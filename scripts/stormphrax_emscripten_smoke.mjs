@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {

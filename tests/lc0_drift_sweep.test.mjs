@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { compareEvalSweeps, runEvalSweep, sweepFixtureInput } from '../src/lc0/driftSweep.ts';
+import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 
 const F32 = new URL('../../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx', import.meta.url);
 const F16 = new URL('../../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx', import.meta.url);
@@ -20,7 +20,9 @@ test('sweepFixtureInput reconstructs fen-only and explicit-history inputs', () =
   assert.throws(() => sweepFixtureInput({ id: 'empty' }), /neither moves nor fen/);
 });
 
-test('f16/WASM stays within f32/WASM drift tolerances across both suites', { skip: (!existsSync(F32) || !existsSync(F16)) && 'missing ONNX models' }, async () => {
+test('f16/WASM stays within f32/WASM drift tolerances across both suites', {
+  skip: (!existsSync(F32) || !existsSync(F16)) && 'missing ONNX models',
+}, async () => {
   const f32 = await Lc0OnnxEvaluator.create(readFileSync(F32));
   const f16 = await Lc0OnnxEvaluator.create(readFileSync(F16));
 
@@ -43,7 +45,16 @@ test('compareEvalSweeps is a zero-drift identity against itself', async () => {
   // A tiny stub evaluator keeps this deterministic and model-free.
   const stub = {
     async evaluate() {
-      return { wdl: [0.5, 0.3, 0.2], q: 0.3, mlh: 40, bestMove: 'e2e4', legalPriors: [{ uci: 'e2e4', prior: 0.6 }, { uci: 'd2d4', prior: 0.4 }] };
+      return {
+        wdl: [0.5, 0.3, 0.2],
+        q: 0.3,
+        mlh: 40,
+        bestMove: 'e2e4',
+        legalPriors: [
+          { uci: 'e2e4', prior: 0.6 },
+          { uci: 'd2d4', prior: 0.4 },
+        ],
+      };
     },
   };
   const sweep = await runEvalSweep('stub', stub, fenOnly);

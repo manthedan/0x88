@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { ORT_PTHREAD_BOOTSTRAP_FILES, ORT_RUNTIME_ASSET_FILES, isRequiredOrtRuntimeAsset, uncompressedOrtRuntimeAsset } from './ort_runtime_assets.mjs';
+import { isRequiredOrtRuntimeAsset, ORT_PTHREAD_BOOTSTRAP_FILES, ORT_RUNTIME_ASSET_FILES, uncompressedOrtRuntimeAsset } from './ort_runtime_assets.mjs';
 
 // Every staged glue module is also the Emscripten pthread bootstrap its own
 // helper workers re-import, so each one must carry those markers.
@@ -30,7 +30,9 @@ export function checkOrtRuntimeAssets(rootPath) {
   const missing = ORT_RUNTIME_ASSET_FILES.filter((name) => !files.includes(name));
   const unexpected = [...baseFiles].filter((name) => !isRequiredOrtRuntimeAsset(name)).sort();
   if (missing.length || unexpected.length) {
-    throw new Error(`ORT runtime asset allowlist mismatch${missing.length ? `; missing: ${missing.join(', ')}` : ''}${unexpected.length ? `; unexpected: ${unexpected.join(', ')}` : ''}`);
+    throw new Error(
+      `ORT runtime asset allowlist mismatch${missing.length ? `; missing: ${missing.join(', ')}` : ''}${unexpected.length ? `; unexpected: ${unexpected.join(', ')}` : ''}`,
+    );
   }
   verifyPthreadBootstrap(ortDir);
   return { root, files, runtimeFiles: [...baseFiles].sort() };

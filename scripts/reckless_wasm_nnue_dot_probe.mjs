@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 // Standalone probe for the propagate_l1 sparse dot-product shape: per nonzero
 // group, splat 4 packed u8 activations and dpbusd them against 64 i8 weights
 // into 4 i32x4 accumulators (L2_SIZE = 16). Compares the previous lane-extract
@@ -10,7 +11,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { execFileSync } from 'node:child_process';
 
 const rustSource = String.raw`#![allow(static_mut_refs, unused_imports, dead_code)]
 use std::arch::wasm32::*;

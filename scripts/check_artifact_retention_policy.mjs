@@ -24,17 +24,20 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(JSON.stringify({
-  ok: true,
-  checked: [
-    'docs/artifact_retention_rollback_policy.md',
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-  ],
-  invariants: [
-    'write-once sha256 keys documented',
-    'rollback only repoints channel manifests',
-    '30-90 day retention documented',
-    'publisher validates legacy and v2 content-addressed keys',
-    'publisher has no overwrite escape hatch',
-  ],
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      checked: ['docs/artifact_retention_rollback_policy.md', 'scripts/publish_hashed_artifacts_to_r2.mjs'],
+      invariants: [
+        'write-once sha256 keys documented',
+        'rollback only repoints channel manifests',
+        '30-90 day retention documented',
+        'publisher validates legacy and v2 content-addressed keys',
+        'publisher has no overwrite escape hatch',
+      ],
+    },
+    null,
+    2,
+  ),
+);

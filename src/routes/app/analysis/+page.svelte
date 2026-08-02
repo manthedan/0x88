@@ -1,39 +1,53 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { afterNavigate } from '$app/navigation';
-  import SiteHeader from '$lib/components/SiteHeader.svelte';
-  import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
-  let mountedUrl: URL | null = null;
-  afterNavigate(({ to }) => {
-    if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
-  });
-  const title = "0x88 Chess — analysis board";
-  const description = "Multi-engine chess analysis in your browser: compare Leela Chess Zero and Stockfish lines side by side, review games with accuracy scores, and explore openings from your own games.";
-  const devMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev');
-  onMount(() => {
-    mountedUrl = new URL(location.href);
-    let cleanup: () => void = () => undefined;
-    let mounted = true;
-    void import('../../../lc0/analysisBrowser').then((module) => {
+import { onMount } from 'svelte';
+import { afterNavigate } from '$app/navigation';
+import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
+import SiteHeader from '$lib/components/SiteHeader.svelte';
+
+let mountedUrl: URL | null = null;
+afterNavigate(({ to }) => {
+  if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
+});
+const title = '0x88 Chess — analysis board';
+const description =
+  'Multi-engine chess analysis in your browser: compare Leela Chess Zero and Stockfish lines side by side, review games with accuracy scores, and explore openings from your own games.';
+const devMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev');
+onMount(() => {
+  mountedUrl = new URL(location.href);
+  let cleanup: () => void = () => undefined;
+  let mounted = true;
+  void import('../../../lc0/analysisBrowser')
+    .then((module) => {
       if (!mounted) return;
       cleanup = module.mountAnalysisBrowser();
-    }).catch((error) => {
+    })
+    .catch((error) => {
       if (!mounted) return;
       console.error('[analysis] failed to load page controller', error);
       const node = document.getElementById('message');
       if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
     });
-    const multiPv = document.getElementById('multiPvInput') as HTMLInputElement | null;
-    const dec = document.getElementById('multiPvDec');
-    const inc = document.getElementById('multiPvInc');
-    const clampPv = (v: number) => Math.min(10, Math.max(1, v));
-    dec?.addEventListener('click', () => { if (multiPv) { multiPv.value = String(clampPv(Number(multiPv.value) - 1)); multiPv.dispatchEvent(new Event('change', { bubbles: true })); } });
-    inc?.addEventListener('click', () => { if (multiPv) { multiPv.value = String(clampPv(Number(multiPv.value) + 1)); multiPv.dispatchEvent(new Event('change', { bubbles: true })); } });
-    return () => {
-      mounted = false;
-      cleanup();
-    };
+  const multiPv = document.getElementById('multiPvInput') as HTMLInputElement | null;
+  const dec = document.getElementById('multiPvDec');
+  const inc = document.getElementById('multiPvInc');
+  const clampPv = (v: number) => Math.min(10, Math.max(1, v));
+  dec?.addEventListener('click', () => {
+    if (multiPv) {
+      multiPv.value = String(clampPv(Number(multiPv.value) - 1));
+      multiPv.dispatchEvent(new Event('change', { bubbles: true }));
+    }
   });
+  inc?.addEventListener('click', () => {
+    if (multiPv) {
+      multiPv.value = String(clampPv(Number(multiPv.value) + 1));
+      multiPv.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  return () => {
+    mounted = false;
+    cleanup();
+  };
+});
 </script>
 
 <svelte:head>

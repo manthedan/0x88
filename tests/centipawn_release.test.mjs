@@ -9,7 +9,9 @@ const TVMJS_MANIFEST_PATH = 'public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem
 const TVMJS_MANIFEST_URL = TVMJS_MANIFEST_PATH.replace(/^public/, '');
 
 async function sha256(path) {
-  return createHash('sha256').update(await readFile(path)).digest('hex');
+  return createHash('sha256')
+    .update(await readFile(path))
+    .digest('hex');
 }
 
 test('Centipawn production manifest matches the tracked model and metadata', async () => {
@@ -20,7 +22,10 @@ test('Centipawn production manifest matches the tracked model and metadata', asy
     assert.equal(bytes.byteLength, entry.bytes, `${entry.file} byte length`);
     assert.equal(await sha256(path), entry.sha256, `${entry.file} sha256`);
   }
-  assert.deepEqual(manifest.models.map((entry) => entry.url), [MODEL_URL, META_URL]);
+  assert.deepEqual(
+    manifest.models.map((entry) => entry.url),
+    [MODEL_URL, META_URL],
+  );
 });
 
 test('stable artifact release maps the Centipawn logical URLs to immutable blobs', async () => {
@@ -29,12 +34,7 @@ test('stable artifact release maps the Centipawn logical URLs to immutable blobs
   const runtimeManifest = JSON.parse(await readFile(TVMJS_MANIFEST_PATH, 'utf8'));
   assert.equal(release.releaseId, channel.releaseId);
   const runtimeBase = TVMJS_MANIFEST_URL.replace(/\/manifest\.json$/, '');
-  const logicalUrls = [
-    MODEL_URL,
-    META_URL,
-    TVMJS_MANIFEST_URL,
-    ...runtimeManifest.files.map((entry) => `${runtimeBase}/${entry.path}`),
-  ];
+  const logicalUrls = [MODEL_URL, META_URL, TVMJS_MANIFEST_URL, ...runtimeManifest.files.map((entry) => `${runtimeBase}/${entry.path}`)];
   for (const logicalUrl of logicalUrls) {
     const artifact = release.artifacts.find((entry) => entry.logicalUrl === logicalUrl);
     assert.ok(artifact, `missing ${logicalUrl}`);

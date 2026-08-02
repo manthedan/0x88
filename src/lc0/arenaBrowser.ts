@@ -1,51 +1,142 @@
 import { Chessground } from 'chessground';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
-import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
-import { boardCheck } from './boardUx.ts';
+import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
-import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
-import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, type ArenaOpening } from './arenaOpenings.ts';
-import { gameOutcome, type GameResultCode } from './engineBattle.ts';
-import { GameTree } from './gameTree.ts';
-import { loadLc0ModelForOrt } from './modelCache.ts';
-import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from '../nn/runtimeAudit.ts';
-import { chooseMove, montyLitePuctPolicy, type SearchResult as CentipawnSearchResult } from '../search/puct.ts';
-import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics } from './onnxEvaluator.ts';
-import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
-import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
-import { Lc0WebHybridEvaluator, type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint } from './wgslMatmulAddProbe.ts';
-import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
+import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { BROWSER_RUNTIME_AUDIT_EVENT, type BrowserRuntimeAuditDetail, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
-import { StockfishEngine, stockfishFlavorLabel, stockfishFlavorUrl, type StockfishFlavor, type StockfishInfoLine } from './stockfishEngine.ts';
-import { RecklessEngine, formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, supportsWasmRelaxedSimd, type RecklessVariant } from './recklessVariants.ts';
-import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
-import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithasVariant, normalizeViridithasVariant, resolveDefaultViridithasVariantAssetFallback, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
-import { BerserkEngine } from './berserkEngine.ts';
-import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
-import { PlentyChessEngine } from './plentychessEngine.ts';
-import { berserkCacheKey, cpuEngineHashMbForSurface, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
-import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
-import { StormphraxEngine } from './stormphraxEngine.ts';
-import { createStormphraxEngine, stormphraxCacheKey } from './engineProvision.ts';
-import { STORMPHRAX_VARIANTS, checkStormphraxVariantAsset, hasExplicitStormphraxVariant, normalizeStormphraxVariant, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantAssetStatus, stormphraxVariantByKey, stormphraxVariantFromParams, stormphraxVariantUnsupportedReason, type StormphraxVariant } from './stormphraxVariants.ts';
-import { BIG_NETS, bigNetAssetStatusSync, bigNetLoadWarning, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4SearchResult, type Bt4WorkerSearcher } from './bt4Engine.ts';
-import { acquireBigNetSearcher, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher, type BigNetKey } from './bigNetSessionPool.ts';
-import { TournamentStandings, buildSchedule, tournamentPairings, type ScheduledGame, type TournamentMode } from './tournament.ts';
-import { hBarChartSvg, lineChartSvg, type ChartSeries } from './charts.ts';
-import { canonicalEngineFamily, defaultStaticEngineVariant, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, centipawnEngineLabel, centipawnVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
-import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
-import { engineVariantMenuLabel } from './engineVariantLabels.ts';
-import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
+import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
+import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
-import { DisposableVariantPool } from './disposableVariantPool.ts';
+import { BerserkEngine } from './berserkEngine.ts';
+import {
+  BERSERK_VARIANTS,
+  type BerserkVariant,
+  berserkVariantAssetStatus,
+  berserkVariantByKey,
+  berserkVariantFromParams,
+  checkBerserkVariantAsset,
+  hasExplicitBerserkVariant,
+  normalizeBerserkVariant,
+  resolveDefaultBerserkVariantAssetFallback,
+} from './berserkVariants.ts';
+import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
+import { boardCheck } from './boardUx.ts';
 import { browserVariantOption } from './browserVariantOption.ts';
+import {
+  BIG_NETS,
+  type BigNetConfig,
+  type Bt4SearchResult,
+  type Bt4WorkerSearcher,
+  bigNetAssetStatusSync,
+  bigNetLoadWarning,
+  bt4SupportedSync,
+  checkBigNetAsset,
+  probeBt4Support,
+} from './bt4Engine.ts';
+import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
+import { DisposableVariantPool } from './disposableVariantPool.ts';
+import { type GameResultCode, gameOutcome } from './engineBattle.ts';
+import {
+  canonicalEngineFamily,
+  centipawnEngineLabel,
+  centipawnVariantOptions,
+  defaultStaticEngineVariant,
+  type EngineFamily,
+  type EngineRow,
+  engineFamilyOptions,
+  engineResourceProfile,
+  engineStrengthMeta,
+  isLc0BigNetVariant,
+  isV0DeployProfile,
+  lc0EngineLabel,
+  lc0VariantOptions,
+  normalizeDeployEngineRow,
+  stockfishEngineLabel,
+  stockfishVariantOptions,
+} from './engineCatalog.ts';
+import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
+import {
+  berserkCacheKey,
+  cpuEngineHashMbForSurface,
+  createBerserkEngine,
+  createPlentyChessEngine,
+  createRecklessEngine,
+  createStormphraxEngine,
+  createViridithasEngine,
+  plentyChessCacheKey,
+  recklessCacheKey,
+  stormphraxCacheKey,
+  viridithasCacheKey,
+} from './engineProvision.ts';
+import { engineVariantMenuLabel } from './engineVariantLabels.ts';
+import { GameTree } from './gameTree.ts';
+import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
+import { loadLc0ModelForOrt } from './modelCache.ts';
+import { CachedLc0Evaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { PlentyChessEngine } from './plentychessEngine.ts';
+import {
+  checkPlentyChessVariantAsset,
+  hasExplicitPlentyChessVariant,
+  normalizePlentyChessVariant,
+  PLENTYCHESS_VARIANTS,
+  type PlentyChessVariant,
+  plentyChessVariantAssetStatus,
+  plentyChessVariantByKey,
+  plentyChessVariantFromParams,
+  plentyChessVariantUnsupportedReason,
+  resolveDefaultPlentyChessVariantAssetFallback,
+} from './plentychessVariants.ts';
+import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
+import { formatRecklessBrowserApiLoadStatus, RecklessEngine } from './recklessEngine.ts';
+import {
+  checkRecklessVariantAsset,
+  hasExplicitRecklessVariant,
+  normalizeRecklessVariant,
+  RECKLESS_VARIANTS,
+  type RecklessVariant,
+  recklessVariantAssetStatus,
+  recklessVariantByKey,
+  recklessVariantFromParams,
+  resolveDefaultRecklessVariantAssetFallback,
+  supportsWasmRelaxedSimd,
+} from './recklessVariants.ts';
+import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
+import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
+import { StockfishEngine, type StockfishFlavor, type StockfishInfoLine, stockfishFlavorLabel, stockfishFlavorUrl } from './stockfishEngine.ts';
+import { StormphraxEngine } from './stormphraxEngine.ts';
+import {
+  checkStormphraxVariantAsset,
+  hasExplicitStormphraxVariant,
+  normalizeStormphraxVariant,
+  resolveDefaultStormphraxVariantAssetFallback,
+  STORMPHRAX_VARIANTS,
+  type StormphraxVariant,
+  stormphraxVariantAssetStatus,
+  stormphraxVariantByKey,
+  stormphraxVariantFromParams,
+  stormphraxVariantUnsupportedReason,
+} from './stormphraxVariants.ts';
+import { buildSchedule, type ScheduledGame, type TournamentMode, TournamentStandings, tournamentPairings } from './tournament.ts';
+import { canUsePersistentViridithasWasi, ViridithasEngine } from './viridithasEngine.ts';
+import {
+  checkViridithasVariantAsset,
+  hasExplicitViridithasVariant,
+  normalizeViridithasVariant,
+  resolveDefaultViridithasVariantAssetFallback,
+  VIRIDITHAS_VARIANTS,
+  type ViridithasVariant,
+  viridithasVariantAssetStatus,
+  viridithasVariantByKey,
+  viridithasVariantFromParams,
+} from './viridithasVariants.ts';
+import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './wgslMatmulAddProbe.ts';
+import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 // Seats are array indices into seatRows; tournament pids are String(index).
@@ -55,8 +146,17 @@ interface ArenaEngine {
   move(positions: BoardState[], signal: AbortSignal): Promise<string | null>;
   warmup?(signal: AbortSignal): Promise<void>;
 }
-interface GameRecord { pgn: string; }
-interface MatchScore { a: number; b: number; aWins: number; bWins: number; draws: number; games: number; }
+interface GameRecord {
+  pgn: string;
+}
+interface MatchScore {
+  a: number;
+  b: number;
+  aWins: number;
+  bWins: number;
+  draws: number;
+  games: number;
+}
 interface Lc0TreeTelemetry {
   engineName: string;
   searches: number;
@@ -152,18 +252,24 @@ const DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL = '/runtimes/centipawn-tvmjs-webgpu/b
 const LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
 const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
-const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl(isV0DeployProfile() ? DEFAULT_CENTIPAWN_MODEL_URL : params.get('centipawnModel') ?? params.get('centipawnOnnx') ?? DEFAULT_CENTIPAWN_MODEL_URL);
-const CENTIPAWN_META_URL = resolvePublicAssetUrl(isV0DeployProfile() ? DEFAULT_CENTIPAWN_META_URL : params.get('centipawnMeta') ?? DEFAULT_CENTIPAWN_META_URL);
+const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl(
+  isV0DeployProfile() ? DEFAULT_CENTIPAWN_MODEL_URL : (params.get('centipawnModel') ?? params.get('centipawnOnnx') ?? DEFAULT_CENTIPAWN_MODEL_URL),
+);
+const CENTIPAWN_META_URL = resolvePublicAssetUrl(
+  isV0DeployProfile() ? DEFAULT_CENTIPAWN_META_URL : (params.get('centipawnMeta') ?? DEFAULT_CENTIPAWN_META_URL),
+);
 const LEGACY_CENTIPAWN_RESOLVED_MODEL_URL = resolvePublicAssetUrl(params.get('tinyModel') ?? params.get('tinyOnnx') ?? LEGACY_CENTIPAWN_MODEL_URL);
 const LEGACY_CENTIPAWN_RESOLVED_META_URL = resolvePublicAssetUrl(params.get('tinyMeta') ?? LEGACY_CENTIPAWN_META_URL);
-const LEGACY_CENTIPAWN_OVERRIDE = !isV0DeployProfile()
-  && (params.has('tinyModel') || params.has('tinyOnnx') || params.has('tinyMeta') || params.has('tinyManifest'));
-const CENTIPAWN_HYBRID_MANIFEST_URL = params.get('centipawnManifest')
-  ?? params.get('manifest')
-  ?? params.get('manifestUrl')
-  ?? params.get('tinyManifest')
-  ?? (LEGACY_CENTIPAWN_OVERRIDE ? LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL : DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL);
-const LC0_WHOLE_MODEL_MANIFEST_URL = params.get('wholeModelManifest') ?? params.get('wholeModelManifestUrl') ?? params.get('tvm' + 'jsManifest') ?? DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL;
+const LEGACY_CENTIPAWN_OVERRIDE =
+  !isV0DeployProfile() && (params.has('tinyModel') || params.has('tinyOnnx') || params.has('tinyMeta') || params.has('tinyManifest'));
+const CENTIPAWN_HYBRID_MANIFEST_URL =
+  params.get('centipawnManifest') ??
+  params.get('manifest') ??
+  params.get('manifestUrl') ??
+  params.get('tinyManifest') ??
+  (LEGACY_CENTIPAWN_OVERRIDE ? LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL : DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL);
+const LC0_WHOLE_MODEL_MANIFEST_URL =
+  params.get('wholeModelManifest') ?? params.get('wholeModelManifestUrl') ?? params.get('tvm' + 'jsManifest') ?? DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL;
 type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
 type Lc0ArenaPreset = 'stable' | 'benchmarked-small' | 'custom';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
@@ -187,7 +293,9 @@ function whileArenaMounted(callback: () => void): () => void {
   const existing = arenaMountedCallbackCache.get(callback);
   if (existing) return existing;
   const signal = mountAbort.signal;
-  const guarded = () => { if (!isStaleMount(signal)) callback(); };
+  const guarded = () => {
+    if (!isStaleMount(signal)) callback();
+  };
   arenaMountedCallbackCache.set(callback, guarded);
   return guarded;
 }
@@ -204,8 +312,16 @@ let lastUci: string | null = null;
 // Game-history review: clicking a chart, the move strip, or a finished game in
 // the log flips the board into a read-only replay; "Live" returns to the
 // running game (which keeps playing in the background meanwhile).
-interface TrailEntry { fen: string; uci: string | null; san: string | null }
-interface GameTrail { label: string; entries: TrailEntry[]; openingPlies: number }
+interface TrailEntry {
+  fen: string;
+  uci: string | null;
+  san: string | null;
+}
+interface GameTrail {
+  label: string;
+  entries: TrailEntry[];
+  openingPlies: number;
+}
 let liveTrail: GameTrail | null = null;
 const finishedTrails: GameTrail[] = [];
 let reviewTrail: GameTrail | null = null;
@@ -229,11 +345,19 @@ let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
 const ARENA_CPU_ENGINE_OPTIONS = { surface: 'arena' } as const;
-const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) => createRecklessEngine(variant, renderRecklessRuntimeInfo, ARENA_CPU_ENGINE_OPTIONS));
-const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) => createViridithasEngine(variant, {}, ARENA_CPU_ENGINE_OPTIONS));
+const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) =>
+  createRecklessEngine(variant, renderRecklessRuntimeInfo, ARENA_CPU_ENGINE_OPTIONS),
+);
+const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) =>
+  createViridithasEngine(variant, {}, ARENA_CPU_ENGINE_OPTIONS),
+);
 const berserkEngines = new DisposableVariantPool(berserkCacheKey, (variant: BerserkVariant) => createBerserkEngine(variant, ARENA_CPU_ENGINE_OPTIONS));
-const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (variant: PlentyChessVariant) => createPlentyChessEngine(variant, ARENA_CPU_ENGINE_OPTIONS));
-const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) => createStormphraxEngine(variant, ARENA_CPU_ENGINE_OPTIONS));
+const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (variant: PlentyChessVariant) =>
+  createPlentyChessEngine(variant, ARENA_CPU_ENGINE_OPTIONS),
+);
+const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) =>
+  createStormphraxEngine(variant, ARENA_CPU_ENGINE_OPTIONS),
+);
 const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
 const centipawnEvaluators = new Set<CachedEvaluator>();
 let centipawnEvaluatorGeneration = 0;
@@ -265,11 +389,21 @@ resourceBroker.register('sf-full', { ...engineResourceProfile('sf') });
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
-interface GameChartSample { ply: number; engineId: string; whiteScore?: number; moveMs: number; nps?: number; }
+interface GameChartSample {
+  ply: number;
+  engineId: string;
+  whiteScore?: number;
+  moveMs: number;
+  nps?: number;
+}
 let gameChartSamples: GameChartSample[] = [];
 const CHART_COLORS = [
-  'var(--chart-1,#4a7a2a)', 'var(--chart-2,#a5461b)', 'var(--chart-3,#1c5f8a)',
-  'var(--chart-4,#7a4a9a)', 'var(--chart-5,#8a7a1c)', 'var(--chart-6,#5a5a5a)',
+  'var(--chart-1,#4a7a2a)',
+  'var(--chart-2,#a5461b)',
+  'var(--chart-3,#1c5f8a)',
+  'var(--chart-4,#7a4a9a)',
+  'var(--chart-5,#8a7a1c)',
+  'var(--chart-6,#5a5a5a)',
 ];
 const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
@@ -330,7 +464,11 @@ function restoreArenaSeatRows(): void {
 }
 
 function persistArenaSeatRows(): void {
-  try { localStorage.setItem(ARENA_SEAT_STORAGE_KEY, JSON.stringify(seatRows)); } catch { /* optional preference */ }
+  try {
+    localStorage.setItem(ARENA_SEAT_STORAGE_KEY, JSON.stringify(seatRows));
+  } catch {
+    /* optional preference */
+  }
 }
 
 function el(id: string): HTMLElement {
@@ -341,10 +479,14 @@ function el(id: string): HTMLElement {
 function maybeEl(id: string): HTMLElement | null {
   return document.getElementById(id);
 }
-function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputElement; }
-function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
+function inputEl(id: string): HTMLInputElement {
+  return el(id) as HTMLInputElement;
+}
+function selectEl(id: string): HTMLSelectElement {
+  return el(id) as HTMLSelectElement;
+}
 function htmlEscape(value: unknown): string {
-  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
 function formatNps(nps: number): string {
@@ -377,11 +519,13 @@ function hideDownloadProgress(): void {
 }
 
 function hasBoundedArenaSearch(progress: ArenaSearchProgress): boolean {
-  return !progress.indeterminate
-    && progress.completed !== undefined
-    && progress.requested !== undefined
-    && progress.requested > 0
-    && progress.requested < Number.MAX_SAFE_INTEGER;
+  return (
+    !progress.indeterminate &&
+    progress.completed !== undefined &&
+    progress.requested !== undefined &&
+    progress.requested > 0 &&
+    progress.requested < Number.MAX_SAFE_INTEGER
+  );
 }
 
 function arenaSearchProgressText(progress: ArenaSearchProgress): string {
@@ -390,7 +534,7 @@ function arenaSearchProgressText(progress: ArenaSearchProgress): string {
   const requested = progress.requested ?? completed;
   const bounded = hasBoundedArenaSearch(progress);
   const count = bounded ? `${completed}/${requested}` : `${completed}`;
-  const pct = bounded ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
+  const pct = bounded ? ` ${((100 * completed) / requested).toFixed(0)}%` : '';
   const elapsed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(progress.elapsedMs / 1000).toFixed(1)}s` : '';
   const nps = progress.nps && progress.nps > 0 ? ` · ${progress.nps.toFixed(1)} ${progress.units}/s` : '';
   const best = progress.best ? ` · best ${progress.best}` : '';
@@ -412,7 +556,11 @@ function setArenaSearchProgress(engineId: string, label: string, progress: Arena
   renderEngineOutputs();
 }
 
-function setArenaVisitProgress(engineId: string, label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): void {
+function setArenaVisitProgress(
+  engineId: string,
+  label: string,
+  progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number },
+): void {
   const completed = progress.completedVisits ?? progress.visits;
   const elapsedMs = progress.elapsedMs ?? 0;
   setArenaSearchProgress(engineId, label, {
@@ -481,21 +629,24 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
   if (existing) return existing;
   const generation = centipawnEvaluatorGeneration;
   const created = (async () => {
-    const loaded = await createBrowserSquareformerRuntimeEvaluator({
-      id: model.modelId,
-      modelId: model.modelId,
-      label: centipawnEngineLabel(variant),
-      onnx: model.onnx,
-      meta: model.meta,
-      runtime,
-      manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
-    }, {
-      params,
-      runtime,
-      manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
-      fallback,
-      audit: { surface: 'arena', searchBudget: 'visits=seat strength' },
-    });
+    const loaded = await createBrowserSquareformerRuntimeEvaluator(
+      {
+        id: model.modelId,
+        modelId: model.modelId,
+        label: centipawnEngineLabel(variant),
+        onnx: model.onnx,
+        meta: model.meta,
+        runtime,
+        manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
+      },
+      {
+        params,
+        runtime,
+        manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
+        fallback,
+        audit: { surface: 'arena', searchBudget: 'visits=seat strength' },
+      },
+    );
     console.info('[lc0-arena] loaded Centipawn evaluator', {
       requestedRuntime: loaded.requestedRuntime,
       resolvedRuntime: loaded.resolvedRuntime,
@@ -503,7 +654,12 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
       manifestUrl: loaded.manifestUrl,
       fallbackReason: loaded.fallbackReason,
     });
-    const cached = new CachedEvaluator(loaded.evaluator, { maxEntries: arenaCacheEntries(), includeHistory: true, includeLegalMoves: true, label: `centipawn-arena:${runtime}` });
+    const cached = new CachedEvaluator(loaded.evaluator, {
+      maxEntries: arenaCacheEntries(),
+      includeHistory: true,
+      includeLegalMoves: true,
+      label: `centipawn-arena:${runtime}`,
+    });
     if (centipawnEvaluatorGeneration !== generation) {
       const destroy = (cached.inner as Evaluator & { destroy?: () => void }).destroy;
       if (typeof destroy === 'function') destroy.call(cached.inner);
@@ -548,9 +704,11 @@ function selectedLc0Runtime(): Lc0ArenaRuntime {
 
 function lc0WholeModelRuntimeRequested(): boolean {
   if (isV0DeployProfile()) return false;
-  return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
-    || params.get('enableWholeModelWebgpu') === '1'
-    || params.get('enableTvm' + 'js') === '1';
+  return (
+    normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ||
+    params.get('enableWholeModelWebgpu') === '1' ||
+    params.get('enableTvm' + 'js') === '1'
+  );
 }
 
 function installExperimentalLc0RuntimeOption(_force = false): void {
@@ -574,7 +732,15 @@ function inferredLc0Preset(): Lc0ArenaPreset {
   if (explicit) return normalizeLc0Preset(explicit);
   const requestedRuntime = normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
   if (requestedRuntime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME || lc0WholeModelRuntimeRequested()) return 'benchmarked-small';
-  if (requestedRuntime !== 'onnx' || params.has('inputBackend') || params.has('encoderKernel') || params.has('legalPriorsBackend') || params.has('lc0BatchSize') || params.has('batchPipelineDepth')) return 'custom';
+  if (
+    requestedRuntime !== 'onnx' ||
+    params.has('inputBackend') ||
+    params.has('encoderKernel') ||
+    params.has('legalPriorsBackend') ||
+    params.has('lc0BatchSize') ||
+    params.has('batchPipelineDepth')
+  )
+    return 'custom';
   return 'stable';
 }
 
@@ -589,7 +755,8 @@ function setLc0PresetNote(preset = selectedLc0Preset()): void {
   } else if (preset === 'custom') {
     note.textContent = 'Custom mode: advanced runtime knobs are open. Only use these for experiments or reproducing old benchmark cells.';
   } else {
-    note.textContent = 'Stable default: LC0 Small via ORT with WebGPU/WASM fallback. Use the fast preset to test benchmarked eval speed in fixed-time arena games.';
+    note.textContent =
+      'Stable default: LC0 Small via ORT with WebGPU/WASM fallback. Use the fast preset to test benchmarked eval speed in fixed-time arena games.';
   }
 }
 
@@ -677,7 +844,9 @@ function normalizeLc0LegalPriorsBackend(value: string | null): 'js' | 'wasm' | '
 
 function lc0HybridLegalPriorsBackend(): 'js' | 'wasm' | 'gpu' {
   const node = document.getElementById('lc0LegalPriorsSelect') as HTMLSelectElement | null;
-  return normalizeLc0LegalPriorsBackend(node?.value ?? params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors'));
+  return normalizeLc0LegalPriorsBackend(
+    node?.value ?? params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors'),
+  );
 }
 
 function lc0EncoderLayers(): number {
@@ -685,7 +854,9 @@ function lc0EncoderLayers(): number {
 }
 
 function normalizeLc0EncoderKernelVariant(value: string | null): Lc0WebEncoderKernelVariant {
-  return value === 'tvm-packed-f16' || value === 'mixed-tvm-ffn' || value === 'mixed-tvm-ffn-outproj' || value === 'mixed-tvm-ffn-smolgen-project' ? value : 'hand';
+  return value === 'tvm-packed-f16' || value === 'mixed-tvm-ffn' || value === 'mixed-tvm-ffn-outproj' || value === 'mixed-tvm-ffn-smolgen-project'
+    ? value
+    : 'hand';
 }
 
 function lc0EncoderKernelVariant(): Lc0WebEncoderKernelVariant {
@@ -695,7 +866,8 @@ function lc0EncoderKernelVariant(): Lc0WebEncoderKernelVariant {
 
 function lc0HybridConfigLabel(runtime = selectedLc0Runtime()): string {
   if (runtime === 'onnx') return '';
-  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return `manifest ${LC0_WHOLE_MODEL_MANIFEST_URL} · physical batch ${lc0WholeModelPhysicalBatch()}${lc0WholeModelTensorCache() ? ' · tensor cache' : ''}`;
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)
+    return `manifest ${LC0_WHOLE_MODEL_MANIFEST_URL} · physical batch ${lc0WholeModelPhysicalBatch()}${lc0WholeModelTensorCache() ? ' · tensor cache' : ''}`;
   const legal = lc0HybridLegalPriorsBackend();
   const effectiveLegal = legal === 'gpu' && runtime !== 'hybrid-wgsl-heads' ? 'js' : legal;
   return `input ${lc0HybridInputBackend()} · encoder ${lc0EncoderKernelVariant()} · legal ${effectiveLegal}`;
@@ -774,13 +946,23 @@ function applyArenaQueryParams(): void {
   const budget = params.get('budgetMode') ?? params.get('budget');
   if (budget === 'movetime' || budget === 'fixed') selectEl('budgetModeSelect').value = budget;
   inputEl('movetimeInput').value = String(intParam('movetimeMs', intParam('movetime', Number(inputEl('movetimeInput').value) || 500, 10, 60000), 10, 60000));
-  inputEl('cacheEntriesInput').value = String(intParam('cacheEntries', intParam('cache', Number(inputEl('cacheEntriesInput').value) || 2048, 0, 100000), 0, 100000));
+  inputEl('cacheEntriesInput').value = String(
+    intParam('cacheEntries', intParam('cache', Number(inputEl('cacheEntriesInput').value) || 2048, 0, 100000), 0, 100000),
+  );
   inputEl('stockfishThreadsInput').value = String(intParam('sfThreads', Number(inputEl('stockfishThreadsInput').value) || 1, 1, 32));
-  inputEl('lc0BatchSizeInput').value = String(boundedIntValue(params.get('lc0BatchSize') ?? params.get('batchSize') ?? params.get('batch'), Number(inputEl('lc0BatchSizeInput').value) || 1, 1, 64));
-  inputEl('lc0BatchPipelineDepthInput').value = String(boundedIntValue(params.get('lc0BatchPipelineDepth') ?? params.get('batchPipelineDepth'), Number(inputEl('lc0BatchPipelineDepthInput').value) || 1, 1, 16));
+  inputEl('lc0BatchSizeInput').value = String(
+    boundedIntValue(params.get('lc0BatchSize') ?? params.get('batchSize') ?? params.get('batch'), Number(inputEl('lc0BatchSizeInput').value) || 1, 1, 64),
+  );
+  inputEl('lc0BatchPipelineDepthInput').value = String(
+    boundedIntValue(params.get('lc0BatchPipelineDepth') ?? params.get('batchPipelineDepth'), Number(inputEl('lc0BatchPipelineDepthInput').value) || 1, 1, 16),
+  );
   selectEl('lc0InputBackendSelect').value = normalizeLc0InputBackend(params.get('inputBackend') ?? params.get('lc0InputBackend'));
-  selectEl('lc0EncoderKernelSelect').value = normalizeLc0EncoderKernelVariant(params.get('encoderKernel') ?? params.get('lc0EncoderKernel') ?? params.get('encoderKernelVariant'));
-  selectEl('lc0LegalPriorsSelect').value = normalizeLc0LegalPriorsBackend(params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors'));
+  selectEl('lc0EncoderKernelSelect').value = normalizeLc0EncoderKernelVariant(
+    params.get('encoderKernel') ?? params.get('lc0EncoderKernel') ?? params.get('encoderKernelVariant'),
+  );
+  selectEl('lc0LegalPriorsSelect').value = normalizeLc0LegalPriorsBackend(
+    params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors'),
+  );
 
   const suite = params.get('openingSuite') ?? params.get('openings') ?? params.get('startingPosition');
   if (suite === 'start' || suite === 'built-in' || suite === 'custom') selectEl('startingPositionSelect').value = suite;
@@ -837,7 +1019,7 @@ function stockfishScoreText(info: StockfishInfoLine | undefined, fen: string): s
   if (!info) return 'score unavailable';
   const w = fenTurn(fen) === 'w' ? 1 : -1;
   if (info.mateIn !== undefined) return `mate ${signed(w * info.mateIn, 0)} · d${info.depth}`;
-  if (info.scoreCp !== undefined) return `${signed(w * info.scoreCp / 100, 2)} · d${info.depth}`;
+  if (info.scoreCp !== undefined) return `${signed((w * info.scoreCp) / 100, 2)} · d${info.depth}`;
   return `score unavailable · d${info.depth}`;
 }
 
@@ -845,16 +1027,16 @@ function stockfishScoreCompact(info: StockfishInfoLine | undefined, fen: string)
   if (!info) return 'eval —';
   const w = fenTurn(fen) === 'w' ? 1 : -1;
   if (info.mateIn !== undefined) return `M${signed(w * info.mateIn, 0)} · d${info.depth}`;
-  if (info.scoreCp !== undefined) return `${signed(w * info.scoreCp / 100, 2)} · d${info.depth}`;
+  if (info.scoreCp !== undefined) return `${signed((w * info.scoreCp) / 100, 2)} · d${info.depth}`;
   return `d${info.depth}`;
 }
 
 function stockfishWhiteCp(info: StockfishInfoLine | undefined, fen: string): number | undefined {
-  return info?.scoreCp === undefined ? undefined : (fenTurn(fen) === 'w' ? info.scoreCp : -info.scoreCp);
+  return info?.scoreCp === undefined ? undefined : fenTurn(fen) === 'w' ? info.scoreCp : -info.scoreCp;
 }
 
 function stockfishMateInWhitePov(info: StockfishInfoLine | undefined, fen: string): number | undefined {
-  return info?.mateIn === undefined ? undefined : (fenTurn(fen) === 'w' ? info.mateIn : -info.mateIn);
+  return info?.mateIn === undefined ? undefined : fenTurn(fen) === 'w' ? info.mateIn : -info.mateIn;
 }
 
 function lc0WdlText(evaluation: Lc0Evaluation): string {
@@ -874,7 +1056,7 @@ function lc0EvalBar(fen: string, wdl: [number, number, number]): EngineEvalBar {
 }
 
 function qEvalBar(fen: string, q: number): EngineEvalBar {
-  const whiteScore = stmScoreToWhiteScore(fen, (clamp01((q + 1) / 2)));
+  const whiteScore = stmScoreToWhiteScore(fen, clamp01((q + 1) / 2));
   return { whiteScore, label: percent0(whiteScore) };
 }
 
@@ -946,18 +1128,15 @@ function renderEvalBars(): void {
 function renderArenaSearchStatus(ids: string[]): void {
   const host = document.getElementById('arenaSearchStatus');
   if (!host) return;
-  const progressId = ids.find((id) => thinkingEngineIds.has(id) && arenaSearchProgress.has(id))
-    ?? ids.find((id) => arenaSearchProgress.has(id));
+  const progressId = ids.find((id) => thinkingEngineIds.has(id) && arenaSearchProgress.has(id)) ?? ids.find((id) => arenaSearchProgress.has(id));
   const progress = progressId ? arenaSearchProgress.get(progressId) : undefined;
   if (progress) {
     host.innerHTML = arenaSearchProgressHtml(progress);
     return;
   }
   const thinkingId = ids.find((id) => thinkingEngineIds.has(id));
-  const thinkingName = thinkingId ? engines.get(thinkingId)?.name ?? thinkingId : null;
-  const text = running
-    ? thinkingName ? `${thinkingName}: starting search…` : 'Waiting for the next search…'
-    : 'Search progress appears here during play.';
+  const thinkingName = thinkingId ? (engines.get(thinkingId)?.name ?? thinkingId) : null;
+  const text = running ? (thinkingName ? `${thinkingName}: starting search…` : 'Waiting for the next search…') : 'Search progress appears here during play.';
   host.innerHTML = `<div class="search-progress-placeholder">${htmlEscape(text)}</div>`;
 }
 
@@ -969,7 +1148,8 @@ function renderEngineOutputs(): void {
     const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
     const thinking = thinkingEngineIds.has(id);
     if (!snapshot && !running && !thinking) return '';
-    if (!snapshot) return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span></div><div class="eval-card-eval">${thinking ? 'thinking…' : 'waiting…'}</div></div>`;
+    if (!snapshot)
+      return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span></div><div class="eval-card-eval">${thinking ? 'thinking…' : 'waiting…'}</div></div>`;
     const moveTag = snapshot.move ? ` · move ${snapshot.move}` : '';
     const statsParts: string[] = [];
     if (snapshot.nps != null) statsParts.push(`${formatNps(snapshot.nps)} nps`);
@@ -1029,7 +1209,7 @@ function renderBoard() {
     fen: shown.fen.split(' ')[0],
     // turnColor matters even in viewOnly mode: `check: true` highlights the
     // king of turnColor, which must be the side to move in the shown position.
-    turnColor: shownBoard.turn === 'w' ? 'white' as const : 'black' as const,
+    turnColor: shownBoard.turn === 'w' ? ('white' as const) : ('black' as const),
     check: boardCheck(shownBoard),
     coordinates: true,
     viewOnly: true,
@@ -1038,12 +1218,15 @@ function renderBoard() {
     lastMove: shownUci ? [shownUci.slice(0, 2) as Key, shownUci.slice(2, 4) as Key] : undefined,
     // Custom brushes in the two side identity colors so the last-move arrow also
     // shows which side just moved — a calm alternative to per-ply "to move" flashing.
-    drawable: { enabled: false, brushes: {
-      moveWhite: { key: 'moveWhite', color: '#2f6e7d', opacity: 0.9, lineWidth: 14 },
-      moveBlack: { key: 'moveBlack', color: '#b15c2b', opacity: 0.9, lineWidth: 14 },
-      candidate: { key: 'candidate', color: '#5a6e2a', opacity: 0.95, lineWidth: 14 },
-      candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.5, lineWidth: 9 },
-    } },
+    drawable: {
+      enabled: false,
+      brushes: {
+        moveWhite: { key: 'moveWhite', color: '#2f6e7d', opacity: 0.9, lineWidth: 14 },
+        moveBlack: { key: 'moveBlack', color: '#b15c2b', opacity: 0.9, lineWidth: 14 },
+        candidate: { key: 'candidate', color: '#5a6e2a', opacity: 0.95, lineWidth: 14 },
+        candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.5, lineWidth: 9 },
+      },
+    },
   };
   // Cast: chessground's DrawBrushes type has fixed keys, but custom brush keys
   // merge fine at runtime.
@@ -1052,10 +1235,12 @@ function renderBoard() {
   else ground.set(cfg);
   // The mover is the side NOT to move now; tint the arrow with their identity hue.
   const moverBrush = fenTurn(shown.fen) === 'w' ? 'moveBlack' : 'moveWhite';
-  const shapes: DrawShape[] = reviewing && reviewShapes
-    ? reviewShapes
-    : shownUci && shownUci.length >= 4
-      ? [{ orig: shownUci.slice(0, 2) as Key, dest: shownUci.slice(2, 4) as Key, brush: moverBrush }] : [];
+  const shapes: DrawShape[] =
+    reviewing && reviewShapes
+      ? reviewShapes
+      : shownUci && shownUci.length >= 4
+        ? [{ orig: shownUci.slice(0, 2) as Key, dest: shownUci.slice(2, 4) as Key, brush: moverBrush }]
+        : [];
   ground.setAutoShapes(shapes);
   renderSideLabels();
   renderEngineOutputs();
@@ -1112,7 +1297,11 @@ function renderReviewBar(): void {
 function renderMoveStrip(): void {
   const strip = el('gameMoves');
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
-  if (!trail || trail.entries.length <= 1) { strip.hidden = true; strip.innerHTML = ''; return; }
+  if (!trail || trail.entries.length <= 1) {
+    strip.hidden = true;
+    strip.innerHTML = '';
+    return;
+  }
   strip.hidden = false;
   const shownIndex = reviewing && reviewTrail === trail ? reviewIndex : trail.entries.length - 1;
   const parts: string[] = [];
@@ -1138,7 +1327,10 @@ function reviewRootChartClick(event: MouseEvent): void {
   // exact FEN strings, both produced by boardToFen of the same board).
   let index = -1;
   for (let i = liveTrail.entries.length - 1; i >= 0; i--) {
-    if (liveTrail.entries[i].fen === rootChartContext.fen) { index = i; break; }
+    if (liveTrail.entries[i].fen === rootChartContext.fen) {
+      index = i;
+      break;
+    }
   }
   if (index < 0) return;
   // Mirror hBarChartSvg's layout: each bar row is 14 viewBox units high.
@@ -1201,60 +1393,84 @@ function bigNetSelectableSync(config: BigNetConfig): boolean {
 
 function bigNetUnavailableText(config: BigNetConfig): string {
   if (!bt4SupportedSync()) return `Lc0 ${config.name} needs WebGPU support.`;
-  if (bigNetAssetStatusSync(config) === 'missing') return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
+  if (bigNetAssetStatusSync(config) === 'missing')
+    return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
   if (bigNetAssetStatusSync(config) === 'unknown') return `Lc0 ${config.name} model asset is still being checked.`;
   return '';
 }
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
   if (isV0DeployProfile() && !['lc0', 'centipawn', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax'].includes(family)) return [];
-  if (family === 'lc0') return lc0VariantOptions(bt4SupportedSync()).map((option) => {
-    if (!isLc0BigNetVariant(option.value)) return option;
-    const config = BIG_NETS[option.value];
-    const asset = bigNetAssetStatusSync(config);
-    if (bt4SupportedSync() && asset === 'unknown') void checkBigNetAsset(config, whileArenaMounted(() => { renderSeatSelectors(); refreshSeatControls(); }));
-    const suffix = !bt4SupportedSync() ? ' (WebGPU unavailable)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
-    return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
-  });
-  if (family === 'centipawn') return centipawnVariantOptions().map((option) => option.value === 'bt4-custom' && centipawnHybridManifestStatus === 'missing'
-    ? { ...option, label: `${option.label} (bundle missing)`, disabled: true }
-    : option);
+  if (family === 'lc0')
+    return lc0VariantOptions(bt4SupportedSync()).map((option) => {
+      if (!isLc0BigNetVariant(option.value)) return option;
+      const config = BIG_NETS[option.value];
+      const asset = bigNetAssetStatusSync(config);
+      if (bt4SupportedSync() && asset === 'unknown')
+        void checkBigNetAsset(
+          config,
+          whileArenaMounted(() => {
+            renderSeatSelectors();
+            refreshSeatControls();
+          }),
+        );
+      const suffix = !bt4SupportedSync() ? ' (WebGPU unavailable)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
+      return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
+    });
+  if (family === 'centipawn')
+    return centipawnVariantOptions().map((option) =>
+      option.value === 'bt4-custom' && centipawnHybridManifestStatus === 'missing'
+        ? { ...option, label: `${option.label} (bundle missing)`, disabled: true }
+        : option,
+    );
   if (family === 'sf') return stockfishVariantOptions();
-  if (family === 'viridithas') return availableViridithasVariants().map((v) => {
-    const status = viridithasVariantAssetStatus(v);
-    const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
-    if (!unsupported && v.key === 'relaxed-simd' && assetProbePending(status)) void checkViridithasVariantAsset(v, whileArenaMounted(populateSeats));
-    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
-      assetStatus: status,
-      unsupportedReason: unsupported ? 'unsupported by this browser' : null,
-      requirePresent: v.key === 'relaxed-simd',
+  if (family === 'viridithas')
+    return availableViridithasVariants().map((v) => {
+      const status = viridithasVariantAssetStatus(v);
+      const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
+      if (!unsupported && v.key === 'relaxed-simd' && assetProbePending(status)) void checkViridithasVariantAsset(v, whileArenaMounted(populateSeats));
+      return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
+        assetStatus: status,
+        unsupportedReason: unsupported ? 'unsupported by this browser' : null,
+        requirePresent: v.key === 'relaxed-simd',
+      });
     });
-  });
-  if (family === 'berserk') return availableBerserkVariants().map((v) => {
-    const status = berserkVariantAssetStatus(v);
-    const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
-    if (!unsupported && assetProbePending(status)) void checkBerserkVariantAsset(v, whileArenaMounted(populateSeats));
-    const needsGeneratedAsset = v.key === 'emscripten-simd' || v.key === 'emscripten-relaxed';
-    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
-      assetStatus: status,
-      unsupportedReason: unsupported ? 'unsupported by this browser' : null,
-      requirePresent: needsGeneratedAsset,
+  if (family === 'berserk')
+    return availableBerserkVariants().map((v) => {
+      const status = berserkVariantAssetStatus(v);
+      const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
+      if (!unsupported && assetProbePending(status)) void checkBerserkVariantAsset(v, whileArenaMounted(populateSeats));
+      const needsGeneratedAsset = v.key === 'emscripten-simd' || v.key === 'emscripten-relaxed';
+      return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
+        assetStatus: status,
+        unsupportedReason: unsupported ? 'unsupported by this browser' : null,
+        requirePresent: needsGeneratedAsset,
+      });
     });
-  });
-  if (family === 'plentychess') return availablePlentyChessVariants().map((v) => {
-    const status = plentyChessVariantAssetStatus(v);
-    const unsupportedReason = plentyChessVariantUnsupportedReason(v);
-    const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
-    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(v, whileArenaMounted(populateSeats));
-    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
-  });
-  if (family === 'stormphrax') return availableStormphraxVariants().map((v) => {
-    const status = stormphraxVariantAssetStatus(v);
-    const unsupportedReason = stormphraxVariantUnsupportedReason(v);
-    const needsGeneratedAsset = v.key === 'emscripten-relaxed';
-    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileArenaMounted(populateSeats));
-    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
-  });
+  if (family === 'plentychess')
+    return availablePlentyChessVariants().map((v) => {
+      const status = plentyChessVariantAssetStatus(v);
+      const unsupportedReason = plentyChessVariantUnsupportedReason(v);
+      const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
+      if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(v, whileArenaMounted(populateSeats));
+      return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
+        assetStatus: status,
+        unsupportedReason,
+        requirePresent: needsGeneratedAsset,
+      });
+    });
+  if (family === 'stormphrax')
+    return availableStormphraxVariants().map((v) => {
+      const status = stormphraxVariantAssetStatus(v);
+      const unsupportedReason = stormphraxVariantUnsupportedReason(v);
+      const needsGeneratedAsset = v.key === 'emscripten-relaxed';
+      if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileArenaMounted(populateSeats));
+      return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
+        assetStatus: status,
+        unsupportedReason,
+        requirePresent: needsGeneratedAsset,
+      });
+    });
   const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
   return recklessVariants.map((v) => {
     const status = recklessVariantAssetStatus(v);
@@ -1319,15 +1535,25 @@ function renderSeatSelectors(): void {
   }
   const families = engineFamilyOptions();
   const matchMode = arenaTournamentMode() === 'match';
-  el('arenaSeatList').innerHTML = seatRows.map((row, index) => {
-    const meta = strengthMeta(row.family);
-    const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
-    const varSel = variantOptions(row.family).map((option) => `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`).join('');
-    const label = `Engine ${index + 1}`;
-    const inactive = matchMode && index >= 2 ? ' seat-inactive' : '';
-    const remove = seatRows.length > 2 ? `<button type="button" class="seat-remove" data-seat="${index}" title="Remove ${label}" aria-label="Remove ${label}">×</button>` : '';
-    return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${label}</span>${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="seat-fam" data-seat="${index}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${index}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
-  }).join('');
+  el('arenaSeatList').innerHTML = seatRows
+    .map((row, index) => {
+      const meta = strengthMeta(row.family);
+      const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
+      const varSel = variantOptions(row.family)
+        .map(
+          (option) =>
+            `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`,
+        )
+        .join('');
+      const label = `Engine ${index + 1}`;
+      const inactive = matchMode && index >= 2 ? ' seat-inactive' : '';
+      const remove =
+        seatRows.length > 2
+          ? `<button type="button" class="seat-remove" data-seat="${index}" title="Remove ${label}" aria-label="Remove ${label}">×</button>`
+          : '';
+      return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${label}</span>${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="seat-fam" data-seat="${index}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${index}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
+    })
+    .join('');
 }
 
 function syncSeatRowsFromDom(): void {
@@ -1417,7 +1643,10 @@ function timingMeansText(means: Record<string, number> | undefined): string {
   if (!means) return '';
   const entries = Object.entries(means).filter(([, value]) => Number.isFinite(value));
   if (!entries.length) return '';
-  return entries.slice(0, 4).map(([key, value]) => `${key} ${formatMs(value)}`).join(' · ');
+  return entries
+    .slice(0, 4)
+    .map(([key, value]) => `${key} ${formatMs(value)}`)
+    .join(' · ');
 }
 
 /** Thread count to plan worker flavor/warmup around before any lease exists. */
@@ -1486,7 +1715,8 @@ function engineRuntimeDiagnosticsText(): string {
       const { config, searcher } = bigNetFor(row.variant);
       return `${name}: ${budgetText(row)} · ${searcher.loaded ? `loaded ${searcher.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ${config.name} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · eval cache ${arenaCacheEntries()} · ~${config.approxMb}MB net · ${config.modelUrl}`;
     }
-    if (row?.family === 'centipawn') return `${name}: ${budgetText(row)} · SquareFormer ${centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`;
+    if (row?.family === 'centipawn')
+      return `${name}: ${budgetText(row)} · SquareFormer ${centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`;
     if (row?.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
       const threads = stockfishThreadsPlanned();
@@ -1563,15 +1793,20 @@ function ratioText(numerator: number, denominator: number): string {
 
 function lc0TreeTelemetrySummary(t: Lc0TreeTelemetry): string {
   const fresh = Math.max(0, t.searches - t.rootReused);
-  const backend = timingMeansText(t.evalBackendTimingPerPositionMeans ?? t.evalBackendTimingMeans ?? t.lastBackendTimingPerPositionMeans ?? t.lastBackendTimingMeans);
-  const batch = t.lastBatchSize ? ` · batch ${t.lastBatchSize} · maxEvalBatch ${t.maxEvalBatch ?? t.lastBatchSize}${t.lastBatchPipelineDepth && t.lastBatchPipelineDepth > 1 ? ` · pipeline ${t.lastBatchPipelineDepth}` : ''}` : '';
+  const backend = timingMeansText(
+    t.evalBackendTimingPerPositionMeans ?? t.evalBackendTimingMeans ?? t.lastBackendTimingPerPositionMeans ?? t.lastBackendTimingMeans,
+  );
+  const batch = t.lastBatchSize
+    ? ` · batch ${t.lastBatchSize} · maxEvalBatch ${t.maxEvalBatch ?? t.lastBatchSize}${t.lastBatchPipelineDepth && t.lastBatchPipelineDepth > 1 ? ` · pipeline ${t.lastBatchPipelineDepth}` : ''}`
+    : '';
   return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · last ${formatMs(t.lastElapsedMs)}${backend ? ` · backend avg ${backend}` : ''}${batch} · tree reuse ${ratioText(t.rootReused, t.searches)} (${fresh} fresh) · reused visits ${t.reusedRootVisits} · reply parent ${ratioText(t.replyParentsExpanded, t.replyChecks)} · reply visited ${ratioText(t.replyVisited, t.replyChecks)} · opp reply top-policy≤5 ${ratioText(t.replyTopPolicy5, t.replyChecks)} · top-visits≤5 ${ratioText(t.replyTopVisits5, t.replyChecks)} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · trans ${t.transpositionHits}`;
 }
 
 function uciTelemetrySummary(t: UciEngineTelemetry): string {
-  const last = t.lastDepth !== undefined
-    ? `last d${t.lastDepth} · nodes ${formatCount(t.lastNodes)} · nps ${formatCount(t.lastNps)} · PV ${t.lastPvMoves ?? 0}`
-    : 'waiting for first PV';
+  const last =
+    t.lastDepth !== undefined
+      ? `last d${t.lastDepth} · nodes ${formatCount(t.lastNodes)} · nps ${formatCount(t.lastNps)} · PV ${t.lastPvMoves ?? 0}`
+      : 'waiting for first PV';
   return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · last ${formatMs(t.lastElapsedMs)} · total nodes ${formatCount(t.totalNodes)} · ${last}${t.lastMultiPv && t.lastMultiPv > 1 ? ` · MultiPV ${t.lastMultiPv}` : ''}`;
 }
 
@@ -1592,7 +1827,9 @@ function engineSearchDiagnosticsText(): string {
     if (row?.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
       const t = bt4Telemetry.get(id);
       const { config, searcher } = bigNetFor(row.variant);
-      return t?.searches ? bt4TelemetrySummary(t, searcher) : `${name}: ${config.name} search waiting${searcher.loaded ? ` · backend ${searcher.backend || 'WebGPU'}` : ''}`;
+      return t?.searches
+        ? bt4TelemetrySummary(t, searcher)
+        : `${name}: ${config.name} search waiting${searcher.loaded ? ` · backend ${searcher.backend || 'WebGPU'}` : ''}`;
     }
     if (row?.family === 'centipawn') return engineOutputs.has(id) ? `${name}: Centipawn search output ready` : `${name}: Centipawn search waiting`;
     const uci = uciTelemetry.get(id);
@@ -1722,7 +1959,12 @@ function recordLc0PolicyOutput(engineId: string, engineName: string, evaluation:
     summary: lc0WdlText(evaluation),
     shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q, evaluation.fen),
     evalBar: lc0EvalBar(evaluation.fen, evaluation.wdl),
-    detail: `top policy ${evaluation.legalPriors.slice(0, 5).map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`).join(', ') || '—'}`,
+    detail: `top policy ${
+      evaluation.legalPriors
+        .slice(0, 5)
+        .map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`)
+        .join(', ') || '—'
+    }`,
   });
 }
 
@@ -1775,7 +2017,15 @@ function recordCentipawnSearchOutput(engineId: string, engineName: string, fen: 
   });
 }
 
-function recordUciOutput(engineId: string, engineName: string, label: string, fen: string, move: string | null, lines: StockfishInfoLine[], elapsedMs?: number): void {
+function recordUciOutput(
+  engineId: string,
+  engineName: string,
+  label: string,
+  fen: string,
+  move: string | null,
+  lines: StockfishInfoLine[],
+  elapsedMs?: number,
+): void {
   recordUciTelemetry(engineId, engineName, lines, elapsedMs);
   const best = lines[0];
   recordEngineOutput({
@@ -1787,7 +2037,10 @@ function recordUciOutput(engineId: string, engineName: string, label: string, fe
     summary: `${label} ${stockfishScoreText(best, fen)}`,
     shortEval: stockfishScoreCompact(best, fen),
     evalBar: stockfishEvalBar(fen, best),
-    detail: lines.length > 1 ? `MultiPV ${(lines.slice(0, 3) as StockfishInfoLine[]).map((line) => `#${line.multipv ?? 1} ${stockfishScoreText(line, fen)}`).join(' · ')}` : undefined,
+    detail:
+      lines.length > 1
+        ? `MultiPV ${(lines.slice(0, 3) as StockfishInfoLine[]).map((line) => `#${line.multipv ?? 1} ${stockfishScoreText(line, fen)}`).join(' · ')}`
+        : undefined,
     pv: best?.pvUci,
     whiteCp: stockfishWhiteCp(best, fen),
     mateInWhitePov: stockfishMateInWhitePov(best, fen),
@@ -1846,8 +2099,14 @@ function recordPendingLc0ReplyProbes(replyEngine: ArenaEngine, replyBoard: Board
     const child = pending.child;
     if (child?.expanded) {
       t.replyParentsExpanded += 1;
-      const policyRank = child.edges.slice().sort((a, b) => b.prior - a.prior).findIndex((edge) => moveToUci(edge.move) === replyUci);
-      const visitsRank = child.edges.slice().sort((a, b) => b.visits - a.visits || b.prior - a.prior).findIndex((edge) => moveToUci(edge.move) === replyUci);
+      const policyRank = child.edges
+        .slice()
+        .sort((a, b) => b.prior - a.prior)
+        .findIndex((edge) => moveToUci(edge.move) === replyUci);
+      const visitsRank = child.edges
+        .slice()
+        .sort((a, b) => b.visits - a.visits || b.prior - a.prior)
+        .findIndex((edge) => moveToUci(edge.move) === replyUci);
       const replyEdge = child.edges.find((edge) => moveToUci(edge.move) === replyUci);
       if (replyEdge && replyEdge.visits > 0) t.replyVisited += 1;
       if (policyRank >= 0 && policyRank < 5) t.replyTopPolicy5 += 1;
@@ -1872,10 +2131,18 @@ function stockfishFlavorFor(kind: 'lite' | 'full'): StockfishFlavor {
 // each has its own lazily-created instance.
 function stockfishEngineFor(kind: 'lite' | 'full'): StockfishEngine {
   if (kind === 'lite') {
-    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 4, threads: stockfishThreadsPlanned(), hashMb: cpuEngineHashMbForSurface('arena') }, stockfishFlavorUrl(stockfishFlavorFor('lite')));
+    if (!stockfishLite)
+      stockfishLite = new StockfishEngine(
+        { depth: 4, threads: stockfishThreadsPlanned(), hashMb: cpuEngineHashMbForSurface('arena') },
+        stockfishFlavorUrl(stockfishFlavorFor('lite')),
+      );
     return stockfishLite;
   }
-  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 4, threads: stockfishThreadsPlanned(), hashMb: cpuEngineHashMbForSurface('arena') }, stockfishFlavorUrl(stockfishFlavorFor('full')));
+  if (!stockfishFull)
+    stockfishFull = new StockfishEngine(
+      { depth: 4, threads: stockfishThreadsPlanned(), hashMb: cpuEngineHashMbForSurface('arena') },
+      stockfishFlavorUrl(stockfishFlavorFor('full')),
+    );
   return stockfishFull;
 }
 
@@ -1903,7 +2170,8 @@ function getRecklessFor(variantKey: string): RecklessEngine {
 }
 
 function prewarmReckless(engine: RecklessEngine): void {
-  void engine.prewarm()
+  void engine
+    .prewarm()
     .then(renderRecklessRuntimeInfo)
     .catch((error) => {
       if ((error as Error).name !== 'AbortError') console.warn('Reckless prewarm failed', error);
@@ -1919,7 +2187,10 @@ function recklessMissingAssetMessage(variants: RecklessVariant[]): string {
 function renderRecklessRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'reckless');
   el('recklessRuntimeInfo').hidden = !rows.length;
-  if (!rows.length) { el('recklessRuntimeInfo').textContent = ''; return; }
+  if (!rows.length) {
+    el('recklessRuntimeInfo').textContent = '';
+    return;
+  }
   const parts = rows.map((row) => {
     const variant = recklessVariantForKey(row.variant);
     const engine = recklessEngines.peek(variant);
@@ -1937,7 +2208,9 @@ function renderRecklessRuntimeInfo(): void {
 function refreshRecklessVariantUi(): void {
   const select = selectEl('recklessVariantSelect');
   if (!select.options.length) {
-    select.innerHTML = availableRecklessVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+    select.innerHTML = availableRecklessVariants()
+      .map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`)
+      .join('');
   }
   select.disabled = running;
   renderRecklessRuntimeInfo();
@@ -1960,7 +2233,10 @@ function getViridithasFor(variantKey: string) {
 function renderViridithasRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'viridithas');
   el('viridithasRuntimeInfo').hidden = !rows.length;
-  if (!rows.length) { el('viridithasRuntimeInfo').textContent = ''; return; }
+  if (!rows.length) {
+    el('viridithasRuntimeInfo').textContent = '';
+    return;
+  }
   const parts = rows.map((row) => {
     const variant = viridithasVariantForKey(row.variant);
     const engine = viridithasEngines.peek(variant);
@@ -1977,7 +2253,9 @@ function renderViridithasRuntimeInfo(): void {
 function refreshViridithasVariantUi(): void {
   const select = selectEl('viridithasVariantSelect');
   if (!select.options.length) {
-    select.innerHTML = availableViridithasVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+    select.innerHTML = availableViridithasVariants()
+      .map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`)
+      .join('');
   }
   select.disabled = running;
   renderViridithasRuntimeInfo();
@@ -2003,7 +2281,10 @@ function getBerserkFor(variantKey: string) {
 function renderBerserkRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'berserk');
   el('berserkRuntimeInfo').hidden = !rows.length;
-  if (!rows.length) { el('berserkRuntimeInfo').textContent = ''; return; }
+  if (!rows.length) {
+    el('berserkRuntimeInfo').textContent = '';
+    return;
+  }
   const parts = rows.map((row) => {
     const variant = berserkVariantForKey(row.variant);
     const engine = berserkEngines.peek(variant);
@@ -2018,7 +2299,9 @@ function renderBerserkRuntimeInfo(): void {
 function refreshBerserkVariantUi(): void {
   const select = selectEl('berserkVariantSelect');
   if (!select.options.length) {
-    select.innerHTML = availableBerserkVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+    select.innerHTML = availableBerserkVariants()
+      .map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`)
+      .join('');
   }
   select.disabled = running;
   renderBerserkRuntimeInfo();
@@ -2042,7 +2325,10 @@ function getPlentyChessFor(variantKey: string) {
 function renderPlentyChessRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'plentychess');
   el('plentychessRuntimeInfo').hidden = !rows.length;
-  if (!rows.length) { el('plentychessRuntimeInfo').textContent = ''; return; }
+  if (!rows.length) {
+    el('plentychessRuntimeInfo').textContent = '';
+    return;
+  }
   const parts = rows.map((row) => {
     const variant = plentyChessVariantForKey(row.variant);
     const engine = plentyChessEngines.peek(variant);
@@ -2058,14 +2344,17 @@ function renderPlentyChessRuntimeInfo(): void {
 function refreshPlentyChessVariantUi(): void {
   const select = selectEl('plentychessVariantSelect');
   const selected = select.value;
-  select.innerHTML = availablePlentyChessVariants().map((variant) => {
-    const status = plentyChessVariantAssetStatus(variant);
-    const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
-    const needsGeneratedAsset = variant.key === 'emscripten-sse41' || variant.key === 'emscripten-relaxed';
-    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(variant, whileArenaMounted(refreshPlentyChessVariantUi));
-    const option = browserVariantOption(variant.key, variant.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
-    return `<option value="${option.value}"${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`;
-  }).join('');
+  select.innerHTML = availablePlentyChessVariants()
+    .map((variant) => {
+      const status = plentyChessVariantAssetStatus(variant);
+      const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
+      const needsGeneratedAsset = variant.key === 'emscripten-sse41' || variant.key === 'emscripten-relaxed';
+      if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status))
+        void checkPlentyChessVariantAsset(variant, whileArenaMounted(refreshPlentyChessVariantUi));
+      const option = browserVariantOption(variant.key, variant.label, { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
+      return `<option value="${option.value}"${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`;
+    })
+    .join('');
   if (selected) select.value = selected;
   select.disabled = running;
   renderPlentyChessRuntimeInfo();
@@ -2089,7 +2378,10 @@ function getStormphraxFor(variantKey: string) {
 function renderStormphraxRuntimeInfo(): void {
   const rows = activeSeatRows().filter((row) => row.family === 'stormphrax');
   el('stormphraxRuntimeInfo').hidden = !rows.length;
-  if (!rows.length) { el('stormphraxRuntimeInfo').textContent = ''; return; }
+  if (!rows.length) {
+    el('stormphraxRuntimeInfo').textContent = '';
+    return;
+  }
   const parts = rows.map((row) => {
     const variant = stormphraxVariantForKey(row.variant);
     const engine = stormphraxEngines.peek(variant);
@@ -2105,7 +2397,9 @@ function renderStormphraxRuntimeInfo(): void {
 function refreshStormphraxVariantUi(): void {
   const select = selectEl('stormphraxVariantSelect');
   const selected = select.value;
-  select.innerHTML = availableStormphraxVariants().map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`).join('');
+  select.innerHTML = availableStormphraxVariants()
+    .map((variant) => `<option value="${variant.key}">${htmlEscape(variant.label)}</option>`)
+    .join('');
   if (selected) select.value = selected;
   select.disabled = running;
   renderStormphraxRuntimeInfo();
@@ -2209,154 +2503,185 @@ function buildEngines() {
   engines.clear();
   disposeUnusedUciEngines();
   const warmupPositions = [parseFen(START_FEN)];
-  const lc0Search = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
-    const timed = arenaBudgetMode() === 'movetime';
-    const started = performance.now();
-    const result = await lc0SearcherFor(engineId).search({ positions }, {
-      visits: timed ? undefined : row.strength,
-      movetimeMs: timed ? arenaMovetimeMs() : undefined,
-      signal,
-      yieldEveryMs: 16,
-      reuseTree: true,
-      batchSize: lc0BatchSize(),
-      batchPipelineDepth: lc0BatchPipelineDepth(),
-      onProgress: (progress: Lc0SearchProgress) => setArenaVisitProgress(engineId, engines.get(engineId)?.name ?? engineId, progress),
-    });
-    const elapsedMs = performance.now() - started;
-    const engineName = engines.get(engineId)?.name ?? engineId;
-    recordLc0SearchTelemetry(engineId, engineName, result, elapsedMs);
-    recordLc0SearchOutput(engineId, engineName, result);
-    return result.move ?? null;
-  };
-  const lc0BigNetMove = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
-    const { config, searcher } = bigNetFor(row.variant);
-    const onAbort = () => searcher.cancel();
-    signal.addEventListener('abort', onAbort, { once: true });
-    const label = engines.get(engineId)?.name ?? `Lc0 ${config.name}`;
-    searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(label, loaded, total, 'Downloading');
-    try {
+  const lc0Search =
+    (engineId: string, row: EngineRow): ArenaEngine['move'] =>
+    async (positions, signal) => {
       const timed = arenaBudgetMode() === 'movetime';
-      const result = await searcher.search({ positions }, {
+      const started = performance.now();
+      const result = await lc0SearcherFor(engineId).search(
+        { positions },
+        {
+          visits: timed ? undefined : row.strength,
+          movetimeMs: timed ? arenaMovetimeMs() : undefined,
+          signal,
+          yieldEveryMs: 16,
+          reuseTree: true,
+          batchSize: lc0BatchSize(),
+          batchPipelineDepth: lc0BatchPipelineDepth(),
+          onProgress: (progress: Lc0SearchProgress) => setArenaVisitProgress(engineId, engines.get(engineId)?.name ?? engineId, progress),
+        },
+      );
+      const elapsedMs = performance.now() - started;
+      const engineName = engines.get(engineId)?.name ?? engineId;
+      recordLc0SearchTelemetry(engineId, engineName, result, elapsedMs);
+      recordLc0SearchOutput(engineId, engineName, result);
+      return result.move ?? null;
+    };
+  const lc0BigNetMove =
+    (engineId: string, row: EngineRow): ArenaEngine['move'] =>
+    async (positions, signal) => {
+      const { config, searcher } = bigNetFor(row.variant);
+      const onAbort = () => searcher.cancel();
+      signal.addEventListener('abort', onAbort, { once: true });
+      const label = engines.get(engineId)?.name ?? `Lc0 ${config.name}`;
+      searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(label, loaded, total, 'Downloading');
+      try {
+        const timed = arenaBudgetMode() === 'movetime';
+        const result = await searcher.search(
+          { positions },
+          {
+            visits: timed ? undefined : row.strength,
+            movetimeMs: timed ? arenaMovetimeMs() : undefined,
+            reuseTree: true,
+            batchSize: config.recommendedBatchSize,
+            batchPipelineDepth: config.recommendedPipelineDepth,
+            evalCacheEntries: arenaCacheEntries(),
+            signal,
+            onProgress: (progress) => setArenaVisitProgress(engineId, label, progress),
+          },
+        );
+        if (result.cancelled) return null;
+        recordBt4SearchOutput(engineId, engines.get(engineId)?.name ?? `Lc0 ${config.name}`, result);
+        return result.move ?? null;
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+        hideDownloadProgress();
+        clearArenaSearchProgress(engineId);
+      }
+    };
+  const centipawnMove =
+    (engineId: string, row: EngineRow): ArenaEngine['move'] =>
+    async (positions, signal) => {
+      const current = positions[positions.length - 1];
+      const fen = boardToFen(current);
+      const evaluator = await centipawnEvaluator(row.variant);
+      const timed = arenaBudgetMode() === 'movetime';
+      const result = await chooseMove(current, evaluator, {
         visits: timed ? undefined : row.strength,
         movetimeMs: timed ? arenaMovetimeMs() : undefined,
-        reuseTree: true,
-        batchSize: config.recommendedBatchSize,
-        batchPipelineDepth: config.recommendedPipelineDepth,
-        evalCacheEntries: arenaCacheEntries(),
+        batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('centipawnBatch') ?? params.get('tinyBatch') ?? '32') || 32))),
         signal,
-        onProgress: (progress) => setArenaVisitProgress(engineId, label, progress),
+        historyFens: centipawnHistoryFens(positions),
+        searchPolicy: montyLitePuctPolicy,
+        onProgress: (progress) => {
+          const completed = progress.completedVisits ?? progress.visits;
+          const elapsedMs = progress.elapsedMs ?? 0;
+          setArenaSearchProgress(engineId, engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant), {
+            label: engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant),
+            completed,
+            requested: progress.requestedVisits ?? progress.visits,
+            elapsedMs,
+            nps: elapsedMs > 0 ? completed / Math.max(1e-9, elapsedMs / 1000) : undefined,
+            best: progress.move ? moveToUci(progress.move) : null,
+            value: progress.value,
+            units: 'visits',
+          });
+        },
       });
-      if (result.cancelled) return null;
-      recordBt4SearchOutput(engineId, engines.get(engineId)?.name ?? `Lc0 ${config.name}`, result);
-      return result.move ?? null;
-    } finally {
-      signal.removeEventListener('abort', onAbort);
-      hideDownloadProgress();
-      clearArenaSearchProgress(engineId);
-    }
-  };
-  const centipawnMove = (engineId: string, row: EngineRow): ArenaEngine['move'] => async (positions, signal) => {
-    const current = positions[positions.length - 1];
-    const fen = boardToFen(current);
-    const evaluator = await centipawnEvaluator(row.variant);
-    const timed = arenaBudgetMode() === 'movetime';
-    const result = await chooseMove(current, evaluator, {
-      visits: timed ? undefined : row.strength,
-      movetimeMs: timed ? arenaMovetimeMs() : undefined,
-      batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('centipawnBatch') ?? params.get('tinyBatch') ?? '32') || 32))),
-      signal,
-      historyFens: centipawnHistoryFens(positions),
-      searchPolicy: montyLitePuctPolicy,
-      onProgress: (progress) => {
-        const completed = progress.completedVisits ?? progress.visits;
-        const elapsedMs = progress.elapsedMs ?? 0;
-        setArenaSearchProgress(engineId, engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant), {
-          label: engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant),
-          completed,
-          requested: progress.requestedVisits ?? progress.visits,
+      recordCentipawnSearchOutput(engineId, engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant), fen, result);
+      return result.move ? moveToUci(result.move) : null;
+    };
+  const sf =
+    (engineId: string, row: EngineRow, kind: 'lite' | 'full'): ArenaEngine['move'] =>
+    async (positions, signal) => {
+      const engine = stockfishEngineFor(kind);
+      const lease = await resourceBroker.acquire({ engineId: `sf-${kind}`, signal });
+      try {
+        const threads = stockfishThreadsGranted(lease.threads);
+        if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads });
+        else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads });
+        const fen = boardToFen(positions[positions.length - 1]);
+        const started = performance.now();
+        const move = await engine.bestMove(fen, signal);
+        const elapsedMs = performance.now() - started;
+        recordStockfishOutput(
+          engineId,
+          engines.get(engineId)?.name ?? (kind === 'lite' ? 'Stockfish Lite' : 'Stockfish'),
+          fen,
+          move,
+          engine.lastInfo(),
           elapsedMs,
-          nps: elapsedMs > 0 ? completed / Math.max(1e-9, elapsedMs / 1000) : undefined,
-          best: progress.move ? moveToUci(progress.move) : null,
-          value: progress.value,
-          units: 'visits',
-        });
-      },
-    });
-    recordCentipawnSearchOutput(engineId, engines.get(engineId)?.name ?? centipawnEngineLabel(row.variant), fen, result);
-    return result.move ? moveToUci(result.move) : null;
-  };
-  const sf = (engineId: string, row: EngineRow, kind: 'lite' | 'full'): ArenaEngine['move'] => async (positions, signal) => {
-    const engine = stockfishEngineFor(kind);
-    const lease = await resourceBroker.acquire({ engineId: `sf-${kind}`, signal });
-    try {
-      const threads = stockfishThreadsGranted(lease.threads);
-      if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads });
-      else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads });
+        );
+        return move;
+      } finally {
+        lease.release();
+      }
+    };
+  const recklessMove =
+    (engineId: string, row: EngineRow, engine: RecklessEngine): ArenaEngine['move'] =>
+    async (positions, signal) => {
+      if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
+      else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
       const fen = boardToFen(positions[positions.length - 1]);
       const started = performance.now();
       const move = await engine.bestMove(fen, signal);
       const elapsedMs = performance.now() - started;
-      recordStockfishOutput(engineId, engines.get(engineId)?.name ?? (kind === 'lite' ? 'Stockfish Lite' : 'Stockfish'), fen, move, engine.lastInfo(), elapsedMs);
+      recordRecklessOutput(engineId, engines.get(engineId)?.name ?? 'Reckless', fen, move, engine.lastInfo(), elapsedMs);
+      renderRecklessRuntimeInfo();
       return move;
-    } finally {
-      lease.release();
-    }
-  };
-  const recklessMove = (engineId: string, row: EngineRow, engine: RecklessEngine): ArenaEngine['move'] => async (positions, signal) => {
-    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
-    else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
-    const fen = boardToFen(positions[positions.length - 1]);
-    const started = performance.now();
-    const move = await engine.bestMove(fen, signal);
-    const elapsedMs = performance.now() - started;
-    recordRecklessOutput(engineId, engines.get(engineId)?.name ?? 'Reckless', fen, move, engine.lastInfo(), elapsedMs);
-    renderRecklessRuntimeInfo();
-    return move;
-  };
-  const viridithasMove = (engineId: string, row: EngineRow, engine: ViridithasEngine): ArenaEngine['move'] => async (positions, signal) => {
-    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
-    else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
-    const fen = boardToFen(positions[positions.length - 1]);
-    const started = performance.now();
-    const move = await engine.bestMove(fen, signal);
-    const elapsedMs = performance.now() - started;
-    recordViridithasOutput(engineId, engines.get(engineId)?.name ?? 'Viridithas', fen, move, engine.lastInfo(), elapsedMs);
-    renderViridithasRuntimeInfo();
-    return move;
-  };
-  const berserkMove = (engineId: string, row: EngineRow, engine: BerserkEngine): ArenaEngine['move'] => async (positions, signal) => {
-    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
-    else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
-    const fen = boardToFen(positions[positions.length - 1]);
-    const started = performance.now();
-    const move = await engine.bestMove(fen, signal);
-    const elapsedMs = performance.now() - started;
-    recordBerserkOutput(engineId, engines.get(engineId)?.name ?? 'Berserk', fen, move, engine.lastInfo(), elapsedMs);
-    renderBerserkRuntimeInfo();
-    return move;
-  };
-  const plentyChessMove = (engineId: string, row: EngineRow, engine: PlentyChessEngine): ArenaEngine['move'] => async (positions, signal) => {
-    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
-    else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
-    const fen = boardToFen(positions[positions.length - 1]);
-    const started = performance.now();
-    const move = await engine.bestMove(fen, signal);
-    const elapsedMs = performance.now() - started;
-    recordPlentyChessOutput(engineId, engines.get(engineId)?.name ?? 'PlentyChess', fen, move, engine.lastInfo(), elapsedMs);
-    renderPlentyChessRuntimeInfo();
-    return move;
-  };
-  const stormphraxMove = (engineId: string, row: EngineRow, engine: StormphraxEngine): ArenaEngine['move'] => async (positions, signal) => {
-    if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
-    else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
-    const fen = boardToFen(positions[positions.length - 1]);
-    const started = performance.now();
-    const move = await engine.bestMove(fen, signal);
-    const elapsedMs = performance.now() - started;
-    recordStormphraxOutput(engineId, engines.get(engineId)?.name ?? 'Stormphrax', fen, move, engine.lastInfo(), elapsedMs);
-    renderStormphraxRuntimeInfo();
-    return move;
-  };
+    };
+  const viridithasMove =
+    (engineId: string, row: EngineRow, engine: ViridithasEngine): ArenaEngine['move'] =>
+    async (positions, signal) => {
+      if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
+      else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
+      const fen = boardToFen(positions[positions.length - 1]);
+      const started = performance.now();
+      const move = await engine.bestMove(fen, signal);
+      const elapsedMs = performance.now() - started;
+      recordViridithasOutput(engineId, engines.get(engineId)?.name ?? 'Viridithas', fen, move, engine.lastInfo(), elapsedMs);
+      renderViridithasRuntimeInfo();
+      return move;
+    };
+  const berserkMove =
+    (engineId: string, row: EngineRow, engine: BerserkEngine): ArenaEngine['move'] =>
+    async (positions, signal) => {
+      if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
+      else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
+      const fen = boardToFen(positions[positions.length - 1]);
+      const started = performance.now();
+      const move = await engine.bestMove(fen, signal);
+      const elapsedMs = performance.now() - started;
+      recordBerserkOutput(engineId, engines.get(engineId)?.name ?? 'Berserk', fen, move, engine.lastInfo(), elapsedMs);
+      renderBerserkRuntimeInfo();
+      return move;
+    };
+  const plentyChessMove =
+    (engineId: string, row: EngineRow, engine: PlentyChessEngine): ArenaEngine['move'] =>
+    async (positions, signal) => {
+      if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
+      else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
+      const fen = boardToFen(positions[positions.length - 1]);
+      const started = performance.now();
+      const move = await engine.bestMove(fen, signal);
+      const elapsedMs = performance.now() - started;
+      recordPlentyChessOutput(engineId, engines.get(engineId)?.name ?? 'PlentyChess', fen, move, engine.lastInfo(), elapsedMs);
+      renderPlentyChessRuntimeInfo();
+      return move;
+    };
+  const stormphraxMove =
+    (engineId: string, row: EngineRow, engine: StormphraxEngine): ArenaEngine['move'] =>
+    async (positions, signal) => {
+      if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
+      else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
+      const fen = boardToFen(positions[positions.length - 1]);
+      const started = performance.now();
+      const move = await engine.bestMove(fen, signal);
+      const elapsedMs = performance.now() - started;
+      recordStormphraxOutput(engineId, engines.get(engineId)?.name ?? 'Stormphrax', fen, move, engine.lastInfo(), elapsedMs);
+      renderStormphraxRuntimeInfo();
+      return move;
+    };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
     await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
@@ -2369,7 +2694,10 @@ function buildEngines() {
     signal.addEventListener('abort', onAbort, { once: true });
     searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(`Lc0 ${config.name}`, loaded, total, 'Downloading');
     try {
-      await searcher.search({ positions: warmupPositions }, { visits: 1, batchSize: config.recommendedBatchSize, batchPipelineDepth: config.recommendedPipelineDepth, evalCacheEntries: arenaCacheEntries() });
+      await searcher.search(
+        { positions: warmupPositions },
+        { visits: 1, batchSize: config.recommendedBatchSize, batchPipelineDepth: config.recommendedPipelineDepth, evalCacheEntries: arenaCacheEntries() },
+      );
       await searcher.resetTree();
     } finally {
       signal.removeEventListener('abort', onAbort);
@@ -2438,7 +2766,13 @@ function buildEngines() {
     } else if (row.family === 'reckless') {
       const variant = recklessVariantForKey(row.variant);
       if (variant.key !== 'custom' && recklessVariantAssetStatus(variant) === 'missing') {
-        engines.set(id, { id, name, move: async () => { throw new Error(recklessMissingAssetMessage([variant])); } });
+        engines.set(id, {
+          id,
+          name,
+          move: async () => {
+            throw new Error(recklessMissingAssetMessage([variant]));
+          },
+        });
         continue;
       }
       const engine = getRecklessFor(row.variant);
@@ -2454,7 +2788,13 @@ function buildEngines() {
       const variant = plentyChessVariantForKey(row.variant);
       const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
       if (unsupportedReason) {
-        engines.set(id, { id, name, move: async () => { throw new Error(`${variant.label} ${unsupportedReason}.`); } });
+        engines.set(id, {
+          id,
+          name,
+          move: async () => {
+            throw new Error(`${variant.label} ${unsupportedReason}.`);
+          },
+        });
         continue;
       }
       const engine = getPlentyChessFor(row.variant);
@@ -2463,7 +2803,13 @@ function buildEngines() {
       const variant = stormphraxVariantForKey(row.variant);
       const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
       if (unsupportedReason) {
-        engines.set(id, { id, name, move: async () => { throw new Error(`${variant.label} ${unsupportedReason}.`); } });
+        engines.set(id, {
+          id,
+          name,
+          move: async () => {
+            throw new Error(`${variant.label} ${unsupportedReason}.`);
+          },
+        });
         continue;
       }
       const engine = getStormphraxFor(row.variant);
@@ -2521,9 +2867,7 @@ function setOpeningPreview(opening: ArenaOpening): void {
 function refreshBudgetControls(): void {
   const movetime = arenaBudgetMode() === 'movetime';
   el('movetimeField').hidden = !movetime;
-  el('matchupNote').textContent = movetime
-    ? 'Equal time per move · colors alternate.'
-    : 'Configured engine strength · colors alternate.';
+  el('matchupNote').textContent = movetime ? 'Equal time per move · colors alternate.' : 'Configured engine strength · colors alternate.';
 }
 
 function refreshOpeningPreview(): void {
@@ -2548,7 +2892,10 @@ function formatScoreHalf(value: number): string {
 }
 
 function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, score: MatchScore): void {
-  if (score.games === 0) { el('matchScore').textContent = 'No games played yet.'; return; }
+  if (score.games === 0) {
+    el('matchScore').textContent = 'No games played yet.';
+    return;
+  }
   (el('resultSection') as HTMLDetailsElement).open = true;
   const games = `${score.games} game${score.games === 1 ? '' : 's'}`;
   el('matchScore').textContent = sameEngine
@@ -2559,13 +2906,17 @@ function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, sco
 function renderStandings(standings: TournamentStandings, scheduledGames: number): void {
   (el('resultSection') as HTMLDetailsElement).open = true;
   const rows = standings.table();
-  const elo = (row: ReturnType<TournamentStandings['table']>[number]) => row.eloDiff === null
-    ? '—'
-    : `${row.eloDiff >= 0 ? '+' : ''}${Math.round(row.eloDiff)}${row.eloError !== null ? ` ±${Math.round(row.eloError)}` : ''}`;
-  const body = rows.map((row, i) =>
-    `<tr><td>${i + 1}</td><td>${htmlEscape(row.name)}</td><td>${elo(row)}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${formatScoreHalf(row.points) || '0'}</td><td>${row.games}</td></tr>`).join('');
-  el('matchScore').innerHTML = `<div class="small">${standings.totalGames()}/${scheduledGames} games · Elo vs pool, ±95% approx</div>`
-    + `<table class="standings"><thead><tr><th>#</th><th>Engine</th><th>Elo</th><th>W</th><th>D</th><th>L</th><th>Pts</th><th>G</th></tr></thead><tbody>${body}</tbody></table>`;
+  const elo = (row: ReturnType<TournamentStandings['table']>[number]) =>
+    row.eloDiff === null ? '—' : `${row.eloDiff >= 0 ? '+' : ''}${Math.round(row.eloDiff)}${row.eloError !== null ? ` ±${Math.round(row.eloError)}` : ''}`;
+  const body = rows
+    .map(
+      (row, i) =>
+        `<tr><td>${i + 1}</td><td>${htmlEscape(row.name)}</td><td>${elo(row)}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${formatScoreHalf(row.points) || '0'}</td><td>${row.games}</td></tr>`,
+    )
+    .join('');
+  el('matchScore').innerHTML =
+    `<div class="small">${standings.totalGames()}/${scheduledGames} games · Elo vs pool, ±95% approx</div>` +
+    `<table class="standings"><thead><tr><th>#</th><th>Engine</th><th>Elo</th><th>W</th><th>D</th><th>L</th><th>Pts</th><th>G</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function appendLog(text: string, gameIndex?: number) {
@@ -2583,7 +2934,14 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (ms <= 0 || signal.aborted) return resolve();
     const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
   });
 }
 
@@ -2631,37 +2989,54 @@ function resetGameCharts(): void {
 
 function renderGameCharts(): void {
   const ids = [...new Set(gameChartSamples.map((sample) => sample.engineId))];
-  const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] => ids.map((id) => ({
-    label: engines.get(id)?.name ?? id,
-    color: chartColorFor(id),
-    points: gameChartSamples
-      .filter((sample) => sample.engineId === id)
-      .flatMap((sample) => {
-        const y = value(sample);
-        return y === undefined || !Number.isFinite(y) ? [] : [{ x: sample.ply, y }];
-      }),
-  }));
-  el('evalChart').innerHTML = lineChartSvg(seriesFor((sample) => sample.whiteScore), { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%` });
-  el('timeChart').innerHTML = lineChartSvg(seriesFor((sample) => sample.moveMs), { yMin: 0, formatY: formatCompactNumber });
-  el('npsChart').innerHTML = lineChartSvg(seriesFor((sample) => sample.nps), { yMin: 0, formatY: formatCompactNumber });
-  el('chartLegend').innerHTML = ids.map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(engines.get(id)?.name ?? id)}</span>`).join('');
+  const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] =>
+    ids.map((id) => ({
+      label: engines.get(id)?.name ?? id,
+      color: chartColorFor(id),
+      points: gameChartSamples
+        .filter((sample) => sample.engineId === id)
+        .flatMap((sample) => {
+          const y = value(sample);
+          return y === undefined || !Number.isFinite(y) ? [] : [{ x: sample.ply, y }];
+        }),
+    }));
+  el('evalChart').innerHTML = lineChartSvg(
+    seriesFor((sample) => sample.whiteScore),
+    { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%` },
+  );
+  el('timeChart').innerHTML = lineChartSvg(
+    seriesFor((sample) => sample.moveMs),
+    { yMin: 0, formatY: formatCompactNumber },
+  );
+  el('npsChart').innerHTML = lineChartSvg(
+    seriesFor((sample) => sample.nps),
+    { yMin: 0, formatY: formatCompactNumber },
+  );
+  el('chartLegend').innerHTML = ids
+    .map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(engines.get(id)?.name ?? id)}</span>`)
+    .join('');
 }
 
 /** Live PUCT-root distribution from the real search tree (Lc0SearchResult.children). */
 function renderRootChart(engineId: string): void {
   const result = lastLc0SearchResults.get(engineId);
   if (!result?.children?.length) return;
-  const top = [...result.children].sort((a, b) => b.visits - a.visits).slice(0, 8).filter((child) => child.visits > 0);
+  const top = [...result.children]
+    .sort((a, b) => b.visits - a.visits)
+    .slice(0, 8)
+    .filter((child) => child.visits > 0);
   if (!top.length) return;
   rootChartContext = { fen: result.fen, top: top.map((child) => ({ uci: child.uci, visits: child.visits })) };
   el('rootChartTitle').textContent = `${engines.get(engineId)?.name ?? engineId} root visits (Q from side to move)`;
   (el('rootChart').parentElement as HTMLElement).hidden = false;
-  el('rootChart').innerHTML = hBarChartSvg(top.map((child) => ({
-    label: child.uci,
-    value: child.visits,
-    detail: `Q ${signed(child.q, 2)} · P ${Math.round(child.prior * 100)}%`,
-    color: chartColorFor(engineId),
-  })));
+  el('rootChart').innerHTML = hBarChartSvg(
+    top.map((child) => ({
+      label: child.uci,
+      value: child.visits,
+      detail: `Q ${signed(child.q, 2)} · P ${Math.round(child.prior * 100)}%`,
+      color: chartColorFor(engineId),
+    })),
+  );
 }
 
 function recordGameChartSample(ply: number, engine: ArenaEngine, moveMs: number): void {
@@ -2673,7 +3048,12 @@ function recordGameChartSample(ply: number, engine: ArenaEngine, moveMs: number)
   renderRootChart(engine.id);
 }
 
-async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: ArenaOpening, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string; tree: GameTree }> {
+async function playArenaGame(
+  white: ArenaEngine,
+  black: ArenaEngine,
+  opening: ArenaOpening,
+  signal: AbortSignal,
+): Promise<{ result: GameResultCode; reason: string; tree: GameTree }> {
   pendingLc0ReplyProbes.clear();
   const tree = gameTreeFromOpening(opening);
   historyBoards = tree.historyBoards();
@@ -2726,20 +3106,27 @@ async function playArenaGame(white: ArenaEngine, black: ArenaEngine, opening: Ar
 }
 
 async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.signal): Promise<boolean> {
-  const variants = [...new Map(activeSeatRows()
-    .filter((row) => row.family === 'reckless')
-    .map((row) => {
-      const variant = recklessVariantForKey(row.variant);
-      return [recklessCacheKey(variant), variant] as const;
-    })).values()];
+  const variants = [
+    ...new Map(
+      activeSeatRows()
+        .filter((row) => row.family === 'reckless')
+        .map((row) => {
+          const variant = recklessVariantForKey(row.variant);
+          return [recklessCacheKey(variant), variant] as const;
+        }),
+    ).values(),
+  ];
   if (!variants.length) return true;
   const missing: RecklessVariant[] = [];
   for (const variant of variants) {
-    const status = await checkRecklessVariantAsset(variant, whileArenaMounted(() => {
-      renderRecklessRuntimeInfo();
-      renderSeatSelectors();
-      refreshSeatControls();
-    }));
+    const status = await checkRecklessVariantAsset(
+      variant,
+      whileArenaMounted(() => {
+        renderRecklessRuntimeInfo();
+        renderSeatSelectors();
+        refreshSeatControls();
+      }),
+    );
     if (isStaleMount(mountSignal)) return false;
     if (status === 'missing' && variant.key !== 'custom') missing.push(variant);
   }
@@ -2764,8 +3151,14 @@ async function startMatch() {
   syncSeatRowsFromDom();
   const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
   if (isStaleMount(mountSignal)) return;
-  if (!selectedAssetsAvailable) { clearStartPending(); return; }
-  if (running) { clearStartPending(); return; }
+  if (!selectedAssetsAvailable) {
+    clearStartPending();
+    return;
+  }
+  if (running) {
+    clearStartPending();
+    return;
+  }
   buildEngines();
   populateSeats();
   const mode = arenaTournamentMode();
@@ -2780,7 +3173,7 @@ async function startMatch() {
     const engine = engines.get(engineId);
     // Duplicate engine configs are legal (mirror/self-play pools); standings
     // key on seat pids and names get a seat suffix to stay distinguishable.
-    const name = engine && (idCounts.get(engineId) ?? 0) > 1 && mode !== 'match' ? `${engine.name} (seat ${index + 1})` : engine?.name ?? engineId;
+    const name = engine && (idCounts.get(engineId) ?? 0) > 1 && mode !== 'match' ? `${engine.name} (seat ${index + 1})` : (engine?.name ?? engineId);
     return { pid: String(index), index, engineId, engine, name };
   });
   if (participants.length < 2 || participants.some((participant) => !participant.engine)) {
@@ -2790,7 +3183,7 @@ async function startMatch() {
   }
   const byPid = new Map(participants.map((participant) => [participant.pid, participant]));
   const bigNetRows = activeSeatRows().filter((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant));
-  const bigNetRuntimeSupported = !bigNetRows.length || await probeBt4Support();
+  const bigNetRuntimeSupported = !bigNetRows.length || (await probeBt4Support());
   if (isStaleMount(mountSignal)) return;
   if (!bigNetRuntimeSupported) {
     el('message').textContent = 'Lc0 big nets need WebGPU, which is unavailable in this browser.';
@@ -2821,13 +3214,24 @@ async function startMatch() {
   let schedule: ScheduledGame<ArenaOpening>[];
   try {
     // Colors alternate per game index within each pairing (see tournament.ts).
-    schedule = buildSchedule(tournamentPairings(mode, participants.map((participant) => participant.pid)), selectedOpenings(), gamesPerOpening);
+    schedule = buildSchedule(
+      tournamentPairings(
+        mode,
+        participants.map((participant) => participant.pid),
+      ),
+      selectedOpenings(),
+      gamesPerOpening,
+    );
   } catch (error) {
     el('message').textContent = `Opening setup error: ${(error as Error).message}`;
     clearStartPending();
     return;
   }
-  if (!schedule.length) { el('message').textContent = 'No games to play.'; clearStartPending(); return; }
+  if (!schedule.length) {
+    el('message').textContent = 'No games to play.';
+    clearStartPending();
+    return;
+  }
 
   startPending = false;
   running = true;
@@ -2896,10 +3300,19 @@ async function startMatch() {
       if (reason === 'cancelled') break;
       score.games += 1;
       standings.record(whiteId, blackId, result);
-      if (result === '1/2-1/2') { score.draws += 1; score.a += 0.5; score.b += 0.5; }
-      else {
+      if (result === '1/2-1/2') {
+        score.draws += 1;
+        score.a += 0.5;
+        score.b += 0.5;
+      } else {
         const winnerIsA = (whiteId === participants[0].pid) === (result === '1-0');
-        if (winnerIsA) { score.a += 1; score.aWins += 1; } else { score.b += 1; score.bWins += 1; }
+        if (winnerIsA) {
+          score.a += 1;
+          score.aWins += 1;
+        } else {
+          score.b += 1;
+          score.bWins += 1;
+        }
       }
       const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
       games.push({ pgn: gameTreeToPgn(tree, tags, result) });
@@ -2908,12 +3321,17 @@ async function startMatch() {
         finishedTrails[i] = liveTrail;
       }
       renderCacheInfo();
-      appendLog(`${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${engineRuntimeDiagnosticsText()} · ${searchTelemetryText()}`, i);
+      appendLog(
+        `${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${engineRuntimeDiagnosticsText()} · ${searchTelemetryText()}`,
+        i,
+      );
       if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
       else renderStandings(standings, schedule.length);
     }
     if (!isStaleMount(mountSignal)) {
-      el('message').textContent = matchAbort.signal.aborted ? `Stopped after ${score.games} game(s).` : `Match done (${score.games} game${score.games === 1 ? '' : 's'}).`;
+      el('message').textContent = matchAbort.signal.aborted
+        ? `Stopped after ${score.games} game(s).`
+        : `Match done (${score.games} game${score.games === 1 ? '' : 's'}).`;
       el('pairing').textContent = matchAbort.signal.aborted ? 'Match stopped.' : 'Match finished.';
     }
   } catch (error) {
@@ -3065,8 +3483,19 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
       resolvedRuntime: lc0ResolvedRuntime(runtime),
       runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
       manifestUrl: runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
-      searchBudget: activeSeatRows().filter((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant)).map((row) => budgetText(row)).join(', '),
-      notes: [lc0RuntimeLabel(runtime), hybrid, runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? 'whole-model runtime is research-only and opt-in' : 'hybrid runtime is pack-lazy until first evaluation succeeds'].filter((part): part is string => !!part),
+      searchBudget: activeSeatRows()
+        .filter((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))
+        .map((row) => budgetText(row))
+        .join(', '),
+      notes: [
+        lc0RuntimeLabel(runtime),
+        hybrid,
+        runtime === 'onnx'
+          ? undefined
+          : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
+            ? 'whole-model runtime is research-only and opt-in'
+            : 'hybrid runtime is pack-lazy until first evaluation succeeds',
+      ].filter((part): part is string => !!part),
     });
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
     lc0Searchers.clear();
@@ -3111,13 +3540,19 @@ function mapValues<T>(map: Map<string, T>): Record<string, T> {
 }
 
 async function safeOrtRuntimeDiagnostics(): Promise<unknown> {
-  try { return await collectOrtRuntimeDiagnostics({ probeAdapter: false }); }
-  catch (error) { return { error: (error as Error).message }; }
+  try {
+    return await collectOrtRuntimeDiagnostics({ probeAdapter: false });
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
 }
 
 function fixedSuiteFensFromParams(): string[] {
   const raw = params.get('fixedSuiteFens') ?? params.get('fens') ?? '';
-  return raw.split(/[|\n]/).map((fen) => fen.trim()).filter(Boolean);
+  return raw
+    .split(/[|\n]/)
+    .map((fen) => fen.trim())
+    .filter(Boolean);
 }
 
 function stockfishScoreMs(): number {
@@ -3160,21 +3595,28 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
     const timed = arenaBudgetMode() === 'movetime';
     const scoreMs = stockfishScoreMs();
     const scoreDepth = stockfishScoreDepth();
-    sfEngine.setOptions({ depth: scoreDepth ?? (timed ? undefined : seatRows[1].strength), movetimeMs: scoreDepth === undefined && timed ? scoreMs : undefined, threads: stockfishThreadsPlanned() });
+    sfEngine.setOptions({
+      depth: scoreDepth ?? (timed ? undefined : seatRows[1].strength),
+      movetimeMs: scoreDepth === undefined && timed ? scoreMs : undefined,
+      threads: stockfishThreadsPlanned(),
+    });
     resetLc0SearchTrees([lc0Id]);
     const positions = [];
     for (let i = 0; i < fens.length; i++) {
       const boardAtMove = parseFen(fens[i]);
       const searchStarted = performance.now();
-      const search = await lc0SearcherFor(lc0Id).search({ positions: [boardAtMove] }, {
-        visits: timed ? undefined : lc0Row.strength,
-        movetimeMs: timed ? arenaMovetimeMs() : undefined,
-        signal: controller.signal,
-        yieldEveryMs: 16,
-        reuseTree: false,
-        batchSize: lc0BatchSize(),
-        batchPipelineDepth: lc0BatchPipelineDepth(),
-      });
+      const search = await lc0SearcherFor(lc0Id).search(
+        { positions: [boardAtMove] },
+        {
+          visits: timed ? undefined : lc0Row.strength,
+          movetimeMs: timed ? arenaMovetimeMs() : undefined,
+          signal: controller.signal,
+          yieldEveryMs: 16,
+          reuseTree: false,
+          batchSize: lc0BatchSize(),
+          batchPipelineDepth: lc0BatchPipelineDepth(),
+        },
+      );
       const searchElapsedMs = performance.now() - searchStarted;
       recordLc0SearchTelemetry(lc0Id, lc0Name, search, searchElapsedMs);
       recordLc0SearchOutput(lc0Id, lc0Name, search);
@@ -3219,8 +3661,8 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
           reply: sfMove,
           whiteCp,
           mateInWhitePov,
-          lc0PerspectiveCp: whiteCp === undefined ? undefined : (boardAtMove.turn === 'w' ? whiteCp : -whiteCp),
-          lc0PerspectiveMate: mateInWhitePov === undefined ? undefined : (boardAtMove.turn === 'w' ? mateInWhitePov : -mateInWhitePov),
+          lc0PerspectiveCp: whiteCp === undefined ? undefined : boardAtMove.turn === 'w' ? whiteCp : -whiteCp,
+          lc0PerspectiveMate: mateInWhitePov === undefined ? undefined : boardAtMove.turn === 'w' ? mateInWhitePov : -mateInWhitePov,
           depth: best?.depth,
           nodes: best?.nodes,
           nps: best?.nps,
@@ -3268,7 +3710,13 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
     };
     setBenchResult(result);
   } catch (error) {
-    setBenchResult({ status: 'LC0_FIXED_SUITE_FAILED', runtime: selectedLc0Runtime(), elapsedMs: Math.round(performance.now() - started), error: (error as Error).message, stack: (error as Error).stack });
+    setBenchResult({
+      status: 'LC0_FIXED_SUITE_FAILED',
+      runtime: selectedLc0Runtime(),
+      elapsedMs: Math.round(performance.now() - started),
+      error: (error as Error).message,
+      stack: (error as Error).stack,
+    });
   }
 }
 
@@ -3328,13 +3776,24 @@ async function runArenaBenchAutorun(): Promise<void> {
     };
     setBenchResult(result);
   } catch (error) {
-    setBenchResult({ status: 'ARENA_BENCH_FAILED', runtime: selectedLc0Runtime(), elapsedMs: Math.round(performance.now() - started), error: (error as Error).message, stack: (error as Error).stack });
+    setBenchResult({
+      status: 'ARENA_BENCH_FAILED',
+      runtime: selectedLc0Runtime(),
+      elapsedMs: Math.round(performance.now() - started),
+      error: (error as Error).message,
+      stack: (error as Error).stack,
+    });
   }
 }
 
 function wireEvents() {
-  el('start').addEventListener('click', () => { void startMatch(); });
-  el('stop').addEventListener('click', () => { abort?.abort(); el('message').textContent = 'Stopping…'; });
+  el('start').addEventListener('click', () => {
+    void startMatch();
+  });
+  el('stop').addEventListener('click', () => {
+    abort?.abort();
+    el('message').textContent = 'Stopping…';
+  });
   el('exportPgn').addEventListener('click', exportPgn);
   // History review: charts, move strip, and finished-game log rows jump the
   // board to a past position; Live (or Escape) returns to the running game.
@@ -3368,9 +3827,13 @@ function wireEvents() {
     if (!reviewing) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest?.('input,textarea,select')) return;
-    if (event.key === 'ArrowLeft') { event.preventDefault(); stepReview(-1); }
-    else if (event.key === 'ArrowRight') { event.preventDefault(); stepReview(1); }
-    else if (event.key === 'Escape') exitReview();
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      stepReview(-1);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      stepReview(1);
+    } else if (event.key === 'Escape') exitReview();
   };
   document.addEventListener('keydown', arenaKeydownHandler);
   el('arenaSeatList').addEventListener('change', (event) => {
@@ -3384,7 +3847,14 @@ function wireEvents() {
       row.variant = defaultVariant(row.family);
       row.strength = strengthMeta(row.family).def;
     } else if (target.classList.contains('seat-var')) {
-      if (row.family === 'lc0' && isLc0BigNetVariant(target.value) && !window.confirm(`${bigNetLoadWarning(BIG_NETS[target.value])}\n\nUse Lc0 ${BIG_NETS[target.value].name}?`)) { target.value = row.variant; return; }
+      if (
+        row.family === 'lc0' &&
+        isLc0BigNetVariant(target.value) &&
+        !window.confirm(`${bigNetLoadWarning(BIG_NETS[target.value])}\n\nUse Lc0 ${BIG_NETS[target.value].name}?`)
+      ) {
+        target.value = row.variant;
+        return;
+      }
       row.variant = target.value;
     } else if (target.classList.contains('seat-strength')) {
       row.strength = Number(target.value);
@@ -3451,13 +3921,34 @@ function wireEvents() {
   });
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
-  el('cacheEntriesInput').addEventListener('input', () => { renderCacheInfo(); resetLc0SearchTrees(); });
+  el('cacheEntriesInput').addEventListener('input', () => {
+    renderCacheInfo();
+    resetLc0SearchTrees();
+  });
   el('lc0PresetSelect').addEventListener('change', () => applyLc0Preset(selectedLc0Preset(), { reload: true }));
-  el('lc0BatchSizeInput').addEventListener('input', () => { markLc0PresetCustom(); inputEl('lc0BatchSizeInput').value = String(lc0BatchSize()); renderCacheInfo(); resetLc0SearchTrees(); });
-  el('lc0BatchPipelineDepthInput').addEventListener('input', () => { markLc0PresetCustom(); inputEl('lc0BatchPipelineDepthInput').value = String(lc0BatchPipelineDepth()); renderCacheInfo(); resetLc0SearchTrees(); });
-  el('lc0RuntimeSelect').addEventListener('change', () => { markLc0PresetCustom(); refreshSeatControls(); if (!running) void reloadLc0Evaluator(); });
+  el('lc0BatchSizeInput').addEventListener('input', () => {
+    markLc0PresetCustom();
+    inputEl('lc0BatchSizeInput').value = String(lc0BatchSize());
+    renderCacheInfo();
+    resetLc0SearchTrees();
+  });
+  el('lc0BatchPipelineDepthInput').addEventListener('input', () => {
+    markLc0PresetCustom();
+    inputEl('lc0BatchPipelineDepthInput').value = String(lc0BatchPipelineDepth());
+    renderCacheInfo();
+    resetLc0SearchTrees();
+  });
+  el('lc0RuntimeSelect').addEventListener('change', () => {
+    markLc0PresetCustom();
+    refreshSeatControls();
+    if (!running) void reloadLc0Evaluator();
+  });
   for (const id of ['lc0InputBackendSelect', 'lc0EncoderKernelSelect', 'lc0LegalPriorsSelect']) {
-    el(id).addEventListener('change', () => { markLc0PresetCustom(); renderCacheInfo(); if (!running && selectedLc0Runtime() !== 'onnx') void reloadLc0Evaluator(); });
+    el(id).addEventListener('change', () => {
+      markLc0PresetCustom();
+      renderCacheInfo();
+      if (!running && selectedLc0Runtime() !== 'onnx') void reloadLc0Evaluator();
+    });
   }
   el('budgetModeSelect').addEventListener('change', () => {
     refreshBudgetControls();
@@ -3483,16 +3974,36 @@ function wireEvents() {
 
 async function init(mountSignal: AbortSignal) {
   if (!isV0DeployProfile()) {
-    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, whileArenaMounted(renderRecklessRuntimeInfo));
+    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(
+      REQUESTED_RECKLESS_VARIANT,
+      REQUESTED_RECKLESS_EXPLICIT,
+      whileArenaMounted(renderRecklessRuntimeInfo),
+    );
   }
   if (isStaleMount(mountSignal)) return;
-  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, whileArenaMounted(renderRecklessRuntimeInfo));
+  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(
+    REQUESTED_VIRIDITHAS_VARIANT,
+    REQUESTED_VIRIDITHAS_EXPLICIT,
+    whileArenaMounted(renderRecklessRuntimeInfo),
+  );
   if (isStaleMount(mountSignal)) return;
-  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, whileArenaMounted(renderRecklessRuntimeInfo));
+  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(
+    REQUESTED_BERSERK_VARIANT,
+    REQUESTED_BERSERK_EXPLICIT,
+    whileArenaMounted(renderRecklessRuntimeInfo),
+  );
   if (isStaleMount(mountSignal)) return;
-  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, whileArenaMounted(renderRecklessRuntimeInfo));
+  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(
+    REQUESTED_PLENTYCHESS_VARIANT,
+    REQUESTED_PLENTYCHESS_EXPLICIT,
+    whileArenaMounted(renderRecklessRuntimeInfo),
+  );
   if (isStaleMount(mountSignal)) return;
-  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, whileArenaMounted(renderStormphraxRuntimeInfo));
+  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(
+    REQUESTED_STORMPHRAX_VARIANT,
+    REQUESTED_STORMPHRAX_EXPLICIT,
+    whileArenaMounted(renderStormphraxRuntimeInfo),
+  );
   if (isStaleMount(mountSignal)) return;
   renderBoard();
   installRuntimeAuditPanel();
@@ -3527,7 +4038,13 @@ async function init(mountSignal: AbortSignal) {
   buildEngines();
   populateSeats();
   void refreshBt4Availability();
-  void probeEngineLogos(whileArenaMounted(() => { renderSeatSelectors(); refreshSeatControls(); renderSideLabels(); }));
+  void probeEngineLogos(
+    whileArenaMounted(() => {
+      renderSeatSelectors();
+      refreshSeatControls();
+      renderSideLabels();
+    }),
+  );
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();
@@ -3560,10 +4077,7 @@ function resetArenaPageState(): void {
   gameChartSamples = [];
   games.length = 0;
   engines.clear();
-  seatRows.splice(0, seatRows.length,
-    { family: 'lc0', variant: 'small', strength: 100 },
-    { family: 'sf', variant: 'lite', strength: 8 },
-  );
+  seatRows.splice(0, seatRows.length, { family: 'lc0', variant: 'small', strength: 100 }, { family: 'sf', variant: 'lite', strength: 8 });
 }
 
 export function mountArenaBrowser(): () => void {

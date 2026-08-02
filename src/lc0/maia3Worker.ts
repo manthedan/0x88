@@ -1,5 +1,13 @@
 import * as ort from '../nn/ortRuntime.ts';
-import { createOrtSession, releaseOrtSession, describeOrtBackendConfig, ortRuntimeArtifactKindIsLocked, setOrtRuntimeArtifactKindForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
+import {
+  createOrtSession,
+  describeOrtBackendConfig,
+  type OrtExecutionProviderPreference,
+  ortRuntimeArtifactKindIsLocked,
+  releaseOrtSession,
+  setOrtRuntimeArtifactKindForCurrentThread,
+  setRequestedOrtExecutionProviderForCurrentThread,
+} from '../nn/ortRuntime.ts';
 
 type InitMessage = {
   type: 'init';
@@ -44,9 +52,7 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
   const tensor = byName ?? Object.values(outputs)[fallbackIndex];
   if (!tensor) throw new Error(`Maia3 output ${preferred} missing`);
   const maybeGpuTensor = tensor as ort.Tensor & { location?: string; getData?: (releaseData?: boolean) => Promise<unknown> };
-  const rawData = maybeGpuTensor.location === 'gpu-buffer' && typeof maybeGpuTensor.getData === 'function'
-    ? await maybeGpuTensor.getData(true)
-    : tensor.data;
+  const rawData = maybeGpuTensor.location === 'gpu-buffer' && typeof maybeGpuTensor.getData === 'function' ? await maybeGpuTensor.getData(true) : tensor.data;
   return new Float32Array(rawData as Float32Array | number[]);
 }
 
@@ -92,12 +98,15 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
         const outputs = await session.run(feeds);
         const logitsMove = await firstOutput(outputs, 'logits_move', 0);
         const logitsValue = await firstOutput(outputs, 'logits_value', 1);
-        post({
-          type: 'result',
-          id: message.id,
-          logitsMove: logitsMove.buffer,
-          logitsValue: logitsValue.buffer,
-        }, [logitsMove.buffer, logitsValue.buffer]);
+        post(
+          {
+            type: 'result',
+            id: message.id,
+            logitsMove: logitsMove.buffer,
+            logitsValue: logitsValue.buffer,
+          },
+          [logitsMove.buffer, logitsValue.buffer],
+        );
         return;
       }
 
@@ -109,12 +118,15 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
       const outputs = await session.run(feeds);
       const logitsMove = await firstOutput(outputs, 'logits_move', 0);
       const logitsValue = await firstOutput(outputs, 'logits_value', 1);
-      post({
-        type: 'result',
-        id: message.id,
-        logitsMove: logitsMove.buffer,
-        logitsValue: logitsValue.buffer,
-      }, [logitsMove.buffer, logitsValue.buffer]);
+      post(
+        {
+          type: 'result',
+          id: message.id,
+          logitsMove: logitsMove.buffer,
+          logitsValue: logitsValue.buffer,
+        },
+        [logitsMove.buffer, logitsValue.buffer],
+      );
     } catch (error) {
       post({ type: 'error', id: message.id, message: error instanceof Error ? error.message : String(error) });
     }

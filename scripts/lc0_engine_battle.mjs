@@ -7,10 +7,10 @@
 // Any other opponent (e.g. Stockfish.wasm) can be dropped in by implementing the
 // BattleEngine interface from src/lc0/engineBattle.ts and passing it to runMatch.
 import { readFileSync } from 'node:fs';
+import { lc0PolicyBattleEngine, lc0SearchBattleEngine, runMatch } from '../src/lc0/engineBattle.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from '../src/lc0/policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from '../src/lc0/search.ts';
-import { lc0PolicyBattleEngine, lc0SearchBattleEngine, runMatch } from '../src/lc0/engineBattle.ts';
 
 const model = process.argv[2] ?? '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const games = Number(process.argv[3] ?? 4);

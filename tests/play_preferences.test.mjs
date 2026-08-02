@@ -2,22 +2,38 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   DEFAULT_PLAY_PREFERENCES,
-  PLAY_PREFERENCES_STORAGE_KEY,
   loadPlayPreferences,
   normalizePlayPreferences,
+  PLAY_PREFERENCES_STORAGE_KEY,
   savePlayPreferences,
 } from '../src/lc0/playPreferences.ts';
 
 const engines = new Set(['maia3', 'centipawn', 'stormphrax']);
 
 test('play preferences normalize persisted engine, strength, color, and Maia controls', () => {
-  assert.deepEqual(normalizePlayPreferences({
-    engineId: 'centipawn', level: 9, color: 'black', maiaElo: 1733,
-    maiaStyle: 'argmax', maiaTemperature: 9, maiaTopP: 0,
-  }, engines), {
-    engineId: 'centipawn', level: 4, color: 'black', maiaElo: 1700,
-    maiaStyle: 'argmax', maiaTemperature: 5, maiaTopP: 0.01,
-  });
+  assert.deepEqual(
+    normalizePlayPreferences(
+      {
+        engineId: 'centipawn',
+        level: 9,
+        color: 'black',
+        maiaElo: 1733,
+        maiaStyle: 'argmax',
+        maiaTemperature: 9,
+        maiaTopP: 0,
+      },
+      engines,
+    ),
+    {
+      engineId: 'centipawn',
+      level: 4,
+      color: 'black',
+      maiaElo: 1700,
+      maiaStyle: 'argmax',
+      maiaTemperature: 5,
+      maiaTopP: 0.01,
+    },
+  );
 });
 
 test('play preferences reject unknown engines and malformed storage', () => {

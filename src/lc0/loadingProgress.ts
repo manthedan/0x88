@@ -7,7 +7,7 @@ export interface LoadingProgressItem {
 }
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 }
 
 export function formatBytes(bytes: number): string {
@@ -28,11 +28,13 @@ export function loadingProgressText(item: LoadingProgressItem): string {
 export function renderLoadingProgress(container: HTMLElement, item: LoadingProgressItem | LoadingProgressItem[]): void {
   const items = Array.isArray(item) ? item : [item];
   container.hidden = items.length === 0;
-  container.innerHTML = items.map((entry) => {
-    const value = entry.loadedBytes !== undefined ? ` value="${Math.max(0, Math.floor(entry.loadedBytes))}"` : '';
-    const max = entry.totalBytes !== undefined && entry.totalBytes > 0 ? ` max="${Math.max(1, Math.floor(entry.totalBytes))}"` : '';
-    return `<div class="loading-progress-row" data-progress-id="${escapeHtml(entry.id ?? entry.label)}"><progress${value}${max}></progress><div class="dl-label small">${escapeHtml(loadingProgressText(entry))}</div></div>`;
-  }).join('');
+  container.innerHTML = items
+    .map((entry) => {
+      const value = entry.loadedBytes !== undefined ? ` value="${Math.max(0, Math.floor(entry.loadedBytes))}"` : '';
+      const max = entry.totalBytes !== undefined && entry.totalBytes > 0 ? ` max="${Math.max(1, Math.floor(entry.totalBytes))}"` : '';
+      return `<div class="loading-progress-row" data-progress-id="${escapeHtml(entry.id ?? entry.label)}"><progress${value}${max}></progress><div class="dl-label small">${escapeHtml(loadingProgressText(entry))}</div></div>`;
+    })
+    .join('');
 }
 
 export function hideLoadingProgress(container: HTMLElement): void {

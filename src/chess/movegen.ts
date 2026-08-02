@@ -1,10 +1,38 @@
-import { cloneBoard, opposite, squareName, type BoardState, type Color, type Piece } from './board.ts';
+import { type BoardState, type Color, cloneBoard, opposite, type Piece, squareName } from './board.ts';
 import type { Move } from './moveCodec.ts';
 
-const KNIGHT = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
-const KING = [[1, 1], [1, 0], [1, -1], [0, 1], [0, -1], [-1, 1], [-1, 0], [-1, -1]];
-const BISHOP = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
-const ROOK = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const KNIGHT = [
+  [1, 2],
+  [2, 1],
+  [-1, 2],
+  [-2, 1],
+  [1, -2],
+  [2, -1],
+  [-1, -2],
+  [-2, -1],
+];
+const KING = [
+  [1, 1],
+  [1, 0],
+  [1, -1],
+  [0, 1],
+  [0, -1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
+];
+const BISHOP = [
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+];
+const ROOK = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
 // Hoisted: `[...BISHOP, ...ROOK]` inline rebuilt an 8-entry array of arrays for
 // every queen, on every generation.
 const QUEEN = [...BISHOP, ...ROOK];
@@ -13,7 +41,7 @@ const fileOf = (sq: number) => sq & 7;
 const rankOf = (sq: number) => sq >> 3;
 const on = (f: number, r: number) => f >= 0 && f < 8 && r >= 0 && r < 8;
 const idx = (f: number, r: number) => f + (r << 3);
-const colorOf = (piece: Piece | null): Color | null => piece?.[0] as Color | undefined ?? null;
+const colorOf = (piece: Piece | null): Color | null => (piece?.[0] as Color | undefined) ?? null;
 
 /**
  * Piece literals per colour, hoisted out of the scan loops.
@@ -29,7 +57,8 @@ const PIECES = {
 } as const;
 
 function addStep(board: BoardState, moves: Move[], from: number, df: number, dr: number): void {
-  const f = fileOf(from) + df, r = rankOf(from) + dr;
+  const f = fileOf(from) + df,
+    r = rankOf(from) + dr;
   if (!on(f, r)) return;
   const to = idx(f, r);
   if (colorOf(board.squares[to]) !== board.turn) moves.push({ from, to });
@@ -37,7 +66,8 @@ function addStep(board: BoardState, moves: Move[], from: number, df: number, dr:
 
 function addSlides(board: BoardState, moves: Move[], from: number, dirs: number[][]): void {
   for (const [df, dr] of dirs) {
-    let f = fileOf(from) + df, r = rankOf(from) + dr;
+    let f = fileOf(from) + df,
+      r = rankOf(from) + dr;
     while (on(f, r)) {
       const to = idx(f, r);
       const occ = board.squares[to];
@@ -46,7 +76,8 @@ function addSlides(board: BoardState, moves: Move[], from: number, dirs: number[
         if (colorOf(occ) !== board.turn) moves.push({ from, to });
         break;
       }
-      f += df; r += dr;
+      f += df;
+      r += dr;
     }
   }
 }
@@ -76,7 +107,8 @@ export function pseudoLegalMoves(board: BoardState): Move[] {
       const dir = board.turn === 'w' ? 1 : -1;
       const startRank = board.turn === 'w' ? 1 : 6;
       const promoteRank = board.turn === 'w' ? 7 : 0;
-      const f = fileOf(from), r = rankOf(from);
+      const f = fileOf(from),
+        r = rankOf(from);
       const oneR = r + dir;
       if (on(f, oneR) && !board.squares[idx(f, oneR)]) {
         const to = idx(f, oneR);
@@ -94,8 +126,9 @@ export function pseudoLegalMoves(board: BoardState): Move[] {
           else moves.push({ from, to });
         }
       }
-    } else if (role === 'n') { for (const [df, dr] of KNIGHT) addStep(board, moves, from, df, dr); }
-    else if (role === 'b') addSlides(board, moves, from, BISHOP);
+    } else if (role === 'n') {
+      for (const [df, dr] of KNIGHT) addStep(board, moves, from, df, dr);
+    } else if (role === 'b') addSlides(board, moves, from, BISHOP);
     else if (role === 'r') addSlides(board, moves, from, ROOK);
     else if (role === 'q') addSlides(board, moves, from, QUEEN);
     else if (role === 'k') {
@@ -108,7 +141,8 @@ export function pseudoLegalMoves(board: BoardState): Move[] {
 }
 
 export function isSquareAttacked(board: BoardState, square: number, by: Color): boolean {
-  const f = fileOf(square), r = rankOf(square);
+  const f = fileOf(square),
+    r = rankOf(square);
   const pieces = PIECES[by];
   const squares = board.squares;
   const pawnFromRank = r + (by === 'w' ? -1 : 1);
@@ -117,27 +151,39 @@ export function isSquareAttacked(board: BoardState, square: number, by: Color): 
     if (on(pf, pawnFromRank) && squares[idx(pf, pawnFromRank)] === pieces.p) return true;
   }
   for (const [df, dr] of KNIGHT) {
-    const nf = f + df, nr = r + dr;
+    const nf = f + df,
+      nr = r + dr;
     if (on(nf, nr) && squares[idx(nf, nr)] === pieces.n) return true;
   }
   for (const [df, dr] of BISHOP) {
-    let sf = f + df, sr = r + dr;
+    let sf = f + df,
+      sr = r + dr;
     while (on(sf, sr)) {
       const piece = squares[idx(sf, sr)];
-      if (piece) { if (piece === pieces.b || piece === pieces.q) return true; break; }
-      sf += df; sr += dr;
+      if (piece) {
+        if (piece === pieces.b || piece === pieces.q) return true;
+        break;
+      }
+      sf += df;
+      sr += dr;
     }
   }
   for (const [df, dr] of ROOK) {
-    let sf = f + df, sr = r + dr;
+    let sf = f + df,
+      sr = r + dr;
     while (on(sf, sr)) {
       const piece = squares[idx(sf, sr)];
-      if (piece) { if (piece === pieces.r || piece === pieces.q) return true; break; }
-      sf += df; sr += dr;
+      if (piece) {
+        if (piece === pieces.r || piece === pieces.q) return true;
+        break;
+      }
+      sf += df;
+      sr += dr;
     }
   }
   for (const [df, dr] of KING) {
-    const kf = f + df, kr = r + dr;
+    const kf = f + df,
+      kr = r + dr;
     if (on(kf, kr) && squares[idx(kf, kr)] === pieces.k) return true;
   }
   return false;
@@ -162,10 +208,7 @@ function moveKeepsKingSafe(board: BoardState, move: Move, color: Color): boolean
 
   const captured = squares[move.to];
   const isPawn = piece[1] === 'p';
-  const isEnPassant = isPawn
-    && move.to === board.epSquare
-    && !captured
-    && fileOf(move.from) !== fileOf(move.to);
+  const isEnPassant = isPawn && move.to === board.epSquare && !captured && fileOf(move.from) !== fileOf(move.to);
   const enPassantCaptureSquare = isEnPassant ? idx(fileOf(move.to), rankOf(move.from)) : -1;
   const enPassantCaptured = enPassantCaptureSquare >= 0 ? squares[enPassantCaptureSquare] : null;
 
@@ -209,7 +252,10 @@ export function legalMoves(board: BoardState): Move[] {
 }
 
 function castlingWithout(castling: string, removed: string): string {
-  const next = castling.split('').filter((ch) => !removed.includes(ch)).join('');
+  const next = castling
+    .split('')
+    .filter((ch) => !removed.includes(ch))
+    .join('');
   return next || '-';
 }
 
@@ -218,14 +264,15 @@ export function makeMove(board: BoardState, move: Move): BoardState {
   const piece = next.squares[move.from];
   if (!piece) throw new Error('No piece on source square');
   const captured = next.squares[move.to];
-  const fromName = squareName(move.from), toName = squareName(move.to);
+  const fromName = squareName(move.from),
+    toName = squareName(move.to);
   const isPawn = piece[1] === 'p';
   const isCastle = piece[1] === 'k' && Math.abs(fileOf(move.to) - fileOf(move.from)) === 2;
   const isEp = isPawn && move.to === board.epSquare && !captured && fileOf(move.from) !== fileOf(move.to);
 
   next.squares[move.from] = null;
   if (isEp) next.squares[idx(fileOf(move.to), rankOf(move.from))] = null;
-  next.squares[move.to] = move.promotion ? `${board.turn}${move.promotion}` as Piece : piece;
+  next.squares[move.to] = move.promotion ? (`${board.turn}${move.promotion}` as Piece) : piece;
   if (isCastle) {
     const rank = board.turn === 'w' ? 0 : 7;
     if (fileOf(move.to) === 6) {

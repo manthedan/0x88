@@ -1,10 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  supportsWasmRelaxedSimd,
-  supportsWasmRelaxedSimdIntegerDot,
-  supportsWasmSimd,
-} from '../src/lc0/wasmFeatures.ts';
+import test from 'node:test';
+import { supportsWasmRelaxedSimd, supportsWasmRelaxedSimdIntegerDot, supportsWasmSimd } from '../src/lc0/wasmFeatures.ts';
 
 test('LC0 WebAssembly feature probes return capability booleans', () => {
   assert.equal(typeof supportsWasmSimd(), 'boolean');

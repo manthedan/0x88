@@ -1,14 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
-import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToActionId } from '../src/chess/moveCodec.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
-import {
-  currentBoardAndFen,
-  legalPolicyPriors,
-  prepareLc0EvaluatorInput,
-} from '../src/lc0/onnxEvaluator.ts';
+import { currentBoardAndFen, legalPolicyPriors, prepareLc0EvaluatorInput } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PuctSearcher, Lc0SearchEvaluator } from '../src/lc0/search.ts';
 
 function arraysEqual(a, b) {
@@ -37,10 +33,7 @@ test('prepared LC0 input preserves planes and carries legal action/policy mappin
   const priors = legalPolicyPriors(board, logits, 1, prepared.prepared.legalMoves);
   assert.equal(priors.length, moves.length);
   assert.ok(priors.every((prior) => prior.actionId !== undefined));
-  assert.deepEqual(
-    new Set(priors.map((prior) => prior.actionId)),
-    new Set(moves.map(moveToActionId)),
-  );
+  assert.deepEqual(new Set(priors.map((prior) => prior.actionId)), new Set(moves.map(moveToActionId)));
 });
 
 test('LC0 search adapter passes prepared history and legal mappings through to the provider', async () => {
@@ -73,7 +66,9 @@ test('PUCT retains board-state history for every search-native evaluation', asyn
       const priors = legalPolicyPriors(board, new Float32Array(1858), 1);
       return { fen, wdl: [0.3, 0.4, 0.3], q: 0, mlh: 0, legalPriors: priors, bestMove: priors[0]?.uci };
     },
-    async evaluateBatch(inputs) { return Promise.all(inputs.map((input) => this.evaluate(input))); },
+    async evaluateBatch(inputs) {
+      return Promise.all(inputs.map((input) => this.evaluate(input)));
+    },
   };
   const searcher = new Lc0PuctSearcher(provider);
   await searcher.search({ positions: [start] }, { visits: 3, batchSize: 1 });

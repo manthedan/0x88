@@ -87,7 +87,9 @@ const server = createServer((req, res) => {
     res.setHeader('Content-Encoding', encoded.encoding);
     res.setHeader('Vary', 'Accept-Encoding');
   }
-  const rel = uncompressedPathFor(file).slice(root.length + 1).replace(/\\/g, '/');
+  const rel = uncompressedPathFor(file)
+    .slice(root.length + 1)
+    .replace(/\\/g, '/');
   if (ext === '.nnue') {
     // Full Reckless network filenames include the network hash, so they are safe
     // to cache aggressively and reuse across small WASM rebuilds.
@@ -97,7 +99,10 @@ const server = createServer((req, res) => {
   } else if (rel.startsWith('stormphrax/') && (ext === '.js' || ext === '.wasm' || ext === '.data' || ext === '.nnue')) {
     // Stormphrax uses versionless logical aliases; avoid cross-build mixtures.
     res.setHeader('Cache-Control', 'public, max-age=300');
-  } else if ((rel.startsWith('berserk/') || rel.startsWith('plentychess/')) && (ext === '.js' || ext === '.wasm' || ext === '.data' || ext === '.nn' || ext === '.nnue' || ext === '.bin')) {
+  } else if (
+    (rel.startsWith('berserk/') || rel.startsWith('plentychess/')) &&
+    (ext === '.js' || ext === '.wasm' || ext === '.data' || ext === '.nn' || ext === '.nnue' || ext === '.bin')
+  ) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   } else if (rel.startsWith('assets/')) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');

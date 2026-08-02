@@ -13,9 +13,21 @@ function parseArgs(argv) {
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
-    if (arg === '--input' && next) { args.input = next; index += 1; continue; }
-    if (arg === '--output' && next) { args.output = next; index += 1; continue; }
-    if (arg === '--chunk-mib' && next) { args.chunkMib = Number(next); index += 1; continue; }
+    if (arg === '--input' && next) {
+      args.input = next;
+      index += 1;
+      continue;
+    }
+    if (arg === '--output' && next) {
+      args.output = next;
+      index += 1;
+      continue;
+    }
+    if (arg === '--chunk-mib' && next) {
+      args.chunkMib = Number(next);
+      index += 1;
+      continue;
+    }
     if (arg === '-h' || arg === '--help') {
       console.log('Usage: node scripts/generate_resumable_model_shards.mjs --input model.onnx --output output-dir [--chunk-mib 16]');
       process.exit(0);
@@ -53,7 +65,11 @@ async function writeShardVerified(path, bytes, sha256) {
     await writeFile(temporaryPath, bytes, { flag: 'wx' });
     await rename(temporaryPath, path);
   } catch (error) {
-    try { await unlink(temporaryPath); } catch { /* best-effort cleanup of this script's exact temporary file */ }
+    try {
+      await unlink(temporaryPath);
+    } catch {
+      /* best-effort cleanup of this script's exact temporary file */
+    }
     throw error;
   }
   return true;
@@ -65,7 +81,11 @@ export async function writeFileAtomically(path, bytes, renameFile = rename) {
     await writeFile(temporaryPath, bytes, { flag: 'wx' });
     await renameFile(temporaryPath, path);
   } catch (error) {
-    try { await unlink(temporaryPath); } catch { /* best-effort cleanup of this script's exact temporary file */ }
+    try {
+      await unlink(temporaryPath);
+    } catch {
+      /* best-effort cleanup of this script's exact temporary file */
+    }
     throw error;
   }
 }
@@ -135,19 +155,25 @@ export async function generateResumableModelShards({ inputPath, outputDir, chunk
 
 async function main() {
   const result = await generateResumableModelShards(parseArgs(process.argv));
-  console.log(JSON.stringify({
-    schema: 'lc0_browser.resumable_model_shard_generation.v1',
-    researchOnly: true,
-    manifestPath: result.manifestPath,
-    decodedBytes: result.manifest.decoded.bytes,
-    decodedSha256: result.manifest.decoded.sha256,
-    chunkBytes: result.manifest.chunkBytes,
-    shardReferences: result.shardReferences,
-    uniqueShardCount: result.uniqueShardCount,
-    uniqueBytesWritten: result.uniqueBytesWritten,
-    deduplicatedShards: result.deduplicatedShards,
-    productionRecommendation: 'blocked pending successful live Artifact v2 rollout and startup evidence',
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        schema: 'lc0_browser.resumable_model_shard_generation.v1',
+        researchOnly: true,
+        manifestPath: result.manifestPath,
+        decodedBytes: result.manifest.decoded.bytes,
+        decodedSha256: result.manifest.decoded.sha256,
+        chunkBytes: result.manifest.chunkBytes,
+        shardReferences: result.shardReferences,
+        uniqueShardCount: result.uniqueShardCount,
+        uniqueBytesWritten: result.uniqueBytesWritten,
+        deduplicatedShards: result.deduplicatedShards,
+        productionRecommendation: 'blocked pending successful live Artifact v2 rollout and startup evidence',
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -37,10 +37,12 @@ function parseArgs(argv) {
 function keychainToken(service) {
   if (process.platform !== 'darwin' || !service) return null;
   try {
-    return execFileSync('security', ['find-generic-password', '-s', service, '-w'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim() || null;
+    return (
+      execFileSync('security', ['find-generic-password', '-s', service, '-w'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim() || null
+    );
   } catch {
     return null;
   }
@@ -57,8 +59,9 @@ async function cloudflare(path, token, init = {}) {
   });
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) {
-    const detail = body?.errors?.map((error) => `${error.code ?? 'unknown'}: ${error.message ?? 'Cloudflare API error'}`).join('; ')
-      ?? `${response.status} ${response.statusText}`;
+    const detail =
+      body?.errors?.map((error) => `${error.code ?? 'unknown'}: ${error.message ?? 'Cloudflare API error'}`).join('; ') ??
+      `${response.status} ${response.statusText}`;
     const error = new Error(`Cloudflare API ${init.method ?? 'GET'} ${path} failed: ${detail}`);
     error.status = response.status;
     throw error;

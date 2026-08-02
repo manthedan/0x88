@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
-import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
 import {
+  centipawnPuctAnalysisLines,
   engineBrushes,
   engineColorKey,
   evalBarWhitePercent,
@@ -11,7 +12,6 @@ import {
   lc0AnalysisLines,
   qToCentipawns,
   stockfishAnalysisLines,
-  centipawnPuctAnalysisLines,
 } from '../src/lc0/analysisFormat.ts';
 import { parseStockfishInfo } from '../src/lc0/stockfishEngine.ts';
 
@@ -47,7 +47,10 @@ test('lc0AnalysisLines builds MultiPV lines with SAN and root-mover score', () =
     value: 0.1,
     visits: 40,
     pv: ['d2d4', 'd7d5'],
-    multiPv: [['d2d4', 'd7d5', 'c2c4'], ['g1f3', 'g8f6']],
+    multiPv: [
+      ['d2d4', 'd7d5', 'c2c4'],
+      ['g1f3', 'g8f6'],
+    ],
     children: [
       { uci: 'd2d4', visits: 21, q: 0.12 }, // child q is the move's value for the root mover (white)
       { uci: 'g1f3', visits: 12, q: 0.05 },
@@ -119,7 +122,10 @@ test('parseStockfishInfo extracts multipv, score, mate, and PV', () => {
 
 test('stockfishAnalysisLines converts info lines to SAN-rendered analysis lines', () => {
   const lines = stockfishAnalysisLines(
-    [{ multipv: 1, depth: 18, scoreCp: 35, pvUci: ['e2e4', 'e7e5'] }, { multipv: 2, depth: 18, mateIn: 4, pvUci: ['d2d4', 'd7d5'] }],
+    [
+      { multipv: 1, depth: 18, scoreCp: 35, pvUci: ['e2e4', 'e7e5'] },
+      { multipv: 2, depth: 18, mateIn: 4, pvUci: ['d2d4', 'd7d5'] },
+    ],
     START_FEN,
     'SF 18',
   );
@@ -134,7 +140,10 @@ test('stockfishAnalysisLines converts info lines to SAN-rendered analysis lines'
 test('stockfishAnalysisLines reports scores from White perspective when Black is to move', () => {
   const blackToMove = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
   const lines = stockfishAnalysisLines(
-    [{ multipv: 1, depth: 18, scoreCp: 35, pvUci: ['e7e5'] }, { multipv: 2, depth: 18, mateIn: 4, pvUci: ['d7d5'] }],
+    [
+      { multipv: 1, depth: 18, scoreCp: 35, pvUci: ['e7e5'] },
+      { multipv: 2, depth: 18, mateIn: 4, pvUci: ['d7d5'] },
+    ],
     blackToMove,
     'SF',
   );

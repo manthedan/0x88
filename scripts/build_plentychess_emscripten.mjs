@@ -1,8 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const engineDir = path.resolve(process.env.PLENTYCHESS_BUILD_DIR ?? path.join(root, '.local_engines', 'plentychess-emscripten-src'));
@@ -63,7 +63,7 @@ function publishSharedData(builtDataPath) {
     if (sharedDigest !== builtDigest) {
       throw new Error(
         `Shared PlentyChess .data mismatch: ${outBase}.data (sha256 ${builtDigest}) differs from ${sharedDataPath} (sha256 ${sharedDigest}).\n` +
-        'All PlentyChess variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
+          'All PlentyChess variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
       );
     }
     console.log(`Shared ${sharedDataPath} already matches ${outBase}.data (sha256 ${builtDigest})`);
@@ -153,11 +153,8 @@ const sources = [
 // for dpbusd and the relaxed-madd vectorized f32 tail (the FMA/AVX2/ARM gates
 // in nnue.cpp are never true under emcc, so the f32 layers otherwise run
 // scalar std::fma loops).
-const simdFlags = process.env.PLENTYCHESS_WASM_RELAXED_SIMD === '1'
-  ? ['-msse4.1', '-mrelaxed-simd']
-  : process.env.PLENTYCHESS_WASM_SSE41 === '1'
-    ? ['-msse4.1']
-    : [];
+const simdFlags =
+  process.env.PLENTYCHESS_WASM_RELAXED_SIMD === '1' ? ['-msse4.1', '-mrelaxed-simd'] : process.env.PLENTYCHESS_WASM_SSE41 === '1' ? ['-msse4.1'] : [];
 
 const emccArgs = [
   '-std=c++17',
@@ -242,6 +239,8 @@ for (const [tmp, out] of staged) {
 // is loud rather than something release tooling later hashes and ships.
 for (const [, out] of staged) {
   if (!fs.existsSync(out) || fs.statSync(out).size === 0) {
-    throw new Error(`Publish incomplete: ${out} is missing or empty. The output directory now holds a mixed artifact set; re-run this build before packaging or deploying.`);
+    throw new Error(
+      `Publish incomplete: ${out} is missing or empty. The output directory now holds a mixed artifact set; re-run this build before packaging or deploying.`,
+    );
   }
 }

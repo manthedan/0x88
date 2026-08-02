@@ -82,12 +82,18 @@ function createStorageBuffer(device: GPUDevice, label: string, bytes: number, us
 function approxErf(input: number): number {
   const x = Math.max(-4, Math.min(4, input));
   const x2 = x * x;
-  const numerator = x * ((((((-2.726142e-10 * x2 + 2.770681e-8) * x2 - 2.101024e-6) * x2 - 5.692506e-5) * x2 - 7.349906e-4) * x2 - 2.954600e-3) * x2 - 1.609603e-2);
-  const denominator = ((((-1.456607e-5 * x2 - 2.133740e-4) * x2 - 1.682827e-3) * x2 - 7.373329e-3) * x2 - 1.426474e-2);
+  const numerator =
+    x * ((((((-2.726142e-10 * x2 + 2.770681e-8) * x2 - 2.101024e-6) * x2 - 5.692506e-5) * x2 - 7.349906e-4) * x2 - 2.9546e-3) * x2 - 1.609603e-2);
+  const denominator = (((-1.456607e-5 * x2 - 2.13374e-4) * x2 - 1.682827e-3) * x2 - 7.373329e-3) * x2 - 1.426474e-2;
   return numerator / denominator;
 }
 
-export function squareformerTvmFfnCpuReference(input: Float32Array, weights: SquareformerTvmFfnWeights, shape: SquareformerTvmFfnShape = DEFAULT_SHAPE, residual: Float32Array = input): Float32Array {
+export function squareformerTvmFfnCpuReference(
+  input: Float32Array,
+  weights: SquareformerTvmFfnWeights,
+  shape: SquareformerTvmFfnShape = DEFAULT_SHAPE,
+  residual: Float32Array = input,
+): Float32Array {
   const { rows, dModel, dFf } = shape;
   assertLength('input', input.length, rows * dModel);
   assertLength('dense1Weight', weights.dense1Weight.length, dModel * dFf);
@@ -184,7 +190,12 @@ export class SquareformerTvmFfnWebgpuBlock {
     this.readback = buffers.readback;
   }
 
-  static async create(device: GPUDevice, kernels: SquareformerTvmFfnKernels, weights: SquareformerTvmFfnWeights, shape: Partial<SquareformerTvmFfnShape> = {}): Promise<SquareformerTvmFfnWebgpuBlock> {
+  static async create(
+    device: GPUDevice,
+    kernels: SquareformerTvmFfnKernels,
+    weights: SquareformerTvmFfnWeights,
+    shape: Partial<SquareformerTvmFfnShape> = {},
+  ): Promise<SquareformerTvmFfnWebgpuBlock> {
     const fullShape = { ...DEFAULT_SHAPE, ...shape };
     const { rows, dModel, dFf } = fullShape;
     assertLength('dense1Weight', weights.dense1Weight.length, dModel * dFf);
@@ -194,8 +205,16 @@ export class SquareformerTvmFfnWebgpuBlock {
     const dense1Module = device.createShaderModule({ label: 'squareformer-tvm-ffn-dense1-gelu', code: kernels.dense1Gelu });
     const dense2Module = device.createShaderModule({ label: 'squareformer-tvm-ffn-dense2-residual', code: kernels.dense2Residual });
     const [dense1Pipeline, dense2Pipeline] = await Promise.all([
-      device.createComputePipelineAsync({ label: 'squareformer-tvm-ffn-dense1-gelu', layout: 'auto', compute: { module: dense1Module, entryPoint: 'matmul_kernel' } }),
-      device.createComputePipelineAsync({ label: 'squareformer-tvm-ffn-dense2-residual', layout: 'auto', compute: { module: dense2Module, entryPoint: 'matmul_kernel' } }),
+      device.createComputePipelineAsync({
+        label: 'squareformer-tvm-ffn-dense1-gelu',
+        layout: 'auto',
+        compute: { module: dense1Module, entryPoint: 'matmul_kernel' },
+      }),
+      device.createComputePipelineAsync({
+        label: 'squareformer-tvm-ffn-dense2-residual',
+        layout: 'auto',
+        compute: { module: dense2Module, entryPoint: 'matmul_kernel' },
+      }),
     ]);
     const inputBytes = rows * dModel * 4;
     const hiddenBytes = rows * dFf * 4;
@@ -223,35 +242,46 @@ export class SquareformerTvmFfnWebgpuBlock {
     this.device.queue.writeBuffer(this.residual, 0, residual);
   }
 
-  encode(commandEncoder: GPUCommandEncoder, inputBuffer: GPUBuffer = this.input, residualBuffer: GPUBuffer = this.residual, outputBuffer: GPUBuffer = this.output): GPUBuffer {
+  encode(
+    commandEncoder: GPUCommandEncoder,
+    inputBuffer: GPUBuffer = this.input,
+    residualBuffer: GPUBuffer = this.residual,
+    outputBuffer: GPUBuffer = this.output,
+  ): GPUBuffer {
     const { rows, dModel, dFf } = this.shape;
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-ffn' });
     pass.setPipeline(this.dense1Pipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-ffn-dense1-bindings',
-      layout: this.dense1Pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.hidden } },
-        { binding: 1, resource: { buffer: this.dense1Weight } },
-        { binding: 2, resource: { buffer: inputBuffer } },
-        { binding: 3, resource: { buffer: this.podArgs } },
-        { binding: 4, resource: { buffer: this.dense1Bias } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-ffn-dense1-bindings',
+        layout: this.dense1Pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.hidden } },
+          { binding: 1, resource: { buffer: this.dense1Weight } },
+          { binding: 2, resource: { buffer: inputBuffer } },
+          { binding: 3, resource: { buffer: this.podArgs } },
+          { binding: 4, resource: { buffer: this.dense1Bias } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(rows, 32), ceilDiv(dFf, 32), 1);
     pass.setPipeline(this.dense2Pipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-ffn-dense2-bindings',
-      layout: this.dense2Pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: outputBuffer } },
-        { binding: 1, resource: { buffer: this.dense2Weight } },
-        { binding: 2, resource: { buffer: this.hidden } },
-        { binding: 3, resource: { buffer: this.podArgs } },
-        { binding: 4, resource: { buffer: this.dense2Bias } },
-        { binding: 5, resource: { buffer: residualBuffer } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-ffn-dense2-bindings',
+        layout: this.dense2Pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: outputBuffer } },
+          { binding: 1, resource: { buffer: this.dense2Weight } },
+          { binding: 2, resource: { buffer: this.hidden } },
+          { binding: 3, resource: { buffer: this.podArgs } },
+          { binding: 4, resource: { buffer: this.dense2Bias } },
+          { binding: 5, resource: { buffer: residualBuffer } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(rows, 32), ceilDiv(dModel, 32), 1);
     pass.end();
     return outputBuffer;
@@ -281,7 +311,18 @@ export class SquareformerTvmFfnWebgpuBlock {
   }
 
   destroy() {
-    for (const buffer of [this.dense1Weight, this.dense1Bias, this.dense2Weight, this.dense2Bias, this.podArgs, this.input, this.residual, this.hidden, this.output, this.readback] as StorageBuffer[]) {
+    for (const buffer of [
+      this.dense1Weight,
+      this.dense1Bias,
+      this.dense2Weight,
+      this.dense2Bias,
+      this.podArgs,
+      this.input,
+      this.residual,
+      this.hidden,
+      this.output,
+      this.readback,
+    ] as StorageBuffer[]) {
       buffer.destroy();
     }
   }

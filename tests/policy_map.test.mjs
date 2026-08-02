@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { POLICY_INDEX, POLICY_MAP, POLICY_MOVES, POLICY_SIZE, moveToPolicyIndex } from '../src/chess/policyMap.ts';
 import { moveFromUci } from '../src/chess/moveCodec.ts';
+import { moveToPolicyIndex, POLICY_INDEX, POLICY_MAP, POLICY_MOVES, POLICY_SIZE } from '../src/chess/policyMap.ts';
 
 test('fixed policy map is stable and covers common/promotional moves', () => {
   assert.equal(POLICY_MAP, 'uci_queen_knight_promo_v1');

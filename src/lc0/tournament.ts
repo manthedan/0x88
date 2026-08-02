@@ -156,9 +156,16 @@ export class TournamentStandings {
     row.games += 1;
     row.points += points;
     const record = row.perOpponent.get(opponentId) ?? { wins: 0, draws: 0, losses: 0 };
-    if (points === 1) { row.wins += 1; record.wins += 1; }
-    else if (points === 0) { row.losses += 1; record.losses += 1; }
-    else { row.draws += 1; record.draws += 1; }
+    if (points === 1) {
+      row.wins += 1;
+      record.wins += 1;
+    } else if (points === 0) {
+      row.losses += 1;
+      record.losses += 1;
+    } else {
+      row.draws += 1;
+      record.draws += 1;
+    }
     row.perOpponent.set(opponentId, record);
     row.score = row.points / row.games;
     row.eloDiff = eloFromScore(row.score);
@@ -167,10 +174,7 @@ export class TournamentStandings {
 
   /** Rows sorted by points, then score fraction, then name; stable for ties. */
   table(): StandingsRow[] {
-    return [...this.rows.values()].sort((a, b) =>
-      b.points - a.points
-      || (b.score ?? 0) - (a.score ?? 0)
-      || a.name.localeCompare(b.name));
+    return [...this.rows.values()].sort((a, b) => b.points - a.points || (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name));
   }
 
   totalGames(): number {

@@ -1,4 +1,4 @@
-import { boardToFen, cloneBoard, parseFen, squareName, type BoardState, type Piece } from './board.ts';
+import { type BoardState, boardToFen, cloneBoard, type Piece, parseFen, squareName } from './board.ts';
 import { type Move } from './moveCodec.ts';
 
 export const STM_WHITE_RANKFLIP_V1 = 'stm_white_rankflip_v1';

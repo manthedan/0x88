@@ -88,7 +88,10 @@ function printSummary(rows) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) { usage(); return; }
+  if (args.help) {
+    usage();
+    return;
+  }
   const steps = plan(args);
   // `npm test` runs `svelte-kit sync`, which must not mutate .svelte-kit while Vite builds it.
   const serial = args.serial || (args.mode === 'final' && args.withBuild);

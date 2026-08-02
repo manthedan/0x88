@@ -7,7 +7,9 @@ const ROOT = process.cwd();
 const PUBLIC_ROOT = join(ROOT, 'public');
 
 function usage() {
-  console.log(`Usage: node scripts/check_browser_engine_assets.mjs [options]\n\nChecks local public/ browser engine assets used by /app/analysis and /app/arena, then prints the prep/build command for each missing family.\n\nOptions:\n  --only LIST       Comma-separated family ids to check (default all)\n  --allow-missing   Exit 0 even when assets are missing\n  --json            Print JSON only\n  -h, --help        Show this help\n`);
+  console.log(
+    `Usage: node scripts/check_browser_engine_assets.mjs [options]\n\nChecks local public/ browser engine assets used by /app/analysis and /app/arena, then prints the prep/build command for each missing family.\n\nOptions:\n  --only LIST       Comma-separated family ids to check (default all)\n  --allow-missing   Exit 0 even when assets are missing\n  --json            Print JSON only\n  -h, --help        Show this help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -18,7 +20,13 @@ function parseArgs(argv) {
       if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
       return argv[++i];
     };
-    if (arg === '--only') args.only = new Set(next().split(',').map((value) => value.trim()).filter(Boolean));
+    if (arg === '--only')
+      args.only = new Set(
+        next()
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean),
+      );
     else if (arg === '--allow-missing') args.allowMissing = true;
     else if (arg === '--json') args.json = true;
     else if (arg === '-h' || arg === '--help') args.help = true;
@@ -60,7 +68,8 @@ function textReport(report) {
     lines.push(`  docs: ${group.docs}`);
     lines.push(`  bytes present: ${group.bytes}`);
     for (const asset of group.assets) lines.push(`  ${asset.ok ? 'ok ' : 'miss'} ${asset.url}${asset.ok ? ` (${asset.bytes} bytes)` : ''}`);
-    for (const asset of group.optionalAssets) lines.push(`  ${asset.ok ? 'ok ' : 'opt '} ${asset.url}${asset.ok ? ` (${asset.bytes} bytes)` : ' (optional, not staged)'}`);
+    for (const asset of group.optionalAssets)
+      lines.push(`  ${asset.ok ? 'ok ' : 'opt '} ${asset.url}${asset.ok ? ` (${asset.bytes} bytes)` : ' (optional, not staged)'}`);
     if (!group.ok || group.optionalMissing.length) lines.push(`  prepare: ${group.command}`);
   }
   if (!report.ok) {
@@ -88,7 +97,14 @@ async function main() {
   const missingFamilies = groups.filter((group) => !group.ok && !buildLocally(group)).map((group) => group.family);
   const optionalMissingFamilies = groups.filter((group) => !group.ok && buildLocally(group)).map((group) => group.family);
   const nextCommands = [...new Set(groups.filter((group) => !group.ok).map((group) => group.command))];
-  const report = { status: 'BROWSER_ENGINE_ASSET_CHECK_DONE', ok: missingFamilies.length === 0, missingFamilies, optionalMissingFamilies, nextCommands, groups };
+  const report = {
+    status: 'BROWSER_ENGINE_ASSET_CHECK_DONE',
+    ok: missingFamilies.length === 0,
+    missingFamilies,
+    optionalMissingFamilies,
+    nextCommands,
+    groups,
+  };
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else console.log(textReport(report));
   if (!report.ok && !args.allowMissing) process.exitCode = 1;

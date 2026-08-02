@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { extname, join } from 'node:path';
+import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -117,10 +117,7 @@ test('app-shell does not reintroduce !important surface overrides', async () => 
   const withoutComments = shell.replace(/\/\*[\s\S]*?\*\//g, '');
   const important = withoutComments.match(/!important/g) ?? [];
   // Known, intentional exceptions: reduced-motion reset (2), .cg-wrap (2), [hidden] (1).
-  assert.ok(
-    important.length <= 5,
-    `expected at most 5 known !important declarations, found ${important.length}`,
-  );
+  assert.ok(important.length <= 5, `expected at most 5 known !important declarations, found ${important.length}`);
 });
 
 test('text tokens meet 4.5:1 contrast in every theme', async () => {

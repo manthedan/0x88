@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
-import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToActionId } from '../src/chess/moveCodec.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
 function parseArgs(argv) {
@@ -22,13 +22,23 @@ function parseArgs(argv) {
       return argv[i];
     };
     if (arg === '--fen' || arg.startsWith('--fen=')) args.fen = readValue();
-    else if (arg === '--visits' || arg.startsWith('--visits=')) args.visits = readValue().split(',').map((v) => Number(v.trim())).filter(Number.isFinite);
-    else if (arg === '--batches' || arg.startsWith('--batches=')) args.batches = readValue().split(',').map((v) => Number(v.trim())).filter(Number.isFinite);
+    else if (arg === '--visits' || arg.startsWith('--visits='))
+      args.visits = readValue()
+        .split(',')
+        .map((v) => Number(v.trim()))
+        .filter(Number.isFinite);
+    else if (arg === '--batches' || arg.startsWith('--batches='))
+      args.batches = readValue()
+        .split(',')
+        .map((v) => Number(v.trim()))
+        .filter(Number.isFinite);
     else if (arg === '--iters' || arg.startsWith('--iters=')) args.iters = Number(readValue());
     else if (arg === '--warmup' || arg.startsWith('--warmup=')) args.warmup = Number(readValue());
     else if (arg === '--out' || arg.startsWith('--out=')) args.out = readValue();
     else if (arg === '--help') {
-      console.log('Usage: node --experimental-strip-types scripts/lc0_puct_wasm_feasibility_audit.mjs [--visits 64,256,1024] [--batches 1,4,8] [--iters 3] [--warmup 1] [--out /tmp/audit.json]');
+      console.log(
+        'Usage: node --experimental-strip-types scripts/lc0_puct_wasm_feasibility_audit.mjs [--visits 64,256,1024] [--batches 1,4,8] [--iters 3] [--warmup 1] [--out /tmp/audit.json]',
+      );
       process.exit(0);
     } else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -66,7 +76,7 @@ class SyntheticLc0SearchEvaluator {
     const policy = new Map();
     const fallback = moves.length ? 1 / moves.length : 0;
     for (const move of moves) policy.set(moveToActionId(move), fallback);
-    return { policy, wdl: [0.45, 0.10, 0.45] };
+    return { policy, wdl: [0.45, 0.1, 0.45] };
   }
 
   async evaluate(board, context) {
@@ -133,7 +143,7 @@ for (const visits of args.visits) {
   }
 }
 
-const fastest = rows.reduce((best, row) => !best || row.visitsPerSecond.mean > best.visitsPerSecond.mean ? row : best, undefined);
+const fastest = rows.reduce((best, row) => (!best || row.visitsPerSecond.mean > best.visitsPerSecond.mean ? row : best), undefined);
 const output = {
   generatedAt: new Date().toISOString(),
   mode: 'synthetic-js-puct-zero-neural-latency',

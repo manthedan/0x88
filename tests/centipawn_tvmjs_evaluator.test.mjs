@@ -10,9 +10,15 @@ class FakeTensor {
     this.bytes = bytes;
     this.device = { sync };
   }
-  copyFromRawBytes(bytes) { this.bytes = bytes.slice(); }
-  copyFrom(tensor) { this.bytes = tensor.bytes.slice(); }
-  toRawBytes() { return this.bytes; }
+  copyFromRawBytes(bytes) {
+    this.bytes = bytes.slice();
+  }
+  copyFrom(tensor) {
+    this.bytes = tensor.bytes.slice();
+  }
+  toRawBytes() {
+    return this.bytes;
+  }
 }
 
 function bytesOf(values) {
@@ -27,17 +33,25 @@ function fakeRuntime(sync = async () => {}) {
     set_input(_name, tokens, attack) {
       state.inputShapes.push([tokens.shape, tokens.dtype, attack.shape, attack.dtype]);
     },
-    invoke_stateful() { state.invokes += 1; },
-    get_output(_name, index) { return index === 0 ? policy : wdl; },
+    invoke_stateful() {
+      state.invokes += 1;
+    },
+    get_output(_name, index) {
+      return index === 0 ? policy : wdl;
+    },
   };
   const runtime = {
     webgpu: () => ({}),
     cpu: () => ({}),
     beginScope() {},
-    endScope() { state.ended += 1; },
+    endScope() {
+      state.ended += 1;
+    },
     empty: (shape, dtype) => new FakeTensor(shape, dtype),
     scalar: (value) => value,
-    dispose() { state.destroyed = true; },
+    dispose() {
+      state.destroyed = true;
+    },
   };
   const vmModule = { getFunction: (name) => functions[name] };
   return { runtime, vmModule, state };
@@ -67,7 +81,11 @@ function replaceGlobal(name, value) {
 
 test('Centipawn TVMJS evaluator pads and chunks fixed batch 16 requests', async () => {
   const { runtime, vmModule, state } = fakeRuntime();
-  const device = { destroy() { state.deviceDestroyed = true; } };
+  const device = {
+    destroy() {
+      state.deviceDestroyed = true;
+    },
+  };
   const evaluator = new SquareformerTvmjsWebgpuEvaluator(runtime, device, vmModule, meta, 16);
   const boards = Array.from({ length: 17 }, () => parseFen(START_FEN));
   const results = await evaluator.evaluateBatch(boards);
@@ -91,15 +109,23 @@ test('Centipawn TVMJS evaluator pads and chunks fixed batch 16 requests', async 
 test('Centipawn TVMJS evaluator defers disposal until an in-flight batch finishes', async () => {
   let releaseSync;
   let syncStarted;
-  const started = new Promise((resolve) => { syncStarted = resolve; });
-  const blocked = new Promise((resolve) => { releaseSync = resolve; });
+  const started = new Promise((resolve) => {
+    syncStarted = resolve;
+  });
+  const blocked = new Promise((resolve) => {
+    releaseSync = resolve;
+  });
   const { runtime, vmModule, state } = fakeRuntime(async () => {
     syncStarted();
     await blocked;
   });
   const evaluator = new SquareformerTvmjsWebgpuEvaluator(
     runtime,
-    { destroy() { state.deviceDestroyed = true; } },
+    {
+      destroy() {
+        state.deviceDestroyed = true;
+      },
+    },
     vmModule,
     meta,
     16,
@@ -123,10 +149,7 @@ test('Centipawn TVMJS evaluator rejects untrusted manifests before fetching', as
     throw new Error('unexpected fetch');
   });
   try {
-    await assert.rejects(
-      SquareformerTvmjsWebgpuEvaluator.create('https://evil.example/manifest.json', meta),
-      /Untrusted TVMJS manifest URL/,
-    );
+    await assert.rejects(SquareformerTvmjsWebgpuEvaluator.create('https://evil.example/manifest.json', meta), /Untrusted TVMJS manifest URL/);
     assert.equal(fetched, false);
   } finally {
     restoreFetch();
@@ -166,22 +189,27 @@ test('Centipawn TVMJS evaluator destroys its device when model fetch fails', asy
           features: { has: () => false },
           limits: {},
           async requestDevice() {
-            return { destroy() { deviceDestroyed = true; } };
+            return {
+              destroy() {
+                deviceDestroyed = true;
+              },
+            };
           },
         };
       },
     },
   });
   const restoreTvmjs = replaceGlobal('tvmjs', {
-    createPolyfillWASI() { return {}; },
-    async instantiate() { throw new Error('instantiate should not run'); },
+    createPolyfillWASI() {
+      return {};
+    },
+    async instantiate() {
+      throw new Error('instantiate should not run');
+    },
   });
   const restoreBundleSha = replaceGlobal('__LC0_TVMJS_BUNDLE_SHA256__', '0'.repeat(64));
   try {
-    await assert.rejects(
-      SquareformerTvmjsWebgpuEvaluator.create('/runtimes/centipawn/manifest.json', meta),
-      /Fetch failed 404/,
-    );
+    await assert.rejects(SquareformerTvmjsWebgpuEvaluator.create('/runtimes/centipawn/manifest.json', meta), /Fetch failed 404/);
     assert.equal(deviceDestroyed, true);
   } finally {
     restoreBundleSha();

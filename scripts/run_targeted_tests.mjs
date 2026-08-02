@@ -43,7 +43,10 @@ function parseArgs(argv) {
 function gitLines(args) {
   const result = spawnSync('git', args, { encoding: 'utf8' });
   if (result.status !== 0) return [];
-  return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  return result.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function snakeCase(value) {
@@ -66,7 +69,11 @@ function changedFiles(args) {
 }
 
 function existingTests() {
-  return new Set(readdirSync('tests').filter((file) => file.endsWith('.test.mjs')).map((file) => `tests/${file}`));
+  return new Set(
+    readdirSync('tests')
+      .filter((file) => file.endsWith('.test.mjs'))
+      .map((file) => `tests/${file}`),
+  );
 }
 
 function inferTests(files) {
@@ -130,7 +137,10 @@ function run(command, commandArgs) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) { usage(); return; }
+  if (args.help) {
+    usage();
+    return;
+  }
   const tests = args.tests.length ? args.tests.map((test) => relative(process.cwd(), test)) : inferTests(changedFiles(args));
   if (!tests.length) {
     console.log('No targeted tests inferred. Run npm test before commit/deploy, or pass tests explicitly.');

@@ -36,7 +36,9 @@ test('CachedLc0Evaluator reuses evaluations and exposes hit/miss metrics', async
 test('CachedLc0Evaluator collapses duplicate and concurrent in-flight misses', async () => {
   let calls = 0;
   let release;
-  const gate = new Promise((resolve) => { release = resolve; });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
   const inner = {
     async evaluateBatch(inputs) {
       calls += 1;
@@ -51,7 +53,10 @@ test('CachedLc0Evaluator collapses duplicate and concurrent in-flight misses', a
 
   assert.equal(calls, 1, 'duplicates in one batch and a concurrent caller share one physical evaluation');
   release();
-  assert.deepEqual((await first).map((entry) => entry.bestMove), ['e2e4', 'e2e4']);
+  assert.deepEqual(
+    (await first).map((entry) => entry.bestMove),
+    ['e2e4', 'e2e4'],
+  );
   assert.equal((await second).bestMove, 'e2e4');
   assert.deepEqual(cached.metrics(), { hits: 0, misses: 3, entries: 1, maxEntries: 8 });
 });
@@ -73,8 +78,14 @@ test('CachedLc0Evaluator preserves sequence batches for uncached misses', async 
   const first = await cached.evaluateBatchSequence(batches);
   const second = await cached.evaluateBatchSequence(batches);
 
-  assert.deepEqual(first.map((batch) => batch.map((entry) => entry.bestMove)), [['e2e4'], ['e2e4', 'e2e4']]);
-  assert.deepEqual(second.map((batch) => batch.map((entry) => entry.bestMove)), [['e2e4'], ['e2e4', 'e2e4']]);
+  assert.deepEqual(
+    first.map((batch) => batch.map((entry) => entry.bestMove)),
+    [['e2e4'], ['e2e4', 'e2e4']],
+  );
+  assert.deepEqual(
+    second.map((batch) => batch.map((entry) => entry.bestMove)),
+    [['e2e4'], ['e2e4', 'e2e4']],
+  );
   assert.deepEqual(sequenceCalls, [[1, 2]], 'cache forwards the first miss set as one sequence call');
   assert.deepEqual(cached.metrics(), { hits: 3, misses: 3, entries: 3, maxEntries: 8 });
 });
@@ -89,10 +100,19 @@ test('CachedLc0Evaluator deduplicates misses across a batch sequence', async () 
   };
   const cached = new CachedLc0Evaluator(inner, { maxEntries: 8 });
   const fen2 = '8/8/8/8/8/8/8/K5k1 w - - 0 1';
-  const result = await cached.evaluateBatchSequence([[START_FEN, START_FEN], [START_FEN, fen2]]);
+  const result = await cached.evaluateBatchSequence([
+    [START_FEN, START_FEN],
+    [START_FEN, fen2],
+  ]);
 
   assert.deepEqual(calls, [[1, 1]], 'only one representative per key reaches the physical sequence');
-  assert.deepEqual(result.map((batch) => batch.map((entry) => entry.bestMove)), [['e2e4', 'e2e4'], ['e2e4', 'e2e4']]);
+  assert.deepEqual(
+    result.map((batch) => batch.map((entry) => entry.bestMove)),
+    [
+      ['e2e4', 'e2e4'],
+      ['e2e4', 'e2e4'],
+    ],
+  );
   assert.deepEqual(cached.metrics(), { hits: 0, misses: 4, entries: 2, maxEntries: 8 });
 });
 
@@ -138,8 +158,12 @@ test('CachedLc0Evaluator evicts least-recently-used entries when resized', async
 test('CachedLc0Evaluator clears entries and forwards dispose to the wrapped evaluator', async () => {
   let disposed = 0;
   const inner = {
-    async evaluate(input) { return evaluation(String(input)); },
-    async dispose() { disposed += 1; },
+    async evaluate(input) {
+      return evaluation(String(input));
+    },
+    async dispose() {
+      disposed += 1;
+    },
   };
   const cached = new CachedLc0Evaluator(inner, { maxEntries: 8 });
   await cached.evaluate(START_FEN);
@@ -155,8 +179,12 @@ test('Lc0OnnxEvaluator releases its ORT session at most once', async () => {
   let releases = 0;
   const session = {
     inputMetadata: [{ name: '/input/planes', type: 'float32', shape: [1, 112, 8, 8] }],
-    async run() { throw new Error('not used'); },
-    async release() { releases += 1; },
+    async run() {
+      throw new Error('not used');
+    },
+    async release() {
+      releases += 1;
+    },
   };
   const evaluator = new Lc0OnnxEvaluator(session);
 

@@ -3,13 +3,15 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
+import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5181;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_move_sequence_cache_matrix.mjs [options]\n\nRuns LC0 hybrid move-sequence search benchmarks over tree-reuse and eval-cache settings.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_move_sequence_cache_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --fen FEN             Starting FEN (default browser start position)\n  --plies N             LC0-driven sequence plies per cell (default 8)\n  --visits LIST         Comma-separated visits list (default 32)\n  --preset NAME         Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batches LIST        Comma-separated batch sizes (default 1,4)\n  --batch-pipeline-depth N\n                        LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default wgsl)\n  --input-backend NAME  Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME Hybrid encoder kernel (default hand)\n  --legal-priors-backend NAME\n                        Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --reuse-tree LIST     Comma-separated booleans (default 0,1)\n  --eval-cache LIST     Comma-separated cache entry counts (default 0,2048)\n  --layers N            Encoder layers (default 10)\n  --timeout MS          Per-cell browser timeout (default 240000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
+  console.log(
+    `Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_move_sequence_cache_matrix.mjs [options]\n\nRuns LC0 hybrid move-sequence search benchmarks over tree-reuse and eval-cache settings.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_move_sequence_cache_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --fen FEN             Starting FEN (default browser start position)\n  --plies N             LC0-driven sequence plies per cell (default 8)\n  --visits LIST         Comma-separated visits list (default 32)\n  --preset NAME         Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batches LIST        Comma-separated batch sizes (default 1,4)\n  --batch-pipeline-depth N\n                        LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default wgsl)\n  --input-backend NAME  Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME Hybrid encoder kernel (default hand)\n  --legal-priors-backend NAME\n                        Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --reuse-tree LIST     Comma-separated booleans (default 0,1)\n  --eval-cache LIST     Comma-separated cache entry counts (default 0,2048)\n  --layers N            Encoder layers (default 10)\n  --timeout MS          Per-cell browser timeout (default 240000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`,
+  );
 }
 
 function parseBool(raw) {
@@ -20,8 +22,13 @@ function parseBool(raw) {
 }
 
 function parseList(raw, parse, name) {
-  const values = String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean).map(parse);
-  if (!values.length || values.some((value) => value === undefined || (typeof value === 'number' && Number.isNaN(value)))) throw new Error(`Invalid --${name}: ${raw}`);
+  const values = String(raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(parse);
+  if (!values.length || values.some((value) => value === undefined || (typeof value === 'number' && Number.isNaN(value))))
+    throw new Error(`Invalid --${name}: ${raw}`);
   return values;
 }
 
@@ -82,14 +89,26 @@ function parseArgs(argv) {
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   for (const backend of args.headBackends) if (!['ort', 'wgsl'].includes(backend)) throw new Error(`Invalid backend: ${backend}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel))
+    throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
   if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
-  if (args.legalPriorsBackend === 'gpu' && args.headBackends.some((backend) => backend !== 'wgsl')) throw new Error('--legal-priors-backend gpu requires --head-backends wgsl');
-  if (args.batchPipelineDepth > 1) process.stderr.write('[move-sequence] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the parity-preserving baseline.\n');
-  for (const [name, value] of [['port', args.port], ['plies', args.plies], ['batch-pipeline-depth', args.batchPipelineDepth], ['layers', args.layers], ['timeout', args.timeoutMs]]) {
+  if (args.legalPriorsBackend === 'gpu' && args.headBackends.some((backend) => backend !== 'wgsl'))
+    throw new Error('--legal-priors-backend gpu requires --head-backends wgsl');
+  if (args.batchPipelineDepth > 1)
+    process.stderr.write('[move-sequence] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the parity-preserving baseline.\n');
+  for (const [name, value] of [
+    ['port', args.port],
+    ['plies', args.plies],
+    ['batch-pipeline-depth', args.batchPipelineDepth],
+    ['layers', args.layers],
+    ['timeout', args.timeoutMs],
+  ]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
-  for (const [name, values] of [['visits', args.visits], ['batches', args.batches]]) {
+  for (const [name, values] of [
+    ['visits', args.visits],
+    ['batches', args.batches],
+  ]) {
     if (values.some((value) => !Number.isFinite(value) || value <= 0)) throw new Error(`Invalid --${name}: ${values.join(',')}`);
   }
   if (args.evalCacheEntries.some((value) => !Number.isFinite(value) || value < 0)) throw new Error(`Invalid --eval-cache: ${args.evalCacheEntries.join(',')}`);
@@ -146,7 +165,8 @@ function runAgent(args, session, commandArgs, timeoutMs = 30_000) {
       try {
         const parsed = stdout ? JSON.parse(stdout.trim()) : null;
         if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
+          if (parsed.success === false)
+            return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);
@@ -166,7 +186,7 @@ function textFromGetResult(result) {
 function runtimeConfiguration(args) {
   return lc0RuntimeConfiguration({
     preset: args.preset,
-    runtimes: args.headBackends.map((backend) => backend === 'wgsl' ? 'hybrid-wgsl-heads' : 'hybrid'),
+    runtimes: args.headBackends.map((backend) => (backend === 'wgsl' ? 'hybrid-wgsl-heads' : 'hybrid')),
     headBackend: args.headBackends.length === 1 ? args.headBackends[0] : undefined,
     inputBackend: args.inputBackend,
     encoderKernel: args.encoderKernel,
@@ -241,7 +261,9 @@ async function closeAgentSession(args, session) {
 async function runCell(args, combo, index, total) {
   const session = `lc0-hybrid-move-sequence-${process.pid}-${index}`;
   const url = moveSequenceUrl(args, combo);
-  process.stderr.write(`[move-sequence] ${index}/${total} backend=${combo.headBackend} visits=${combo.visits} batch=${combo.batch} depth=${args.batchPipelineDepth} input=${args.inputBackend} encoder=${args.encoderKernel} legal=${args.legalPriorsBackend} plies=${args.plies} reuse=${combo.reuseTree ? 1 : 0} cache=${combo.evalCacheEntries}\n`);
+  process.stderr.write(
+    `[move-sequence] ${index}/${total} backend=${combo.headBackend} visits=${combo.visits} batch=${combo.batch} depth=${args.batchPipelineDepth} input=${args.inputBackend} encoder=${args.encoderKernel} legal=${args.legalPriorsBackend} plies=${args.plies} reuse=${combo.reuseTree ? 1 : 0} cache=${combo.evalCacheEntries}\n`,
+  );
   const started = Date.now();
   try {
     await runAgent(args, session, ['open', url], 30_000);
@@ -256,8 +278,10 @@ async function runCell(args, combo, index, total) {
         if (result.status !== 'HYBRID_MOVE_SEQUENCE_BENCH_DONE') throw new Error(`unexpected benchmark status: ${result.status}`);
         const expectedBackend = combo.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
         if (result.backend !== expectedBackend) throw new Error(`unexpected hybrid backend: ${result.backend}`);
-        if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel variant: ${result.encoderKernelVariant ?? 'hand'}`);
-        if ((result.legalPriorsBackend ?? 'js') !== args.legalPriorsBackend) throw new Error(`unexpected legal-priors backend: ${result.legalPriorsBackend ?? 'js'}`);
+        if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel)
+          throw new Error(`unexpected encoder kernel variant: ${result.encoderKernelVariant ?? 'hand'}`);
+        if ((result.legalPriorsBackend ?? 'js') !== args.legalPriorsBackend)
+          throw new Error(`unexpected legal-priors backend: ${result.legalPriorsBackend ?? 'js'}`);
         return { combo, elapsedMs: Date.now() - started, result: { ...result, scriptPreset: args.preset || null }, summary: compactCell(result, combo) };
       } catch (error) {
         if (Date.now() >= deadline) throw error;

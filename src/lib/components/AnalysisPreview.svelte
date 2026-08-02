@@ -1,42 +1,42 @@
 <script lang="ts">
-  type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
-  type Piece = { color: 'white' | 'black'; role: PieceRole; file: number; rank: number };
+type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
+type Piece = { color: 'white' | 'black'; role: PieceRole; file: number; rank: number };
 
-  // Kiwipete: the classic castling, pin, and move-generation test position.
-  const pieces: Piece[] = [
-    { color: 'black', role: 'rook', file: 0, rank: 0 },
-    { color: 'black', role: 'king', file: 4, rank: 0 },
-    { color: 'black', role: 'rook', file: 7, rank: 0 },
-    { color: 'black', role: 'pawn', file: 0, rank: 1 },
-    { color: 'black', role: 'pawn', file: 2, rank: 1 },
-    { color: 'black', role: 'pawn', file: 3, rank: 1 },
-    { color: 'black', role: 'queen', file: 4, rank: 1 },
-    { color: 'black', role: 'pawn', file: 5, rank: 1 },
-    { color: 'black', role: 'bishop', file: 6, rank: 1 },
-    { color: 'black', role: 'bishop', file: 0, rank: 2 },
-    { color: 'black', role: 'knight', file: 1, rank: 2 },
-    { color: 'black', role: 'pawn', file: 4, rank: 2 },
-    { color: 'black', role: 'knight', file: 5, rank: 2 },
-    { color: 'black', role: 'pawn', file: 6, rank: 2 },
-    { color: 'black', role: 'pawn', file: 3, rank: 3 },
-    { color: 'black', role: 'pawn', file: 1, rank: 4 },
-    { color: 'white', role: 'pawn', file: 2, rank: 3 },
-    { color: 'white', role: 'pawn', file: 4, rank: 3 },
-    { color: 'white', role: 'pawn', file: 4, rank: 4 },
-    { color: 'white', role: 'knight', file: 2, rank: 5 },
-    { color: 'white', role: 'knight', file: 5, rank: 5 },
-    { color: 'white', role: 'pawn', file: 0, rank: 6 },
-    { color: 'white', role: 'pawn', file: 1, rank: 6 },
-    { color: 'white', role: 'queen', file: 2, rank: 6 },
-    { color: 'white', role: 'bishop', file: 3, rank: 6 },
-    { color: 'white', role: 'bishop', file: 4, rank: 6 },
-    { color: 'white', role: 'pawn', file: 5, rank: 6 },
-    { color: 'white', role: 'pawn', file: 6, rank: 6 },
-    { color: 'white', role: 'pawn', file: 7, rank: 6 },
-    { color: 'white', role: 'rook', file: 0, rank: 7 },
-    { color: 'white', role: 'king', file: 4, rank: 7 },
-    { color: 'white', role: 'rook', file: 7, rank: 7 },
-  ];
+// Kiwipete: the classic castling, pin, and move-generation test position.
+const pieces: Piece[] = [
+  { color: 'black', role: 'rook', file: 0, rank: 0 },
+  { color: 'black', role: 'king', file: 4, rank: 0 },
+  { color: 'black', role: 'rook', file: 7, rank: 0 },
+  { color: 'black', role: 'pawn', file: 0, rank: 1 },
+  { color: 'black', role: 'pawn', file: 2, rank: 1 },
+  { color: 'black', role: 'pawn', file: 3, rank: 1 },
+  { color: 'black', role: 'queen', file: 4, rank: 1 },
+  { color: 'black', role: 'pawn', file: 5, rank: 1 },
+  { color: 'black', role: 'bishop', file: 6, rank: 1 },
+  { color: 'black', role: 'bishop', file: 0, rank: 2 },
+  { color: 'black', role: 'knight', file: 1, rank: 2 },
+  { color: 'black', role: 'pawn', file: 4, rank: 2 },
+  { color: 'black', role: 'knight', file: 5, rank: 2 },
+  { color: 'black', role: 'pawn', file: 6, rank: 2 },
+  { color: 'black', role: 'pawn', file: 3, rank: 3 },
+  { color: 'black', role: 'pawn', file: 1, rank: 4 },
+  { color: 'white', role: 'pawn', file: 2, rank: 3 },
+  { color: 'white', role: 'pawn', file: 4, rank: 3 },
+  { color: 'white', role: 'pawn', file: 4, rank: 4 },
+  { color: 'white', role: 'knight', file: 2, rank: 5 },
+  { color: 'white', role: 'knight', file: 5, rank: 5 },
+  { color: 'white', role: 'pawn', file: 0, rank: 6 },
+  { color: 'white', role: 'pawn', file: 1, rank: 6 },
+  { color: 'white', role: 'queen', file: 2, rank: 6 },
+  { color: 'white', role: 'bishop', file: 3, rank: 6 },
+  { color: 'white', role: 'bishop', file: 4, rank: 6 },
+  { color: 'white', role: 'pawn', file: 5, rank: 6 },
+  { color: 'white', role: 'pawn', file: 6, rank: 6 },
+  { color: 'white', role: 'pawn', file: 7, rank: 6 },
+  { color: 'white', role: 'rook', file: 0, rank: 7 },
+  { color: 'white', role: 'king', file: 4, rank: 7 },
+  { color: 'white', role: 'rook', file: 7, rank: 7 },
+];
 </script>
 
 <div class="analysis-preview" role="img" aria-label="Preview of Lc0 and Stockfish analyzing the Kiwipete position in 0x88">

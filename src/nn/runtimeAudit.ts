@@ -18,9 +18,7 @@ export type BrowserRuntimeAuditDetail = {
 export const BROWSER_RUNTIME_AUDIT_EVENT = 'lc0-browser-runtime-audit';
 
 export function sanitizeBrowserRuntimeAudit(detail: BrowserRuntimeAuditDetail): BrowserRuntimeAuditDetail {
-  return Object.fromEntries(
-    Object.entries(detail).filter(([, value]) => value !== undefined && value !== ''),
-  ) as BrowserRuntimeAuditDetail;
+  return Object.fromEntries(Object.entries(detail).filter(([, value]) => value !== undefined && value !== '')) as BrowserRuntimeAuditDetail;
 }
 
 export function formatBrowserRuntimeAudit(detail: BrowserRuntimeAuditDetail): string {

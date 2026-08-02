@@ -1,8 +1,8 @@
-import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
-import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
 import { BERSERK_ARTIFACT_BUILD_HINT } from './berserkVariants.ts';
+import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
+import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 
 export interface BerserkOptions {
   /** Fixed search depth. */
@@ -42,9 +42,12 @@ export function workerScript(): string {
   // A missing Berserk artifact indicates an incomplete checkout or deploy.
   // Carry the local rebuild hint into the worker so the failure identifies the
   // affected URLs instead of surfacing a bare "NetworkError importing script".
-  return String.raw`
+  return (
+    String.raw`
 const resolveEmscriptenAssetUrl = ${resolveEmscriptenAssetUrl.toString()};
-const MISSING_ARTIFACT_HINT = ` + JSON.stringify(BERSERK_ARTIFACT_BUILD_HINT) + String.raw`;
+const MISSING_ARTIFACT_HINT = ` +
+    JSON.stringify(BERSERK_ARTIFACT_BUILD_HINT) +
+    String.raw`;
 function artifactLoadError(error, urls) {
   const detail = error && error.message ? error.message : String(error);
   return new Error('Berserk artifacts failed to load (' + urls.filter(Boolean).join(', ') + '): ' + detail + ' — ' + MISSING_ARTIFACT_HINT);
@@ -124,7 +127,8 @@ self.onmessage = (event) => {
     throw new Error('Unknown Berserk worker message type: ' + message.type);
   }).catch((error) => postError(id, error));
 };
-`;
+`
+  );
 }
 
 type WorkerResponse =
@@ -176,15 +180,22 @@ export class BerserkEngine implements BrowserUciEngine {
   private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    this.queueTail = previous.then(() => gate, () => gate);
-    return previous.catch(() => undefined).then(async () => {
-      try {
-        return await fn();
-      } finally {
-        release();
-      }
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    this.queueTail = previous.then(
+      () => gate,
+      () => gate,
+    );
+    return previous
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          return await fn();
+        } finally {
+          release();
+        }
+      });
   }
 
   private makeWorker(): Worker {
@@ -274,7 +285,15 @@ export class BerserkEngine implements BrowserUciEngine {
       const cleanup = () => signal?.removeEventListener('abort', onAbort);
       this.pending.set(id, { resolve, reject, cleanup });
       signal?.addEventListener('abort', onAbort, { once: true });
-      worker.postMessage({ type, id, jsUrl: this.resolvedJsUrl(), wasmUrl: this.resolvedWasmUrl(), dataUrl: this.resolvedDataUrl(), trustedJsUrl: this.trustedJsUrl(), ...payload });
+      worker.postMessage({
+        type,
+        id,
+        jsUrl: this.resolvedJsUrl(),
+        wasmUrl: this.resolvedWasmUrl(),
+        dataUrl: this.resolvedDataUrl(),
+        trustedJsUrl: this.trustedJsUrl(),
+        ...payload,
+      });
     });
   }
 
@@ -420,7 +439,10 @@ export class BerserkEngine implements BrowserUciEngine {
       await this.sendCommand(`setoption name MultiPV value ${multipv}`, opts.signal);
       await this.sendCommand(`position fen ${fen}`, opts.signal);
       const searchStart = this.stdout.length;
-      const commandPromise = this.sendCommand(berserkGoCommand({ ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }), opts.signal);
+      const commandPromise = this.sendCommand(
+        berserkGoCommand({ ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }),
+        opts.signal,
+      );
       try {
         await this.waitForLine((line) => line.startsWith('bestmove '), 'analysis bestmove', searchStart, opts.signal, 60000);
         await commandPromise;

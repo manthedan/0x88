@@ -19,7 +19,9 @@ test('runtime fallback does not create ORT after destruction', async () => {
   const evaluator = new RuntimeFallbackEvaluator(
     {
       evaluate: () => pending.promise,
-      destroy() { primaryDestroyed = true; },
+      destroy() {
+        primaryDestroyed = true;
+      },
     },
     async () => {
       fallbackCreates += 1;
@@ -56,7 +58,9 @@ test('runtime fallback destroys ORT when creation completes after destruction', 
   evaluator.destroy();
   resolveFallback({
     evaluate: async () => ({ policy: new Map(), wdl: [0, 1, 0] }),
-    destroy() { fallbackDestroyed = true; },
+    destroy() {
+      fallbackDestroyed = true;
+    },
   });
   await assert.rejects(evaluation, (error) => error?.name === 'AbortError');
   assert.equal(fallbackDestroyed, true);
@@ -64,9 +68,14 @@ test('runtime fallback destroys ORT when creation completes after destruction', 
 
 test('SquareFormer evaluator releases its ORT session once', async () => {
   let releases = 0;
-  const evaluator = new SquareFormerEvaluator({
-    release() { releases += 1; },
-  }, {});
+  const evaluator = new SquareFormerEvaluator(
+    {
+      release() {
+        releases += 1;
+      },
+    },
+    {},
+  );
   evaluator.destroy();
   evaluator.destroy();
   await Promise.resolve();

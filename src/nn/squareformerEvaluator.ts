@@ -1,13 +1,19 @@
-import * as ort from './ortRuntime.ts';
-import { boardToFen, opposite, type BoardState, type Color, type PieceRole } from '../chess/board.ts';
-import { isStmWhiteRankflip, normalizePositionForStmWhite, normalizedMoveToOriginal, rankFlipSquare } from '../chess/boardNormalization.ts';
-import { isSquareAttacked, legalMoves } from '../chess/movegen.ts';
-import { moveToActionId, type Move } from '../chess/moveCodec.ts';
+import { type BoardState, boardToFen, type Color, opposite, type PieceRole } from '../chess/board.ts';
+import { isStmWhiteRankflip, normalizedMoveToOriginal, normalizePositionForStmWhite, rankFlipSquare } from '../chess/boardNormalization.ts';
+import { type Move, moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
+import { isSquareAttacked, legalMoves } from '../chess/movegen.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
+import * as ort from './ortRuntime.ts';
 
-const INPUT_CACHE_ENTRIES = Math.max(0, Math.min(65536, Math.floor(Number(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('evalInputCacheEntries') ?? '4096')) || 4096));
+const INPUT_CACHE_ENTRIES = Math.max(
+  0,
+  Math.min(
+    65536,
+    Math.floor(Number(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('evalInputCacheEntries') ?? '4096')) || 4096,
+  ),
+);
 type SquareFormerEncodedInput = Float32Array | BigInt64Array | Int32Array;
 type CompactIndexDtype = 'int64' | 'int32';
 type CompactIndexArray = BigInt64Array | Int32Array;
@@ -70,7 +76,6 @@ function addBoardFeatures(data: Float32Array, board: BoardState, boardIndex: num
   for (let sq = 0; sq < 64; sq++) data[sq * stride + base + pieceId(board.squares[sq])] = 1;
 }
 
-
 export function squareformerFloatInput(board: BoardState, meta: SquareFormerMeta, historyFens: string[] = []): Float32Array {
   const history = meta.history_plies;
   const planesPerBoard = 13;
@@ -79,7 +84,11 @@ export function squareformerFloatInput(board: BoardState, meta: SquareFormerMeta
   addBoardFeatures(data, board, 0, planesPerBoard, inputDim);
   for (let h = 0; h < history; h++) {
     if (!historyFens[h]) continue;
-    try { addBoardFeatures(data, parseFenCached(historyFens[h]), h + 1, planesPerBoard, inputDim); } catch { /* ignore bad history */ }
+    try {
+      addBoardFeatures(data, parseFenCached(historyFens[h]), h + 1, planesPerBoard, inputDim);
+    } catch {
+      /* ignore bad history */
+    }
   }
   const base = (history + 1) * planesPerBoard;
   for (let sq = 0; sq < 64; sq++) {
@@ -127,10 +136,15 @@ function repetitionKeyCached(board: BoardState): string {
 function compactRepetitionFlags(board: BoardState, historyBoards: Array<BoardState | null>, history: number): number[] {
   const keys: Array<string | null> = [repetitionKeyCached(board)];
   for (let h = 0; h < history; h++) keys.push(historyBoards[h] ? repetitionKeyCached(historyBoards[h]!) : null);
-  return keys.map((key, i) => key == null ? 0 : keys.slice(i + 1).some((older) => older === key) ? 1 : 0);
+  return keys.map((key, i) => (key == null ? 0 : keys.slice(i + 1).some((older) => older === key) ? 1 : 0));
 }
 
-export function squareformerCompactInput(board: BoardState, meta: SquareFormerMeta, historyFens: string[] = [], dtype: CompactIndexDtype = compactIndexDtype(meta)): CompactIndexArray {
+export function squareformerCompactInput(
+  board: BoardState,
+  meta: SquareFormerMeta,
+  historyFens: string[] = [],
+  dtype: CompactIndexDtype = compactIndexDtype(meta),
+): CompactIndexArray {
   const history = meta.history_plies;
   const stride = meta.token_features ?? history + 9;
   const data = makeCompactArray(64 * stride, dtype);
@@ -141,7 +155,9 @@ export function squareformerCompactInput(board: BoardState, meta: SquareFormerMe
     try {
       historyBoards[h] = parseFenCached(historyFens[h]);
       addCompactBoard(data, historyBoards[h]!, h + 1, stride);
-    } catch { /* ignore bad history */ }
+    } catch {
+      /* ignore bad history */
+    }
   }
   const base = history + 1;
   const stm = board.turn === 'w' ? 1 : 2;
@@ -187,7 +203,12 @@ function parseFenCached(fen: string): BoardState {
   return { squares, turn: turn as 'w' | 'b', castling, epSquare, halfmove: Number(half), fullmove: Number(full) };
 }
 
-export function squareformerLegalCandidateInputs(boards: BoardState[], width: number, contexts: EvaluationContext[] = [], dtype: CompactIndexDtype = 'int64'): { moves: Move[][]; classes: CompactIndexArray; width: number } {
+export function squareformerLegalCandidateInputs(
+  boards: BoardState[],
+  width: number,
+  contexts: EvaluationContext[] = [],
+  dtype: CompactIndexDtype = 'int64',
+): { moves: Move[][]; classes: CompactIndexArray; width: number } {
   const moves = boards.map((board, i) => contexts[i]?.legalMoves ?? legalMoves(board));
   const classes = makeCompactArray(boards.length * width, dtype);
   for (let i = 0; i < moves.length; i++) {
@@ -266,24 +287,53 @@ export const THREATGRAPH_SQUARE_SUMMARY_V2_EXTRA_FEATURE_NAMES = [
   'enemy_king_escape_candidate_attacked_by_stm',
   'enemy_king_escape_candidate_defended_by_opp_nonking',
 ] as const;
-export const THREATGRAPH_SQUARE_SUMMARY_V2_FEATURE_NAMES = [...THREATGRAPH_SQUARE_SUMMARY_V1_FEATURE_NAMES, ...THREATGRAPH_SQUARE_SUMMARY_V2_EXTRA_FEATURE_NAMES] as const;
+export const THREATGRAPH_SQUARE_SUMMARY_V2_FEATURE_NAMES = [
+  ...THREATGRAPH_SQUARE_SUMMARY_V1_FEATURE_NAMES,
+  ...THREATGRAPH_SQUARE_SUMMARY_V2_EXTRA_FEATURE_NAMES,
+] as const;
 export const THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_FEATURES = 28;
 export const THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_SCHEMA = 'threatgraph_square_summary_v1_swap_mobility_outgoing_28';
 export const THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_V2_INDICES = [
-  0, 1, 2, 3, 4, 38,
-  6, 7, 8, 9, 10, 40,
-  12, 13, 14, 15,
-  16, 17, 18, 19, 20, 41, 22, 23,
-  42, 43, 26, 27,
+  0, 1, 2, 3, 4, 38, 6, 7, 8, 9, 10, 40, 12, 13, 14, 15, 16, 17, 18, 19, 20, 41, 22, 23, 42, 43, 26, 27,
 ] as const;
-export const THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_FEATURE_NAMES = THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_V2_INDICES.map((i) => THREATGRAPH_SQUARE_SUMMARY_V2_FEATURE_NAMES[i]);
+export const THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_FEATURE_NAMES = THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_V2_INDICES.map(
+  (i) => THREATGRAPH_SQUARE_SUMMARY_V2_FEATURE_NAMES[i],
+);
 const ROLE_INDEX: Record<PieceRole, number> = { p: 0, n: 1, b: 2, r: 3, q: 4, k: 5 };
 const ROLE_TYPE: Record<PieceRole, number> = { p: 1, n: 2, b: 3, r: 4, q: 5, k: 6 };
 const ROLE_VALUE_BUCKET: Record<PieceRole, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 20 };
-const KNIGHT_DELTAS = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]] as const;
-const KING_DELTAS = [[1, 1], [1, 0], [1, -1], [0, 1], [0, -1], [-1, 1], [-1, 0], [-1, -1]] as const;
-const BISHOP_DELTAS = [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const;
-const ROOK_DELTAS = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+const KNIGHT_DELTAS = [
+  [1, 2],
+  [2, 1],
+  [-1, 2],
+  [-2, 1],
+  [1, -2],
+  [2, -1],
+  [-1, -2],
+  [-2, -1],
+] as const;
+const KING_DELTAS = [
+  [1, 1],
+  [1, 0],
+  [1, -1],
+  [0, 1],
+  [0, -1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
+] as const;
+const BISHOP_DELTAS = [
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+] as const;
+const ROOK_DELTAS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const;
 
 type AttackAccumulator = {
   byRole: Uint8Array;
@@ -295,7 +345,7 @@ const fileOf = (sq: number) => sq & 7;
 const rankOf = (sq: number) => sq >> 3;
 const onBoard = (file: number, rank: number) => file >= 0 && file < 8 && rank >= 0 && rank < 8;
 const sqIndex = (file: number, rank: number) => file + rank * 8;
-const colorIndex = (color: Color) => color === 'w' ? 0 : 1;
+const colorIndex = (color: Color) => (color === 'w' ? 0 : 1);
 const roleOf = (piece: string): PieceRole => piece[1] as PieceRole;
 const chebyshev = (a: number, b: number) => Math.max(Math.abs(fileOf(a) - fileOf(b)), Math.abs(rankOf(a) - rankOf(b)));
 
@@ -316,7 +366,14 @@ function markAttack(acc: AttackAccumulator, color: Color, role: PieceRole, sq: n
   if (acc.minValue[idx] === 0 || v < acc.minValue[idx]) acc.minValue[idx] = v;
 }
 
-function addSliderAttacks(board: BoardState, acc: AttackAccumulator, from: number, color: Color, role: PieceRole, dirs: readonly (readonly [number, number])[]): void {
+function addSliderAttacks(
+  board: BoardState,
+  acc: AttackAccumulator,
+  from: number,
+  color: Color,
+  role: PieceRole,
+  dirs: readonly (readonly [number, number])[],
+): void {
   for (const [df, dr] of dirs) {
     let f = fileOf(from) + df;
     let r = rankOf(from) + dr;
@@ -540,7 +597,7 @@ function kingEscapeCandidates(board: BoardState, color: Color): Set<number> {
 }
 
 function sliderRolesForDirection(direction: readonly [number, number]): readonly PieceRole[] {
-  return (direction[0] === 0 || direction[1] === 0) ? ['r', 'q'] : ['b', 'q'];
+  return direction[0] === 0 || direction[1] === 0 ? ['r', 'q'] : ['b', 'q'];
 }
 
 function pinToOwnKingKind(board: BoardState, color: Color, sq: number): 'rooklike' | 'bishoplike' | null {
@@ -552,7 +609,10 @@ function pinToOwnKingKind(board: BoardState, color: Color, sq: number): 'rooklik
   const allowed = sliderRolesForDirection(dir);
   let seenSq = false;
   for (const cur of raySquaresFrom(king, dir)) {
-    if (cur === sq) { seenSq = true; continue; }
+    if (cur === sq) {
+      seenSq = true;
+      continue;
+    }
     const blocker = board.squares[cur];
     if (!blocker) continue;
     if (seenSq && blocker[0] !== color && allowed.includes(roleOf(blocker))) return allowed[0] === 'r' ? 'rooklike' : 'bishoplike';
@@ -565,7 +625,10 @@ function relativelyPinnedToOwnMajor(board: BoardState, color: Color, sq: number)
   const piece = board.squares[sq];
   if (!piece || piece[0] !== color || piece[1] === 'k') return false;
   for (const dir of [...BISHOP_DELTAS, ...ROOK_DELTAS]) {
-    const pairs = [[dir, [-dir[0], -dir[1]] as const], [[-dir[0], -dir[1]] as const, dir]] as const;
+    const pairs = [
+      [dir, [-dir[0], -dir[1]] as const],
+      [[-dir[0], -dir[1]] as const, dir],
+    ] as const;
     for (const [ownDir, enemyDir] of pairs) {
       let ownMajor = false;
       for (const cur of raySquaresFrom(sq, ownDir)) {
@@ -599,7 +662,10 @@ function sourcePinsEnemyToRole(board: BoardState, src: number, targetRoles: Set<
       const piece = board.squares[cur];
       if (!piece) continue;
       if (!firstEnemy) {
-        if (piece[0] !== color && piece[1] !== 'k') { firstEnemy = true; continue; }
+        if (piece[0] !== color && piece[1] !== 'k') {
+          firstEnemy = true;
+          continue;
+        }
         break;
       }
       if (piece[0] !== color && targetRoles.has(roleOf(piece))) return true;
@@ -620,7 +686,10 @@ function sourceHasXrayOrSkewerOnEnemyMajorOrKing(board: BoardState, src: number)
     for (const cur of raySquaresFrom(src, dir)) {
       const piece = board.squares[cur];
       if (!piece) continue;
-      if (!sawBlocker) { sawBlocker = true; continue; }
+      if (!sawBlocker) {
+        sawBlocker = true;
+        continue;
+      }
       if (piece[0] !== color && (piece[1] === 'q' || piece[1] === 'k')) return true;
       break;
     }
@@ -628,12 +697,20 @@ function sourceHasXrayOrSkewerOnEnemyMajorOrKing(board: BoardState, src: number)
   return false;
 }
 
-function sourceBlocksFriendlySliderAttack(board: BoardState, src: number, dirs: readonly (readonly [number, number])[], friendlyRoles: Set<PieceRole>): boolean {
+function sourceBlocksFriendlySliderAttack(
+  board: BoardState,
+  src: number,
+  dirs: readonly (readonly [number, number])[],
+  friendlyRoles: Set<PieceRole>,
+): boolean {
   const piece = board.squares[src];
   if (!piece) return false;
   const color = piece[0];
   for (const dir of dirs) {
-    const pairs = [[dir, [-dir[0], -dir[1]] as const], [[-dir[0], -dir[1]] as const, dir]] as const;
+    const pairs = [
+      [dir, [-dir[0], -dir[1]] as const],
+      [[-dir[0], -dir[1]] as const, dir],
+    ] as const;
     for (const [friendlyDir, enemyDir] of pairs) {
       let friendly = false;
       for (const cur of raySquaresFrom(src, friendlyDir)) {
@@ -827,10 +904,10 @@ export function threatgraphSquareSummaryV2(board: BoardState, rankflipColorSwap 
     }
     out[base + 58] = ownEscape.has(sq) ? 1 : 0;
     out[base + 59] = ownEscape.has(sq) && acc.total[oppI * 64 + sq] > 0 ? 1 : 0;
-    out[base + 60] = ownEscape.has(sq) && (acc.total[stmI * 64 + sq] - acc.byRole[(stmI * 64 + sq) * 6 + ROLE_INDEX.k]) > 0 ? 1 : 0;
+    out[base + 60] = ownEscape.has(sq) && acc.total[stmI * 64 + sq] - acc.byRole[(stmI * 64 + sq) * 6 + ROLE_INDEX.k] > 0 ? 1 : 0;
     out[base + 61] = enemyEscape.has(sq) ? 1 : 0;
     out[base + 62] = enemyEscape.has(sq) && acc.total[stmI * 64 + sq] > 0 ? 1 : 0;
-    out[base + 63] = enemyEscape.has(sq) && (acc.total[oppI * 64 + sq] - acc.byRole[(oppI * 64 + sq) * 6 + ROLE_INDEX.k]) > 0 ? 1 : 0;
+    out[base + 63] = enemyEscape.has(sq) && acc.total[oppI * 64 + sq] - acc.byRole[(oppI * 64 + sq) * 6 + ROLE_INDEX.k] > 0 ? 1 : 0;
   }
   return out;
 }
@@ -846,14 +923,16 @@ function outputNames(outputs: Record<string, ort.Tensor>): string {
 function requiredFloatOutput(outputs: Record<string, ort.Tensor>, name: string): Float32Array {
   const tensor = outputs[name];
   if (!tensor) throw new Error(`SquareFormer ONNX output missing required tensor '${name}'. Available outputs: ${outputNames(outputs)}`);
-  if (!(tensor.data instanceof Float32Array)) throw new Error(`SquareFormer ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
+  if (!(tensor.data instanceof Float32Array))
+    throw new Error(`SquareFormer ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
   return tensor.data;
 }
 
 function optionalFloatOutput(outputs: Record<string, ort.Tensor>, name: string): Float32Array | undefined {
   const tensor = outputs[name];
   if (!tensor) return undefined;
-  if (!(tensor.data instanceof Float32Array)) throw new Error(`SquareFormer ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
+  if (!(tensor.data instanceof Float32Array))
+    throw new Error(`SquareFormer ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
   return tensor.data;
 }
 
@@ -886,7 +965,10 @@ function sessionOptions(): ort.InferenceSession.SessionOptions {
   const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
   const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
   const epEnv = globalThis.process?.env?.TINY_LEELA_ORT_EP ?? globalThis.process?.env?.ORT_EXECUTION_PROVIDERS ?? '';
-  const executionProviders = epEnv.split(',').map((s) => s.trim()).filter(Boolean);
+  const executionProviders = epEnv
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (executionProviders.length) opts.executionProviders = executionProviders;
   if (Number.isFinite(threads) && threads > 0) {
     opts.intraOpNumThreads = Math.floor(threads);
@@ -900,7 +982,10 @@ export class SquareFormerEvaluator implements Evaluator {
   private meta: SquareFormerMeta;
   private inputCache = new Map<string, SquareFormerEncodedInput>();
   private destroyed = false;
-  constructor(session: ort.InferenceSession, meta: SquareFormerMeta) { this.session = session; this.meta = meta; }
+  constructor(session: ort.InferenceSession, meta: SquareFormerMeta) {
+    this.session = session;
+    this.meta = meta;
+  }
   static async create(modelPath: string | Uint8Array | ArrayBuffer, meta: SquareFormerMeta): Promise<SquareFormerEvaluator> {
     return new SquareFormerEvaluator(await ort.createOrtSession(modelPath), meta);
   }
@@ -939,7 +1024,7 @@ export class SquareFormerEvaluator implements Evaluator {
     const evalContexts = normalized.map((n) => ({ historyFens: n.historyFens, legalMoves: n.legalMoves }));
     const compact = isCompactMeta(this.meta);
     const indexDtype = compactIndexDtype(this.meta);
-    const stride = compact ? this.meta.token_features ?? this.meta.history_plies + 9 : this.meta.input_dim;
+    const stride = compact ? (this.meta.token_features ?? this.meta.history_plies + 9) : this.meta.input_dim;
     const one = 64 * stride;
     const input = compact ? makeCompactArray(boards.length * one, indexDtype) : new Float32Array(boards.length * one);
     for (let i = 0; i < boards.length; i++) {
@@ -948,23 +1033,31 @@ export class SquareFormerEvaluator implements Evaluator {
     }
     const tEncoded = ort.tinyLeelaNowMs();
     const shape: [number, number, number] = [boards.length, 64, stride];
-    const feeds: Record<string, ort.Tensor> = { tokens: compact ? new ort.Tensor(compactTensorType(indexDtype), input as CompactIndexArray, shape) : new ort.Tensor('float32', input as Float32Array, shape) };
+    const feeds: Record<string, ort.Tensor> = {
+      tokens: compact
+        ? new ort.Tensor(compactTensorType(indexDtype), input as CompactIndexArray, shape)
+        : new ort.Tensor('float32', input as Float32Array, shape),
+    };
     const attackFeatures = Number(this.meta.attack_summary_feature_count ?? 0);
     if (attackFeatures > 0) {
-      const encodeAttack = this.meta.attack_summary_schema === 'threatgraph_square_summary_v1' && attackFeatures === THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES
-        ? threatgraphSquareSummaryV1
-        : this.meta.attack_summary_schema === THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_SCHEMA && attackFeatures === THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_FEATURES
-          ? threatgraphSquareSummaryV1SwapMobilityOutgoing
-          : this.meta.attack_summary_schema === 'threatgraph_square_summary_v2' && attackFeatures === THREATGRAPH_SQUARE_SUMMARY_V2_FEATURES
-            ? threatgraphSquareSummaryV2
-            : null;
-      if (!encodeAttack) throw new Error(`Unsupported SquareFormer attack_summary schema/features: schema=${this.meta.attack_summary_schema} features=${attackFeatures}`);
+      const encodeAttack =
+        this.meta.attack_summary_schema === 'threatgraph_square_summary_v1' && attackFeatures === THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES
+          ? threatgraphSquareSummaryV1
+          : this.meta.attack_summary_schema === THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_SCHEMA &&
+              attackFeatures === THREATGRAPH_SQUARE_SUMMARY_V1_SWAP_MOBILITY_OUTGOING_FEATURES
+            ? threatgraphSquareSummaryV1SwapMobilityOutgoing
+            : this.meta.attack_summary_schema === 'threatgraph_square_summary_v2' && attackFeatures === THREATGRAPH_SQUARE_SUMMARY_V2_FEATURES
+              ? threatgraphSquareSummaryV2
+              : null;
+      if (!encodeAttack)
+        throw new Error(`Unsupported SquareFormer attack_summary schema/features: schema=${this.meta.attack_summary_schema} features=${attackFeatures}`);
       const attack = new Float32Array(boards.length * 64 * attackFeatures);
       for (let i = 0; i < boards.length; i++) {
         const row = encodeAttack(evalBoards[i]);
         const mask = normalized[i].attackSummaryChannelMask;
         if (mask) {
-          if (mask.length !== attackFeatures) throw new Error(`attackSummaryChannelMask length ${mask.length} does not match attack features ${attackFeatures}`);
+          if (mask.length !== attackFeatures)
+            throw new Error(`attackSummaryChannelMask length ${mask.length} does not match attack features ${attackFeatures}`);
           for (let sq = 0; sq < 64; sq++) {
             const base = sq * attackFeatures;
             for (let ch = 0; ch < attackFeatures; ch++) row[base + ch] *= Number(mask[ch] ?? 0);

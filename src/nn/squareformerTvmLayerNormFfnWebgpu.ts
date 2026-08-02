@@ -1,8 +1,8 @@
 import {
-  SquareformerTvmFfnWebgpuBlock,
   type SquareformerGpuBuffer,
   type SquareformerTvmFfnKernels,
   type SquareformerTvmFfnShape,
+  SquareformerTvmFfnWebgpuBlock,
   type SquareformerTvmFfnWeights,
 } from './squareformerTvmFfnWebgpu.ts';
 
@@ -134,7 +134,13 @@ export class SquareformerTvmLayerNormFfnWebgpuBlock {
     this.podArgs = buffers.podArgs;
   }
 
-  static async create(device: GPUDevice, kernels: SquareformerTvmFfnKernels, weights: SquareformerTvmLayerNormFfnWeights, shape: SquareformerTvmFfnShape, epsilon = 1e-5): Promise<SquareformerTvmLayerNormFfnWebgpuBlock> {
+  static async create(
+    device: GPUDevice,
+    kernels: SquareformerTvmFfnKernels,
+    weights: SquareformerTvmLayerNormFfnWeights,
+    shape: SquareformerTvmFfnShape,
+    epsilon = 1e-5,
+  ): Promise<SquareformerTvmLayerNormFfnWebgpuBlock> {
     const { rows, dModel } = shape;
     assertLength('layerNormWeight', weights.layerNormWeight.length, dModel);
     assertLength('layerNormBias', weights.layerNormBias.length, dModel);
@@ -167,17 +173,20 @@ export class SquareformerTvmLayerNormFfnWebgpuBlock {
   encode(commandEncoder: GPUCommandEncoder, residualBuffer: GPUBuffer = this.residual): GPUBuffer {
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-layernorm-ffn' });
     pass.setPipeline(this.layerNormPipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-layernorm-bindings',
-      layout: this.layerNormPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.normalized } },
-        { binding: 1, resource: { buffer: residualBuffer } },
-        { binding: 2, resource: { buffer: this.layerNormWeight } },
-        { binding: 3, resource: { buffer: this.layerNormBias } },
-        { binding: 4, resource: { buffer: this.podArgs } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-layernorm-bindings',
+        layout: this.layerNormPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.normalized } },
+          { binding: 1, resource: { buffer: residualBuffer } },
+          { binding: 2, resource: { buffer: this.layerNormWeight } },
+          { binding: 3, resource: { buffer: this.layerNormBias } },
+          { binding: 4, resource: { buffer: this.podArgs } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(this.shape.rows, 1, 1);
     pass.end();
     return this.ffn.encode(commandEncoder as never, this.normalized as never, residualBuffer as never) as never;

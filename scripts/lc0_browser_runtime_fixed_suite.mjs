@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createHash } from 'node:crypto';
 import { parsePgnGames } from '../src/chess/pgn.ts';
-import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
+import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5180;
@@ -66,7 +66,11 @@ function parseArgs(argv) {
     else if (arg === '--max-positions') args.maxPositions = Number(next());
     else if (arg === '--skip-plies') args.skipPlies = Number(next());
     else if (arg === '--fens') args.fensFile = next();
-    else if (arg === '--runtimes') args.runtimes = next().split(',').map((s) => s.trim()).filter(Boolean);
+    else if (arg === '--runtimes')
+      args.runtimes = next()
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
     else if (arg === '--preset') args.preset = next();
     else if (arg === '--movetime') args.movetime = Number(next());
     else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
@@ -79,8 +83,10 @@ function parseArgs(argv) {
     else if (arg === '--legal-priors-backend' || arg === '--hybrid-legal-priors') args.legalPriorsBackend = next();
     else if (arg === '--out') args.out = next();
     else if (arg === '--summary-only') args.summaryOnly = true;
-    else if (arg === '--base-url') { args.baseUrl = next(); args.explicitBaseUrl = true; }
-    else if (arg === '--port') args.port = Number(next());
+    else if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.explicitBaseUrl = true;
+    } else if (arg === '--port') args.port = Number(next());
     else if (arg === '--host') args.host = next();
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--session') args.session = next();
@@ -96,13 +102,19 @@ function parseArgs(argv) {
     if (!Number.isFinite(args[name]) || args[name] <= 0) throw new Error(`Invalid ${name}: ${args[name]}`);
   }
   if (!Number.isFinite(args.cache) || args.cache < 0) throw new Error(`Invalid cache: ${args.cache}`);
-  if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0)) throw new Error(`Invalid stockfishScoreDepth: ${args.stockfishScoreDepth}`);
+  if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0))
+    throw new Error(`Invalid stockfishScoreDepth: ${args.stockfishScoreDepth}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid inputBackend: ${args.inputBackend}`);
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid encoderKernel: ${args.encoderKernel}`);
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel))
+    throw new Error(`Invalid encoderKernel: ${args.encoderKernel}`);
   if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid legalPriorsBackend: ${args.legalPriorsBackend}`);
-  if (args.legalPriorsBackend === 'gpu' && args.runtimes.some((runtime) => runtime !== 'hybrid-wgsl-heads')) throw new Error('--legal-priors-backend gpu requires hybrid-wgsl-heads runtime');
+  if (args.legalPriorsBackend === 'gpu' && args.runtimes.some((runtime) => runtime !== 'hybrid-wgsl-heads'))
+    throw new Error('--legal-priors-backend gpu requires hybrid-wgsl-heads runtime');
   args.session = sanitizeAgentBrowserSessionName(args.session);
-  if (args.batchPipelineDepth > 1) process.stderr.write('[lc0-fixed-suite] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the parity-preserving arena baseline.\n');
+  if (args.batchPipelineDepth > 1)
+    process.stderr.write(
+      '[lc0-fixed-suite] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the parity-preserving arena baseline.\n',
+    );
   return args;
 }
 
@@ -113,7 +125,12 @@ function lc0SideFromTags(tags) {
 }
 
 async function loadFixedFens(args) {
-  if (args.fensFile) return (await readFile(args.fensFile, 'utf8')).split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#')).slice(0, args.maxPositions);
+  if (args.fensFile)
+    return (await readFile(args.fensFile, 'utf8'))
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'))
+      .slice(0, args.maxPositions);
   if (!args.sourceReport) throw new Error('expected --source-report or --fens');
   const report = JSON.parse(await readFile(args.sourceReport, 'utf8'));
   const result = (report.results ?? []).find((entry) => entry.runtime === args.sourceRuntime) ?? report.results?.[0];
@@ -182,7 +199,8 @@ function runAgent(args, session, commandArgs, timeoutMs = 30_000) {
       try {
         const parsed = stdout ? JSON.parse(stdout.trim()) : null;
         if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
+          if (parsed.success === false)
+            return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);
@@ -200,8 +218,11 @@ function textFromGetResult(result) {
 }
 
 async function closeAgentSession(args, session) {
-  try { await runAgent(args, session, ['close'], 5_000); }
-  catch (error) { process.stderr.write(`[lc0-fixed-suite] warning: failed to close ${session}: ${error.message ?? error}\n`); }
+  try {
+    await runAgent(args, session, ['close'], 5_000);
+  } catch (error) {
+    process.stderr.write(`[lc0-fixed-suite] warning: failed to close ${session}: ${error.message ?? error}\n`);
+  }
 }
 
 async function waitForServer(baseUrl, timeoutMs) {
@@ -212,7 +233,9 @@ async function waitForServer(baseUrl, timeoutMs) {
       const response = await fetch(new URL('/app/arena', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) { lastError = error; }
+    } catch (error) {
+      lastError = error;
+    }
     await delay(250);
   }
   throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
@@ -263,9 +286,18 @@ function bytesToKb(value) {
 
 function compactRuntime(result) {
   const cp = result.positions.map((p) => p.stockfish?.lc0PerspectiveCp).filter(Number.isFinite);
-  const visits = result.positions.map((p) => p.lc0Search?.visits).filter(Number.isFinite).reduce((a, b) => a + b, 0);
-  const evals = result.positions.map((p) => p.lc0Search?.evals).filter(Number.isFinite).reduce((a, b) => a + b, 0);
-  const lc0Ms = result.positions.map((p) => p.lc0Search?.elapsedMs).filter(Number.isFinite).reduce((a, b) => a + b, 0);
+  const visits = result.positions
+    .map((p) => p.lc0Search?.visits)
+    .filter(Number.isFinite)
+    .reduce((a, b) => a + b, 0);
+  const evals = result.positions
+    .map((p) => p.lc0Search?.evals)
+    .filter(Number.isFinite)
+    .reduce((a, b) => a + b, 0);
+  const lc0Ms = result.positions
+    .map((p) => p.lc0Search?.elapsedMs)
+    .filter(Number.isFinite)
+    .reduce((a, b) => a + b, 0);
   const executionFootprint = result.telemetry?.lc0ExecutionFootprint;
   const cacheFootprint = result.telemetry?.lc0CacheFootprint;
   return {
@@ -288,7 +320,8 @@ function addRelativeLoss(summary, results) {
   const byRuntime = new Map(summary.map((row) => [row.runtime, { ...row, avgRelativeCpLoss: 0, relativeCpLossPositions: 0 }]));
   const n = Math.max(0, ...results.map((result) => result.positions.length));
   for (let i = 0; i < n; i++) {
-    const entries = results.map((result) => ({ runtime: result.runtime, position: result.positions[i] }))
+    const entries = results
+      .map((result) => ({ runtime: result.runtime, position: result.positions[i] }))
       .filter((entry) => Number.isFinite(entry.position?.stockfish?.lc0PerspectiveCp));
     if (entries.length < 2) continue;
     const best = Math.max(...entries.map((entry) => entry.position.stockfish.lc0PerspectiveCp));

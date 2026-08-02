@@ -1,6 +1,6 @@
-import { boardToFen, type BoardState, type Color, type PieceRole } from '../chess/board.ts';
-import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
+import { type BoardState, boardToFen, type Color, type PieceRole } from '../chess/board.ts';
 import type { Move } from '../chess/moveCodec.ts';
+import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 
 export interface EndgameOracleMove {
   move: Move;
@@ -100,7 +100,10 @@ function mateDistance(board: BoardState, attacker: Color, depth: number, memo: M
     result = 0;
     for (const move of orderedMoves(board, legal, attacker)) {
       const childDistance = mateDistance(makeMove(board, move), attacker, depth - 1, memo, proven);
-      if (childDistance === null) { result = null; break; }
+      if (childDistance === null) {
+        result = null;
+        break;
+      }
       result = Math.max(result, childDistance + 1);
     }
   }

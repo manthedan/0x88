@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  checkRecklessVariantAsset,
+  defaultRecklessVariantKey,
+  normalizeRecklessVariant,
   RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT,
   RECKLESS_FULL_VARIANT,
   RECKLESS_LITE_VARIANT,
@@ -9,9 +12,6 @@ import {
   RECKLESS_V60_NNUE_BYTES,
   RECKLESS_VARIANTS,
   RECKLESS_WASI_SIMD_EXTERNAL_VARIANT,
-  checkRecklessVariantAsset,
-  defaultRecklessVariantKey,
-  normalizeRecklessVariant,
   recklessVariantAssetStatus,
   recklessVariantFromParams,
   resolveDefaultRecklessVariantAssetFallback,
@@ -46,17 +46,17 @@ test('Reckless external NNUE prototype stays explicit and uses the WASI backend'
   assert.equal(RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT.nnueExpectedBytes, RECKLESS_V60_NNUE_BYTES);
   assert.equal(recklessVariantFromParams(new URLSearchParams('reckless=persistent-external')), RECKLESS_WASI_SIMD_EXTERNAL_VARIANT);
   assert.notEqual(defaultRecklessVariantKey(), 'wasi-simd-external');
-  assert.equal(
-    await resolveDefaultRecklessVariantAssetFallback(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT, false),
-    RECKLESS_WASI_SIMD_EXTERNAL_VARIANT,
-  );
+  assert.equal(await resolveDefaultRecklessVariantAssetFallback(RECKLESS_WASI_SIMD_EXTERNAL_VARIANT, false), RECKLESS_WASI_SIMD_EXTERNAL_VARIANT);
 });
 
 test('Reckless relaxed SIMD is the feature-detected default where supported', () => {
   assert.equal(typeof supportsWasmRelaxedSimd(), 'boolean');
   assert.equal(recklessVariantFromParams(new URLSearchParams('recklessVariant=relaxed-simd')).wasmUrl, RECKLESS_RELAXED_SIMD_VARIANT.wasmUrl);
   if (supportsWasmRelaxedSimd()) assert.equal(defaultRecklessVariantKey(), 'relaxed-simd');
-  assert.equal(RECKLESS_VARIANTS.some((variant) => variant.key === 'relaxed-simd'), true);
+  assert.equal(
+    RECKLESS_VARIANTS.some((variant) => variant.key === 'relaxed-simd'),
+    true,
+  );
 });
 
 test('explicit relaxed SIMD falls back when the runtime cannot validate relaxed SIMD', async () => {
@@ -114,7 +114,10 @@ test('IPv6 loopback still probes local generated Reckless assets', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: false };
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '[::1]' },

@@ -119,7 +119,12 @@ export class SquareformerTvmAttentionWebgpuBlock {
   private readback: GPUBuffer;
   private podArgs: GPUBuffer;
 
-  private constructor(private device: GPUDevice, shape: SquareformerTvmAttentionShape, pipeline: GPUComputePipeline, buffers: { qkv: GPUBuffer; bias: GPUBuffer; output: GPUBuffer; readback: GPUBuffer; podArgs: GPUBuffer }) {
+  private constructor(
+    private device: GPUDevice,
+    shape: SquareformerTvmAttentionShape,
+    pipeline: GPUComputePipeline,
+    buffers: { qkv: GPUBuffer; bias: GPUBuffer; output: GPUBuffer; readback: GPUBuffer; podArgs: GPUBuffer },
+  ) {
     this.shape = shape;
     this.pipeline = pipeline;
     this.qkv = buffers.qkv;
@@ -137,7 +142,11 @@ export class SquareformerTvmAttentionWebgpuBlock {
     const headDim = dModel / heads;
     if (headDim !== 16) throw new Error(`attention shader is fixed to headDim=16, got ${headDim}`);
     const module = device.createShaderModule({ label: 'squareformer-tvm-attention', code: ATTENTION_WGSL });
-    const pipeline = await device.createComputePipelineAsync({ label: 'squareformer-tvm-attention', layout: 'auto', compute: { module, entryPoint: 'attention_kernel' } });
+    const pipeline = await device.createComputePipelineAsync({
+      label: 'squareformer-tvm-attention',
+      layout: 'auto',
+      compute: { module, entryPoint: 'attention_kernel' },
+    });
     const qkvBytes = rows * 3 * dModel * 4;
     const biasBytes = heads * rows * rows * 4;
     const outputBytes = rows * dModel * 4;
@@ -145,7 +154,11 @@ export class SquareformerTvmAttentionWebgpuBlock {
       qkv: createStorageBuffer(device, 'squareformer-tvm-attention-qkv', qkvBytes, GPUBufferUsage.COPY_DST),
       bias: createStorageBuffer(device, 'squareformer-tvm-attention-bias', biasBytes, GPUBufferUsage.COPY_DST),
       output: createStorageBuffer(device, 'squareformer-tvm-attention-context', outputBytes, GPUBufferUsage.COPY_SRC),
-      readback: device.createBuffer({ label: 'squareformer-tvm-attention-readback', size: outputBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+      readback: device.createBuffer({
+        label: 'squareformer-tvm-attention-readback',
+        size: outputBytes,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      }),
       podArgs: createInitializedBuffer(device, 'squareformer-tvm-attention-pod', new Uint32Array([rows, dModel, heads, headDim]), GPUBufferUsage.UNIFORM),
     };
     return new SquareformerTvmAttentionWebgpuBlock(device, fullShape, pipeline, buffers);
@@ -168,19 +181,27 @@ export class SquareformerTvmAttentionWebgpuBlock {
     this.device.queue.writeBuffer(this.bias, 0, bias);
   }
 
-  encode(commandEncoder: GPUCommandEncoder, qkvBuffer: GPUBuffer = this.qkv, biasBuffer: GPUBuffer = this.bias, outputBuffer: GPUBuffer = this.output): GPUBuffer {
+  encode(
+    commandEncoder: GPUCommandEncoder,
+    qkvBuffer: GPUBuffer = this.qkv,
+    biasBuffer: GPUBuffer = this.bias,
+    outputBuffer: GPUBuffer = this.output,
+  ): GPUBuffer {
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-attention' });
     pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-attention-bindings',
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: outputBuffer } },
-        { binding: 1, resource: { buffer: qkvBuffer } },
-        { binding: 2, resource: { buffer: biasBuffer } },
-        { binding: 3, resource: { buffer: this.podArgs } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-attention-bindings',
+        layout: this.pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: outputBuffer } },
+          { binding: 1, resource: { buffer: qkvBuffer } },
+          { binding: 2, resource: { buffer: biasBuffer } },
+          { binding: 3, resource: { buffer: this.podArgs } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(this.shape.rows, this.shape.heads, 1);
     pass.end();
     return outputBuffer;

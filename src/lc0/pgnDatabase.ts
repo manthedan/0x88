@@ -7,7 +7,7 @@
  */
 
 import { parsePgnGames } from '../chess/pgn.ts';
-import { buildOpeningPositionIndex, openingSummary, positionKey, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
+import { buildOpeningPositionIndex, type OpeningMoveStat, type OpeningPositionIndex, openingSummary, positionKey } from './openingStats.ts';
 
 export type PgnCollectionSource = 'manual' | 'lichess' | 'chesscom';
 
@@ -191,9 +191,7 @@ export async function listPgnCollections(): Promise<PgnCollectionSummary[]> {
   const db = await openDatabase();
   try {
     const records = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
-    return records
-      .map(collectionSummary)
-      .sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name));
+    return records.map(collectionSummary).sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name));
   } finally {
     db.close();
   }
@@ -221,8 +219,8 @@ export async function savePgnCollection(input: SavePgnCollectionInput): Promise<
       pgn: input.pgn,
       gameCount: Math.max(0, Math.floor(input.gameCount) || 0),
       source: input.source ?? existing?.source ?? 'manual',
-      username: input.username !== undefined ? (input.username.trim() || undefined) : existing?.username,
-      color: input.color !== undefined ? (input.color || undefined) : existing?.color,
+      username: input.username !== undefined ? input.username.trim() || undefined : existing?.username,
+      color: input.color !== undefined ? input.color || undefined : existing?.color,
       positionIndex: input.positionIndex,
       indexedPositionCount: input.indexedPositionCount ?? (input.positionIndex ? Object.keys(input.positionIndex).length : 0),
       createdAt: existing?.createdAt ?? now,

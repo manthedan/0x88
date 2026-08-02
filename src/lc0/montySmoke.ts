@@ -1,5 +1,5 @@
 import { START_FEN } from '../chess/board.ts';
-import { MontyEngine, DEFAULT_MONTY_WASM_URL } from './montyEngine.ts';
+import { DEFAULT_MONTY_WASM_URL, MontyEngine } from './montyEngine.ts';
 
 const params = new URLSearchParams(location.search);
 const statusEl = document.getElementById('status')!;

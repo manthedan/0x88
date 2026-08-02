@@ -1,4 +1,4 @@
-import { BIG_NETS, Bt4WorkerSearcher, type BigNetConfig } from './bt4Engine.ts';
+import { BIG_NETS, type BigNetConfig, Bt4WorkerSearcher } from './bt4Engine.ts';
 
 export type BigNetKey = BigNetConfig['key'];
 
@@ -25,11 +25,7 @@ export class BigNetSessionPool<T extends DisposableSearcher> {
   private readonly scheduler: TimerScheduler;
   private readonly defaultIdleTtlMs: number;
 
-  constructor(
-    factory: (config: BigNetConfig) => T,
-    scheduler: TimerScheduler = { setTimeout, clearTimeout },
-    defaultIdleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS,
-  ) {
+  constructor(factory: (config: BigNetConfig) => T, scheduler: TimerScheduler = { setTimeout, clearTimeout }, defaultIdleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS) {
     this.factory = factory;
     this.scheduler = scheduler;
     this.defaultIdleTtlMs = defaultIdleTtlMs;

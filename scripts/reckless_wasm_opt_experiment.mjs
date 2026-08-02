@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { gzipSync } from 'node:zlib';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { spawn } from 'node:child_process';
+import { gzipSync } from 'node:zlib';
 
 const ROOT = process.cwd();
 const OUT_DIR = path.join(ROOT, '.local_engines', 'reckless-wasm-opt');
@@ -49,8 +49,12 @@ async function runChecked(command, args) {
     let stderr = '';
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
     child.on('error', reject);
     child.on('close', (status) => {
       if (status !== 0) reject(new Error(`${command} ${args.join(' ')} failed with ${status}\n${stderr}`));

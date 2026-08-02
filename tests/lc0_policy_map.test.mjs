@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { moveFromUci } from '../src/chess/moveCodec.ts';
 import {
   LC0_FLIP_TRANSFORM,
   LC0_MIRROR_TRANSFORM,
@@ -14,7 +15,6 @@ import {
   transformPolicyUci,
   uciToLc0PolicyIndex,
 } from '../src/lc0/policyMap.ts';
-import { moveFromUci } from '../src/chess/moveCodec.ts';
 
 const LC0_ENCODER_SOURCE = new URL('../../repos/lc0/src/neural/encoder.cc', import.meta.url);
 

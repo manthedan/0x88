@@ -39,9 +39,15 @@ fn legal_policy_gather_kernel(@builtin(global_invocation_id) gid : vec3<u32>) {
 }
 `;
 
-function ceilDiv(a: number, b: number): number { return Math.floor((a + b - 1) / b); }
-function assertLength(name: string, actual: number, expected: number) { if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`); }
-function validateLegalIndices(legalIndices: Uint32Array, policySize: number) { for (const index of legalIndices) if (index >= policySize) throw new Error(`legal policy index ${index} is out of range for policySize=${policySize}`); }
+function ceilDiv(a: number, b: number): number {
+  return Math.floor((a + b - 1) / b);
+}
+function assertLength(name: string, actual: number, expected: number) {
+  if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`);
+}
+function validateLegalIndices(legalIndices: Uint32Array, policySize: number) {
+  for (const index of legalIndices) if (index >= policySize) throw new Error(`legal policy index ${index} is out of range for policySize=${policySize}`);
+}
 function createInitializedBuffer(device: GPUDevice, label: string, data: Uint32Array, usage: number): GPUBuffer {
   const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage, mappedAtCreation: true });
   new Uint32Array(buffer.getMappedRange()).set(data);
@@ -63,7 +69,14 @@ export class SquareformerTvmLegalPolicyGatherWebgpuBlock {
   private readback: GPUBuffer;
   private podArgs: GPUBuffer;
 
-  private constructor(private device: GPUDevice, pipeline: GPUComputePipeline, legalCount: number, maxLegalCount: number, policySize: number, buffers: { policy: GPUBuffer; indices: GPUBuffer; output: GPUBuffer; readback: GPUBuffer; podArgs: GPUBuffer }) {
+  private constructor(
+    private device: GPUDevice,
+    pipeline: GPUComputePipeline,
+    legalCount: number,
+    maxLegalCount: number,
+    policySize: number,
+    buffers: { policy: GPUBuffer; indices: GPUBuffer; output: GPUBuffer; readback: GPUBuffer; podArgs: GPUBuffer },
+  ) {
     this.pipeline = pipeline;
     this.legalCount = legalCount;
     this.maxLegalCount = maxLegalCount;
@@ -86,14 +99,32 @@ export class SquareformerTvmLegalPolicyGatherWebgpuBlock {
   static async createDynamic(device: GPUDevice, maxLegalCount = 256, policySize = 20480): Promise<SquareformerTvmLegalPolicyGatherWebgpuBlock> {
     if (maxLegalCount <= 0) throw new Error('maxLegalCount must be positive');
     const module = device.createShaderModule({ label: 'squareformer-tvm-legal-policy-gather', code: LEGAL_GATHER_WGSL });
-    const pipeline = await device.createComputePipelineAsync({ label: 'squareformer-tvm-legal-policy-gather', layout: 'auto', compute: { module, entryPoint: 'legal_policy_gather_kernel' } });
+    const pipeline = await device.createComputePipelineAsync({
+      label: 'squareformer-tvm-legal-policy-gather',
+      layout: 'auto',
+      compute: { module, entryPoint: 'legal_policy_gather_kernel' },
+    });
     const outputBytes = maxLegalCount * 4;
     const buffers = {
       policy: createStorageBuffer(device, 'squareformer-tvm-legal-policy-input', policySize * 4, GPUBufferUsage.COPY_DST),
-      indices: createInitializedBuffer(device, 'squareformer-tvm-legal-policy-indices', new Uint32Array(maxLegalCount), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+      indices: createInitializedBuffer(
+        device,
+        'squareformer-tvm-legal-policy-indices',
+        new Uint32Array(maxLegalCount),
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
       output: createStorageBuffer(device, 'squareformer-tvm-legal-policy-output', outputBytes, GPUBufferUsage.COPY_SRC),
-      readback: device.createBuffer({ label: 'squareformer-tvm-legal-policy-readback', size: outputBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
-      podArgs: createInitializedBuffer(device, 'squareformer-tvm-legal-policy-pod', new Uint32Array([0, policySize, 0, 0]), GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
+      readback: device.createBuffer({
+        label: 'squareformer-tvm-legal-policy-readback',
+        size: outputBytes,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      }),
+      podArgs: createInitializedBuffer(
+        device,
+        'squareformer-tvm-legal-policy-pod',
+        new Uint32Array([0, policySize, 0, 0]),
+        GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      ),
     };
     return new SquareformerTvmLegalPolicyGatherWebgpuBlock(device, pipeline, 0, maxLegalCount, policySize, buffers);
   }
@@ -115,16 +146,19 @@ export class SquareformerTvmLegalPolicyGatherWebgpuBlock {
   encode(commandEncoder: GPUCommandEncoder, policyBuffer: GPUBuffer = this.policy, outputBuffer: GPUBuffer = this.output): GPUBuffer {
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-legal-policy-gather' });
     pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-legal-policy-gather-bindings',
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: outputBuffer } },
-        { binding: 1, resource: { buffer: policyBuffer } },
-        { binding: 2, resource: { buffer: this.indices } },
-        { binding: 3, resource: { buffer: this.podArgs } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-legal-policy-gather-bindings',
+        layout: this.pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: outputBuffer } },
+          { binding: 1, resource: { buffer: policyBuffer } },
+          { binding: 2, resource: { buffer: this.indices } },
+          { binding: 3, resource: { buffer: this.podArgs } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(this.legalCount, 64), 1, 1);
     pass.end();
     return outputBuffer;

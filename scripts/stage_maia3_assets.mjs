@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 // Stage the Maia3 models for a clean checkout.
 //
 // The repo commits only symlinks (public/models/maia3/*.onnx ->
@@ -16,7 +17,6 @@
 //
 // Env overrides: MAIA3_MODEL_DIR, MAIA3_SOURCE_URL, MAIA3_PYTHON.
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readlink, rename, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -40,7 +40,9 @@ const targetDir = process.env.MAIA3_MODEL_DIR ?? defaultDir;
 const python = process.env.MAIA3_PYTHON ?? '.venv-onnx/bin/python';
 
 async function sha256(filePath) {
-  return createHash('sha256').update(await readFile(filePath)).digest('hex');
+  return createHash('sha256')
+    .update(await readFile(filePath))
+    .digest('hex');
 }
 
 async function isStaged(entry) {
@@ -55,8 +57,8 @@ const actions = [];
 if (await isStaged(upstream)) {
   actions.push({ file: upstream.file, action: 'already-staged' });
 } else {
-  const sourceUrl = process.env.MAIA3_SOURCE_URL
-    ?? `https://raw.githubusercontent.com/CSSLab/maia-platform-frontend/${UPSTREAM_COMMIT}/public/maia3/${upstream.file}`;
+  const sourceUrl =
+    process.env.MAIA3_SOURCE_URL ?? `https://raw.githubusercontent.com/CSSLab/maia-platform-frontend/${UPSTREAM_COMMIT}/public/maia3/${upstream.file}`;
   console.log(`Downloading Maia3 model (${(upstream.bytes / 1e6).toFixed(1)}MB) from ${sourceUrl}`);
   const response = await fetch(sourceUrl);
   if (!response.ok) throw new Error(`download failed: HTTP ${response.status} for ${sourceUrl}`);
@@ -78,25 +80,38 @@ for (const entry of derived) {
     continue;
   }
   if (!existsSync(python)) {
-    actions.push({ file: entry.file, action: 'SKIPPED', reason: `python not found at ${python} (set MAIA3_PYTHON); browser falls back to ${entry.derivedFrom}` });
+    actions.push({
+      file: entry.file,
+      action: 'SKIPPED',
+      reason: `python not found at ${python} (set MAIA3_PYTHON); browser falls back to ${entry.derivedFrom}`,
+    });
     continue;
   }
   const sourcePath = path.join(targetDir, entry.derivedFrom);
   const targetPath = path.join(targetDir, entry.file);
   const op21Path = path.join(tmpdir(), `maia3_op21_${process.pid}.onnx`);
   console.log(`Deriving ${entry.file} from ${entry.derivedFrom} (opset 21 + int8 QDQ)…`);
-  const convert = spawnSync(python, ['-c', `
+  const convert = spawnSync(
+    python,
+    [
+      '-c',
+      `
 import onnx
 from onnx import version_converter
 m = onnx.load(${JSON.stringify(sourcePath)})
 onnx.save(version_converter.convert_version(m, 21), ${JSON.stringify(op21Path)})
-`], { stdio: 'inherit' });
+`,
+    ],
+    { stdio: 'inherit' },
+  );
   if (convert.status !== 0) throw new Error(`opset conversion failed for ${entry.file}`);
   const quantize = spawnSync(python, ['scripts/lc0_quantize_onnx_weights_qdq.py', '--in', op21Path, '--out', targetPath], { stdio: 'inherit' });
   if (quantize.status !== 0) throw new Error(`quantization failed for ${entry.file}`);
   const digest = await sha256(targetPath);
   if (digest !== entry.sha256) {
-    throw new Error(`${entry.file}: derived sha256 ${digest} does not match manifest ${entry.sha256} — onnx/numpy version drift? Re-derive and update the manifest deliberately.`);
+    throw new Error(
+      `${entry.file}: derived sha256 ${digest} does not match manifest ${entry.sha256} — onnx/numpy version drift? Re-derive and update the manifest deliberately.`,
+    );
   }
   actions.push({ file: entry.file, action: 'derived', sha256: digest });
 }

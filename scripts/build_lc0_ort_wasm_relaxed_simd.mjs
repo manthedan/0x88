@@ -1,15 +1,11 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
 
 const ORT_REPOSITORY = 'https://github.com/microsoft/onnxruntime.git';
-const ORT_REMOTE_ALIASES = new Set([
-  ORT_REPOSITORY,
-  'git@github.com:microsoft/onnxruntime.git',
-  'ssh://git@github.com/microsoft/onnxruntime.git',
-]);
+const ORT_REMOTE_ALIASES = new Set([ORT_REPOSITORY, 'git@github.com:microsoft/onnxruntime.git', 'ssh://git@github.com/microsoft/onnxruntime.git']);
 const ORT_TAG = 'v1.27.0';
 const ORT_COMMIT = '8f0278c77bf44b0cc83c098c6c722b92a36ac4b5';
 const EMSCRIPTEN_VERSION = '4.0.23';
@@ -19,20 +15,21 @@ const outputRoot = resolve(process.env.ORT_WASM_OUTPUT_DIR ?? 'public/ort-experi
 const skipBuild = process.env.ORT_SKIP_BUILD === '1';
 function artifactNames(variant) {
   const simd = variant === 'relaxed' ? 'relaxedsimd' : 'simd';
-  return [
-    `ort-wasm-${simd}-threaded.asyncify.mjs`,
-    `ort-wasm-${simd}-threaded.asyncify.wasm`,
-  ];
+  return [`ort-wasm-${simd}-threaded.asyncify.mjs`, `ort-wasm-${simd}-threaded.asyncify.wasm`];
 }
 
 function buildFlags(variant) {
   return [
-    '--config', 'Release',
-    '--build_dir', resolve(`.local_ort/build-${variant}`),
-    '--parallel', BUILD_JOBS,
+    '--config',
+    'Release',
+    '--build_dir',
+    resolve(`.local_ort/build-${variant}`),
+    '--parallel',
+    BUILD_JOBS,
     '--build_wasm',
     '--skip_tests',
-    '--emsdk_version', EMSCRIPTEN_VERSION,
+    '--emsdk_version',
+    EMSCRIPTEN_VERSION,
     '--enable_wasm_simd',
     '--enable_wasm_threads',
     '--use_webgpu',
@@ -43,14 +40,20 @@ function buildFlags(variant) {
 }
 
 if (process.argv.includes('--print-config')) {
-  console.log(JSON.stringify({
-    repository: ORT_REPOSITORY,
-    tag: ORT_TAG,
-    commit: ORT_COMMIT,
-    emscriptenVersion: EMSCRIPTEN_VERSION,
-    artifacts: Object.fromEntries(['fixed', 'relaxed'].map((variant) => [variant, artifactNames(variant)])),
-    variants: Object.fromEntries(['fixed', 'relaxed'].map((variant) => [variant, buildFlags(variant)])),
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        repository: ORT_REPOSITORY,
+        tag: ORT_TAG,
+        commit: ORT_COMMIT,
+        emscriptenVersion: EMSCRIPTEN_VERSION,
+        artifacts: Object.fromEntries(['fixed', 'relaxed'].map((variant) => [variant, artifactNames(variant)])),
+        variants: Object.fromEntries(['fixed', 'relaxed'].map((variant) => [variant, buildFlags(variant)])),
+      },
+      null,
+      2,
+    ),
+  );
   process.exit(0);
 }
 
@@ -128,16 +131,8 @@ const variants = [buildVariant('fixed'), buildVariant('relaxed')];
 const fixedWasm = variants[0].artifacts.find((artifact) => artifact.name.endsWith('.wasm')).path;
 const relaxedWasm = variants[1].artifacts.find((artifact) => artifact.name.endsWith('.wasm')).path;
 run(process.execPath, ['scripts/inspect_wasm_simd.mjs', fixedWasm, relaxedWasm]);
-run(process.execPath, [
-  'scripts/inspect_wasm_simd.mjs',
-  '--forbid-op', 'i32x4.relaxed_dot_i8x16_i7x16_add_s',
-  fixedWasm,
-]);
-run(process.execPath, [
-  'scripts/inspect_wasm_simd.mjs',
-  '--require-op', 'i32x4.relaxed_dot_i8x16_i7x16_add_s',
-  relaxedWasm,
-]);
+run(process.execPath, ['scripts/inspect_wasm_simd.mjs', '--forbid-op', 'i32x4.relaxed_dot_i8x16_i7x16_add_s', fixedWasm]);
+run(process.execPath, ['scripts/inspect_wasm_simd.mjs', '--require-op', 'i32x4.relaxed_dot_i8x16_i7x16_add_s', relaxedWasm]);
 
 const manifest = {
   schema: 'lc0_browser.ort_wasm_relaxed_simd_build.v1',
@@ -148,7 +143,7 @@ const manifest = {
   generatedAt: new Date().toISOString(),
   variants: variants.map((variant) => ({
     ...variant,
-    flags: variant.flags.map((value) => value.startsWith(`${process.cwd()}/`) ? relative(process.cwd(), value) : value),
+    flags: variant.flags.map((value) => (value.startsWith(`${process.cwd()}/`) ? relative(process.cwd(), value) : value)),
     artifacts: variant.artifacts.map((artifact) => ({
       ...artifact,
       path: relative(process.cwd(), artifact.path),

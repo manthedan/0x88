@@ -1,8 +1,8 @@
-import { moveFromUci, moveToActionId, moveToUci, type Move } from './moveCodec.ts';
-import { POLICY_INDEX, POLICY_MOVES, moveToPolicyIndex } from './policyMap.ts';
+import { type Move, moveFromUci, moveToActionId, moveToUci } from './moveCodec.ts';
+import { moveToPolicyIndex, POLICY_INDEX, POLICY_MOVES } from './policyMap.ts';
 
-export { ACTION_SPACE, moveFromUci, moveToActionId, moveToUci, type Move } from './moveCodec.ts';
-export { POLICY_INDEX, POLICY_MAP, POLICY_MOVES, POLICY_SIZE, moveToPolicyIndex, policyIndexToMove } from './policyMap.ts';
+export { ACTION_SPACE, type Move, moveFromUci, moveToActionId, moveToUci } from './moveCodec.ts';
+export { moveToPolicyIndex, POLICY_INDEX, POLICY_MAP, POLICY_MOVES, POLICY_SIZE, policyIndexToMove } from './policyMap.ts';
 
 const CHESSBENCH_PROMO: Record<NonNullable<Move['promotion']>, number> = { n: 0, b: 1, r: 2, q: 3 };
 

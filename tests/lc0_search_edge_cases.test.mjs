@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
-import { inCheck, legalMoves } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
+import { inCheck, legalMoves } from '../src/chess/movegen.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PuctSearcher } from '../src/lc0/search.ts';
 
@@ -36,7 +36,10 @@ test('edge-case fixtures have the expected terminal/legal structure', () => {
       assert.ok(legalUciSet(fx.fen).has(uci), `${fx.id}: ${uci} is legal`);
     }
     if (fx.kind === 'promotion') {
-      assert.ok([...legalUciSet(fx.fen)].some((uci) => uci.length === 5), `${fx.id} has a promotion move`);
+      assert.ok(
+        [...legalUciSet(fx.fen)].some((uci) => uci.length === 5),
+        `${fx.id} has a promotion move`,
+      );
     }
   }
 });
@@ -59,7 +62,10 @@ test('LC0 search handles edge-case positions', { skip: !existsSync(MODEL) && 'mi
 
     assert.ok(result.move, `${fx.id}: search returns a move`);
     assert.ok(legal.has(result.move), `${fx.id}: chosen move ${result.move} is legal`);
-    assert.ok(result.pv.every((uci) => typeof uci === 'string' && uci.length >= 4), `${fx.id}: pv is well-formed`);
+    assert.ok(
+      result.pv.every((uci) => typeof uci === 'string' && uci.length >= 4),
+      `${fx.id}: pv is well-formed`,
+    );
 
     // The evaluator must produce finite, normalized priors for the special moves
     // (promotion/castling/en-passant) so the policy map covers them.

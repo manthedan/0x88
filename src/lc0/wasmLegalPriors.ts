@@ -108,7 +108,19 @@ export class Lc0WasmLegalPriors {
     }));
     const outputReadMs = nowMs() - outputReadStarted;
     const totalMs = nowMs() - totalStarted;
-    return { legalPriors, bestMove: legalPriors[0]?.uci, timing: { textEncodeMs, inputWriteMs, logitsWriteMs, wasmRunMs, outputReadMs, totalMs, bridgeCopyMs: textEncodeMs + inputWriteMs + logitsWriteMs + outputReadMs } };
+    return {
+      legalPriors,
+      bestMove: legalPriors[0]?.uci,
+      timing: {
+        textEncodeMs,
+        inputWriteMs,
+        logitsWriteMs,
+        wasmRunMs,
+        outputReadMs,
+        totalMs,
+        bridgeCopyMs: textEncodeMs + inputWriteMs + logitsWriteMs + outputReadMs,
+      },
+    };
   }
 }
 
@@ -116,11 +128,11 @@ export async function createLc0WasmLegalPriors(source: Lc0WasmLegalPriorsSource 
   if (source instanceof WebAssembly.Module) return new Lc0WasmLegalPriors(await WebAssembly.instantiate(source, {}));
   if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
     const bytes = source instanceof ArrayBuffer ? source : source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
-    const result = await WebAssembly.instantiate(bytes, {}) as WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource;
+    const result = (await WebAssembly.instantiate(bytes, {})) as WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource;
     return new Lc0WasmLegalPriors(result instanceof WebAssembly.Instance ? result : result.instance);
   }
   const response = await fetch(source);
   if (!response.ok) throw new Error(`Failed to fetch LC0 WASM legal-prior module ${source}: HTTP ${response.status}`);
-  const result = await WebAssembly.instantiate(await response.arrayBuffer(), {}) as WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource;
+  const result = (await WebAssembly.instantiate(await response.arrayBuffer(), {})) as WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource;
   return new Lc0WasmLegalPriors(result instanceof WebAssembly.Instance ? result : result.instance);
 }

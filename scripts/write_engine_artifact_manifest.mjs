@@ -1,9 +1,9 @@
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, relative } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
+import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 
 const ROOT = process.cwd();
 
@@ -37,7 +37,8 @@ const CONFIGS = {
         name: 'berserk-9b84c340af7e.nn',
         sourceUrl: 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn',
         rawSha256: '9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084',
-        licenseNote: 'Covered by Berserk GPL-3.0 under this release policy: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it is treated as part of the Corresponding Source. See docs/engine_artifact_distribution.md.',
+        licenseNote:
+          'Covered by Berserk GPL-3.0 under this release policy: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it is treated as part of the Corresponding Source. See docs/engine_artifact_distribution.md.',
         embeddedIn: 'public/berserk/berserk-emscripten.data (one canonical preload package shared by every SIMD tier)',
       },
     ],
@@ -94,7 +95,8 @@ const CONFIGS = {
       script: 'scripts/build_stormphrax_emscripten.mjs',
       command: 'npm run stormphrax:build-emscripten && npm run stormphrax:build-relaxed-simd-emscripten',
       patches: ['patches/stormphrax-emscripten.patch'],
-      toolchain: 'Emscripten 6.0.2, WebAssembly SIMD plus an explicit Relaxed SIMD candidate, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty.',
+      toolchain:
+        'Emscripten 6.0.2, WebAssembly SIMD plus an explicit Relaxed SIMD candidate, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty.',
     },
     artifacts: [
       'public/stormphrax/stormphrax-emscripten.js',
@@ -108,7 +110,8 @@ const CONFIGS = {
         name: 'undertown.nnue',
         sourceUrl: 'https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue',
         rawSha256: '04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf',
-        licenseNote: 'Stormphrax documents undertown as its self-trained 8.0.0 release network; distribute it with the GPL corresponding source and provenance manifest.',
+        licenseNote:
+          'Stormphrax documents undertown as its self-trained 8.0.0 release network; distribute it with the GPL corresponding source and provenance manifest.',
         embeddedIn: 'public/stormphrax/stormphrax-emscripten.data (one canonical preload package shared by every SIMD tier)',
       },
     ],
@@ -126,7 +129,8 @@ const CONFIGS = {
       script: 'scripts/build_reckless_release_assets.mjs',
       command: 'npm run reckless:build-release',
       patches: [],
-      toolchain: 'Rust cargo with wasm32-wasip1 target; scalar, SIMD, relaxed-SIMD, explicit non-default external-NNUE WASI prototype, and browser-API builds from the pinned Reckless source.',
+      toolchain:
+        'Rust cargo with wasm32-wasip1 target; scalar, SIMD, relaxed-SIMD, explicit non-default external-NNUE WASI prototype, and browser-API builds from the pinned Reckless source.',
     },
     artifacts: [
       'public/reckless/reckless.wasm',
@@ -147,8 +151,10 @@ const CONFIGS = {
         name: 'v60-7f587dfb.nnue',
         sourceUrl: 'https://github.com/codedeliveryservice/Reckless.git',
         rawSha256: '7f587dfb1fe5d74d53909328afa6fd51650c8c7f45907602db7fbb1e52948c61',
-        licenseNote: 'Reckless embeds and distributes this NNUE with the AGPL-3.0 engine source; preserve corresponding source archives with public WASM distribution.',
-        embeddedIn: 'public/reckless/reckless.wasm, public/reckless/reckless-simd128.wasm, public/reckless/reckless-relaxed-simd128.wasm, public/reckless/reckless-browser-api.wasm, public/reckless/reckless-browser-api-simd128.wasm, and public/reckless/reckless-v60-7f587dfb.nnue for the explicit external-NNUE WASI and browser API prototypes',
+        licenseNote:
+          'Reckless embeds and distributes this NNUE with the AGPL-3.0 engine source; preserve corresponding source archives with public WASM distribution.',
+        embeddedIn:
+          'public/reckless/reckless.wasm, public/reckless/reckless-simd128.wasm, public/reckless/reckless-relaxed-simd128.wasm, public/reckless/reckless-browser-api.wasm, public/reckless/reckless-browser-api-simd128.wasm, and public/reckless/reckless-v60-7f587dfb.nnue for the explicit external-NNUE WASI and browser API prototypes',
       },
     ],
   },
@@ -167,11 +173,7 @@ const CONFIGS = {
       patches: ['patches/viridithas-wasip1.patch'],
       toolchain: 'Rust cargo with wasm32-wasip1 target; scalar build uses +bulk-memory, SIMD build also uses +simd128, and relaxed build adds +relaxed-simd.',
     },
-    artifacts: [
-      'public/viridithas/viridithas.wasm',
-      'public/viridithas/viridithas-simd128.wasm',
-      'public/viridithas/viridithas-relaxed-simd128.wasm',
-    ],
+    artifacts: ['public/viridithas/viridithas.wasm', 'public/viridithas/viridithas-simd128.wasm', 'public/viridithas/viridithas-relaxed-simd128.wasm'],
     assets: [
       {
         name: 'atlantis-b800.nnue.zst',
@@ -194,9 +196,13 @@ const CONFIGS = {
     },
     build: {
       script: 'upstream build.js; scripts/build_stockfish_relaxed_simd.mjs for relaxed SIMD artifacts',
-      command: 'cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f; npm run stockfish:build-relaxed-simd:lite-single',
-      patches: ['scripts/build_stockfish_relaxed_simd.mjs applies the relaxed SIMD source/build edits from the corresponding source tarball; additional full/threaded relaxed variants remain buildable as unpromoted candidates'],
-      toolchain: 'Emscripten 3.1.7 as required by Stockfish.js 18 upstream README for upstream artifacts; Emscripten 3.1.40 known-good for the promoted lite-single relaxed SIMD artifact. Lite-threaded/full-threaded relaxed candidates build with 3.1.40 and full-single relaxed builds with 6.0.1/linux-arm64, with 5.0.7 and current 6.x retained in the benchmark matrix before promotion.',
+      command:
+        'cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f; npm run stockfish:build-relaxed-simd:lite-single',
+      patches: [
+        'scripts/build_stockfish_relaxed_simd.mjs applies the relaxed SIMD source/build edits from the corresponding source tarball; additional full/threaded relaxed variants remain buildable as unpromoted candidates',
+      ],
+      toolchain:
+        'Emscripten 3.1.7 as required by Stockfish.js 18 upstream README for upstream artifacts; Emscripten 3.1.40 known-good for the promoted lite-single relaxed SIMD artifact. Lite-threaded/full-threaded relaxed candidates build with 3.1.40 and full-single relaxed builds with 6.0.1/linux-arm64, with 5.0.7 and current 6.x retained in the benchmark matrix before promotion.',
     },
     artifacts: [
       'public/stockfish/stockfish-18-lite-single.js',
@@ -215,7 +221,9 @@ const CONFIGS = {
 };
 
 function usage() {
-  console.error('Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|stormphrax|reckless|viridithas|stockfish> [--out path] [--allow-missing] [--brotli-quality 0-11] [--skip-compression-estimates]');
+  console.error(
+    'Usage: node scripts/write_engine_artifact_manifest.mjs <berserk|plentychess|stormphrax|reckless|viridithas|stockfish> [--out path] [--allow-missing] [--brotli-quality 0-11] [--skip-compression-estimates]',
+  );
 }
 
 function argValue(name) {
@@ -326,7 +334,9 @@ if (!config) {
           required: true,
           ...(await fileMetadata(sourceArchivePath, false, 'source archive')),
           url: sourceArchiveUrl ?? null,
-          note: sourceArchiveUrl ? 'Source archive recorded for public distribution.' : 'Source archive hash recorded; add --source-url before public distribution.',
+          note: sourceArchiveUrl
+            ? 'Source archive recorded for public distribution.'
+            : 'Source archive hash recorded; add --source-url before public distribution.',
         }
       : {
           required: true,

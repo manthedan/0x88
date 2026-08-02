@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseFen, boardToFen, START_FEN } from '../src/chess/board.ts';
-import { makeMove } from '../src/chess/movegen.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveFromUci, moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { makeMove } from '../src/chess/movegen.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
 // Knight-shuffle history: from the start position both sides bounce their
@@ -26,7 +26,7 @@ const flatEvaluator = {
   async evaluate(board, context) {
     const moves = context?.legalMoves ?? [];
     const uniform = moves.length ? 1 / moves.length : 0;
-    return { policy: new Map(moves.map((move) => [moveToActionId(move), uniform])), wdl: [0.36, 0.30, 0.34] };
+    return { policy: new Map(moves.map((move) => [moveToActionId(move), uniform])), wdl: [0.36, 0.3, 0.34] };
   },
 };
 

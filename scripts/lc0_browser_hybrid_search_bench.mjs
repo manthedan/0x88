@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
+import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs [options]\n\nRuns a bounded browser benchmark for the hybrid WGSL encoder + ORT heads evaluator, including warm eval latency and fixed-visit PUCT search latency.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fen FEN            Position to benchmark (default page start position)\n  --visits N           Fixed PUCT visits per timed search (default 32)\n  --preset NAME        Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batch N            Search leaf batch size (default 1)\n  --batch-pipeline-depth N\n                       Experimental leaf-batch pipeline depth for deferred readback/search scheduling (default 1)\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --wgsl-batch-mode MODE\n                       WGSL-head evaluateBatch mode: physical or serial (default physical)\n  --input-backend MODE Hybrid input backend: js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                       Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --encoder-kernel MODE\n                       Hybrid encoder kernels: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)\n  --eval-iters N       Timed warm eval iterations (default 3, max 100; 0 for search-only)\n  --eval-warmup N      Warm eval warmup iterations (default 1, max 20)\n  --batch-eval-iters N Timed evaluateBatch iterations at --batch size (default 0)\n  --batch-eval-warmup N\n                       evaluateBatch warmup iterations (default 0)\n  --search-iters N     Timed fixed-visit searches (default 3, max 50)\n  --search-warmup N    Search warmup iterations (default 1, max 10)\n  --reuse-tree         Reuse the worker search tree across repeated searches\n  --reset-between-searches\n                       Reset the tree before every search even when reuse is enabled\n  --no-reset-between-searches\n                       Keep the tree between repeated searches\n  --eval-cache-entries N\n                       Enable worker-side LC0 eval cache with this many entries\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
+  console.log(
+    `Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_search_bench.mjs [options]\n\nRuns a bounded browser benchmark for the hybrid WGSL encoder + ORT heads evaluator, including warm eval latency and fixed-visit PUCT search latency.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fen FEN            Position to benchmark (default page start position)\n  --visits N           Fixed PUCT visits per timed search (default 32)\n  --preset NAME        Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batch N            Search leaf batch size (default 1)\n  --batch-pipeline-depth N\n                       Experimental leaf-batch pipeline depth for deferred readback/search scheduling (default 1)\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --wgsl-batch-mode MODE\n                       WGSL-head evaluateBatch mode: physical or serial (default physical)\n  --input-backend MODE Hybrid input backend: js, wgsl, or wasm (default js)\n  --legal-priors-backend MODE\n                       Legal-prior backend: js, wasm, or gpu (default js; gpu requires WGSL heads; opt-in)\n  --encoder-kernel MODE\n                       Hybrid encoder kernels: hand, tvm-packed-f16, mixed-tvm-ffn, or mixed-tvm-ffn-outproj, mixed-tvm-ffn-smolgen-project (default hand)\n  --eval-iters N       Timed warm eval iterations (default 3, max 100; 0 for search-only)\n  --eval-warmup N      Warm eval warmup iterations (default 1, max 20)\n  --batch-eval-iters N Timed evaluateBatch iterations at --batch size (default 0)\n  --batch-eval-warmup N\n                       evaluateBatch warmup iterations (default 0)\n  --search-iters N     Timed fixed-visit searches (default 3, max 50)\n  --search-warmup N    Search warmup iterations (default 1, max 10)\n  --reuse-tree         Reuse the worker search tree across repeated searches\n  --reset-between-searches\n                       Reset the tree before every search even when reuse is enabled\n  --no-reset-between-searches\n                       Keep the tree between repeated searches\n  --eval-cache-entries N\n                       Enable worker-side LC0 eval cache with this many entries\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -51,8 +53,7 @@ function parseArgs(argv) {
     if (arg === '--base-url') {
       args.baseUrl = next();
       args.explicitBaseUrl = true;
-    }
-    else if (arg === '--port') args.port = Number(next());
+    } else if (arg === '--port') args.port = Number(next());
     else if (arg === '--host') args.host = next();
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--session') args.session = next();
@@ -93,12 +94,29 @@ function parseArgs(argv) {
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
   if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
   if (args.legalPriorsBackend === 'gpu' && args.headBackend !== 'wgsl') throw new Error('--legal-priors-backend gpu requires --head-backend wgsl');
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel))
+    throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
   for (const [name, value] of [
-    ['port', args.port], ['timeout', args.timeoutMs], ['visits', args.visits], ['batch', args.batch], ['batch-pipeline-depth', args.batchPipelineDepth], ['layers', args.layers],
-    ['eval-iters', args.evalIters], ['eval-warmup', args.evalWarmup], ['batch-eval-iters', args.batchEvalIters], ['batch-eval-warmup', args.batchEvalWarmup], ['search-iters', args.searchIters], ['search-warmup', args.searchWarmup], ['eval-cache-entries', args.evalCacheEntries],
+    ['port', args.port],
+    ['timeout', args.timeoutMs],
+    ['visits', args.visits],
+    ['batch', args.batch],
+    ['batch-pipeline-depth', args.batchPipelineDepth],
+    ['layers', args.layers],
+    ['eval-iters', args.evalIters],
+    ['eval-warmup', args.evalWarmup],
+    ['batch-eval-iters', args.batchEvalIters],
+    ['batch-eval-warmup', args.batchEvalWarmup],
+    ['search-iters', args.searchIters],
+    ['search-warmup', args.searchWarmup],
+    ['eval-cache-entries', args.evalCacheEntries],
   ]) {
-    if (!Number.isFinite(value) || value < 0 || (!['eval-iters', 'eval-warmup', 'batch-eval-iters', 'batch-eval-warmup', 'search-warmup', 'eval-cache-entries'].includes(name) && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
+    if (
+      !Number.isFinite(value) ||
+      value < 0 ||
+      (!['eval-iters', 'eval-warmup', 'batch-eval-iters', 'batch-eval-warmup', 'search-warmup', 'eval-cache-entries'].includes(name) && value <= 0)
+    )
+      throw new Error(`Invalid --${name}: ${value}`);
   }
   return args;
 }
@@ -157,7 +175,8 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
       try {
         const parsed = stdout ? JSON.parse(stdout.trim()) : null;
         if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
+          if (parsed.success === false)
+            return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);
@@ -208,10 +227,13 @@ function textFromGetResult(result) {
 
 function browserInfoFromEvalResult(result) {
   const value = result?.value ?? result?.result ?? result;
-  if (!value || typeof value !== 'object'
-    || typeof value.userAgent !== 'string'
-    || typeof value.platform !== 'string'
-    || !Number.isFinite(value.hardwareConcurrency)) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    typeof value.userAgent !== 'string' ||
+    typeof value.platform !== 'string' ||
+    !Number.isFinite(value.hardwareConcurrency)
+  ) {
     throw new Error(`agent-browser eval returned unexpected browser info: ${JSON.stringify(result)}`);
   }
   return {
@@ -222,11 +244,18 @@ function browserInfoFromEvalResult(result) {
 }
 
 async function readBrowserInfo(args) {
-  const result = await runAgent(args, ['eval', `(() => ({
+  const result = await runAgent(
+    args,
+    [
+      'eval',
+      `(() => ({
     userAgent: navigator.userAgent,
     platform: navigator.platform,
     hardwareConcurrency: navigator.hardwareConcurrency,
-  }))()`], 30_000);
+  }))()`,
+    ],
+    30_000,
+  );
   return browserInfoFromEvalResult(result);
 }
 
@@ -246,8 +275,10 @@ async function runBrowserBenchmark(args) {
         if (result.status !== 'HYBRID_SEARCH_BENCH_DONE') throw new Error(`unexpected benchmark status: ${result.status}`);
         const expectedBackend = args.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
         if (result.backend !== expectedBackend) throw new Error(`unexpected hybrid backend: ${result.backend}`);
-        if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel variant: ${result.encoderKernelVariant ?? 'hand'}`);
-        if ((result.legalPriorsBackend ?? 'js') !== args.legalPriorsBackend) throw new Error(`unexpected legal-priors backend: ${result.legalPriorsBackend ?? 'js'}`);
+        if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel)
+          throw new Error(`unexpected encoder kernel variant: ${result.encoderKernelVariant ?? 'hand'}`);
+        if ((result.legalPriorsBackend ?? 'js') !== args.legalPriorsBackend)
+          throw new Error(`unexpected legal-priors backend: ${result.legalPriorsBackend ?? 'js'}`);
         const browserInfo = await readBrowserInfo(args);
         return { ...result, browserInfo, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
       } catch (error) {

@@ -3,10 +3,27 @@ import { test } from 'node:test';
 import { hBarChartSvg, lineChartSvg } from '../src/lc0/charts.ts';
 
 test('lineChartSvg renders polylines per series and y tick labels', () => {
-  const svg = lineChartSvg([
-    { label: 'a', color: '#123456', points: [{ x: 1, y: 0.2 }, { x: 2, y: 0.8 }] },
-    { label: 'b', color: '#654321', points: [{ x: 1, y: 0.6 }, { x: 2, y: 0.4 }] },
-  ], { yMin: 0, yMax: 1, formatY: (v) => `${Math.round(v * 100)}%` });
+  const svg = lineChartSvg(
+    [
+      {
+        label: 'a',
+        color: '#123456',
+        points: [
+          { x: 1, y: 0.2 },
+          { x: 2, y: 0.8 },
+        ],
+      },
+      {
+        label: 'b',
+        color: '#654321',
+        points: [
+          { x: 1, y: 0.6 },
+          { x: 2, y: 0.4 },
+        ],
+      },
+    ],
+    { yMin: 0, yMax: 1, formatY: (v) => `${Math.round(v * 100)}%` },
+  );
   assert.ok(svg.startsWith('<svg'));
   assert.equal((svg.match(/<polyline/g) ?? []).length, 2);
   assert.ok(svg.includes('#123456') && svg.includes('#654321'));
@@ -19,12 +36,33 @@ test('lineChartSvg handles empty, single-point, and flat series', () => {
   const single = lineChartSvg([{ label: 'x', color: '#000', points: [{ x: 1, y: 5 }] }]);
   assert.ok(single.includes('<circle'));
   // Flat series must not divide by zero on the y range.
-  const flat = lineChartSvg([{ label: 'x', color: '#000', points: [{ x: 1, y: 3 }, { x: 2, y: 3 }] }]);
+  const flat = lineChartSvg([
+    {
+      label: 'x',
+      color: '#000',
+      points: [
+        { x: 1, y: 3 },
+        { x: 2, y: 3 },
+      ],
+    },
+  ]);
   assert.ok(flat.includes('<polyline') && !flat.includes('NaN'));
 });
 
 test('lineChartSvg clamps values outside the fixed y range', () => {
-  const svg = lineChartSvg([{ label: 'x', color: '#000', points: [{ x: 0, y: 99 }, { x: 1, y: -99 }] }], { yMin: 0, yMax: 1 });
+  const svg = lineChartSvg(
+    [
+      {
+        label: 'x',
+        color: '#000',
+        points: [
+          { x: 0, y: 99 },
+          { x: 1, y: -99 },
+        ],
+      },
+    ],
+    { yMin: 0, yMax: 1 },
+  );
   assert.ok(!svg.includes('NaN'));
 });
 

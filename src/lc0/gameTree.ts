@@ -1,6 +1,6 @@
-import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
+import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
-import { moveToUci, type Move } from '../chess/moveCodec.ts';
 import { moveToSan } from '../chess/san.ts';
 
 /**

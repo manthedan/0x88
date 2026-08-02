@@ -1,13 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseFen, squareIndex, START_FEN } from '../src/chess/board.ts';
+import { parseFen, START_FEN, squareIndex } from '../src/chess/board.ts';
+import { encodeLc0Classical112, LC0_AUX_PLANE_BASE, LC0_CLASSICAL_112_PLANES, LC0_PLANES_PER_HISTORY } from '../src/lc0/encoder112.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
-import {
-  LC0_AUX_PLANE_BASE,
-  LC0_CLASSICAL_112_PLANES,
-  LC0_PLANES_PER_HISTORY,
-  encodeLc0Classical112,
-} from '../src/lc0/encoder112.ts';
 
 const ALL = (1n << 64n) - 1n;
 const bit = (name) => 1n << BigInt(squareIndex(name));

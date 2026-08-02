@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -11,10 +11,7 @@ const PTHREAD_BOOTSTRAP_SOURCE = 'new Worker(new URL(import.meta.url), {type:"mo
 async function fixture(files) {
   const root = await mkdtemp(join(tmpdir(), 'ort-runtime-assets-'));
   await mkdir(join(root, 'ort'));
-  await Promise.all(files.map((name) => writeFile(
-    join(root, 'ort', name),
-    ORT_PTHREAD_BOOTSTRAP_FILES.includes(name) ? PTHREAD_BOOTSTRAP_SOURCE : name,
-  )));
+  await Promise.all(files.map((name) => writeFile(join(root, 'ort', name), ORT_PTHREAD_BOOTSTRAP_FILES.includes(name) ? PTHREAD_BOOTSTRAP_SOURCE : name)));
   return root;
 }
 
@@ -25,10 +22,7 @@ test('ORT runtime allowlist stages the WebGPU asyncify pair and the CPU-only was
     'ort-wasm-simd-threaded.mjs',
     'ort-wasm-simd-threaded.wasm',
   ]);
-  assert.deepEqual(ORT_PTHREAD_BOOTSTRAP_FILES, [
-    'ort-wasm-simd-threaded.asyncify.mjs',
-    'ort-wasm-simd-threaded.mjs',
-  ]);
+  assert.deepEqual(ORT_PTHREAD_BOOTSTRAP_FILES, ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.mjs']);
 });
 
 test('ORT runtime asset check accepts required files and compressed sidecars', async () => {

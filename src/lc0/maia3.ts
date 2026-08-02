@@ -1,8 +1,8 @@
-import { boardToFen, parseFen, type BoardState, type Piece, type PieceRole } from '../chess/board.ts';
-import { legalMoves } from '../chess/movegen.ts';
+import { type BoardState, boardToFen, type Piece, type PieceRole, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
-import { loadLc0ModelForOrt, type Lc0ModelLoadResult } from './modelCache.ts';
+import { legalMoves } from '../chess/movegen.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 
 /**
  * Default browser model: the locally derived weight-only int8 QDQ variant
@@ -189,12 +189,14 @@ function legalPolicyFromLogits(board: BoardState, logits: Float32Array, temperat
   if (!legal.length) return [];
   const scaledLogits = legal.map((entry) => Number(logits[entry.index] ?? -Infinity) / temperature);
   const probabilities = softmax(scaledLogits);
-  return legal.map((entry, i) => ({
-    uci: entry.uci,
-    prior: probabilities[i],
-    logit: Number(logits[entry.index] ?? -Infinity),
-    index: entry.index,
-  })).sort((a, b) => b.prior - a.prior);
+  return legal
+    .map((entry, i) => ({
+      uci: entry.uci,
+      prior: probabilities[i],
+      logit: Number(logits[entry.index] ?? -Infinity),
+      index: entry.index,
+    }))
+    .sort((a, b) => b.prior - a.prior);
 }
 
 function topPPool(policy: Maia3MovePolicyEntry[], topP: number): Maia3MovePolicyEntry[] {
@@ -244,7 +246,13 @@ export class Maia3BrowserEvaluator {
   /** Resolved ORT backend, e.g. 'auto->webgpu' or 'wasm' (from the worker). */
   readonly backend: string;
 
-  private constructor(worker: Worker, modelLoad: Lc0ModelLoadResult, selfElo: number, oppoElo: number, names: { inputNames: string[]; outputNames: string[]; backend: string }) {
+  private constructor(
+    worker: Worker,
+    modelLoad: Lc0ModelLoadResult,
+    selfElo: number,
+    oppoElo: number,
+    names: { inputNames: string[]; outputNames: string[]; backend: string },
+  ) {
     this.worker = worker;
     this.modelLoad = modelLoad;
     this.selfElo = selfElo;
@@ -258,12 +266,13 @@ export class Maia3BrowserEvaluator {
   static async create(options: Maia3BrowserEvaluatorOptions = {}): Promise<Maia3BrowserEvaluator> {
     const selfElo = clampElo(options.selfElo ?? MAIA3_DEFAULT_ELO);
     const oppoElo = clampElo(options.oppoElo ?? selfElo);
-    const load = (url: string) => loadLc0ModelForOrt(url, {
-      cache: true,
-      manifestUrl: MAIA3_MODEL_MANIFEST_URL,
-      cacheName: 'maia3-browser-models-v1',
-      onProgress: options.onProgress,
-    });
+    const load = (url: string) =>
+      loadLc0ModelForOrt(url, {
+        cache: true,
+        manifestUrl: MAIA3_MODEL_MANIFEST_URL,
+        cacheName: 'maia3-browser-models-v1',
+        onProgress: options.onProgress,
+      });
     let modelLoad: Lc0ModelLoadResult;
     if (options.modelUrl) {
       modelLoad = await load(options.modelUrl);
@@ -285,7 +294,11 @@ export class Maia3BrowserEvaluator {
     }
   }
 
-  private static postInit(worker: Worker, model: string | ArrayBuffer, ep?: Maia3BrowserEvaluatorOptions['ep']): Promise<{ inputNames: string[]; outputNames: string[]; backend: string }> {
+  private static postInit(
+    worker: Worker,
+    model: string | ArrayBuffer,
+    ep?: Maia3BrowserEvaluatorOptions['ep'],
+  ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string }> {
     return new Promise((resolve, reject) => {
       const id = 0;
       const cleanup = () => {
@@ -366,7 +379,11 @@ export class Maia3BrowserEvaluator {
    * single batched run — the rating-inference grid workload. Each condition
    * gets the full legal-policy + value treatment of evaluate().
    */
-  async evaluateConditions(input: Maia3EvaluateInput, conditions: Array<{ selfElo: number; oppoElo: number }>, options: { temperature?: number } = {}): Promise<Maia3Evaluation[]> {
+  async evaluateConditions(
+    input: Maia3EvaluateInput,
+    conditions: Array<{ selfElo: number; oppoElo: number }>,
+    options: { temperature?: number } = {},
+  ): Promise<Maia3Evaluation[]> {
     if (!conditions.length) return [];
     const board = boardFromInput(input);
     const fen = boardToFen(board);

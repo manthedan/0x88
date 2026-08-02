@@ -16,30 +16,38 @@ if (fenOrFixture.endsWith('.json')) {
   for (const fixture of fixtures) {
     input = fixture.moves ? { positions: buildBoardHistoryFromMoves(fixture.moves, fixture.startFen) } : fixture.fen;
     const result = await searcher.search(input, { visits, batchSize, multiPv });
-    console.log(JSON.stringify({
-      id: fixture.id,
-      fen: result.fen,
-      ...(fixture.moves ? { startFen: fixture.startFen, moves: fixture.moves } : {}),
-      visits: result.visits,
-      bestMove: result.move,
-      value: result.value,
-      pv: result.pv,
-      multiPv: result.multiPv,
-      topChildren: result.children.slice(0, 10),
-      stats: result.search.stats,
-    }));
+    console.log(
+      JSON.stringify({
+        id: fixture.id,
+        fen: result.fen,
+        ...(fixture.moves ? { startFen: fixture.startFen, moves: fixture.moves } : {}),
+        visits: result.visits,
+        bestMove: result.move,
+        value: result.value,
+        pv: result.pv,
+        multiPv: result.multiPv,
+        topChildren: result.children.slice(0, 10),
+        stats: result.search.stats,
+      }),
+    );
   }
 } else {
   input = fenOrFixture === 'startpos' ? undefined : fenOrFixture;
   const result = await searcher.search(input ?? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', { visits, batchSize, multiPv });
-  console.log(JSON.stringify({
-    fen: result.fen,
-    visits: result.visits,
-    bestMove: result.move,
-    value: result.value,
-    pv: result.pv,
-    multiPv: result.multiPv,
-    topChildren: result.children.slice(0, 10),
-    stats: result.search.stats,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        fen: result.fen,
+        visits: result.visits,
+        bestMove: result.move,
+        value: result.value,
+        pv: result.pv,
+        multiPv: result.multiPv,
+        topChildren: result.children.slice(0, 10),
+        stats: result.search.stats,
+      },
+      null,
+      2,
+    ),
+  );
 }

@@ -55,11 +55,7 @@ if (process.env.MONTY_SKIP_GIT !== '1') {
 
 applyPatchOnce();
 run('rustup', ['target', 'add', 'wasm32-wasip1']);
-const targetFeatures = [
-  '+bulk-memory',
-  '+simd128',
-  ...(process.env.MONTY_WASM_RELAXED_SIMD === '1' ? ['+relaxed-simd'] : []),
-].join(',');
+const targetFeatures = ['+bulk-memory', '+simd128', ...(process.env.MONTY_WASM_RELAXED_SIMD === '1' ? ['+relaxed-simd'] : [])].join(',');
 run('cargo', ['build', '--release', '--target', 'wasm32-wasip1'], {
   cwd: engineDir,
   env: { ...process.env, RUSTFLAGS: `${process.env.RUSTFLAGS ?? ''} -C target-feature=${targetFeatures}`.trim() },

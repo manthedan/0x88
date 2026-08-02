@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { boardToFen, parseFen } from '../src/chess/board.ts';
-import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { CachedEvaluator } from '../src/nn/evaluator.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
@@ -21,7 +21,7 @@ function makeMockEvaluator() {
   const byUci = new Map(legalMoves(board).map((move) => [moveToUci(move), move]));
   const shortFen = boardToFen(makeMove(board, byUci.get(SHORT_UCI)));
   const longFen = boardToFen(makeMove(board, byUci.get(LONG_UCI)));
-  const movesLeftFor = (fen) => fen === shortFen ? 8 : fen === longFen ? 28 : 20;
+  const movesLeftFor = (fen) => (fen === shortFen ? 8 : fen === longFen ? 28 : 20);
   const evaluate = async (evalBoard, context) => {
     const moves = context?.legalMoves ?? legalMoves(evalBoard);
     const policy = new Map();
@@ -58,10 +58,8 @@ test('moves-left utility prefers the shorter win when enabled', async () => {
   const off = await visitSplit(0);
   const on = await visitSplit(0.0345);
   // Disabled: the two symmetric candidates split visits about evenly.
-  assert.ok(Math.abs(off.short - off.long) <= VISITS * 0.2,
-    `expected near-even split with effect off, got short=${off.short} long=${off.long}`);
+  assert.ok(Math.abs(off.short - off.long) <= VISITS * 0.2, `expected near-even split with effect off, got short=${off.short} long=${off.long}`);
   // Enabled: the shorter win dominates visits and wins the move choice.
-  assert.ok(on.short > on.long,
-    `expected shorter win to receive more visits, got short=${on.short} long=${on.long}`);
+  assert.ok(on.short > on.long, `expected shorter win to receive more visits, got short=${on.short} long=${on.long}`);
   assert.equal(on.move, SHORT_UCI);
 });

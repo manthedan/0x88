@@ -1,73 +1,92 @@
 import '../nn/ortConsoleFilter.ts';
-import { collectOrtRuntimeDiagnostics, ortRuntimeArtifactKindIsLocked, setOrtRuntimeArtifactKindForCurrentThread, setOrtRuntimeDiagnosticOptionsForCurrentThread, setRequestedOrtExecutionProviderForCurrentThread, setRequestedOrtWasmArtifactForCurrentThread, setRequestedOrtWasmThreadsForCurrentThread, type OrtExecutionProviderPreference, type OrtRuntimeDiagnosticOptions, type OrtRuntimeDiagnostics, type OrtWasmArtifactSelection } from '../nn/ortRuntime.ts';
+import {
+  collectOrtRuntimeDiagnostics,
+  type OrtExecutionProviderPreference,
+  type OrtRuntimeDiagnosticOptions,
+  type OrtRuntimeDiagnostics,
+  type OrtWasmArtifactSelection,
+  ortRuntimeArtifactKindIsLocked,
+  setOrtRuntimeArtifactKindForCurrentThread,
+  setOrtRuntimeDiagnosticOptionsForCurrentThread,
+  setRequestedOrtExecutionProviderForCurrentThread,
+  setRequestedOrtWasmArtifactForCurrentThread,
+  setRequestedOrtWasmThreadsForCurrentThread,
+} from '../nn/ortRuntime.ts';
+import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';
-import { CachedLc0Evaluator, Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import {
-  runLc0WebAttentionBlockBenchmark,
-  runLc0WebAttentionOutputBenchmark,
-  runLc0WebAttentionOutputOrtBenchmark,
-  runLc0WebAttentionScoreBenchmark,
-  runLc0WebSmolgenBenchmark,
-  runLc0WebEncoder0BlockBenchmark,
-  runLc0WebEncoder0BlockOrtBenchmark,
-  runLc0WebEncoder0FfnBenchmark,
-  runLc0WebEncoderStackBenchmark,
-  runLc0WebEncoder0FfnOrtBenchmark,
-  runLc0WebWgslHeadsProbe,
-  runLc0WebMappedPolicyProbe,
-  runLc0WebWgslHeadsVsOrtFixtures,
-  Lc0WebHybridEvaluator,
-  runLc0WebHybridEvaluation,
-  runLc0WebHybridEncoderProfile,
-  runLc0WebWgslDeferredReadbackBenchmark,
-  runLc0WebAttentionScoreOrtBenchmark,
-  runLc0WebAttentionValueBenchmark,
-  runLc0WebAttentionValueOrtBenchmark,
-  runLc0WebMatmulAddKernelBenchmark,
-  runLc0WebMatmulAddKernelProbe,
-  runLc0WebMatmulAddOrtBenchmark,
-  runLc0WebQkvProjectionBenchmark,
-  runLc0WebQkvProjectionProbe,
-  runLc0WebSoftmaxBenchmark,
+  CachedLc0Evaluator,
+  type Lc0Evaluation,
+  type Lc0EvaluationCacheFootprint,
+  type Lc0EvaluationProvider,
+  type Lc0EvaluatorInput,
+  Lc0OnnxEvaluator,
+} from './onnxEvaluator.ts';
+import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
+import {
   type Lc0WebAttentionBlockBenchmarkResult,
-  type Lc0WebAttentionQkvKernelVariant,
-  type Lc0WebAttentionOutputBenchmarkResult,
   type Lc0WebAttentionOutProjKernelVariant,
+  type Lc0WebAttentionOutputBenchmarkResult,
   type Lc0WebAttentionOutputOrtBenchmarkResult,
+  type Lc0WebAttentionQkvKernelVariant,
   type Lc0WebAttentionScoreBenchmarkResult,
   type Lc0WebAttentionScoreOrtBenchmarkResult,
-  type Lc0WebSmolgenBenchmarkResult,
-  type Lc0WebSmolgenKernelVariant,
   type Lc0WebAttentionValueBenchmarkResult,
   type Lc0WebAttentionValueOrtBenchmarkResult,
   type Lc0WebEncoder0BlockBenchmarkResult,
   type Lc0WebEncoder0BlockOrtBenchmarkResult,
   type Lc0WebEncoder0FfnBenchmarkResult,
-  type Lc0WebEncoderStackBenchmarkResult,
-  type Lc0WebEncoderKernelVariant,
-  type Lc0WebFfnKernelVariant,
   type Lc0WebEncoder0FfnOrtBenchmarkResult,
-  type Lc0WebHybridEvaluationResult,
-  type Lc0WebHybridEncoderProfileResult,
+  type Lc0WebEncoderKernelVariant,
+  type Lc0WebEncoderStackBenchmarkResult,
   type Lc0WebExecutionFootprint,
+  type Lc0WebFfnKernelVariant,
   type Lc0WebHybridEncoderProfileMode,
+  type Lc0WebHybridEncoderProfileResult,
+  type Lc0WebHybridEvaluationResult,
+  Lc0WebHybridEvaluator,
   type Lc0WebHybridLegalPriorsBackend,
-  type Lc0WebWgslDeferredReadbackBenchResult,
-  type Lc0WebWgslHeadsProbeResult,
   type Lc0WebMappedPolicyProbeResult,
-  type Lc0WebWgslHeadsVsOrtFixturesResult,
-  type Lc0WebWgslHeadsVsOrtFixtureInput,
   type Lc0WebMatmulAddKernelBenchmarkResult,
   type Lc0WebMatmulAddKernelProbeResult,
   type Lc0WebMatmulAddOrtBenchmarkResult,
   type Lc0WebQkvProjectionBenchmarkResult,
   type Lc0WebQkvProjectionProbeResult,
+  type Lc0WebSmolgenBenchmarkResult,
+  type Lc0WebSmolgenKernelVariant,
   type Lc0WebSoftmaxBenchmarkResult,
+  type Lc0WebWgslDeferredReadbackBenchResult,
+  type Lc0WebWgslHeadsProbeResult,
+  type Lc0WebWgslHeadsVsOrtFixtureInput,
+  type Lc0WebWgslHeadsVsOrtFixturesResult,
+  runLc0WebAttentionBlockBenchmark,
+  runLc0WebAttentionOutputBenchmark,
+  runLc0WebAttentionOutputOrtBenchmark,
+  runLc0WebAttentionScoreBenchmark,
+  runLc0WebAttentionScoreOrtBenchmark,
+  runLc0WebAttentionValueBenchmark,
+  runLc0WebAttentionValueOrtBenchmark,
+  runLc0WebEncoder0BlockBenchmark,
+  runLc0WebEncoder0BlockOrtBenchmark,
+  runLc0WebEncoder0FfnBenchmark,
+  runLc0WebEncoder0FfnOrtBenchmark,
+  runLc0WebEncoderStackBenchmark,
+  runLc0WebHybridEncoderProfile,
+  runLc0WebHybridEvaluation,
+  runLc0WebMappedPolicyProbe,
+  runLc0WebMatmulAddKernelBenchmark,
+  runLc0WebMatmulAddKernelProbe,
+  runLc0WebMatmulAddOrtBenchmark,
+  runLc0WebQkvProjectionBenchmark,
+  runLc0WebQkvProjectionProbe,
+  runLc0WebSmolgenBenchmark,
+  runLc0WebSoftmaxBenchmark,
+  runLc0WebWgslDeferredReadbackBenchmark,
+  runLc0WebWgslHeadsProbe,
+  runLc0WebWgslHeadsVsOrtFixtures,
 } from './wgslMatmulAddProbe.ts';
-import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
-import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 
 type InitMessage = {
   type: 'init';
@@ -423,7 +442,39 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | HybridEvaluateMessage | HybridEncoderProfileMessage | WgslDeferredReadbackBenchmarkMessage | LoadPackMessage | KernelProbeMessage | KernelBenchmarkMessage | OrtBenchmarkMessage | WgslHeadsProbeMessage | WgslHeadsVsOrtFixturesMessage | MappedPolicyProbeMessage | QkvProbeMessage | QkvBenchmarkMessage | AttentionScoreBenchmarkMessage | AttentionScoreOrtBenchmarkMessage | SmolgenBenchmarkMessage | SoftmaxBenchmarkMessage | AttentionValueBenchmarkMessage | AttentionValueOrtBenchmarkMessage | AttentionBlockBenchmarkMessage | AttentionOutputBenchmarkMessage | AttentionOutputOrtBenchmarkMessage | Encoder0FfnBenchmarkMessage | Encoder0FfnOrtBenchmarkMessage | Encoder0BlockBenchmarkMessage | EncoderStackBenchmarkMessage | Encoder0BlockOrtBenchmarkMessage | CancelMessage;
+type WorkerRequest =
+  | InitMessage
+  | SearchMessage
+  | ResetSearchMessage
+  | EvaluateMessage
+  | EvaluateBatchMessage
+  | HybridEvaluateMessage
+  | HybridEncoderProfileMessage
+  | WgslDeferredReadbackBenchmarkMessage
+  | LoadPackMessage
+  | KernelProbeMessage
+  | KernelBenchmarkMessage
+  | OrtBenchmarkMessage
+  | WgslHeadsProbeMessage
+  | WgslHeadsVsOrtFixturesMessage
+  | MappedPolicyProbeMessage
+  | QkvProbeMessage
+  | QkvBenchmarkMessage
+  | AttentionScoreBenchmarkMessage
+  | AttentionScoreOrtBenchmarkMessage
+  | SmolgenBenchmarkMessage
+  | SoftmaxBenchmarkMessage
+  | AttentionValueBenchmarkMessage
+  | AttentionValueOrtBenchmarkMessage
+  | AttentionBlockBenchmarkMessage
+  | AttentionOutputBenchmarkMessage
+  | AttentionOutputOrtBenchmarkMessage
+  | Encoder0FfnBenchmarkMessage
+  | Encoder0FfnOrtBenchmarkMessage
+  | Encoder0BlockBenchmarkMessage
+  | EncoderStackBenchmarkMessage
+  | Encoder0BlockOrtBenchmarkMessage
+  | CancelMessage;
 
 type WebGpuBufferAllocationTelemetry = {
   installed: boolean;
@@ -530,9 +581,7 @@ const patchedDevices = new WeakSet<object>();
 
 function recordWebGpuBufferAllocation(descriptor: unknown): void {
   const maybeDescriptor = descriptor as { size?: unknown; usage?: unknown } | undefined;
-  const size = typeof maybeDescriptor?.size === 'bigint'
-    ? Number(maybeDescriptor.size)
-    : Number(maybeDescriptor?.size ?? 0);
+  const size = typeof maybeDescriptor?.size === 'bigint' ? Number(maybeDescriptor.size) : Number(maybeDescriptor?.size ?? 0);
   const bytes = Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
   const usage = String(maybeDescriptor?.usage ?? 'unknown');
   webGpuBufferAllocationTelemetry.createBufferCount += 1;
@@ -686,7 +735,13 @@ async function handleInit(message: InitMessage): Promise<void> {
     ortWasmThreads: message.ortWasmThreads ?? null,
   });
   if (evaluator && configuredInitKey === initKey) {
-    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: `${configuredModelCacheStatus} · reused existing worker session`, ortWasm: configuredOrtWasm });
+    post({
+      type: 'ready',
+      id: message.id,
+      backend: configuredBackend,
+      modelCache: `${configuredModelCacheStatus} · reused existing worker session`,
+      ortWasm: configuredOrtWasm,
+    });
     return;
   }
 
@@ -704,9 +759,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       fetchTensorCache: message.wholeModelTensorCache,
       logger: (line) => console.info('[lc0 whole-model worker]', line),
     });
-    const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
-      ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })
-      : baseEvaluator;
+    const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
     const previousEvaluator = evaluator;
     evaluator = nextEvaluator;
     searcher = new Lc0PuctSearcher(nextEvaluator);
@@ -731,9 +784,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       legalPriorsBackend: message.legalPriorsBackend,
       encoderKernelVariant: message.encoderKernelVariant,
     });
-    const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
-      ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })
-      : baseEvaluator;
+    const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
     const previousEvaluator = evaluator;
     evaluator = nextEvaluator;
     searcher = new Lc0PuctSearcher(nextEvaluator);
@@ -762,9 +813,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       : undefined,
   });
   const baseEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
-  const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0
-    ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries })
-    : baseEvaluator;
+  const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
   const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
   const diagnostics = await collectOrtRuntimeDiagnostics();
   const previousEvaluator = evaluator;
@@ -810,9 +859,7 @@ async function handleLoadPack(message: LoadPackMessage): Promise<void> {
     loadedShardFiles.add(tensor.info.shard);
   }
   const totalShardBytes = pack.manifest.weights.shards.reduce((sum, shard) => sum + shard.bytes, 0);
-  const loadedShardBytes = pack.manifest.weights.shards
-    .filter((shard) => loadedShardFiles.has(shard.file))
-    .reduce((sum, shard) => sum + shard.bytes, 0);
+  const loadedShardBytes = pack.manifest.weights.shards.filter((shard) => loadedShardFiles.has(shard.file)).reduce((sum, shard) => sum + shard.bytes, 0);
   const packFootprint: PackFootprint = {
     declaredTensorBytes: pack.manifest.weights.totalTensorBytes,
     loadedTensorBytes,
@@ -1065,21 +1112,19 @@ async function assertStrictWebGpuOrt(message: string, options: { probeAdapter?: 
   const adapterOk = diagnostics.adapter?.ok !== false;
   const sessionAttempts = diagnostics.sessionAttempts.slice(options.minSessionAttemptIndex ?? 0);
   const latestSuccessfulSession = [...sessionAttempts].reverse().find((attempt) => attempt.ok);
-  const actualProviders = options.requireSession
-    ? latestSuccessfulSession?.providers ?? []
-    : diagnostics.resolvedExecutionProviders;
+  const actualProviders = options.requireSession ? (latestSuccessfulSession?.providers ?? []) : diagnostics.resolvedExecutionProviders;
   const providerOk = actualProviders.includes('webgpu');
   if (!diagnostics.webgpuAvailable || !adapterOk || !providerOk || (options.requireSession && !latestSuccessfulSession)) {
-    throw new Error(`${message}: strict ORT WebGPU required but actual providers were ${actualProviders.join(',') || 'none'} (webgpuAvailable=${diagnostics.webgpuAvailable}, adapterOk=${adapterOk}, sessionsSince=${sessionAttempts.length}, sessionsTotal=${diagnostics.sessionAttempts.length})`);
+    throw new Error(
+      `${message}: strict ORT WebGPU required but actual providers were ${actualProviders.join(',') || 'none'} (webgpuAvailable=${diagnostics.webgpuAvailable}, adapterOk=${adapterOk}, sessionsSince=${sessionAttempts.length}, sessionsTotal=${diagnostics.sessionAttempts.length})`,
+    );
   }
   return diagnostics;
 }
 
 async function handleWgslHeadsVsOrtFixtures(message: WgslHeadsVsOrtFixturesMessage): Promise<void> {
   applyOrtExecutionProvider(message.ep);
-  const strictPreflight = message.strictWebGpu
-    ? await assertStrictWebGpuOrt('WGSL heads vs ORT fixtures preflight', { probeAdapter: true })
-    : undefined;
+  const strictPreflight = message.strictWebGpu ? await assertStrictWebGpuOrt('WGSL heads vs ORT fixtures preflight', { probeAdapter: true }) : undefined;
   const result = await runLc0WebWgslHeadsVsOrtFixtures({
     packUrl: message.packUrl,
     fixtures: message.fixtures,
@@ -1088,7 +1133,11 @@ async function handleWgslHeadsVsOrtFixtures(message: WgslHeadsVsOrtFixturesMessa
     mappedPolicyTolerance: message.mappedPolicyTolerance,
     wdlTolerance: message.wdlTolerance,
   });
-  if (message.strictWebGpu) await assertStrictWebGpuOrt('WGSL heads vs ORT fixtures postrun', { requireSession: true, minSessionAttemptIndex: strictPreflight?.sessionAttempts.length ?? 0 });
+  if (message.strictWebGpu)
+    await assertStrictWebGpuOrt('WGSL heads vs ORT fixtures postrun', {
+      requireSession: true,
+      minSessionAttemptIndex: strictPreflight?.sessionAttempts.length ?? 0,
+    });
   post({ type: 'wgslHeadsVsOrtFixturesResult', id: message.id, result });
 }
 
@@ -1154,9 +1203,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       contemptElo: message.contemptElo,
       searchContemptLimit: message.searchContemptLimit,
       progressEveryMs: message.progressEveryMs,
-      onProgress: message.reportProgress
-        ? (progress) => post({ type: 'searchProgress', id: message.id, progress })
-        : undefined,
+      onProgress: message.reportProgress ? (progress) => post({ type: 'searchProgress', id: message.id, progress }) : undefined,
       signal: controller.signal,
       yieldEveryMs: 16,
     };

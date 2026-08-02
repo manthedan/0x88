@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { ENGINE_RESOURCE_PROFILES, engineResourceProfile } from '../src/lc0/engineCatalog.ts';
 import {
-  EngineResourceBroker,
   allocateSharedThreads,
   cpuThreadBudget,
+  EngineResourceBroker,
   loadCalibratedThreads,
   loadPerformanceDial,
   saveCalibratedThreads,
   savePerformanceDial,
 } from '../src/lc0/resourceBroker.ts';
-import { ENGINE_RESOURCE_PROFILES, engineResourceProfile } from '../src/lc0/engineCatalog.ts';
 
 const isolated = (hardwareConcurrency, calibratedThreads) => ({
   hardwareConcurrency,

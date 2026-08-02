@@ -1,8 +1,5 @@
-import {
-  SquareformerTvmLayerNormFfnWebgpuBlock,
-  type SquareformerTvmLayerNormFfnWeights,
-} from './squareformerTvmLayerNormFfnWebgpu.ts';
 import type { SquareformerGpuBuffer, SquareformerTvmFfnKernels, SquareformerTvmFfnShape } from './squareformerTvmFfnWebgpu.ts';
+import { SquareformerTvmLayerNormFfnWebgpuBlock, type SquareformerTvmLayerNormFfnWeights } from './squareformerTvmLayerNormFfnWebgpu.ts';
 
 type GPUBuffer = SquareformerGpuBuffer;
 type GPUDevice = {
@@ -91,13 +88,23 @@ export class SquareformerTvmAttnOutLnFfnWebgpuBlock {
     this.podArgs = buffers.podArgs;
   }
 
-  static async create(device: GPUDevice, kernels: SquareformerTvmAttnOutLnFfnKernels, weights: SquareformerTvmAttnOutLnFfnWeights, shape: SquareformerTvmFfnShape, epsilon = 1e-5): Promise<SquareformerTvmAttnOutLnFfnWebgpuBlock> {
+  static async create(
+    device: GPUDevice,
+    kernels: SquareformerTvmAttnOutLnFfnKernels,
+    weights: SquareformerTvmAttnOutLnFfnWeights,
+    shape: SquareformerTvmFfnShape,
+    epsilon = 1e-5,
+  ): Promise<SquareformerTvmAttnOutLnFfnWebgpuBlock> {
     const { rows, dModel } = shape;
     assertLength('attnOutWeight', weights.attnOutWeight.length, dModel * dModel);
     assertLength('attnOutBias', weights.attnOutBias.length, dModel);
     const attnOutModule = device.createShaderModule({ label: 'squareformer-tvm-attn-out-residual', code: kernels.attnOutResidual });
     const [attnOutPipeline, lnFfn] = await Promise.all([
-      device.createComputePipelineAsync({ label: 'squareformer-tvm-attn-out-residual', layout: 'auto', compute: { module: attnOutModule, entryPoint: 'matmul_kernel' } }),
+      device.createComputePipelineAsync({
+        label: 'squareformer-tvm-attn-out-residual',
+        layout: 'auto',
+        compute: { module: attnOutModule, entryPoint: 'matmul_kernel' },
+      }),
       SquareformerTvmLayerNormFfnWebgpuBlock.create(device, kernels, weights, shape, epsilon),
     ]);
     const bytes = rows * dModel * 4;
@@ -129,18 +136,21 @@ export class SquareformerTvmAttnOutLnFfnWebgpuBlock {
     const { rows, dModel } = this.shape;
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-attn-out-ln-ffn' });
     pass.setPipeline(this.attnOutPipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-attn-out-bindings',
-      layout: this.attnOutPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.attnOut } },
-        { binding: 1, resource: { buffer: this.attnOutWeight } },
-        { binding: 2, resource: { buffer: attnContextBuffer } },
-        { binding: 3, resource: { buffer: this.podArgs } },
-        { binding: 4, resource: { buffer: this.attnOutBias } },
-        { binding: 5, resource: { buffer: attnResidualBuffer } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-attn-out-bindings',
+        layout: this.attnOutPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.attnOut } },
+          { binding: 1, resource: { buffer: this.attnOutWeight } },
+          { binding: 2, resource: { buffer: attnContextBuffer } },
+          { binding: 3, resource: { buffer: this.podArgs } },
+          { binding: 4, resource: { buffer: this.attnOutBias } },
+          { binding: 5, resource: { buffer: attnResidualBuffer } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(rows, 32), ceilDiv(dModel, 32), 1);
     pass.end();
     return this.lnFfn.encode(commandEncoder as never, this.attnOut as never) as never;

@@ -1,4 +1,4 @@
-import { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory } from '@bjorn3/browser_wasi_shim';
+import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from '@bjorn3/browser_wasi_shim';
 
 type SearchLineJson = {
   multipv: number;
@@ -40,7 +40,18 @@ type ApiExports = WebAssembly.Exports & {
 type ApiMessage =
   | { type: 'prewarm'; id: number; wasmUrl: string; nnueUrl?: string; nnueExpectedBytes?: number; hashMb?: number }
   | { type: 'new-game'; id: number; wasmUrl: string; nnueUrl?: string; nnueExpectedBytes?: number; hashMb?: number }
-  | { type: 'search'; id: number; wasmUrl: string; nnueUrl?: string; nnueExpectedBytes?: number; hashMb?: number; fen: string; depth?: number; movetimeMs?: number; multipv?: number }
+  | {
+      type: 'search';
+      id: number;
+      wasmUrl: string;
+      nnueUrl?: string;
+      nnueExpectedBytes?: number;
+      hashMb?: number;
+      fen: string;
+      depth?: number;
+      movetimeMs?: number;
+      multipv?: number;
+    }
   | { type: 'dispose' };
 
 type ApiState = {
@@ -293,12 +304,9 @@ async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undef
   const modulePromise = compileModule(wasmUrl, id);
   const nnuePromise = nnueUrl ? fetchNnue(nnueUrl, id, nnueExpectedBytes) : undefined;
   const module = await modulePromise;
-  const wasiInstance = new WASI(
-    ['reckless-browser-api'],
-    [],
-    [new OpenFile(new File([])), nullStdout(), nullStdout(), new PreopenDirectory('.', new Map())],
-    { debug: false },
-  );
+  const wasiInstance = new WASI(['reckless-browser-api'], [], [new OpenFile(new File([])), nullStdout(), nullStdout(), new PreopenDirectory('.', new Map())], {
+    debug: false,
+  });
   postStatus(id, 'wasm-instantiate', { url: wasmUrl });
   const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1: wasiInstance.wasiImport });
   wasiInstance.initialize(instance as WebAssembly.Instance & { exports: { memory: WebAssembly.Memory; _initialize?: () => unknown } });
@@ -306,11 +314,11 @@ async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undef
   const exports = instance.exports;
   const handle = nnueUrl
     ? await (async () => {
-      if (!exports.reckless_api_new_with_network) throw new Error('Reckless browser API external-NNUE export missing: reckless_api_new_with_network');
-      const bytes = new Uint8Array(await nnuePromise!);
-      postStatus(id, 'nnue-copy', { url: nnueUrl, loadedBytes: bytes.byteLength, totalBytes: bytes.byteLength });
-      return withBytes(exports, bytes, (ptr, len) => exports.reckless_api_new_with_network!(hashMb, ptr, len));
-    })()
+        if (!exports.reckless_api_new_with_network) throw new Error('Reckless browser API external-NNUE export missing: reckless_api_new_with_network');
+        const bytes = new Uint8Array(await nnuePromise!);
+        postStatus(id, 'nnue-copy', { url: nnueUrl, loadedBytes: bytes.byteLength, totalBytes: bytes.byteLength });
+        return withBytes(exports, bytes, (ptr, len) => exports.reckless_api_new_with_network!(hashMb, ptr, len));
+      })()
     : exports.reckless_api_new(hashMb);
   if (!handle) throw new Error(globalErrorString(exports) || 'Reckless browser API returned a null engine handle');
   state = { wasmUrl, nnueUrl, nnueExpectedBytes, exports, handle, hashMb };
@@ -392,7 +400,7 @@ async function handleMessage(message: ApiMessage): Promise<void> {
   postOk(message.id, { result: readResult(api.exports, api.handle) });
 }
 
-onmessage = (event: MessageEvent<ApiMessage>) => {
+self.onmessage = (event: MessageEvent<ApiMessage>) => {
   void handleMessage(event.data).catch((error) => {
     const id = 'id' in event.data ? event.data.id : 0;
     postError(id, error);

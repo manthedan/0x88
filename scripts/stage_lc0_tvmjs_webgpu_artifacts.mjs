@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 
 function arg(name, fallback) {
@@ -9,9 +9,15 @@ function arg(name, fallback) {
   const found = process.argv.find((item) => item.startsWith(prefix));
   return found ? found.slice(prefix.length) : fallback;
 }
-function flag(name) { return process.argv.includes(`--${name}`); }
-function sha256(path) { return createHash('sha256').update(readFileSync(path)).digest('hex'); }
-function requireFile(path) { if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`Required file not found: ${path}`); }
+function flag(name) {
+  return process.argv.includes(`--${name}`);
+}
+function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+function requireFile(path) {
+  if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`Required file not found: ${path}`);
+}
 function copyTracked(src, dst, root) {
   requireFile(src);
   mkdirSync(resolve(dst, '..'), { recursive: true });
@@ -59,7 +65,9 @@ function copyTensorCache(cacheDir, outDir, root) {
 }
 
 function parseBatches(raw) {
-  const tokens = String(raw).split(',').map((item) => item.trim());
+  const tokens = String(raw)
+    .split(',')
+    .map((item) => item.trim());
   if (!tokens.length) throw new Error(`Invalid --batches: ${raw}`);
   const batches = [];
   for (const token of tokens) {
@@ -80,7 +88,11 @@ function commandOutput(command, args, options = {}) {
   return String(result.stdout ?? '').trim() || undefined;
 }
 function contains(path, needle) {
-  try { return readFileSync(path, 'utf8').includes(needle); } catch { return false; }
+  try {
+    return readFileSync(path, 'utf8').includes(needle);
+  } catch {
+    return false;
+  }
 }
 function publicPathLabel(value, fallback) {
   return basename(String(value || fallback));
@@ -167,30 +179,38 @@ const manifest = {
     note: 'TVMJS/WebGPU whole-model export bundle. Runtime/parity/perf still require browser validation.',
   },
   parameterStrategy: {
-    current: paramsMode === 'detached'
-      ? 'detached-tensor-cache'
-      : paramsMode === 'detached-quant-int8'
-      ? 'detached-quant-int8'
-      : tensorCache ? 'embedded-wasm-plus-staged-tensor-cache' : 'embedded-in-per-batch-wasm',
-    note: paramsMode === 'detached'
-      ? 'Model wasm artifacts were built with --detach-params; weights live only in the tensor-cache sidecar and the browser must fetchTensorCache before invoking.'
-      : paramsMode === 'detached-quant-int8'
-      ? 'Detached params stored as int8-ch0 (+ raw f16 for small tensors) by lc0_quantize_tensor_cache.py; the browser fetches the sidecar, dequantizes to f16, and uploads before invoking. GPU compute is unchanged f16.'
-      : tensorCache
-      ? 'A TVM tensor-cache sidecar is staged for research comparison. Model wasm artifacts may still contain embedded params until the export flow detaches params before build.'
-      : 'Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.',
+    current:
+      paramsMode === 'detached'
+        ? 'detached-tensor-cache'
+        : paramsMode === 'detached-quant-int8'
+          ? 'detached-quant-int8'
+          : tensorCache
+            ? 'embedded-wasm-plus-staged-tensor-cache'
+            : 'embedded-in-per-batch-wasm',
+    note:
+      paramsMode === 'detached'
+        ? 'Model wasm artifacts were built with --detach-params; weights live only in the tensor-cache sidecar and the browser must fetchTensorCache before invoking.'
+        : paramsMode === 'detached-quant-int8'
+          ? 'Detached params stored as int8-ch0 (+ raw f16 for small tensors) by lc0_quantize_tensor_cache.py; the browser fetches the sidecar, dequantizes to f16, and uploads before invoking. GPU compute is unchanged f16.'
+          : tensorCache
+            ? 'A TVM tensor-cache sidecar is staged for research comparison. Model wasm artifacts may still contain embedded params until the export flow detaches params before build.'
+            : 'Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.',
     tensorCacheApis: {
       pythonDumpTensorCache: 'tvm.contrib.tvmjs.dump_tensor_cache',
       browserFetchTensorCache: 'tvm.fetchTensorCache',
     },
   },
-  ...(tensorCache ? { tensorCache: {
-    manifest: tensorCache.manifest,
-    directory: tensorCache.directory,
-    shardCount: tensorCache.shardCount,
-    totalBytes: tensorCache.totalBytes,
-    files: tensorCache.files.map((file) => file.path),
-  } } : {}),
+  ...(tensorCache
+    ? {
+        tensorCache: {
+          manifest: tensorCache.manifest,
+          directory: tensorCache.directory,
+          shardCount: tensorCache.shardCount,
+          totalBytes: tensorCache.totalBytes,
+          files: tensorCache.files.map((file) => file.path),
+        },
+      }
+    : {}),
   compilerProvenance: tvmProvenance(tvmSrc, requiredFeatures),
   models,
   files,

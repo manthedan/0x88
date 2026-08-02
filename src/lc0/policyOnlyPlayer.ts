@@ -1,4 +1,4 @@
-import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluatorInput, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
+import { type Lc0Evaluation, type Lc0EvaluatorInput, Lc0OnnxEvaluator, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 
 export interface Lc0PolicyOnlyChoice {
   fen: string;

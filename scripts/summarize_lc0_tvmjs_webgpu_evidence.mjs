@@ -1,19 +1,32 @@
 #!/usr/bin/env node
-import { readdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 const DEFAULT_DIR = 'artifacts/tvm';
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_summary.json';
 
 function usage() {
-  console.log(`Usage: node scripts/summarize_lc0_tvmjs_webgpu_evidence.mjs [options]\n\nBuilds an aggregate TVMJS/WebGPU research-evidence summary from local smoke/report artifacts.\n\nOptions:\n  --dir PATH       Artifact directory (default ${DEFAULT_DIR})\n  --out PATH       Output summary JSON (default ${DEFAULT_OUT})\n  --no-write       Print summary only\n  --require-all-matches\n                   Fail unless every discovered search row has matching TVMJS/ORT move\n  --min-search-rows N\n                   Fail unless at least N search rows are present\n  --min-stockfish-scored-runs N\n                   Fail unless at least N Stockfish-scored runs are present\n  --min-fixed-suite-reports N\n                   Fail unless at least N fixed-suite-style reports are present\n  -h, --help       Show help\n`);
+  console.log(
+    `Usage: node scripts/summarize_lc0_tvmjs_webgpu_evidence.mjs [options]\n\nBuilds an aggregate TVMJS/WebGPU research-evidence summary from local smoke/report artifacts.\n\nOptions:\n  --dir PATH       Artifact directory (default ${DEFAULT_DIR})\n  --out PATH       Output summary JSON (default ${DEFAULT_OUT})\n  --no-write       Print summary only\n  --require-all-matches\n                   Fail unless every discovered search row has matching TVMJS/ORT move\n  --min-search-rows N\n                   Fail unless at least N search rows are present\n  --min-stockfish-scored-runs N\n                   Fail unless at least N Stockfish-scored runs are present\n  --min-fixed-suite-reports N\n                   Fail unless at least N fixed-suite-style reports are present\n  -h, --help       Show help\n`,
+  );
 }
 
 function parseArgs(argv) {
-  const args = { dir: DEFAULT_DIR, out: DEFAULT_OUT, write: true, requireAllMatches: false, minSearchRows: 0, minStockfishScoredRuns: 0, minFixedSuiteReports: 0 };
+  const args = {
+    dir: DEFAULT_DIR,
+    out: DEFAULT_OUT,
+    write: true,
+    requireAllMatches: false,
+    minSearchRows: 0,
+    minStockfishScoredRuns: 0,
+    minFixedSuiteReports: 0,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
+    const next = () => {
+      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
+      return argv[++i];
+    };
     if (arg === '--dir') args.dir = next();
     else if (arg === '--out') args.out = next();
     else if (arg === '--no-write') args.write = false;
@@ -31,7 +44,12 @@ function parseArgs(argv) {
 }
 
 async function exists(path) {
-  try { await stat(path); return true; } catch { return false; }
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function loadJson(path) {
@@ -102,7 +120,7 @@ function scoredRun(path, artifact) {
 }
 
 async function buildSummary(args) {
-  if (!await exists(args.dir)) throw new Error(`Artifact directory not found: ${args.dir}`);
+  if (!(await exists(args.dir))) throw new Error(`Artifact directory not found: ${args.dir}`);
   const inputs = await discoverSmokeArtifacts(args.dir);
   const artifacts = [];
   for (const path of inputs) artifacts.push([path, await loadJson(path)]);
@@ -157,8 +175,10 @@ function checkSummary(summary, args) {
   if (!summary.ok) failures.push(`failed smoke artifacts: ${summary.failedInputs.join(', ')}`);
   if (args.requireAllMatches && summary.moveMatches !== summary.searchRows) failures.push(`move matches ${summary.moveMatches}/${summary.searchRows}`);
   if (summary.searchRows < args.minSearchRows) failures.push(`search rows ${summary.searchRows} < ${args.minSearchRows}`);
-  if (summary.stockfishScoredRuns.length < args.minStockfishScoredRuns) failures.push(`Stockfish-scored runs ${summary.stockfishScoredRuns.length} < ${args.minStockfishScoredRuns}`);
-  if (summary.fixedSuiteStyleReports.length < args.minFixedSuiteReports) failures.push(`fixed-suite-style reports ${summary.fixedSuiteStyleReports.length} < ${args.minFixedSuiteReports}`);
+  if (summary.stockfishScoredRuns.length < args.minStockfishScoredRuns)
+    failures.push(`Stockfish-scored runs ${summary.stockfishScoredRuns.length} < ${args.minStockfishScoredRuns}`);
+  if (summary.fixedSuiteStyleReports.length < args.minFixedSuiteReports)
+    failures.push(`fixed-suite-style reports ${summary.fixedSuiteStyleReports.length} < ${args.minFixedSuiteReports}`);
   return failures;
 }
 

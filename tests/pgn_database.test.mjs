@@ -1,7 +1,14 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
-import { defaultPgnCollectionName, formatPgnCollectionSummary, normalizePgnDatabaseBackup, pgnDatabaseBackupFilename, rebuildPgnCollectionIndex, sanitizePgnCollectionName } from '../src/lc0/pgnDatabase.ts';
+import {
+  defaultPgnCollectionName,
+  formatPgnCollectionSummary,
+  normalizePgnDatabaseBackup,
+  pgnDatabaseBackupFilename,
+  rebuildPgnCollectionIndex,
+  sanitizePgnCollectionName,
+} from '../src/lc0/pgnDatabase.ts';
 
 test('PGN collection names are trimmed and bounded', () => {
   assert.equal(sanitizePgnCollectionName('  My   Games  '), 'My Games');
@@ -38,18 +45,20 @@ test('PGN database backup import normalizes collection records', () => {
   const collections = normalizePgnDatabaseBackup({
     kind: 'lc0-analysis-pgn-database-backup',
     version: 1,
-    collections: [{
-      id: 'ignored',
-      name: '  Backup   Games  ',
-      pgn: '[Result "*"]\n\n1. e4 *',
-      gameCount: '3',
-      source: 'lichess',
-      username: ' dan ',
-      color: 'white',
-      positionIndex: {
-        'start w KQkq -': [{ uci: 'e2e4', san: 'e4', count: 3, whiteWins: 1, blackWins: 1, draws: 1 }],
+    collections: [
+      {
+        id: 'ignored',
+        name: '  Backup   Games  ',
+        pgn: '[Result "*"]\n\n1. e4 *',
+        gameCount: '3',
+        source: 'lichess',
+        username: ' dan ',
+        color: 'white',
+        positionIndex: {
+          'start w KQkq -': [{ uci: 'e2e4', san: 'e4', count: 3, whiteWins: 1, blackWins: 1, draws: 1 }],
+        },
       },
-    }],
+    ],
   });
   assert.equal(collections.length, 1);
   assert.equal(collections[0].name, 'Backup Games');

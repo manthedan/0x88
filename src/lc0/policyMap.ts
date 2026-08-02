@@ -1,5 +1,5 @@
-import { moveFromUci, moveToUci, type Move } from '../chess/moveCodec.ts';
 import { squareIndex, squareName } from '../chess/board.ts';
+import { type Move, moveFromUci, moveToUci } from '../chess/moveCodec.ts';
 import { LC0_POLICY_MAP, LC0_POLICY_MOVES, LC0_POLICY_SIZE } from './generatedPolicyMap.ts';
 
 export { LC0_POLICY_MAP, LC0_POLICY_MOVES, LC0_POLICY_SIZE };
@@ -10,9 +10,7 @@ export const LC0_MIRROR_TRANSFORM = 2;
 export const LC0_TRANSPOSE_TRANSFORM = 4;
 export type Lc0BoardTransform = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-export const LC0_POLICY_INDEX = new Map<string, number>(
-  LC0_POLICY_MOVES.map((uci, i) => [uci, i]),
-);
+export const LC0_POLICY_INDEX = new Map<string, number>(LC0_POLICY_MOVES.map((uci, i) => [uci, i]));
 
 function transformSquareIndex(square: number, transform: number): number {
   if (square < 0 || square >= 64 || !Number.isInteger(square)) throw new Error(`Invalid square index: ${square}`);
@@ -39,21 +37,31 @@ function inverseTransform(transform: number): number {
 
 function standardCastlingUciToLc0Internal(uci: string): string {
   switch (uci) {
-    case 'e1g1': return 'e1h1';
-    case 'e1c1': return 'e1a1';
-    case 'e8g8': return 'e8h8';
-    case 'e8c8': return 'e8a8';
-    default: return uci;
+    case 'e1g1':
+      return 'e1h1';
+    case 'e1c1':
+      return 'e1a1';
+    case 'e8g8':
+      return 'e8h8';
+    case 'e8c8':
+      return 'e8a8';
+    default:
+      return uci;
   }
 }
 
 function lc0InternalCastlingToStandardUci(uci: string): string {
   switch (uci) {
-    case 'e1h1': return 'e1g1';
-    case 'e1a1': return 'e1c1';
-    case 'e8h8': return 'e8g8';
-    case 'e8a8': return 'e8c8';
-    default: return uci;
+    case 'e1h1':
+      return 'e1g1';
+    case 'e1a1':
+      return 'e1c1';
+    case 'e8h8':
+      return 'e8g8';
+    case 'e8a8':
+      return 'e8c8';
+    default:
+      return uci;
   }
 }
 

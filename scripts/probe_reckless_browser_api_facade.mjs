@@ -1,7 +1,7 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
 
 const source = resolve(process.env.RECKLESS_SOURCE_DIR ?? '.local_engines/reckless-wasi-src');
 const workdir = resolve(process.env.RECKLESS_API_PROBE_DIR ?? '.local_engines/reckless-browser-api-probe');
@@ -28,7 +28,9 @@ rmSync(workdir, { recursive: true, force: true });
 mkdirSync(dirname(workdir), { recursive: true });
 run('rsync', ['-a', '--exclude', '.git', '--exclude', 'target', `${source}/`, `${workdir}/`]);
 
-writeFileSync(`${workdir}/src/lib.rs`, `#![allow(unsafe_op_in_unsafe_fn)]
+writeFileSync(
+  `${workdir}/src/lib.rs`,
+  `#![allow(unsafe_op_in_unsafe_fn)]
 #![warn(clippy::large_types_passed_by_value)]
 #![warn(clippy::trivially_copy_pass_by_ref)]
 #![warn(clippy::redundant_clone)]
@@ -60,9 +62,12 @@ pub mod tb;
 #[cfg(feature = "syzygy")]
 #[allow(warnings)]
 pub mod bindings;
-`);
+`,
+);
 
-writeFileSync(`${workdir}/src/browser_api.rs`, `use std::{sync::{Arc, Once}, time::Duration};
+writeFileSync(
+  `${workdir}/src/browser_api.rs`,
+  `use std::{sync::{Arc, Once}, time::Duration};
 
 use crate::{
     board::{Board, NullBoardObserver},
@@ -216,11 +221,11 @@ fn score_fields(score: i32, board: &Board) -> (Option<i32>, Option<i32>) {
 }
 
 fn json_string(value: &str) -> String {
-    let mut out = String::from("\\\"");
+    let mut out = String::from("\\"");
     for ch in value.chars() {
         match ch {
             '\\\\' => out.push_str("\\\\\\\\"),
-            '\"' => out.push_str("\\\\\\\""),
+            '"' => out.push_str("\\\\\\""),
             '\\n' => out.push_str("\\\\n"),
             '\\r' => out.push_str("\\\\r"),
             '\\t' => out.push_str("\\\\t"),
@@ -228,31 +233,31 @@ fn json_string(value: &str) -> String {
             c => out.push(c),
         }
     }
-    out.push('\"');
+    out.push('"');
     out
 }
 
 impl SearchResult {
     pub fn to_json(&self) -> String {
         let mut out = String::new();
-        out.push_str("{\\\"bestmove\\\":");
+        out.push_str("{\\"bestmove\\":");
         match &self.bestmove {
             Some(bestmove) => out.push_str(&json_string(bestmove)),
             None => out.push_str("null"),
         }
-        out.push_str(&format!(",\\\"elapsedMs\\\":{},\\\"lines\\\":[", self.elapsed_ms));
+        out.push_str(&format!(",\\"elapsedMs\\":{},\\"lines\\":[", self.elapsed_ms));
         for (index, line) in self.lines.iter().enumerate() {
             if index > 0 { out.push(','); }
-            out.push_str(&format!("{{\\\"multipv\\\":{},\\\"depth\\\":{}", line.multipv, line.depth));
+            out.push_str(&format!("{{\\"multipv\\":{},\\"depth\\":{}", line.multipv, line.depth));
             match line.score_cp {
-                Some(score_cp) => out.push_str(&format!(",\\\"scoreCp\\\":{}", score_cp)),
-                None => out.push_str(",\\\"scoreCp\\\":null"),
+                Some(score_cp) => out.push_str(&format!(",\\"scoreCp\\":{}", score_cp)),
+                None => out.push_str(",\\"scoreCp\\":null"),
             }
             match line.mate_in {
-                Some(mate_in) => out.push_str(&format!(",\\\"mateIn\\\":{}", mate_in)),
-                None => out.push_str(",\\\"mateIn\\\":null"),
+                Some(mate_in) => out.push_str(&format!(",\\"mateIn\\":{}", mate_in)),
+                None => out.push_str(",\\"mateIn\\":null"),
             }
-            out.push_str(&format!(",\\\"nodes\\\":{},\\\"nps\\\":{},\\\"pv\\\":[", line.nodes, line.nps));
+            out.push_str(&format!(",\\"nodes\\":{},\\"nps\\":{},\\"pv\\":[", line.nodes, line.nps));
             for (pv_index, mv) in line.pv.iter().enumerate() {
                 if pv_index > 0 { out.push(','); }
                 out.push_str(&json_string(mv));
@@ -263,10 +268,13 @@ impl SearchResult {
         out
     }
 }
-`);
+`,
+);
 
 mkdirSync(`${workdir}/src/bin`, { recursive: true });
-writeFileSync(`${workdir}/src/bin/browser_api_probe.rs`, `use reckless::browser_api::BrowserEngine;
+writeFileSync(
+  `${workdir}/src/bin/browser_api_probe.rs`,
+  `use reckless::browser_api::BrowserEngine;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -277,7 +285,8 @@ fn main() {
     let result = engine.search_depth(depth);
     println!("{}", result.to_json());
 }
-`);
+`,
+);
 
 run('cargo', ['run', '--release', '--no-default-features', '--bin', 'browser_api_probe', '--', fen, String(depth)], {
   cwd: workdir,

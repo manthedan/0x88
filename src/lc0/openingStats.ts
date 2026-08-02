@@ -54,7 +54,10 @@ export function buildOpeningPositionIndex(games: ImportedGame[]): OpeningPositio
     for (const child of node.children) {
       if (child.move) {
         let byUci = byPosition.get(key);
-        if (!byUci) { byUci = new Map<string, OpeningMoveStat>(); byPosition.set(key, byUci); }
+        if (!byUci) {
+          byUci = new Map<string, OpeningMoveStat>();
+          byPosition.set(key, byUci);
+        }
         const uci = moveToUci(child.move);
         const stat = byUci.get(uci) ?? { uci, san: child.san ?? uci, count: 0, whiteWins: 0, blackWins: 0, draws: 0 };
         stat.count += 1;

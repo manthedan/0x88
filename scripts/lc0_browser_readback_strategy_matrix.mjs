@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -23,7 +23,10 @@ function intArg(value, label, min, max = Number.MAX_SAFE_INTEGER) {
 }
 
 function parseList(raw) {
-  return String(raw).split(',').map((s) => s.trim()).filter(Boolean);
+  return String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function parseArgs(argv) {
@@ -58,8 +61,10 @@ function parseArgs(argv) {
       return argv[++i];
     };
     if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') { args.baseUrl = next(); args.explicitBaseUrl = true; }
-    else if (arg === '--host') args.host = next();
+    else if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.explicitBaseUrl = true;
+    } else if (arg === '--host') args.host = next();
     else if (arg === '--port') args.port = intArg(next(), '--port', 1, 65535);
     else if (arg === '--fens') args.fens = next();
     else if (arg === '--max-positions') args.maxPositions = intArg(next(), '--max-positions', 1, 10_000);
@@ -87,13 +92,15 @@ function parseArgs(argv) {
   const valid = new Set(['ort-cpu', 'ort-gpu', 'wgsl-pipe1', 'wgsl-gpu-legal', 'wgsl-pipe2', 'wgsl-gpu-legal-pipe2']);
   for (const strategy of args.strategies) if (!valid.has(strategy)) throw new Error(`Invalid strategy: ${strategy}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid inputBackend: ${args.inputBackend}`);
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid encoderKernel: ${args.encoderKernel}`);
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel))
+    throw new Error(`Invalid encoderKernel: ${args.encoderKernel}`);
   return args;
 }
 
 async function loadFens(path, maxPositions) {
   const text = await readFile(path, 'utf8');
-  const fens = text.split(/\r?\n/)
+  const fens = text
+    .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'))
     .map((line) => line.split(/\s+;|\s+#/)[0].trim())
@@ -106,7 +113,10 @@ async function loadFens(path, maxPositions) {
 function startServer(args) {
   if (args.noServer) return null;
   const viteBin = process.platform === 'win32' ? 'node_modules/.bin/vite.cmd' : 'node_modules/.bin/vite';
-  const server = spawn(viteBin, ['--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, FORCE_COLOR: '0' } });
+  const server = spawn(viteBin, ['--host', args.host, '--port', String(args.port), '--strictPort'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, FORCE_COLOR: '0' },
+  });
   server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
   server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
   return server;
@@ -120,7 +130,9 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
       const response = await fetch(new URL('/single-engine', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) { lastError = error; }
+    } catch (error) {
+      lastError = error;
+    }
     await delay(250);
   }
   throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
@@ -155,13 +167,20 @@ function commandForCell(args, cell) {
   if (cell.strategy === 'ort-cpu' || cell.strategy === 'ort-gpu') {
     const commandArgs = [
       'scripts/lc0_browser_ort_readback_profile.mjs',
-      '--base-url', args.baseUrl,
-      '--agent-browser', args.agentBrowser,
-      '--session', `lc0-readback-matrix-${process.pid}-${cell.index}`,
-      '--fen', cell.fen,
-      '--iters', String(args.ortIters),
-      '--warmup', String(args.ortWarmup),
-      '--timeout', String(args.timeoutMs),
+      '--base-url',
+      args.baseUrl,
+      '--agent-browser',
+      args.agentBrowser,
+      '--session',
+      `lc0-readback-matrix-${process.pid}-${cell.index}`,
+      '--fen',
+      cell.fen,
+      '--iters',
+      String(args.ortIters),
+      '--warmup',
+      String(args.ortWarmup),
+      '--timeout',
+      String(args.timeoutMs),
     ];
     if (cell.strategy === 'ort-cpu') commandArgs.push('--no-gpu-outputs');
     return { command: 'node', commandArgs };
@@ -173,23 +192,40 @@ function commandForCell(args, cell) {
     command: 'node',
     commandArgs: [
       'scripts/lc0_browser_hybrid_search_bench.mjs',
-      '--base-url', args.baseUrl,
-      '--agent-browser', args.agentBrowser,
-      '--session', `lc0-readback-matrix-${process.pid}-${cell.index}`,
-      '--fen', cell.fen,
-      '--head-backend', 'wgsl',
-      '--wgsl-batch-mode', 'physical',
-      '--input-backend', args.inputBackend,
-      '--encoder-kernel', args.encoderKernel,
-      '--legal-priors-backend', legalPriorsBackend,
-      '--visits', String(args.visits),
-      '--batch', String(effectiveBatch),
-      '--batch-pipeline-depth', String(pipelineDepth),
-      '--eval-iters', String(args.wgslEvalIters),
-      '--eval-warmup', '1',
-      '--search-iters', String(args.wgslSearchIters),
-      '--search-warmup', String(args.wgslSearchWarmup),
-      '--timeout', String(args.timeoutMs),
+      '--base-url',
+      args.baseUrl,
+      '--agent-browser',
+      args.agentBrowser,
+      '--session',
+      `lc0-readback-matrix-${process.pid}-${cell.index}`,
+      '--fen',
+      cell.fen,
+      '--head-backend',
+      'wgsl',
+      '--wgsl-batch-mode',
+      'physical',
+      '--input-backend',
+      args.inputBackend,
+      '--encoder-kernel',
+      args.encoderKernel,
+      '--legal-priors-backend',
+      legalPriorsBackend,
+      '--visits',
+      String(args.visits),
+      '--batch',
+      String(effectiveBatch),
+      '--batch-pipeline-depth',
+      String(pipelineDepth),
+      '--eval-iters',
+      String(args.wgslEvalIters),
+      '--eval-warmup',
+      '1',
+      '--search-iters',
+      String(args.wgslSearchIters),
+      '--search-warmup',
+      String(args.wgslSearchWarmup),
+      '--timeout',
+      String(args.timeoutMs),
     ],
   };
 }
@@ -233,7 +269,6 @@ function compactResult(strategy, result) {
     encoderKernelVariant: result.encoderKernelVariant,
     legalPriorsBackend: result.legalPriorsBackend ?? (strategy === 'wgsl-gpu-legal' || strategy === 'wgsl-gpu-legal-pipe2' ? 'gpu' : 'js'),
     batchSize: result.batchSize,
-    batchPipelineDepth: result.batchPipelineDepth,
     evalMeanMs: result.eval?.timingStats?.meanMs,
     searchMeanMs: result.search?.timingStats?.meanMs,
     visitsPerSecond: result.search?.visitsPerSecond,
@@ -287,9 +322,7 @@ export function numericStats(values) {
     max = Math.max(max, value);
   }
   const mean = sum / samples.length;
-  const variance = samples.length > 1
-    ? samples.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (samples.length - 1)
-    : 0;
+  const variance = samples.length > 1 ? samples.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (samples.length - 1) : 0;
   return {
     samples: samples.length,
     mean,
@@ -310,32 +343,37 @@ function summarize(cells) {
     items.push(cell.summary);
     groups.set(cell.strategy, items);
   }
-  return Object.fromEntries(Array.from(groups.entries()).map(([strategy, items]) => {
-    const get = (key) => median(items.map((item) => Number(item[key])));
-    const stats = (key) => numericStats(items.map((item) => item[key]));
-    return [strategy, {
-      samples: items.length,
-      avgMsMedian: get('avgMs'),
-      evalMeanMsMedian: get('evalMeanMs'),
-      searchMeanMsMedian: get('searchMeanMs'),
-      visitsPerSecondMedian: get('visitsPerSecond'),
-      batchSizeMedian: get('batchSize'),
-      batchPipelineDepthMedian: get('batchPipelineDepth'),
-      ortRunMsMedian: get('ortRunMsMean'),
-      ortAllGetDataMsMedian: get('ortAllGetDataMsMean'),
-      webgpuMapAsyncMsMedian: get('webgpuMapAsyncMsMean'),
-      readbackSyncedMsMedian: get('evalReadbackSyncedMs'),
-      searchReadbackSyncedMsMedian: get('searchReadbackSyncedMs'),
-      readbackBytesMedian: get('evalReadbackBytes'),
-      searchReadbackBytesMedian: get('searchReadbackBytes'),
-      mapReadBufferBytesMedian: get('webgpuMapReadBufferBytesMean'),
-      evalMeanMsStats: stats('evalMeanMs'),
-      searchMeanMsStats: stats('searchMeanMs'),
-      visitsPerSecondStats: stats('visitsPerSecond'),
-      evalReadbackBytesStats: stats('evalReadbackBytes'),
-      searchReadbackBytesStats: stats('searchReadbackBytes'),
-    }];
-  }));
+  return Object.fromEntries(
+    Array.from(groups.entries()).map(([strategy, items]) => {
+      const get = (key) => median(items.map((item) => Number(item[key])));
+      const stats = (key) => numericStats(items.map((item) => item[key]));
+      return [
+        strategy,
+        {
+          samples: items.length,
+          avgMsMedian: get('avgMs'),
+          evalMeanMsMedian: get('evalMeanMs'),
+          searchMeanMsMedian: get('searchMeanMs'),
+          visitsPerSecondMedian: get('visitsPerSecond'),
+          batchSizeMedian: get('batchSize'),
+          batchPipelineDepthMedian: get('batchPipelineDepth'),
+          ortRunMsMedian: get('ortRunMsMean'),
+          ortAllGetDataMsMedian: get('ortAllGetDataMsMean'),
+          webgpuMapAsyncMsMedian: get('webgpuMapAsyncMsMean'),
+          readbackSyncedMsMedian: get('evalReadbackSyncedMs'),
+          searchReadbackSyncedMsMedian: get('searchReadbackSyncedMs'),
+          readbackBytesMedian: get('evalReadbackBytes'),
+          searchReadbackBytesMedian: get('searchReadbackBytes'),
+          mapReadBufferBytesMedian: get('webgpuMapReadBufferBytesMean'),
+          evalMeanMsStats: stats('evalMeanMs'),
+          searchMeanMsStats: stats('searchMeanMs'),
+          visitsPerSecondStats: stats('visitsPerSecond'),
+          evalReadbackBytesStats: stats('evalReadbackBytes'),
+          searchReadbackBytesStats: stats('searchReadbackBytes'),
+        },
+      ];
+    }),
+  );
 }
 
 function searchParity(cells, strategies) {
@@ -349,16 +387,23 @@ function searchParity(cells, strategies) {
     group[cell.strategy] = cell.summary;
     groups.set(key, group);
   }
-  return Object.fromEntries(strategies.filter((strategy) => strategy !== control && !strategy.startsWith('ort-')).map((strategy) => {
-    const pairs = Array.from(groups.values()).filter((group) => group[control] && group[strategy]);
-    return [strategy, {
-      control,
-      comparableCells: pairs.length,
-      bestMoveMatches: pairs.filter((group) => group[control].bestMove === group[strategy].bestMove).length,
-      pvMatches: pairs.filter((group) => JSON.stringify(group[control].pv) === JSON.stringify(group[strategy].pv)).length,
-      completedVisitsMatches: pairs.filter((group) => group[control].completedVisits === group[strategy].completedVisits).length,
-    }];
-  }));
+  return Object.fromEntries(
+    strategies
+      .filter((strategy) => strategy !== control && !strategy.startsWith('ort-'))
+      .map((strategy) => {
+        const pairs = Array.from(groups.values()).filter((group) => group[control] && group[strategy]);
+        return [
+          strategy,
+          {
+            control,
+            comparableCells: pairs.length,
+            bestMoveMatches: pairs.filter((group) => group[control].bestMove === group[strategy].bestMove).length,
+            pvMatches: pairs.filter((group) => JSON.stringify(group[control].pv) === JSON.stringify(group[strategy].pv)).length,
+            completedVisitsMatches: pairs.filter((group) => group[control].completedVisits === group[strategy].completedVisits).length,
+          },
+        ];
+      }),
+  );
 }
 
 function environmentReport(cells) {
@@ -390,7 +435,18 @@ async function main() {
     }
   }
   if (args.dryRun) {
-    console.log(JSON.stringify({ status: 'LC0_READBACK_STRATEGY_MATRIX_DRY_RUN', baseUrl: args.baseUrl, fens, plan: plan.map((cell) => ({ ...cell, command: commandForCell(args, cell) })) }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          status: 'LC0_READBACK_STRATEGY_MATRIX_DRY_RUN',
+          baseUrl: args.baseUrl,
+          fens,
+          plan: plan.map((cell) => ({ ...cell, command: commandForCell(args, cell) })),
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
   const server = startServer(args);
@@ -429,5 +485,8 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => { console.error(error.stack ?? error.message); process.exit(1); });
+  main().catch((error) => {
+    console.error(error.stack ?? error.message);
+    process.exit(1);
+  });
 }

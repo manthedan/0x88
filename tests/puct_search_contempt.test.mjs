@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseFen, boardToFen, START_FEN } from '../src/chess/board.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveFromUci, moveToActionId } from '../src/chess/moveCodec.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
@@ -20,9 +20,7 @@ const trapEvaluator = {
     // sticks at any depth); everything else is dead neutral.
     const fens = [boardToFen(board), ...(context?.historyFens ?? [])];
     const refuted = fens.some((fen) => fen.startsWith(REFUTED));
-    const wdl = !refuted
-      ? [0.34, 0.32, 0.34]
-      : board.turn === 'w' ? [0.02, 0.04, 0.94] : [0.94, 0.04, 0.02];
+    const wdl = !refuted ? [0.34, 0.32, 0.34] : board.turn === 'w' ? [0.02, 0.04, 0.94] : [0.94, 0.04, 0.02];
     return { policy, wdl };
   },
 };

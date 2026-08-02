@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
 const ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
@@ -15,13 +15,11 @@ async function writeJson(path, value) {
 }
 
 function runGenerator(root) {
-  return spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  return spawnSync(
+    process.execPath,
+    ['scripts/write_artifact_release_manifests.mjs', '--root', root, '--release-id', 'next', '--base-release', 'base.json', '--manifest', 'missing.json'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
 }
 
 function identity(rawSha256 = ABC_SHA256, bytes = 3) {
@@ -57,10 +55,7 @@ test('release generator rejects conflicting deduplicated raw alias metadata befo
     },
     {
       name: 'hash',
-      artifacts: [
-        baseArtifact('/models/a.onnx'),
-        baseArtifact('/models/b.onnx', { sha256: 'f'.repeat(64), bytes: 3 }),
-      ],
+      artifacts: [baseArtifact('/models/a.onnx'), baseArtifact('/models/b.onnx', { sha256: 'f'.repeat(64), bytes: 3 })],
       expected: /Conflicting raw SHA-256 metadata/,
     },
     {
@@ -166,13 +161,21 @@ test('release generator rejects incompatible local alias content types before ma
     artifacts: [{ path: 'public/engines/a.wasm', bytes: 3, sha256: ABC_SHA256 }],
   });
 
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--manifest', 'public/models/manifest.json',
-    '--manifest', 'public/engines/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--manifest',
+      'public/models/manifest.json',
+      '--manifest',
+      'public/engines/manifest.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Incompatible contentType metadata/);
@@ -193,18 +196,20 @@ test('release generator materializes compatible local alias content types once',
     ],
   });
 
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--manifest', 'public/models/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/write_artifact_release_manifests.mjs', '--root', root, '--release-id', 'next', '--manifest', 'public/models/manifest.json'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
 
   assert.equal(result.status, 0, result.stderr);
   const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/next.json'), 'utf8'));
   const aliases = release.artifacts.filter((artifact) => artifact.logicalUrl === '/models/a.onnx' || artifact.logicalUrl === '/models/b.onnx');
   assert.equal(aliases.length, 2);
-  assert.deepEqual(aliases.map((artifact) => artifact.contentType), ['application/octet-stream', 'application/octet-stream']);
+  assert.deepEqual(
+    aliases.map((artifact) => artifact.contentType),
+    ['application/octet-stream', 'application/octet-stream'],
+  );
   assert.equal(aliases[0].representations[0].url, aliases[1].representations[0].url);
   assert.equal(existsSync(join(root, DEFAULT_RELEASE_OUTPUT, 'artifacts/sha256', ABC_SHA256, 'identity')), true);
 });

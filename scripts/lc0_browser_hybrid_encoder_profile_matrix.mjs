@@ -10,11 +10,17 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const ENCODER_KERNELS = ['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'];
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_encoder_profile_matrix.mjs [options]\n\nRuns repeated browser hybrid encoder stage profiles over encoder-kernel variants and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_encoder_profile_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --encoder-kernels LIST\n                       Comma-separated encoder kernels: ${ENCODER_KERNELS.join(',')} (default hand)\n  --repeats N           Repeat each variant, alternating variants in repeat order (default 1)\n  --layers N            Encoder layers (default 10)\n  --profile-mode MODE   gpu-timestamp or sync-staged (default gpu-timestamp)\n  --profile-iters N     Profile iterations per cell (default 10)\n  --profile-warmup N    Profile warmup iterations per cell (default 2)\n  --input-backend MODE  Hybrid input backend: js, wgsl, or wasm (default js)\n  --timeout MS          Per-cell browser timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and URLs without running\n  -h, --help            Show this help\n`);
+  console.log(
+    `Usage: node scripts/lc0_browser_hybrid_encoder_profile_matrix.mjs [options]\n\nRuns repeated browser hybrid encoder stage profiles over encoder-kernel variants and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_encoder_profile_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --encoder-kernels LIST\n                       Comma-separated encoder kernels: ${ENCODER_KERNELS.join(',')} (default hand)\n  --repeats N           Repeat each variant, alternating variants in repeat order (default 1)\n  --layers N            Encoder layers (default 10)\n  --profile-mode MODE   gpu-timestamp or sync-staged (default gpu-timestamp)\n  --profile-iters N     Profile iterations per cell (default 10)\n  --profile-warmup N    Profile warmup iterations per cell (default 2)\n  --input-backend MODE  Hybrid input backend: js, wgsl, or wasm (default js)\n  --timeout MS          Per-cell browser timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and URLs without running\n  -h, --help            Show this help\n`,
+  );
 }
 
 function parseList(raw, parse, name) {
-  const values = String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean).map(parse);
+  const values = String(raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(parse);
   if (!values.length || values.some((value) => value === undefined || Number.isNaN(value))) throw new Error(`Invalid --${name}: ${raw}`);
   return values;
 }
@@ -48,8 +54,7 @@ function parseArgs(argv) {
     else if (arg === '--base-url') {
       args.baseUrl = next();
       args.explicitBaseUrl = true;
-    }
-    else if (arg === '--encoder-kernels') args.encoderKernels = parseList(next(), (value) => value, 'encoder-kernels');
+    } else if (arg === '--encoder-kernels') args.encoderKernels = parseList(next(), (value) => value, 'encoder-kernels');
     else if (arg === '--repeats') args.repeats = Number(next());
     else if (arg === '--layers') args.layers = Number(next());
     else if (arg === '--profile-mode') args.profileMode = next();
@@ -66,7 +71,13 @@ function parseArgs(argv) {
   for (const kernel of args.encoderKernels) if (!ENCODER_KERNELS.includes(kernel)) throw new Error(`Invalid encoder kernel: ${kernel}`);
   if (!['gpu-timestamp', 'sync-staged'].includes(args.profileMode)) throw new Error(`Invalid --profile-mode: ${args.profileMode}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
-  for (const [name, value] of [['port', args.port], ['repeats', args.repeats], ['layers', args.layers], ['profile-iters', args.profileIters], ['timeout', args.timeoutMs]]) {
+  for (const [name, value] of [
+    ['port', args.port],
+    ['repeats', args.repeats],
+    ['layers', args.layers],
+    ['profile-iters', args.profileIters],
+    ['timeout', args.timeoutMs],
+  ]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   if (!Number.isFinite(args.profileWarmup) || args.profileWarmup < 0) throw new Error(`Invalid --profile-warmup: ${args.profileWarmup}`);
@@ -123,7 +134,8 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
       try {
         const parsed = stdout ? JSON.parse(stdout.trim()) : null;
         if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
+          if (parsed.success === false)
+            return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);
@@ -159,8 +171,10 @@ function profileUrl(args, combo) {
 
 function compactProfile(result, combo) {
   const stages = Object.fromEntries((result.aggregateStageTimings ?? []).map((stage) => [stage.stage, stage.avgMs]));
-  const smolgenSubstageAvgMs = ['smolgenCompress', 'smolgenDense1', 'smolgenLn1', 'smolgenDense2', 'smolgenLn2', 'smolgenProject']
-    .reduce((sum, stage) => sum + (stages[stage] ?? 0), 0);
+  const smolgenSubstageAvgMs = ['smolgenCompress', 'smolgenDense1', 'smolgenLn1', 'smolgenDense2', 'smolgenLn2', 'smolgenProject'].reduce(
+    (sum, stage) => sum + (stages[stage] ?? 0),
+    0,
+  );
   return {
     ...combo,
     encoderKernelVariant: result.encoderKernelVariant,

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { brotliCompressSync, brotliDecompressSync } from 'node:zlib';
 
@@ -30,8 +30,12 @@ async function runNode(args, options = {}) {
     let stderr = '';
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
     child.on('close', (status) => resolve({ status, stdout, stderr }));
   });
 }
@@ -52,7 +56,9 @@ async function writeMockR2Object(root, target, body, metadata) {
 
 async function writeStatefulWrangler(root) {
   const path = join(root, 'fake-wrangler.mjs');
-  await writeFile(path, `#!/usr/bin/env node
+  await writeFile(
+    path,
+    `#!/usr/bin/env node
 import { appendFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -78,14 +84,17 @@ if (args[0] === 'r2' && args[1] === 'object' && args[2] === 'put') {
   process.exit(0);
 }
 process.exit(1);
-`);
+`,
+  );
   await chmod(path, 0o755);
   return path;
 }
 
 async function writeAtomicAws(root) {
   const path = join(root, 'fake-aws.mjs');
-  await writeFile(path, `#!/usr/bin/env node
+  await writeFile(
+    path,
+    `#!/usr/bin/env node
 import { appendFileSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -149,7 +158,8 @@ writeFileSync(metadataPath, JSON.stringify({
   ...(contentEncodingIndex >= 0 ? { ContentEncoding: args[contentEncodingIndex + 1] } : {}),
   ...(customMetadataIndex >= 0 ? { Metadata: JSON.parse(args[customMetadataIndex + 1]) } : {}),
 }));
-`);
+`,
+  );
   await chmod(path, 0o755);
   return path;
 }
@@ -202,15 +212,25 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
     artifacts: [{ path: 'public/stockfish/engine.wasm', bytes: 3, sha256: DEF_SHA256 }],
   });
 
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'test-release',
-    '--channel', 'stable',
-    '--generated-at', '2026-06-22T00:00:00.000Z',
-    '--manifest', 'public/models/lc0/manifest.json',
-    '--manifest', 'public/stockfish/stockfish.manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'test-release',
+      '--channel',
+      'stable',
+      '--generated-at',
+      '2026-06-22T00:00:00.000Z',
+      '--manifest',
+      'public/models/lc0/manifest.json',
+      '--manifest',
+      'public/stockfish/stockfish.manifest.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
 
   const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
@@ -236,7 +256,10 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
     assert.equal(artifact.raw.bytes, 3);
     assert.equal(artifact.sha256, expectedSha256);
     assert.equal(artifact.bytes, 3);
-    assert.deepEqual(artifact.representations.map((entry) => entry.encoding), ['identity', 'br']);
+    assert.deepEqual(
+      artifact.representations.map((entry) => entry.encoding),
+      ['identity', 'br'],
+    );
     assert.match(artifact.representations[0].url, new RegExp(`/artifacts/sha256/${expectedSha256}/identity$`));
     assert.doesNotMatch(artifact.representations[0].url, /test\.onnx|engine\.wasm/);
     assert.match(artifact.representations[1].url, new RegExp(`/artifacts/sha256/${expectedSha256}/br/[a-f0-9]{64}$`));
@@ -253,28 +276,46 @@ test('write_artifact_release_manifests creates channel and content-addressed rel
   assert.equal(existsSync(join(root, 'public/releases')), false);
   assert.equal(existsSync(join(root, 'public/channels')), false);
 
-  const publishPlan = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--channel-manifest', join(outputRoot, 'channels/stable.json'),
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const publishPlan = spawnSync(
+    process.execPath,
+    [
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--channel-manifest',
+      join(outputRoot, 'channels/stable.json'),
+      '--bucket',
+      'test-bucket',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(publishPlan.status, 0, publishPlan.stderr);
   const planned = JSON.parse(publishPlan.stdout).planned;
   assert.ok(planned.every((entry) => entry.localPath.startsWith(outputRoot)));
   assert.ok(planned.every((entry) => existsSync(entry.localPath)));
 
-  const check = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'test-release',
-    '--channel', 'stable',
-    '--generated-at', '2026-06-22T00:00:00.000Z',
-    '--manifest', 'public/models/lc0/manifest.json',
-    '--manifest', 'public/stockfish/stockfish.manifest.json',
-    '--check',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const check = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'test-release',
+      '--channel',
+      'stable',
+      '--generated-at',
+      '2026-06-22T00:00:00.000Z',
+      '--manifest',
+      'public/models/lc0/manifest.json',
+      '--manifest',
+      'public/stockfish/stockfish.manifest.json',
+      '--check',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(check.status, 0, check.stderr);
 });
 
@@ -287,10 +328,14 @@ test('write_artifact_release_manifests check mode works with a read-only staging
   });
   const args = [
     'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'read-only-check',
-    '--generated-at', '2026-07-14T00:00:00.000Z',
-    '--manifest', 'public/models/lc0/manifest.json',
+    '--root',
+    root,
+    '--release-id',
+    'read-only-check',
+    '--generated-at',
+    '2026-07-14T00:00:00.000Z',
+    '--manifest',
+    'public/models/lc0/manifest.json',
   ];
   const generated = spawnSync(process.execPath, args, { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(generated.status, 0, generated.stderr);
@@ -327,22 +372,32 @@ test('write_artifact_release_manifests includes TVMJS runtime files', async () =
     ],
   });
 
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'centipawn-tvmjs',
-    '--manifest', 'public/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'centipawn-tvmjs',
+      '--manifest',
+      'public/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/manifest.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
 
   const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/centipawn-tvmjs.json'), 'utf8'));
   assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
-  assert.deepEqual(release.artifacts.map((artifact) => [artifact.logicalUrl, artifact.kind, artifact.contentType]), [
-    ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/manifest.json', 'manifest', 'application/json'],
-    ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/model.tvmjs.wasm', 'runtime', 'application/wasm'],
-    ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/tvmjs_runtime.wasm', 'runtime', 'application/wasm'],
-    ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/tvmjs.bundle.js', 'runtime', 'text/javascript; charset=utf-8'],
-  ]);
+  assert.deepEqual(
+    release.artifacts.map((artifact) => [artifact.logicalUrl, artifact.kind, artifact.contentType]),
+    [
+      ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/manifest.json', 'manifest', 'application/json'],
+      ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/model.tvmjs.wasm', 'runtime', 'application/wasm'],
+      ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/tvmjs_runtime.wasm', 'runtime', 'application/wasm'],
+      ['/runtimes/centipawn-tvmjs-webgpu/model/f32/v2/tvmjs.bundle.js', 'runtime', 'text/javascript; charset=utf-8'],
+    ],
+  );
 });
 
 test('write_artifact_release_manifests carries forward an immutable v2 base release without local artifact files', async () => {
@@ -356,38 +411,49 @@ test('write_artifact_release_manifests carries forward an immutable v2 base rele
     schema: 'lc0_browser.artifact_release_manifest.v2',
     releaseId: 'base',
     sourceManifests: ['public/legacy/manifest.json'],
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      raw: { sha256: ABC_SHA256, bytes: 3 },
-      representations: [{
-        encoding: 'identity',
-        url: `https://assets.example/artifacts/sha256/${ABC_SHA256}/identity`,
-        sha256: ABC_SHA256,
-        bytes: 3,
-      }],
-      file: 'legacy.wasm',
-      kind: 'engine',
-      contentType: 'application/wasm',
-      sourceManifest: 'public/legacy/manifest.json',
-      localPath: 'public/legacy/engine.wasm',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        raw: { sha256: ABC_SHA256, bytes: 3 },
+        representations: [
+          {
+            encoding: 'identity',
+            url: `https://assets.example/artifacts/sha256/${ABC_SHA256}/identity`,
+            sha256: ABC_SHA256,
+            bytes: 3,
+          },
+        ],
+        file: 'legacy.wasm',
+        kind: 'engine',
+        contentType: 'application/wasm',
+        sourceManifest: 'public/legacy/manifest.json',
+        localPath: 'public/legacy/engine.wasm',
+      },
+    ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'public/stormphrax/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'public/stormphrax/manifest.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/next.json'), 'utf8'));
   assert.equal(release.schema, 'lc0_browser.artifact_release_manifest.v2');
   assert.equal(release.baseReleaseId, 'base');
-  assert.deepEqual(release.artifacts.map((artifact) => artifact.logicalUrl), [
-    '/legacy/engine.wasm',
-    '/stormphrax/engine.wasm',
-    '/stormphrax/manifest.json',
-  ]);
+  assert.deepEqual(
+    release.artifacts.map((artifact) => artifact.logicalUrl),
+    ['/legacy/engine.wasm', '/stormphrax/engine.wasm', '/stormphrax/manifest.json'],
+  );
   assert.equal(release.artifacts[0].carriedForwardFrom, 'base');
   assert.equal(release.artifacts[0].representations[0].url, `https://assets.example/artifacts/sha256/${ABC_SHA256}/identity`);
   assert.equal(release.artifacts[1].carriedForwardFrom, undefined);
@@ -430,13 +496,21 @@ test('write_artifact_release_manifests migrates an actual v1-shaped base release
       },
     ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'missing.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
   const releasePath = join(outputRoot, 'releases/next.json');
@@ -455,18 +529,20 @@ test('write_artifact_release_manifests migrates an actual v1-shaped base release
     `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
   ]);
 
-  const publish = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const publish = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(publish.status, 0, publish.stderr);
   const plan = JSON.parse(publish.stdout);
   assert.equal(plan.catalogObjectCount, 2);
   assert.equal(plan.plannedCount, 2);
-  assert.ok(plan.planned.some((entry) => entry.key === `artifacts/sha256/${ABC_SHA256}/identity`
-    && entry.localPath === join(outputRoot, 'artifacts/sha256', ABC_SHA256, 'identity')));
+  assert.ok(
+    plan.planned.some(
+      (entry) => entry.key === `artifacts/sha256/${ABC_SHA256}/identity` && entry.localPath === join(outputRoot, 'artifacts/sha256', ABC_SHA256, 'identity'),
+    ),
+  );
 });
 
 test('write_artifact_release_manifests preserves verified v1 provenance when a body is unavailable locally', async () => {
@@ -474,21 +550,31 @@ test('write_artifact_release_manifests preserves verified v1 provenance when a b
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      localPath: 'public/legacy/engine.wasm',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        localPath: 'public/legacy/engine.wasm',
+      },
+    ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'missing.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
   const release = JSON.parse(await readFile(join(outputRoot, 'releases/next.json'), 'utf8'));
@@ -502,29 +588,32 @@ test('write_artifact_release_manifests preserves verified v1 provenance when a b
     key: `artifacts/sha256/${ABC_SHA256}/engine.wasm`,
     url: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
   });
-  assert.deepEqual(artifact.representations, [{
-    encoding: 'identity',
-    url: `https://assets.0x88.app/artifacts/sha256/${ABC_SHA256}/identity`,
-    sha256: ABC_SHA256,
-    bytes: 3,
-  }]);
+  assert.deepEqual(artifact.representations, [
+    {
+      encoding: 'identity',
+      url: `https://assets.0x88.app/artifacts/sha256/${ABC_SHA256}/identity`,
+      sha256: ABC_SHA256,
+      bytes: 3,
+    },
+  ]);
 
-  const dryRun = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', join(outputRoot, 'releases/next.json'),
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const dryRun = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', join(outputRoot, 'releases/next.json'), '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(dryRun.status, 0, dryRun.stderr);
   const plan = JSON.parse(dryRun.stdout);
   assert.equal(plan.plannedCount, 1);
   assert.equal(plan.planned[0].key, `artifacts/sha256/${ABC_SHA256}/identity`);
   assert.equal(plan.planned[0].uploadAction, 'materialize-from-v1-and-conditional-create');
-  assert.deepEqual(plan.planned[0].migrationSources, [{
-    releaseId: 'base',
-    key: `artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-    url: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-  }]);
+  assert.deepEqual(plan.planned[0].migrationSources, [
+    {
+      releaseId: 'base',
+      key: `artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+      url: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+    },
+  ]);
   assert.equal(existsSync(join(outputRoot, 'artifacts/sha256', ABC_SHA256, 'identity')), false);
 });
 
@@ -534,11 +623,13 @@ test('write_artifact_release_manifests publishes current v1 logical updates whil
   await mkdir(join(root, 'public/legacy'), { recursive: true });
   await writeFile(join(root, 'public/legacy/engine.wasm'), 'abd');
   await writeJson(join(root, 'public/legacy/manifest.json'), {
-    artifacts: [{
-      path: 'public/legacy/engine.wasm',
-      bytes: 3,
-      sha256: updatedSha256,
-    }],
+    artifacts: [
+      {
+        path: 'public/legacy/engine.wasm',
+        bytes: 3,
+        sha256: updatedSha256,
+      },
+    ],
   });
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
@@ -561,13 +652,21 @@ test('write_artifact_release_manifests publishes current v1 logical updates whil
     ],
   });
 
-  const generated = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'public/legacy/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const generated = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'public/legacy/manifest.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(generated.status, 0, generated.stderr);
 
   const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
@@ -592,27 +691,32 @@ test('write_artifact_release_manifests publishes current v1 logical updates whil
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const published = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', await writeStatefulWrangler(root),
-      '--aws-bin', await writeAtomicAws(root),
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    const published = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--channel-manifest',
+        channelPath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        await writeStatefulWrangler(root),
+        '--aws-bin',
+        await writeAtomicAws(root),
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, MOCK_R2_DIR: r2Root } },
+    );
     assert.equal(published.status, 0, published.stderr);
-    assert.equal(
-      (await readFile(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${updatedSha256}/identity`))).toString(),
-      'abd',
-    );
-    assert.equal(
-      (await readFile(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`))).toString(),
-      'abc',
-    );
+    assert.equal((await readFile(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${updatedSha256}/identity`))).toString(), 'abd');
+    assert.equal((await readFile(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/identity`))).toString(), 'abc');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -627,21 +731,31 @@ test('write_artifact_release_manifests ignores a stale v1 localPath after a late
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      localPath: 'stale/engine.wasm',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        localPath: 'stale/engine.wasm',
+      },
+    ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'missing.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/next.json'), 'utf8'));
   assert.equal(release.artifacts[0].localPath, 'public/legacy/engine.wasm');
@@ -654,31 +768,43 @@ test('write_artifact_release_manifests accepts a verified equal local body after
   await writeFile(join(root, 'public/current/engine.wasm'), 'abc');
   await writeFile(join(root, 'public/legacy/engine.wasm'), 'abd');
   await writeJson(join(root, 'public/current/manifest.json'), {
-    models: [{
-      file: 'engine.wasm',
-      url: '/current/engine.wasm',
-      bytes: 3,
-      sha256: ABC_SHA256,
-    }],
+    models: [
+      {
+        file: 'engine.wasm',
+        url: '/current/engine.wasm',
+        bytes: 3,
+        sha256: ABC_SHA256,
+      },
+    ],
   });
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      localPath: 'public/legacy/engine.wasm',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        localPath: 'public/legacy/engine.wasm',
+      },
+    ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'public/current/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'public/current/manifest.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/next.json'), 'utf8'));
   const migrated = release.artifacts.find((artifact) => artifact.logicalUrl === '/legacy/engine.wasm');
@@ -694,21 +820,31 @@ test('write_artifact_release_manifests retains remote v1 migration provenance wh
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      localPath: 'stale/engine.wasm',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        localPath: 'stale/engine.wasm',
+      },
+    ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'missing.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const release = JSON.parse(await readFile(join(root, DEFAULT_RELEASE_OUTPUT, 'releases/next.json'), 'utf8'));
   assert.equal(release.artifacts[0].localPath, undefined);
@@ -724,20 +860,30 @@ test('write_artifact_release_manifests rejects corrupt immutable content-address
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `https://assets.example/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+      },
+    ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'missing.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Corrupt local v1 migration source/);
   assert.match(result.stderr, /artifact-releases\/artifacts\/sha256\/.*\/engine\.wasm has 3\//);
@@ -750,21 +896,31 @@ test('publish_hashed_artifacts_to_r2 materializes a missing SHA-only identity fr
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      contentType: 'application/wasm',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        contentType: 'application/wasm',
+      },
+    ],
   });
-  const generated = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const generated = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'missing.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(generated.status, 0, generated.stderr);
 
   const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
@@ -778,18 +934,29 @@ test('publish_hashed_artifacts_to_r2 materializes a missing SHA-only identity fr
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', join(outputRoot, 'releases/next.json'),
-      '--channel-manifest', join(outputRoot, 'channels/stable.json'),
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        join(outputRoot, 'releases/next.json'),
+        '--channel-manifest',
+        join(outputRoot, 'channels/stable.json'),
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, MOCK_R2_DIR: r2Root } },
+    );
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.plannedCount, 1);
@@ -819,26 +986,38 @@ test('publish_hashed_artifacts_to_r2 tries a later deduplicated migration source
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, MOCK_R2_DIR: r2Root, LOG: log } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--channel-manifest',
+        channelPath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, MOCK_R2_DIR: r2Root, LOG: log } },
+    );
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.planned[0].migrationSourceUsed.key, availableKey);
     assert.equal((await readFile(mockR2ObjectPath(r2Root, identityTarget))).toString(), 'abc');
-    const sourceGets = (await readFile(log, 'utf8'))
-      .split('\n')
-      .filter((line) => /a-missing\.wasm|b-available\.wasm/.test(line));
-    assert.deepEqual(sourceGets.map((line) => line.match(/(a-missing|b-available)\.wasm/)[1]), ['a-missing', 'b-available']);
+    const sourceGets = (await readFile(log, 'utf8')).split('\n').filter((line) => /a-missing\.wasm|b-available\.wasm/.test(line));
+    assert.deepEqual(
+      sourceGets.map((line) => line.match(/(a-missing|b-available)\.wasm/)[1]),
+      ['a-missing', 'b-available'],
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -860,18 +1039,29 @@ test('publish_hashed_artifacts_to_r2 tries a later deduplicated migration source
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--channel-manifest',
+        channelPath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, MOCK_R2_DIR: r2Root } },
+    );
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.planned[0].migrationSourceUsed.key, availableKey);
@@ -893,18 +1083,29 @@ test('publish_hashed_artifacts_to_r2 reports every failed deduplicated migration
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--channel-manifest',
+        channelPath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, MOCK_R2_DIR: r2Root } },
+    );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /No verified v1 migration source was available/);
     assert.match(result.stderr, new RegExp(`- artifacts/sha256/${ABC_SHA256}/a-missing\\.wasm: .*HTTP 404`));
@@ -938,12 +1139,14 @@ test('publish_hashed_artifacts_to_r2 preflights every migration before any immut
           url: `/artifacts/sha256/${ABC_SHA256}/available.wasm`,
         },
         raw: { bytes: 3, sha256: ABC_SHA256 },
-        representations: [{
-          encoding: 'identity',
-          url: `/artifacts/sha256/${ABC_SHA256}/identity`,
-          bytes: 3,
-          sha256: ABC_SHA256,
-        }],
+        representations: [
+          {
+            encoding: 'identity',
+            url: `/artifacts/sha256/${ABC_SHA256}/identity`,
+            bytes: 3,
+            sha256: ABC_SHA256,
+          },
+        ],
         contentType: 'application/wasm',
       },
       {
@@ -956,12 +1159,14 @@ test('publish_hashed_artifacts_to_r2 preflights every migration before any immut
           url: `/artifacts/sha256/${secondSha256}/missing.wasm`,
         },
         raw: { bytes: secondBody.byteLength, sha256: secondSha256 },
-        representations: [{
-          encoding: 'identity',
-          url: `/artifacts/sha256/${secondSha256}/identity`,
-          bytes: secondBody.byteLength,
-          sha256: secondSha256,
-        }],
+        representations: [
+          {
+            encoding: 'identity',
+            url: `/artifacts/sha256/${secondSha256}/identity`,
+            bytes: secondBody.byteLength,
+            sha256: secondSha256,
+          },
+        ],
         contentType: 'application/wasm',
       },
     ],
@@ -978,25 +1183,33 @@ test('publish_hashed_artifacts_to_r2 preflights every migration before any immut
   const wrangler = await writeStatefulWrangler(root);
   const aws = await writeAtomicAws(root);
   await mkdir(r2Root, { recursive: true });
-  await writeFile(
-    mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/available.wasm`),
-    'abc',
-  );
+  await writeFile(mockR2ObjectPath(r2Root, `test-bucket/artifacts/sha256/${ABC_SHA256}/available.wasm`), 'abc');
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--channel-manifest',
+        channelPath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+    );
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /No verified v1 migration source was available for \/legacy\/missing\.wasm/);
@@ -1018,20 +1231,30 @@ test('publish_hashed_artifacts_to_r2 blocks migration when the v1 body is unavai
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+      },
+    ],
   });
-  const generated = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const generated = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'missing.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(generated.status, 0, generated.stderr);
 
   const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
@@ -1042,18 +1265,29 @@ test('publish_hashed_artifacts_to_r2 blocks migration when the v1 body is unavai
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', join(outputRoot, 'releases/next.json'),
-      '--channel-manifest', join(outputRoot, 'channels/stable.json'),
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        join(outputRoot, 'releases/next.json'),
+        '--channel-manifest',
+        join(outputRoot, 'channels/stable.json'),
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, MOCK_R2_DIR: r2Root } },
+    );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /No verified v1 migration source was available/);
     assert.match(result.stderr, /R2 object is missing and fallback download failed: .*HTTP 404/);
@@ -1071,20 +1305,30 @@ test('publish_hashed_artifacts_to_r2 rejects corrupt v1 migration content before
   await writeJson(join(root, 'public/releases/base.json'), {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'base',
-    artifacts: [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/engine.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+      },
+    ],
   });
-  const generated = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'next',
-    '--base-release', 'public/releases/base.json',
-    '--manifest', 'missing.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const generated = spawnSync(
+    process.execPath,
+    [
+      'scripts/write_artifact_release_manifests.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'next',
+      '--base-release',
+      'public/releases/base.json',
+      '--manifest',
+      'missing.json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(generated.status, 0, generated.stderr);
 
   const outputRoot = join(root, DEFAULT_RELEASE_OUTPUT);
@@ -1097,18 +1341,29 @@ test('publish_hashed_artifacts_to_r2 rejects corrupt v1 migration content before
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
   try {
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', join(outputRoot, 'releases/next.json'),
-      '--channel-manifest', join(outputRoot, 'channels/stable.json'),
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        join(outputRoot, 'releases/next.json'),
+        '--channel-manifest',
+        join(outputRoot, 'channels/stable.json'),
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, MOCK_R2_DIR: r2Root } },
+    );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /No verified v1 migration source was available/);
     assert.match(result.stderr, /verification failed: got 3\//);
@@ -1127,13 +1382,22 @@ test('write_artifact_release_manifests keeps releases write-once while channels 
   await writeJson(join(root, 'public/models/lc0/manifest.json'), {
     models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
   });
-  const generate = (releaseId, generatedAt) => spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', releaseId,
-    '--generated-at', generatedAt,
-    '--manifest', 'public/models/lc0/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const generate = (releaseId, generatedAt) =>
+    spawnSync(
+      process.execPath,
+      [
+        'scripts/write_artifact_release_manifests.mjs',
+        '--root',
+        root,
+        '--release-id',
+        releaseId,
+        '--generated-at',
+        generatedAt,
+        '--manifest',
+        'public/models/lc0/manifest.json',
+      ],
+      { cwd: process.cwd(), encoding: 'utf8' },
+    );
 
   assert.equal(generate('one', '2026-07-14T00:00:00.000Z').status, 0);
   assert.equal(generate('two', '2026-07-14T00:01:00.000Z').status, 0);
@@ -1159,11 +1423,11 @@ test('write_artifact_release_manifests reuses an existing release timestamp for 
   await writeJson(join(root, 'public/models/lc0/manifest.json'), {
     models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
   });
-  const generate = () => spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--manifest', 'public/models/lc0/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const generate = () =>
+    spawnSync(process.execPath, ['scripts/write_artifact_release_manifests.mjs', '--root', root, '--manifest', 'public/models/lc0/manifest.json'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    });
 
   const first = generate();
   assert.equal(first.status, 0, first.stderr);
@@ -1193,12 +1457,12 @@ test('write_artifact_release_manifests rejects mismatched default retries withou
   await writeJson(manifestPath, {
     models: [{ file: 'test.onnx', url: '/models/lc0/test.onnx', bytes: 3, sha256: ABC_SHA256 }],
   });
-  const generate = (releaseId) => spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', releaseId,
-    '--manifest', 'public/models/lc0/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const generate = (releaseId) =>
+    spawnSync(
+      process.execPath,
+      ['scripts/write_artifact_release_manifests.mjs', '--root', root, '--release-id', releaseId, '--manifest', 'public/models/lc0/manifest.json'],
+      { cwd: process.cwd(), encoding: 'utf8' },
+    );
 
   assert.equal(generate('accepted').status, 0);
   assert.equal(generate('conflict').status, 0);
@@ -1228,12 +1492,11 @@ test('write_artifact_release_manifests rejects mismatched default retries withou
 
 test('write_artifact_release_manifests rejects unsafe release and channel names', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-release-path-safety-'));
-  const run = (...args) => spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--manifest', 'missing.json',
-    ...args,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const run = (...args) =>
+    spawnSync(process.execPath, ['scripts/write_artifact_release_manifests.mjs', '--root', root, '--manifest', 'missing.json', ...args], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    });
 
   const release = run('--release-id', '../outside');
   assert.notEqual(release.status, 0);
@@ -1254,12 +1517,11 @@ test('write_artifact_release_manifests rejects corrupt existing SHA-only bodies'
   const identity = join(root, DEFAULT_RELEASE_OUTPUT, 'artifacts/sha256', ABC_SHA256, 'identity');
   await mkdir(dirname(identity), { recursive: true });
   await writeFile(identity, 'abd');
-  const result = spawnSync(process.execPath, [
-    'scripts/write_artifact_release_manifests.mjs',
-    '--root', root,
-    '--release-id', 'corrupt',
-    '--manifest', 'public/models/lc0/manifest.json',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/write_artifact_release_manifests.mjs', '--root', root, '--release-id', 'corrupt', '--manifest', 'public/models/lc0/manifest.json'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Content-addressed key collision or corruption/);
 });
@@ -1273,16 +1535,18 @@ test('publish_hashed_artifacts_to_r2 plans release and channel manifest uploads'
   await writeJson(releasePath, {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'test-release',
-    artifacts: [{
-      logicalUrl: '/models/lc0/test.onnx',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      file: 'test.onnx',
-      kind: 'model',
-      sourceManifest: 'test',
-      localPath: 'public/models/lc0/test.onnx',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/models/lc0/test.onnx',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        file: 'test.onnx',
+        kind: 'model',
+        sourceManifest: 'test',
+        localPath: 'public/models/lc0/test.onnx',
+      },
+    ],
   });
   await writeJson(channelPath, {
     schema: 'lc0_browser.artifact_channel_manifest.v1',
@@ -1290,19 +1554,20 @@ test('publish_hashed_artifacts_to_r2 plans release and channel manifest uploads'
     releaseId: 'test-release',
     releaseManifestUrl: '/releases/test-release.json',
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--channel-manifest', channelPath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--channel-manifest', channelPath, '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
-  assert.deepEqual(parsed.manifests.map((item) => [item.type, item.key, item.cacheControl]), [
-    ['release-manifest', 'releases/test-release.json', 'public, max-age=31536000, immutable'],
-    ['channel-manifest', 'channels/stable.json', 'no-cache'],
-  ]);
+  assert.deepEqual(
+    parsed.manifests.map((item) => [item.type, item.key, item.cacheControl]),
+    [
+      ['release-manifest', 'releases/test-release.json', 'public, max-age=31536000, immutable'],
+      ['channel-manifest', 'channels/stable.json', 'no-cache'],
+    ],
+  );
 });
 
 test('publish_hashed_artifacts_to_r2 rejects a channel manifest whose filename disagrees with channel.channel', async () => {
@@ -1313,13 +1578,15 @@ test('publish_hashed_artifacts_to_r2 rejects a channel manifest whose filename d
   await writeJson(releasePath, {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'test-release',
-    artifacts: [{
-      logicalUrl: '/model.onnx',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/model.onnx`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      localPath: 'model.onnx',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/model.onnx',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/model.onnx`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        localPath: 'model.onnx',
+      },
+    ],
   });
   await writeJson(channelPath, {
     schema: 'lc0_browser.artifact_channel_manifest.v1',
@@ -1328,13 +1595,11 @@ test('publish_hashed_artifacts_to_r2 rejects a channel manifest whose filename d
     releaseManifestUrl: '/releases/test-release.json',
   });
 
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--channel-manifest', channelPath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--channel-manifest', channelPath, '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /filename canary\.json does not match channel\.channel stable/);
@@ -1349,30 +1614,38 @@ test('publish_hashed_artifacts_to_r2 rejects v2 artifacts without exactly one id
     sha256: ABC_SHA256,
     bytes: 3,
   };
-  const run = () => spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const run = () =>
+    spawnSync(process.execPath, ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--bucket', 'test-bucket'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    });
 
   for (const [artifact, expected] of [
-    [{
-      logicalUrl: '/legacy/engine.wasm',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/legacy.wasm`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-    }, /V2 artifact has no representations/],
-    [{
-      logicalUrl: '/models/model.onnx',
-      raw: { sha256: ABC_SHA256, bytes: 3 },
-      representations: [],
-    }, /V2 artifact has no representations/],
-    [{
-      logicalUrl: '/models/model.onnx',
-      raw: { sha256: ABC_SHA256, bytes: 3 },
-      representations: [identity, { ...identity }],
-    }, /must have exactly one identity representation.*found 2/],
+    [
+      {
+        logicalUrl: '/legacy/engine.wasm',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/legacy.wasm`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+      },
+      /V2 artifact has no representations/,
+    ],
+    [
+      {
+        logicalUrl: '/models/model.onnx',
+        raw: { sha256: ABC_SHA256, bytes: 3 },
+        representations: [],
+      },
+      /V2 artifact has no representations/,
+    ],
+    [
+      {
+        logicalUrl: '/models/model.onnx',
+        raw: { sha256: ABC_SHA256, bytes: 3 },
+        representations: [identity, { ...identity }],
+      },
+      /must have exactly one identity representation.*found 2/,
+    ],
   ]) {
     await writeJson(releasePath, {
       schema: 'lc0_browser.artifact_release_manifest.v2',
@@ -1391,25 +1664,32 @@ test('publish_hashed_artifacts_to_r2 plans deduplicated v2 identity and Brotli r
   const sourceB = join(root, 'b.onnx');
   await writeFile(sourceA, 'abc');
   await writeFile(sourceB, 'abc');
-  const materialize = spawnSync(process.execPath, [
-    'scripts/publish_content_addressed_release.mjs',
-    '--root', root,
-    '--release-id', 'v2-release',
-    '--channel', 'stable',
-    '--asset', `model-a=${sourceA}`,
-    '--asset', `model-b=${sourceB}`,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const materialize = spawnSync(
+    process.execPath,
+    [
+      'scripts/publish_content_addressed_release.mjs',
+      '--root',
+      root,
+      '--release-id',
+      'v2-release',
+      '--channel',
+      'stable',
+      '--asset',
+      `model-a=${sourceA}`,
+      '--asset',
+      `model-b=${sourceB}`,
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(materialize.status, 0, materialize.stderr);
 
   const releasePath = join(root, 'releases/v2-release.json');
   const channelPath = join(root, 'channels/stable.json');
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--channel-manifest', channelPath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--channel-manifest', channelPath, '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.releaseSchema, 'lc0-webgpu.artifact-release.v2');
@@ -1455,12 +1735,11 @@ test('publish_hashed_artifacts_to_r2 deduplicates aliases with compatible repres
     ],
   });
 
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
 
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
@@ -1508,21 +1787,32 @@ test('publish_hashed_artifacts_to_r2 rejects conflicting MIME types before remot
     releaseManifestUrl: '/releases/conflicting-mime-aliases.json',
   });
   const logPath = join(root, 'publish.log');
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--channel-manifest', channelPath,
-    '--bucket', 'test-bucket',
-    '--execute',
-    '--wrangler-bin', await writeStatefulWrangler(root),
-    '--aws-bin', await writeAtomicAws(root),
-    '--r2-endpoint', 'https://r2.invalid',
-  ], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, LOG: logPath, MOCK_R2_DIR: join(root, 'mock-r2') },
-  });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--channel-manifest',
+      channelPath,
+      '--bucket',
+      'test-bucket',
+      '--execute',
+      '--wrangler-bin',
+      await writeStatefulWrangler(root),
+      '--aws-bin',
+      await writeAtomicAws(root),
+      '--r2-endpoint',
+      'https://r2.invalid',
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: { ...process.env, LOG: logPath, MOCK_R2_DIR: join(root, 'mock-r2') },
+    },
+  );
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, new RegExp(`Conflicting v2 representation metadata for artifacts/sha256/${ABC_SHA256}/identity`));
@@ -1543,12 +1833,11 @@ test('publish_hashed_artifacts_to_r2 uses any local duplicate when an inherited 
       { name: 'missing-later-alias', localPath: 'missing.onnx', raw: { bytes: 3, sha256: ABC_SHA256 }, representations: [identity] },
     ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.plannedCount, 1);
@@ -1564,12 +1853,14 @@ test('publish_hashed_artifacts_to_r2 rejects same-length corrupt v2 remote bodie
   await writeJson(releasePath, {
     schema: 'lc0-webgpu.artifact-release.v2',
     releaseId: 'v2-corrupt',
-    artifacts: [{
-      name: 'model',
-      localPath: 'model.onnx',
-      raw: { bytes: 3, sha256: ABC_SHA256 },
-      representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
-    }],
+    artifacts: [
+      {
+        name: 'model',
+        localPath: 'model.onnx',
+        raw: { bytes: 3, sha256: ABC_SHA256 },
+        representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
+      },
+    ],
   });
   const server = createServer((req, res) => {
     const headers = {
@@ -1584,10 +1875,14 @@ test('publish_hashed_artifacts_to_r2 rejects same-length corrupt v2 remote bodie
   try {
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--bucket',
+      'test-bucket',
+      '--artifact-base',
+      `http://127.0.0.1:${port}`,
       '--probe-existing',
     ]);
     assert.notEqual(result.status, 0);
@@ -1608,30 +1903,37 @@ test('publish_hashed_artifacts_to_r2 trusts encoded-length metadata when identit
   await writeJson(releasePath, {
     schema: 'lc0-webgpu.artifact-release.v2',
     releaseId: 'v2-normalized-head',
-    artifacts: [{
-      name: 'model',
-      raw: { bytes: identityBody.byteLength, sha256: ABC_SHA256 },
-      representations: [
-        {
-          encoding: 'identity',
-          url: `/artifacts/sha256/${ABC_SHA256}/identity`,
-          localPath: 'model.onnx',
-          bytes: identityBody.byteLength,
-          sha256: ABC_SHA256,
-        },
-        {
-          encoding: 'br',
-          url: `/artifacts/sha256/${ABC_SHA256}/br/${brSha256}`,
-          localPath: 'model.onnx.br',
-          bytes: brBody.byteLength,
-          sha256: brSha256,
-        },
-      ],
-    }],
+    artifacts: [
+      {
+        name: 'model',
+        raw: { bytes: identityBody.byteLength, sha256: ABC_SHA256 },
+        representations: [
+          {
+            encoding: 'identity',
+            url: `/artifacts/sha256/${ABC_SHA256}/identity`,
+            localPath: 'model.onnx',
+            bytes: identityBody.byteLength,
+            sha256: ABC_SHA256,
+          },
+          {
+            encoding: 'br',
+            url: `/artifacts/sha256/${ABC_SHA256}/br/${brSha256}`,
+            localPath: 'model.onnx.br',
+            bytes: brBody.byteLength,
+            sha256: brSha256,
+          },
+        ],
+      },
+    ],
   });
   const server = createServer((req, res) => {
     const isBr = req.url?.endsWith(`/br/${brSha256}`);
-    const servesBr = isBr && req.headers['accept-encoding']?.split(',').map((value) => value.trim()).includes('br');
+    const servesBr =
+      isBr &&
+      req.headers['accept-encoding']
+        ?.split(',')
+        .map((value) => value.trim())
+        .includes('br');
     const body = servesBr ? brBody : identityBody;
     const headers = {
       'Content-Length': req.method === 'HEAD' ? '0' : String(body.byteLength),
@@ -1647,10 +1949,14 @@ test('publish_hashed_artifacts_to_r2 trusts encoded-length metadata when identit
   try {
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--bucket',
+      'test-bucket',
+      '--artifact-base',
+      `http://127.0.0.1:${port}`,
       '--probe-existing',
     ]);
     assert.equal(result.status, 0, result.stderr);
@@ -1668,12 +1974,11 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
   const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-v2-execute-'));
   const source = join(root, 'model.onnx');
   await writeFile(source, 'abc');
-  const materialize = spawnSync(process.execPath, [
-    'scripts/publish_content_addressed_release.mjs',
-    '--root', root,
-    '--release-id', 'v2-execute',
-    '--asset', `model=${source}`,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const materialize = spawnSync(
+    process.execPath,
+    ['scripts/publish_content_addressed_release.mjs', '--root', root, '--release-id', 'v2-execute', '--asset', `model=${source}`],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(materialize.status, 0, materialize.stderr);
 
   const server = createServer((_req, res) => res.writeHead(404).end());
@@ -1683,24 +1988,55 @@ test('publish_hashed_artifacts_to_r2 uploads v2 Brotli bodies with Content-Encod
     const r2Root = join(root, 'mock-r2');
     const wrangler = await writeStatefulWrangler(root);
     const aws = await writeAtomicAws(root);
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', join(root, 'releases/v2-execute.json'),
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        join(root, 'releases/v2-execute.json'),
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+    );
     assert.equal(result.status, 0, result.stderr);
     const log = await readFile(logPath, 'utf8');
-    assert.match(log, new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity --body .* --content-type application/octet-stream --cache-control public, max-age=31536000, immutable --if-none-match \\* --endpoint-url https://r2\\.invalid --region auto`));
-    assert.match(log, new RegExp(`s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64} --body .* --content-type application/octet-stream --cache-control public, max-age=31536000, immutable --if-none-match \\* --endpoint-url https://r2\\.invalid --region auto --content-encoding br`));
-    assert.match(log, /s3api put-object --bucket test-bucket --key releases\/v2-execute\.json .*--content-type application\/json; charset=utf-8 --cache-control public, max-age=31536000, immutable --if-none-match \* .*--endpoint-url https:\/\/r2\.invalid --region auto/);
-    assert.match(log, new RegExp(`s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity --endpoint-url https://r2\\.invalid --region auto`));
-    assert.match(log, new RegExp(`s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64} --endpoint-url https://r2\\.invalid --region auto`));
+    assert.match(
+      log,
+      new RegExp(
+        `s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity --body .* --content-type application/octet-stream --cache-control public, max-age=31536000, immutable --if-none-match \\* --endpoint-url https://r2\\.invalid --region auto`,
+      ),
+    );
+    assert.match(
+      log,
+      new RegExp(
+        `s3api put-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64} --body .* --content-type application/octet-stream --cache-control public, max-age=31536000, immutable --if-none-match \\* --endpoint-url https://r2\\.invalid --region auto --content-encoding br`,
+      ),
+    );
+    assert.match(
+      log,
+      /s3api put-object --bucket test-bucket --key releases\/v2-execute\.json .*--content-type application\/json; charset=utf-8 --cache-control public, max-age=31536000, immutable --if-none-match \* .*--endpoint-url https:\/\/r2\.invalid --region auto/,
+    );
+    assert.match(
+      log,
+      new RegExp(`s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/identity --endpoint-url https://r2\\.invalid --region auto`),
+    );
+    assert.match(
+      log,
+      new RegExp(
+        `s3api get-object --bucket test-bucket --key artifacts/sha256/${ABC_SHA256}/br/[a-f0-9]{64} --endpoint-url https://r2\\.invalid --region auto`,
+      ),
+    );
     assert.doesNotMatch(log, /r2 object get/);
     assert.doesNotMatch(log, /r2 object put test-bucket\/artifacts\//);
   } finally {
@@ -1715,12 +2051,14 @@ test('publish_hashed_artifacts_to_r2 refuses a warm valid CDN object when author
   await writeJson(releasePath, {
     schema: 'lc0-webgpu.artifact-release.v2',
     releaseId: 'stale-cdn',
-    artifacts: [{
-      name: 'model',
-      localPath: 'model.onnx',
-      raw: { bytes: 3, sha256: ABC_SHA256 },
-      representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
-    }],
+    artifacts: [
+      {
+        name: 'model',
+        localPath: 'model.onnx',
+        raw: { bytes: 3, sha256: ABC_SHA256 },
+        representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
+      },
+    ],
   });
   const server = createServer((req, res) => {
     const headers = {
@@ -1744,17 +2082,27 @@ test('publish_hashed_artifacts_to_r2 refuses a warm valid CDN object when author
       CacheControl: 'public, max-age=31536000, immutable',
     });
 
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+    );
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Refusing to overwrite immutable object .*remote content differs/);
@@ -1774,12 +2122,14 @@ test('publish_hashed_artifacts_to_r2 rejects a differing artifact after an atomi
   await writeJson(releasePath, {
     schema: 'lc0-webgpu.artifact-release.v2',
     releaseId: 'create-race',
-    artifacts: [{
-      name: 'model',
-      localPath: 'model.onnx',
-      raw: { bytes: 3, sha256: ABC_SHA256 },
-      representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
-    }],
+    artifacts: [
+      {
+        name: 'model',
+        localPath: 'model.onnx',
+        raw: { bytes: 3, sha256: ABC_SHA256 },
+        representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
+      },
+    ],
   });
   await writeJson(channelPath, {
     schema: 'lc0_browser.artifact_channel_manifest.v2',
@@ -1802,18 +2152,29 @@ test('publish_hashed_artifacts_to_r2 rejects a differing artifact after an atomi
       CacheControl: 'public, max-age=31536000, immutable',
     });
 
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--channel-manifest',
+        channelPath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+    );
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Refusing to overwrite immutable object .*remote content differs/);
@@ -1833,13 +2194,21 @@ test('publish_hashed_artifacts_to_r2 rejects Brotli conflicts with missing or wr
     const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-br-metadata-race-'));
     const source = join(root, 'model.onnx');
     await writeFile(source, 'abc');
-    const materialize = spawnSync(process.execPath, [
-      'scripts/publish_content_addressed_release.mjs',
-      '--root', root,
-      '--release-id', 'br-metadata-race',
-      '--channel', 'stable',
-      '--asset', `model=${source}`,
-    ], { cwd: process.cwd(), encoding: 'utf8' });
+    const materialize = spawnSync(
+      process.execPath,
+      [
+        'scripts/publish_content_addressed_release.mjs',
+        '--root',
+        root,
+        '--release-id',
+        'br-metadata-race',
+        '--channel',
+        'stable',
+        '--asset',
+        `model=${source}`,
+      ],
+      { cwd: process.cwd(), encoding: 'utf8' },
+    );
     assert.equal(materialize.status, 0, materialize.stderr);
     const releasePath = join(root, 'releases/br-metadata-race.json');
     const channelPath = join(root, 'channels/stable.json');
@@ -1861,18 +2230,29 @@ test('publish_hashed_artifacts_to_r2 rejects Brotli conflicts with missing or wr
         ...(contentEncoding ? { ContentEncoding: contentEncoding } : {}),
       });
 
-      const result = await runNode([
-        'scripts/publish_hashed_artifacts_to_r2.mjs',
-        '--root', root,
-        '--release', releasePath,
-        '--channel-manifest', channelPath,
-        '--bucket', 'test-bucket',
-        '--artifact-base', `http://127.0.0.1:${port}`,
-        '--execute',
-        '--wrangler-bin', wrangler,
-        '--aws-bin', aws,
-        '--r2-endpoint', 'https://r2.invalid',
-      ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+      const result = await runNode(
+        [
+          'scripts/publish_hashed_artifacts_to_r2.mjs',
+          '--root',
+          root,
+          '--release',
+          releasePath,
+          '--channel-manifest',
+          channelPath,
+          '--bucket',
+          'test-bucket',
+          '--artifact-base',
+          `http://127.0.0.1:${port}`,
+          '--execute',
+          '--wrangler-bin',
+          wrangler,
+          '--aws-bin',
+          aws,
+          '--r2-endpoint',
+          'https://r2.invalid',
+        ],
+        { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+      );
 
       assert.notEqual(result.status, 0);
       assert.match(result.stderr, new RegExp(`Content-Encoding is ${contentEncoding ?? 'missing'}, expected br`));
@@ -1895,13 +2275,15 @@ test('publish_hashed_artifacts_to_r2 rejects an identity conflict with wrong aut
   await writeJson(releasePath, {
     schema: 'lc0-webgpu.artifact-release.v2',
     releaseId: 'identity-metadata-race',
-    artifacts: [{
-      name: 'model',
-      localPath: 'model.onnx',
-      contentType: 'application/octet-stream',
-      raw: { bytes: 3, sha256: ABC_SHA256 },
-      representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
-    }],
+    artifacts: [
+      {
+        name: 'model',
+        localPath: 'model.onnx',
+        contentType: 'application/octet-stream',
+        raw: { bytes: 3, sha256: ABC_SHA256 },
+        representations: [{ encoding: 'identity', url: `/artifacts/sha256/${ABC_SHA256}/identity`, bytes: 3, sha256: ABC_SHA256 }],
+      },
+    ],
   });
   await writeJson(channelPath, {
     schema: 'lc0_browser.artifact_channel_manifest.v2',
@@ -1924,18 +2306,29 @@ test('publish_hashed_artifacts_to_r2 rejects an identity conflict with wrong aut
       CacheControl: 'public, max-age=31536000, immutable',
     });
 
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--channel-manifest',
+        channelPath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+    );
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Content-Type is text\/plain, expected application\/octet-stream/);
@@ -1973,17 +2366,27 @@ test('publish_hashed_artifacts_to_r2 rejects an identical release conflict with 
     CacheControl: 'no-cache',
   });
 
-  const result = await runNode([
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--channel-manifest', channelPath,
-    '--bucket', 'test-bucket',
-    '--execute',
-    '--wrangler-bin', wrangler,
-    '--aws-bin', aws,
-    '--r2-endpoint', 'https://r2.invalid',
-  ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+  const result = await runNode(
+    [
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--channel-manifest',
+      channelPath,
+      '--bucket',
+      'test-bucket',
+      '--execute',
+      '--wrangler-bin',
+      wrangler,
+      '--aws-bin',
+      aws,
+      '--r2-endpoint',
+      'https://r2.invalid',
+    ],
+    { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+  );
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Cache-Control is no-cache, expected public, max-age=31536000, immutable/);
@@ -2015,16 +2418,18 @@ test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads',
     await writeJson(releasePath, {
       schema: 'lc0_browser.artifact_release_manifest.v1',
       releaseId: 'test-release',
-      artifacts: [{
-        logicalUrl: '/models/lc0/test.onnx',
-        artifactUrl: `http://127.0.0.1:${port}/artifacts/sha256/${ABC_SHA256}/test.onnx`,
-        sha256: ABC_SHA256,
-        bytes: 3,
-        file: 'test.onnx',
-        kind: 'model',
-        sourceManifest: 'test',
-        localPath: 'public/models/lc0/test.onnx',
-      }],
+      artifacts: [
+        {
+          logicalUrl: '/models/lc0/test.onnx',
+          artifactUrl: `http://127.0.0.1:${port}/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+          sha256: ABC_SHA256,
+          bytes: 3,
+          file: 'test.onnx',
+          kind: 'model',
+          sourceManifest: 'test',
+          localPath: 'public/models/lc0/test.onnx',
+        },
+      ],
     });
     const logPath = join(root, 'wrangler.log');
     const r2Root = join(root, 'mock-r2');
@@ -2036,16 +2441,25 @@ test('publish_hashed_artifacts_to_r2 skips existing validated artifact uploads',
       ContentType: 'application/octet-stream',
       CacheControl: 'public, max-age=31536000, immutable',
     });
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--bucket', 'test-bucket',
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--bucket',
+        'test-bucket',
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+    );
     assert.equal(result.status, 0, result.stderr);
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.planned[0].remoteState, 'identical-r2');
@@ -2065,10 +2479,12 @@ test('publish_hashed_artifacts_to_r2 rejects existing artifact size mismatches',
   await writeFile(join(root, 'public/models/lc0/test.onnx'), 'abc');
   const server = createServer((req, res) => {
     if (req.method === 'HEAD') {
-      res.writeHead(200, {
-        'X-Artifact-Content-Length': '2',
-        'Cache-Control': 'public, max-age=31536000, immutable',
-      }).end();
+      res
+        .writeHead(200, {
+          'X-Artifact-Content-Length': '2',
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        })
+        .end();
       return;
     }
     res.writeHead(200, { 'Content-Length': '3' }).end('abc');
@@ -2079,22 +2495,27 @@ test('publish_hashed_artifacts_to_r2 rejects existing artifact size mismatches',
     await writeJson(releasePath, {
       schema: 'lc0_browser.artifact_release_manifest.v1',
       releaseId: 'test-release',
-      artifacts: [{
-        logicalUrl: '/models/lc0/test.onnx',
-        artifactUrl: `http://127.0.0.1:${port}/artifacts/sha256/${ABC_SHA256}/test.onnx`,
-        sha256: ABC_SHA256,
-        bytes: 3,
-        file: 'test.onnx',
-        kind: 'model',
-        sourceManifest: 'test',
-        localPath: 'public/models/lc0/test.onnx',
-      }],
+      artifacts: [
+        {
+          logicalUrl: '/models/lc0/test.onnx',
+          artifactUrl: `http://127.0.0.1:${port}/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+          sha256: ABC_SHA256,
+          bytes: 3,
+          file: 'test.onnx',
+          kind: 'model',
+          sourceManifest: 'test',
+          localPath: 'public/models/lc0/test.onnx',
+        },
+      ],
     });
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--bucket', 'test-bucket',
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--bucket',
+      'test-bucket',
       '--probe-existing',
     ]);
     assert.notEqual(result.status, 0);
@@ -2122,22 +2543,27 @@ test('publish_hashed_artifacts_to_r2 rejects existing artifact hash mismatches',
     await writeJson(releasePath, {
       schema: 'lc0_browser.artifact_release_manifest.v1',
       releaseId: 'test-release',
-      artifacts: [{
-        logicalUrl: '/models/lc0/test.onnx',
-        artifactUrl: `http://127.0.0.1:${port}/artifacts/sha256/${ABC_SHA256}/test.onnx`,
-        sha256: ABC_SHA256,
-        bytes: 3,
-        file: 'test.onnx',
-        kind: 'model',
-        sourceManifest: 'test',
-        localPath: 'public/models/lc0/test.onnx',
-      }],
+      artifacts: [
+        {
+          logicalUrl: '/models/lc0/test.onnx',
+          artifactUrl: `http://127.0.0.1:${port}/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+          sha256: ABC_SHA256,
+          bytes: 3,
+          file: 'test.onnx',
+          kind: 'model',
+          sourceManifest: 'test',
+          localPath: 'public/models/lc0/test.onnx',
+        },
+      ],
     });
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--bucket', 'test-bucket',
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--bucket',
+      'test-bucket',
       '--probe-existing',
     ]);
     assert.notEqual(result.status, 0);
@@ -2156,16 +2582,18 @@ test('publish_hashed_artifacts_to_r2 rejects a stale channel manifest', async ()
   await writeJson(releasePath, {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'test-release',
-    artifacts: [{
-      logicalUrl: '/models/lc0/test.onnx',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      file: 'test.onnx',
-      kind: 'model',
-      sourceManifest: 'test',
-      localPath: 'public/models/lc0/test.onnx',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/models/lc0/test.onnx',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        file: 'test.onnx',
+        kind: 'model',
+        sourceManifest: 'test',
+        localPath: 'public/models/lc0/test.onnx',
+      },
+    ],
   });
   await writeJson(channelPath, {
     schema: 'lc0_browser.artifact_channel_manifest.v1',
@@ -2173,13 +2601,11 @@ test('publish_hashed_artifacts_to_r2 rejects a stale channel manifest', async ()
     releaseId: 'old-release',
     releaseManifestUrl: '/releases/old-release.json',
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--channel-manifest', channelPath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--channel-manifest', channelPath, '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /does not match release test-release/);
 });
@@ -2192,16 +2618,18 @@ test('publish_hashed_artifacts_to_r2 refuses to overwrite release manifests', as
   await writeJson(releasePath, {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'test-release',
-    artifacts: [{
-      logicalUrl: '/models/lc0/test.onnx',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      file: 'test.onnx',
-      kind: 'model',
-      sourceManifest: 'test',
-      localPath: 'public/models/lc0/test.onnx',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/models/lc0/test.onnx',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        file: 'test.onnx',
+        kind: 'model',
+        sourceManifest: 'test',
+        localPath: 'public/models/lc0/test.onnx',
+      },
+    ],
   });
   const server = createServer((_req, res) => res.writeHead(404).end());
   const port = await listen(server);
@@ -2216,17 +2644,27 @@ test('publish_hashed_artifacts_to_r2 refuses to overwrite release manifests', as
       ContentType: 'application/json; charset=utf-8',
       CacheControl: 'public, max-age=31536000, immutable',
     });
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, MOCK_R2_DIR: r2Root } },
+    );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Refusing to accept immutable object .*releases\/test-release\.json/);
   } finally {
@@ -2242,13 +2680,15 @@ test('publish_hashed_artifacts_to_r2 fails closed when artifact existence cannot
   await writeJson(releasePath, {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'test-release',
-    artifacts: [{
-      logicalUrl: '/models/lc0/test.onnx',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      localPath: 'public/models/lc0/test.onnx',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/models/lc0/test.onnx',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        localPath: 'public/models/lc0/test.onnx',
+      },
+    ],
   });
   const server = createServer((req, res) => {
     const headers = {
@@ -2268,14 +2708,21 @@ test('publish_hashed_artifacts_to_r2 fails closed when artifact existence cannot
     await chmod(aws, 0o755);
     const result = await runNode([
       'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--bucket',
+      'test-bucket',
+      '--artifact-base',
+      `http://127.0.0.1:${port}`,
       '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
+      '--wrangler-bin',
+      wrangler,
+      '--aws-bin',
+      aws,
+      '--r2-endpoint',
+      'https://r2.invalid',
     ]);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, new RegExp(`Unable to verify immutable object .*artifacts/sha256/${ABC_SHA256}/test\\.onnx`));
@@ -2293,13 +2740,15 @@ test('publish_hashed_artifacts_to_r2 treats an identical remote release manifest
   await writeJson(releasePath, {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'test-release',
-    artifacts: [{
-      logicalUrl: '/models/lc0/test.onnx',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      localPath: 'public/models/lc0/test.onnx',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/models/lc0/test.onnx',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/test.onnx`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        localPath: 'public/models/lc0/test.onnx',
+      },
+    ],
   });
   await writeJson(channelPath, {
     schema: 'lc0_browser.artifact_channel_manifest.v1',
@@ -2321,18 +2770,29 @@ test('publish_hashed_artifacts_to_r2 treats an identical remote release manifest
       ContentType: 'application/json; charset=utf-8',
       CacheControl: 'public, max-age=31536000, immutable',
     });
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
+    const result = await runNode(
+      [
+        'scripts/publish_hashed_artifacts_to_r2.mjs',
+        '--root',
+        root,
+        '--release',
+        releasePath,
+        '--channel-manifest',
+        channelPath,
+        '--bucket',
+        'test-bucket',
+        '--artifact-base',
+        `http://127.0.0.1:${port}`,
+        '--execute',
+        '--wrangler-bin',
+        wrangler,
+        '--aws-bin',
+        aws,
+        '--r2-endpoint',
+        'https://r2.invalid',
+      ],
+      { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+    );
     assert.equal(result.status, 0, result.stderr);
     const parsed = JSON.parse(result.stdout);
     const releaseItem = parsed.manifests.find((item) => item.type === 'release-manifest');
@@ -2355,35 +2815,47 @@ test('publish_hashed_artifacts_to_r2 atomically admits only one competing releas
   const aws = await writeAtomicAws(root);
   const publishers = ['alpha', 'beta'];
 
-  const runs = await Promise.all(publishers.map(async (publisher) => {
-    const releasePath = join(root, publisher, `${publisher}.json`);
-    const channelPath = join(root, publisher, 'stable.json');
-    await writeJson(releasePath, {
-      schema: 'lc0_browser.artifact_release_manifest.v1',
-      releaseId: 'test-release',
-      publisher,
-      artifacts: [],
-    });
-    await writeJson(channelPath, {
-      schema: 'lc0_browser.artifact_channel_manifest.v1',
-      channel: 'stable',
-      releaseId: 'test-release',
-      releaseManifestUrl: '/releases/test-release.json',
-      publisher,
-    });
-    const result = await runNode([
-      'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', releasePath,
-      '--channel-manifest', channelPath,
-      '--bucket', 'test-bucket',
-      '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
-    ], { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } });
-    return { publisher, result };
-  }));
+  const runs = await Promise.all(
+    publishers.map(async (publisher) => {
+      const releasePath = join(root, publisher, `${publisher}.json`);
+      const channelPath = join(root, publisher, 'stable.json');
+      await writeJson(releasePath, {
+        schema: 'lc0_browser.artifact_release_manifest.v1',
+        releaseId: 'test-release',
+        publisher,
+        artifacts: [],
+      });
+      await writeJson(channelPath, {
+        schema: 'lc0_browser.artifact_channel_manifest.v1',
+        channel: 'stable',
+        releaseId: 'test-release',
+        releaseManifestUrl: '/releases/test-release.json',
+        publisher,
+      });
+      const result = await runNode(
+        [
+          'scripts/publish_hashed_artifacts_to_r2.mjs',
+          '--root',
+          root,
+          '--release',
+          releasePath,
+          '--channel-manifest',
+          channelPath,
+          '--bucket',
+          'test-bucket',
+          '--execute',
+          '--wrangler-bin',
+          wrangler,
+          '--aws-bin',
+          aws,
+          '--r2-endpoint',
+          'https://r2.invalid',
+        ],
+        { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } },
+      );
+      return { publisher, result };
+    }),
+  );
 
   const succeeded = runs.filter(({ result }) => result.status === 0);
   const rejected = runs.filter(({ result }) => result.status !== 0);
@@ -2407,12 +2879,11 @@ test('publish_hashed_artifacts_to_r2 safely handles concurrent writers for the s
   const root = await mkdtemp(join(tmpdir(), 'lc0-r2-publish-artifact-race-'));
   const source = join(root, 'model.onnx');
   await writeFile(source, 'abc');
-  const materialize = spawnSync(process.execPath, [
-    'scripts/publish_content_addressed_release.mjs',
-    '--root', root,
-    '--release-id', 'artifact-race',
-    '--asset', `model=${source}`,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const materialize = spawnSync(
+    process.execPath,
+    ['scripts/publish_content_addressed_release.mjs', '--root', root, '--release-id', 'artifact-race', '--asset', `model=${source}`],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.equal(materialize.status, 0, materialize.stderr);
 
   const server = createServer((_req, res) => res.writeHead(404).end());
@@ -2424,21 +2895,32 @@ test('publish_hashed_artifacts_to_r2 safely handles concurrent writers for the s
     const aws = await writeAtomicAws(root);
     const args = [
       'scripts/publish_hashed_artifacts_to_r2.mjs',
-      '--root', root,
-      '--release', join(root, 'releases/artifact-race.json'),
-      '--channel-manifest', join(root, 'channels/stable.json'),
-      '--bucket', 'test-bucket',
-      '--artifact-base', `http://127.0.0.1:${port}`,
+      '--root',
+      root,
+      '--release',
+      join(root, 'releases/artifact-race.json'),
+      '--channel-manifest',
+      join(root, 'channels/stable.json'),
+      '--bucket',
+      'test-bucket',
+      '--artifact-base',
+      `http://127.0.0.1:${port}`,
       '--execute',
-      '--wrangler-bin', wrangler,
-      '--aws-bin', aws,
-      '--r2-endpoint', 'https://r2.invalid',
+      '--wrangler-bin',
+      wrangler,
+      '--aws-bin',
+      aws,
+      '--r2-endpoint',
+      'https://r2.invalid',
     ];
     const runs = await Promise.all([
       runNode(args, { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } }),
       runNode(args, { env: { ...process.env, LOG: logPath, MOCK_R2_DIR: r2Root } }),
     ]);
-    assert.ok(runs.every((result) => result.status === 0), runs.map((result) => result.stderr).join('\n'));
+    assert.ok(
+      runs.every((result) => result.status === 0),
+      runs.map((result) => result.stderr).join('\n'),
+    );
     const plans = runs.map((result) => JSON.parse(result.stdout));
     for (const plan of plans) {
       assert.ok(plan.planned.every((item) => ['created-r2', 'identical-r2'].includes(item.remoteState)));
@@ -2466,26 +2948,36 @@ test('publish_hashed_artifacts_to_r2 refuses execute when artifacts are skipped'
   await writeJson(releasePath, {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'test-release',
-    artifacts: [{
-      logicalUrl: '/models/lc0/missing.onnx',
-      artifactUrl: `/artifacts/sha256/${ABC_SHA256}/missing.onnx`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      file: 'missing.onnx',
-      kind: 'model',
-      sourceManifest: 'test',
-      localPath: 'public/models/lc0/missing.onnx',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/models/lc0/missing.onnx',
+        artifactUrl: `/artifacts/sha256/${ABC_SHA256}/missing.onnx`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        file: 'missing.onnx',
+        kind: 'model',
+        sourceManifest: 'test',
+        localPath: 'public/models/lc0/missing.onnx',
+      },
+    ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--bucket', 'test-bucket',
-    '--allow-missing',
-    '--execute',
-    '--wrangler-bin', process.execPath,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      'scripts/publish_hashed_artifacts_to_r2.mjs',
+      '--root',
+      root,
+      '--release',
+      releasePath,
+      '--bucket',
+      'test-bucket',
+      '--allow-missing',
+      '--execute',
+      '--wrangler-bin',
+      process.execPath,
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Refusing to publish release\/channel manifests when artifacts were skipped/);
 });
@@ -2499,23 +2991,24 @@ test('publish_hashed_artifacts_to_r2 rejects artifactUrl hash mismatches', async
   await writeJson(releasePath, {
     schema: 'lc0_browser.artifact_release_manifest.v1',
     releaseId: 'bad-key',
-    artifacts: [{
-      logicalUrl: '/models/lc0/test.onnx',
-      artifactUrl: `/artifacts/sha256/${wrongSha}/test.onnx`,
-      sha256: ABC_SHA256,
-      bytes: 3,
-      file: 'test.onnx',
-      kind: 'model',
-      sourceManifest: 'test',
-      localPath: 'public/models/lc0/test.onnx',
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/models/lc0/test.onnx',
+        artifactUrl: `/artifacts/sha256/${wrongSha}/test.onnx`,
+        sha256: ABC_SHA256,
+        bytes: 3,
+        file: 'test.onnx',
+        kind: 'model',
+        sourceManifest: 'test',
+        localPath: 'public/models/lc0/test.onnx',
+      },
+    ],
   });
-  const result = spawnSync(process.execPath, [
-    'scripts/publish_hashed_artifacts_to_r2.mjs',
-    '--root', root,
-    '--release', releasePath,
-    '--bucket', 'test-bucket',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/publish_hashed_artifacts_to_r2.mjs', '--root', root, '--release', releasePath, '--bucket', 'test-bucket'],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Content-addressed key mismatch/);
 });

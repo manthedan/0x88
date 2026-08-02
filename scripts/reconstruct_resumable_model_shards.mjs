@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -28,15 +28,45 @@ export function parseArgs(argv) {
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
-    if (arg === '--manifest' && next) { args.manifest = next; index += 1; continue; }
-    if (arg === '--output' && next) { args.output = next; index += 1; continue; }
-    if (arg === '--cache-dir' && next) { args.cacheDir = next; index += 1; continue; }
-    if (arg === '--concurrency' && next) { args.concurrency = Number(next); index += 1; continue; }
-    if (arg === '--max-manifest-bytes' && next) { args.maxManifestBytes = Number(next); index += 1; continue; }
-    if (arg === '--max-decoded-bytes' && next) { args.maxDecodedBytes = Number(next); index += 1; continue; }
-    if (arg === '--max-shard-references' && next) { args.maxShardReferences = Number(next); index += 1; continue; }
+    if (arg === '--manifest' && next) {
+      args.manifest = next;
+      index += 1;
+      continue;
+    }
+    if (arg === '--output' && next) {
+      args.output = next;
+      index += 1;
+      continue;
+    }
+    if (arg === '--cache-dir' && next) {
+      args.cacheDir = next;
+      index += 1;
+      continue;
+    }
+    if (arg === '--concurrency' && next) {
+      args.concurrency = Number(next);
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-manifest-bytes' && next) {
+      args.maxManifestBytes = Number(next);
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-decoded-bytes' && next) {
+      args.maxDecodedBytes = Number(next);
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-shard-references' && next) {
+      args.maxShardReferences = Number(next);
+      index += 1;
+      continue;
+    }
     if (arg === '-h' || arg === '--help') {
-      console.log('Usage: node --experimental-strip-types scripts/reconstruct_resumable_model_shards.mjs --manifest model.resumable.json --output model.onnx --cache-dir shard-cache [--concurrency 3] [--max-manifest-bytes bytes] [--max-decoded-bytes bytes] [--max-shard-references count]');
+      console.log(
+        'Usage: node --experimental-strip-types scripts/reconstruct_resumable_model_shards.mjs --manifest model.resumable.json --output model.onnx --cache-dir shard-cache [--concurrency 3] [--max-manifest-bytes bytes] [--max-decoded-bytes bytes] [--max-shard-references count]',
+      );
       process.exit(0);
     }
     throw new Error(`Unknown argument: ${arg}`);
@@ -129,8 +159,7 @@ export class FileModelShardStore {
       throwIfAborted(signal);
     } catch (error) {
       if (error?.code === 'ENOENT') return undefined;
-      if (error instanceof Error
-        && error.message.startsWith('Resumable model shard response exceeded expected length')) {
+      if (error instanceof Error && error.message.startsWith('Resumable model shard response exceeded expected length')) {
         await this.delete(sha256);
       }
       throw error;
@@ -148,11 +177,15 @@ export class FileModelShardStore {
       try {
         await rename(temporary, destination);
       } catch (error) {
-        if (!await exists(destination)) throw error;
+        if (!(await exists(destination))) throw error;
         await unlink(temporary);
       }
     } catch (error) {
-      try { await unlink(temporary); } catch { /* best-effort cleanup of this exact temporary file */ }
+      try {
+        await unlink(temporary);
+      } catch {
+        /* best-effort cleanup of this exact temporary file */
+      }
       throw error;
     }
   }
@@ -205,8 +238,9 @@ export class FileModelShardStore {
 
 function pathIsWithin(root, candidate) {
   const relativePath = relative(root, candidate);
-  return relativePath === ''
-    || (!isAbsolute(relativePath) && relativePath !== '..' && !relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`));
+  return (
+    relativePath === '' || (!isAbsolute(relativePath) && relativePath !== '..' && !relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`))
+  );
 }
 
 function resolveLocalShardUrl(shardUrl, manifestBaseUrl, publicationRoot) {
@@ -251,21 +285,20 @@ export function localFileFetch(publicationRoot) {
       throw new Error(`Local resumable model file escapes the publication root: ${path}`);
     }
     try {
-      const [metadata, canonicalRoot, canonicalPath] = await Promise.all([
-        lstat(path),
-        publicationRootRealPath,
-        realpath(path),
-      ]);
+      const [metadata, canonicalRoot, canonicalPath] = await Promise.all([lstat(path), publicationRootRealPath, realpath(path)]);
       throwIfAborted(signal);
       if (!metadata.isFile() || !pathIsWithin(canonicalRoot, canonicalPath)) {
         throw new Error(`Local resumable model file must be a regular file within the publication root: ${path}`);
       }
       const source = Readable.toWeb(createReadStream(path, { signal }));
-      const bounded = source.pipeThrough(new TransformStream({
-        transform(chunk, controller) {
-          controller.enqueue(chunk);
-        },
-      }), { signal });
+      const bounded = source.pipeThrough(
+        new TransformStream({
+          transform(chunk, controller) {
+            controller.enqueue(chunk);
+          },
+        }),
+        { signal },
+      );
       return new Response(bounded, {
         headers: {
           'content-length': String(metadata.size),
@@ -304,11 +337,7 @@ export async function reconstructResumableModelShards({
     onProgress,
     fetchFn: localFileFetch(publicationRoot),
     shardStore: new FileModelShardStore(cacheDir),
-    resolveShardUrl: (shardUrl, manifestBaseUrl) => resolveLocalShardUrl(
-      shardUrl,
-      manifestBaseUrl,
-      publicationRoot,
-    ),
+    resolveShardUrl: (shardUrl, manifestBaseUrl) => resolveLocalShardUrl(shardUrl, manifestBaseUrl, publicationRoot),
   });
 }
 
@@ -328,10 +357,18 @@ export async function writeReconstructedModelAtomically(outputPath, model, renam
     temporaryCreated = false;
   } catch (error) {
     if (file) {
-      try { await file.close(); } catch { /* best-effort close before cleanup */ }
+      try {
+        await file.close();
+      } catch {
+        /* best-effort close before cleanup */
+      }
     }
     if (temporaryCreated) {
-      try { await unlink(temporaryPath); } catch { /* best-effort cleanup of this exact temporary file */ }
+      try {
+        await unlink(temporaryPath);
+      } catch {
+        /* best-effort cleanup of this exact temporary file */
+      }
     }
     throw error;
   }
@@ -341,22 +378,28 @@ async function main() {
   const args = parseArgs(process.argv);
   const result = await reconstructResumableModelShards(args);
   await writeReconstructedModelAtomically(args.outputPath, result.model);
-  console.log(JSON.stringify({
-    schema: 'lc0_browser.resumable_model_reconstruction.v1',
-    researchOnly: true,
-    outputPath: args.outputPath,
-    sha256: result.sha256,
-    bytes: result.bytes,
-    downloadedBytes: result.downloadedBytes,
-    reusedBytes: result.reusedBytes,
-    downloadedShards: result.downloadedShards,
-    reusedShards: result.reusedShards,
-    corruptShardsEvicted: result.corruptShardsEvicted,
-    corruptionRetries: result.corruptionRetries,
-    peakTemporaryBytes: result.peakTemporaryBytes,
-    elapsedMs: Number(result.elapsedMs.toFixed(3)),
-    productionRecommendation: 'blocked pending successful live Artifact v2 rollout and startup evidence',
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        schema: 'lc0_browser.resumable_model_reconstruction.v1',
+        researchOnly: true,
+        outputPath: args.outputPath,
+        sha256: result.sha256,
+        bytes: result.bytes,
+        downloadedBytes: result.downloadedBytes,
+        reusedBytes: result.reusedBytes,
+        downloadedShards: result.downloadedShards,
+        reusedShards: result.reusedShards,
+        corruptShardsEvicted: result.corruptShardsEvicted,
+        corruptionRetries: result.corruptionRetries,
+        peakTemporaryBytes: result.peakTemporaryBytes,
+        elapsedMs: Number(result.elapsedMs.toFixed(3)),
+        productionRecommendation: 'blocked pending successful live Artifact v2 rollout and startup evidence',
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

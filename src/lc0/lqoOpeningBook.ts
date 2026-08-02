@@ -1,6 +1,6 @@
 import { type BoardState } from '../chess/board.ts';
-import { legalMoves } from '../chess/movegen.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
+import { legalMoves } from '../chess/movegen.ts';
 import { LQO_BLACK_OPENING_BOOK, LQO_OPENING_BOOK_MAX_PLIES, LQO_WHITE_OPENING_BOOK } from './lqoOpeningBookData.ts';
 
 export interface LqoBookMove {
@@ -9,21 +9,21 @@ export interface LqoBookMove {
 }
 
 function parseBook(rows: readonly (readonly [string, string])[]): Map<string, LqoBookMove[]> {
-  return new Map(rows.map(([key, packed]) => [
-    key,
-    packed ? packed.split(',').map((entry) => {
-      const [uci, weight] = entry.split(':');
-      return { uci, weight: Number.parseInt(weight, 36) };
-    }) : [],
-  ]));
+  return new Map(
+    rows.map(([key, packed]) => [
+      key,
+      packed
+        ? packed.split(',').map((entry) => {
+            const [uci, weight] = entry.split(':');
+            return { uci, weight: Number.parseInt(weight, 36) };
+          })
+        : [],
+    ]),
+  );
 }
 
-const lqoBlackBook = new Map<string, LqoBookMove[]>(
-  parseBook(LQO_BLACK_OPENING_BOOK),
-);
-const lqoWhiteBook = new Map<string, LqoBookMove[]>(
-  parseBook(LQO_WHITE_OPENING_BOOK),
-);
+const lqoBlackBook = new Map<string, LqoBookMove[]>(parseBook(LQO_BLACK_OPENING_BOOK));
+const lqoWhiteBook = new Map<string, LqoBookMove[]>(parseBook(LQO_WHITE_OPENING_BOOK));
 
 function sequenceKey(ply: number, historyUcis: readonly string[]): string | null {
   if (historyUcis.length < ply) return null;

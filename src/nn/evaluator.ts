@@ -1,6 +1,6 @@
-import { boardToFen, type BoardState } from '../chess/board.ts';
+import { type BoardState, boardToFen } from '../chess/board.ts';
+import { type Move, moveToActionId } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { moveToActionId, type Move } from '../chess/moveCodec.ts';
 
 export interface Evaluation {
   policy: Map<number, number>;
@@ -55,7 +55,9 @@ export class UniformEvaluator implements Evaluator {
     for (const move of moves) policy.set(moveToActionId(move), p);
     return { policy, wdl: [0.33, 0.34, 0.33] };
   }
-  evaluateBatch(boards: BoardState[]): Evaluation[] { return boards.map((board) => this.evaluate(board)); }
+  evaluateBatch(boards: BoardState[]): Evaluation[] {
+    return boards.map((board) => this.evaluate(board));
+  }
 }
 
 export interface CachedEvaluatorMetrics {
@@ -80,7 +82,9 @@ function cloneEvaluation(evaln: Evaluation): Evaluation {
   return {
     policy: new Map(evaln.policy),
     wdl: [evaln.wdl[0], evaln.wdl[1], evaln.wdl[2]],
-    ...(evaln.auxiliaryWdls ? { auxiliaryWdls: Object.fromEntries(Object.entries(evaln.auxiliaryWdls).map(([k, v]) => [k, [v[0], v[1], v[2]] as [number, number, number]])) } : {}),
+    ...(evaln.auxiliaryWdls
+      ? { auxiliaryWdls: Object.fromEntries(Object.entries(evaln.auxiliaryWdls).map(([k, v]) => [k, [v[0], v[1], v[2]] as [number, number, number]])) }
+      : {}),
     ...(evaln.actionValues ? { actionValues: new Map(evaln.actionValues) } : {}),
     ...(evaln.rankScores ? { rankScores: new Map(evaln.rankScores) } : {}),
     ...(evaln.regrets ? { regrets: new Map(evaln.regrets) } : {}),
@@ -292,7 +296,10 @@ export class BrokeredEvaluator implements Evaluator {
     this.metricsState.logicalPositions += boards.length;
     return new Promise((resolve, reject) => {
       this.pending.push({ boards, contexts, enqueuedAt: currentMs(), resolve, reject });
-      this.metricsState.maxQueueDepth = Math.max(this.metricsState.maxQueueDepth, this.pending.reduce((s, p) => s + p.boards.length, 0));
+      this.metricsState.maxQueueDepth = Math.max(
+        this.metricsState.maxQueueDepth,
+        this.pending.reduce((s, p) => s + p.boards.length, 0),
+      );
       this.scheduleFlush();
     });
   }

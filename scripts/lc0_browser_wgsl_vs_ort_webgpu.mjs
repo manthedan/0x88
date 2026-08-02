@@ -12,17 +12,21 @@ const VARIANTS = {
   wgsl: {
     label: 'wgsl-encoder0-block',
     doneText: 'ENCODER0_BLOCK_BENCH_DONE',
-    query: (args) => `encoder0BlockBench=1&encoder0BlockWarmup=${args.wgslWarmup}&encoder0BlockIters=${args.wgslIters}&packVerify=${args.packVerify ? '1' : '0'}`,
+    query: (args) =>
+      `encoder0BlockBench=1&encoder0BlockWarmup=${args.wgslWarmup}&encoder0BlockIters=${args.wgslIters}&packVerify=${args.packVerify ? '1' : '0'}`,
   },
   ort: {
     label: 'ort-webgpu-encoder0-block',
     doneText: 'ENCODER0_BLOCK_ORT_BENCH_DONE',
-    query: (args) => `encoder0BlockOrtBench=1&encoder0BlockOrtWarmup=${args.ortWarmup}&encoder0BlockOrtIters=${args.ortIters}&ep=webgpu&packVerify=${args.packVerify ? '1' : '0'}`,
+    query: (args) =>
+      `encoder0BlockOrtBench=1&encoder0BlockOrtWarmup=${args.ortWarmup}&encoder0BlockOrtIters=${args.ortIters}&ep=webgpu&packVerify=${args.packVerify ? '1' : '0'}`,
   },
 };
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs [options]\n\nAlternates fresh browser sessions between custom WGSL encoder0-block and ORT WebGPU encoder0-block benchmarks.\nThis script reports measurements only; it never promotes an implementation based on these numbers.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       Session prefix (default: lc0-wgsl-vs-ort-PID)\n  --timeout MS         Per-run wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --samples N          Alternating A/B pairs to run (default ${DEFAULT_SAMPLES})\n  --wgsl-iters N       Queued WGSL encoder0 block iterations per sample (default 1)\n  --wgsl-warmup N      WGSL warmup iterations per sample (default 1)\n  --ort-iters N        ORT timed iterations per sample (default 3)\n  --ort-warmup N       ORT warmup iterations per sample (default 1)\n  --max-error N        Max accepted maxAbsError (default ${DEFAULT_MAX_ERROR})\n  --allow-wasm-fallback\n                       Do not fail if ORT WebGPU falls back to WASM; result is marked not-promotable\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print planned alternating runs and exit\n  -h, --help           Show this help\n`);
+  console.log(
+    `Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_vs_ort_webgpu.mjs [options]\n\nAlternates fresh browser sessions between custom WGSL encoder0-block and ORT WebGPU encoder0-block benchmarks.\nThis script reports measurements only; it never promotes an implementation based on these numbers.\n\nOptions:\n  --base-url URL        Use an existing dev server, e.g. http://127.0.0.1:5179\n  --port N             Port for the auto-started Vite dev server (default ${DEFAULT_PORT})\n  --host HOST          Host for the auto-started Vite dev server (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       Session prefix (default: lc0-wgsl-vs-ort-PID)\n  --timeout MS         Per-run wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --samples N          Alternating A/B pairs to run (default ${DEFAULT_SAMPLES})\n  --wgsl-iters N       Queued WGSL encoder0 block iterations per sample (default 1)\n  --wgsl-warmup N      WGSL warmup iterations per sample (default 1)\n  --ort-iters N        ORT timed iterations per sample (default 3)\n  --ort-warmup N       ORT warmup iterations per sample (default 1)\n  --max-error N        Max accepted maxAbsError (default ${DEFAULT_MAX_ERROR})\n  --allow-wasm-fallback\n                       Do not fail if ORT WebGPU falls back to WASM; result is marked not-promotable\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print planned alternating runs and exit\n  -h, --help           Show this help\n`,
+  );
 }
 
 function intArg(value, label, min, max) {
@@ -190,8 +194,10 @@ function metricFor(kind, result) {
 function ortUsedWebGpu(result) {
   const providers = result.ortDiagnostics?.resolvedExecutionProviders;
   const attempts = result.ortDiagnostics?.sessionAttempts;
-  return (Array.isArray(providers) && providers.includes('webgpu'))
-    || (Array.isArray(attempts) && attempts.some((attempt) => attempt?.ok && Array.isArray(attempt.providers) && attempt.providers.includes('webgpu')));
+  return (
+    (Array.isArray(providers) && providers.includes('webgpu')) ||
+    (Array.isArray(attempts) && attempts.some((attempt) => attempt?.ok && Array.isArray(attempt.providers) && attempt.providers.includes('webgpu')))
+  );
 }
 
 function median(values) {
@@ -202,17 +208,22 @@ function median(values) {
 }
 
 function summarize(rows) {
-  const byKind = Object.fromEntries(['wgsl', 'ort'].map((kind) => {
-    const items = rows.filter((row) => row.kind === kind);
-    const metrics = items.map((row) => row.metricMs);
-    return [kind, {
-      samples: items.length,
-      medianMs: median(metrics),
-      minMs: metrics.length ? Math.min(...metrics) : null,
-      maxMs: metrics.length ? Math.max(...metrics) : null,
-      maxAbsError: items.length ? Math.max(...items.map((row) => row.maxAbsError)) : null,
-    }];
-  }));
+  const byKind = Object.fromEntries(
+    ['wgsl', 'ort'].map((kind) => {
+      const items = rows.filter((row) => row.kind === kind);
+      const metrics = items.map((row) => row.metricMs);
+      return [
+        kind,
+        {
+          samples: items.length,
+          medianMs: median(metrics),
+          minMs: metrics.length ? Math.min(...metrics) : null,
+          maxMs: metrics.length ? Math.max(...metrics) : null,
+          maxAbsError: items.length ? Math.max(...items.map((row) => row.maxAbsError)) : null,
+        },
+      ];
+    }),
+  );
   const wgslMedian = byKind.wgsl.medianMs;
   const ortMedian = byKind.ort.medianMs;
   return {
@@ -248,12 +259,15 @@ async function runOne(args, baseUrl, stepIndex, step) {
       status: result.status,
       ortUsedWebGpu: step.kind === 'ort' ? usedWebGpu : undefined,
       ortDiagnostics: step.kind === 'ort' ? result.ortDiagnostics : undefined,
-      rawTiming: step.kind === 'wgsl'
-        ? { readbackSyncedMs: result.readbackSyncedMs, dispatchLoopMs: result.dispatchLoopMs, dispatchLoopAvgMs: result.dispatchLoopAvgMs }
-        : { avgMs: result.avgMs, minMs: result.minMs, maxMs: result.maxMs, timesMs: result.timesMs },
+      rawTiming:
+        step.kind === 'wgsl'
+          ? { readbackSyncedMs: result.readbackSyncedMs, dispatchLoopMs: result.dispatchLoopMs, dispatchLoopAvgMs: result.dispatchLoopAvgMs }
+          : { avgMs: result.avgMs, minMs: result.minMs, maxMs: result.maxMs, timesMs: result.timesMs },
     };
   } finally {
-    try { runJsonCommand(args.agentBrowser, ['close'], 5_000, session); } catch {}
+    try {
+      runJsonCommand(args.agentBrowser, ['close'], 5_000, session);
+    } catch {}
   }
 }
 
@@ -266,7 +280,17 @@ async function main() {
   const baseUrl = args.baseUrl ?? `http://${args.host}:${args.port}`;
   const plan = runPlan(args);
   if (args.dryRun) {
-    console.log(JSON.stringify({ status: 'LC0_WGSL_VS_ORT_WEBGPU_DRY_RUN', baseUrl, plan: plan.map((step, i) => ({ i, pair: step.pair, kind: step.kind, url: runUrl(baseUrl, args, step.kind) })) }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          status: 'LC0_WGSL_VS_ORT_WEBGPU_DRY_RUN',
+          baseUrl,
+          plan: plan.map((step, i) => ({ i, pair: step.pair, kind: step.kind, url: runUrl(baseUrl, args, step.kind) })),
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
   let server;
@@ -277,16 +301,22 @@ async function main() {
     for (let i = 0; i < plan.length; i++) rows.push(await runOne(args, baseUrl, i, plan[i]));
     const summary = summarize(rows);
     const promotable = rows.every((row) => row.kind !== 'ort' || row.ortUsedWebGpu) && rows.length >= 4;
-    console.log(JSON.stringify({
-      status: 'LC0_WGSL_VS_ORT_WEBGPU_DONE',
-      baseUrl,
-      samplesPerSide: args.samples,
-      freshSessionPerRun: true,
-      alternatingOrder: plan.map((step) => step.kind),
-      promotableEvidence: promotable ? 'webgpu-provider-present-but-still-measurement-only' : 'not-promotable; ORT WebGPU not confirmed or too few samples',
-      rows,
-      summary,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          status: 'LC0_WGSL_VS_ORT_WEBGPU_DONE',
+          baseUrl,
+          samplesPerSide: args.samples,
+          freshSessionPerRun: true,
+          alternatingOrder: plan.map((step) => step.kind),
+          promotableEvidence: promotable ? 'webgpu-provider-present-but-still-measurement-only' : 'not-promotable; ORT WebGPU not confirmed or too few samples',
+          rows,
+          summary,
+        },
+        null,
+        2,
+      ),
+    );
   } finally {
     if (server) server.kill('SIGTERM');
   }

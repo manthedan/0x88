@@ -30,7 +30,11 @@ const FORBIDDEN = [
 
 const DEFAULT_RUNTIME_ASSERTIONS = [
   { path: 'src/lc0/arenaBrowser.ts', pattern: /function normalizeLc0Runtime[\s\S]{0,600}?return 'onnx';/, reason: 'Arena LC0 runtime must default to onnx.' },
-  { path: 'src/lc0/analysisBrowser.ts', pattern: /function normalizeLc0Runtime[\s\S]{0,600}?return 'onnx';/, reason: 'Analysis LC0 runtime must default to onnx.' },
+  {
+    path: 'src/lc0/analysisBrowser.ts',
+    pattern: /function normalizeLc0Runtime[\s\S]{0,600}?return 'onnx';/,
+    reason: 'Analysis LC0 runtime must default to onnx.',
+  },
 ];
 
 async function main() {

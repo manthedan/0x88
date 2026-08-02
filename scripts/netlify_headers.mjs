@@ -19,9 +19,8 @@ import { parse } from 'smol-toml';
 // `TomlDate` instances for date values, so `values = 2026-01-01` would otherwise
 // pass as a table, yield no entries, and silently drop the block from the
 // generated file with the staleness check blessing the omission.
-const isPlainTable = (value) => typeof value === 'object'
-  && value !== null
-  && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+const isPlainTable = (value) =>
+  typeof value === 'object' && value !== null && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 
 // Netlify header values are strings. A TOML number, boolean, array, or table
 // under [headers.values] is not a header this policy knows how to serve, and
@@ -104,7 +103,13 @@ export function cacheControlDirectives(value) {
     if (!token) continue;
     const split = token.indexOf('=');
     const name = (split === -1 ? token : token.slice(0, split)).trim().toLowerCase();
-    const argument = split === -1 ? '' : token.slice(split + 1).trim().replace(/^"(.*)"$/, '$1');
+    const argument =
+      split === -1
+        ? ''
+        : token
+            .slice(split + 1)
+            .trim()
+            .replace(/^"(.*)"$/, '$1');
     if (!directives.has(name)) directives.set(name, []);
     directives.get(name).push(argument);
   }
@@ -121,18 +126,14 @@ export function hasDirective(directives, name, argument) {
 // value so a prohibition can test a threshold rather than one exact spelling —
 // `max-age=31536001` is not less dangerous than `max-age=31536000`.
 export function maxSeconds(directives, name) {
-  const parsed = (directives.get(name) ?? [])
-    .filter((argument) => /^\d+$/.test(argument))
-    .map(Number);
+  const parsed = (directives.get(name) ?? []).filter((argument) => /^\d+$/.test(argument)).map(Number);
   return parsed.length ? Math.max(...parsed) : undefined;
 }
 
 // A directive stated twice with different arguments has no single meaning, and
 // caches may resolve it differently. It is rejected rather than interpreted.
 export function conflictingDirectives(directives) {
-  return [...directives]
-    .filter(([, args]) => new Set(args).size > 1)
-    .map(([name]) => name);
+  return [...directives].filter(([, args]) => new Set(args).size > 1).map(([name]) => name);
 }
 
 // The configured build command decides whether the deploy gate runs at all.

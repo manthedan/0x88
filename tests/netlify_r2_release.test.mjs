@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
 async function fakeBin(path, body) {
@@ -18,16 +18,17 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   const netlifyLog = join(root, 'netlify.log');
   const npm = join(root, 'fake-npm.sh');
   const netlify = join(root, 'fake-netlify.sh');
-  await fakeBin(npm, 'printf "%s\\n" "$*" >> "$NPM_LOG"\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.wasm"\nexit 0');
+  await fakeBin(
+    npm,
+    'printf "%s\\n" "$*" >> "$NPM_LOG"\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.wasm"\nexit 0',
+  );
   await fakeBin(netlify, 'printf "%s\\n" "$*" >> "$NETLIFY_LOG"\nexit 0');
 
-  const first = spawnSync(process.execPath, [
-    'scripts/netlify_r2_release.mjs',
-    '--dist', dist,
-    '--build-if-needed',
-    '--npm-bin', npm,
-    '--json',
-  ], { cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, NPM_LOG: npmLog, NETLIFY_LOG: netlifyLog } });
+  const first = spawnSync(process.execPath, ['scripts/netlify_r2_release.mjs', '--dist', dist, '--build-if-needed', '--npm-bin', npm, '--json'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: { ...process.env, NPM_LOG: npmLog, NETLIFY_LOG: netlifyLog },
+  });
   assert.equal(first.status, 0, first.stderr);
   const firstSummary = JSON.parse(first.stdout);
   assert.equal(firstSummary.built, true);
@@ -47,17 +48,25 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
     VITE_BROWSER_CHESS_DEPLOY_PROFILE: 'v0',
   });
 
-  const second = spawnSync(process.execPath, [
-    'scripts/netlify_r2_release.mjs',
-    '--dist', dist,
-    '--build-if-needed',
-    '--deploy',
-    '--prod',
-    '--message', 'test deploy',
-    '--npm-bin', npm,
-    '--netlify-bin', netlify,
-    '--json',
-  ], { cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, NPM_LOG: npmLog, NETLIFY_LOG: netlifyLog } });
+  const second = spawnSync(
+    process.execPath,
+    [
+      'scripts/netlify_r2_release.mjs',
+      '--dist',
+      dist,
+      '--build-if-needed',
+      '--deploy',
+      '--prod',
+      '--message',
+      'test deploy',
+      '--npm-bin',
+      npm,
+      '--netlify-bin',
+      netlify,
+      '--json',
+    ],
+    { cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, NPM_LOG: npmLog, NETLIFY_LOG: netlifyLog } },
+  );
   assert.equal(second.status, 0, second.stderr);
   const secondSummary = JSON.parse(second.stdout);
   assert.equal(secondSummary.built, false);
@@ -69,11 +78,7 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
 });
 
 test('netlify_r2_release check mode rejects side-effect flags', async () => {
-  const result = spawnSync(process.execPath, [
-    'scripts/netlify_r2_release.mjs',
-    '--check',
-    '--build-if-needed',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['scripts/netlify_r2_release.mjs', '--check', '--build-if-needed'], { cwd: process.cwd(), encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /--check is verification-only/);
 });
@@ -90,10 +95,7 @@ test('prune_external_model_assets removes Monty from R2 Netlify dist', async () 
   await writeFile(join(dist, 'stockfish', 'stockfish-18.js'), 'full');
   await writeFile(join(dist, 'stockfish', 'stockfish-18-lite.wasm'), 'wasm');
 
-  const result = spawnSync(process.execPath, [
-    'scripts/prune_external_model_assets.mjs',
-    dist,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['scripts/prune_external_model_assets.mjs', dist], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(existsSync(join(dist, 'models', 'monty')), false);
   assert.equal(existsSync(join(dist, 'monty')), false);
@@ -122,10 +124,7 @@ test('prune_v0_deploy_assets keeps production Stockfish assets and Reckless noti
     await writeFile(join(dist, 'stockfish', name), 'abc');
   }
 
-  const result = spawnSync(process.execPath, [
-    'scripts/prune_v0_deploy_assets.mjs',
-    dist,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['scripts/prune_v0_deploy_assets.mjs', dist], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single-relaxed.js')), true);
   assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single-relaxed.wasm')), true);
@@ -143,12 +142,10 @@ test('precompress_engine_artifacts skips Monty artifacts', async () => {
   await writeFile(join(root, 'monty', 'monty.wasm'), 'abc');
   await writeFile(join(root, 'models', 'tiny.wasm'), 'abc');
 
-  const result = spawnSync(process.execPath, [
-    'scripts/precompress_engine_artifacts.mjs',
-    root,
-    '--allow-missing',
-    '--exclude', 'monty',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['scripts/precompress_engine_artifacts.mjs', root, '--allow-missing', '--exclude', 'monty'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(existsSync(join(root, 'monty', 'monty.wasm.gz')), false);
   assert.equal(existsSync(join(root, 'monty', 'monty.wasm.br')), false);
@@ -162,22 +159,18 @@ test('precompress_engine_artifacts reuses cached sidecars when dist was rebuilt'
   await mkdir(join(root, 'models'), { recursive: true });
   await writeFile(join(root, 'models', 'tiny.wasm'), 'abc');
 
-  const first = spawnSync(process.execPath, [
-    'scripts/precompress_engine_artifacts.mjs',
-    root,
-    '--allow-missing',
-    '--cache-dir', cache,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const first = spawnSync(process.execPath, ['scripts/precompress_engine_artifacts.mjs', root, '--allow-missing', '--cache-dir', cache], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
   assert.equal(first.status, 0, first.stderr);
   await rm(join(root, 'models', 'tiny.wasm.gz'));
   await rm(join(root, 'models', 'tiny.wasm.br'));
 
-  const second = spawnSync(process.execPath, [
-    'scripts/precompress_engine_artifacts.mjs',
-    root,
-    '--allow-missing',
-    '--cache-dir', cache,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const second = spawnSync(process.execPath, ['scripts/precompress_engine_artifacts.mjs', root, '--allow-missing', '--cache-dir', cache], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
   assert.equal(second.status, 0, second.stderr);
   assert.match(second.stdout, /cached .*tiny\.wasm/);
   assert.equal(existsSync(join(root, 'models', 'tiny.wasm.gz')), true);
@@ -216,11 +209,7 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   await writeFile(join(root, 'ort-real/ort.webgpu.min.mjs'), 'bundled by Vite');
   await symlink(join(root, 'ort-real'), join(source, 'ort'));
 
-  const result = spawnSync(process.execPath, [
-    'scripts/prepare_netlify_r2_public_assets.mjs',
-    source,
-    out,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['scripts/prepare_netlify_r2_public_assets.mjs', source, out], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.status, 'R2_PUBLIC_ASSETS_PREPARED');
@@ -258,12 +247,10 @@ test('netlify_r2_release rejects a dist that still contains pruned external blob
   await writeFile(join(dist, 'stockfish/stockfish-18-lite.wasm'), 'abc');
   const npm = join(root, 'fake-npm.sh');
   await fakeBin(npm, 'exit 0');
-  const result = spawnSync(process.execPath, [
-    'scripts/netlify_r2_release.mjs',
-    '--dist', dist,
-    '--build-if-needed',
-    '--npm-bin', npm,
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['scripts/netlify_r2_release.mjs', '--dist', dist, '--build-if-needed', '--npm-bin', npm], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /R2 Netlify dist contains pruned external artifacts/);
   assert.match(result.stderr, /models\/lc0\/test\.onnx/);
@@ -278,7 +265,12 @@ test('netlify.toml and package scripts use the R2-pruned build path', async () =
   assert.match(netlifyToml, /VITE_LC0_ARTIFACT_CHANNEL_URL=https:\/\/assets\.0x88\.app\/channels\/stable\.json/);
   assert.match(netlifyToml, /VITE_LC0_BROWSER_ASSET_BASE_URL=https:\/\/assets\.0x88\.app/);
   for (const file of ['stockfish-18-lite.wasm', 'stockfish-18.wasm']) {
-    assert.match(netlifyToml, new RegExp(`from = "/stockfish/${file.replace('.', '\\.')}"[\\s\\S]*to = "https://assets\\.0x88\\.app/stockfish/${file.replace('.', '\\.')}"[\\s\\S]*status = 200[\\s\\S]*force = true`));
+    assert.match(
+      netlifyToml,
+      new RegExp(
+        `from = "/stockfish/${file.replace('.', '\\.')}"[\\s\\S]*to = "https://assets\\.0x88\\.app/stockfish/${file.replace('.', '\\.')}"[\\s\\S]*status = 200[\\s\\S]*force = true`,
+      ),
+    );
   }
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
   assert.match(packageJson.scripts['build:netlify:r2'], /NETLIFY_R2_RELEASE_DIST:-dist-client/);
@@ -286,5 +278,5 @@ test('netlify.toml and package scripts use the R2-pruned build path', async () =
   const buildScript = await readFile('scripts/build_netlify_r2.mjs', 'utf8');
   assert.match(buildScript, /deployProfile === 'v0'/);
   assert.match(buildScript, /prune_v0_deploy_assets\.mjs/);
-  assert.match(buildScript, /--exclude', 'monty', '--exclude', 'stockfish'/);
+  assert.match(buildScript, /--exclude',\s*'monty',\s*'--exclude',\s*'stockfish'/);
 });

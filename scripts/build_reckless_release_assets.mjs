@@ -1,7 +1,7 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
 
 const repo = process.env.RECKLESS_REPO ?? 'https://github.com/codedeliveryservice/Reckless.git';
 const ref = process.env.RECKLESS_REF ?? '0010617448bdef4c8cd7d4f4825b7e42c8bc262a';
@@ -59,13 +59,7 @@ Reckless is an external AGPL-3.0 chess engine by its upstream authors. This proj
 function archiveSource(workdir, archivePath) {
   if (!existsSync(workdir)) throw new Error(`missing source dir: ${workdir}`);
   mkdirSync(dirname(archivePath), { recursive: true });
-  run('tar', [
-    '-czf', archivePath,
-    '--exclude', 'target',
-    '--exclude', '.git',
-    '-C', dirname(workdir),
-    basename(workdir),
-  ]);
+  run('tar', ['-czf', archivePath, '--exclude', 'target', '--exclude', '.git', '-C', dirname(workdir), basename(workdir)]);
 }
 
 function buildVariant(variant) {

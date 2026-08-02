@@ -7,12 +7,13 @@
 //   - Off the main thread: search runs entirely inside searchWorker.ts so heavy
 //     inference never blocks the UI.
 //   - Disposable: `dispose()` terminates the worker, freeing model memory.
-import { collectOrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
-import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
-import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
+
+import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
-import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
+import { collectOrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 export interface BigNetConfig {
   key: 'bt4' | 't3' | 'lqo';
@@ -288,8 +289,12 @@ export function bigNetLoadWarning(config: BigNetConfig = BT4_NET): string {
   return `Lc0 ${config.name} is a large net (~${config.approxMb}MB download, cached after first load) and needs WebGPU. Arena uses the ${config.exportNote} with search tree reuse and leaf batching.${caution ? ` ${caution}` : ''}`;
 }
 
-export function bt4MemoryCaution(): string | null { return bigNetMemoryCaution(BT4_NET); }
-export function bt4LoadWarning(): string { return bigNetLoadWarning(BT4_NET); }
+export function bt4MemoryCaution(): string | null {
+  return bigNetMemoryCaution(BT4_NET);
+}
+export function bt4LoadWarning(): string {
+  return bigNetLoadWarning(BT4_NET);
+}
 
 /**
  * A lazily-initialized, worker-backed Lc0 big-net searcher. One instance owns
@@ -301,7 +306,10 @@ export class Bt4WorkerSearcher {
   private ready = false;
   private initPromise: Promise<string> | null = null;
   private seq = 0;
-  private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: Bt4SearchProgress) => void }>();
+  private pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: Bt4SearchProgress) => void }
+  >();
   private activeSearchId: number | null = null;
   private configuredEvalCacheEntries = -1;
   backend = '';
@@ -409,7 +417,10 @@ export class Bt4WorkerSearcher {
           movetimeMs: options.movetimeMs,
           multiPv: options.multiPv,
           batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
-          batchPipelineDepth: Math.max(1, Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth)),
+          batchPipelineDepth: Math.max(
+            1,
+            Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth),
+          ),
           reuseTree: options.reuseTree,
           drawScore: options.drawScore,
           contemptElo: options.contemptElo,
@@ -424,9 +435,7 @@ export class Bt4WorkerSearcher {
           this.activeSearchId = id;
           if (options.signal?.aborted) this.cancelSearch(id);
         },
-        options.onProgress
-          ? (progress) => options.onProgress!(options.swapColors ? swapColorsResult(progress, input) : progress)
-          : undefined,
+        options.onProgress ? (progress) => options.onProgress!(options.swapColors ? swapColorsResult(progress, input) : progress) : undefined,
       );
       return options.swapColors ? swapColorsResult(response.result, input) : response.result;
     } finally {

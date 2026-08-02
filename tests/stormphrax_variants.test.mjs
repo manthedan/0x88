@@ -1,19 +1,19 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { stormphraxSearchTimeoutMs } from '../src/lc0/stormphraxEngine.ts';
 import {
-  STORMPHRAX_EMSCRIPTEN_VARIANT,
-  STORMPHRAX_RELAXED_VARIANT,
-  STORMPHRAX_MAIN_NETWORK,
   checkStormphraxVariantAsset,
   defaultStormphraxVariantKey,
   hasExplicitStormphraxVariant,
   normalizeStormphraxVariant,
   resolveDefaultStormphraxVariantAssetFallback,
+  STORMPHRAX_EMSCRIPTEN_VARIANT,
+  STORMPHRAX_MAIN_NETWORK,
+  STORMPHRAX_RELAXED_VARIANT,
   stormphraxVariantByKey,
   stormphraxVariantFromParams,
 } from '../src/lc0/stormphraxVariants.ts';
-import { stormphraxSearchTimeoutMs } from '../src/lc0/stormphraxEngine.ts';
 import { supportsWasmRelaxedSimd } from '../src/lc0/wasmFeatures.ts';
 
 test('Stormphrax variant metadata pins the browser sidecars and undertown network', () => {
@@ -54,7 +54,10 @@ test('Stormphrax in-flight asset checks notify callbacks attached by a remount',
     let remount;
     const first = checkStormphraxVariantAsset(variant, () => {
       firstNotifications += 1;
-      if (firstNotifications === 1) remount = checkStormphraxVariantAsset(variant, () => { remountNotifications += 1; });
+      if (firstNotifications === 1)
+        remount = checkStormphraxVariantAsset(variant, () => {
+          remountNotifications += 1;
+        });
     });
     assert.equal(resolvers.length, 3, 're-entrant checking callback must reuse the registered probe');
     for (const resolve of resolvers) resolve({ ok: true });
@@ -69,9 +72,10 @@ test('Stormphrax in-flight asset checks notify callbacks attached by a remount',
 
 test('Stormphrax asset probes time out to the safe missing state', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => {
-    init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
-  });
+  globalThis.fetch = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+    });
   try {
     const variant = {
       ...STORMPHRAX_EMSCRIPTEN_VARIANT,
@@ -118,7 +122,9 @@ test('Stormphrax variant normalization and same-origin overrides are stable', ()
   assert.equal(stormphraxVariantByKey('unknown').label, 'Stormphrax 8');
   assert.equal(hasExplicitStormphraxVariant(new URLSearchParams('')), false);
   assert.equal(hasExplicitStormphraxVariant(new URLSearchParams('stormphrax=emscripten')), true);
-  const custom = stormphraxVariantFromParams(new URLSearchParams('stormphraxJs=/stormphrax/custom.js&stormphraxWasm=/stormphrax/custom.wasm&stormphraxData=/stormphrax/custom.data'));
+  const custom = stormphraxVariantFromParams(
+    new URLSearchParams('stormphraxJs=/stormphrax/custom.js&stormphraxWasm=/stormphrax/custom.wasm&stormphraxData=/stormphrax/custom.data'),
+  );
   assert.equal(custom.key, 'custom');
   assert.equal(custom.jsUrl, '/stormphrax/custom.js');
   assert.equal(custom.wasmUrl, '/stormphrax/custom.wasm');

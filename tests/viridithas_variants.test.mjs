@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  VIRIDITHAS_RELAXED_SIMD_VARIANT,
-  VIRIDITHAS_SIMD_VARIANT,
   checkViridithasVariantAsset,
   resolveDefaultViridithasVariantAssetFallback,
+  VIRIDITHAS_RELAXED_SIMD_VARIANT,
+  VIRIDITHAS_SIMD_VARIANT,
   viridithasVariantAssetStatus,
 } from '../src/lc0/viridithasVariants.ts';
 
@@ -40,7 +40,10 @@ test('production probes deployed Viridithas relaxed asset', async () => {
 test('Viridithas in-flight asset checks notify callbacks attached by a remount', async () => {
   const originalFetch = globalThis.fetch;
   let resolveFetch;
-  globalThis.fetch = () => new Promise((resolve) => { resolveFetch = resolve; });
+  globalThis.fetch = () =>
+    new Promise((resolve) => {
+      resolveFetch = resolve;
+    });
   const variant = { ...VIRIDITHAS_SIMD_VARIANT, key: 'custom', wasmUrl: '/viridithas/remount-test.wasm' };
   let firstNotifications = 0;
   let remountNotifications = 0;
@@ -51,7 +54,9 @@ test('Viridithas in-flight asset checks notify callbacks attached by a remount',
       firstNotifications += 1;
       if (firstNotifications === 1) {
         remountedVariant = { ...variant, assetStatus: undefined };
-        remount = checkViridithasVariantAsset(remountedVariant, () => { remountNotifications += 1; });
+        remount = checkViridithasVariantAsset(remountedVariant, () => {
+          remountNotifications += 1;
+        });
       }
     });
     resolveFetch({ ok: true });
@@ -69,7 +74,10 @@ test('IPv6 loopback still probes local Viridithas generated assets', async () =>
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return new Response(null, { status: 404 }); };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(null, { status: 404 });
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '[::1]' },
@@ -89,7 +97,10 @@ test('production still probes deployed Viridithas SIMD asset', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return new Response(null, { status: 200 }); };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(null, { status: 200 });
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '0x88.app' },
@@ -109,7 +120,10 @@ test('Viridithas default fallback keeps deployed relaxed asset', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return new Response(null, { status: 200 }); };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(null, { status: 200 });
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '0x88.app' },

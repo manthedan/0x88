@@ -88,10 +88,11 @@ test('lc0web pack loader reserves per-tensor hashes for explicit diagnostic mode
   assert.equal(production.verifiedShards.length, 1, 'production integrity is established at shard level');
 
   await assert.rejects(
-    () => loadLc0WebModelPack('https://example.test/pack/model.lc0web.json', {
-      fetchFn: makeFetch(manifest, shardBytes),
-      verifyTensors: true,
-    }),
+    () =>
+      loadLc0WebModelPack('https://example.test/pack/model.lc0web.json', {
+        fetchFn: makeFetch(manifest, shardBytes),
+        verifyTensors: true,
+      }),
     /tensor a sha256 mismatch/,
   );
 });
@@ -100,16 +101,19 @@ test('lc0web pack loader rejects corrupt shard bytes', async () => {
   const { manifest } = makeTinyPack();
   const corruptShard = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 9]);
   await assert.rejects(
-    () => loadLc0WebModelPack('https://example.test/pack/model.lc0web.json', {
-      fetchFn: makeFetch(manifest, corruptShard),
-    }),
+    () =>
+      loadLc0WebModelPack('https://example.test/pack/model.lc0web.json', {
+        fetchFn: makeFetch(manifest, corruptShard),
+      }),
     /sha256 mismatch/,
   );
 });
 
 const GENERATED_PACK_DIR = '../models/lc0-bestnets/lc0web/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web';
 
-test('generated batch-8 lc0web pack metadata and first shard verify', { skip: existsSync(GENERATED_PACK_DIR) ? false : `missing ${GENERATED_PACK_DIR}` }, async () => {
+test('generated batch-8 lc0web pack metadata and first shard verify', {
+  skip: existsSync(GENERATED_PACK_DIR) ? false : `missing ${GENERATED_PACK_DIR}`,
+}, async () => {
   const fetchFn = async (url) => {
     const name = String(url).split('/').pop();
     const path = `${GENERATED_PACK_DIR}/${name}`;

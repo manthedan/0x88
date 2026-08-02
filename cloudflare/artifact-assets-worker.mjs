@@ -7,7 +7,8 @@ const CONTROL_CHANNEL_CACHE_CONTROL = 'public, max-age=60, stale-if-error=86400'
 const DEFAULT_CHANNEL_KEY = 'channels/stable.json';
 const MAX_CONTROL_MANIFEST_BYTES = 8 * 1024 * 1024;
 const HEAD_CACHE_VERSION = 4;
-const EXPOSED_HEADERS = 'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length, X-Artifact-Decoded-SHA256, X-Artifact-Encoded-SHA256, Content-Range, Accept-Ranges';
+const EXPOSED_HEADERS =
+  'CF-Cache-Status, Cache-Status, Age, ETag, Content-Length, X-Artifact-Content-Length, X-Artifact-Encoded-Length, X-Artifact-Decoded-SHA256, X-Artifact-Encoded-SHA256, Content-Range, Accept-Ranges';
 
 function artifactHeaders(env, extra = {}) {
   const headers = new Headers(extra);
@@ -20,7 +21,10 @@ function artifactHeaders(env, extra = {}) {
 }
 
 function appendVary(headers, value) {
-  const values = (headers.get('Vary') || '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  const values = (headers.get('Vary') || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
   if (!values.some((entry) => entry.toLowerCase() === value.toLowerCase())) values.push(value);
   headers.set('Vary', values.join(', '));
 }
@@ -91,12 +95,14 @@ function cacheControlForKey(key) {
 }
 
 function shouldPreventTransform(key, contentType) {
-  return key.endsWith('.wasm')
-    || key.endsWith('.onnx')
-    || key.endsWith('.data')
-    || key.endsWith('.gz')
-    || contentType === 'application/wasm'
-    || contentType === 'application/octet-stream';
+  return (
+    key.endsWith('.wasm') ||
+    key.endsWith('.onnx') ||
+    key.endsWith('.data') ||
+    key.endsWith('.gz') ||
+    contentType === 'application/wasm' ||
+    contentType === 'application/octet-stream'
+  );
 }
 
 function preventTransform(cacheControl) {
@@ -244,7 +250,18 @@ async function readJsonObjectCached(env, key, request, cacheControl) {
 
 async function descriptorFromStableReleaseLogicalPath(request, env) {
   const logicalUrl = new URL(request.url).pathname;
-  if (!logicalUrl.startsWith('/models/') && !logicalUrl.startsWith('/stockfish/') && !logicalUrl.startsWith('/berserk/') && !logicalUrl.startsWith('/plentychess/') && !logicalUrl.startsWith('/stormphrax/') && !logicalUrl.startsWith('/viridithas/') && !logicalUrl.startsWith('/monty/') && !logicalUrl.startsWith('/reckless/') && !logicalUrl.startsWith('/runtimes/')) return undefined;
+  if (
+    !logicalUrl.startsWith('/models/') &&
+    !logicalUrl.startsWith('/stockfish/') &&
+    !logicalUrl.startsWith('/berserk/') &&
+    !logicalUrl.startsWith('/plentychess/') &&
+    !logicalUrl.startsWith('/stormphrax/') &&
+    !logicalUrl.startsWith('/viridithas/') &&
+    !logicalUrl.startsWith('/monty/') &&
+    !logicalUrl.startsWith('/reckless/') &&
+    !logicalUrl.startsWith('/runtimes/')
+  )
+    return undefined;
   const channelKey = env.ARTIFACT_CHANNEL_KEY || DEFAULT_CHANNEL_KEY;
   const channel = await readJsonObjectCached(env, channelKey, request, CONTROL_CHANNEL_CACHE_CONTROL);
   const releasePath = channel?.releaseManifestUrl || channel?.releaseUrl;
@@ -258,8 +275,7 @@ async function descriptorFromStableReleaseLogicalPath(request, env) {
   const artifact = exactArtifact ?? (fallbackArtifacts.length === 1 ? fallbackArtifacts[0] : undefined);
   if (!artifact) return undefined;
 
-  const v2Release = release?.schema === 'lc0_browser.artifact_release_manifest.v2'
-    || release?.schema === 'lc0-webgpu.artifact-release.v2';
+  const v2Release = release?.schema === 'lc0_browser.artifact_release_manifest.v2' || release?.schema === 'lc0-webgpu.artifact-release.v2';
   if (v2Release || artifact.raw || Array.isArray(artifact.representations)) {
     const representations = validatedV2Representations(artifact);
     if (!representations) return undefined;
@@ -295,22 +311,16 @@ function resolvedMetadata(descriptor, object) {
   const custom = object?.customMetadata || {};
   const representation = descriptor.representation || representationFromKey(descriptor.key);
   const encoding = representation.encoding || custom.encoding || 'identity';
-  const customEncodedBytes = typeof custom.encodedBytes === 'string' && custom.encodedBytes.trim() !== ''
-    ? Number(custom.encodedBytes)
-    : undefined;
-  const encodedBytes = Number.isFinite(representation.bytes)
-    ? representation.bytes
-    : Number.isFinite(customEncodedBytes)
-      ? customEncodedBytes
-      : object?.size;
-  const customDecodedBytes = typeof custom.decodedBytes === 'string' && custom.decodedBytes.trim() !== ''
-    ? Number(custom.decodedBytes)
-    : undefined;
+  const customEncodedBytes = typeof custom.encodedBytes === 'string' && custom.encodedBytes.trim() !== '' ? Number(custom.encodedBytes) : undefined;
+  const encodedBytes = Number.isFinite(representation.bytes) ? representation.bytes : Number.isFinite(customEncodedBytes) ? customEncodedBytes : object?.size;
+  const customDecodedBytes = typeof custom.decodedBytes === 'string' && custom.decodedBytes.trim() !== '' ? Number(custom.decodedBytes) : undefined;
   const decodedBytes = Number.isFinite(descriptor.raw?.bytes)
     ? descriptor.raw.bytes
     : Number.isFinite(customDecodedBytes)
       ? customDecodedBytes
-      : encoding === 'identity' ? encodedBytes : undefined;
+      : encoding === 'identity'
+        ? encodedBytes
+        : undefined;
   return {
     encoding,
     encodedBytes,
@@ -383,10 +393,11 @@ async function fullBodyResponse(descriptor, request, env, ctx) {
   const cacheRequest = canonicalCacheRequest(request, descriptor.key);
   if (cache && isImmutableArtifactKey(descriptor.key)) {
     const cached = await cache.match(cacheRequest);
-    if (cached) return withCacheStatus(applyDescriptorHeaders(cached, descriptor, env), 'hit', {
-      cacheControl: descriptor.logicalAlias ? LOGICAL_ALIAS_CACHE_CONTROL : undefined,
-      negotiated: descriptor.negotiated,
-    });
+    if (cached)
+      return withCacheStatus(applyDescriptorHeaders(cached, descriptor, env), 'hit', {
+        cacheControl: descriptor.logicalAlias ? LOGICAL_ALIAS_CACHE_CONTROL : undefined,
+        negotiated: descriptor.negotiated,
+      });
   }
 
   const object = await env.ARTIFACTS.get(descriptor.key);
@@ -409,10 +420,11 @@ async function headResponse(descriptor, request, env) {
   const cacheRequest = canonicalCacheRequest(request, descriptor.key, 'head');
   if (!rangeHeader && cache && isImmutableArtifactKey(descriptor.key)) {
     const cached = await cache.match(cacheRequest);
-    if (cached) return withCacheStatus(applyDescriptorHeaders(cached, descriptor, env), 'hit', {
-      cacheControl: descriptor.logicalAlias ? LOGICAL_ALIAS_CACHE_CONTROL : undefined,
-      negotiated: descriptor.negotiated,
-    });
+    if (cached)
+      return withCacheStatus(applyDescriptorHeaders(cached, descriptor, env), 'hit', {
+        cacheControl: descriptor.logicalAlias ? LOGICAL_ALIAS_CACHE_CONTROL : undefined,
+        negotiated: descriptor.negotiated,
+      });
   }
 
   // Expected release metadata cannot prove that the immutable R2 object exists.

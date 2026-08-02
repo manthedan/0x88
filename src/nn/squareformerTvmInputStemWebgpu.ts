@@ -150,8 +150,12 @@ fn input_stem_kernel(@builtin(global_invocation_id) gid : vec3<u32>) {
 }
 `;
 
-function assertLength(name: string, actual: number, expected: number) { if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`); }
-function createStorageBuffer(device: GPUDevice, label: string, bytes: number, usage = 0): GPUBuffer { return device.createBuffer({ label, size: Math.max(4, bytes), usage: GPUBufferUsage.STORAGE | usage }); }
+function assertLength(name: string, actual: number, expected: number) {
+  if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`);
+}
+function createStorageBuffer(device: GPUDevice, label: string, bytes: number, usage = 0): GPUBuffer {
+  return device.createBuffer({ label, size: Math.max(4, bytes), usage: GPUBufferUsage.STORAGE | usage });
+}
 function createInitializedF32Buffer(device: GPUDevice, label: string, data: Float32Array, usage = 0): GPUBuffer {
   const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: GPUBufferUsage.STORAGE | usage, mappedAtCreation: true });
   new Float32Array(buffer.getMappedRange()).set(data);
@@ -205,7 +209,11 @@ export class SquareformerTvmInputStemWebgpuBlock {
   private output: GPUBuffer;
   private readback: GPUBuffer;
 
-  private constructor(private device: GPUDevice, pipeline: GPUComputePipeline, buffers: { tokens: GPUBuffer; attackSummary: GPUBuffer; weights: GPUBuffer; output: GPUBuffer; readback: GPUBuffer }) {
+  private constructor(
+    private device: GPUDevice,
+    pipeline: GPUComputePipeline,
+    buffers: { tokens: GPUBuffer; attackSummary: GPUBuffer; weights: GPUBuffer; output: GPUBuffer; readback: GPUBuffer },
+  ) {
     this.pipeline = pipeline;
     this.tokens = buffers.tokens;
     this.attackSummary = buffers.attackSummary;
@@ -216,13 +224,21 @@ export class SquareformerTvmInputStemWebgpuBlock {
 
   static async create(device: GPUDevice, weights: SquareformerTvmInputStemWeights): Promise<SquareformerTvmInputStemWebgpuBlock> {
     const module = device.createShaderModule({ label: 'squareformer-tvm-input-stem', code: INPUT_STEM_WGSL });
-    const pipeline = await device.createComputePipelineAsync({ label: 'squareformer-tvm-input-stem', layout: 'auto', compute: { module, entryPoint: 'input_stem_kernel' } });
+    const pipeline = await device.createComputePipelineAsync({
+      label: 'squareformer-tvm-input-stem',
+      layout: 'auto',
+      compute: { module, entryPoint: 'input_stem_kernel' },
+    });
     const buffers = {
       tokens: createStorageBuffer(device, 'squareformer-tvm-input-stem-tokens', 64 * 24 * 4, GPUBufferUsage.COPY_DST),
       attackSummary: createStorageBuffer(device, 'squareformer-tvm-input-stem-attack-summary', 64 * 28 * 4, GPUBufferUsage.COPY_DST),
       weights: createInitializedF32Buffer(device, 'squareformer-tvm-input-stem-weights', packWeights(weights)),
       output: createStorageBuffer(device, 'squareformer-tvm-input-stem-output', 64 * 128 * 4, GPUBufferUsage.COPY_SRC),
-      readback: device.createBuffer({ label: 'squareformer-tvm-input-stem-readback', size: 64 * 128 * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+      readback: device.createBuffer({
+        label: 'squareformer-tvm-input-stem-readback',
+        size: 64 * 128 * 4,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      }),
     };
     return new SquareformerTvmInputStemWebgpuBlock(device, pipeline, buffers);
   }
@@ -234,19 +250,27 @@ export class SquareformerTvmInputStemWebgpuBlock {
     this.device.queue.writeBuffer(this.attackSummary, 0, attackSummary);
   }
 
-  encode(commandEncoder: GPUCommandEncoder, tokensBuffer: GPUBuffer = this.tokens, attackSummaryBuffer: GPUBuffer = this.attackSummary, outputBuffer: GPUBuffer = this.output): GPUBuffer {
+  encode(
+    commandEncoder: GPUCommandEncoder,
+    tokensBuffer: GPUBuffer = this.tokens,
+    attackSummaryBuffer: GPUBuffer = this.attackSummary,
+    outputBuffer: GPUBuffer = this.output,
+  ): GPUBuffer {
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-input-stem' });
     pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-input-stem-bindings',
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: outputBuffer } },
-        { binding: 1, resource: { buffer: tokensBuffer } },
-        { binding: 2, resource: { buffer: attackSummaryBuffer } },
-        { binding: 3, resource: { buffer: this.weights } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-input-stem-bindings',
+        layout: this.pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: outputBuffer } },
+          { binding: 1, resource: { buffer: tokensBuffer } },
+          { binding: 2, resource: { buffer: attackSummaryBuffer } },
+          { binding: 3, resource: { buffer: this.weights } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(64, 1, 1);
     pass.end();
     return outputBuffer;

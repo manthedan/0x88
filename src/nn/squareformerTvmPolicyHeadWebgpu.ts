@@ -69,8 +69,12 @@ fn policy_concat_kernel(@builtin(global_invocation_id) gid : vec3<u32>) {
 }
 `;
 
-function ceilDiv(a: number, b: number): number { return Math.floor((a + b - 1) / b); }
-function assertLength(name: string, actual: number, expected: number) { if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`); }
+function ceilDiv(a: number, b: number): number {
+  return Math.floor((a + b - 1) / b);
+}
+function assertLength(name: string, actual: number, expected: number) {
+  if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`);
+}
 function createInitializedBuffer(device: GPUDevice, label: string, data: Float32Array | Uint32Array, usage: number): GPUBuffer {
   const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage, mappedAtCreation: true });
   if (data instanceof Float32Array) new Float32Array(buffer.getMappedRange()).set(data);
@@ -102,10 +106,27 @@ export class SquareformerTvmPolicyHeadWebgpuBlock {
   private matmulPodArgs: GPUBuffer;
   private concatPodArgs: GPUBuffer;
 
-  private constructor(private device: GPUDevice, shape: SquareformerTvmPolicyHeadShape, pipelines: { pair: GPUComputePipeline; promo: GPUComputePipeline; concat: GPUComputePipeline }, buffers: {
-    input: GPUBuffer; fromProj: GPUBuffer; toProj: GPUBuffer; promoProj: GPUBuffer; policy: GPUBuffer; readback: GPUBuffer;
-    policyFromWeight: GPUBuffer; policyFromBias: GPUBuffer; policyToWeight: GPUBuffer; policyToBias: GPUBuffer; policyPromoWeight: GPUBuffer; policyPromoBias: GPUBuffer; matmulPodArgs: GPUBuffer; concatPodArgs: GPUBuffer;
-  }) {
+  private constructor(
+    private device: GPUDevice,
+    shape: SquareformerTvmPolicyHeadShape,
+    pipelines: { pair: GPUComputePipeline; promo: GPUComputePipeline; concat: GPUComputePipeline },
+    buffers: {
+      input: GPUBuffer;
+      fromProj: GPUBuffer;
+      toProj: GPUBuffer;
+      promoProj: GPUBuffer;
+      policy: GPUBuffer;
+      readback: GPUBuffer;
+      policyFromWeight: GPUBuffer;
+      policyFromBias: GPUBuffer;
+      policyToWeight: GPUBuffer;
+      policyToBias: GPUBuffer;
+      policyPromoWeight: GPUBuffer;
+      policyPromoBias: GPUBuffer;
+      matmulPodArgs: GPUBuffer;
+      concatPodArgs: GPUBuffer;
+    },
+  ) {
     this.shape = shape;
     this.pairPipeline = pipelines.pair;
     this.promoPipeline = pipelines.promo;
@@ -126,10 +147,16 @@ export class SquareformerTvmPolicyHeadWebgpuBlock {
     this.concatPodArgs = buffers.concatPodArgs;
   }
 
-  static async create(device: GPUDevice, kernels: SquareformerTvmPolicyHeadKernels, weights: SquareformerTvmPolicyHeadWeights, shape: Partial<SquareformerTvmPolicyHeadShape> = {}): Promise<SquareformerTvmPolicyHeadWebgpuBlock> {
+  static async create(
+    device: GPUDevice,
+    kernels: SquareformerTvmPolicyHeadKernels,
+    weights: SquareformerTvmPolicyHeadWeights,
+    shape: Partial<SquareformerTvmPolicyHeadShape> = {},
+  ): Promise<SquareformerTvmPolicyHeadWebgpuBlock> {
     const fullShape = { ...DEFAULT_SHAPE, ...shape };
     const { rows, dModel, pairDim, promoDim } = fullShape;
-    if (rows !== 64 || dModel !== 128 || pairDim !== 128 || promoDim !== 256) throw new Error(`policy shader expects rows=64,dModel=128,pairDim=128,promoDim=256; got ${JSON.stringify(fullShape)}`);
+    if (rows !== 64 || dModel !== 128 || pairDim !== 128 || promoDim !== 256)
+      throw new Error(`policy shader expects rows=64,dModel=128,pairDim=128,promoDim=256; got ${JSON.stringify(fullShape)}`);
     assertLength('policyFromWeight', weights.policyFromWeight.length, dModel * pairDim);
     assertLength('policyFromBias', weights.policyFromBias.length, pairDim);
     assertLength('policyToWeight', weights.policyToWeight.length, dModel * pairDim);
@@ -140,9 +167,21 @@ export class SquareformerTvmPolicyHeadWebgpuBlock {
     const promoModule = device.createShaderModule({ label: 'squareformer-tvm-policy-promo-proj', code: kernels.policyPromoProj });
     const concatModule = device.createShaderModule({ label: 'squareformer-tvm-policy-concat', code: POLICY_CONCAT_WGSL });
     const [pairPipeline, promoPipeline, concatPipeline] = await Promise.all([
-      device.createComputePipelineAsync({ label: 'squareformer-tvm-policy-pair-proj', layout: 'auto', compute: { module: pairModule, entryPoint: 'matmul_kernel' } }),
-      device.createComputePipelineAsync({ label: 'squareformer-tvm-policy-promo-proj', layout: 'auto', compute: { module: promoModule, entryPoint: 'matmul_kernel' } }),
-      device.createComputePipelineAsync({ label: 'squareformer-tvm-policy-concat', layout: 'auto', compute: { module: concatModule, entryPoint: 'policy_concat_kernel' } }),
+      device.createComputePipelineAsync({
+        label: 'squareformer-tvm-policy-pair-proj',
+        layout: 'auto',
+        compute: { module: pairModule, entryPoint: 'matmul_kernel' },
+      }),
+      device.createComputePipelineAsync({
+        label: 'squareformer-tvm-policy-promo-proj',
+        layout: 'auto',
+        compute: { module: promoModule, entryPoint: 'matmul_kernel' },
+      }),
+      device.createComputePipelineAsync({
+        label: 'squareformer-tvm-policy-concat',
+        layout: 'auto',
+        compute: { module: concatModule, entryPoint: 'policy_concat_kernel' },
+      }),
     ]);
     const inputBytes = rows * dModel * 4;
     const pairBytes = rows * pairDim * 4;
@@ -161,8 +200,18 @@ export class SquareformerTvmPolicyHeadWebgpuBlock {
       policyToBias: createInitializedBuffer(device, 'squareformer-tvm-policy-to-bias', weights.policyToBias, GPUBufferUsage.STORAGE),
       policyPromoWeight: createInitializedBuffer(device, 'squareformer-tvm-policy-promo-weight', weights.policyPromoWeight, GPUBufferUsage.STORAGE),
       policyPromoBias: createInitializedBuffer(device, 'squareformer-tvm-policy-promo-bias', weights.policyPromoBias, GPUBufferUsage.STORAGE),
-      matmulPodArgs: createInitializedBuffer(device, 'squareformer-tvm-policy-matmul-pod', new Uint32Array([ceilDiv(rows, 32) - 1, 0, 0, 0]), GPUBufferUsage.UNIFORM),
-      concatPodArgs: createInitializedBuffer(device, 'squareformer-tvm-policy-concat-pod', new Uint32Array([rows, pairDim, promoDim, 0]), GPUBufferUsage.UNIFORM),
+      matmulPodArgs: createInitializedBuffer(
+        device,
+        'squareformer-tvm-policy-matmul-pod',
+        new Uint32Array([ceilDiv(rows, 32) - 1, 0, 0, 0]),
+        GPUBufferUsage.UNIFORM,
+      ),
+      concatPodArgs: createInitializedBuffer(
+        device,
+        'squareformer-tvm-policy-concat-pod',
+        new Uint32Array([rows, pairDim, promoDim, 0]),
+        GPUBufferUsage.UNIFORM,
+      ),
     };
     return new SquareformerTvmPolicyHeadWebgpuBlock(device, fullShape, { pair: pairPipeline, promo: promoPipeline, concat: concatPipeline }, buffers);
   }
@@ -177,55 +226,67 @@ export class SquareformerTvmPolicyHeadWebgpuBlock {
     const { rows, pairDim, promoDim } = this.shape;
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-policy-head' });
     pass.setPipeline(this.pairPipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-policy-from-bindings',
-      layout: this.pairPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.fromProj } },
-        { binding: 1, resource: { buffer: this.policyFromWeight } },
-        { binding: 2, resource: { buffer: inputBuffer } },
-        { binding: 3, resource: { buffer: this.matmulPodArgs } },
-        { binding: 4, resource: { buffer: this.policyFromBias } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-policy-from-bindings',
+        layout: this.pairPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.fromProj } },
+          { binding: 1, resource: { buffer: this.policyFromWeight } },
+          { binding: 2, resource: { buffer: inputBuffer } },
+          { binding: 3, resource: { buffer: this.matmulPodArgs } },
+          { binding: 4, resource: { buffer: this.policyFromBias } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(rows, 32), ceilDiv(pairDim, 32), 1);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-policy-to-bindings',
-      layout: this.pairPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.toProj } },
-        { binding: 1, resource: { buffer: this.policyToWeight } },
-        { binding: 2, resource: { buffer: inputBuffer } },
-        { binding: 3, resource: { buffer: this.matmulPodArgs } },
-        { binding: 4, resource: { buffer: this.policyToBias } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-policy-to-bindings',
+        layout: this.pairPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.toProj } },
+          { binding: 1, resource: { buffer: this.policyToWeight } },
+          { binding: 2, resource: { buffer: inputBuffer } },
+          { binding: 3, resource: { buffer: this.matmulPodArgs } },
+          { binding: 4, resource: { buffer: this.policyToBias } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(rows, 32), ceilDiv(pairDim, 32), 1);
     pass.setPipeline(this.promoPipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-policy-promo-bindings',
-      layout: this.promoPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.promoProj } },
-        { binding: 1, resource: { buffer: this.policyPromoWeight } },
-        { binding: 2, resource: { buffer: inputBuffer } },
-        { binding: 3, resource: { buffer: this.matmulPodArgs } },
-        { binding: 4, resource: { buffer: this.policyPromoBias } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-policy-promo-bindings',
+        layout: this.promoPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.promoProj } },
+          { binding: 1, resource: { buffer: this.policyPromoWeight } },
+          { binding: 2, resource: { buffer: inputBuffer } },
+          { binding: 3, resource: { buffer: this.matmulPodArgs } },
+          { binding: 4, resource: { buffer: this.policyPromoBias } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(rows, 32), ceilDiv(promoDim, 32), 1);
     pass.setPipeline(this.concatPipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-policy-concat-bindings',
-      layout: this.concatPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: outputBuffer } },
-        { binding: 1, resource: { buffer: this.fromProj } },
-        { binding: 2, resource: { buffer: this.toProj } },
-        { binding: 3, resource: { buffer: this.promoProj } },
-        { binding: 4, resource: { buffer: this.concatPodArgs } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-policy-concat-bindings',
+        layout: this.concatPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: outputBuffer } },
+          { binding: 1, resource: { buffer: this.fromProj } },
+          { binding: 2, resource: { buffer: this.toProj } },
+          { binding: 3, resource: { buffer: this.promoProj } },
+          { binding: 4, resource: { buffer: this.concatPodArgs } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(promoDim, 16), ceilDiv(rows, 16), 1);
     pass.end();
     return outputBuffer;
@@ -253,6 +314,22 @@ export class SquareformerTvmPolicyHeadWebgpuBlock {
   }
 
   destroy(): void {
-    for (const buffer of [this.input, this.fromProj, this.toProj, this.promoProj, this.policy, this.readback, this.policyFromWeight, this.policyFromBias, this.policyToWeight, this.policyToBias, this.policyPromoWeight, this.policyPromoBias, this.matmulPodArgs, this.concatPodArgs]) buffer.destroy();
+    for (const buffer of [
+      this.input,
+      this.fromProj,
+      this.toProj,
+      this.promoProj,
+      this.policy,
+      this.readback,
+      this.policyFromWeight,
+      this.policyFromBias,
+      this.policyToWeight,
+      this.policyToBias,
+      this.policyPromoWeight,
+      this.policyPromoBias,
+      this.matmulPodArgs,
+      this.concatPodArgs,
+    ])
+      buffer.destroy();
   }
 }

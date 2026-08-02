@@ -27,7 +27,11 @@ test('LC0 f32 ONNX evaluator runs every FEN-only fixture with normalized legal p
     if (expectedBest) assert.equal(evaluation.bestMove, expectedBest, fixture.id);
     assert.equal(legal.has(evaluation.bestMove), true, `${fixture.id} best move legal`);
     assert.equal(evaluation.legalPriors.length, legal.size, `${fixture.id} legal prior count`);
-    assert.equal(evaluation.legalPriors.every((entry) => legal.has(entry.uci)), true, `${fixture.id} all priors legal`);
+    assert.equal(
+      evaluation.legalPriors.every((entry) => legal.has(entry.uci)),
+      true,
+      `${fixture.id} all priors legal`,
+    );
     assert.ok(Math.abs(evaluation.legalPriors.reduce((acc, entry) => acc + entry.prior, 0) - 1) < 1e-5, `${fixture.id} policy normalization`);
     assert.ok(Math.abs(evaluation.wdl.reduce((acc, value) => acc + value, 0) - 1) < 1e-5, `${fixture.id} WDL normalization`);
     assert.ok(Number.isFinite(evaluation.q), `${fixture.id} q finite`);

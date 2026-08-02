@@ -41,7 +41,7 @@ export async function checkSvelteKitRuntimeId(outputDir = process.env.NETLIFY_R2
   if (scriptIds.length !== 1 || pageIds.length !== 1 || scriptIds[0] !== pageIds[0]) {
     throw new Error(
       `SvelteKit runtime id mismatch: scripts=${scriptIds.join(',') || 'none'} pages=${pageIds.join(',') || 'none'}. ` +
-      'Clean .svelte-kit/output and rebuild before publishing.',
+        'Clean .svelte-kit/output and rebuild before publishing.',
     );
   }
 
@@ -49,10 +49,12 @@ export async function checkSvelteKitRuntimeId(outputDir = process.env.NETLIFY_R2
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  checkSvelteKitRuntimeId(process.argv[2]).then((report) => {
-    console.log(JSON.stringify(report));
-  }).catch((error) => {
-    console.error(error.message || error);
-    process.exit(1);
-  });
+  checkSvelteKitRuntimeId(process.argv[2])
+    .then((report) => {
+      console.log(JSON.stringify(report));
+    })
+    .catch((error) => {
+      console.error(error.message || error);
+      process.exit(1);
+    });
 }

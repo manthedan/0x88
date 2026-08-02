@@ -6,9 +6,21 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
-    if (arg === '--mb' && next) { args.mb = Number(next); i += 1; continue; }
-    if (arg === '--chunk-kb' && next) { args.chunkKb = Number(next); i += 1; continue; }
-    if (arg === '--repeats' && next) { args.repeats = Number(next); i += 1; continue; }
+    if (arg === '--mb' && next) {
+      args.mb = Number(next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--chunk-kb' && next) {
+      args.chunkKb = Number(next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--repeats' && next) {
+      args.repeats = Number(next);
+      i += 1;
+      continue;
+    }
     if (arg === '-h' || arg === '--help') {
       console.log('Usage: node --experimental-strip-types scripts/bench_model_cache_streaming.mjs [--mb 32] [--chunk-kb 256] [--repeats 3]');
       process.exit(0);
@@ -69,7 +81,9 @@ async function main() {
       const result = await loadLc0ModelForOrt(modelUrl, {
         cache: false,
         manifestUrl,
-        onProgress: () => { progressEvents += 1; },
+        onProgress: () => {
+          progressEvents += 1;
+        },
       });
       rows.push({
         repeat: i + 1,
@@ -86,14 +100,20 @@ async function main() {
   }
 
   const avgDownloadMs = rows.reduce((sum, row) => sum + row.downloadMs, 0) / rows.length;
-  console.log(JSON.stringify({
-    schema: 'lc0_browser.model_cache_streaming_bench.v1',
-    totalBytes,
-    chunkBytes,
-    repeats: args.repeats,
-    avgDownloadMs: Number(avgDownloadMs.toFixed(3)),
-    rows,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        schema: 'lc0_browser.model_cache_streaming_bench.v1',
+        totalBytes,
+        chunkBytes,
+        repeats: args.repeats,
+        avgDownloadMs: Number(avgDownloadMs.toFixed(3)),
+        rows,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((error) => {

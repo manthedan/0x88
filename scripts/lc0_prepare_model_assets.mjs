@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, relative, resolve } from 'node:path';
 
 const mode = process.argv.includes('--copy') ? 'copy' : 'symlink';
@@ -40,18 +40,13 @@ const files = [
   't3-512x15x16h-distill-swa-2767500.batch16.f16.onnx',
 ];
 
-const packDirs = [
-  't1-256x10-distilled-swa-2432500.batch8.f16.lc0web',
-];
+const packDirs = ['t1-256x10-distilled-swa-2432500.batch8.f16.lc0web'];
 
 // LeelaQueenOdds v2 (notune/LeelaQueenOdds, the public net behind the Lichess
 // queen-odds bot). T-era attention net; converted 2026-06-11 with:
 // lc0 leela2onnx --onnx-data-type=f16. WebGPU-gated big-net (bt4Engine.ts).
 const oddsSourceDir = resolve(workspaceRoot, 'models/odds/onnx');
-const oddsFiles = [
-  'lqo_v2.f16.qdq8.onnx',
-  'lqo_v2.f16.onnx',
-];
+const oddsFiles = ['lqo_v2.f16.qdq8.onnx', 'lqo_v2.f16.onnx'];
 
 // The Maia-1 per-level nets (maia-NNNN.f32.onnx) were retired 2026-06-12:
 // the Play page's fixed-rating human opponents now run on Maia3 conditioned
@@ -132,7 +127,9 @@ for (const packDir of packDirs) {
   const target = resolve(publicDir, packDir);
   rmSync(target, { force: true, recursive: true });
   mkdirSync(target, { recursive: true });
-  const packFiles = readdirSync(source).filter((file) => !file.startsWith('.')).sort();
+  const packFiles = readdirSync(source)
+    .filter((file) => !file.startsWith('.'))
+    .sort();
   for (const file of packFiles) {
     exposeAsset(resolve(source, file), resolve(target, file));
   }

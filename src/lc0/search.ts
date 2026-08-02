@@ -1,9 +1,18 @@
-import { boardToFen, parseFen, type BoardState } from '../chess/board.ts';
+import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
+import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
-import { searchRoot, type Node as PuctNode, type SearchOptions, type SearchProgress, type SearchResult } from '../search/puct.ts';
 import type { Evaluation, EvaluationBatchRequest, EvaluationContext, Evaluator } from '../nn/evaluator.ts';
-import { Lc0OnnxEvaluator, prepareLc0EvaluatorInput, type Lc0EvaluationCacheMetrics, type Lc0EvaluationProvider, type Lc0EvaluatorInput, type Lc0Evaluation, type Lc0OnnxEvaluatorOptions, type Lc0PreparedEvaluatorInput } from './onnxEvaluator.ts';
+import { type Node as PuctNode, type SearchOptions, type SearchProgress, type SearchResult, searchRoot } from '../search/puct.ts';
+import {
+  type Lc0Evaluation,
+  type Lc0EvaluationCacheMetrics,
+  type Lc0EvaluationProvider,
+  type Lc0EvaluatorInput,
+  Lc0OnnxEvaluator,
+  type Lc0OnnxEvaluatorOptions,
+  type Lc0PreparedEvaluatorInput,
+  prepareLc0EvaluatorInput,
+} from './onnxEvaluator.ts';
 
 export interface Lc0SearchOptions extends Omit<SearchOptions, 'onProgress'> {
   /** Fixed PUCT visits. Kept explicit here because Phase 2 starts with fixed-visit search parity. */
@@ -51,7 +60,7 @@ export interface Lc0SearchProgress {
 function currentBoardAndHistory(input: Lc0EvaluatorInput): { board: BoardState; historyFens: string[]; historyBoards: BoardState[]; explicitHistory: boolean } {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     if (input.positions.length === 0) throw new Error('LC0 search history input requires at least one position');
-    const boards = input.positions.map((position) => typeof position === 'string' ? parseFen(position) : position);
+    const boards = input.positions.map((position) => (typeof position === 'string' ? parseFen(position) : position));
     const board = boards[boards.length - 1];
     const historyBoards = boards.slice(0, -1).reverse();
     return { board, historyBoards, historyFens: historyBoards.map(boardToFen), explicitHistory: true };
@@ -61,18 +70,14 @@ function currentBoardAndHistory(input: Lc0EvaluatorInput): { board: BoardState; 
 
 function contextInput(board: BoardState, context?: EvaluationContext): Lc0PreparedEvaluatorInput {
   const historyFens = context?.historyFens ?? [];
-  const history = context?.historyBoards?.length === historyFens.length
-    ? context.historyBoards
-    : historyFens.map(parseFen);
-  return prepareLc0EvaluatorInput(board, history, context?.legalMoves ?? legalMoves(board), historyFens, context?.explicitHistory ?? (history.length > 0));
+  const history = context?.historyBoards?.length === historyFens.length ? context.historyBoards : historyFens.map(parseFen);
+  return prepareLc0EvaluatorInput(board, history, context?.legalMoves ?? legalMoves(board), historyFens, context?.explicitHistory ?? history.length > 0);
 }
 
 function lc0ToSearchEvaluation(board: BoardState, lc0: Lc0Evaluation, context?: EvaluationContext): Evaluation {
   const policy = new Map<number, number>();
   const needsUciFallback = lc0.legalPriors.some((prior) => prior.actionId === undefined);
-  const legalByUci = needsUciFallback
-    ? new Map<string, Move>((context?.legalMoves ?? legalMoves(board)).map((move) => [moveToUci(move), move]))
-    : undefined;
+  const legalByUci = needsUciFallback ? new Map<string, Move>((context?.legalMoves ?? legalMoves(board)).map((move) => [moveToUci(move), move])) : undefined;
   for (const prior of lc0.legalPriors) {
     if (prior.actionId !== undefined) {
       policy.set(prior.actionId, prior.prior);
@@ -102,9 +107,7 @@ export class Lc0SearchEvaluator implements Evaluator {
 
   async evaluateBatch(boards: BoardState[], contexts: EvaluationContext[] = []): Promise<Evaluation[]> {
     const inputs = boards.map((board, i) => contextInput(board, contexts[i]));
-    const evals = this.inner.evaluateBatch
-      ? await this.inner.evaluateBatch(inputs)
-      : await Promise.all(inputs.map((input) => this.inner.evaluate(input)));
+    const evals = this.inner.evaluateBatch ? await this.inner.evaluateBatch(inputs) : await Promise.all(inputs.map((input) => this.inner.evaluate(input)));
     return evals.map((lc0, i) => lc0ToSearchEvaluation(boards[i], lc0, contexts[i]));
   }
 
@@ -113,12 +116,14 @@ export class Lc0SearchEvaluator implements Evaluator {
     const lc0Batches = this.inner.evaluateBatchSequence ? await this.inner.evaluateBatchSequence(inputBatches) : [];
     if (!this.inner.evaluateBatchSequence) {
       for (const inputs of inputBatches) {
-        lc0Batches.push(this.inner.evaluateBatch
-          ? await this.inner.evaluateBatch(inputs)
-          : await Promise.all(inputs.map((input) => this.inner.evaluate(input))));
+        lc0Batches.push(
+          this.inner.evaluateBatch ? await this.inner.evaluateBatch(inputs) : await Promise.all(inputs.map((input) => this.inner.evaluate(input))),
+        );
       }
     }
-    return lc0Batches.map((evals, batchIndex) => evals.map((lc0, i) => lc0ToSearchEvaluation(batches[batchIndex].boards[i], lc0, batches[batchIndex].contexts?.[i])));
+    return lc0Batches.map((evals, batchIndex) =>
+      evals.map((lc0, i) => lc0ToSearchEvaluation(batches[batchIndex].boards[i], lc0, batches[batchIndex].contexts?.[i])),
+    );
   }
 
   metrics(): Lc0EvaluationCacheMetrics | undefined {
@@ -170,11 +175,9 @@ export class Lc0PuctSearcher {
   async search(input: Lc0EvaluatorInput, options: Lc0SearchOptions = {}): Promise<Lc0SearchResult> {
     const { board, historyFens, historyBoards, explicitHistory } = currentBoardAndHistory(input);
     const { reuseTree = false, onProgress, ...searchOptions } = options;
-    const hasExplicitRoot = Object.prototype.hasOwnProperty.call(searchOptions, 'root');
+    const hasExplicitRoot = Object.hasOwn(searchOptions, 'root');
     const useInternalTree = reuseTree && !hasExplicitRoot && !searchOptions.rootMoves;
-    const root = hasExplicitRoot
-      ? searchOptions.root
-      : useInternalTree ? this.compatibleCachedRoot(board, historyFens) : undefined;
+    const root = hasExplicitRoot ? searchOptions.root : useInternalTree ? this.compatibleCachedRoot(board, historyFens) : undefined;
     const convertProgress = (progress: SearchProgress): Lc0SearchProgress => {
       const children = progress.policy
         .map((entry) => ({ uci: moveToUci(entry.move), visits: entry.visits, prior: entry.prior, q: entry.q, probability: entry.probability }))

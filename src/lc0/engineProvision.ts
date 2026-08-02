@@ -7,21 +7,37 @@
 // module the three pages carried parallel copies that had already drifted
 // (arena's reckless cache key included the backend, analysis's did not, so
 // two backends of the same variant collided in the analysis cache).
-import type { BrowserUciEngine } from './browserUciEngine.ts';
-import { RecklessEngine } from './recklessEngine.ts';
-import { defaultRecklessVariantKey, recklessVariantByKey, resolveDefaultRecklessVariantAssetFallback, type RecklessVariant } from './recklessVariants.ts';
-import { ViridithasEngine, type ViridithasRuntimeOptions } from './viridithasEngine.ts';
-import { defaultViridithasVariantKey, resolveDefaultViridithasVariantAssetFallback, viridithasVariantByKey, type ViridithasVariant } from './viridithasVariants.ts';
-import { BerserkEngine } from './berserkEngine.ts';
-import { berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
-import { PlentyChessEngine } from './plentychessEngine.ts';
-import { defaultPlentyChessVariantKey, plentyChessVariantByKey, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
-import { StormphraxEngine } from './stormphraxEngine.ts';
-import { defaultStormphraxVariantKey, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantByKey, type StormphraxVariant } from './stormphraxVariants.ts';
-import { cpuEngineHashMbForSurface, type CpuEngineSurface } from './cpuEngineMemory.ts';
 
-export { CPU_ENGINE_HASH_MB_BY_SURFACE, DEFAULT_CPU_ENGINE_HASH_MB, cpuEngineHashMbForSurface } from './cpuEngineMemory.ts';
+import { BerserkEngine } from './berserkEngine.ts';
+import { type BerserkVariant, berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVariantAssetFallback } from './berserkVariants.ts';
+import type { BrowserUciEngine } from './browserUciEngine.ts';
+import { type CpuEngineSurface, cpuEngineHashMbForSurface } from './cpuEngineMemory.ts';
+import { PlentyChessEngine } from './plentychessEngine.ts';
+import {
+  defaultPlentyChessVariantKey,
+  type PlentyChessVariant,
+  plentyChessVariantByKey,
+  resolveDefaultPlentyChessVariantAssetFallback,
+} from './plentychessVariants.ts';
+import { RecklessEngine } from './recklessEngine.ts';
+import { defaultRecklessVariantKey, type RecklessVariant, recklessVariantByKey, resolveDefaultRecklessVariantAssetFallback } from './recklessVariants.ts';
+import { StormphraxEngine } from './stormphraxEngine.ts';
+import {
+  defaultStormphraxVariantKey,
+  resolveDefaultStormphraxVariantAssetFallback,
+  type StormphraxVariant,
+  stormphraxVariantByKey,
+} from './stormphraxVariants.ts';
+import { ViridithasEngine, type ViridithasRuntimeOptions } from './viridithasEngine.ts';
+import {
+  defaultViridithasVariantKey,
+  resolveDefaultViridithasVariantAssetFallback,
+  type ViridithasVariant,
+  viridithasVariantByKey,
+} from './viridithasVariants.ts';
+
 export type { CpuEngineSurface } from './cpuEngineMemory.ts';
+export { CPU_ENGINE_HASH_MB_BY_SURFACE, cpuEngineHashMbForSurface, DEFAULT_CPU_ENGINE_HASH_MB } from './cpuEngineMemory.ts';
 
 export interface CpuEngineProvisionOptions {
   surface?: CpuEngineSurface;
@@ -51,11 +67,7 @@ export function stormphraxCacheKey(variant: StormphraxVariant): string {
   return `${variant.key}:${variant.jsUrl}:${variant.wasmUrl}:${variant.dataUrl}`;
 }
 
-export function createRecklessEngine(
-  variant: RecklessVariant,
-  onStatus?: () => void,
-  options: CpuEngineProvisionOptions = {},
-): RecklessEngine {
+export function createRecklessEngine(variant: RecklessVariant, onStatus?: () => void, options: CpuEngineProvisionOptions = {}): RecklessEngine {
   return new RecklessEngine(cpuEngineDefaults(options), variant.wasmUrl, {
     backend: variant.backend ?? 'wasi',
     nnueUrl: variant.nnueUrl,
@@ -94,22 +106,15 @@ type DefaultBrowserUciProvisioner = (onStatus?: () => void) => Promise<BrowserUc
  * new Play-specific construction branch.
  */
 export const DEFAULT_BROWSER_UCI_FAMILY_PROVISIONERS: Record<DefaultBrowserUciFamily, DefaultBrowserUciProvisioner> = {
-  reckless: async (onStatus) => createRecklessEngine(
-    await resolveDefaultRecklessVariantAssetFallback(recklessVariantByKey(defaultRecklessVariantKey()), false),
-    onStatus,
-  ),
-  viridithas: async () => createViridithasEngine(
-    await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey(defaultViridithasVariantKey()), false),
-  ),
-  berserk: async () => createBerserkEngine(
-    await resolveDefaultBerserkVariantAssetFallback(berserkVariantByKey(defaultBerserkVariantKey()), false),
-  ),
-  plentychess: async () => createPlentyChessEngine(
-    await resolveDefaultPlentyChessVariantAssetFallback(plentyChessVariantByKey(defaultPlentyChessVariantKey()), false),
-  ),
-  stormphrax: async () => createStormphraxEngine(
-    await resolveDefaultStormphraxVariantAssetFallback(stormphraxVariantByKey(defaultStormphraxVariantKey()), false),
-  ),
+  reckless: async (onStatus) =>
+    createRecklessEngine(await resolveDefaultRecklessVariantAssetFallback(recklessVariantByKey(defaultRecklessVariantKey()), false), onStatus),
+  viridithas: async () =>
+    createViridithasEngine(await resolveDefaultViridithasVariantAssetFallback(viridithasVariantByKey(defaultViridithasVariantKey()), false)),
+  berserk: async () => createBerserkEngine(await resolveDefaultBerserkVariantAssetFallback(berserkVariantByKey(defaultBerserkVariantKey()), false)),
+  plentychess: async () =>
+    createPlentyChessEngine(await resolveDefaultPlentyChessVariantAssetFallback(plentyChessVariantByKey(defaultPlentyChessVariantKey()), false)),
+  stormphrax: async () =>
+    createStormphraxEngine(await resolveDefaultStormphraxVariantAssetFallback(stormphraxVariantByKey(defaultStormphraxVariantKey()), false)),
 };
 
 export function isDefaultBrowserUciFamily(family: string): family is DefaultBrowserUciFamily {

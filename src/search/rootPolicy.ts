@@ -12,7 +12,7 @@ export function rootVisitDistribution(policy: MovePolicy, variant: RootPolicyVar
   const moves = Object.keys(policy);
   if (moves.length === 0) return {};
   if (variant === 'argmax') {
-    const best = moves.reduce((a, b) => policy[a] >= policy[b] ? a : b);
+    const best = moves.reduce((a, b) => (policy[a] >= policy[b] ? a : b));
     return Object.fromEntries(moves.map((move) => [move, move === best ? 1 : 0]));
   }
   if (variant === 'prior_proportional') return normalize(policy);

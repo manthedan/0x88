@@ -15,12 +15,15 @@ async function loadWorkerModule(messages) {
 }
 
 function streamedResponse(chunks, headers = {}) {
-  return new Response(new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(Uint8Array.from(chunk));
-      controller.close();
-    },
-  }), { headers });
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(Uint8Array.from(chunk));
+        controller.close();
+      },
+    }),
+    { headers },
+  );
 }
 
 function resetPreopenState(worker, byteBudget) {
@@ -73,10 +76,17 @@ test('Reckless WASI preopen ignores encoded Content-Length and rejects no-header
     const worker = await loadWorkerModule(messages);
     resetPreopenState(worker);
     const { fetchPreopenBytes } = worker;
-    globalThis.fetch = async () => streamedResponse([[1, 2, 3], [4, 5]], {
-      'content-encoding': 'br',
-      'content-length': '2',
-    });
+    globalThis.fetch = async () =>
+      streamedResponse(
+        [
+          [1, 2, 3],
+          [4, 5],
+        ],
+        {
+          'content-encoding': 'br',
+          'content-length': '2',
+        },
+      );
     await assert.rejects(fetchPreopenBytes('/reckless/br-overflow.nnue', 4), /exceeds its 4-byte download limit.*at least 5/);
     assert.ok(messages.every((message) => message.totalBytes === 4));
     assert.ok(messages.every((message) => message.totalBytes !== 2));
@@ -113,10 +123,17 @@ test('Reckless WASI preopen accepts the exact decoded body and reports the expec
     const worker = await loadWorkerModule(messages);
     resetPreopenState(worker);
     const { fetchPreopenBytes } = worker;
-    globalThis.fetch = async () => streamedResponse([[1, 2], [3, 4]], {
-      'content-encoding': 'br',
-      'content-length': '2',
-    });
+    globalThis.fetch = async () =>
+      streamedResponse(
+        [
+          [1, 2],
+          [3, 4],
+        ],
+        {
+          'content-encoding': 'br',
+          'content-length': '2',
+        },
+      );
     const buffer = await fetchPreopenBytes('/reckless/exact.nnue', 4);
     assert.equal(buffer.byteLength, 4);
     assert.deepEqual([...new Uint8Array(buffer)], [1, 2, 3, 4]);
@@ -146,10 +163,7 @@ test('Reckless WASI preopen reuses verified bytes sequentially and deduplicates 
       fetches += 1;
       return streamedResponse([[1]], { 'content-length': '1' });
     };
-    const [first, second] = await Promise.all([
-      fetchPreopenBytes('/reckless/dedup.nnue', 1),
-      fetchPreopenBytes('/reckless/dedup.nnue', 1),
-    ]);
+    const [first, second] = await Promise.all([fetchPreopenBytes('/reckless/dedup.nnue', 1), fetchPreopenBytes('/reckless/dedup.nnue', 1)]);
     assert.equal(first, second);
     assert.equal(fetches, 1);
 
@@ -177,11 +191,13 @@ test('Reckless WASI preopen download preserves HTTP and stream errors and permit
       responseIndex += 1;
       if (responseIndex === 1) return new Response('', { status: 503 });
       if (responseIndex === 2) {
-        return new Response(new ReadableStream({
-          start(controller) {
-            controller.error(new Error('corrupt response stream'));
-          },
-        }));
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error('corrupt response stream'));
+            },
+          }),
+        );
       }
       return streamedResponse([[5]], { 'content-length': '1' });
     };
@@ -216,9 +232,7 @@ test('Reckless WASI preopen cache identity includes expected decoded bytes', asy
     const { fetchPreopenBytes } = worker;
     globalThis.fetch = async () => {
       fetches += 1;
-      return fetches === 1
-        ? streamedResponse([[1]], { 'content-length': '1' })
-        : streamedResponse([[1, 2]], { 'content-length': '2' });
+      return fetches === 1 ? streamedResponse([[1]], { 'content-length': '1' }) : streamedResponse([[1, 2]], { 'content-length': '2' });
     };
 
     assert.equal((await fetchPreopenBytes('/reckless/cache-key.nnue', 1)).byteLength, 1);

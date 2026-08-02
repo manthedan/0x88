@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 function engineSource(name) {
   return fileURLToPath(new URL(`../engines/reckless/src/${name}`, import.meta.url));
 }
+
 import { execFileSync } from 'node:child_process';
 
 const repo = process.env.RECKLESS_REPO ?? 'https://github.com/codedeliveryservice/Reckless.git';
@@ -57,11 +58,7 @@ function patchRecklessForWasmSimdNnue(root) {
 
 function patchRecklessForWasi(root) {
   if (l1Size) {
-    replace(
-      `${root}/src/nnue.rs`,
-      `const L1_SIZE: usize = 768;`,
-      `const L1_SIZE: usize = ${Number.parseInt(l1Size, 10)};`,
-    );
+    replace(`${root}/src/nnue.rs`, `const L1_SIZE: usize = 768;`, `const L1_SIZE: usize = ${Number.parseInt(l1Size, 10)};`);
   }
 
   replace(

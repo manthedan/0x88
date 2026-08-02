@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseFen } from '../src/chess/board.ts';
-import { legalMoves } from '../src/chess/movegen.ts';
 import { moveFromUci, moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
 
 const FENS = [
   'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1',
@@ -20,7 +20,8 @@ for (const fen of FENS) {
     const id = moveToActionId(move);
     if (id < 0 || id >= 64 * 64 * 5) throw new Error(`action id range ${fen} ${uci}`);
     if (seen.has(id)) throw new Error(`duplicate action id ${fen} ${uci}`);
-    seen.add(id); moves++;
+    seen.add(id);
+    moves++;
   }
 }
 console.log(`METRIC move_codec_roundtrip_positions=${FENS.length}`);

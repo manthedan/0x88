@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { basename, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -132,10 +132,7 @@ function ensureRequiredNets() {
     }
     if (existsSync(netPath)) continue;
 
-    for (const url of [
-      `https://tests.stockfishchess.org/api/nn/${net}`,
-      `https://github.com/official-stockfish/networks/raw/master/${net}`,
-    ]) {
+    for (const url of [`https://tests.stockfishchess.org/api/nn/${net}`, `https://github.com/official-stockfish/networks/raw/master/${net}`]) {
       const tmp = `${netPath}.tmp`;
       const result = spawnSync('curl', ['-fL', '--retry', '3', '--retry-delay', '2', url, '-o', tmp], { stdio: 'inherit' });
       if (result.status !== 0) continue;
@@ -184,25 +181,17 @@ function patchSource() {
   }
 
   const buildJs = resolve(sourceDir, 'build.js');
-  replaceOnce(
-    buildJs,
-    'var args = ["-j", require("os").cpus().length];',
-    'var args = ["-j", process.env.STOCKFISH_MAKE_JOBS || require("os").cpus().length];',
-  );
-  replaceOnce(
-    buildJs,
-    'var workerExternPostData = fs.readFileSync(workerExternPostPath, "utf8");',
-    'var workerExternPostData = "";',
-  );
+  replaceOnce(buildJs, 'var args = ["-j", require("os").cpus().length];', 'var args = ["-j", process.env.STOCKFISH_MAKE_JOBS || require("os").cpus().length];');
+  replaceOnce(buildJs, 'var workerExternPostData = fs.readFileSync(workerExternPostPath, "utf8");', 'var workerExternPostData = "";');
   replaceOnce(
     buildJs,
     'workerData = fs.readFileSync(stockfishWorkerThreadPath, "utf8") + workerExternPostData;',
-    'workerData = fs.readFileSync(stockfishWorkerThreadPath, "utf8").replace(\'"use strict";var Module={};\', \'"use strict";var startWorker;var Module={};\').replace(\'self.startWorker=instance=>\', \'startWorker=self.startWorker=instance=>\').replace(\'if(typeof e.data.urlOrBlob=="string"){importScripts(e.data.urlOrBlob)}else{var objectUrl=URL.createObjectURL(e.data.urlOrBlob);importScripts(objectUrl);URL.revokeObjectURL(objectUrl)}Stockfish(Module)\', \'Stockfish=INIT_ENGINE();Stockfish(Module)\') + workerExternPostData;',
+    "workerData = fs.readFileSync(stockfishWorkerThreadPath, \"utf8\").replace('\"use strict\";var Module={};', '\"use strict\";var startWorker;var Module={};').replace('self.startWorker=instance=>', 'startWorker=self.startWorker=instance=>').replace('if(typeof e.data.urlOrBlob==\"string\"){importScripts(e.data.urlOrBlob)}else{var objectUrl=URL.createObjectURL(e.data.urlOrBlob);importScripts(objectUrl);URL.revokeObjectURL(objectUrl)}Stockfish(Module)', 'Stockfish=INIT_ENGINE();Stockfish(Module)') + workerExternPostData;",
   );
   replaceOnce(
     buildJs,
     'stockfishWASMLoaderData = fs.readFileSync(stockfishWASMLoaderPath, "utf8").replace(/\\/\\/\\/ Insert worker here/, workerData);',
-    'stockfishWASMLoaderData = fs.readFileSync(stockfishWASMLoaderPath, "utf8").replace(/\\/\\/\\/ Insert worker here/, workerData).replace(\'startWorker(Module);\', \'self.startWorker(Module);\');',
+    "stockfishWASMLoaderData = fs.readFileSync(stockfishWASMLoaderPath, \"utf8\").replace(/\\/\\/\\/ Insert worker here/, workerData).replace('startWorker(Module);', 'self.startWorker(Module);');",
   );
 
   const simd = resolve(sourceDir, 'src/nnue/simd.h');
@@ -218,7 +207,8 @@ function patchSource() {
   );
 }
 
-if (!sourceInputDir && !existsSync(sourceTar)) throw new Error(`missing ${sourceTar}; set STOCKFISH_RELAXED_SOURCE_DIR=/path/to/stockfish.js/source to build from an extracted source archive`);
+if (!sourceInputDir && !existsSync(sourceTar))
+  throw new Error(`missing ${sourceTar}; set STOCKFISH_RELAXED_SOURCE_DIR=/path/to/stockfish.js/source to build from an extracted source archive`);
 rmSync(workRoot, { recursive: true, force: true });
 mkdirSync(sourceDir, { recursive: true });
 mkdirSync(outDir, { recursive: true });
@@ -229,8 +219,10 @@ if (sourceInputDir) {
   cpSync(sourceInputDir, sourceDir, { recursive: true });
 } else {
   run('tar', [
-    '-xzf', sourceTar,
-    '-C', sourceDir,
+    '-xzf',
+    sourceTar,
+    '-C',
+    sourceDir,
     '--strip-components=3',
     'stockfish-stockfish-js-18.0.7-corresponding-source/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832',
   ]);
@@ -241,11 +233,21 @@ console.log(`Building Stockfish.js relaxed SIMD variant: ${variantName} (${varia
 const dockerEnv = [];
 if (process.env.STOCKFISH_MAKE_JOBS) dockerEnv.push('-e', `STOCKFISH_MAKE_JOBS=${process.env.STOCKFISH_MAKE_JOBS}`);
 run('docker', [
-  'run', '--rm', '--platform', dockerPlatform,
-  '--user', `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
+  'run',
+  '--rm',
+  '--platform',
+  dockerPlatform,
+  '--user',
+  `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
   ...dockerEnv,
-  '-v', `${sourceDir}:/src`, '-w', '/src', dockerImage,
-  'bash', '-lc', ['node', 'build.js', ...variant.buildArgs, '--skip-em-check', '--force', '--no-minify'].join(' '),
+  '-v',
+  `${sourceDir}:/src`,
+  '-w',
+  '/src',
+  dockerImage,
+  'bash',
+  '-lc',
+  ['node', 'build.js', ...variant.buildArgs, '--skip-em-check', '--force', '--no-minify'].join(' '),
 ]);
 copyFileSync(resolve(sourceDir, 'src', `${variant.inputBase}.js`), resolve(outDir, `${variant.outputBase}.js`));
 copyFileSync(resolve(sourceDir, 'src', `${variant.inputBase}.wasm`), resolve(outDir, `${variant.outputBase}.wasm`));

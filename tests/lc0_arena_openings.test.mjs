@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, scheduleOpenings } from '../src/lc0/arenaOpenings.ts';
 import { boardToFen, START_FEN } from '../src/chess/board.ts';
+import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, scheduleOpenings } from '../src/lc0/arenaOpenings.ts';
 
 test('parseArenaOpenings accepts raw FEN and named FEN rows', () => {
   const rows = parseArenaOpenings(`
@@ -48,24 +48,27 @@ Italian PGN | 1. e4 e5 2. Nf3 Nc6 3. Bc4
 });
 
 test('parseArenaOpenings rejects malformed PGN/SAN instead of silently skipping tokens', () => {
-  assert.throws(
-    () => parseArenaOpenings('Bad | 1. e4 bogus e5'),
-    /illegal or unsupported SAN token bogus/,
-  );
-  assert.throws(
-    () => parseArenaOpenings('Bad NAG | 1. e4 $bogus e5'),
-    /Malformed PGN NAG token \$bogus/,
-  );
+  assert.throws(() => parseArenaOpenings('Bad | 1. e4 bogus e5'), /illegal or unsupported SAN token bogus/);
+  assert.throws(() => parseArenaOpenings('Bad NAG | 1. e4 $bogus e5'), /Malformed PGN NAG token \$bogus/);
 });
 
 test('scheduleOpenings plays every pairing on every configured position', () => {
-  const pairings = [{ white: 'a', black: 'b' }, { white: 'b', black: 'a' }];
-  const openings = [{ name: 'Start', fen: START_FEN }, { name: 'French', fen: 'fen2' }];
+  const pairings = [
+    { white: 'a', black: 'b' },
+    { white: 'b', black: 'a' },
+  ];
+  const openings = [
+    { name: 'Start', fen: START_FEN },
+    { name: 'French', fen: 'fen2' },
+  ];
   const scheduled = scheduleOpenings(pairings, openings);
-  assert.deepEqual(scheduled.map((g) => [g.white, g.black, g.opening.name]), [
-    ['a', 'b', 'Start'],
-    ['b', 'a', 'Start'],
-    ['a', 'b', 'French'],
-    ['b', 'a', 'French'],
-  ]);
+  assert.deepEqual(
+    scheduled.map((g) => [g.white, g.black, g.opening.name]),
+    [
+      ['a', 'b', 'Start'],
+      ['b', 'a', 'Start'],
+      ['a', 'b', 'French'],
+      ['b', 'a', 'French'],
+    ],
+  );
 });

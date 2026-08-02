@@ -15,12 +15,6 @@ export function browserVariantOption(value: string, label: string, state: Browse
   const unsupportedReason = state.unsupportedReason ?? null;
   const checkingRequiredAsset = state.requirePresent === true && status !== 'present' && status !== 'missing';
   const disabled = Boolean(unsupportedReason) || status === 'missing' || checkingRequiredAsset;
-  const suffix = unsupportedReason
-    ? ` (${unsupportedReason})`
-    : status === 'missing'
-      ? ' (asset missing)'
-      : checkingRequiredAsset
-        ? ' (checking asset)'
-        : '';
+  const suffix = unsupportedReason ? ` (${unsupportedReason})` : status === 'missing' ? ' (asset missing)' : checkingRequiredAsset ? ' (checking asset)' : '';
   return { value, label: `${label}${suffix}`, disabled };
 }

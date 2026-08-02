@@ -78,14 +78,16 @@ export async function probeEngineLogos(onChange?: () => void): Promise<void> {
     notifyProbeCallbacks();
     return;
   }
-  probing ??= Promise.all(Object.values(ENGINE_LOGO_ASSETS).map(async ({ family, url }) => {
-    try {
-      const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-      if (response.ok && (response.headers.get('content-type') ?? '').startsWith('image/')) availableEngineLogos.add(family);
-    } catch {
-      // Logo assets are decorative; missing files fall back to text-only labels.
-    }
-  })).then(() => {
+  probing ??= Promise.all(
+    Object.values(ENGINE_LOGO_ASSETS).map(async ({ family, url }) => {
+      try {
+        const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        if (response.ok && (response.headers.get('content-type') ?? '').startsWith('image/')) availableEngineLogos.add(family);
+      } catch {
+        // Logo assets are decorative; missing files fall back to text-only labels.
+      }
+    }),
+  ).then(() => {
     probed = true;
     notifyProbeCallbacks();
   });

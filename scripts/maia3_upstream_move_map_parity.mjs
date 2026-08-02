@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { maia3MoveIndex } from '../src/lc0/maia3.ts';
 
 const DEFAULT_UPSTREAM = process.env.MAIA_PLATFORM_FRONTEND_DIR ?? '/tmp/maia-platform-frontend';
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/maia3_upstream_move_map_parity.mjs [options]\n\nCompares this project's algorithmic Maia3 4352-move indexer against the upstream CSSLab maia-platform-frontend JSON move maps. It reads upstream files from a local clone and does not vendor/copy them.\n\nOptions:\n  --upstream-dir PATH   Local maia-platform-frontend checkout (default ${DEFAULT_UPSTREAM})\n  --out PATH            Optional JSON artifact path\n  -h, --help            Show this help\n`);
+  console.log(
+    `Usage: node --experimental-strip-types scripts/maia3_upstream_move_map_parity.mjs [options]\n\nCompares this project's algorithmic Maia3 4352-move indexer against the upstream CSSLab maia-platform-frontend JSON move maps. It reads upstream files from a local clone and does not vendor/copy them.\n\nOptions:\n  --upstream-dir PATH   Local maia-platform-frontend checkout (default ${DEFAULT_UPSTREAM})\n  --out PATH            Optional JSON artifact path\n  -h, --help            Show this help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -31,7 +33,10 @@ async function readJson(path) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) { usage(); return; }
+  if (args.help) {
+    usage();
+    return;
+  }
   const dataDir = join(args.upstreamDir, 'src/lib/engine/data');
   const forwardPath = join(dataDir, 'all_moves_maia3.json');
   const reversePath = join(dataDir, 'all_moves_maia3_reversed.json');
@@ -71,6 +76,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.stack ?? error.message : error);
+  console.error(error instanceof Error ? (error.stack ?? error.message) : error);
   process.exitCode = 1;
 });

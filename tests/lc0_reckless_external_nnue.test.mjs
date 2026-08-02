@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { RecklessEngine, RECKLESS_EXTERNAL_NNUE_FILE } from '../src/lc0/recklessEngine.ts';
+import { RECKLESS_EXTERNAL_NNUE_FILE, RecklessEngine } from '../src/lc0/recklessEngine.ts';
 import { RECKLESS_V60_NNUE_BYTES, RECKLESS_WASI_SIMD_EXTERNAL_VARIANT } from '../src/lc0/recklessVariants.ts';
 
 const FEN = '8/8/8/8/8/8/4P3/4K3 w - - 0 1';
@@ -36,16 +36,20 @@ test('persistent Reckless WASI preopens an external NNUE and reports download pr
     const engine = new RecklessEngine({}, RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.wasmUrl, {
       nnueUrl: RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.nnueUrl,
       nnueExpectedBytes: RECKLESS_WASI_SIMD_EXTERNAL_VARIANT.nnueExpectedBytes,
-      onStatus: () => { statusNotifications += 1; },
+      onStatus: () => {
+        statusNotifications += 1;
+      },
       disablePersistentFallback: true,
     });
     await engine.prewarm();
     const start = MockWorker.messages.find((message) => message.type === 'start-persistent');
-    assert.deepEqual(start.preopenFiles, [{
-      name: RECKLESS_EXTERNAL_NNUE_FILE,
-      url: '/reckless/reckless-v60-7f587dfb.nnue',
-      expectedBytes: RECKLESS_V60_NNUE_BYTES,
-    }]);
+    assert.deepEqual(start.preopenFiles, [
+      {
+        name: RECKLESS_EXTERNAL_NNUE_FILE,
+        url: '/reckless/reckless-v60-7f587dfb.nnue',
+        expectedBytes: RECKLESS_V60_NNUE_BYTES,
+      },
+    ]);
     assert.equal(engine.runtimeStatus().mode, 'persistent');
     assert.equal(engine.runtimeStatus().nnueExpectedBytes, RECKLESS_V60_NNUE_BYTES);
     assert.deepEqual(engine.runtimeStatus().browserApiLoad, {
@@ -76,15 +80,17 @@ test('one-shot Reckless fallback also preopens the external NNUE', async () => {
     postMessage(message) {
       MockWorker.messages.push(message);
       if (message.type === 'run') {
-        queueMicrotask(() => this.onmessage?.({
-          data: {
-            type: 'result',
-            id: message.id,
-            exitCode: 0,
-            stdout: ['info depth 1 score cp 1 pv e2e4', 'bestmove e2e4'],
-            stderr: [],
-          },
-        }));
+        queueMicrotask(() =>
+          this.onmessage?.({
+            data: {
+              type: 'result',
+              id: message.id,
+              exitCode: 0,
+              stdout: ['info depth 1 score cp 1 pv e2e4', 'bestmove e2e4'],
+              stderr: [],
+            },
+          }),
+        );
       }
     }
 
@@ -101,11 +107,13 @@ test('one-shot Reckless fallback also preopens the external NNUE', async () => {
     });
     assert.equal(await engine.bestMove(FEN), 'e2e4');
     const run = MockWorker.messages.find((message) => message.type === 'run');
-    assert.deepEqual(run.preopenFiles, [{
-      name: RECKLESS_EXTERNAL_NNUE_FILE,
-      url: '/reckless/reckless-v60-7f587dfb.nnue',
-      expectedBytes: RECKLESS_V60_NNUE_BYTES,
-    }]);
+    assert.deepEqual(run.preopenFiles, [
+      {
+        name: RECKLESS_EXTERNAL_NNUE_FILE,
+        url: '/reckless/reckless-v60-7f587dfb.nnue',
+        expectedBytes: RECKLESS_V60_NNUE_BYTES,
+      },
+    ]);
     engine.dispose();
   } finally {
     if (previousWorker === undefined) delete globalThis.Worker;
@@ -125,19 +133,23 @@ test('Reckless browser API messages carry the exact external NNUE byte requireme
     postMessage(message) {
       MockWorker.messages.push(message);
       if (message.type === 'dispose') return;
-      queueMicrotask(() => this.onmessage?.({
-        data: {
-          type: 'ok',
-          id: message.id,
-          ...(message.type === 'search' ? {
-            result: {
-              bestmove: 'e2e4',
-              elapsedMs: 1,
-              lines: [],
-            },
-          } : {}),
-        },
-      }));
+      queueMicrotask(() =>
+        this.onmessage?.({
+          data: {
+            type: 'ok',
+            id: message.id,
+            ...(message.type === 'search'
+              ? {
+                  result: {
+                    bestmove: 'e2e4',
+                    elapsedMs: 1,
+                    lines: [],
+                  },
+                }
+              : {}),
+          },
+        }),
+      );
     }
 
     terminate() {}
@@ -155,7 +167,10 @@ test('Reckless browser API messages carry the exact external NNUE byte requireme
     await engine.newGame();
     assert.equal(await engine.bestMove(FEN), 'e2e4');
     const apiMessages = MockWorker.messages.filter((message) => ['prewarm', 'new-game', 'search'].includes(message.type));
-    assert.deepEqual(apiMessages.map((message) => message.type), ['prewarm', 'new-game', 'search']);
+    assert.deepEqual(
+      apiMessages.map((message) => message.type),
+      ['prewarm', 'new-game', 'search'],
+    );
     for (const message of apiMessages) {
       assert.equal(message.nnueUrl, '/reckless/reckless-v60-7f587dfb.nnue');
       assert.equal(message.nnueExpectedBytes, RECKLESS_V60_NNUE_BYTES);

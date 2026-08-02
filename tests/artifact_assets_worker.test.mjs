@@ -22,11 +22,13 @@ function fakeEnv() {
     ARTIFACTS: {
       async head(key) {
         const entry = entries.get(key);
-        return entry ? {
-          size: entry.body.byteLength,
-          httpEtag: '"fake-etag"',
-          httpMetadata: { contentType: entry.contentType, cacheControl: entry.cacheControl },
-        } : null;
+        return entry
+          ? {
+              size: entry.body.byteLength,
+              httpEtag: '"fake-etag"',
+              httpMetadata: { contentType: entry.contentType, cacheControl: entry.cacheControl },
+            }
+          : null;
       },
       async get(key, options) {
         const entry = entries.get(key);
@@ -49,9 +51,15 @@ async function text(response) {
 }
 
 class FakeCache {
-  constructor() { this.store = new Map(); }
-  async match(request) { return this.store.get(request.url); }
-  async put(request, response) { this.store.set(request.url, response); }
+  constructor() {
+    this.store = new Map();
+  }
+  async match(request) {
+    return this.store.get(request.url);
+  }
+  async put(request, response) {
+    this.store.set(request.url, response);
+  }
 }
 
 async function withFakeEdgeCache(run) {
@@ -97,14 +105,18 @@ test('artifact assets worker caches HEAD metadata without R2 body fetches', asyn
 test('artifact assets worker preserves encoded length through normalized cached HEAD metadata', async () => {
   const previous = globalThis.caches;
   let cached;
-  globalThis.caches = { default: {
-    async match() { return cached; },
-    async put(_request, response) {
-      const headers = new Headers(response.headers);
-      headers.set('Content-Length', '0');
-      cached = new Response(null, { status: response.status, headers });
+  globalThis.caches = {
+    default: {
+      async match() {
+        return cached;
+      },
+      async put(_request, response) {
+        const headers = new Headers(response.headers);
+        headers.set('Content-Length', '0');
+        cached = new Response(null, { status: response.status, headers });
+      },
     },
-  } };
+  };
   try {
     const request = new Request(`https://assets.example/${V2_BR_KEY}`, { method: 'HEAD' });
     const env = fakeV2Env();
@@ -124,22 +136,24 @@ test('artifact assets worker ignores legacy v3 HEAD cache entries without encode
   const previous = globalThis.caches;
   const oldCacheUrl = `https://assets.example/${KEY}?__lc0_artifact_head=v3`;
   const matchedUrls = [];
-  globalThis.caches = { default: {
-    async match(request) {
-      matchedUrls.push(request.url);
-      if (request.url === oldCacheUrl) {
-        return new Response(null, {
-          status: 200,
-          headers: {
-            'Content-Length': '0',
-            'X-Artifact-Content-Length': String(BODY.byteLength),
-          },
-        });
-      }
-      return undefined;
+  globalThis.caches = {
+    default: {
+      async match(request) {
+        matchedUrls.push(request.url);
+        if (request.url === oldCacheUrl) {
+          return new Response(null, {
+            status: 200,
+            headers: {
+              'Content-Length': '0',
+              'X-Artifact-Content-Length': String(BODY.byteLength),
+            },
+          });
+        }
+        return undefined;
+      },
+      async put() {},
     },
-    async put() {},
-  } };
+  };
   try {
     const env = fakeEnv();
     let headCalls = 0;
@@ -166,7 +180,13 @@ test('artifact assets worker serves cached full artifacts without an R2 head hit
     const first = await handleArtifactRequest(request, fakeEnv());
     assert.equal(first.headers.get('Cache-Status'), 'lc0-artifact-worker; miss');
     assert.equal(await text(first), 'abcdefghijklmnopqrstuvwxyz');
-    const unavailableEnv = { ARTIFACTS: { head: async () => { throw new Error('R2 unavailable'); } } };
+    const unavailableEnv = {
+      ARTIFACTS: {
+        head: async () => {
+          throw new Error('R2 unavailable');
+        },
+      },
+    };
     const second = await handleArtifactRequest(request, unavailableEnv);
     assert.equal(second.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
     assert.equal(await text(second), 'abcdefghijklmnopqrstuvwxyz');
@@ -178,7 +198,13 @@ test('artifact assets worker serves cached HEAD metadata without an R2 head hit'
     const request = new Request(`https://assets.example/${KEY}`, { method: 'HEAD' });
     const first = await handleArtifactRequest(request, fakeEnv());
     assert.equal(first.headers.get('Cache-Status'), 'lc0-artifact-worker; miss');
-    const unavailableEnv = { ARTIFACTS: { head: async () => { throw new Error('R2 unavailable'); } } };
+    const unavailableEnv = {
+      ARTIFACTS: {
+        head: async () => {
+          throw new Error('R2 unavailable');
+        },
+      },
+    };
     const second = await handleArtifactRequest(request, unavailableEnv);
     assert.equal(second.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
     assert.equal(second.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
@@ -186,9 +212,12 @@ test('artifact assets worker serves cached HEAD metadata without an R2 head hit'
 });
 
 test('artifact assets worker serves valid byte ranges', async () => {
-  const response = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`, {
-    headers: { Range: 'bytes=2-5' },
-  }), fakeEnv());
+  const response = await handleArtifactRequest(
+    new Request(`https://assets.example/${KEY}`, {
+      headers: { Range: 'bytes=2-5' },
+    }),
+    fakeEnv(),
+  );
   assert.equal(response.status, 206);
   assert.equal(response.headers.get('Content-Range'), `bytes 2-5/${BODY.byteLength}`);
   assert.equal(response.headers.get('Content-Length'), '4');
@@ -196,9 +225,12 @@ test('artifact assets worker serves valid byte ranges', async () => {
 });
 
 test('artifact assets worker serves suffix byte ranges', async () => {
-  const response = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`, {
-    headers: { Range: 'bytes=-3' },
-  }), fakeEnv());
+  const response = await handleArtifactRequest(
+    new Request(`https://assets.example/${KEY}`, {
+      headers: { Range: 'bytes=-3' },
+    }),
+    fakeEnv(),
+  );
   assert.equal(response.status, 206);
   assert.equal(response.headers.get('Content-Range'), `bytes ${BODY.byteLength - 3}-${BODY.byteLength - 1}/${BODY.byteLength}`);
   assert.equal(await text(response), 'xyz');
@@ -209,9 +241,12 @@ test('artifact assets worker does not materialize cached full bodies for ranges'
     const full = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`), fakeEnv());
     assert.equal(full.headers.get('Cache-Status'), 'lc0-artifact-worker; miss');
     assert.equal(await text(full), 'abcdefghijklmnopqrstuvwxyz');
-    const range = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`, {
-      headers: { Range: 'bytes=0-2' },
-    }), fakeEnv());
+    const range = await handleArtifactRequest(
+      new Request(`https://assets.example/${KEY}`, {
+        headers: { Range: 'bytes=0-2' },
+      }),
+      fakeEnv(),
+    );
     assert.equal(range.headers.get('Cache-Status'), 'lc0-artifact-worker; fwd');
     assert.equal(await text(range), 'abc');
   });
@@ -219,7 +254,14 @@ test('artifact assets worker does not materialize cached full bodies for ranges'
 
 test('artifact assets worker still serves when cache population fails', async () => {
   const previous = globalThis.caches;
-  globalThis.caches = { default: { match: async () => undefined, put: async () => { throw new Error('cache unavailable'); } } };
+  globalThis.caches = {
+    default: {
+      match: async () => undefined,
+      put: async () => {
+        throw new Error('cache unavailable');
+      },
+    },
+  };
   try {
     const response = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`), fakeEnv());
     assert.equal(response.status, 200);
@@ -292,12 +334,16 @@ test('artifact assets worker preserves percent-encoded R2 keys', async () => {
 
 test('artifact assets worker serves stable logical asset paths through the channel release manifest with short caching', async () => {
   const channelBody = new TextEncoder().encode(JSON.stringify({ releaseManifestUrl: '/releases/stable-test.json' }));
-  const releaseBody = new TextEncoder().encode(JSON.stringify({
-    artifacts: [{
-      logicalUrl: '/stormphrax/stormphrax-emscripten.js',
-      artifactUrl: `https://assets.example/${KEY}`,
-    }],
-  }));
+  const releaseBody = new TextEncoder().encode(
+    JSON.stringify({
+      artifacts: [
+        {
+          logicalUrl: '/stormphrax/stormphrax-emscripten.js',
+          artifactUrl: `https://assets.example/${KEY}`,
+        },
+      ],
+    }),
+  );
   const entries = new Map([
     [KEY, { body: BODY, contentType: 'text/javascript; charset=utf-8' }],
     ['channels/stable.json', { body: channelBody, contentType: 'application/json; charset=utf-8' }],
@@ -337,13 +383,17 @@ test('artifact assets worker serves stable logical asset paths through the chann
 test('artifact assets worker binds engine manifests to the selected release', async () => {
   const manifestKey = `artifacts/sha256/${'a'.repeat(64)}/stormphrax.manifest.json`;
   const channelBody = new TextEncoder().encode(JSON.stringify({ releaseManifestUrl: '/releases/stable-test.json' }));
-  const releaseBody = new TextEncoder().encode(JSON.stringify({
-    sourceManifests: ['public/stormphrax/stormphrax-emscripten-single-thread.manifest.json'],
-    artifacts: [{
-      logicalUrl: '/stormphrax/stormphrax-emscripten-single-thread.manifest.json',
-      artifactUrl: `https://assets.example/${manifestKey}`,
-    }],
-  }));
+  const releaseBody = new TextEncoder().encode(
+    JSON.stringify({
+      sourceManifests: ['public/stormphrax/stormphrax-emscripten-single-thread.manifest.json'],
+      artifacts: [
+        {
+          logicalUrl: '/stormphrax/stormphrax-emscripten-single-thread.manifest.json',
+          artifactUrl: `https://assets.example/${manifestKey}`,
+        },
+      ],
+    }),
+  );
   const manifestBody = new TextEncoder().encode('{}');
   const entries = new Map([
     ['channels/stable.json', { body: channelBody, contentType: 'application/json; charset=utf-8' }],
@@ -362,7 +412,10 @@ test('artifact assets worker binds engine manifests to the selected release', as
       },
     },
   };
-  const response = await handleArtifactRequest(new Request('https://assets.example/stormphrax/stormphrax-emscripten-single-thread.manifest.json', { method: 'HEAD' }), env);
+  const response = await handleArtifactRequest(
+    new Request('https://assets.example/stormphrax/stormphrax-emscripten-single-thread.manifest.json', { method: 'HEAD' }),
+    env,
+  );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=86400');
   assert.equal(response.headers.get('X-Artifact-Content-Length'), String(manifestBody.byteLength));
@@ -374,9 +427,12 @@ test('artifact assets worker rejects non-artifact paths and invalid ranges', asy
   const notFound = await handleArtifactRequest(new Request('https://assets.example/models/raw.onnx'), fakeEnv());
   assert.equal(notFound.status, 404);
   assert.equal(notFound.headers.get('Cache-Control'), 'no-store');
-  const badRange = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`, {
-    headers: { Range: 'bytes=999-1000' },
-  }), fakeEnv());
+  const badRange = await handleArtifactRequest(
+    new Request(`https://assets.example/${KEY}`, {
+      headers: { Range: 'bytes=999-1000' },
+    }),
+    fakeEnv(),
+  );
   assert.equal(badRange.status, 416);
   assert.equal(badRange.headers.get('Content-Range'), `bytes */${BODY.byteLength}`);
 });
@@ -389,11 +445,13 @@ const V2_BR_BODY = new TextEncoder().encode('compressed-body');
 
 function fakeV2Env() {
   const counts = { head: new Map(), get: new Map() };
-  const channel = new TextEncoder().encode(JSON.stringify({
-    schema: 'lc0-webgpu.artifact-channel.v2',
-    releaseId: 'v2-test',
-    releaseUrl: '/releases/v2-test.json',
-  }));
+  const channel = new TextEncoder().encode(
+    JSON.stringify({
+      schema: 'lc0-webgpu.artifact-channel.v2',
+      releaseId: 'v2-test',
+      releaseUrl: '/releases/v2-test.json',
+    }),
+  );
   const artifact = {
     name: 'model-a',
     logicalUrl: '/models/lc0/model-a.onnx',
@@ -404,11 +462,13 @@ function fakeV2Env() {
       { encoding: 'br', url: `/${V2_BR_KEY}`, sha256: V2_BR_SHA, bytes: V2_BR_BODY.byteLength },
     ],
   };
-  const release = new TextEncoder().encode(JSON.stringify({
-    schema: 'lc0-webgpu.artifact-release.v2',
-    releaseId: 'v2-test',
-    artifacts: [artifact, { ...artifact, name: 'model-b', file: 'model-b.onnx', logicalUrl: undefined, contentType: 'application/wasm' }],
-  }));
+  const release = new TextEncoder().encode(
+    JSON.stringify({
+      schema: 'lc0-webgpu.artifact-release.v2',
+      releaseId: 'v2-test',
+      artifacts: [artifact, { ...artifact, name: 'model-b', file: 'model-b.onnx', logicalUrl: undefined, contentType: 'application/wasm' }],
+    }),
+  );
   const entries = new Map([
     ['channels/stable.json', { body: channel, contentType: 'application/json; charset=utf-8' }],
     ['releases/v2-test.json', { body: release, contentType: 'application/json; charset=utf-8' }],
@@ -422,11 +482,13 @@ function fakeV2Env() {
       async head(key) {
         increment(counts.head, key);
         const entry = entries.get(key);
-        return entry ? {
-          size: entry.body.byteLength,
-          httpEtag: '"v2-etag"',
-          httpMetadata: { contentType: entry.contentType, contentEncoding: entry.contentEncoding },
-        } : null;
+        return entry
+          ? {
+              size: entry.body.byteLength,
+              httpEtag: '"v2-etag"',
+              httpMetadata: { contentType: entry.contentType, contentEncoding: entry.contentEncoding },
+            }
+          : null;
       },
       async get(key, options) {
         increment(counts.get, key);
@@ -446,9 +508,12 @@ function fakeV2Env() {
 }
 
 test('artifact assets worker negotiates a v2 Brotli representation with decoded integrity metadata', async () => {
-  const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx', {
-    headers: { 'Accept-Encoding': 'br' },
-  }), fakeV2Env());
+  const response = await handleArtifactRequest(
+    new Request('https://assets.example/models/lc0/model-a.onnx', {
+      headers: { 'Accept-Encoding': 'br' },
+    }),
+    fakeV2Env(),
+  );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('Content-Encoding'), 'br');
   assert.equal(response.headers.get('Vary'), 'Accept-Encoding');
@@ -462,27 +527,27 @@ test('artifact assets worker negotiates a v2 Brotli representation with decoded 
 
 test('artifact assets worker rejects malformed v2 artifacts instead of falling back to legacy fields', async () => {
   const identity = { encoding: 'identity', url: `/${V2_IDENTITY_KEY}`, sha256: V2_RAW_SHA, bytes: BODY.byteLength };
-  for (const representations of [
-    [],
-    [identity, { ...identity }],
-    [{ ...identity, url: `/artifacts/sha256/${'c'.repeat(64)}/identity` }],
-  ]) {
+  for (const representations of [[], [identity, { ...identity }], [{ ...identity, url: `/artifacts/sha256/${'c'.repeat(64)}/identity` }]]) {
     const env = fakeV2Env();
     const originalGet = env.ARTIFACTS.get;
     env.ARTIFACTS.get = async (key, options) => {
       if (key !== 'releases/v2-test.json') return originalGet(key, options);
-      const body = new TextEncoder().encode(JSON.stringify({
-        schema: 'lc0_browser.artifact_release_manifest.v2',
-        releaseId: 'v2-test',
-        artifacts: [{
-          logicalUrl: '/models/lc0/model-a.onnx',
-          artifactUrl: `/${V2_IDENTITY_KEY}`,
-          sha256: V2_RAW_SHA,
-          bytes: BODY.byteLength,
-          raw: { sha256: V2_RAW_SHA, bytes: BODY.byteLength },
-          representations,
-        }],
-      }));
+      const body = new TextEncoder().encode(
+        JSON.stringify({
+          schema: 'lc0_browser.artifact_release_manifest.v2',
+          releaseId: 'v2-test',
+          artifacts: [
+            {
+              logicalUrl: '/models/lc0/model-a.onnx',
+              artifactUrl: `/${V2_IDENTITY_KEY}`,
+              sha256: V2_RAW_SHA,
+              bytes: BODY.byteLength,
+              raw: { sha256: V2_RAW_SHA, bytes: BODY.byteLength },
+              representations,
+            },
+          ],
+        }),
+      );
       return { size: body.byteLength, httpMetadata: { contentType: 'application/json' }, body };
     };
     const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx'), env);
@@ -493,9 +558,12 @@ test('artifact assets worker rejects malformed v2 artifacts instead of falling b
 
 test('artifact assets worker forces v2 Range requests to the identity representation', async () => {
   const env = fakeV2Env();
-  const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx', {
-    headers: { 'Accept-Encoding': 'br', Range: 'bytes=2-5' },
-  }), env);
+  const response = await handleArtifactRequest(
+    new Request('https://assets.example/models/lc0/model-a.onnx', {
+      headers: { 'Accept-Encoding': 'br', Range: 'bytes=2-5' },
+    }),
+    env,
+  );
   assert.equal(response.status, 206);
   assert.equal(response.headers.get('Content-Encoding'), null);
   assert.equal(response.headers.get('Content-Range'), `bytes 2-5/${BODY.byteLength}`);
@@ -517,7 +585,10 @@ test('artifact assets worker shares canonical v2 body and control caches across 
     assert.equal(env.counts.get.get('channels/stable.json'), 1);
     assert.equal(env.counts.get.get('releases/v2-test.json'), 1);
     assert.equal(env.counts.get.get(V2_IDENTITY_KEY), 1);
-    assert.equal([...env.counts.head.values()].reduce((sum, value) => sum + value, 0), 0);
+    assert.equal(
+      [...env.counts.head.values()].reduce((sum, value) => sum + value, 0),
+      0,
+    );
   });
 });
 
@@ -527,9 +598,12 @@ test('artifact assets worker reapplies logical metadata after a direct canonical
     const direct = await handleArtifactRequest(new Request(`https://assets.example/${V2_BR_KEY}`), env);
     assert.equal(direct.headers.get('X-Artifact-Content-Length'), null);
     assert.equal(await text(direct), 'compressed-body');
-    const alias = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx', {
-      headers: { 'Accept-Encoding': 'br' },
-    }), env);
+    const alias = await handleArtifactRequest(
+      new Request('https://assets.example/models/lc0/model-a.onnx', {
+        headers: { 'Accept-Encoding': 'br' },
+      }),
+      env,
+    );
     assert.equal(alias.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
     assert.equal(alias.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
     assert.equal(alias.headers.get('X-Artifact-Decoded-SHA256'), V2_RAW_SHA);
@@ -545,18 +619,24 @@ test('artifact assets worker reapplies logical metadata after a direct canonical
 
 test('artifact assets worker rejects Range on an explicit Brotli representation without reading identity', async () => {
   const env = fakeV2Env();
-  const response = await handleArtifactRequest(new Request(`https://assets.example/${V2_BR_KEY}`, {
-    headers: { Range: 'bytes=0-3' },
-  }), env);
+  const response = await handleArtifactRequest(
+    new Request(`https://assets.example/${V2_BR_KEY}`, {
+      headers: { Range: 'bytes=0-3' },
+    }),
+    env,
+  );
   assert.equal(response.status, 416);
   assert.equal(response.headers.get('Accept-Ranges'), 'none');
   assert.equal(env.counts.get.get(V2_IDENTITY_KEY), undefined);
   assert.equal(env.counts.get.get(V2_BR_KEY), undefined);
 
-  const head = await handleArtifactRequest(new Request(`https://assets.example/${V2_BR_KEY}`, {
-    method: 'HEAD',
-    headers: { Range: 'bytes=0-3' },
-  }), env);
+  const head = await handleArtifactRequest(
+    new Request(`https://assets.example/${V2_BR_KEY}`, {
+      method: 'HEAD',
+      headers: { Range: 'bytes=0-3' },
+    }),
+    env,
+  );
   assert.equal(head.status, 416);
   assert.equal((await head.arrayBuffer()).byteLength, 0);
 });
@@ -564,17 +644,20 @@ test('artifact assets worker rejects Range on an explicit Brotli representation 
 test('artifact assets worker verifies R2 existence before answering a logical HEAD', async () => {
   const env = fakeV2Env();
   const originalHead = env.ARTIFACTS.head;
-  env.ARTIFACTS.head = async (key) => key === V2_IDENTITY_KEY ? null : originalHead(key);
+  env.ARTIFACTS.head = async (key) => (key === V2_IDENTITY_KEY ? null : originalHead(key));
   const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx', { method: 'HEAD' }), env);
   assert.equal(response.status, 404);
 });
 
 test('artifact assets worker keeps ranged HEAD responses bodyless and avoids R2 GET', async () => {
   const env = fakeV2Env();
-  const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx', {
-    method: 'HEAD',
-    headers: { Range: 'bytes=0-3' },
-  }), env);
+  const response = await handleArtifactRequest(
+    new Request('https://assets.example/models/lc0/model-a.onnx', {
+      method: 'HEAD',
+      headers: { Range: 'bytes=0-3' },
+    }),
+    env,
+  );
   assert.equal(response.status, 206);
   assert.equal(response.headers.get('Content-Range'), `bytes 0-3/${BODY.byteLength}`);
   assert.equal((await response.arrayBuffer()).byteLength, 0);
@@ -585,18 +668,29 @@ test('artifact assets worker keeps ranged HEAD responses bodyless and avoids R2 
 test('artifact assets worker performs one body-cache lookup and no HEAD on a full GET miss', async () => {
   const previous = globalThis.caches;
   let matches = 0;
-  globalThis.caches = { default: {
-    async match() { matches += 1; return undefined; },
-    async put() {},
-  } };
+  globalThis.caches = {
+    default: {
+      async match() {
+        matches += 1;
+        return undefined;
+      },
+      async put() {},
+    },
+  };
   try {
     const env = fakeEnv();
     let heads = 0;
     let gets = 0;
     const originalHead = env.ARTIFACTS.head;
     const originalGet = env.ARTIFACTS.get;
-    env.ARTIFACTS.head = async (...args) => { heads += 1; return originalHead(...args); };
-    env.ARTIFACTS.get = async (...args) => { gets += 1; return originalGet(...args); };
+    env.ARTIFACTS.head = async (...args) => {
+      heads += 1;
+      return originalHead(...args);
+    };
+    env.ARTIFACTS.get = async (...args) => {
+      gets += 1;
+      return originalGet(...args);
+    };
     const response = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`), env);
     assert.equal(await text(response), 'abcdefghijklmnopqrstuvwxyz');
     assert.equal(matches, 1);
@@ -614,13 +708,15 @@ test('artifact assets worker rejects ambiguous name-only v2 basename aliases', a
     if (key !== 'releases/v2-test.json') return originalGet(key, options);
     const raw = { sha256: V2_RAW_SHA, bytes: BODY.byteLength };
     const representations = [{ encoding: 'identity', url: `/${V2_IDENTITY_KEY}`, sha256: V2_RAW_SHA, bytes: BODY.byteLength }];
-    const body = new TextEncoder().encode(JSON.stringify({
-      schema: 'lc0-webgpu.artifact-release.v2',
-      artifacts: [
-        { name: 'one', file: 'model-a.onnx', raw, representations },
-        { name: 'two', file: 'model-a.onnx', raw, representations },
-      ],
-    }));
+    const body = new TextEncoder().encode(
+      JSON.stringify({
+        schema: 'lc0-webgpu.artifact-release.v2',
+        artifacts: [
+          { name: 'one', file: 'model-a.onnx', raw, representations },
+          { name: 'two', file: 'model-a.onnx', raw, representations },
+        ],
+      }),
+    );
     return { size: body.byteLength, httpMetadata: { contentType: 'application/json' }, body };
   };
   const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx'), env);
@@ -628,15 +724,21 @@ test('artifact assets worker rejects ambiguous name-only v2 basename aliases', a
 });
 
 test('artifact assets worker returns 406 when a v2 client rejects every available encoding', async () => {
-  const response = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx', {
-    headers: { 'Accept-Encoding': 'identity;q=0, br;q=0' },
-  }), fakeV2Env());
+  const response = await handleArtifactRequest(
+    new Request('https://assets.example/models/lc0/model-a.onnx', {
+      headers: { 'Accept-Encoding': 'identity;q=0, br;q=0' },
+    }),
+    fakeV2Env(),
+  );
   assert.equal(response.status, 406);
   assert.equal(response.headers.get('Vary'), 'Accept-Encoding');
 
-  const range = await handleArtifactRequest(new Request('https://assets.example/models/lc0/model-a.onnx', {
-    headers: { 'Accept-Encoding': 'br, identity;q=0', Range: 'bytes=0-3' },
-  }), fakeV2Env());
+  const range = await handleArtifactRequest(
+    new Request('https://assets.example/models/lc0/model-a.onnx', {
+      headers: { 'Accept-Encoding': 'br, identity;q=0', Range: 'bytes=0-3' },
+    }),
+    fakeV2Env(),
+  );
   assert.equal(range.status, 406);
   assert.equal(range.headers.get('Vary'), 'Accept-Encoding');
 });

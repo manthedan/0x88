@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { parsePgnGames } from '../src/chess/pgn.ts';
-import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsForPosition, openingStatsFromIndex, openingSummary, positionKey } from '../src/lc0/openingStats.ts';
+import {
+  buildOpeningPositionIndex,
+  mergeOpeningMoveStats,
+  openingStatsForPosition,
+  openingStatsFromIndex,
+  openingSummary,
+  positionKey,
+} from '../src/lc0/openingStats.ts';
 
 const PGN = [
   '[Result "1-0"]\n\n1. e4 e5 2. Nf3 Nc6 1-0',
@@ -53,8 +60,17 @@ test('buildOpeningPositionIndex precomputes lookup stats by position key', () =>
 test('mergeOpeningMoveStats aggregates saved collection search hits', () => {
   const merged = mergeOpeningMoveStats([
     [{ uci: 'e2e4', san: 'e4', count: 2, whiteWins: 1, blackWins: 1, draws: 0 }],
-    [{ uci: 'e2e4', san: 'e4', count: 1, whiteWins: 0, blackWins: 0, draws: 1 }, { uci: 'd2d4', san: 'd4', count: 2, whiteWins: 2, blackWins: 0, draws: 0 }],
+    [
+      { uci: 'e2e4', san: 'e4', count: 1, whiteWins: 0, blackWins: 0, draws: 1 },
+      { uci: 'd2d4', san: 'd4', count: 2, whiteWins: 2, blackWins: 0, draws: 0 },
+    ],
   ]);
-  assert.deepEqual(merged.map((stat) => [stat.san, stat.count]), [['e4', 3], ['d4', 2]]);
+  assert.deepEqual(
+    merged.map((stat) => [stat.san, stat.count]),
+    [
+      ['e4', 3],
+      ['d4', 2],
+    ],
+  );
   assert.equal(merged[0].draws, 1);
 });

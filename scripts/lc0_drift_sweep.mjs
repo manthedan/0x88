@@ -7,9 +7,9 @@
 //
 // Usage: npm run lc0:drift-sweep [f32Model] [f16Model] [visits]
 import { existsSync, readFileSync } from 'node:fs';
+import { compareEvalSweeps, runEvalSweep, runSearchSweep } from '../src/lc0/driftSweep.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PuctSearcher } from '../src/lc0/search.ts';
-import { compareEvalSweeps, runEvalSweep, runSearchSweep } from '../src/lc0/driftSweep.ts';
 
 const F32 = process.argv[2] ?? '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const F16 = process.argv[3] ?? '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx';
@@ -60,11 +60,17 @@ for (const m of comparison.perFixture) {
 }
 console.log('');
 console.log('## Aggregate');
-console.log(JSON.stringify({
-  evalBestMoveMismatches: comparison.bestMoveMismatches,
-  searchBestMoveMismatches: searchMismatches.length,
-  maxWdlDrift: comparison.maxWdlDrift,
-  maxQDrift: comparison.maxQDrift,
-  maxMlhDrift: comparison.maxMlhDrift,
-  maxTopPriorDrift: comparison.maxTopPriorDrift,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      evalBestMoveMismatches: comparison.bestMoveMismatches,
+      searchBestMoveMismatches: searchMismatches.length,
+      maxWdlDrift: comparison.maxWdlDrift,
+      maxQDrift: comparison.maxQDrift,
+      maxMlhDrift: comparison.maxMlhDrift,
+      maxTopPriorDrift: comparison.maxTopPriorDrift,
+    },
+    null,
+    2,
+  ),
+);

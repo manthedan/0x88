@@ -1,9 +1,9 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { execFileSync } from 'node:child_process';
 
 const rustSource = String.raw`#![allow(static_mut_refs, unused_imports)]
 use std::arch::wasm32::*;

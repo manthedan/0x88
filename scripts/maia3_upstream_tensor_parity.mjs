@@ -15,11 +15,11 @@
 // Elo inputs need no script: both sides pass raw floats as [1]-shaped
 // float32 tensors named elo_self / elo_oppo (verified by inspection of
 // upstream maia.ts evaluateMaia3 vs our maia3Worker.ts).
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseFen, boardToFen, START_FEN } from '../src/chess/board.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { boardToMaia3Tokens } from '../src/lc0/maia3.ts';
 
@@ -80,8 +80,10 @@ const fens = [
 let board = parseFen(START_FEN);
 let rngState = 0x9e3779b9;
 const rand = () => {
-  rngState ^= rngState << 13; rngState ^= rngState >>> 17; rngState ^= rngState << 5;
-  return ((rngState >>> 0) / 0xffffffff);
+  rngState ^= rngState << 13;
+  rngState ^= rngState >>> 17;
+  rngState ^= rngState << 5;
+  return (rngState >>> 0) / 0xffffffff;
 };
 for (let game = 0; game < 6; game += 1) {
   board = parseFen(START_FEN);
@@ -103,7 +105,10 @@ for (const fen of fens) {
   let same = expected.length === actual.length;
   if (same) {
     for (let i = 0; i < expected.length; i += 1) {
-      if (expected[i] !== actual[i]) { same = false; break; }
+      if (expected[i] !== actual[i]) {
+        same = false;
+        break;
+      }
     }
   }
   if (!same) {

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const bucket = process.env.R2_BUCKET ?? 'browser-chess-models';
@@ -23,12 +23,37 @@ const targets = [
   ['models/maia3/maia3_simplified.qdq8.onnx', 'public/models/maia3/maia3_simplified.qdq8.onnx', 'application/octet-stream', immutable],
   ['models/maia3/maia3_simplified.onnx', 'public/models/maia3/maia3_simplified.onnx', 'application/octet-stream', immutable],
   ['models/lc0/manifest.json', 'public/models/lc0/manifest.json', 'application/json', shortCache],
-  ['models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx', 'application/octet-stream', immutable],
+  [
+    'models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx',
+    'public/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx',
+    'application/octet-stream',
+    immutable,
+  ],
   ['models/lc0/lqo_v2.f16.qdq8.onnx', 'public/models/lc0/lqo_v2.f16.qdq8.onnx', 'application/octet-stream', immutable],
-  ['models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json', 'application/json', immutable],
-  ['models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.000.bin', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.000.bin', 'application/octet-stream', immutable],
-  ['models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.001.bin', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.001.bin', 'application/octet-stream', immutable],
-  ['models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.002.bin', 'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.002.bin', 'application/octet-stream', immutable],
+  [
+    'models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json',
+    'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json',
+    'application/json',
+    immutable,
+  ],
+  [
+    'models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.000.bin',
+    'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.000.bin',
+    'application/octet-stream',
+    immutable,
+  ],
+  [
+    'models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.001.bin',
+    'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.001.bin',
+    'application/octet-stream',
+    immutable,
+  ],
+  [
+    'models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.002.bin',
+    'public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/weights.002.bin',
+    'application/octet-stream',
+    immutable,
+  ],
   ['stockfish/stockfish-18.0.7.manifest.json', 'public/stockfish/stockfish-18.0.7.manifest.json', 'application/json', immutable],
   ['stockfish/stockfish-18.0.7-corresponding-source.tar.gz', 'public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz', 'application/gzip', immutable],
   ...['stockfish-18-lite-single', 'stockfish-18-lite-single-relaxed', 'stockfish-18-lite', 'stockfish-18-single', 'stockfish-18'].flatMap((base) => [
@@ -36,7 +61,12 @@ const targets = [
     [`stockfish/${base}.wasm`, `public/stockfish/${base}.wasm`, 'application/wasm', immutable],
   ]),
   ['berserk/berserk-emscripten-single-thread.manifest.json', 'public/berserk/berserk-emscripten-single-thread.manifest.json', 'application/json', immutable],
-  ['berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz', 'public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz', 'application/gzip', immutable],
+  [
+    'berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz',
+    'public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz',
+    'application/gzip',
+    immutable,
+  ],
   // Code per variant, one shared preload package (see plentychess below).
   ...['berserk-emscripten', 'berserk-emscripten-simd128', 'berserk-emscripten-relaxed-simd128'].flatMap((base) => [
     [`berserk/${base}.js`, `public/berserk/${base}.js`, 'text/javascript; charset=utf-8', immutable],
@@ -51,8 +81,18 @@ const targets = [
     [`plentychess/${base}.wasm`, `public/plentychess/${base}.wasm`, 'application/wasm', immutable],
   ]),
   ['plentychess/plentychess-emscripten.data', 'public/plentychess/plentychess-emscripten.data', 'application/octet-stream', immutable],
-  ['plentychess/plentychess-emscripten-single-thread.manifest.json', 'public/plentychess/plentychess-emscripten-single-thread.manifest.json', 'application/json', immutable],
-  ['plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz', 'public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz', 'application/gzip', immutable],
+  [
+    'plentychess/plentychess-emscripten-single-thread.manifest.json',
+    'public/plentychess/plentychess-emscripten-single-thread.manifest.json',
+    'application/json',
+    immutable,
+  ],
+  [
+    'plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz',
+    'public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz',
+    'application/gzip',
+    immutable,
+  ],
   ...['viridithas.wasm', 'viridithas-simd128.wasm', 'viridithas-relaxed-simd128.wasm'].map((name) => [
     `viridithas/${name}`,
     `public/viridithas/${name}`,
@@ -60,7 +100,12 @@ const targets = [
     immutable,
   ]),
   ['viridithas/viridithas-wasip1.manifest.json', 'public/viridithas/viridithas-wasip1.manifest.json', 'application/json', immutable],
-  ['viridithas/viridithas-wasip1-corresponding-source.tar.gz', 'public/viridithas/viridithas-wasip1-corresponding-source.tar.gz', 'application/gzip', immutable],
+  [
+    'viridithas/viridithas-wasip1-corresponding-source.tar.gz',
+    'public/viridithas/viridithas-wasip1-corresponding-source.tar.gz',
+    'application/gzip',
+    immutable,
+  ],
   ['reckless/NOTICE.md', 'public/reckless/NOTICE.md', 'text/markdown; charset=utf-8', immutable],
   ['reckless/reckless-wasip1.manifest.json', 'public/reckless/reckless-wasip1.manifest.json', 'application/json', immutable],
   ['reckless/reckless-v60-7f587dfb.nnue', 'public/reckless/reckless-v60-7f587dfb.nnue', 'application/octet-stream', immutable],
@@ -70,12 +115,12 @@ const targets = [
     'application/wasm',
     immutable,
   ]),
-  ...['reckless-scalar-corresponding-source.tar.gz', 'reckless-simd128-corresponding-source.tar.gz', 'reckless-simd128-external-corresponding-source.tar.gz', 'reckless-relaxed-simd128-corresponding-source.tar.gz'].map((name) => [
-    `reckless/${name}`,
-    `public/reckless/${name}`,
-    'application/gzip',
-    immutable,
-  ]),
+  ...[
+    'reckless-scalar-corresponding-source.tar.gz',
+    'reckless-simd128-corresponding-source.tar.gz',
+    'reckless-simd128-external-corresponding-source.tar.gz',
+    'reckless-relaxed-simd128-corresponding-source.tar.gz',
+  ].map((name) => [`reckless/${name}`, `public/reckless/${name}`, 'application/gzip', immutable]),
 ];
 
 function run(command, commandArgs, options = {}) {
@@ -97,11 +142,19 @@ function uploadTarget([key, _relPath, contentType, cacheControl]) {
   const file = join(outRoot, key);
   if (!existsSync(file)) throw new Error(`missing Brotli file for ${key}: ${file}`);
   const wranglerArgs = [
-    'wrangler', 'r2', 'object', 'put', `${bucket}/${key}`,
-    '--file', file,
-    '--content-type', contentType,
-    '--content-encoding', 'br',
-    '--cache-control', cacheControl,
+    'wrangler',
+    'r2',
+    'object',
+    'put',
+    `${bucket}/${key}`,
+    '--file',
+    file,
+    '--content-type',
+    contentType,
+    '--content-encoding',
+    'br',
+    '--cache-control',
+    cacheControl,
     remote === '1' ? '--remote' : '--local',
   ];
   if (dryRun) console.log(`[dry-run] npx ${wranglerArgs.join(' ')}`);

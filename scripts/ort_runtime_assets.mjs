@@ -11,23 +11,12 @@ export const ORT_WASM_EP_BOOTSTRAP_FILE = 'ort-wasm-simd-threaded.mjs';
 export const ORT_WASM_EP_WASM_FILE = 'ort-wasm-simd-threaded.wasm';
 
 /** Every staged glue module must carry the Emscripten pthread bootstrap. */
-export const ORT_PTHREAD_BOOTSTRAP_FILES = Object.freeze([
-  ORT_PTHREAD_BOOTSTRAP_FILE,
-  ORT_WASM_EP_BOOTSTRAP_FILE,
-]);
+export const ORT_PTHREAD_BOOTSTRAP_FILES = Object.freeze([ORT_PTHREAD_BOOTSTRAP_FILE, ORT_WASM_EP_BOOTSTRAP_FILE]);
 
 /** Both staged wasm binaries; each must exist exactly once under /ort/. */
-export const ORT_RUNTIME_WASM_FILES = Object.freeze([
-  ORT_PTHREAD_WASM_FILE,
-  ORT_WASM_EP_WASM_FILE,
-]);
+export const ORT_RUNTIME_WASM_FILES = Object.freeze([ORT_PTHREAD_WASM_FILE, ORT_WASM_EP_WASM_FILE]);
 
-export const ORT_RUNTIME_ASSET_FILES = Object.freeze([
-  ORT_PTHREAD_BOOTSTRAP_FILE,
-  ORT_PTHREAD_WASM_FILE,
-  ORT_WASM_EP_BOOTSTRAP_FILE,
-  ORT_WASM_EP_WASM_FILE,
-]);
+export const ORT_RUNTIME_ASSET_FILES = Object.freeze([ORT_PTHREAD_BOOTSTRAP_FILE, ORT_PTHREAD_WASM_FILE, ORT_WASM_EP_BOOTSTRAP_FILE, ORT_WASM_EP_WASM_FILE]);
 
 const ortRuntimeAssetFiles = new Set(ORT_RUNTIME_ASSET_FILES);
 

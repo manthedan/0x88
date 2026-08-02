@@ -1,14 +1,19 @@
-import * as ort from '../nn/ortRuntime.ts';
-import { boardToFen, type BoardState } from '../chess/board.ts';
+import { type BoardState, boardToFen } from '../chess/board.ts';
+import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { moveToUci, type Move } from '../chess/moveCodec.ts';
+import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0HistoryFill } from './encoder112.ts';
-import { currentBoardAndFen, LC0_DEFAULT_POLICY_TEMPERATURE, legalPolicyPriors, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import {
+  ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL,
+  ATTENTION_OUTPUT_PROJ_TVM_PACKED_F16_WGSL,
+  FFN_DENSE1_TVM_PACKED_F16_WGSL,
+  FFN_DENSE2_TVM_PACKED_F16_WGSL,
+} from './generated/tvmPackedF16Wgsl.ts';
+import { type Lc0WebTensorView, loadLc0WebModelPack } from './modelPack.ts';
+import { currentBoardAndFen, LC0_DEFAULT_POLICY_TEMPERATURE, type Lc0Evaluation, type Lc0EvaluatorInput, legalPolicyPriors } from './onnxEvaluator.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
-import { loadLc0WebModelPack, type Lc0WebTensorView } from './modelPack.ts';
 import { createLc0WasmInputEncoder, type Lc0WasmInputEncoder, type Lc0WasmInputEncoderTiming } from './wasmInputEncoder.ts';
 import { createLc0WasmLegalPriors, type Lc0WasmLegalPriors, type Lc0WasmLegalPriorTiming } from './wasmLegalPriors.ts';
-import { ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL, ATTENTION_OUTPUT_PROJ_TVM_PACKED_F16_WGSL, FFN_DENSE1_TVM_PACKED_F16_WGSL, FFN_DENSE2_TVM_PACKED_F16_WGSL } from './generated/tvmPackedF16Wgsl.ts';
 
 const DEFAULT_WEIGHT_TENSOR = '/encoder0/mha/Q/w/w';
 const DEFAULT_BIAS_TENSOR = '/encoder0/mha/Q/b/w';
@@ -361,9 +366,11 @@ export async function createLc0WebGpuPipelineCache(
     };
   });
   if (device.createComputePipelineAsync) {
-    const results = await Promise.allSettled(prepared.map(async ({ descriptor, pipelineDescriptor }) => {
-      pipelines.set(descriptor.key, await device.createComputePipelineAsync!(pipelineDescriptor));
-    }));
+    const results = await Promise.allSettled(
+      prepared.map(async ({ descriptor, pipelineDescriptor }) => {
+        pipelines.set(descriptor.key, await device.createComputePipelineAsync!(pipelineDescriptor));
+      }),
+    );
     const failure = results.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
     if (failure) throw failure.reason;
   } else {
@@ -414,7 +421,10 @@ function beginCountedComputePass(encoder: CommandEncoderLike, counter: DispatchC
   return {
     setPipeline: (pipeline) => pass.setPipeline(pipeline),
     setBindGroup: (index, bindGroup) => pass.setBindGroup(index, bindGroup),
-    dispatchWorkgroups: (x, y, z) => { counter.count += 1; pass.dispatchWorkgroups(x, y, z); },
+    dispatchWorkgroups: (x, y, z) => {
+      counter.count += 1;
+      pass.dispatchWorkgroups(x, y, z);
+    },
     end: () => pass.end(),
   };
 }
@@ -452,7 +462,7 @@ function kernelVariantRequiresShaderF16(variant: Lc0WebMatmulAddKernelVariant): 
 }
 
 export function f16BitsToF32(bits: number): number {
-  const sign = (bits & 0x8000) ? -1 : 1;
+  const sign = bits & 0x8000 ? -1 : 1;
   const exp = (bits >>> 10) & 0x1f;
   const frac = bits & 0x03ff;
   if (exp === 0) return sign * (frac === 0 ? 0 : Math.pow(2, -14) * (frac / 1024));
@@ -521,7 +531,13 @@ function cpuMatmulAdd(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, 
   return output;
 }
 
-function cpuMatmulAddShaderF16AccumF32(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, k: number, n: number): Float32Array<ArrayBufferLike> {
+function cpuMatmulAddShaderF16AccumF32(
+  input: Float32Array<ArrayBufferLike>,
+  weight: Uint8Array,
+  bias: Uint8Array,
+  k: number,
+  n: number,
+): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(n);
   for (let col = 0; col < n; col++) {
     let sum = readF16At(bias, col);
@@ -534,7 +550,14 @@ function cpuMatmulAddShaderF16AccumF32(input: Float32Array<ArrayBufferLike>, wei
   return output;
 }
 
-function cpuProjectTokens(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, tokens: number, k: number, n: number): Float32Array<ArrayBufferLike> {
+function cpuProjectTokens(
+  input: Float32Array<ArrayBufferLike>,
+  weight: Uint8Array,
+  bias: Uint8Array,
+  tokens: number,
+  k: number,
+  n: number,
+): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(tokens * n);
   for (let token = 0; token < tokens; token++) {
     const tokenInput = input.subarray(token * k, (token + 1) * k);
@@ -543,7 +566,14 @@ function cpuProjectTokens(input: Float32Array<ArrayBufferLike>, weight: Uint8Arr
   return output;
 }
 
-function cpuProjectTokensShaderF16AccumF32(input: Float32Array<ArrayBufferLike>, weight: Uint8Array, bias: Uint8Array, tokens: number, k: number, n: number): Float32Array<ArrayBufferLike> {
+function cpuProjectTokensShaderF16AccumF32(
+  input: Float32Array<ArrayBufferLike>,
+  weight: Uint8Array,
+  bias: Uint8Array,
+  tokens: number,
+  k: number,
+  n: number,
+): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(tokens * n);
   for (let token = 0; token < tokens; token++) {
     const tokenInput = input.subarray(token * k, (token + 1) * k);
@@ -606,7 +636,14 @@ function cpuLayerNormVector(input: Float32Array<ArrayBufferLike>, scale: Uint8Ar
   return output;
 }
 
-function cpuAttentionScores(q: Float32Array<ArrayBufferLike>, k: Float32Array<ArrayBufferLike>, scale: number, tokens: number, channels: number, heads: number): Float32Array<ArrayBufferLike> {
+function cpuAttentionScores(
+  q: Float32Array<ArrayBufferLike>,
+  k: Float32Array<ArrayBufferLike>,
+  scale: number,
+  tokens: number,
+  channels: number,
+  heads: number,
+): Float32Array<ArrayBufferLike> {
   const headDim = channels / heads;
   const output = new Float32Array(heads * tokens * tokens);
   for (let head = 0; head < heads; head++) {
@@ -657,7 +694,9 @@ function assertTensorShapeAndBytes(tensor: Lc0WebTensorView, expected: number[],
   }
   const expectedBytes = expected.reduce((product, dim) => product * dim, 1) * bytesPerElement;
   if (tensor.bytes.byteLength !== expectedBytes || tensor.info.byteLength !== expectedBytes) {
-    throw new Error(`${label} tensor ${tensor.info.name} byte length mismatch: got ${tensor.bytes.byteLength}/${tensor.info.byteLength}, expected ${expectedBytes}`);
+    throw new Error(
+      `${label} tensor ${tensor.info.name} byte length mismatch: got ${tensor.bytes.byteLength}/${tensor.info.byteLength}, expected ${expectedBytes}`,
+    );
   }
 }
 
@@ -666,9 +705,7 @@ function createStorageBuffer(device: DeviceLike, data: ArrayBufferView | ArrayBu
   const paddedSize = Math.max(4, Math.ceil(byteLength / 4) * 4);
   const buffer = device.createBuffer({ size: paddedSize, usage, mappedAtCreation: true });
   const mapped = new Uint8Array(buffer.getMappedRange());
-  const source = ArrayBuffer.isView(data)
-    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-    : new Uint8Array(data);
+  const source = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
   mapped.set(source);
   buffer.unmap();
   return buffer;
@@ -803,7 +840,9 @@ function onnxTensor(name: string, dims: number[], values: Float32Array<ArrayBuff
 function onnxInt64Tensor(name: string, dims: number[], values: readonly number[]): Uint8Array {
   const raw = new Uint8Array(values.length * 8);
   const view = new DataView(raw.buffer);
-  values.forEach((value, index) => view.setBigInt64(index * 8, BigInt(value), true));
+  values.forEach((value, index) => {
+    view.setBigInt64(index * 8, BigInt(value), true);
+  });
   const writer = new ProtoWriter();
   for (const dim of dims) writer.int64(1, dim);
   writer.int32(2, 7); // TensorProto.INT64
@@ -815,7 +854,9 @@ function onnxInt64Tensor(name: string, dims: number[], values: readonly number[]
 function onnxInt32Tensor(name: string, dims: number[], values: readonly number[]): Uint8Array {
   const raw = new Uint8Array(values.length * 4);
   const view = new DataView(raw.buffer);
-  values.forEach((value, index) => view.setInt32(index * 4, value, true));
+  values.forEach((value, index) => {
+    view.setInt32(index * 4, value, true);
+  });
   const writer = new ProtoWriter();
   for (const dim of dims) writer.int64(1, dim);
   writer.int32(2, 6); // TensorProto.INT32
@@ -1011,7 +1052,6 @@ function wgslForVariant(variant: Lc0WebMatmulAddKernelVariant): string {
   return SCALAR_WGSL;
 }
 
-
 function cloneableAdapterInfo(info: unknown): Record<string, unknown> | undefined {
   if (!info || typeof info !== 'object') return undefined;
   const source = info as Record<string, unknown>;
@@ -1023,20 +1063,19 @@ function cloneableAdapterInfo(info: unknown): Record<string, unknown> | undefine
   return Object.keys(out).length ? out : undefined;
 }
 
-async function requestDevice(options: { timestampQuery?: boolean; shaderF16?: boolean } = {}): Promise<{ device: DeviceLike; adapterInfo?: Record<string, unknown>; timestampQuerySupported: boolean; shaderF16Supported: boolean }> {
+async function requestDevice(
+  options: { timestampQuery?: boolean; shaderF16?: boolean } = {},
+): Promise<{ device: DeviceLike; adapterInfo?: Record<string, unknown>; timestampQuerySupported: boolean; shaderF16Supported: boolean }> {
   const globals = gpuGlobals();
   const gpu = globals.navigator?.gpu as GpuLike | undefined;
   if (!gpu) throw new Error('WebGPU unavailable for lc0web kernel probe');
-  const adapter = await gpu.requestAdapter() as AdapterLike | null;
+  const adapter = (await gpu.requestAdapter()) as AdapterLike | null;
   if (!adapter) throw new Error('WebGPU adapter unavailable for lc0web kernel probe');
   const rawAdapterInfo = adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : adapter.info;
   const timestampQuerySupported = adapter.features?.has('timestamp-query') === true;
   const shaderF16Supported = adapter.features?.has('shader-f16') === true;
   if (options.shaderF16 && !shaderF16Supported) throw new Error('WebGPU adapter does not support required shader-f16 feature');
-  const requiredFeatures = [
-    ...(options.timestampQuery && timestampQuerySupported ? ['timestamp-query'] : []),
-    ...(options.shaderF16 ? ['shader-f16'] : []),
-  ];
+  const requiredFeatures = [...(options.timestampQuery && timestampQuerySupported ? ['timestamp-query'] : []), ...(options.shaderF16 ? ['shader-f16'] : [])];
   const device = await adapter.requestDevice(requiredFeatures.length ? { requiredFeatures } : undefined);
   return { device, adapterInfo: cloneableAdapterInfo(rawAdapterInfo), timestampQuerySupported, shaderF16Supported };
 }
@@ -1046,7 +1085,14 @@ function dispatchKernel(pass: ComputePassLike, variant: Lc0WebMatmulAddKernelVar
   else pass.dispatchWorkgroups(Math.ceil(n / 64));
 }
 
-function encodeKernelDispatches(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, n: number, iterations: number, variant: Lc0WebMatmulAddKernelVariant): unknown {
+function encodeKernelDispatches(
+  device: DeviceLike,
+  pipeline: PipelineLike,
+  bindGroup: unknown,
+  n: number,
+  iterations: number,
+  variant: Lc0WebMatmulAddKernelVariant,
+): unknown {
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
@@ -1067,7 +1113,15 @@ async function readOutputOnce(device: DeviceLike, outputBuffer: BufferLike, read
   return copy;
 }
 
-async function runKernelOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike, n: number, variant: Lc0WebMatmulAddKernelVariant): Promise<Float32Array<ArrayBufferLike>> {
+async function runKernelOnce(
+  device: DeviceLike,
+  pipeline: PipelineLike,
+  bindGroup: unknown,
+  outputBuffer: BufferLike,
+  readbackBuffer: BufferLike,
+  n: number,
+  variant: Lc0WebMatmulAddKernelVariant,
+): Promise<Float32Array<ArrayBufferLike>> {
   device.queue.submit([encodeKernelDispatches(device, pipeline, bindGroup, n, 1, variant)]);
   return readOutputOnce(device, outputBuffer, readbackBuffer, n);
 }
@@ -1089,7 +1143,14 @@ function assertErrorInTolerance(maxAbsError: number, tolerance = 1e-3): void {
   }
 }
 
-function createMatmulAddPipeline(device: DeviceLike, inputBuffer: BufferLike, weightBuffer: BufferLike, biasBuffer: BufferLike, outputBuffer: BufferLike, variant: Lc0WebMatmulAddKernelVariant): { pipeline: PipelineLike; bindGroup: unknown } {
+function createMatmulAddPipeline(
+  device: DeviceLike,
+  inputBuffer: BufferLike,
+  weightBuffer: BufferLike,
+  biasBuffer: BufferLike,
+  outputBuffer: BufferLike,
+  variant: Lc0WebMatmulAddKernelVariant,
+): { pipeline: PipelineLike; bindGroup: unknown } {
   const module = device.createShaderModule({ label: `lc0web matmul+add ${variant}`, code: wgslForVariant(variant) });
   const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
   const bindGroup = device.createBindGroup({
@@ -1386,16 +1447,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
-function createQkvPipeline(device: DeviceLike, buffers: {
-  input: BufferLike;
-  qWeight: BufferLike;
-  qBias: BufferLike;
-  kWeight: BufferLike;
-  kBias: BufferLike;
-  vWeight: BufferLike;
-  vBias: BufferLike;
-  output: BufferLike;
-}): { pipeline: PipelineLike; bindGroup: unknown } {
+function createQkvPipeline(
+  device: DeviceLike,
+  buffers: {
+    input: BufferLike;
+    qWeight: BufferLike;
+    qBias: BufferLike;
+    kWeight: BufferLike;
+    kBias: BufferLike;
+    vWeight: BufferLike;
+    vBias: BufferLike;
+    output: BufferLike;
+  },
+): { pipeline: PipelineLike; bindGroup: unknown } {
   const module = device.createShaderModule({ label: 'lc0web qkv projection probe', code: QKV_WGSL });
   const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
   const bindGroup = device.createBindGroup({
@@ -1424,7 +1488,11 @@ function encodeQkvDispatches(device: DeviceLike, pipeline: PipelineLike, bindGro
   return encoder.finish();
 }
 
-async function readQkvOutputOnce(device: DeviceLike, outputBuffer: BufferLike, readbackBuffer: BufferLike): Promise<{ q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> }> {
+async function readQkvOutputOnce(
+  device: DeviceLike,
+  outputBuffer: BufferLike,
+  readbackBuffer: BufferLike,
+): Promise<{ q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> }> {
   const globals = gpuGlobals();
   const encoder = device.createCommandEncoder();
   encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, DEFAULT_N * 3 * 4);
@@ -1435,7 +1503,13 @@ async function readQkvOutputOnce(device: DeviceLike, outputBuffer: BufferLike, r
   return { q: all.slice(0, DEFAULT_N), k: all.slice(DEFAULT_N, DEFAULT_N * 2), v: all.slice(DEFAULT_N * 2, DEFAULT_N * 3) };
 }
 
-async function runQkvOnce(device: DeviceLike, pipeline: PipelineLike, bindGroup: unknown, outputBuffer: BufferLike, readbackBuffer: BufferLike): Promise<{ q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> }> {
+async function runQkvOnce(
+  device: DeviceLike,
+  pipeline: PipelineLike,
+  bindGroup: unknown,
+  outputBuffer: BufferLike,
+  readbackBuffer: BufferLike,
+): Promise<{ q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> }> {
   device.queue.submit([encodeQkvDispatches(device, pipeline, bindGroup, 1)]);
   return readQkvOutputOnce(device, outputBuffer, readbackBuffer);
 }
@@ -1449,7 +1523,10 @@ export async function runLc0WebQkvProjectionProbe(options: Lc0WebQkvProjectionPr
     verifyShards: options.verifyShards ?? true,
     tensorNames,
   });
-  const tensors = Object.fromEntries(Object.entries(DEFAULT_QKV_TENSORS).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<keyof typeof DEFAULT_QKV_TENSORS, Lc0WebTensorView | undefined>;
+  const tensors = Object.fromEntries(Object.entries(DEFAULT_QKV_TENSORS).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<
+    keyof typeof DEFAULT_QKV_TENSORS,
+    Lc0WebTensorView | undefined
+  >;
   for (const [key, tensor] of Object.entries(tensors)) {
     if (!tensor) throw new Error(`lc0web QKV projection tensor missing: ${key}`);
     const isBias = key.endsWith('Bias');
@@ -1477,7 +1554,11 @@ export async function runLc0WebQkvProjectionProbe(options: Lc0WebQkvProjectionPr
     liveBuffers.push(inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, outputBuffer, readbackBuffer);
     const { pipeline, bindGroup } = createQkvPipeline(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, output: outputBuffer });
 
-    let outputs: { q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> } = { q: new Float32Array(DEFAULT_N), k: new Float32Array(DEFAULT_N), v: new Float32Array(DEFAULT_N) };
+    let outputs: { q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike> } = {
+      q: new Float32Array(DEFAULT_N),
+      k: new Float32Array(DEFAULT_N),
+      v: new Float32Array(DEFAULT_N),
+    };
     for (let i = 0; i < warmup; i++) outputs = await runQkvOnce(device, pipeline, bindGroup, outputBuffer, readbackBuffer);
     const times: number[] = [];
     for (let i = 0; i < iterations; i++) {
@@ -1514,7 +1595,6 @@ export async function runLc0WebQkvProjectionProbe(options: Lc0WebQkvProjectionPr
   }
 }
 
-
 export async function runLc0WebQkvProjectionBenchmark(options: Lc0WebQkvProjectionBenchmarkOptions): Promise<Lc0WebQkvProjectionBenchmarkResult> {
   const totalStarted = nowMs();
   const warmup = clampInteger(options.warmup, 10, 0, 1000);
@@ -1525,7 +1605,10 @@ export async function runLc0WebQkvProjectionBenchmark(options: Lc0WebQkvProjecti
     verifyShards: options.verifyShards ?? true,
     tensorNames,
   });
-  const tensors = Object.fromEntries(Object.entries(DEFAULT_QKV_TENSORS).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<keyof typeof DEFAULT_QKV_TENSORS, Lc0WebTensorView | undefined>;
+  const tensors = Object.fromEntries(Object.entries(DEFAULT_QKV_TENSORS).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<
+    keyof typeof DEFAULT_QKV_TENSORS,
+    Lc0WebTensorView | undefined
+  >;
   for (const [key, tensor] of Object.entries(tensors)) {
     if (!tensor) throw new Error(`lc0web QKV benchmark tensor missing: ${key}`);
     const isBias = key.endsWith('Bias');
@@ -1624,7 +1707,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
-function createAttentionScorePipeline(device: DeviceLike, buffers: { q: BufferLike; k: BufferLike; scale: BufferLike; smolgenBias: BufferLike; output: BufferLike }): { pipeline: PipelineLike; bindGroup: unknown } {
+function createAttentionScorePipeline(
+  device: DeviceLike,
+  buffers: { q: BufferLike; k: BufferLike; scale: BufferLike; smolgenBias: BufferLike; output: BufferLike },
+): { pipeline: PipelineLike; bindGroup: unknown } {
   const module = device.createShaderModule({ label: 'lc0web attention score probe with smolgen bias', code: ATTENTION_SCORE_WGSL });
   const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
   const bindGroup = device.createBindGroup({
@@ -1684,8 +1770,14 @@ type AttentionScoreInputs = {
   smolgen: Encoder0SmolgenTensors;
 };
 
-function loadEncoder0SmolgenTensors(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Record<keyof typeof DEFAULT_SMOLGEN_TENSORS, string> = DEFAULT_SMOLGEN_TENSORS): Encoder0SmolgenTensors {
-  const tensors = Object.fromEntries(Object.entries(tensorNames).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<keyof typeof DEFAULT_SMOLGEN_TENSORS, Lc0WebTensorView | undefined>;
+function loadEncoder0SmolgenTensors(
+  pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>,
+  tensorNames: Record<keyof typeof DEFAULT_SMOLGEN_TENSORS, string> = DEFAULT_SMOLGEN_TENSORS,
+): Encoder0SmolgenTensors {
+  const tensors = Object.fromEntries(Object.entries(tensorNames).map(([key, name]) => [key, pack.tensors.get(name)])) as Record<
+    keyof typeof DEFAULT_SMOLGEN_TENSORS,
+    Lc0WebTensorView | undefined
+  >;
   for (const [key, tensor] of Object.entries(tensors)) if (!tensor) throw new Error(`lc0web encoder0 smolgen tensor missing: ${key}`);
   assertTensorShapeAndBytes(tensors.compressWeight!, [DEFAULT_N, DEFAULT_SMOLGEN_COMPRESSED], 2, 'smolgen.compressWeight');
   assertTensorShapeAndBytes(tensors.dense1Weight!, [DEFAULT_SMOLGEN_FLAT, DEFAULT_SMOLGEN_HIDDEN], 2, 'smolgen.dense1Weight');
@@ -1703,7 +1795,14 @@ function loadEncoder0SmolgenTensors(pack: Awaited<ReturnType<typeof loadLc0WebMo
   return tensors as Encoder0SmolgenTensors;
 }
 
-function loadAttentionScoreInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Pick<Lc0WebEncoderBlockTensorNames, 'qkv' | 'scaleTensor' | 'smolgen'> = { qkv: DEFAULT_QKV_TENSORS, scaleTensor: DEFAULT_SCALE_TENSOR, smolgen: DEFAULT_SMOLGEN_TENSORS }): AttentionScoreInputs {
+function loadAttentionScoreInputs(
+  pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>,
+  tensorNames: Pick<Lc0WebEncoderBlockTensorNames, 'qkv' | 'scaleTensor' | 'smolgen'> = {
+    qkv: DEFAULT_QKV_TENSORS,
+    scaleTensor: DEFAULT_SCALE_TENSOR,
+    smolgen: DEFAULT_SMOLGEN_TENSORS,
+  },
+): AttentionScoreInputs {
   const qWeight = pack.tensors.get(tensorNames.qkv.qWeight);
   const qBias = pack.tensors.get(tensorNames.qkv.qBias);
   const kWeight = pack.tensors.get(tensorNames.qkv.kWeight);
@@ -1737,7 +1836,10 @@ function cpuEncoder0SmolgenBias(input: Float32Array<ArrayBufferLike>, tensors: E
   const bias = new Float32Array(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS);
   for (let head = 0; head < DEFAULT_HEADS; head++) {
     const headInput = ln2.subarray(head * DEFAULT_SMOLGEN_HIDDEN, (head + 1) * DEFAULT_SMOLGEN_HIDDEN);
-    bias.set(cpuMatmulVectorNoBias(headInput, tensors.smolgenWeight.bytes, DEFAULT_SMOLGEN_HIDDEN, DEFAULT_TOKENS * DEFAULT_TOKENS), head * DEFAULT_TOKENS * DEFAULT_TOKENS);
+    bias.set(
+      cpuMatmulVectorNoBias(headInput, tensors.smolgenWeight.bytes, DEFAULT_SMOLGEN_HIDDEN, DEFAULT_TOKENS * DEFAULT_TOKENS),
+      head * DEFAULT_TOKENS * DEFAULT_TOKENS,
+    );
   }
   return bias;
 }
@@ -1748,7 +1850,18 @@ function addElementwise(a: Float32Array<ArrayBufferLike>, b: Float32Array<ArrayB
   return out;
 }
 
-function buildAttentionScoreReference(tensors: ReturnType<typeof loadAttentionScoreInputs>, input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K)): { input: Float32Array<ArrayBufferLike>; q: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; scale: number; qkScores: Float32Array<ArrayBufferLike>; smolgenBias: Float32Array<ArrayBufferLike>; scores: Float32Array<ArrayBufferLike> } {
+function buildAttentionScoreReference(
+  tensors: ReturnType<typeof loadAttentionScoreInputs>,
+  input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K),
+): {
+  input: Float32Array<ArrayBufferLike>;
+  q: Float32Array<ArrayBufferLike>;
+  k: Float32Array<ArrayBufferLike>;
+  scale: number;
+  qkScores: Float32Array<ArrayBufferLike>;
+  smolgenBias: Float32Array<ArrayBufferLike>;
+  scores: Float32Array<ArrayBufferLike>;
+} {
   const q = cpuProjectTokens(input, tensors.qWeight.bytes, tensors.qBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
   const k = cpuProjectTokens(input, tensors.kWeight.bytes, tensors.kBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
   const scale = readF16At(tensors.scale.bytes, 0);
@@ -1765,7 +1878,14 @@ export async function runLc0WebAttentionScoreBenchmark(options: Lc0WebAttentionS
   const { device, adapterInfo } = await requestDevice();
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [DEFAULT_QKV_TENSORS.qWeight, DEFAULT_QKV_TENSORS.qBias, DEFAULT_QKV_TENSORS.kWeight, DEFAULT_QKV_TENSORS.kBias, DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS)],
+    tensorNames: [
+      DEFAULT_QKV_TENSORS.qWeight,
+      DEFAULT_QKV_TENSORS.qBias,
+      DEFAULT_QKV_TENSORS.kWeight,
+      DEFAULT_QKV_TENSORS.kBias,
+      DEFAULT_SCALE_TENSOR,
+      ...Object.values(DEFAULT_SMOLGEN_TENSORS),
+    ],
   });
   const tensors = loadAttentionScoreInputs(pack);
   const reference = buildAttentionScoreReference(tensors);
@@ -1781,7 +1901,13 @@ export async function runLc0WebAttentionScoreBenchmark(options: Lc0WebAttentionS
     const outputBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.MAP_READ | usage.COPY_DST });
     buffers.push(qBuffer, kBuffer, scaleBuffer, smolgenBiasBuffer, outputBuffer, readbackBuffer);
-    const { pipeline, bindGroup } = createAttentionScorePipeline(device, { q: qBuffer, k: kBuffer, scale: scaleBuffer, smolgenBias: smolgenBiasBuffer, output: outputBuffer });
+    const { pipeline, bindGroup } = createAttentionScorePipeline(device, {
+      q: qBuffer,
+      k: kBuffer,
+      scale: scaleBuffer,
+      smolgenBias: smolgenBiasBuffer,
+      output: outputBuffer,
+    });
     const uploadSetupMs = nowMs() - setupStarted;
 
     if (warmup > 0) {
@@ -1829,7 +1955,14 @@ export async function runLc0WebAttentionScoreOrtBenchmark(options: Lc0WebAttenti
   const iterations = clampInteger(options.iterations, 25, 1, 1000);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [DEFAULT_QKV_TENSORS.qWeight, DEFAULT_QKV_TENSORS.qBias, DEFAULT_QKV_TENSORS.kWeight, DEFAULT_QKV_TENSORS.kBias, DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS)],
+    tensorNames: [
+      DEFAULT_QKV_TENSORS.qWeight,
+      DEFAULT_QKV_TENSORS.qBias,
+      DEFAULT_QKV_TENSORS.kWeight,
+      DEFAULT_QKV_TENSORS.kBias,
+      DEFAULT_SCALE_TENSOR,
+      ...Object.values(DEFAULT_SMOLGEN_TENSORS),
+    ],
   });
   const tensors = loadAttentionScoreInputs(pack);
   const reference = buildAttentionScoreReference(tensors);
@@ -1839,7 +1972,11 @@ export async function runLc0WebAttentionScoreOrtBenchmark(options: Lc0WebAttenti
   const sessionStarted = nowMs();
   const session = await ort.createOrtSession(tinyOnnx);
   const sessionCreateMs = nowMs() - sessionStarted;
-  const feeds = { q: new ort.Tensor('float32', packHeadsQ(reference.q, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS), [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_HEAD_DIM]), kt: new ort.Tensor('float32', packHeadsKt(reference.k, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS), [DEFAULT_HEADS, DEFAULT_HEAD_DIM, DEFAULT_TOKENS]), bias: new ort.Tensor('float32', reference.smolgenBias, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_TOKENS]) };
+  const feeds = {
+    q: new ort.Tensor('float32', packHeadsQ(reference.q, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS), [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_HEAD_DIM]),
+    kt: new ort.Tensor('float32', packHeadsKt(reference.k, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_HEADS), [DEFAULT_HEADS, DEFAULT_HEAD_DIM, DEFAULT_TOKENS]),
+    bias: new ort.Tensor('float32', reference.smolgenBias, [DEFAULT_HEADS, DEFAULT_TOKENS, DEFAULT_TOKENS]),
+  };
   let output: Float32Array<ArrayBufferLike> = new Float32Array(DEFAULT_TOKENS * DEFAULT_TOKENS);
   for (let i = 0; i < warmup; i++) {
     const outputs = await session.run(feeds);
@@ -1972,7 +2109,11 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 }
 `;
 
-function createSoftmaxPipeline(device: DeviceLike, buffers: { input: BufferLike; output: BufferLike }, pipelineCache?: WgslPipelineCache): { pipeline: PipelineLike; bindGroup: unknown } {
+function createSoftmaxPipeline(
+  device: DeviceLike,
+  buffers: { input: BufferLike; output: BufferLike },
+  pipelineCache?: WgslPipelineCache,
+): { pipeline: PipelineLike; bindGroup: unknown } {
   const pipeline = createCachedComputePipeline(device, pipelineCache, 'attention-softmax', {
     label: 'lc0web attention softmax probe',
     code: SOFTMAX_WGSL,
@@ -1997,7 +2138,12 @@ function encodeSoftmaxDispatches(device: DeviceLike, pipeline: PipelineLike, bin
   return encoder.finish();
 }
 
-async function readF32OutputOnce(device: DeviceLike, outputBuffer: BufferLike, readbackBuffer: BufferLike, elements: number): Promise<Float32Array<ArrayBufferLike>> {
+async function readF32OutputOnce(
+  device: DeviceLike,
+  outputBuffer: BufferLike,
+  readbackBuffer: BufferLike,
+  elements: number,
+): Promise<Float32Array<ArrayBufferLike>> {
   const globals = gpuGlobals();
   const encoder = device.createCommandEncoder();
   encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, elements * 4);
@@ -2043,7 +2189,14 @@ export async function runLc0WebSoftmaxBenchmark(options: Lc0WebSoftmaxBenchmarkO
   const { device, adapterInfo } = await requestDevice();
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: [DEFAULT_QKV_TENSORS.qWeight, DEFAULT_QKV_TENSORS.qBias, DEFAULT_QKV_TENSORS.kWeight, DEFAULT_QKV_TENSORS.kBias, DEFAULT_SCALE_TENSOR, ...Object.values(DEFAULT_SMOLGEN_TENSORS)],
+    tensorNames: [
+      DEFAULT_QKV_TENSORS.qWeight,
+      DEFAULT_QKV_TENSORS.qBias,
+      DEFAULT_QKV_TENSORS.kWeight,
+      DEFAULT_QKV_TENSORS.kBias,
+      DEFAULT_SCALE_TENSOR,
+      ...Object.values(DEFAULT_SMOLGEN_TENSORS),
+    ],
   });
   const tensors = loadAttentionScoreInputs(pack);
   const reference = buildAttentionScoreReference(tensors);
@@ -2128,7 +2281,13 @@ export interface Lc0WebAttentionValueBenchmarkResult {
   outputSample: number[];
 }
 
-function cpuAttentionValues(probs: Float32Array<ArrayBufferLike>, v: Float32Array<ArrayBufferLike>, tokens: number, channels: number, heads: number): Float32Array<ArrayBufferLike> {
+function cpuAttentionValues(
+  probs: Float32Array<ArrayBufferLike>,
+  v: Float32Array<ArrayBufferLike>,
+  tokens: number,
+  channels: number,
+  heads: number,
+): Float32Array<ArrayBufferLike> {
   const headDim = channels / heads;
   const output = new Float32Array(tokens * channels);
   for (let head = 0; head < heads; head++) {
@@ -2166,7 +2325,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
-function createAttentionValuePipeline(device: DeviceLike, buffers: { probs: BufferLike; v: BufferLike; output: BufferLike }): { pipeline: PipelineLike; bindGroup: unknown } {
+function createAttentionValuePipeline(
+  device: DeviceLike,
+  buffers: { probs: BufferLike; v: BufferLike; output: BufferLike },
+): { pipeline: PipelineLike; bindGroup: unknown } {
   const module = device.createShaderModule({ label: 'lc0web attention value probe', code: ATTENTION_VALUE_WGSL });
   const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
   const bindGroup = device.createBindGroup({
@@ -2190,7 +2352,14 @@ function encodeAttentionValueDispatches(device: DeviceLike, pipeline: PipelineLi
   return encoder.finish();
 }
 
-function loadAttentionValueInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Pick<Lc0WebEncoderBlockTensorNames, 'qkv' | 'scaleTensor' | 'smolgen'> = { qkv: DEFAULT_QKV_TENSORS, scaleTensor: DEFAULT_SCALE_TENSOR, smolgen: DEFAULT_SMOLGEN_TENSORS }): {
+function loadAttentionValueInputs(
+  pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>,
+  tensorNames: Pick<Lc0WebEncoderBlockTensorNames, 'qkv' | 'scaleTensor' | 'smolgen'> = {
+    qkv: DEFAULT_QKV_TENSORS,
+    scaleTensor: DEFAULT_SCALE_TENSOR,
+    smolgen: DEFAULT_SMOLGEN_TENSORS,
+  },
+): {
   qWeight: Lc0WebTensorView;
   qBias: Lc0WebTensorView;
   kWeight: Lc0WebTensorView;
@@ -2217,7 +2386,16 @@ function loadAttentionValueInputs(pack: Awaited<ReturnType<typeof loadLc0WebMode
   return { qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgen: loadEncoder0SmolgenTensors(pack, tensorNames.smolgen) };
 }
 
-function buildAttentionValueReference(tensors: ReturnType<typeof loadAttentionValueInputs>, input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K)): { probs: Float32Array<ArrayBufferLike>; v: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; scale: number; smolgenBias: Float32Array<ArrayBufferLike> } {
+function buildAttentionValueReference(
+  tensors: ReturnType<typeof loadAttentionValueInputs>,
+  input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K),
+): {
+  probs: Float32Array<ArrayBufferLike>;
+  v: Float32Array<ArrayBufferLike>;
+  output: Float32Array<ArrayBufferLike>;
+  scale: number;
+  smolgenBias: Float32Array<ArrayBufferLike>;
+} {
   const q = cpuProjectTokens(input, tensors.qWeight.bytes, tensors.qBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
   const k = cpuProjectTokens(input, tensors.kWeight.bytes, tensors.kBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
   const v = cpuProjectTokens(input, tensors.vWeight.bytes, tensors.vBias.bytes, DEFAULT_TOKENS, DEFAULT_K, DEFAULT_N);
@@ -2328,7 +2506,6 @@ export interface Lc0WebAttentionBlockBenchmarkResult {
   rmsError: number;
   outputSample: number[];
 }
-
 
 const ATTENTION_BLOCK_QKV_WGSL = `
 @group(0) @binding(0) var<storage, read> inputMat: array<f32>;
@@ -2489,17 +2666,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
-function createAttentionQkvStage(device: DeviceLike, buffers: {
-  input: BufferLike;
-  qWeight: BufferLike;
-  qBias: BufferLike;
-  kWeight: BufferLike;
-  kBias: BufferLike;
-  vWeight: BufferLike;
-  vBias: BufferLike;
-  qkv: BufferLike;
-  podArgs?: BufferLike;
-}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant, pipelineCache?: WgslPipelineCache): { qkv: PipelineLike; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant } {
+function createAttentionQkvStage(
+  device: DeviceLike,
+  buffers: {
+    input: BufferLike;
+    qWeight: BufferLike;
+    qBias: BufferLike;
+    kWeight: BufferLike;
+    kBias: BufferLike;
+    vWeight: BufferLike;
+    vBias: BufferLike;
+    qkv: BufferLike;
+    podArgs?: BufferLike;
+  },
+  qkvKernelVariant: Lc0WebAttentionQkvKernelVariant,
+  pipelineCache?: WgslPipelineCache,
+): { qkv: PipelineLike; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant } {
   if (qkvKernelVariant === 'tvm-packed-f16') {
     if (!buffers.podArgs) throw new Error('TVM packed-f16 attention QKV kernels require a POD args uniform buffer');
     const qkv = createCachedComputePipeline(device, pipelineCache, 'attention-qkv-tvm-packed-f16', {
@@ -2508,21 +2690,26 @@ function createAttentionQkvStage(device: DeviceLike, buffers: {
       entryPoint: 'matmul_kernel',
     });
     const outputBytes = DEFAULT_TOKENS * DEFAULT_N * 4;
-    const qkvBindFor = (weight: BufferLike, bias: BufferLike, outputOffset: number) => device.createBindGroup({
-      layout: qkv.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: buffers.qkv, offset: outputOffset, size: outputBytes } },
-        { binding: 1, resource: { buffer: weight } },
-        { binding: 2, resource: { buffer: buffers.input } },
-        { binding: 3, resource: { buffer: buffers.podArgs! } },
-        { binding: 4, resource: { buffer: bias } },
+    const qkvBindFor = (weight: BufferLike, bias: BufferLike, outputOffset: number) =>
+      device.createBindGroup({
+        layout: qkv.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: buffers.qkv, offset: outputOffset, size: outputBytes } },
+          { binding: 1, resource: { buffer: weight } },
+          { binding: 2, resource: { buffer: buffers.input } },
+          { binding: 3, resource: { buffer: buffers.podArgs! } },
+          { binding: 4, resource: { buffer: bias } },
+        ],
+      });
+    return {
+      qkv,
+      qkvKernelVariant,
+      qkvBinds: [
+        qkvBindFor(buffers.qWeight, buffers.qBias, 0),
+        qkvBindFor(buffers.kWeight, buffers.kBias, outputBytes),
+        qkvBindFor(buffers.vWeight, buffers.vBias, outputBytes * 2),
       ],
-    });
-    return { qkv, qkvKernelVariant, qkvBinds: [
-      qkvBindFor(buffers.qWeight, buffers.qBias, 0),
-      qkvBindFor(buffers.kWeight, buffers.kBias, outputBytes),
-      qkvBindFor(buffers.vWeight, buffers.vBias, outputBytes * 2),
-    ] };
+    };
   }
   const qkv = createCachedComputePipeline(device, pipelineCache, 'attention-qkv-hand', {
     label: 'lc0web attention block qkv',
@@ -2544,22 +2731,38 @@ function createAttentionQkvStage(device: DeviceLike, buffers: {
   return { qkv, qkvKernelVariant, qkvBinds: [qkvBind] };
 }
 
-function createAttentionBlockPipelines(device: DeviceLike, buffers: {
-  input: BufferLike;
-  qWeight: BufferLike;
-  qBias: BufferLike;
-  kWeight: BufferLike;
-  kBias: BufferLike;
-  vWeight: BufferLike;
-  vBias: BufferLike;
-  scale: BufferLike;
-  smolgenBias: BufferLike;
-  qkv: BufferLike;
-  scores: BufferLike;
-  probs: BufferLike;
-  output: BufferLike;
-  podArgs?: BufferLike;
-}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand', pipelineCache?: WgslPipelineCache): { qkv: PipelineLike; qkvBind: unknown; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant; score: PipelineLike; scoreBind: unknown; softmax: PipelineLike; softmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
+function createAttentionBlockPipelines(
+  device: DeviceLike,
+  buffers: {
+    input: BufferLike;
+    qWeight: BufferLike;
+    qBias: BufferLike;
+    kWeight: BufferLike;
+    kBias: BufferLike;
+    vWeight: BufferLike;
+    vBias: BufferLike;
+    scale: BufferLike;
+    smolgenBias: BufferLike;
+    qkv: BufferLike;
+    scores: BufferLike;
+    probs: BufferLike;
+    output: BufferLike;
+    podArgs?: BufferLike;
+  },
+  qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand',
+  pipelineCache?: WgslPipelineCache,
+): {
+  qkv: PipelineLike;
+  qkvBind: unknown;
+  qkvBinds: unknown[];
+  qkvKernelVariant: Lc0WebAttentionQkvKernelVariant;
+  score: PipelineLike;
+  scoreBind: unknown;
+  softmax: PipelineLike;
+  softmaxBind: unknown;
+  value: PipelineLike;
+  valueBind: unknown;
+} {
   const qkvStage = createAttentionQkvStage(device, buffers, qkvKernelVariant, pipelineCache);
   const { qkv, qkvBinds } = qkvStage;
   const score = createCachedComputePipeline(device, pipelineCache, 'attention-score', {
@@ -2591,21 +2794,34 @@ function createAttentionBlockPipelines(device: DeviceLike, buffers: {
   return { qkv, qkvBind: qkvBinds[0], qkvBinds, qkvKernelVariant: qkvStage.qkvKernelVariant, score, scoreBind, softmax, softmaxBind, value, valueBind };
 }
 
-function createAttentionBlockFusedPipelines(device: DeviceLike, buffers: {
-  input: BufferLike;
-  qWeight: BufferLike;
-  qBias: BufferLike;
-  kWeight: BufferLike;
-  kBias: BufferLike;
-  vWeight: BufferLike;
-  vBias: BufferLike;
-  scale: BufferLike;
-  smolgenBias: BufferLike;
-  qkv: BufferLike;
-  probs: BufferLike;
-  output: BufferLike;
-  podArgs?: BufferLike;
-}, qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand'): { qkv: PipelineLike; qkvBind: unknown; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant; scoreSoftmax: PipelineLike; scoreSoftmaxBind: unknown; value: PipelineLike; valueBind: unknown } {
+function createAttentionBlockFusedPipelines(
+  device: DeviceLike,
+  buffers: {
+    input: BufferLike;
+    qWeight: BufferLike;
+    qBias: BufferLike;
+    kWeight: BufferLike;
+    kBias: BufferLike;
+    vWeight: BufferLike;
+    vBias: BufferLike;
+    scale: BufferLike;
+    smolgenBias: BufferLike;
+    qkv: BufferLike;
+    probs: BufferLike;
+    output: BufferLike;
+    podArgs?: BufferLike;
+  },
+  qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand',
+): {
+  qkv: PipelineLike;
+  qkvBind: unknown;
+  qkvBinds: unknown[];
+  qkvKernelVariant: Lc0WebAttentionQkvKernelVariant;
+  scoreSoftmax: PipelineLike;
+  scoreSoftmaxBind: unknown;
+  value: PipelineLike;
+  valueBind: unknown;
+} {
   const qkvStage = createAttentionQkvStage(device, buffers, qkvKernelVariant);
   const { qkv, qkvBinds } = qkvStage;
   const scoreSoftmaxModule = device.createShaderModule({ label: 'lc0web attention block fused score+softmax', code: ATTENTION_BLOCK_SCORE_SOFTMAX_WGSL });
@@ -2632,7 +2848,10 @@ function createAttentionBlockFusedPipelines(device: DeviceLike, buffers: {
   return { qkv, qkvBind: qkvBinds[0], qkvBinds, qkvKernelVariant: qkvStage.qkvKernelVariant, scoreSoftmax, scoreSoftmaxBind, value, valueBind };
 }
 
-function encodeAttentionQkvPass(pass: ComputePassLike, pipelines: { qkv: PipelineLike; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant }): void {
+function encodeAttentionQkvPass(
+  pass: ComputePassLike,
+  pipelines: { qkv: PipelineLike; qkvBinds: unknown[]; qkvKernelVariant: Lc0WebAttentionQkvKernelVariant },
+): void {
   pass.setPipeline(pipelines.qkv);
   for (const qkvBind of pipelines.qkvBinds) {
     pass.setBindGroup(0, qkvBind);
@@ -2660,7 +2879,11 @@ function encodeAttentionBlockDispatches(device: DeviceLike, pipelines: ReturnTyp
   return encoder.finish();
 }
 
-function encodeAttentionBlockFusedDispatches(device: DeviceLike, pipelines: ReturnType<typeof createAttentionBlockFusedPipelines>, iterations: number): unknown {
+function encodeAttentionBlockFusedDispatches(
+  device: DeviceLike,
+  pipelines: ReturnType<typeof createAttentionBlockFusedPipelines>,
+  iterations: number,
+): unknown {
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   for (let i = 0; i < iterations; i++) {
@@ -2711,11 +2934,63 @@ export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionB
     const outputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
     const podArgs = qkvKernelVariant === 'tvm-packed-f16' ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
-    buffers.push(inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkvBuffer, scoreBuffer, probBuffer, outputBuffer, readbackBuffer);
+    buffers.push(
+      inputBuffer,
+      qWeight,
+      qBias,
+      kWeight,
+      kBias,
+      vWeight,
+      vBias,
+      scale,
+      smolgenBias,
+      qkvBuffer,
+      scoreBuffer,
+      probBuffer,
+      outputBuffer,
+      readbackBuffer,
+    );
     if (podArgs) buffers.push(podArgs);
     const pipelines = fusedScoreSoftmax
-      ? createAttentionBlockFusedPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, probs: probBuffer, output: outputBuffer, podArgs }, qkvKernelVariant)
-      : createAttentionBlockPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, scores: scoreBuffer, probs: probBuffer, output: outputBuffer, podArgs }, qkvKernelVariant);
+      ? createAttentionBlockFusedPipelines(
+          device,
+          {
+            input: inputBuffer,
+            qWeight,
+            qBias,
+            kWeight,
+            kBias,
+            vWeight,
+            vBias,
+            scale,
+            smolgenBias,
+            qkv: qkvBuffer,
+            probs: probBuffer,
+            output: outputBuffer,
+            podArgs,
+          },
+          qkvKernelVariant,
+        )
+      : createAttentionBlockPipelines(
+          device,
+          {
+            input: inputBuffer,
+            qWeight,
+            qBias,
+            kWeight,
+            kBias,
+            vWeight,
+            vBias,
+            scale,
+            smolgenBias,
+            qkv: qkvBuffer,
+            scores: scoreBuffer,
+            probs: probBuffer,
+            output: outputBuffer,
+            podArgs,
+          },
+          qkvKernelVariant,
+        );
     const encode = fusedScoreSoftmax
       ? (count: number) => encodeAttentionBlockFusedDispatches(device, pipelines as ReturnType<typeof createAttentionBlockFusedPipelines>, count)
       : (count: number) => encodeAttentionBlockDispatches(device, pipelines as ReturnType<typeof createAttentionBlockPipelines>, count);
@@ -2855,7 +3130,14 @@ export interface Lc0WebAttentionOutputOrtBenchmarkResult {
   outputSample: number[];
 }
 
-function cpuLayerNormRows(input: Float32Array<ArrayBufferLike>, scale: Uint8Array, bias: Uint8Array, rows: number, cols: number, epsilon: number): Float32Array<ArrayBufferLike> {
+function cpuLayerNormRows(
+  input: Float32Array<ArrayBufferLike>,
+  scale: Uint8Array,
+  bias: Uint8Array,
+  rows: number,
+  cols: number,
+  epsilon: number,
+): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(input.length);
   for (let row = 0; row < rows; row++) {
     const base = row * cols;
@@ -2873,7 +3155,10 @@ function cpuLayerNormRows(input: Float32Array<ArrayBufferLike>, scale: Uint8Arra
   return output;
 }
 
-function loadAttentionOutputInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Lc0WebEncoderBlockTensorNames = lc0WebEncoderBlockTensorNames()): ReturnType<typeof loadAttentionValueInputs> & {
+function loadAttentionOutputInputs(
+  pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>,
+  tensorNames: Lc0WebEncoderBlockTensorNames = lc0WebEncoderBlockTensorNames(),
+): ReturnType<typeof loadAttentionValueInputs> & {
   outWeight: Lc0WebTensorView;
   outBias: Lc0WebTensorView;
   alpha: Lc0WebTensorView;
@@ -2898,7 +3183,10 @@ function loadAttentionOutputInputs(pack: Awaited<ReturnType<typeof loadLc0WebMod
   return { ...base, outWeight, outBias, alpha, lnScale, lnBias };
 }
 
-function buildAttentionOutputReference(tensors: ReturnType<typeof loadAttentionOutputInputs>, input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K)): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number; smolgenBias: Float32Array<ArrayBufferLike> } {
+function buildAttentionOutputReference(
+  tensors: ReturnType<typeof loadAttentionOutputInputs>,
+  input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K),
+): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number; smolgenBias: Float32Array<ArrayBufferLike> } {
   const attentionReference = buildAttentionValueReference(tensors, input);
   const attention = attentionReference.output;
   const projected = cpuProjectTokens(attention, tensors.outWeight.bytes, tensors.outBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N);
@@ -2953,7 +3241,6 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   skipVec[index] = sum * pick_lane(alphaF16[0], 0u) + residualVec[index];
 }
 `;
-
 
 const ATTENTION_OUTPUT_NORM_WGSL = `
 @group(0) @binding(0) var<storage, read> skipVec: array<f32>;
@@ -3254,11 +3541,25 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 
 const SMOLGEN_PROJECT_TILED_F16_WGSL = smolgenProjectTiledF16Wgsl(64);
 
-export type Lc0WebSmolgenKernelVariant = 'hand' | 'tiled-project-f16' | 'tiled-project-f16-16' | 'tiled-project-f16-32' | 'tiled-project-f16-128' | 'tiled-project-f16-256';
+export type Lc0WebSmolgenKernelVariant =
+  | 'hand'
+  | 'tiled-project-f16'
+  | 'tiled-project-f16-16'
+  | 'tiled-project-f16-32'
+  | 'tiled-project-f16-128'
+  | 'tiled-project-f16-256';
 
 export function parseLc0WebSmolgenKernelVariant(raw: string | undefined | null): Lc0WebSmolgenKernelVariant {
   if (!raw || raw === 'tiled' || raw === 'tiled-project') return 'tiled-project-f16';
-  if (raw === 'hand' || raw === 'tiled-project-f16' || raw === 'tiled-project-f16-16' || raw === 'tiled-project-f16-32' || raw === 'tiled-project-f16-128' || raw === 'tiled-project-f16-256') return raw;
+  if (
+    raw === 'hand' ||
+    raw === 'tiled-project-f16' ||
+    raw === 'tiled-project-f16-16' ||
+    raw === 'tiled-project-f16-32' ||
+    raw === 'tiled-project-f16-128' ||
+    raw === 'tiled-project-f16-256'
+  )
+    return raw;
   throw new Error(`Unsupported smolgen project kernel variant: ${raw}`);
 }
 
@@ -3287,84 +3588,107 @@ type SmolgenPipelines = {
   projectBind: unknown;
 };
 
-function createSmolgenPipelines(device: DeviceLike, buffers: {
-  input: BufferLike;
-  compressWeight: BufferLike;
-  compressed: BufferLike;
-  dense1Weight: BufferLike;
-  dense1Bias: BufferLike;
-  dense1: BufferLike;
-  ln1Scale: BufferLike;
-  ln1Bias: BufferLike;
-  ln1: BufferLike;
-  dense2Weight: BufferLike;
-  dense2Bias: BufferLike;
-  dense2: BufferLike;
-  ln2Scale: BufferLike;
-  ln2Bias: BufferLike;
-  ln2: BufferLike;
-  smolgenWeight: BufferLike;
-  output: BufferLike;
-}, projectKernelVariant: Lc0WebSmolgenKernelVariant = 'hand', pipelineCache?: WgslPipelineCache): SmolgenPipelines {
+function createSmolgenPipelines(
+  device: DeviceLike,
+  buffers: {
+    input: BufferLike;
+    compressWeight: BufferLike;
+    compressed: BufferLike;
+    dense1Weight: BufferLike;
+    dense1Bias: BufferLike;
+    dense1: BufferLike;
+    ln1Scale: BufferLike;
+    ln1Bias: BufferLike;
+    ln1: BufferLike;
+    dense2Weight: BufferLike;
+    dense2Bias: BufferLike;
+    dense2: BufferLike;
+    ln2Scale: BufferLike;
+    ln2Bias: BufferLike;
+    ln2: BufferLike;
+    smolgenWeight: BufferLike;
+    output: BufferLike;
+  },
+  projectKernelVariant: Lc0WebSmolgenKernelVariant = 'hand',
+  pipelineCache?: WgslPipelineCache,
+): SmolgenPipelines {
   const compress = createCachedComputePipeline(device, pipelineCache, 'smolgen-compress', {
     label: 'lc0web smolgen compress',
     code: SMOLGEN_COMPRESS_WGSL,
   });
-  const compressBind = device.createBindGroup({ layout: compress.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: { buffer: buffers.input } },
-    { binding: 1, resource: { buffer: buffers.compressWeight } },
-    { binding: 2, resource: { buffer: buffers.compressed } },
-  ] });
+  const compressBind = device.createBindGroup({
+    layout: compress.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.input } },
+      { binding: 1, resource: { buffer: buffers.compressWeight } },
+      { binding: 2, resource: { buffer: buffers.compressed } },
+    ],
+  });
   const dense1 = createCachedComputePipeline(device, pipelineCache, 'smolgen-dense1', {
     label: 'lc0web smolgen dense1',
     code: SMOLGEN_DENSE1_WGSL,
   });
-  const dense1Bind = device.createBindGroup({ layout: dense1.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: { buffer: buffers.compressed } },
-    { binding: 1, resource: { buffer: buffers.dense1Weight } },
-    { binding: 2, resource: { buffer: buffers.dense1Bias } },
-    { binding: 3, resource: { buffer: buffers.dense1 } },
-  ] });
+  const dense1Bind = device.createBindGroup({
+    layout: dense1.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.compressed } },
+      { binding: 1, resource: { buffer: buffers.dense1Weight } },
+      { binding: 2, resource: { buffer: buffers.dense1Bias } },
+      { binding: 3, resource: { buffer: buffers.dense1 } },
+    ],
+  });
   const ln1 = createCachedComputePipeline(device, pipelineCache, 'smolgen-ln1', {
     label: 'lc0web smolgen ln1',
     code: SMOLGEN_SWISH_LN1_WGSL,
   });
-  const ln1Bind = device.createBindGroup({ layout: ln1.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: { buffer: buffers.dense1 } },
-    { binding: 1, resource: { buffer: buffers.ln1Scale } },
-    { binding: 2, resource: { buffer: buffers.ln1Bias } },
-    { binding: 3, resource: { buffer: buffers.ln1 } },
-  ] });
+  const ln1Bind = device.createBindGroup({
+    layout: ln1.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.dense1 } },
+      { binding: 1, resource: { buffer: buffers.ln1Scale } },
+      { binding: 2, resource: { buffer: buffers.ln1Bias } },
+      { binding: 3, resource: { buffer: buffers.ln1 } },
+    ],
+  });
   const dense2 = createCachedComputePipeline(device, pipelineCache, 'smolgen-dense2', {
     label: 'lc0web smolgen dense2',
     code: SMOLGEN_DENSE2_WGSL,
   });
-  const dense2Bind = device.createBindGroup({ layout: dense2.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: { buffer: buffers.ln1 } },
-    { binding: 1, resource: { buffer: buffers.dense2Weight } },
-    { binding: 2, resource: { buffer: buffers.dense2Bias } },
-    { binding: 3, resource: { buffer: buffers.dense2 } },
-  ] });
+  const dense2Bind = device.createBindGroup({
+    layout: dense2.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.ln1 } },
+      { binding: 1, resource: { buffer: buffers.dense2Weight } },
+      { binding: 2, resource: { buffer: buffers.dense2Bias } },
+      { binding: 3, resource: { buffer: buffers.dense2 } },
+    ],
+  });
   const ln2 = createCachedComputePipeline(device, pipelineCache, 'smolgen-ln2', {
     label: 'lc0web smolgen ln2',
     code: SMOLGEN_SWISH_LN2_WGSL,
   });
-  const ln2Bind = device.createBindGroup({ layout: ln2.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: { buffer: buffers.dense2 } },
-    { binding: 1, resource: { buffer: buffers.ln2Scale } },
-    { binding: 2, resource: { buffer: buffers.ln2Bias } },
-    { binding: 3, resource: { buffer: buffers.ln2 } },
-  ] });
+  const ln2Bind = device.createBindGroup({
+    layout: ln2.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.dense2 } },
+      { binding: 1, resource: { buffer: buffers.ln2Scale } },
+      { binding: 2, resource: { buffer: buffers.ln2Bias } },
+      { binding: 3, resource: { buffer: buffers.ln2 } },
+    ],
+  });
   const projectTileSize = smolgenProjectKernelTileSize(projectKernelVariant);
   const project = createCachedComputePipeline(device, pipelineCache, `smolgen-project-${projectTileSize ?? 'hand'}`, {
     label: projectTileSize ? `lc0web smolgen project tiled f16 ${projectTileSize}` : 'lc0web smolgen project',
     code: projectTileSize ? (projectTileSize === 64 ? SMOLGEN_PROJECT_TILED_F16_WGSL : smolgenProjectTiledF16Wgsl(projectTileSize)) : SMOLGEN_PROJECT_WGSL,
   });
-  const projectBind = device.createBindGroup({ layout: project.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: { buffer: buffers.ln2 } },
-    { binding: 1, resource: { buffer: buffers.smolgenWeight } },
-    { binding: 2, resource: { buffer: buffers.output } },
-  ] });
+  const projectBind = device.createBindGroup({
+    layout: project.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.ln2 } },
+      { binding: 1, resource: { buffer: buffers.smolgenWeight } },
+      { binding: 2, resource: { buffer: buffers.output } },
+    ],
+  });
   return { compress, compressBind, dense1, dense1Bind, ln1, ln1Bind, dense2, dense2Bind, ln2, ln2Bind, projectKernelVariant, project, projectBind };
 }
 
@@ -3431,7 +3755,12 @@ function encodeSmolgenBenchmarkStageDispatches(device: DeviceLike, iterations: n
   return encoder.finish();
 }
 
-async function measureSmolgenBenchmarkStage(device: DeviceLike, warmup: number, iterations: number, encodeStage: (pass: ComputePassLike) => void): Promise<number> {
+async function measureSmolgenBenchmarkStage(
+  device: DeviceLike,
+  warmup: number,
+  iterations: number,
+  encodeStage: (pass: ComputePassLike) => void,
+): Promise<number> {
   if (warmup > 0) {
     device.queue.submit([encodeSmolgenBenchmarkStageDispatches(device, warmup, encodeStage)]);
     await device.queue.onSubmittedWorkDone?.();
@@ -3479,26 +3808,49 @@ export async function runLc0WebSmolgenBenchmark(options: Lc0WebSmolgenBenchmarkO
     const ln2 = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
     const output = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.MAP_READ | usage.COPY_DST });
-    buffers.push(inputBuffer, compressWeight, dense1Weight, dense1Bias, ln1Scale, ln1Bias, dense2Weight, dense2Bias, ln2Scale, ln2Bias, smolgenWeight, compressed, dense1, ln1, dense2, ln2, output, readbackBuffer);
-    const pipelines = createSmolgenPipelines(device, {
-      input: inputBuffer,
+    buffers.push(
+      inputBuffer,
       compressWeight,
-      compressed,
       dense1Weight,
       dense1Bias,
-      dense1,
       ln1Scale,
       ln1Bias,
-      ln1,
       dense2Weight,
       dense2Bias,
-      dense2,
       ln2Scale,
       ln2Bias,
-      ln2,
       smolgenWeight,
+      compressed,
+      dense1,
+      ln1,
+      dense2,
+      ln2,
       output,
-    }, projectKernelVariant);
+      readbackBuffer,
+    );
+    const pipelines = createSmolgenPipelines(
+      device,
+      {
+        input: inputBuffer,
+        compressWeight,
+        compressed,
+        dense1Weight,
+        dense1Bias,
+        dense1,
+        ln1Scale,
+        ln1Bias,
+        ln1,
+        dense2Weight,
+        dense2Bias,
+        dense2,
+        ln2Scale,
+        ln2Bias,
+        ln2,
+        smolgenWeight,
+        output,
+      },
+      projectKernelVariant,
+    );
     const uploadSetupMs = nowMs() - setupStarted;
 
     if (warmup > 0) {
@@ -3557,29 +3909,41 @@ export async function runLc0WebSmolgenBenchmark(options: Lc0WebSmolgenBenchmarkO
   }
 }
 
-function createAttentionOutputPipelines(device: DeviceLike, buffers: {
-  input: BufferLike;
-  qWeight: BufferLike;
-  qBias: BufferLike;
-  kWeight: BufferLike;
-  kBias: BufferLike;
-  vWeight: BufferLike;
-  vBias: BufferLike;
-  scale: BufferLike;
-  smolgenBias: BufferLike;
-  qkv: BufferLike;
-  scores: BufferLike;
-  probs: BufferLike;
-  attn: BufferLike;
-  outWeight: BufferLike;
-  outBias: BufferLike;
-  alpha: BufferLike;
-  skip: BufferLike;
-  lnScale: BufferLike;
-  lnBias: BufferLike;
-  output: BufferLike;
-  podArgs?: BufferLike;
-}, outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant = 'hand', qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand', pipelineCache?: WgslPipelineCache): ReturnType<typeof createAttentionBlockPipelines> & { outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant; outProj: PipelineLike; outProjBind: unknown; norm: PipelineLike; normBind: unknown } {
+function createAttentionOutputPipelines(
+  device: DeviceLike,
+  buffers: {
+    input: BufferLike;
+    qWeight: BufferLike;
+    qBias: BufferLike;
+    kWeight: BufferLike;
+    kBias: BufferLike;
+    vWeight: BufferLike;
+    vBias: BufferLike;
+    scale: BufferLike;
+    smolgenBias: BufferLike;
+    qkv: BufferLike;
+    scores: BufferLike;
+    probs: BufferLike;
+    attn: BufferLike;
+    outWeight: BufferLike;
+    outBias: BufferLike;
+    alpha: BufferLike;
+    skip: BufferLike;
+    lnScale: BufferLike;
+    lnBias: BufferLike;
+    output: BufferLike;
+    podArgs?: BufferLike;
+  },
+  outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant = 'hand',
+  qkvKernelVariant: Lc0WebAttentionQkvKernelVariant = 'hand',
+  pipelineCache?: WgslPipelineCache,
+): ReturnType<typeof createAttentionBlockPipelines> & {
+  outProjKernelVariant: Lc0WebAttentionOutProjKernelVariant;
+  outProj: PipelineLike;
+  outProjBind: unknown;
+  norm: PipelineLike;
+  normBind: unknown;
+} {
   const base = createAttentionBlockPipelines(device, { ...buffers, output: buffers.attn }, qkvKernelVariant, pipelineCache);
   let outProj: PipelineLike;
   let outProjBind: unknown;
@@ -3671,8 +4035,14 @@ export async function runLc0WebAttentionOutputBenchmark(options: Lc0WebAttention
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
     tensorNames: [
-      ...Object.values(tensorNames.qkv), tensorNames.scaleTensor, ...Object.values(tensorNames.smolgen),
-      tensorNames.outDenseWeight, tensorNames.outDenseBias, tensorNames.outAlpha, tensorNames.ln1Scale, tensorNames.ln1Bias,
+      ...Object.values(tensorNames.qkv),
+      tensorNames.scaleTensor,
+      ...Object.values(tensorNames.smolgen),
+      tensorNames.outDenseWeight,
+      tensorNames.outDenseBias,
+      tensorNames.outAlpha,
+      tensorNames.ln1Scale,
+      tensorNames.ln1Bias,
     ],
   });
   const tensors = loadAttentionOutputInputs(pack, tensorNames);
@@ -3705,9 +4075,57 @@ export async function runLc0WebAttentionOutputBenchmark(options: Lc0WebAttention
     const outputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
     const podArgs = outProjKernelVariant === 'tvm-packed-f16' ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
-    buffers.push(inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, outWeight, outBias, alpha, lnScale, lnBias, qkvBuffer, scoreBuffer, probBuffer, attnBuffer, skipBuffer, outputBuffer, readbackBuffer);
+    buffers.push(
+      inputBuffer,
+      qWeight,
+      qBias,
+      kWeight,
+      kBias,
+      vWeight,
+      vBias,
+      scale,
+      smolgenBias,
+      outWeight,
+      outBias,
+      alpha,
+      lnScale,
+      lnBias,
+      qkvBuffer,
+      scoreBuffer,
+      probBuffer,
+      attnBuffer,
+      skipBuffer,
+      outputBuffer,
+      readbackBuffer,
+    );
     if (podArgs) buffers.push(podArgs);
-    const pipelines = createAttentionOutputPipelines(device, { input: inputBuffer, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv: qkvBuffer, scores: scoreBuffer, probs: probBuffer, attn: attnBuffer, outWeight, outBias, alpha, skip: skipBuffer, lnScale, lnBias, output: outputBuffer, podArgs }, outProjKernelVariant);
+    const pipelines = createAttentionOutputPipelines(
+      device,
+      {
+        input: inputBuffer,
+        qWeight,
+        qBias,
+        kWeight,
+        kBias,
+        vWeight,
+        vBias,
+        scale,
+        smolgenBias,
+        qkv: qkvBuffer,
+        scores: scoreBuffer,
+        probs: probBuffer,
+        attn: attnBuffer,
+        outWeight,
+        outBias,
+        alpha,
+        skip: skipBuffer,
+        lnScale,
+        lnBias,
+        output: outputBuffer,
+        podArgs,
+      },
+      outProjKernelVariant,
+    );
     const uploadSetupMs = nowMs() - setupStarted;
 
     if (warmup > 0) {
@@ -3767,7 +4185,10 @@ export function createTinyAttentionOutputOnnxForTest(
     graph.bytes(1, onnxNode('Add', ['projected', 'outBias'], ['biased'], 'attention_output_bias'));
     graph.bytes(1, onnxNode('Mul', ['biased', 'alpha'], ['scaled'], 'attention_output_alpha'));
     graph.bytes(1, onnxNode('Add', ['scaled', 'residual'], ['skip'], 'attention_output_residual'));
-    graph.bytes(1, onnxNode('LayerNormalization', ['skip', 'lnScale', 'lnBias'], ['output'], 'attention_output_ln1', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]));
+    graph.bytes(
+      1,
+      onnxNode('LayerNormalization', ['skip', 'lnScale', 'lnBias'], ['output'], 'attention_output_ln1', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]),
+    );
     graph.string(2, 'lc0web_attention_output_projection_residual_ln1');
     graph.bytes(5, onnxTensor('outWeight', [DEFAULT_N, DEFAULT_N], outWeight));
     graph.bytes(5, onnxTensor('outBias', [DEFAULT_N], outBias));
@@ -3782,15 +4203,23 @@ export function createTinyAttentionOutputOnnxForTest(
   return writer.finish();
 }
 
-export async function runLc0WebAttentionOutputOrtBenchmark(options: Lc0WebAttentionOutputOrtBenchmarkOptions): Promise<Lc0WebAttentionOutputOrtBenchmarkResult> {
+export async function runLc0WebAttentionOutputOrtBenchmark(
+  options: Lc0WebAttentionOutputOrtBenchmarkOptions,
+): Promise<Lc0WebAttentionOutputOrtBenchmarkResult> {
   const warmup = clampInteger(options.warmup, 5, 0, 100);
   const iterations = clampInteger(options.iterations, 25, 1, 1000);
   const tensorNames = lc0WebEncoderBlockTensorNames(options.encoderPrefix);
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
     tensorNames: [
-      ...Object.values(tensorNames.qkv), tensorNames.scaleTensor, ...Object.values(tensorNames.smolgen),
-      tensorNames.outDenseWeight, tensorNames.outDenseBias, tensorNames.outAlpha, tensorNames.ln1Scale, tensorNames.ln1Bias,
+      ...Object.values(tensorNames.qkv),
+      tensorNames.scaleTensor,
+      ...Object.values(tensorNames.smolgen),
+      tensorNames.outDenseWeight,
+      tensorNames.outDenseBias,
+      tensorNames.outAlpha,
+      tensorNames.ln1Scale,
+      tensorNames.ln1Bias,
     ],
   });
   const tensors = loadAttentionOutputInputs(pack, tensorNames);
@@ -3928,10 +4357,21 @@ export function lc0WebEncoderBlockTensorNames(prefix?: string): Lc0WebEncoderBlo
 
 function encoderBlockTensorNameList(names: Lc0WebEncoderBlockTensorNames): string[] {
   return [
-    ...Object.values(names.qkv), names.scaleTensor, ...Object.values(names.smolgen),
-    names.outDenseWeight, names.outDenseBias, names.outAlpha, names.ln1Scale, names.ln1Bias,
-    names.ffnDense1Weight, names.ffnDense1Bias, names.ffnDense2Weight, names.ffnDense2Bias,
-    names.ffnAlpha, names.ln2Scale, names.ln2Bias,
+    ...Object.values(names.qkv),
+    names.scaleTensor,
+    ...Object.values(names.smolgen),
+    names.outDenseWeight,
+    names.outDenseBias,
+    names.outAlpha,
+    names.ln1Scale,
+    names.ln1Bias,
+    names.ffnDense1Weight,
+    names.ffnDense1Bias,
+    names.ffnDense2Weight,
+    names.ffnDense2Bias,
+    names.ffnAlpha,
+    names.ln2Scale,
+    names.ln2Bias,
   ];
 }
 
@@ -4010,7 +4450,10 @@ type Encoder0FfnTensors = ReturnType<typeof loadAttentionOutputInputs> & {
   ln2Bias: Lc0WebTensorView;
 };
 
-function loadEncoder0FfnInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>, tensorNames: Lc0WebEncoderBlockTensorNames = lc0WebEncoderBlockTensorNames()): Encoder0FfnTensors {
+function loadEncoder0FfnInputs(
+  pack: Awaited<ReturnType<typeof loadLc0WebModelPack>>,
+  tensorNames: Lc0WebEncoderBlockTensorNames = lc0WebEncoderBlockTensorNames(),
+): Encoder0FfnTensors {
   const base = loadAttentionOutputInputs(pack, tensorNames);
   const ffnDense1Weight = pack.tensors.get(tensorNames.ffnDense1Weight);
   const ffnDense1Bias = pack.tensors.get(tensorNames.ffnDense1Bias);
@@ -4019,7 +4462,8 @@ function loadEncoder0FfnInputs(pack: Awaited<ReturnType<typeof loadLc0WebModelPa
   const ffnAlpha = pack.tensors.get(tensorNames.ffnAlpha);
   const ln2Scale = pack.tensors.get(tensorNames.ln2Scale);
   const ln2Bias = pack.tensors.get(tensorNames.ln2Bias);
-  if (!ffnDense1Weight || !ffnDense1Bias || !ffnDense2Weight || !ffnDense2Bias || !ffnAlpha || !ln2Scale || !ln2Bias) throw new Error('lc0web encoder0 FFN tensors were not loaded');
+  if (!ffnDense1Weight || !ffnDense1Bias || !ffnDense2Weight || !ffnDense2Bias || !ffnAlpha || !ln2Scale || !ln2Bias)
+    throw new Error('lc0web encoder0 FFN tensors were not loaded');
   assertTensorShapeAndBytes(ffnDense1Weight, [DEFAULT_N, DEFAULT_FFN_HIDDEN], 2, 'ffnDense1Weight');
   assertTensorShapeAndBytes(ffnDense1Bias, [DEFAULT_FFN_HIDDEN], 2, 'ffnDense1Bias');
   assertTensorShapeAndBytes(ffnDense2Weight, [DEFAULT_FFN_HIDDEN, DEFAULT_N], 2, 'ffnDense2Weight');
@@ -4042,7 +4486,11 @@ function cpuSqrRelu(input: Float32Array<ArrayBufferLike>): Float32Array<ArrayBuf
   return output;
 }
 
-function cpuEncoder0FfnFromLn1(input: Float32Array<ArrayBufferLike>, tensors: Encoder0FfnTensors, options: { shaderF16AccumF32?: boolean } = {}): { output: Float32Array<ArrayBufferLike>; alpha: number } {
+function cpuEncoder0FfnFromLn1(
+  input: Float32Array<ArrayBufferLike>,
+  tensors: Encoder0FfnTensors,
+  options: { shaderF16AccumF32?: boolean } = {},
+): { output: Float32Array<ArrayBufferLike>; alpha: number } {
   const project = options.shaderF16AccumF32 ? cpuProjectTokensShaderF16AccumF32 : cpuProjectTokens;
   const hidden = cpuSqrRelu(project(input, tensors.ffnDense1Weight.bytes, tensors.ffnDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_FFN_HIDDEN));
   const projected = project(hidden, tensors.ffnDense2Weight.bytes, tensors.ffnDense2Bias.bytes, DEFAULT_TOKENS, DEFAULT_FFN_HIDDEN, DEFAULT_N);
@@ -4052,7 +4500,10 @@ function cpuEncoder0FfnFromLn1(input: Float32Array<ArrayBufferLike>, tensors: En
   return { output: cpuLayerNormRows(skip, tensors.ln2Scale.bytes, tensors.ln2Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_LN_EPSILON), alpha };
 }
 
-function buildEncoder0FfnReference(tensors: Encoder0FfnTensors, options: { shaderF16AccumF32?: boolean } = {}): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number } {
+function buildEncoder0FfnReference(
+  tensors: Encoder0FfnTensors,
+  options: { shaderF16AccumF32?: boolean } = {},
+): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; alpha: number } {
   const input = buildAttentionOutputReference(tensors).output;
   const ffn = cpuEncoder0FfnFromLn1(input, tensors, options);
   return { input, output: ffn.output, alpha: ffn.alpha };
@@ -4079,7 +4530,10 @@ export function createTinyEncoder0FfnOnnxForTest(
     graph.bytes(1, onnxNode('Add', ['dense2', 'dense2Bias'], ['dense2Biased'], 'encoder0_ffn_dense2_bias'));
     graph.bytes(1, onnxNode('Mul', ['dense2Biased', 'alpha'], ['scaled'], 'encoder0_ffn_alpha'));
     graph.bytes(1, onnxNode('Add', ['scaled', 'input'], ['skip'], 'encoder0_ffn_residual'));
-    graph.bytes(1, onnxNode('LayerNormalization', ['skip', 'ln2Scale', 'ln2Bias'], ['output'], 'encoder0_ffn_ln2', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]));
+    graph.bytes(
+      1,
+      onnxNode('LayerNormalization', ['skip', 'ln2Scale', 'ln2Bias'], ['output'], 'encoder0_ffn_ln2', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]),
+    );
     graph.string(2, 'lc0web_encoder0_ffn_sqrrelu_residual_ln2');
     graph.bytes(5, onnxTensor('dense1Weight', [DEFAULT_N, DEFAULT_FFN_HIDDEN], dense1Weight));
     graph.bytes(5, onnxTensor('dense1Bias', [DEFAULT_FFN_HIDDEN], dense1Bias));
@@ -4094,8 +4548,6 @@ export function createTinyEncoder0FfnOnnxForTest(
   writer.message(8, (opset) => opset.int64(2, 17));
   return writer.finish();
 }
-
-
 
 const FFN_DENSE1_WGSL = `${WGSL_HEADER}
 var<workgroup> dense1InputTile: array<f32, 128>;
@@ -4241,73 +4693,107 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 
 const FFN_LN2_WGSL = ATTENTION_OUTPUT_NORM_WGSL;
 
-function createEncoder0FfnPipelines(device: DeviceLike, buffers: {
-  input: BufferLike;
-  dense1Weight: BufferLike;
-  dense1Bias: BufferLike;
-  hidden: BufferLike;
-  dense2Weight: BufferLike;
-  dense2Bias: BufferLike;
-  alpha: BufferLike;
-  skip: BufferLike;
-  ln2Scale: BufferLike;
-  ln2Bias: BufferLike;
-  output: BufferLike;
-  podArgs?: BufferLike;
-}, ffnKernelVariant: Lc0WebFfnKernelVariant = 'hand', pipelineCache?: WgslPipelineCache): { ffnKernelVariant: Lc0WebFfnKernelVariant; dense1: PipelineLike; dense1Bind: unknown; dense2: PipelineLike; dense2Bind: unknown; ln2: PipelineLike; ln2Bind: unknown } {
+function createEncoder0FfnPipelines(
+  device: DeviceLike,
+  buffers: {
+    input: BufferLike;
+    dense1Weight: BufferLike;
+    dense1Bias: BufferLike;
+    hidden: BufferLike;
+    dense2Weight: BufferLike;
+    dense2Bias: BufferLike;
+    alpha: BufferLike;
+    skip: BufferLike;
+    ln2Scale: BufferLike;
+    ln2Bias: BufferLike;
+    output: BufferLike;
+    podArgs?: BufferLike;
+  },
+  ffnKernelVariant: Lc0WebFfnKernelVariant = 'hand',
+  pipelineCache?: WgslPipelineCache,
+): {
+  ffnKernelVariant: Lc0WebFfnKernelVariant;
+  dense1: PipelineLike;
+  dense1Bind: unknown;
+  dense2: PipelineLike;
+  dense2Bind: unknown;
+  ln2: PipelineLike;
+  ln2Bind: unknown;
+} {
   const useTvmPackedF16 = ffnKernelVariant === 'tvm-packed-f16';
   const useShaderF16AccumF32 = ffnKernelVariant === 'hand-shader-f16-accum-f32';
   if (useTvmPackedF16 && !buffers.podArgs) throw new Error('TVM packed-f16 FFN kernels require a POD args uniform buffer');
   const dense1Descriptor = {
-    label: useTvmPackedF16 ? 'lc0web encoder0 FFN dense1 TVM packed-f16 sqrrelu' : useShaderF16AccumF32 ? 'lc0web encoder0 FFN dense1 shader-f16 sqrrelu' : 'lc0web encoder0 FFN dense1 sqrrelu',
+    label: useTvmPackedF16
+      ? 'lc0web encoder0 FFN dense1 TVM packed-f16 sqrrelu'
+      : useShaderF16AccumF32
+        ? 'lc0web encoder0 FFN dense1 shader-f16 sqrrelu'
+        : 'lc0web encoder0 FFN dense1 sqrrelu',
     code: useTvmPackedF16 ? FFN_DENSE1_TVM_PACKED_F16_WGSL : useShaderF16AccumF32 ? FFN_DENSE1_SHADER_F16_ACCUM_F32_WGSL : FFN_DENSE1_WGSL,
     entryPoint: useTvmPackedF16 ? 'matmul_kernel' : 'main',
   };
   const dense1 = createCachedComputePipeline(device, pipelineCache, `ffn-dense1-${ffnKernelVariant}`, dense1Descriptor);
-  const dense1Bind = device.createBindGroup({ layout: dense1.getBindGroupLayout(0), entries: useTvmPackedF16 ? [
-    { binding: 0, resource: { buffer: buffers.hidden } },
-    { binding: 1, resource: { buffer: buffers.dense1Weight } },
-    { binding: 2, resource: { buffer: buffers.input } },
-    { binding: 3, resource: { buffer: buffers.podArgs! } },
-    { binding: 4, resource: { buffer: buffers.dense1Bias } },
-  ] : [
-    { binding: 0, resource: { buffer: buffers.input } },
-    { binding: 1, resource: { buffer: buffers.dense1Weight } },
-    { binding: 2, resource: { buffer: buffers.dense1Bias } },
-    { binding: 3, resource: { buffer: buffers.hidden } },
-  ] });
+  const dense1Bind = device.createBindGroup({
+    layout: dense1.getBindGroupLayout(0),
+    entries: useTvmPackedF16
+      ? [
+          { binding: 0, resource: { buffer: buffers.hidden } },
+          { binding: 1, resource: { buffer: buffers.dense1Weight } },
+          { binding: 2, resource: { buffer: buffers.input } },
+          { binding: 3, resource: { buffer: buffers.podArgs! } },
+          { binding: 4, resource: { buffer: buffers.dense1Bias } },
+        ]
+      : [
+          { binding: 0, resource: { buffer: buffers.input } },
+          { binding: 1, resource: { buffer: buffers.dense1Weight } },
+          { binding: 2, resource: { buffer: buffers.dense1Bias } },
+          { binding: 3, resource: { buffer: buffers.hidden } },
+        ],
+  });
   const dense2Descriptor = {
-    label: useTvmPackedF16 ? 'lc0web encoder0 FFN dense2 TVM packed-f16 residual' : useShaderF16AccumF32 ? 'lc0web encoder0 FFN dense2 shader-f16 residual' : 'lc0web encoder0 FFN dense2 residual',
+    label: useTvmPackedF16
+      ? 'lc0web encoder0 FFN dense2 TVM packed-f16 residual'
+      : useShaderF16AccumF32
+        ? 'lc0web encoder0 FFN dense2 shader-f16 residual'
+        : 'lc0web encoder0 FFN dense2 residual',
     code: useTvmPackedF16 ? FFN_DENSE2_TVM_PACKED_F16_WGSL : useShaderF16AccumF32 ? FFN_DENSE2_SHADER_F16_ACCUM_F32_WGSL : FFN_DENSE2_WGSL,
     entryPoint: useTvmPackedF16 ? 'matmul_kernel' : 'main',
   };
   const dense2 = createCachedComputePipeline(device, pipelineCache, `ffn-dense2-${ffnKernelVariant}`, dense2Descriptor);
-  const dense2Bind = device.createBindGroup({ layout: dense2.getBindGroupLayout(0), entries: useTvmPackedF16 ? [
-    { binding: 0, resource: { buffer: buffers.skip } },
-    { binding: 1, resource: { buffer: buffers.dense2Weight } },
-    { binding: 2, resource: { buffer: buffers.hidden } },
-    { binding: 3, resource: { buffer: buffers.podArgs! } },
-    { binding: 4, resource: { buffer: buffers.dense2Bias } },
-    { binding: 5, resource: { buffer: buffers.input } },
-    { binding: 6, resource: { buffer: buffers.alpha } },
-  ] : [
-    { binding: 0, resource: { buffer: buffers.hidden } },
-    { binding: 1, resource: { buffer: buffers.dense2Weight } },
-    { binding: 2, resource: { buffer: buffers.dense2Bias } },
-    { binding: 3, resource: { buffer: buffers.skip } },
-    { binding: 4, resource: { buffer: buffers.input } },
-    { binding: 5, resource: { buffer: buffers.alpha } },
-  ] });
+  const dense2Bind = device.createBindGroup({
+    layout: dense2.getBindGroupLayout(0),
+    entries: useTvmPackedF16
+      ? [
+          { binding: 0, resource: { buffer: buffers.skip } },
+          { binding: 1, resource: { buffer: buffers.dense2Weight } },
+          { binding: 2, resource: { buffer: buffers.hidden } },
+          { binding: 3, resource: { buffer: buffers.podArgs! } },
+          { binding: 4, resource: { buffer: buffers.dense2Bias } },
+          { binding: 5, resource: { buffer: buffers.input } },
+          { binding: 6, resource: { buffer: buffers.alpha } },
+        ]
+      : [
+          { binding: 0, resource: { buffer: buffers.hidden } },
+          { binding: 1, resource: { buffer: buffers.dense2Weight } },
+          { binding: 2, resource: { buffer: buffers.dense2Bias } },
+          { binding: 3, resource: { buffer: buffers.skip } },
+          { binding: 4, resource: { buffer: buffers.input } },
+          { binding: 5, resource: { buffer: buffers.alpha } },
+        ],
+  });
   const ln2 = createCachedComputePipeline(device, pipelineCache, 'ffn-ln2', {
     label: 'lc0web encoder0 FFN ln2',
     code: FFN_LN2_WGSL,
   });
-  const ln2Bind = device.createBindGroup({ layout: ln2.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: { buffer: buffers.skip } },
-    { binding: 1, resource: { buffer: buffers.ln2Scale } },
-    { binding: 2, resource: { buffer: buffers.ln2Bias } },
-    { binding: 3, resource: { buffer: buffers.output } },
-  ] });
+  const ln2Bind = device.createBindGroup({
+    layout: ln2.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: buffers.skip } },
+      { binding: 1, resource: { buffer: buffers.ln2Scale } },
+      { binding: 2, resource: { buffer: buffers.ln2Bias } },
+      { binding: 3, resource: { buffer: buffers.output } },
+    ],
+  });
   return { ffnKernelVariant, dense1, dense1Bind, dense2, dense2Bind, ln2, ln2Bind };
 }
 
@@ -4384,7 +4870,11 @@ function encodeFfnLn2Pass(pass: ComputePassLike, ffnPipelines: ReturnType<typeof
   pass.dispatchWorkgroups(DEFAULT_TOKENS);
 }
 
-function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>): void {
+function encodeLc0WebEncoderBlockPass(
+  pass: ComputePassLike,
+  attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>,
+  ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>,
+): void {
   encodeAttentionQkvPass(pass, attentionPipelines);
   encodeAttentionScoresPass(pass, attentionPipelines);
   encodeAttentionSoftmaxPass(pass, attentionPipelines);
@@ -4394,7 +4884,12 @@ function encodeLc0WebEncoderBlockPass(pass: ComputePassLike, attentionPipelines:
   encodeEncoder0FfnPass(pass, ffnPipelines);
 }
 
-function encodeLc0WebEncoderBlockDispatches(device: DeviceLike, attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>, ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>, iterations: number): unknown {
+function encodeLc0WebEncoderBlockDispatches(
+  device: DeviceLike,
+  attentionPipelines: ReturnType<typeof createAttentionOutputPipelines>,
+  ffnPipelines: ReturnType<typeof createEncoder0FfnPipelines>,
+  iterations: number,
+): unknown {
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   for (let i = 0; i < iterations; i++) encodeLc0WebEncoderBlockPass(pass, attentionPipelines, ffnPipelines);
@@ -4436,7 +4931,11 @@ export async function runLc0WebEncoder0FfnBenchmark(options: Lc0WebEncoder0FfnBe
     const podArgs = ffnKernelVariant === 'tvm-packed-f16' ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
     buffers.push(input, dense1Weight, dense1Bias, dense2Weight, dense2Bias, alpha, ln2Scale, ln2Bias, hidden, skip, output, readback);
     if (podArgs) buffers.push(podArgs);
-    const pipelines = createEncoder0FfnPipelines(device, { input, dense1Weight, dense1Bias, hidden, dense2Weight, dense2Bias, alpha, skip, ln2Scale, ln2Bias, output, podArgs }, ffnKernelVariant);
+    const pipelines = createEncoder0FfnPipelines(
+      device,
+      { input, dense1Weight, dense1Bias, hidden, dense2Weight, dense2Bias, alpha, skip, ln2Scale, ln2Bias, output, podArgs },
+      ffnKernelVariant,
+    );
     const uploadSetupMs = nowMs() - setupStarted;
     if (warmup > 0) {
       device.queue.submit([encodeEncoder0FfnDispatches(device, pipelines, warmup)]);
@@ -4568,7 +5067,10 @@ export function createTinyEncoder0BlockOnnxForTest(
     graph.bytes(1, onnxNode('Add', ['projected', 'outBias'], ['biased'], 'encoder0_attention_output_bias'));
     graph.bytes(1, onnxNode('Mul', ['biased', 'attentionAlpha'], ['attentionScaled'], 'encoder0_attention_output_alpha'));
     graph.bytes(1, onnxNode('Add', ['attentionScaled', 'residual'], ['attentionSkip'], 'encoder0_attention_output_residual'));
-    graph.bytes(1, onnxNode('LayerNormalization', ['attentionSkip', 'ln1Scale', 'ln1Bias'], ['ln1'], 'encoder0_ln1', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]));
+    graph.bytes(
+      1,
+      onnxNode('LayerNormalization', ['attentionSkip', 'ln1Scale', 'ln1Bias'], ['ln1'], 'encoder0_ln1', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]),
+    );
     graph.bytes(1, onnxNode('MatMul', ['ln1', 'dense1Weight'], ['dense1'], 'encoder0_ffn_dense1_matmul'));
     graph.bytes(1, onnxNode('Add', ['dense1', 'dense1Bias'], ['dense1Biased'], 'encoder0_ffn_dense1_bias'));
     graph.bytes(1, onnxNode('Relu', ['dense1Biased'], ['dense1Relu'], 'encoder0_ffn_relu'));
@@ -4577,7 +5079,10 @@ export function createTinyEncoder0BlockOnnxForTest(
     graph.bytes(1, onnxNode('Add', ['dense2', 'dense2Bias'], ['dense2Biased'], 'encoder0_ffn_dense2_bias'));
     graph.bytes(1, onnxNode('Mul', ['dense2Biased', 'ffnAlpha'], ['ffnScaled'], 'encoder0_ffn_alpha'));
     graph.bytes(1, onnxNode('Add', ['ffnScaled', 'ln1'], ['ffnSkip'], 'encoder0_ffn_residual'));
-    graph.bytes(1, onnxNode('LayerNormalization', ['ffnSkip', 'ln2Scale', 'ln2Bias'], ['output'], 'encoder0_ln2', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]));
+    graph.bytes(
+      1,
+      onnxNode('LayerNormalization', ['ffnSkip', 'ln2Scale', 'ln2Bias'], ['output'], 'encoder0_ln2', [onnxFloatAttribute('epsilon', DEFAULT_LN_EPSILON)]),
+    );
     graph.string(2, 'lc0web_encoder0_attention_output_plus_ffn');
     graph.bytes(5, onnxTensor('outWeight', [DEFAULT_N, DEFAULT_N], outWeight));
     graph.bytes(5, onnxTensor('outBias', [DEFAULT_N], outBias));
@@ -4761,7 +5266,16 @@ export interface Lc0WebEncoderStackBenchmarkResult {
   blocks: Lc0WebEncoderStackBlockResult[];
 }
 
-function buildEncoder0BlockReference(tensors: Encoder0FfnTensors, input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K)): { input: Float32Array<ArrayBufferLike>; output: Float32Array<ArrayBufferLike>; attentionAlpha: number; ffnAlpha: number; smolgenBias: Float32Array<ArrayBufferLike> } {
+function buildEncoder0BlockReference(
+  tensors: Encoder0FfnTensors,
+  input: Float32Array<ArrayBufferLike> = makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_K),
+): {
+  input: Float32Array<ArrayBufferLike>;
+  output: Float32Array<ArrayBufferLike>;
+  attentionAlpha: number;
+  ffnAlpha: number;
+  smolgenBias: Float32Array<ArrayBufferLike>;
+} {
   const attention = buildAttentionOutputReference(tensors, input);
   const ffn = cpuEncoder0FfnFromLn1(attention.output, tensors);
   return { input: attention.input, output: ffn.output, attentionAlpha: attention.alpha, ffnAlpha: ffn.alpha, smolgenBias: attention.smolgenBias };
@@ -4914,7 +5428,10 @@ function cpuSoftmaxVector(input: Float32Array<ArrayBufferLike>): Float32Array<Ar
   return output;
 }
 
-function cpuPolicyHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): { policy: Float32Array<ArrayBufferLike>; mappedPolicy: Float32Array<ArrayBufferLike> } {
+function cpuPolicyHead(
+  input: Float32Array<ArrayBufferLike>,
+  tensors: Lc0WebPolicyValueHeadTensors,
+): { policy: Float32Array<ArrayBufferLike>; mappedPolicy: Float32Array<ArrayBufferLike> } {
   const dense = cpuMish(cpuProjectTokens(input, tensors.policyDense1Weight.bytes, tensors.policyDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N));
   const q = cpuProjectTokens(dense, tensors.policyQWeight.bytes, tensors.policyQBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N);
   const k = cpuProjectTokens(dense, tensors.policyKWeight.bytes, tensors.policyKBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N);
@@ -4970,12 +5487,17 @@ function cpuPolicyHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPoli
 
 function cpuValueHead(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): Float32Array<ArrayBufferLike> {
   const embed = cpuMish(cpuProjectTokens(input, tensors.valueEmbedWeight.bytes, tensors.valueEmbedBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_VALUE_EMBED));
-  const dense1 = cpuMish(cpuMatmulAddVector(embed, tensors.valueDense1Weight.bytes, tensors.valueDense1Bias.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN));
+  const dense1 = cpuMish(
+    cpuMatmulAddVector(embed, tensors.valueDense1Weight.bytes, tensors.valueDense1Bias.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN),
+  );
   const logits = cpuMatmulAddVector(dense1, tensors.valueDense2Weight.bytes, tensors.valueDense2Bias.bytes, DEFAULT_VALUE_HIDDEN, 3);
   return cpuSoftmaxVector(logits);
 }
 
-function buildPolicyValueHeadReference(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors): { policy: Float32Array<ArrayBufferLike>; mappedPolicy: Float32Array<ArrayBufferLike>; wdl: Float32Array<ArrayBufferLike> } {
+function buildPolicyValueHeadReference(
+  input: Float32Array<ArrayBufferLike>,
+  tensors: Lc0WebPolicyValueHeadTensors,
+): { policy: Float32Array<ArrayBufferLike>; mappedPolicy: Float32Array<ArrayBufferLike>; wdl: Float32Array<ArrayBufferLike> } {
   const policy = cpuPolicyHead(input, tensors);
   return { policy: policy.policy, mappedPolicy: policy.mappedPolicy, wdl: cpuValueHead(input, tensors) };
 }
@@ -5253,7 +5775,15 @@ function createU32UniformBuffer(device: DeviceLike, values: number[], usage: num
   return createStorageBuffer(device, data, usage);
 }
 
-function createWgslHeadsDenseBindGroup(device: DeviceLike, pipeline: PipelineLike, inputBuffer: BufferLike, weightBuffer: BufferLike, biasBuffer: BufferLike, outputBuffer: BufferLike, shapeBuffer: BufferLike): unknown {
+function createWgslHeadsDenseBindGroup(
+  device: DeviceLike,
+  pipeline: PipelineLike,
+  inputBuffer: BufferLike,
+  weightBuffer: BufferLike,
+  biasBuffer: BufferLike,
+  outputBuffer: BufferLike,
+  shapeBuffer: BufferLike,
+): unknown {
   return device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
@@ -5266,7 +5796,14 @@ function createWgslHeadsDenseBindGroup(device: DeviceLike, pipeline: PipelineLik
   });
 }
 
-function createWgslHeadsPolicyLogitsBindGroup(device: DeviceLike, pipeline: PipelineLike, qBuffer: BufferLike, kBuffer: BufferLike, scaleBuffer: BufferLike, outputBuffer: BufferLike): unknown {
+function createWgslHeadsPolicyLogitsBindGroup(
+  device: DeviceLike,
+  pipeline: PipelineLike,
+  qBuffer: BufferLike,
+  kBuffer: BufferLike,
+  scaleBuffer: BufferLike,
+  outputBuffer: BufferLike,
+): unknown {
   return device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
@@ -5278,7 +5815,15 @@ function createWgslHeadsPolicyLogitsBindGroup(device: DeviceLike, pipeline: Pipe
   });
 }
 
-function createMappedPolicyBindGroup(device: DeviceLike, pipeline: PipelineLike, policyBuffer: BufferLike, kBuffer: BufferLike, promotionWeightBuffer: BufferLike, mappingBuffer: BufferLike, outputBuffer: BufferLike): unknown {
+function createMappedPolicyBindGroup(
+  device: DeviceLike,
+  pipeline: PipelineLike,
+  policyBuffer: BufferLike,
+  kBuffer: BufferLike,
+  promotionWeightBuffer: BufferLike,
+  mappingBuffer: BufferLike,
+  outputBuffer: BufferLike,
+): unknown {
   return device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
@@ -5301,7 +5846,14 @@ function createWgslHeadsSoftmaxBindGroup(device: DeviceLike, pipeline: PipelineL
   });
 }
 
-function createWgslLegalPriorsBindGroup(device: DeviceLike, pipeline: PipelineLike, mappedPolicyBuffer: BufferLike, legalIndicesBuffer: BufferLike, outputBuffer: BufferLike, argsBuffer: BufferLike): unknown {
+function createWgslLegalPriorsBindGroup(
+  device: DeviceLike,
+  pipeline: PipelineLike,
+  mappedPolicyBuffer: BufferLike,
+  legalIndicesBuffer: BufferLike,
+  outputBuffer: BufferLike,
+  argsBuffer: BufferLike,
+): unknown {
   return device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
@@ -5313,7 +5865,12 @@ function createWgslLegalPriorsBindGroup(device: DeviceLike, pipeline: PipelineLi
   });
 }
 
-function makeSyntheticMappedPolicyInputs(): { policy: Float32Array<ArrayBufferLike>; k: Float32Array<ArrayBufferLike>; promotionWeight: Float32Array<ArrayBufferLike>; mapping: Int32Array<ArrayBufferLike> } {
+function makeSyntheticMappedPolicyInputs(): {
+  policy: Float32Array<ArrayBufferLike>;
+  k: Float32Array<ArrayBufferLike>;
+  promotionWeight: Float32Array<ArrayBufferLike>;
+  mapping: Int32Array<ArrayBufferLike>;
+} {
   const policy = new Float32Array(DEFAULT_POLICY_OUTPUTS);
   for (let i = 0; i < policy.length; i++) policy[i] = Math.sin(i * 0.013) * 0.5 + (i % 97) * 0.001;
   const k = new Float32Array(DEFAULT_TOKENS * DEFAULT_N);
@@ -5330,11 +5887,16 @@ function makeSyntheticMappedPolicyInputs(): { policy: Float32Array<ArrayBufferLi
   }
   const mapping = new Int32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
   for (let i = 0; i < 1792; i++) mapping[i] = (i * 37 + 1) % DEFAULT_POLICY_OUTPUTS;
-  for (let i = 1792; i < DEFAULT_POLICY_MAPPED_OUTPUTS; i++) mapping[i] = DEFAULT_POLICY_OUTPUTS + ((i - 1792) * 17) % (3 * DEFAULT_TOKENS);
+  for (let i = 1792; i < DEFAULT_POLICY_MAPPED_OUTPUTS; i++) mapping[i] = DEFAULT_POLICY_OUTPUTS + (((i - 1792) * 17) % (3 * DEFAULT_TOKENS));
   return { policy, k, promotionWeight, mapping };
 }
 
-function cpuMappedPolicyFromSyntheticInputs(policy: Float32Array<ArrayBufferLike>, k: Float32Array<ArrayBufferLike>, promotionWeight: Float32Array<ArrayBufferLike>, mapping: Int32Array<ArrayBufferLike>): Float32Array<ArrayBufferLike> {
+function cpuMappedPolicyFromSyntheticInputs(
+  policy: Float32Array<ArrayBufferLike>,
+  k: Float32Array<ArrayBufferLike>,
+  promotionWeight: Float32Array<ArrayBufferLike>,
+  mapping: Int32Array<ArrayBufferLike>,
+): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
   for (let out = 0; out < output.length; out++) {
     const flat = mapping[out];
@@ -5368,14 +5930,20 @@ export async function runLc0WebMappedPolicyProbe(): Promise<Lc0WebMappedPolicyPr
   try {
     const compileStarted = nowMs();
     const module = device.createShaderModule({ label: 'lc0web WGSL mapped policy synthetic probe', code: WGSL_MAPPED_POLICY_PROBE });
-    const compilationInfo = await (module as { getCompilationInfo?: () => Promise<{ messages: Array<{ type: string; message: string; lineNum?: number; linePos?: number }> }> }).getCompilationInfo?.();
+    const compilationInfo = await (
+      module as { getCompilationInfo?: () => Promise<{ messages: Array<{ type: string; message: string; lineNum?: number; linePos?: number }> }> }
+    ).getCompilationInfo?.();
     const compilationErrors = compilationInfo?.messages.filter((message) => message.type === 'error') ?? [];
-    if (compilationErrors.length) throw new Error(`mapped-policy probe shader compilation failed: ${compilationErrors.map((message) => `${message.lineNum}:${message.linePos} ${message.message}`).join('; ')}`);
+    if (compilationErrors.length)
+      throw new Error(
+        `mapped-policy probe shader compilation failed: ${compilationErrors.map((message) => `${message.lineNum}:${message.linePos} ${message.message}`).join('; ')}`,
+      );
     const scopedCompileDevice = device as DeviceLike & { pushErrorScope?: (filter: string) => void; popErrorScope?: () => Promise<unknown> };
     scopedCompileDevice.pushErrorScope?.('validation');
     const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }) as PipelineLike;
     const pipelineError = await scopedCompileDevice.popErrorScope?.();
-    if (pipelineError) throw new Error(`mapped-policy probe pipeline validation error: ${String((pipelineError as { message?: unknown }).message ?? pipelineError)}`);
+    if (pipelineError)
+      throw new Error(`mapped-policy probe pipeline validation error: ${String((pipelineError as { message?: unknown }).message ?? pipelineError)}`);
     const pipelineCompileMs = nowMs() - compileStarted;
     const policyBuffer = createStorageBuffer(device, policy, usage.STORAGE | usage.COPY_DST);
     const kBuffer = createStorageBuffer(device, k, usage.STORAGE | usage.COPY_DST);
@@ -5397,7 +5965,8 @@ export async function runLc0WebMappedPolicyProbe(): Promise<Lc0WebMappedPolicyPr
     device.queue.submit([encoder.finish()]);
     await device.queue.onSubmittedWorkDone?.();
     const validationError = await scopedDevice.popErrorScope?.();
-    if (validationError) throw new Error(`mapped-policy probe WebGPU validation error: ${String((validationError as { message?: unknown }).message ?? validationError)}`);
+    if (validationError)
+      throw new Error(`mapped-policy probe WebGPU validation error: ${String((validationError as { message?: unknown }).message ?? validationError)}`);
     const dispatchSyncedMs = nowMs() - dispatchStarted;
     const readbackStarted = nowMs();
     const output = await readF32OutputOnce(device, outputBuffer, readbackBuffer, DEFAULT_POLICY_MAPPED_OUTPUTS);
@@ -5421,7 +5990,10 @@ export async function runLc0WebMappedPolicyProbe(): Promise<Lc0WebMappedPolicyPr
         if (promotionSample.length < 8) promotionSample.push(output[i]);
       }
     }
-    if (error.maxAbsError > 1e-5) throw new Error(`mapped-policy probe maxAbsError=${error.maxAbsError}, normalMaxAbsError=${normalMaxAbsError}, promotionMaxAbsError=${promotionMaxAbsError}, normalSample=${normalSample.slice(0, 3).join('/')}, promotionSample=${promotionSample.slice(0, 3).join('/')}, tolerance=0.00001`);
+    if (error.maxAbsError > 1e-5)
+      throw new Error(
+        `mapped-policy probe maxAbsError=${error.maxAbsError}, normalMaxAbsError=${normalMaxAbsError}, promotionMaxAbsError=${promotionMaxAbsError}, normalSample=${normalSample.slice(0, 3).join('/')}, promotionSample=${promotionSample.slice(0, 3).join('/')}, tolerance=0.00001`,
+      );
     if (!arrayHasNonzero(output) || !arrayHasVariation(output)) throw new Error('mapped-policy probe produced zero or uniform output');
     return {
       status: 'MAPPED_POLICY_PROBE_DONE',
@@ -5447,7 +6019,12 @@ export async function runLc0WebMappedPolicyProbe(): Promise<Lc0WebMappedPolicyPr
   }
 }
 
-export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verifyShards?: boolean; input?: Float32Array<ArrayBufferLike>; includeOutputs?: boolean }): Promise<Lc0WebWgslHeadsProbeResult> {
+export async function runLc0WebWgslHeadsProbe(options: {
+  packUrl: string;
+  verifyShards?: boolean;
+  input?: Float32Array<ArrayBufferLike>;
+  includeOutputs?: boolean;
+}): Promise<Lc0WebWgslHeadsProbeResult> {
   const packLoadStarted = nowMs();
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards,
@@ -5458,8 +6035,12 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
   const input = options.input ?? makeInputTokenMatrix(DEFAULT_TOKENS, DEFAULT_N);
   if (input.length !== DEFAULT_TOKENS * DEFAULT_N) throw new Error(`WGSL heads input length ${input.length} != ${DEFAULT_TOKENS * DEFAULT_N}`);
   const policyRef = cpuPolicyHead(input, tensors);
-  const policyDenseRef = cpuMish(cpuProjectTokens(input, tensors.policyDense1Weight.bytes, tensors.policyDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N));
-  const valueEmbedRef = cpuMish(cpuProjectTokens(input, tensors.valueEmbedWeight.bytes, tensors.valueEmbedBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_VALUE_EMBED));
+  const policyDenseRef = cpuMish(
+    cpuProjectTokens(input, tensors.policyDense1Weight.bytes, tensors.policyDense1Bias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_N),
+  );
+  const valueEmbedRef = cpuMish(
+    cpuProjectTokens(input, tensors.valueEmbedWeight.bytes, tensors.valueEmbedBias.bytes, DEFAULT_TOKENS, DEFAULT_N, DEFAULT_VALUE_EMBED),
+  );
   const valueWdlRef = cpuValueHead(input, tensors);
   const { device, adapterInfo } = await requestDevice();
   const usage = gpuGlobals().GPUBufferUsage!;
@@ -5479,20 +6060,56 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     const pipelineCompileMs = nowMs() - compileStarted;
 
     const inputBuffer = createStorageBuffer(device, input, usage.STORAGE | usage.COPY_DST);
-    const policyWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Weight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+    const policyWeightBuffer = createStorageBuffer(
+      device,
+      f16BytesToF32Array(tensors.policyDense1Weight.bytes, DEFAULT_N * DEFAULT_N),
+      usage.STORAGE | usage.COPY_DST,
+    );
     const policyBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Bias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
-    const policyQWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyQWeight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+    const policyQWeightBuffer = createStorageBuffer(
+      device,
+      f16BytesToF32Array(tensors.policyQWeight.bytes, DEFAULT_N * DEFAULT_N),
+      usage.STORAGE | usage.COPY_DST,
+    );
     const policyQBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyQBias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
-    const policyKWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyKWeight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+    const policyKWeightBuffer = createStorageBuffer(
+      device,
+      f16BytesToF32Array(tensors.policyKWeight.bytes, DEFAULT_N * DEFAULT_N),
+      usage.STORAGE | usage.COPY_DST,
+    );
     const policyKBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyKBias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
     const policyScaleBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyScale.bytes, 1), usage.STORAGE | usage.COPY_DST);
-    const policyPromotionWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyPromotionWeight.bytes, DEFAULT_N * 4), usage.STORAGE | usage.COPY_DST);
-    const policyMappingBuffer = createStorageBuffer(device, readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS), usage.STORAGE | usage.COPY_DST);
-    const valueWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED), usage.STORAGE | usage.COPY_DST);
+    const policyPromotionWeightBuffer = createStorageBuffer(
+      device,
+      f16BytesToF32Array(tensors.policyPromotionWeight.bytes, DEFAULT_N * 4),
+      usage.STORAGE | usage.COPY_DST,
+    );
+    const policyMappingBuffer = createStorageBuffer(
+      device,
+      readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS),
+      usage.STORAGE | usage.COPY_DST,
+    );
+    const valueWeightBuffer = createStorageBuffer(
+      device,
+      f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED),
+      usage.STORAGE | usage.COPY_DST,
+    );
     const valueBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueEmbedBias.bytes, DEFAULT_VALUE_EMBED), usage.STORAGE | usage.COPY_DST);
-    const valueDense1WeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN), usage.STORAGE | usage.COPY_DST);
-    const valueDense1BiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense1Bias.bytes, DEFAULT_VALUE_HIDDEN), usage.STORAGE | usage.COPY_DST);
-    const valueDense2WeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense2Weight.bytes, DEFAULT_VALUE_HIDDEN * 3), usage.STORAGE | usage.COPY_DST);
+    const valueDense1WeightBuffer = createStorageBuffer(
+      device,
+      f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN),
+      usage.STORAGE | usage.COPY_DST,
+    );
+    const valueDense1BiasBuffer = createStorageBuffer(
+      device,
+      f16BytesToF32Array(tensors.valueDense1Bias.bytes, DEFAULT_VALUE_HIDDEN),
+      usage.STORAGE | usage.COPY_DST,
+    );
+    const valueDense2WeightBuffer = createStorageBuffer(
+      device,
+      f16BytesToF32Array(tensors.valueDense2Weight.bytes, DEFAULT_VALUE_HIDDEN * 3),
+      usage.STORAGE | usage.COPY_DST,
+    );
     const valueDense2BiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense2Bias.bytes, 3), usage.STORAGE | usage.COPY_DST);
     const policyOutputBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
     const policyQBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
@@ -5511,18 +6128,121 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     const policyShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 1], usage.UNIFORM | usage.COPY_DST);
     const policyLinearShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 0], usage.UNIFORM | usage.COPY_DST);
     const valueShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_EMBED, 1], usage.UNIFORM | usage.COPY_DST);
-    const valueDense1ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1], usage.UNIFORM | usage.COPY_DST);
+    const valueDense1ShapeBuffer = createU32UniformBuffer(
+      device,
+      [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1],
+      usage.UNIFORM | usage.COPY_DST,
+    );
     const valueDense2ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_HIDDEN, 3, 0], usage.UNIFORM | usage.COPY_DST);
-    buffers.push(inputBuffer, policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, policyReadbackBuffer, policyLogitsReadbackBuffer, mappedPolicyReadbackBuffer, valueReadbackBuffer, valueWdlReadbackBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer);
+    buffers.push(
+      inputBuffer,
+      policyWeightBuffer,
+      policyBiasBuffer,
+      policyQWeightBuffer,
+      policyQBiasBuffer,
+      policyKWeightBuffer,
+      policyKBiasBuffer,
+      policyScaleBuffer,
+      policyPromotionWeightBuffer,
+      policyMappingBuffer,
+      valueWeightBuffer,
+      valueBiasBuffer,
+      valueDense1WeightBuffer,
+      valueDense1BiasBuffer,
+      valueDense2WeightBuffer,
+      valueDense2BiasBuffer,
+      policyOutputBuffer,
+      policyQBuffer,
+      policyKBuffer,
+      policyLogitsBuffer,
+      mappedPolicyBuffer,
+      valueOutputBuffer,
+      valueHiddenBuffer,
+      valueLogitsBuffer,
+      valueWdlBuffer,
+      policyReadbackBuffer,
+      policyLogitsReadbackBuffer,
+      mappedPolicyReadbackBuffer,
+      valueReadbackBuffer,
+      valueWdlReadbackBuffer,
+      policyShapeBuffer,
+      policyLinearShapeBuffer,
+      valueShapeBuffer,
+      valueDense1ShapeBuffer,
+      valueDense2ShapeBuffer,
+    );
 
-    const policyBindGroup = createWgslHeadsDenseBindGroup(device, pipeline, inputBuffer, policyWeightBuffer, policyBiasBuffer, policyOutputBuffer, policyShapeBuffer);
-    const policyQBindGroup = createWgslHeadsDenseBindGroup(device, pipeline, policyOutputBuffer, policyQWeightBuffer, policyQBiasBuffer, policyQBuffer, policyLinearShapeBuffer);
-    const policyKBindGroup = createWgslHeadsDenseBindGroup(device, pipeline, policyOutputBuffer, policyKWeightBuffer, policyKBiasBuffer, policyKBuffer, policyLinearShapeBuffer);
-    const policyLogitsBindGroup = createWgslHeadsPolicyLogitsBindGroup(device, policyLogitsPipeline, policyQBuffer, policyKBuffer, policyScaleBuffer, policyLogitsBuffer);
-    const mappedPolicyBindGroup = createMappedPolicyBindGroup(device, mappedPolicyPipeline, policyLogitsBuffer, policyKBuffer, policyPromotionWeightBuffer, policyMappingBuffer, mappedPolicyBuffer);
-    const valueBindGroup = createWgslHeadsDenseBindGroup(device, pipeline, inputBuffer, valueWeightBuffer, valueBiasBuffer, valueOutputBuffer, valueShapeBuffer);
-    const valueDense1BindGroup = createWgslHeadsDenseBindGroup(device, vectorPipeline, valueOutputBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueHiddenBuffer, valueDense1ShapeBuffer);
-    const valueDense2BindGroup = createWgslHeadsDenseBindGroup(device, vectorPipeline, valueHiddenBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, valueLogitsBuffer, valueDense2ShapeBuffer);
+    const policyBindGroup = createWgslHeadsDenseBindGroup(
+      device,
+      pipeline,
+      inputBuffer,
+      policyWeightBuffer,
+      policyBiasBuffer,
+      policyOutputBuffer,
+      policyShapeBuffer,
+    );
+    const policyQBindGroup = createWgslHeadsDenseBindGroup(
+      device,
+      pipeline,
+      policyOutputBuffer,
+      policyQWeightBuffer,
+      policyQBiasBuffer,
+      policyQBuffer,
+      policyLinearShapeBuffer,
+    );
+    const policyKBindGroup = createWgslHeadsDenseBindGroup(
+      device,
+      pipeline,
+      policyOutputBuffer,
+      policyKWeightBuffer,
+      policyKBiasBuffer,
+      policyKBuffer,
+      policyLinearShapeBuffer,
+    );
+    const policyLogitsBindGroup = createWgslHeadsPolicyLogitsBindGroup(
+      device,
+      policyLogitsPipeline,
+      policyQBuffer,
+      policyKBuffer,
+      policyScaleBuffer,
+      policyLogitsBuffer,
+    );
+    const mappedPolicyBindGroup = createMappedPolicyBindGroup(
+      device,
+      mappedPolicyPipeline,
+      policyLogitsBuffer,
+      policyKBuffer,
+      policyPromotionWeightBuffer,
+      policyMappingBuffer,
+      mappedPolicyBuffer,
+    );
+    const valueBindGroup = createWgslHeadsDenseBindGroup(
+      device,
+      pipeline,
+      inputBuffer,
+      valueWeightBuffer,
+      valueBiasBuffer,
+      valueOutputBuffer,
+      valueShapeBuffer,
+    );
+    const valueDense1BindGroup = createWgslHeadsDenseBindGroup(
+      device,
+      vectorPipeline,
+      valueOutputBuffer,
+      valueDense1WeightBuffer,
+      valueDense1BiasBuffer,
+      valueHiddenBuffer,
+      valueDense1ShapeBuffer,
+    );
+    const valueDense2BindGroup = createWgslHeadsDenseBindGroup(
+      device,
+      vectorPipeline,
+      valueHiddenBuffer,
+      valueDense2WeightBuffer,
+      valueDense2BiasBuffer,
+      valueLogitsBuffer,
+      valueDense2ShapeBuffer,
+    );
     const valueSoftmaxBindGroup = createWgslHeadsSoftmaxBindGroup(device, softmaxPipeline, valueLogitsBuffer, valueWdlBuffer);
     const dispatchStarted = nowMs();
     const encoder = device.createCommandEncoder();
@@ -5582,7 +6302,18 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
     const valueErr = computeErrorStats(valueEmbed, valueEmbedRef, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED);
     const wdlErr = computeErrorStats(wgslWdl, valueWdlRef, 3);
     assertErrorInTolerance(Math.max(policyErr.maxAbsError, policyLogitsErr.maxAbsError, mappedPolicyErr.maxAbsError, valueErr.maxAbsError, wdlErr.maxAbsError));
-    if (!arrayHasNonzero(policyDense) || !arrayHasNonzero(policyLogits) || !arrayHasNonzero(mappedPolicy) || !arrayHasNonzero(valueEmbed) || !arrayHasNonzero(wgslWdl) || !arrayHasVariation(policyDense) || !arrayHasVariation(policyLogits) || !arrayHasVariation(mappedPolicy) || !arrayHasVariation(valueEmbed) || !arrayHasVariation(wgslWdl)) {
+    if (
+      !arrayHasNonzero(policyDense) ||
+      !arrayHasNonzero(policyLogits) ||
+      !arrayHasNonzero(mappedPolicy) ||
+      !arrayHasNonzero(valueEmbed) ||
+      !arrayHasNonzero(wgslWdl) ||
+      !arrayHasVariation(policyDense) ||
+      !arrayHasVariation(policyLogits) ||
+      !arrayHasVariation(mappedPolicy) ||
+      !arrayHasVariation(valueEmbed) ||
+      !arrayHasVariation(wgslWdl)
+    ) {
       throw new Error('WGSL heads probe produced zero or uniform intermediate output');
     }
     const ortHeads = await runPolicyValueHeadsOrt(input, tensors, { includeOutputs: options.includeOutputs });
@@ -5614,8 +6345,20 @@ export async function runLc0WebWgslHeadsProbe(options: { packUrl: string; verify
       valueEmbedSample: Array.from(valueEmbed.slice(0, 8)),
       wgslWdl: Array.from(wgslWdl),
       ...(options.includeOutputs ? { policyLogits: Array.from(policyLogits), mappedPolicy: Array.from(mappedPolicy) } : {}),
-      nonzero: { policyDense: arrayHasNonzero(policyDense), policyLogits: arrayHasNonzero(policyLogits), mappedPolicy: arrayHasNonzero(mappedPolicy), valueEmbed: arrayHasNonzero(valueEmbed), wgslWdl: arrayHasNonzero(wgslWdl) },
-      nonuniform: { policyDense: arrayHasVariation(policyDense), policyLogits: arrayHasVariation(policyLogits), mappedPolicy: arrayHasVariation(mappedPolicy), valueEmbed: arrayHasVariation(valueEmbed), wgslWdl: arrayHasVariation(wgslWdl) },
+      nonzero: {
+        policyDense: arrayHasNonzero(policyDense),
+        policyLogits: arrayHasNonzero(policyLogits),
+        mappedPolicy: arrayHasNonzero(mappedPolicy),
+        valueEmbed: arrayHasNonzero(valueEmbed),
+        wgslWdl: arrayHasNonzero(wgslWdl),
+      },
+      nonuniform: {
+        policyDense: arrayHasVariation(policyDense),
+        policyLogits: arrayHasVariation(policyLogits),
+        mappedPolicy: arrayHasVariation(mappedPolicy),
+        valueEmbed: arrayHasVariation(valueEmbed),
+        wgslWdl: arrayHasVariation(wgslWdl),
+      },
       ortHeads: {
         mode: ortHeads.mode,
         runMs: ortHeads.runMs,
@@ -5650,15 +6393,46 @@ export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValue
     graph.bytes(1, onnxNode('Slice', ['policyK', 'policyPromStarts', 'policyPromEnds', 'policyPromAxes'], ['policyPromK'], 'policy_promotion_slice'));
     graph.bytes(1, onnxNode('MatMul', ['policyPromK', 'policyPromotionWeight'], ['policyPromMatmul'], 'policy_promotion_matmul'));
     graph.bytes(1, onnxNode('Transpose', ['policyPromMatmul'], ['policyPromT'], 'policy_promotion_transpose', [onnxIntsAttribute('perm', [1, 0])]));
-    graph.bytes(1, onnxNode('Slice', ['policyPromT', 'policyPromUnderStarts', 'policyPromUnderEnds', 'policyPromUnderAxes'], ['policyPromUnder'], 'policy_promotion_under_slice'));
-    graph.bytes(1, onnxNode('Slice', ['policyPromT', 'policyPromQueenStarts', 'policyPromQueenEnds', 'policyPromUnderAxes'], ['policyPromQueen'], 'policy_promotion_queen_slice'));
+    graph.bytes(
+      1,
+      onnxNode(
+        'Slice',
+        ['policyPromT', 'policyPromUnderStarts', 'policyPromUnderEnds', 'policyPromUnderAxes'],
+        ['policyPromUnder'],
+        'policy_promotion_under_slice',
+      ),
+    );
+    graph.bytes(
+      1,
+      onnxNode(
+        'Slice',
+        ['policyPromT', 'policyPromQueenStarts', 'policyPromQueenEnds', 'policyPromUnderAxes'],
+        ['policyPromQueen'],
+        'policy_promotion_queen_slice',
+      ),
+    );
     graph.bytes(1, onnxNode('Add', ['policyPromUnder', 'policyPromQueen'], ['policyPromAdd'], 'policy_promotion_add'));
     graph.bytes(1, onnxNode('Transpose', ['policyPromAdd'], ['policyPromAddT'], 'policy_promotion_transpose2', [onnxIntsAttribute('perm', [1, 0])]));
     graph.bytes(1, onnxNode('Reshape', ['policyPromAddT', 'policyPromotionShape1'], ['policyPromBias'], 'policy_promotion_reshape'));
-    graph.bytes(1, onnxNode('Slice', ['policy', 'policyBaseStarts', 'policyBaseEnds', 'policyBaseAxes'], ['policyPromotionBase'], 'policy_promotion_base_slice'));
+    graph.bytes(
+      1,
+      onnxNode('Slice', ['policy', 'policyBaseStarts', 'policyBaseEnds', 'policyBaseAxes'], ['policyPromotionBase'], 'policy_promotion_base_slice'),
+    );
     graph.bytes(1, onnxNode('Reshape', ['policyPromotionBase', 'policyPromotionShape2'], ['policyPromotionBaseFlat'], 'policy_promotion_base_reshape'));
-    graph.bytes(1, onnxNode('Concat', ['policyPromotionBaseFlat', 'policyPromotionBaseFlat', 'policyPromotionBaseFlat'], ['policyPromotionBaseTripled'], 'policy_promotion_base_concat', [onnxIntAttribute('axis', 1)]));
-    graph.bytes(1, onnxNode('Reshape', ['policyPromotionBaseTripled', 'policyPromotionShape3'], ['policyPromotionBaseReshaped'], 'policy_promotion_base_reshape2'));
+    graph.bytes(
+      1,
+      onnxNode(
+        'Concat',
+        ['policyPromotionBaseFlat', 'policyPromotionBaseFlat', 'policyPromotionBaseFlat'],
+        ['policyPromotionBaseTripled'],
+        'policy_promotion_base_concat',
+        [onnxIntAttribute('axis', 1)],
+      ),
+    );
+    graph.bytes(
+      1,
+      onnxNode('Reshape', ['policyPromotionBaseTripled', 'policyPromotionShape3'], ['policyPromotionBaseReshaped'], 'policy_promotion_base_reshape2'),
+    );
     graph.bytes(1, onnxNode('Add', ['policyPromotionBaseReshaped', 'policyPromBias'], ['policyPromotionAdd'], 'policy_promotion_add2'));
     graph.bytes(1, onnxNode('Reshape', ['policyPromotionAdd', 'policyPromotionShape4'], ['policyPromotionRows'], 'policy_promotion_reshape4'));
     graph.bytes(1, onnxNode('Concat', ['policy', 'policyPromotionRows'], ['policyConcat'], 'policy_concat', [onnxIntAttribute('axis', 0)]));
@@ -5705,11 +6479,28 @@ export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValue
     graph.bytes(5, onnxInt64Tensor('policyPromotionShape3', [2], [8, 24]));
     graph.bytes(5, onnxInt64Tensor('policyPromotionShape4', [2], [3, 64]));
     graph.bytes(5, onnxInt64Tensor('policyFlatShape', [2], [1, DEFAULT_POLICY_FLAT]));
-    graph.bytes(5, onnxInt64Tensor('policyMappingTable', [DEFAULT_POLICY_MAPPED_OUTPUTS], Array.from(readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS))));
+    graph.bytes(
+      5,
+      onnxInt64Tensor(
+        'policyMappingTable',
+        [DEFAULT_POLICY_MAPPED_OUTPUTS],
+        Array.from(readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS)),
+      ),
+    );
     graph.bytes(5, onnxInt64Tensor('valueShape', [2], [1, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED]));
-    graph.bytes(5, onnxTensor('valueEmbedWeight', [DEFAULT_N, DEFAULT_VALUE_EMBED], f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED)));
+    graph.bytes(
+      5,
+      onnxTensor('valueEmbedWeight', [DEFAULT_N, DEFAULT_VALUE_EMBED], f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED)),
+    );
     graph.bytes(5, onnxTensor('valueEmbedBias', [DEFAULT_VALUE_EMBED], f16BytesToF32Array(tensors.valueEmbedBias.bytes, DEFAULT_VALUE_EMBED)));
-    graph.bytes(5, onnxTensor('valueDense1Weight', [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN], f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN)));
+    graph.bytes(
+      5,
+      onnxTensor(
+        'valueDense1Weight',
+        [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN],
+        f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN),
+      ),
+    );
     graph.bytes(5, onnxTensor('valueDense1Bias', [DEFAULT_VALUE_HIDDEN], f16BytesToF32Array(tensors.valueDense1Bias.bytes, DEFAULT_VALUE_HIDDEN)));
     graph.bytes(5, onnxTensor('valueDense2Weight', [DEFAULT_VALUE_HIDDEN, 3], f16BytesToF32Array(tensors.valueDense2Weight.bytes, DEFAULT_VALUE_HIDDEN * 3)));
     graph.bytes(5, onnxTensor('valueDense2Bias', [3], f16BytesToF32Array(tensors.valueDense2Bias.bytes, 3)));
@@ -5722,7 +6513,11 @@ export function createTinyPolicyValueHeadsOnnxForTest(tensors: Lc0WebPolicyValue
   return writer.finish();
 }
 
-async function runPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, tensors: Lc0WebPolicyValueHeadTensors, options: { includeOutputs?: boolean } = {}): Promise<{
+async function runPolicyValueHeadsOrt(
+  input: Float32Array<ArrayBufferLike>,
+  tensors: Lc0WebPolicyValueHeadTensors,
+  options: { includeOutputs?: boolean } = {},
+): Promise<{
   modelBuildMs: number;
   sessionCreateMs: number;
   runMs: number;
@@ -5793,7 +6588,10 @@ async function createCachedPolicyValueHeadSession(tensors: Lc0WebPolicyValueHead
   return { session, modelBuildMs, sessionCreateMs: nowMs() - sessionStarted };
 }
 
-async function runCachedPolicyValueHeadsOrt(input: Float32Array<ArrayBufferLike>, cached: CachedPolicyValueHeadSession): Promise<{
+async function runCachedPolicyValueHeadsOrt(
+  input: Float32Array<ArrayBufferLike>,
+  cached: CachedPolicyValueHeadSession,
+): Promise<{
   runMs: number;
   mappedPolicy: number[];
   wdl: number[];
@@ -5840,14 +6638,16 @@ function legalPolicyCandidates(board: BoardState, prepared?: ReturnType<typeof c
   });
 }
 
-function legalPolicyPriorsFromCandidates(candidates: LegalPolicyCandidate[], logits: ArrayLike<number>, policyTemperature: number): Lc0Evaluation['legalPriors'] {
+function legalPolicyPriorsFromCandidates(
+  candidates: LegalPolicyCandidate[],
+  logits: ArrayLike<number>,
+  policyTemperature: number,
+): Lc0Evaluation['legalPriors'] {
   if (!candidates.length) return [];
   const legal = candidates.map((entry) => ({ ...entry, logit: Number(logits[entry.index]) / policyTemperature }));
   const max = Math.max(...legal.map((entry) => entry.logit));
   const sum = legal.reduce((acc, entry) => acc + Math.exp(entry.logit - max), 0);
-  return legal
-    .map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum }))
-    .sort((a, b) => b.prior - a.prior);
+  return legal.map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum })).sort((a, b) => b.prior - a.prior);
 }
 
 type WgslPolicyValueHeadRuntime = {
@@ -5906,38 +6706,155 @@ type WgslPolicyValueHeadSharedResources = {
   buffers: BufferLike[];
 };
 
-function createWgslPolicyValueHeadSharedResources(device: DeviceLike, tensors: Lc0WebPolicyValueHeadTensors, usage: Record<string, number>, pipelineCache?: WgslPipelineCache): WgslPolicyValueHeadSharedResources {
-  const densePipeline = createCachedComputePipeline(device, pipelineCache, 'heads-dense', { label: 'lc0web hybrid WGSL policy/value head dense', code: WGSL_HEADS_DENSE_PROBE });
-  const policyLogitsPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-policy-logits', { label: 'lc0web hybrid WGSL policy logits', code: WGSL_HEADS_POLICY_LOGITS_PROBE });
-  const mappedPolicyPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-mapped-policy', { label: 'lc0web hybrid WGSL mapped policy', code: WGSL_MAPPED_POLICY_PROBE });
-  const vectorPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-vector', { label: 'lc0web hybrid WGSL value vector dense', code: WGSL_HEADS_VECTOR_DENSE_PROBE });
-  const softmaxPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-softmax', { label: 'lc0web hybrid WGSL WDL softmax', code: WGSL_HEADS_SOFTMAX3_PROBE });
-  const legalPriorsPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-legal-priors', { label: 'lc0web hybrid WGSL legal priors', code: WGSL_LEGAL_PRIORS_PROBE });
-  const policyWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Weight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+function createWgslPolicyValueHeadSharedResources(
+  device: DeviceLike,
+  tensors: Lc0WebPolicyValueHeadTensors,
+  usage: Record<string, number>,
+  pipelineCache?: WgslPipelineCache,
+): WgslPolicyValueHeadSharedResources {
+  const densePipeline = createCachedComputePipeline(device, pipelineCache, 'heads-dense', {
+    label: 'lc0web hybrid WGSL policy/value head dense',
+    code: WGSL_HEADS_DENSE_PROBE,
+  });
+  const policyLogitsPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-policy-logits', {
+    label: 'lc0web hybrid WGSL policy logits',
+    code: WGSL_HEADS_POLICY_LOGITS_PROBE,
+  });
+  const mappedPolicyPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-mapped-policy', {
+    label: 'lc0web hybrid WGSL mapped policy',
+    code: WGSL_MAPPED_POLICY_PROBE,
+  });
+  const vectorPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-vector', {
+    label: 'lc0web hybrid WGSL value vector dense',
+    code: WGSL_HEADS_VECTOR_DENSE_PROBE,
+  });
+  const softmaxPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-softmax', {
+    label: 'lc0web hybrid WGSL WDL softmax',
+    code: WGSL_HEADS_SOFTMAX3_PROBE,
+  });
+  const legalPriorsPipeline = createCachedComputePipeline(device, pipelineCache, 'heads-legal-priors', {
+    label: 'lc0web hybrid WGSL legal priors',
+    code: WGSL_LEGAL_PRIORS_PROBE,
+  });
+  const policyWeightBuffer = createStorageBuffer(
+    device,
+    f16BytesToF32Array(tensors.policyDense1Weight.bytes, DEFAULT_N * DEFAULT_N),
+    usage.STORAGE | usage.COPY_DST,
+  );
   const policyBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyDense1Bias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
-  const policyQWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyQWeight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+  const policyQWeightBuffer = createStorageBuffer(
+    device,
+    f16BytesToF32Array(tensors.policyQWeight.bytes, DEFAULT_N * DEFAULT_N),
+    usage.STORAGE | usage.COPY_DST,
+  );
   const policyQBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyQBias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
-  const policyKWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyKWeight.bytes, DEFAULT_N * DEFAULT_N), usage.STORAGE | usage.COPY_DST);
+  const policyKWeightBuffer = createStorageBuffer(
+    device,
+    f16BytesToF32Array(tensors.policyKWeight.bytes, DEFAULT_N * DEFAULT_N),
+    usage.STORAGE | usage.COPY_DST,
+  );
   const policyKBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyKBias.bytes, DEFAULT_N), usage.STORAGE | usage.COPY_DST);
   const policyScaleBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyScale.bytes, 1), usage.STORAGE | usage.COPY_DST);
-  const policyPromotionWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.policyPromotionWeight.bytes, DEFAULT_N * 4), usage.STORAGE | usage.COPY_DST);
-  const policyMappingBuffer = createStorageBuffer(device, readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS), usage.STORAGE | usage.COPY_DST);
-  const valueWeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED), usage.STORAGE | usage.COPY_DST);
+  const policyPromotionWeightBuffer = createStorageBuffer(
+    device,
+    f16BytesToF32Array(tensors.policyPromotionWeight.bytes, DEFAULT_N * 4),
+    usage.STORAGE | usage.COPY_DST,
+  );
+  const policyMappingBuffer = createStorageBuffer(
+    device,
+    readI32Array(tensors.policyMappingTable.bytes, DEFAULT_POLICY_MAPPED_OUTPUTS),
+    usage.STORAGE | usage.COPY_DST,
+  );
+  const valueWeightBuffer = createStorageBuffer(
+    device,
+    f16BytesToF32Array(tensors.valueEmbedWeight.bytes, DEFAULT_N * DEFAULT_VALUE_EMBED),
+    usage.STORAGE | usage.COPY_DST,
+  );
   const valueBiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueEmbedBias.bytes, DEFAULT_VALUE_EMBED), usage.STORAGE | usage.COPY_DST);
-  const valueDense1WeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN), usage.STORAGE | usage.COPY_DST);
-  const valueDense1BiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense1Bias.bytes, DEFAULT_VALUE_HIDDEN), usage.STORAGE | usage.COPY_DST);
-  const valueDense2WeightBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense2Weight.bytes, DEFAULT_VALUE_HIDDEN * 3), usage.STORAGE | usage.COPY_DST);
+  const valueDense1WeightBuffer = createStorageBuffer(
+    device,
+    f16BytesToF32Array(tensors.valueDense1Weight.bytes, DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN),
+    usage.STORAGE | usage.COPY_DST,
+  );
+  const valueDense1BiasBuffer = createStorageBuffer(
+    device,
+    f16BytesToF32Array(tensors.valueDense1Bias.bytes, DEFAULT_VALUE_HIDDEN),
+    usage.STORAGE | usage.COPY_DST,
+  );
+  const valueDense2WeightBuffer = createStorageBuffer(
+    device,
+    f16BytesToF32Array(tensors.valueDense2Weight.bytes, DEFAULT_VALUE_HIDDEN * 3),
+    usage.STORAGE | usage.COPY_DST,
+  );
   const valueDense2BiasBuffer = createStorageBuffer(device, f16BytesToF32Array(tensors.valueDense2Bias.bytes, 3), usage.STORAGE | usage.COPY_DST);
   const policyShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 1], usage.UNIFORM | usage.COPY_DST);
   const policyLinearShapeBuffer = createU32UniformBuffer(device, [DEFAULT_N, 0], usage.UNIFORM | usage.COPY_DST);
   const valueShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_EMBED, 1], usage.UNIFORM | usage.COPY_DST);
-  const valueDense1ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1], usage.UNIFORM | usage.COPY_DST);
+  const valueDense1ShapeBuffer = createU32UniformBuffer(
+    device,
+    [DEFAULT_TOKENS * DEFAULT_VALUE_EMBED, DEFAULT_VALUE_HIDDEN, 1],
+    usage.UNIFORM | usage.COPY_DST,
+  );
   const valueDense2ShapeBuffer = createU32UniformBuffer(device, [DEFAULT_VALUE_HIDDEN, 3, 0], usage.UNIFORM | usage.COPY_DST);
-  const buffers = [policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer];
-  return { densePipeline, policyLogitsPipeline, mappedPolicyPipeline, vectorPipeline, softmaxPipeline, legalPriorsPipeline, policyWeightBuffer, policyBiasBuffer, policyQWeightBuffer, policyQBiasBuffer, policyKWeightBuffer, policyKBiasBuffer, policyScaleBuffer, policyPromotionWeightBuffer, policyMappingBuffer, valueWeightBuffer, valueBiasBuffer, valueDense1WeightBuffer, valueDense1BiasBuffer, valueDense2WeightBuffer, valueDense2BiasBuffer, policyShapeBuffer, policyLinearShapeBuffer, valueShapeBuffer, valueDense1ShapeBuffer, valueDense2ShapeBuffer, buffers };
+  const buffers = [
+    policyWeightBuffer,
+    policyBiasBuffer,
+    policyQWeightBuffer,
+    policyQBiasBuffer,
+    policyKWeightBuffer,
+    policyKBiasBuffer,
+    policyScaleBuffer,
+    policyPromotionWeightBuffer,
+    policyMappingBuffer,
+    valueWeightBuffer,
+    valueBiasBuffer,
+    valueDense1WeightBuffer,
+    valueDense1BiasBuffer,
+    valueDense2WeightBuffer,
+    valueDense2BiasBuffer,
+    policyShapeBuffer,
+    policyLinearShapeBuffer,
+    valueShapeBuffer,
+    valueDense1ShapeBuffer,
+    valueDense2ShapeBuffer,
+  ];
+  return {
+    densePipeline,
+    policyLogitsPipeline,
+    mappedPolicyPipeline,
+    vectorPipeline,
+    softmaxPipeline,
+    legalPriorsPipeline,
+    policyWeightBuffer,
+    policyBiasBuffer,
+    policyQWeightBuffer,
+    policyQBiasBuffer,
+    policyKWeightBuffer,
+    policyKBiasBuffer,
+    policyScaleBuffer,
+    policyPromotionWeightBuffer,
+    policyMappingBuffer,
+    valueWeightBuffer,
+    valueBiasBuffer,
+    valueDense1WeightBuffer,
+    valueDense1BiasBuffer,
+    valueDense2WeightBuffer,
+    valueDense2BiasBuffer,
+    policyShapeBuffer,
+    policyLinearShapeBuffer,
+    valueShapeBuffer,
+    valueDense1ShapeBuffer,
+    valueDense2ShapeBuffer,
+    buffers,
+  };
 }
 
-function createWgslPolicyValueHeadRuntime(device: DeviceLike, inputBuffer: BufferLike, usage: Record<string, number>, shared: WgslPolicyValueHeadSharedResources): WgslPolicyValueHeadRuntime {
+function createWgslPolicyValueHeadRuntime(
+  device: DeviceLike,
+  inputBuffer: BufferLike,
+  usage: Record<string, number>,
+  shared: WgslPolicyValueHeadSharedResources,
+): WgslPolicyValueHeadRuntime {
   const { densePipeline, policyLogitsPipeline, mappedPolicyPipeline, vectorPipeline, softmaxPipeline, legalPriorsPipeline } = shared;
   const buffers: BufferLike[] = [];
   const policyOutputBuffer = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_N * 4, usage: usage.STORAGE }) as BufferLike;
@@ -5952,8 +6869,25 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, inputBuffer: Buffe
   const legalIndicesBuffer = device.createBuffer({ size: WGSL_GPU_LEGAL_MAX_MOVES * 4, usage: usage.STORAGE | usage.COPY_DST }) as BufferLike;
   const legalArgsBuffer = device.createBuffer({ size: 4 * 4, usage: usage.UNIFORM | usage.COPY_DST }) as BufferLike;
   const legalOutputBuffer = device.createBuffer({ size: WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, usage: usage.STORAGE | usage.COPY_SRC }) as BufferLike;
-  const headsReadbackBuffer = device.createBuffer({ size: Math.max(WGSL_HEADS_READBACK_BYTES, WGSL_GPU_LEGAL_READBACK_BYTES), usage: usage.MAP_READ | usage.COPY_DST }) as BufferLike;
-  buffers.push(policyOutputBuffer, policyQBuffer, policyKBuffer, policyLogitsBuffer, mappedPolicyBuffer, valueOutputBuffer, valueHiddenBuffer, valueLogitsBuffer, valueWdlBuffer, legalIndicesBuffer, legalArgsBuffer, legalOutputBuffer, headsReadbackBuffer);
+  const headsReadbackBuffer = device.createBuffer({
+    size: Math.max(WGSL_HEADS_READBACK_BYTES, WGSL_GPU_LEGAL_READBACK_BYTES),
+    usage: usage.MAP_READ | usage.COPY_DST,
+  }) as BufferLike;
+  buffers.push(
+    policyOutputBuffer,
+    policyQBuffer,
+    policyKBuffer,
+    policyLogitsBuffer,
+    mappedPolicyBuffer,
+    valueOutputBuffer,
+    valueHiddenBuffer,
+    valueLogitsBuffer,
+    valueWdlBuffer,
+    legalIndicesBuffer,
+    legalArgsBuffer,
+    legalOutputBuffer,
+    headsReadbackBuffer,
+  );
 
   return {
     densePipeline,
@@ -5962,16 +6896,86 @@ function createWgslPolicyValueHeadRuntime(device: DeviceLike, inputBuffer: Buffe
     vectorPipeline,
     softmaxPipeline,
     legalPriorsPipeline,
-    policyBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, shared.policyWeightBuffer, shared.policyBiasBuffer, policyOutputBuffer, shared.policyShapeBuffer),
-    policyQBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, shared.policyQWeightBuffer, shared.policyQBiasBuffer, policyQBuffer, shared.policyLinearShapeBuffer),
-    policyKBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, policyOutputBuffer, shared.policyKWeightBuffer, shared.policyKBiasBuffer, policyKBuffer, shared.policyLinearShapeBuffer),
-    policyLogitsBindGroup: createWgslHeadsPolicyLogitsBindGroup(device, policyLogitsPipeline, policyQBuffer, policyKBuffer, shared.policyScaleBuffer, policyLogitsBuffer),
-    mappedPolicyBindGroup: createMappedPolicyBindGroup(device, mappedPolicyPipeline, policyLogitsBuffer, policyKBuffer, shared.policyPromotionWeightBuffer, shared.policyMappingBuffer, mappedPolicyBuffer),
-    valueBindGroup: createWgslHeadsDenseBindGroup(device, densePipeline, inputBuffer, shared.valueWeightBuffer, shared.valueBiasBuffer, valueOutputBuffer, shared.valueShapeBuffer),
-    valueDense1BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueOutputBuffer, shared.valueDense1WeightBuffer, shared.valueDense1BiasBuffer, valueHiddenBuffer, shared.valueDense1ShapeBuffer),
-    valueDense2BindGroup: createWgslHeadsDenseBindGroup(device, vectorPipeline, valueHiddenBuffer, shared.valueDense2WeightBuffer, shared.valueDense2BiasBuffer, valueLogitsBuffer, shared.valueDense2ShapeBuffer),
+    policyBindGroup: createWgslHeadsDenseBindGroup(
+      device,
+      densePipeline,
+      inputBuffer,
+      shared.policyWeightBuffer,
+      shared.policyBiasBuffer,
+      policyOutputBuffer,
+      shared.policyShapeBuffer,
+    ),
+    policyQBindGroup: createWgslHeadsDenseBindGroup(
+      device,
+      densePipeline,
+      policyOutputBuffer,
+      shared.policyQWeightBuffer,
+      shared.policyQBiasBuffer,
+      policyQBuffer,
+      shared.policyLinearShapeBuffer,
+    ),
+    policyKBindGroup: createWgslHeadsDenseBindGroup(
+      device,
+      densePipeline,
+      policyOutputBuffer,
+      shared.policyKWeightBuffer,
+      shared.policyKBiasBuffer,
+      policyKBuffer,
+      shared.policyLinearShapeBuffer,
+    ),
+    policyLogitsBindGroup: createWgslHeadsPolicyLogitsBindGroup(
+      device,
+      policyLogitsPipeline,
+      policyQBuffer,
+      policyKBuffer,
+      shared.policyScaleBuffer,
+      policyLogitsBuffer,
+    ),
+    mappedPolicyBindGroup: createMappedPolicyBindGroup(
+      device,
+      mappedPolicyPipeline,
+      policyLogitsBuffer,
+      policyKBuffer,
+      shared.policyPromotionWeightBuffer,
+      shared.policyMappingBuffer,
+      mappedPolicyBuffer,
+    ),
+    valueBindGroup: createWgslHeadsDenseBindGroup(
+      device,
+      densePipeline,
+      inputBuffer,
+      shared.valueWeightBuffer,
+      shared.valueBiasBuffer,
+      valueOutputBuffer,
+      shared.valueShapeBuffer,
+    ),
+    valueDense1BindGroup: createWgslHeadsDenseBindGroup(
+      device,
+      vectorPipeline,
+      valueOutputBuffer,
+      shared.valueDense1WeightBuffer,
+      shared.valueDense1BiasBuffer,
+      valueHiddenBuffer,
+      shared.valueDense1ShapeBuffer,
+    ),
+    valueDense2BindGroup: createWgslHeadsDenseBindGroup(
+      device,
+      vectorPipeline,
+      valueHiddenBuffer,
+      shared.valueDense2WeightBuffer,
+      shared.valueDense2BiasBuffer,
+      valueLogitsBuffer,
+      shared.valueDense2ShapeBuffer,
+    ),
     valueSoftmaxBindGroup: createWgslHeadsSoftmaxBindGroup(device, softmaxPipeline, valueLogitsBuffer, valueWdlBuffer),
-    legalPriorsBindGroup: createWgslLegalPriorsBindGroup(device, legalPriorsPipeline, mappedPolicyBuffer, legalIndicesBuffer, legalOutputBuffer, legalArgsBuffer),
+    legalPriorsBindGroup: createWgslLegalPriorsBindGroup(
+      device,
+      legalPriorsPipeline,
+      mappedPolicyBuffer,
+      legalIndicesBuffer,
+      legalOutputBuffer,
+      legalArgsBuffer,
+    ),
     mappedPolicyBuffer,
     valueWdlBuffer,
     legalIndicesBuffer,
@@ -6008,7 +7012,12 @@ function encodeWgslPolicyValueHeads(pass: ComputePassLike, runtime: WgslPolicyVa
   pass.dispatchWorkgroups(1);
 }
 
-function copyWgslPolicyValueHeadOutputsTo(encoder: CommandEncoderLike, runtime: WgslPolicyValueHeadRuntime, readbackBuffer: BufferLike, destinationOffset: number): void {
+function copyWgslPolicyValueHeadOutputsTo(
+  encoder: CommandEncoderLike,
+  runtime: WgslPolicyValueHeadRuntime,
+  readbackBuffer: BufferLike,
+  destinationOffset: number,
+): void {
   encoder.copyBufferToBuffer(runtime.mappedPolicyBuffer, 0, readbackBuffer, destinationOffset, DEFAULT_POLICY_MAPPED_OUTPUTS * 4);
   encoder.copyBufferToBuffer(runtime.valueWdlBuffer, 0, readbackBuffer, destinationOffset + DEFAULT_POLICY_MAPPED_OUTPUTS * 4, 3 * 4);
 }
@@ -6017,8 +7026,14 @@ function copyWgslPolicyValueHeadOutputs(encoder: CommandEncoderLike, runtime: Wg
   copyWgslPolicyValueHeadOutputsTo(encoder, runtime, runtime.headsReadbackBuffer, 0);
 }
 
-function uploadWgslLegalPriorsInputs(device: DeviceLike, runtime: WgslPolicyValueHeadRuntime, legalCandidates: LegalPolicyCandidate[], policyTemperature: number): void {
-  if (legalCandidates.length > WGSL_GPU_LEGAL_MAX_MOVES) throw new Error(`WGSL legal-prior path supports at most ${WGSL_GPU_LEGAL_MAX_MOVES} legal moves, got ${legalCandidates.length}`);
+function uploadWgslLegalPriorsInputs(
+  device: DeviceLike,
+  runtime: WgslPolicyValueHeadRuntime,
+  legalCandidates: LegalPolicyCandidate[],
+  policyTemperature: number,
+): void {
+  if (legalCandidates.length > WGSL_GPU_LEGAL_MAX_MOVES)
+    throw new Error(`WGSL legal-prior path supports at most ${WGSL_GPU_LEGAL_MAX_MOVES} legal moves, got ${legalCandidates.length}`);
   const indices = new Uint32Array(WGSL_GPU_LEGAL_MAX_MOVES);
   for (let i = 0; i < legalCandidates.length; i++) indices[i] = legalCandidates[i].index;
   device.queue.writeBuffer(runtime.legalIndicesBuffer, 0, indices);
@@ -6031,7 +7046,12 @@ function encodeWgslLegalPriors(pass: ComputePassLike, runtime: WgslPolicyValueHe
   pass.dispatchWorkgroups(1);
 }
 
-function copyWgslLegalPriorsOutputsTo(encoder: CommandEncoderLike, runtime: WgslPolicyValueHeadRuntime, readbackBuffer: BufferLike, destinationOffset: number): void {
+function copyWgslLegalPriorsOutputsTo(
+  encoder: CommandEncoderLike,
+  runtime: WgslPolicyValueHeadRuntime,
+  readbackBuffer: BufferLike,
+  destinationOffset: number,
+): void {
   encoder.copyBufferToBuffer(runtime.legalOutputBuffer, 0, readbackBuffer, destinationOffset, WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4);
   encoder.copyBufferToBuffer(runtime.valueWdlBuffer, 0, readbackBuffer, destinationOffset + WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3 * 4);
 }
@@ -6069,7 +7089,10 @@ function legalPriorsFromGpuOutput(legalCandidates: LegalPolicyCandidate[], outpu
   return priors;
 }
 
-async function mapWgslLegalPriorsOutputs(runtime: WgslPolicyValueHeadRuntime, legalCandidates: LegalPolicyCandidate[]): Promise<{
+async function mapWgslLegalPriorsOutputs(
+  runtime: WgslPolicyValueHeadRuntime,
+  legalCandidates: LegalPolicyCandidate[],
+): Promise<{
   legalPriors: Lc0Evaluation['legalPriors'];
   wdl: Float32Array<ArrayBufferLike>;
   readbackSyncedMs: number;
@@ -6086,7 +7109,10 @@ async function mapWgslLegalPriorsOutputs(runtime: WgslPolicyValueHeadRuntime, le
   return { legalPriors: legalPriorsFromGpuOutput(legalCandidates, legalOutput), wdl, readbackSyncedMs: nowMs() - started };
 }
 
-async function runCachedWgslPolicyValueHeads(device: DeviceLike, runtime: WgslPolicyValueHeadRuntime): Promise<{ runMs: number; mappedPolicy: number[]; wdl: number[]; readbackSyncedMs: number }> {
+async function runCachedWgslPolicyValueHeads(
+  device: DeviceLike,
+  runtime: WgslPolicyValueHeadRuntime,
+): Promise<{ runMs: number; mappedPolicy: number[]; wdl: number[]; readbackSyncedMs: number }> {
   const started = nowMs();
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
@@ -6095,7 +7121,8 @@ async function runCachedWgslPolicyValueHeads(device: DeviceLike, runtime: WgslPo
   copyWgslPolicyValueHeadOutputs(encoder, runtime);
   device.queue.submit([encoder.finish()]);
   const { mappedPolicy, wdl, readbackSyncedMs } = await mapWgslPolicyValueHeadOutputs(runtime);
-  if (!arrayHasNonzero(mappedPolicy) || !arrayHasVariation(mappedPolicy) || !arrayHasNonzero(wdl) || !arrayHasVariation(wdl)) throw new Error('WGSL hybrid heads produced zero or uniform mapped policy/WDL');
+  if (!arrayHasNonzero(mappedPolicy) || !arrayHasVariation(mappedPolicy) || !arrayHasNonzero(wdl) || !arrayHasVariation(wdl))
+    throw new Error('WGSL hybrid heads produced zero or uniform mapped policy/WDL');
   return { runMs: nowMs() - started, mappedPolicy: Array.from(mappedPolicy), wdl: Array.from(wdl), readbackSyncedMs };
 }
 
@@ -6337,7 +7364,14 @@ function prepareInitialInputTensors(tensors: Lc0WebInitialInputTensors): Lc0WebP
   };
 }
 
-function cpuProjectTokensF32(input: Float32Array<ArrayBufferLike>, weight: Float32Array<ArrayBufferLike>, bias: Float32Array<ArrayBufferLike>, tokens: number, k: number, n: number): Float32Array<ArrayBufferLike> {
+function cpuProjectTokensF32(
+  input: Float32Array<ArrayBufferLike>,
+  weight: Float32Array<ArrayBufferLike>,
+  bias: Float32Array<ArrayBufferLike>,
+  tokens: number,
+  k: number,
+  n: number,
+): Float32Array<ArrayBufferLike> {
   const output = new Float32Array(tokens * n);
   for (let token = 0; token < tokens; token++) {
     const inputBase = token * k;
@@ -6359,7 +7393,11 @@ function boardStateToFen(board: BoardState | string): string {
   return typeof board === 'string' ? board : boardToFen(board);
 }
 
-function buildInitialEncoderPlanesWasm(input: Lc0EvaluatorInput, historyFill: Lc0HistoryFill, encoder: Lc0WasmInputEncoder): { planes: Float32Array<ArrayBufferLike>; timing: Lc0WasmInputEncoderTiming } {
+function buildInitialEncoderPlanesWasm(
+  input: Lc0EvaluatorInput,
+  historyFill: Lc0HistoryFill,
+  encoder: Lc0WasmInputEncoder,
+): { planes: Float32Array<ArrayBufferLike>; timing: Lc0WasmInputEncoderTiming } {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     const fens = input.positions.map(boardStateToFen);
     const result = encoder.encodeFenHistoryTimed(fens);
@@ -6369,7 +7407,11 @@ function buildInitialEncoderPlanesWasm(input: Lc0EvaluatorInput, historyFill: Lc
   return { planes: result.encoded.planes, timing: result.timing };
 }
 
-function buildInitialEncoderActivation(input: Lc0EvaluatorInput, tensors: Lc0WebPreparedInitialInputTensors, historyFill: Lc0HistoryFill): Float32Array<ArrayBufferLike> {
+function buildInitialEncoderActivation(
+  input: Lc0EvaluatorInput,
+  tensors: Lc0WebPreparedInitialInputTensors,
+  historyFill: Lc0HistoryFill,
+): Float32Array<ArrayBufferLike> {
   const encoded = buildInitialEncoderPlanes(input, historyFill);
   const padded = new Float32Array(DEFAULT_TOKENS * DEFAULT_PADDED_INPUT_CHANNELS);
   for (let token = 0; token < DEFAULT_TOKENS; token++) {
@@ -6438,7 +7480,12 @@ type InputBodyGpuSharedResources = {
   buffers: BufferLike[];
 };
 
-function createInputBodyGpuSharedResources(device: DeviceLike, tensors: Lc0WebPreparedInitialInputTensors, usage: Record<string, number>, pipelineCache?: WgslPipelineCache): InputBodyGpuSharedResources {
+function createInputBodyGpuSharedResources(
+  device: DeviceLike,
+  tensors: Lc0WebPreparedInitialInputTensors,
+  usage: Record<string, number>,
+  pipelineCache?: WgslPipelineCache,
+): InputBodyGpuSharedResources {
   const posEncodingBuffer = createStorageBuffer(device, tensors.posEncoding, usage.STORAGE | usage.COPY_DST);
   const inputWeightBuffer = createStorageBuffer(device, tensors.inputWeight, usage.STORAGE | usage.COPY_DST);
   const inputBiasBuffer = createStorageBuffer(device, tensors.inputBias, usage.STORAGE | usage.COPY_DST);
@@ -6450,21 +7497,38 @@ function createInputBodyGpuSharedResources(device: DeviceLike, tensors: Lc0WebPr
     label: 'lc0web input body projection',
     code: INPUT_BODY_WGSL,
   });
-  return { pipeline, posEncodingBuffer, inputWeightBuffer, inputBiasBuffer, mulGateBuffer, addGateBuffer, shapeBuffer, buffers: [posEncodingBuffer, inputWeightBuffer, inputBiasBuffer, mulGateBuffer, addGateBuffer, shapeBuffer] };
+  return {
+    pipeline,
+    posEncodingBuffer,
+    inputWeightBuffer,
+    inputBiasBuffer,
+    mulGateBuffer,
+    addGateBuffer,
+    shapeBuffer,
+    buffers: [posEncodingBuffer, inputWeightBuffer, inputBiasBuffer, mulGateBuffer, addGateBuffer, shapeBuffer],
+  };
 }
 
-function createInputBodyGpuRuntime(device: DeviceLike, outputBuffer: BufferLike, usage: Record<string, number>, shared: InputBodyGpuSharedResources): InputBodyGpuRuntime {
+function createInputBodyGpuRuntime(
+  device: DeviceLike,
+  outputBuffer: BufferLike,
+  usage: Record<string, number>,
+  shared: InputBodyGpuSharedResources,
+): InputBodyGpuRuntime {
   const planesBuffer = device.createBuffer({ size: DEFAULT_INPUT_PLANES * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
-  const bindGroup = device.createBindGroup({ layout: shared.pipeline.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: { buffer: planesBuffer } },
-    { binding: 1, resource: { buffer: shared.posEncodingBuffer } },
-    { binding: 2, resource: { buffer: shared.inputWeightBuffer } },
-    { binding: 3, resource: { buffer: shared.inputBiasBuffer } },
-    { binding: 4, resource: { buffer: shared.mulGateBuffer } },
-    { binding: 5, resource: { buffer: shared.addGateBuffer } },
-    { binding: 6, resource: { buffer: outputBuffer } },
-    { binding: 7, resource: { buffer: shared.shapeBuffer } },
-  ] });
+  const bindGroup = device.createBindGroup({
+    layout: shared.pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: planesBuffer } },
+      { binding: 1, resource: { buffer: shared.posEncodingBuffer } },
+      { binding: 2, resource: { buffer: shared.inputWeightBuffer } },
+      { binding: 3, resource: { buffer: shared.inputBiasBuffer } },
+      { binding: 4, resource: { buffer: shared.mulGateBuffer } },
+      { binding: 5, resource: { buffer: shared.addGateBuffer } },
+      { binding: 6, resource: { buffer: outputBuffer } },
+      { binding: 7, resource: { buffer: shared.shapeBuffer } },
+    ],
+  });
   return { planesBuffer, pipeline: shared.pipeline, bindGroup, buffers: [planesBuffer] };
 }
 
@@ -6542,7 +7606,12 @@ type HybridWgslBatchSlot = {
   wgslHeads: WgslPolicyValueHeadRuntime;
 };
 
-function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType<typeof loadEncoder0FfnInputs>, usage: Record<string, number>, sharedSmolgenWeight?: BufferLike): { weights: HybridEncoderLayerWeights; buffers: BufferLike[] } {
+function createHybridEncoderLayerWeights(
+  device: DeviceLike,
+  tensors: ReturnType<typeof loadEncoder0FfnInputs>,
+  usage: Record<string, number>,
+  sharedSmolgenWeight?: BufferLike,
+): { weights: HybridEncoderLayerWeights; buffers: BufferLike[] } {
   const qWeight = createTransposedF16StorageBuffer(device, tensors.qWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
   const qBias = createStorageBuffer(device, tensors.qBias.bytes, usage.STORAGE | usage.COPY_DST);
   const kWeight = createTransposedF16StorageBuffer(device, tensors.kWeight.bytes, DEFAULT_K, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
@@ -6555,9 +7624,21 @@ function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType
   const attentionAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.alpha.bytes), usage.STORAGE | usage.COPY_DST);
   const ln1Scale = createStorageBuffer(device, tensors.lnScale.bytes, usage.STORAGE | usage.COPY_DST);
   const ln1Bias = createStorageBuffer(device, tensors.lnBias.bytes, usage.STORAGE | usage.COPY_DST);
-  const ffnDense1Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense1Weight.bytes, DEFAULT_N, DEFAULT_FFN_HIDDEN, usage.STORAGE | usage.COPY_DST);
+  const ffnDense1Weight = createTransposedF16StorageBuffer(
+    device,
+    tensors.ffnDense1Weight.bytes,
+    DEFAULT_N,
+    DEFAULT_FFN_HIDDEN,
+    usage.STORAGE | usage.COPY_DST,
+  );
   const ffnDense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
-  const ffnDense2Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
+  const ffnDense2Weight = createTransposedF16StorageBuffer(
+    device,
+    tensors.ffnDense2Weight.bytes,
+    DEFAULT_FFN_HIDDEN,
+    DEFAULT_N,
+    usage.STORAGE | usage.COPY_DST,
+  );
   const ffnDense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
   const ffnAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
   const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
@@ -6572,12 +7653,47 @@ function createHybridEncoderLayerWeights(device: DeviceLike, tensors: ReturnType
   const smolgenLn2Scale = createStorageBuffer(device, tensors.smolgen.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
   const smolgenLn2Bias = createStorageBuffer(device, tensors.smolgen.ln2Bias.bytes, usage.STORAGE | usage.COPY_DST);
   const smolgenWeight = sharedSmolgenWeight ?? createStorageBuffer(device, tensors.smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
-  const weights = { qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, smolgenCompressWeight, smolgenDense1Weight, smolgenDense1Bias, smolgenLn1Scale, smolgenLn1Bias, smolgenDense2Weight, smolgenDense2Bias, smolgenLn2Scale, smolgenLn2Bias, smolgenWeight };
+  const weights = {
+    qWeight,
+    qBias,
+    kWeight,
+    kBias,
+    vWeight,
+    vBias,
+    scale,
+    outWeight,
+    outBias,
+    attentionAlpha,
+    ln1Scale,
+    ln1Bias,
+    ffnDense1Weight,
+    ffnDense1Bias,
+    ffnDense2Weight,
+    ffnDense2Bias,
+    ffnAlpha,
+    ln2Scale,
+    ln2Bias,
+    smolgenCompressWeight,
+    smolgenDense1Weight,
+    smolgenDense1Bias,
+    smolgenLn1Scale,
+    smolgenLn1Bias,
+    smolgenDense2Weight,
+    smolgenDense2Bias,
+    smolgenLn2Scale,
+    smolgenLn2Bias,
+    smolgenWeight,
+  };
   const buffers = Object.values(weights).filter((buffer) => buffer !== sharedSmolgenWeight);
   return { weights, buffers };
 }
 
-function createHybridEncoderLayerSlotScratch(device: DeviceLike, usage: Record<string, number>, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand', sharedPodArgs?: BufferLike): { scratch: HybridEncoderLayerSlotScratch; buffers: BufferLike[] } {
+function createHybridEncoderLayerSlotScratch(
+  device: DeviceLike,
+  usage: Record<string, number>,
+  encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand',
+  sharedPodArgs?: BufferLike,
+): { scratch: HybridEncoderLayerSlotScratch; buffers: BufferLike[] } {
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
   const smolgenBias = device.createBuffer({ size: DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS * 4, usage: usage.STORAGE | usage.COPY_DST });
   const smolgenCompressed = device.createBuffer({ size: DEFAULT_SMOLGEN_FLAT * 4, usage: usage.STORAGE });
@@ -6593,57 +7709,155 @@ function createHybridEncoderLayerSlotScratch(device: DeviceLike, usage: Record<s
   const attentionOutput = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnHidden = device.createBuffer({ size: DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN * 4, usage: usage.STORAGE | usage.COPY_DST });
   const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
-  const podArgs = encoderUsesTvmPackedF16Qkv(encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? sharedPodArgs ?? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
-  const scratch: HybridEncoderLayerSlotScratch = { smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, podArgs };
-  const buffers = [smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip];
+  const podArgs =
+    encoderUsesTvmPackedF16Qkv(encoderKernelVariant) ||
+    encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) ||
+    encoderUsesTvmPackedF16Ffn(encoderKernelVariant)
+      ? (sharedPodArgs ?? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST))
+      : undefined;
+  const scratch: HybridEncoderLayerSlotScratch = {
+    smolgenBias,
+    smolgenCompressed,
+    smolgenDense1,
+    smolgenLn1,
+    smolgenDense2,
+    smolgenLn2,
+    qkv,
+    scores,
+    probs,
+    attn,
+    attentionSkip,
+    attentionOutput,
+    ffnHidden,
+    ffnSkip,
+    podArgs,
+  };
+  const buffers = [
+    smolgenBias,
+    smolgenCompressed,
+    smolgenDense1,
+    smolgenLn1,
+    smolgenDense2,
+    smolgenLn2,
+    qkv,
+    scores,
+    probs,
+    attn,
+    attentionSkip,
+    attentionOutput,
+    ffnHidden,
+    ffnSkip,
+  ];
   if (podArgs && podArgs !== sharedPodArgs) buffers.push(podArgs);
   return { scratch, buffers };
 }
 
-function createHybridEncoderLayerSlotRuntime(device: DeviceLike, usage: Record<string, number>, weights: HybridEncoderLayerWeights, layerInput: BufferLike, encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand', sharedScratch?: HybridEncoderLayerSlotScratch, pipelineCache?: WgslPipelineCache, sharedPodArgs?: BufferLike): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
+function createHybridEncoderLayerSlotRuntime(
+  device: DeviceLike,
+  usage: Record<string, number>,
+  weights: HybridEncoderLayerWeights,
+  layerInput: BufferLike,
+  encoderKernelVariant: Lc0WebEncoderKernelVariant = 'hand',
+  sharedScratch?: HybridEncoderLayerSlotScratch,
+  pipelineCache?: WgslPipelineCache,
+  sharedPodArgs?: BufferLike,
+): { runtime: HybridEncoderLayerSlotRuntime; buffers: BufferLike[] } {
   const outputElements = DEFAULT_TOKENS * DEFAULT_N;
-  const scratchAndBuffers = sharedScratch ? { scratch: sharedScratch, buffers: [] as BufferLike[] } : createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant, sharedPodArgs);
+  const scratchAndBuffers = sharedScratch
+    ? { scratch: sharedScratch, buffers: [] as BufferLike[] }
+    : createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant, sharedPodArgs);
   const { scratch, buffers: scratchBuffers } = scratchAndBuffers;
-  const { smolgenBias, smolgenCompressed, smolgenDense1, smolgenLn1, smolgenDense2, smolgenLn2, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, podArgs } = scratch;
+  const {
+    smolgenBias,
+    smolgenCompressed,
+    smolgenDense1,
+    smolgenLn1,
+    smolgenDense2,
+    smolgenLn2,
+    qkv,
+    scores,
+    probs,
+    attn,
+    attentionSkip,
+    attentionOutput,
+    ffnHidden,
+    ffnSkip,
+    podArgs,
+  } = scratch;
   const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC | usage.COPY_DST });
   const buffers = [...scratchBuffers, output];
-  const smolgenPipelines = createSmolgenPipelines(device, {
-    input: layerInput,
-    compressWeight: weights.smolgenCompressWeight,
-    compressed: smolgenCompressed,
-    dense1Weight: weights.smolgenDense1Weight,
-    dense1Bias: weights.smolgenDense1Bias,
-    dense1: smolgenDense1,
-    ln1Scale: weights.smolgenLn1Scale,
-    ln1Bias: weights.smolgenLn1Bias,
-    ln1: smolgenLn1,
-    dense2Weight: weights.smolgenDense2Weight,
-    dense2Bias: weights.smolgenDense2Bias,
-    dense2: smolgenDense2,
-    ln2Scale: weights.smolgenLn2Scale,
-    ln2Bias: weights.smolgenLn2Bias,
-    ln2: smolgenLn2,
-    smolgenWeight: weights.smolgenWeight,
-    output: smolgenBias,
-  }, encoderUsesTiledSmolgenProject(encoderKernelVariant) ? 'tiled-project-f16' : 'hand', pipelineCache);
-  const attentionPipelines = createAttentionOutputPipelines(device, {
-    input: layerInput, qWeight: weights.qWeight, qBias: weights.qBias, kWeight: weights.kWeight, kBias: weights.kBias, vWeight: weights.vWeight, vBias: weights.vBias, scale: weights.scale, smolgenBias, qkv, scores, probs, attn,
-    outWeight: weights.outWeight, outBias: weights.outBias, alpha: weights.attentionAlpha, skip: attentionSkip, lnScale: weights.ln1Scale, lnBias: weights.ln1Bias, output: attentionOutput, podArgs,
-  }, encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand', encoderUsesTvmPackedF16Qkv(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand', pipelineCache);
-  const ffnPipelines = createEncoder0FfnPipelines(device, {
-    input: attentionOutput,
-    dense1Weight: weights.ffnDense1Weight,
-    dense1Bias: weights.ffnDense1Bias,
-    hidden: ffnHidden,
-    dense2Weight: weights.ffnDense2Weight,
-    dense2Bias: weights.ffnDense2Bias,
-    alpha: weights.ffnAlpha,
-    skip: ffnSkip,
-    ln2Scale: weights.ln2Scale,
-    ln2Bias: weights.ln2Bias,
-    output,
-    podArgs,
-  }, encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand', pipelineCache);
+  const smolgenPipelines = createSmolgenPipelines(
+    device,
+    {
+      input: layerInput,
+      compressWeight: weights.smolgenCompressWeight,
+      compressed: smolgenCompressed,
+      dense1Weight: weights.smolgenDense1Weight,
+      dense1Bias: weights.smolgenDense1Bias,
+      dense1: smolgenDense1,
+      ln1Scale: weights.smolgenLn1Scale,
+      ln1Bias: weights.smolgenLn1Bias,
+      ln1: smolgenLn1,
+      dense2Weight: weights.smolgenDense2Weight,
+      dense2Bias: weights.smolgenDense2Bias,
+      dense2: smolgenDense2,
+      ln2Scale: weights.smolgenLn2Scale,
+      ln2Bias: weights.smolgenLn2Bias,
+      ln2: smolgenLn2,
+      smolgenWeight: weights.smolgenWeight,
+      output: smolgenBias,
+    },
+    encoderUsesTiledSmolgenProject(encoderKernelVariant) ? 'tiled-project-f16' : 'hand',
+    pipelineCache,
+  );
+  const attentionPipelines = createAttentionOutputPipelines(
+    device,
+    {
+      input: layerInput,
+      qWeight: weights.qWeight,
+      qBias: weights.qBias,
+      kWeight: weights.kWeight,
+      kBias: weights.kBias,
+      vWeight: weights.vWeight,
+      vBias: weights.vBias,
+      scale: weights.scale,
+      smolgenBias,
+      qkv,
+      scores,
+      probs,
+      attn,
+      outWeight: weights.outWeight,
+      outBias: weights.outBias,
+      alpha: weights.attentionAlpha,
+      skip: attentionSkip,
+      lnScale: weights.ln1Scale,
+      lnBias: weights.ln1Bias,
+      output: attentionOutput,
+      podArgs,
+    },
+    encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand',
+    encoderUsesTvmPackedF16Qkv(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand',
+    pipelineCache,
+  );
+  const ffnPipelines = createEncoder0FfnPipelines(
+    device,
+    {
+      input: attentionOutput,
+      dense1Weight: weights.ffnDense1Weight,
+      dense1Bias: weights.ffnDense1Bias,
+      hidden: ffnHidden,
+      dense2Weight: weights.ffnDense2Weight,
+      dense2Bias: weights.ffnDense2Bias,
+      alpha: weights.ffnAlpha,
+      skip: ffnSkip,
+      ln2Scale: weights.ln2Scale,
+      ln2Bias: weights.ln2Bias,
+      output,
+      podArgs,
+    },
+    encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand',
+    pipelineCache,
+  );
   return { runtime: { output, smolgenPipelines, attentionPipelines, ffnPipelines }, buffers };
 }
 
@@ -6698,20 +7912,44 @@ function hybridPipelineDescriptors(
   const ffnVariant: Lc0WebFfnKernelVariant = encoderUsesTvmPackedF16Ffn(encoderKernelVariant) ? 'tvm-packed-f16' : 'hand';
   const projectTileSize = smolgenProjectKernelTileSize(encoderUsesTiledSmolgenProject(encoderKernelVariant) ? 'tiled-project-f16' : 'hand');
   const descriptors: WgslPipelineDescriptor[] = [
-    { key: qkvVariant === 'tvm-packed-f16' ? 'attention-qkv-tvm-packed-f16' : 'attention-qkv-hand', label: qkvVariant === 'tvm-packed-f16' ? 'lc0web attention block QKV TVM packed-f16 projection' : 'lc0web attention block qkv', code: qkvVariant === 'tvm-packed-f16' ? ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL : ATTENTION_BLOCK_QKV_WGSL, entryPoint: qkvVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main' },
+    {
+      key: qkvVariant === 'tvm-packed-f16' ? 'attention-qkv-tvm-packed-f16' : 'attention-qkv-hand',
+      label: qkvVariant === 'tvm-packed-f16' ? 'lc0web attention block QKV TVM packed-f16 projection' : 'lc0web attention block qkv',
+      code: qkvVariant === 'tvm-packed-f16' ? ATTENTION_BLOCK_QKV_TVM_PACKED_F16_WGSL : ATTENTION_BLOCK_QKV_WGSL,
+      entryPoint: qkvVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main',
+    },
     { key: 'attention-score', label: 'lc0web attention block score', code: ATTENTION_BLOCK_SCORE_WGSL },
     { key: 'attention-softmax', label: 'lc0web attention softmax probe', code: SOFTMAX_WGSL },
     { key: 'attention-value', label: 'lc0web attention block value', code: ATTENTION_BLOCK_VALUE_WGSL },
-    { key: outProjVariant === 'tvm-packed-f16' ? 'attention-output-tvm-packed-f16' : 'attention-output-hand', label: outProjVariant === 'tvm-packed-f16' ? 'lc0web attention output projection TVM packed-f16 residual' : 'lc0web attention output projection residual', code: outProjVariant === 'tvm-packed-f16' ? ATTENTION_OUTPUT_PROJ_TVM_PACKED_F16_WGSL : ATTENTION_OUTPUT_PROJ_WGSL, entryPoint: outProjVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main' },
+    {
+      key: outProjVariant === 'tvm-packed-f16' ? 'attention-output-tvm-packed-f16' : 'attention-output-hand',
+      label: outProjVariant === 'tvm-packed-f16' ? 'lc0web attention output projection TVM packed-f16 residual' : 'lc0web attention output projection residual',
+      code: outProjVariant === 'tvm-packed-f16' ? ATTENTION_OUTPUT_PROJ_TVM_PACKED_F16_WGSL : ATTENTION_OUTPUT_PROJ_WGSL,
+      entryPoint: outProjVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main',
+    },
     { key: 'attention-output-norm', label: 'lc0web attention output layernorm', code: ATTENTION_OUTPUT_NORM_WGSL },
     { key: 'smolgen-compress', label: 'lc0web smolgen compress', code: SMOLGEN_COMPRESS_WGSL },
     { key: 'smolgen-dense1', label: 'lc0web smolgen dense1', code: SMOLGEN_DENSE1_WGSL },
     { key: 'smolgen-ln1', label: 'lc0web smolgen ln1', code: SMOLGEN_SWISH_LN1_WGSL },
     { key: 'smolgen-dense2', label: 'lc0web smolgen dense2', code: SMOLGEN_DENSE2_WGSL },
     { key: 'smolgen-ln2', label: 'lc0web smolgen ln2', code: SMOLGEN_SWISH_LN2_WGSL },
-    { key: `smolgen-project-${projectTileSize ?? 'hand'}`, label: projectTileSize ? `lc0web smolgen project tiled f16 ${projectTileSize}` : 'lc0web smolgen project', code: projectTileSize ? (projectTileSize === 64 ? SMOLGEN_PROJECT_TILED_F16_WGSL : smolgenProjectTiledF16Wgsl(projectTileSize)) : SMOLGEN_PROJECT_WGSL },
-    { key: `ffn-dense1-${ffnVariant}`, label: ffnVariant === 'tvm-packed-f16' ? 'lc0web encoder0 FFN dense1 TVM packed-f16 sqrrelu' : 'lc0web encoder0 FFN dense1 sqrrelu', code: ffnVariant === 'tvm-packed-f16' ? FFN_DENSE1_TVM_PACKED_F16_WGSL : FFN_DENSE1_WGSL, entryPoint: ffnVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main' },
-    { key: `ffn-dense2-${ffnVariant}`, label: ffnVariant === 'tvm-packed-f16' ? 'lc0web encoder0 FFN dense2 TVM packed-f16 residual' : 'lc0web encoder0 FFN dense2 residual', code: ffnVariant === 'tvm-packed-f16' ? FFN_DENSE2_TVM_PACKED_F16_WGSL : FFN_DENSE2_WGSL, entryPoint: ffnVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main' },
+    {
+      key: `smolgen-project-${projectTileSize ?? 'hand'}`,
+      label: projectTileSize ? `lc0web smolgen project tiled f16 ${projectTileSize}` : 'lc0web smolgen project',
+      code: projectTileSize ? (projectTileSize === 64 ? SMOLGEN_PROJECT_TILED_F16_WGSL : smolgenProjectTiledF16Wgsl(projectTileSize)) : SMOLGEN_PROJECT_WGSL,
+    },
+    {
+      key: `ffn-dense1-${ffnVariant}`,
+      label: ffnVariant === 'tvm-packed-f16' ? 'lc0web encoder0 FFN dense1 TVM packed-f16 sqrrelu' : 'lc0web encoder0 FFN dense1 sqrrelu',
+      code: ffnVariant === 'tvm-packed-f16' ? FFN_DENSE1_TVM_PACKED_F16_WGSL : FFN_DENSE1_WGSL,
+      entryPoint: ffnVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main',
+    },
+    {
+      key: `ffn-dense2-${ffnVariant}`,
+      label: ffnVariant === 'tvm-packed-f16' ? 'lc0web encoder0 FFN dense2 TVM packed-f16 residual' : 'lc0web encoder0 FFN dense2 residual',
+      code: ffnVariant === 'tvm-packed-f16' ? FFN_DENSE2_TVM_PACKED_F16_WGSL : FFN_DENSE2_WGSL,
+      entryPoint: ffnVariant === 'tvm-packed-f16' ? 'matmul_kernel' : 'main',
+    },
     { key: 'ffn-ln2', label: 'lc0web encoder0 FFN ln2', code: FFN_LN2_WGSL },
   ];
   if (inputBackend !== 'js') descriptors.push({ key: 'input-body', label: 'lc0web input body projection', code: INPUT_BODY_WGSL });
@@ -6757,58 +7995,75 @@ function f32StorageBytes(elements: number): number {
 }
 
 function inputBodyGpuFootprintBytes(): number {
-  return paddedGpuBytes(DEFAULT_INPUT_PLANES * DEFAULT_TOKENS * 4)
-    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_POSITIONAL_CHANNELS * 4)
-    + paddedGpuBytes(DEFAULT_PADDED_INPUT_CHANNELS * DEFAULT_N * 4)
-    + paddedGpuBytes(DEFAULT_N * 4)
-    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_N * 4)
-    + paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_N * 4)
-    + paddedGpuBytes(4 * 4);
+  return (
+    paddedGpuBytes(DEFAULT_INPUT_PLANES * DEFAULT_TOKENS * 4) +
+    paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_POSITIONAL_CHANNELS * 4) +
+    paddedGpuBytes(DEFAULT_PADDED_INPUT_CHANNELS * DEFAULT_N * 4) +
+    paddedGpuBytes(DEFAULT_N * 4) +
+    paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_N * 4) +
+    paddedGpuBytes(DEFAULT_TOKENS * DEFAULT_N * 4) +
+    paddedGpuBytes(4 * 4)
+  );
 }
 
 function encoderLayerWeightFootprint(): Record<string, Lc0WebExecutionFootprintCategory> {
   const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
-  addFootprintCategory(categories, 'encoderAttentionWeights',
-    4 * paddedGpuBytes(matrixF16Bytes(DEFAULT_K, DEFAULT_N))
-    + 4 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N))
-    + 2 * paddedGpuBytes(vectorF16Bytes(1))
-    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)),
-    12);
-  addFootprintCategory(categories, 'encoderFfnWeights',
-    paddedGpuBytes(matrixF16Bytes(DEFAULT_N, DEFAULT_FFN_HIDDEN))
-    + paddedGpuBytes(vectorF16Bytes(DEFAULT_FFN_HIDDEN))
-    + paddedGpuBytes(matrixF16Bytes(DEFAULT_FFN_HIDDEN, DEFAULT_N))
-    + paddedGpuBytes(vectorF16Bytes(DEFAULT_N))
-    + paddedGpuBytes(vectorF16Bytes(1))
-    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)),
-    7);
-  addFootprintCategory(categories, 'encoderSmolgenWeights',
-    paddedGpuBytes(matrixF16Bytes(DEFAULT_N, DEFAULT_SMOLGEN_COMPRESSED))
-    + paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_FLAT, DEFAULT_SMOLGEN_HIDDEN))
-    + paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_HIDDEN))
-    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_HIDDEN))
-    + paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_HIDDEN, DEFAULT_SMOLGEN_FLAT))
-    + paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_FLAT))
-    + 2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_FLAT)),
-    9);
+  addFootprintCategory(
+    categories,
+    'encoderAttentionWeights',
+    4 * paddedGpuBytes(matrixF16Bytes(DEFAULT_K, DEFAULT_N)) +
+      4 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)) +
+      2 * paddedGpuBytes(vectorF16Bytes(1)) +
+      2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)),
+    12,
+  );
+  addFootprintCategory(
+    categories,
+    'encoderFfnWeights',
+    paddedGpuBytes(matrixF16Bytes(DEFAULT_N, DEFAULT_FFN_HIDDEN)) +
+      paddedGpuBytes(vectorF16Bytes(DEFAULT_FFN_HIDDEN)) +
+      paddedGpuBytes(matrixF16Bytes(DEFAULT_FFN_HIDDEN, DEFAULT_N)) +
+      paddedGpuBytes(vectorF16Bytes(DEFAULT_N)) +
+      paddedGpuBytes(vectorF16Bytes(1)) +
+      2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_N)),
+    7,
+  );
+  addFootprintCategory(
+    categories,
+    'encoderSmolgenWeights',
+    paddedGpuBytes(matrixF16Bytes(DEFAULT_N, DEFAULT_SMOLGEN_COMPRESSED)) +
+      paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_FLAT, DEFAULT_SMOLGEN_HIDDEN)) +
+      paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_HIDDEN)) +
+      2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_HIDDEN)) +
+      paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_HIDDEN, DEFAULT_SMOLGEN_FLAT)) +
+      paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_FLAT)) +
+      2 * paddedGpuBytes(vectorF16Bytes(DEFAULT_SMOLGEN_FLAT)),
+    9,
+  );
   return categories;
 }
 
-function addEncoderLayerScratchFootprint(categories: Record<string, Lc0WebExecutionFootprintCategory>, layers: number, physicalSlots: number, hasPodArgs: boolean): void {
-  const perPhysicalSlotSmolgen = f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
-    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT)
-    + f32StorageBytes(DEFAULT_SMOLGEN_HIDDEN)
-    + f32StorageBytes(DEFAULT_SMOLGEN_HIDDEN)
-    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT)
-    + f32StorageBytes(DEFAULT_SMOLGEN_FLAT);
-  const perPhysicalSlotAttention = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N * 3)
-    + f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
-    + f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS)
-    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
-    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
-    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
-  const perPhysicalSlotFfnScratch = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN)
-    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
+function addEncoderLayerScratchFootprint(
+  categories: Record<string, Lc0WebExecutionFootprintCategory>,
+  layers: number,
+  physicalSlots: number,
+  hasPodArgs: boolean,
+): void {
+  const perPhysicalSlotSmolgen =
+    f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS) +
+    f32StorageBytes(DEFAULT_SMOLGEN_FLAT) +
+    f32StorageBytes(DEFAULT_SMOLGEN_HIDDEN) +
+    f32StorageBytes(DEFAULT_SMOLGEN_HIDDEN) +
+    f32StorageBytes(DEFAULT_SMOLGEN_FLAT) +
+    f32StorageBytes(DEFAULT_SMOLGEN_FLAT);
+  const perPhysicalSlotAttention =
+    f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N * 3) +
+    f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS) +
+    f32StorageBytes(DEFAULT_HEADS * DEFAULT_TOKENS * DEFAULT_TOKENS) +
+    f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) +
+    f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) +
+    f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
+  const perPhysicalSlotFfnScratch = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_FFN_HIDDEN) + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
   const perLayerSlotOutput = f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N);
   const totalLayerSlots = layers * physicalSlots;
   addFootprintCategory(categories, 'encoderSmolgenScratch', perPhysicalSlotSmolgen * physicalSlots, 6 * physicalSlots);
@@ -6820,34 +8075,40 @@ function addEncoderLayerScratchFootprint(categories: Record<string, Lc0WebExecut
 
 function wgslHeadsFootprintCategories(): Record<string, Lc0WebExecutionFootprintCategory> {
   const categories: Record<string, Lc0WebExecutionFootprintCategory> = {};
-  addFootprintCategory(categories, 'wgslHeadWeights',
-    f32StorageBytes(DEFAULT_N * DEFAULT_N)
-    + f32StorageBytes(DEFAULT_N)
-    + f32StorageBytes(DEFAULT_N * DEFAULT_N)
-    + f32StorageBytes(DEFAULT_N)
-    + f32StorageBytes(DEFAULT_N * DEFAULT_N)
-    + f32StorageBytes(DEFAULT_N)
-    + f32StorageBytes(1)
-    + f32StorageBytes(DEFAULT_N * 4)
-    + f32StorageBytes(DEFAULT_POLICY_MAPPED_OUTPUTS)
-    + f32StorageBytes(DEFAULT_N * DEFAULT_VALUE_EMBED)
-    + f32StorageBytes(DEFAULT_VALUE_EMBED)
-    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN)
-    + f32StorageBytes(DEFAULT_VALUE_HIDDEN)
-    + f32StorageBytes(DEFAULT_VALUE_HIDDEN * 3)
-    + f32StorageBytes(3),
-    15);
-  addFootprintCategory(categories, 'wgslHeadScratch',
-    f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
-    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
-    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N)
-    + f32StorageBytes(DEFAULT_POLICY_OUTPUTS)
-    + f32StorageBytes(DEFAULT_POLICY_MAPPED_OUTPUTS)
-    + f32StorageBytes(DEFAULT_TOKENS * DEFAULT_VALUE_EMBED)
-    + f32StorageBytes(DEFAULT_VALUE_HIDDEN)
-    + f32StorageBytes(3)
-    + f32StorageBytes(3),
-    9);
+  addFootprintCategory(
+    categories,
+    'wgslHeadWeights',
+    f32StorageBytes(DEFAULT_N * DEFAULT_N) +
+      f32StorageBytes(DEFAULT_N) +
+      f32StorageBytes(DEFAULT_N * DEFAULT_N) +
+      f32StorageBytes(DEFAULT_N) +
+      f32StorageBytes(DEFAULT_N * DEFAULT_N) +
+      f32StorageBytes(DEFAULT_N) +
+      f32StorageBytes(1) +
+      f32StorageBytes(DEFAULT_N * 4) +
+      f32StorageBytes(DEFAULT_POLICY_MAPPED_OUTPUTS) +
+      f32StorageBytes(DEFAULT_N * DEFAULT_VALUE_EMBED) +
+      f32StorageBytes(DEFAULT_VALUE_EMBED) +
+      f32StorageBytes(DEFAULT_TOKENS * DEFAULT_VALUE_EMBED * DEFAULT_VALUE_HIDDEN) +
+      f32StorageBytes(DEFAULT_VALUE_HIDDEN) +
+      f32StorageBytes(DEFAULT_VALUE_HIDDEN * 3) +
+      f32StorageBytes(3),
+    15,
+  );
+  addFootprintCategory(
+    categories,
+    'wgslHeadScratch',
+    f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) +
+      f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) +
+      f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) +
+      f32StorageBytes(DEFAULT_POLICY_OUTPUTS) +
+      f32StorageBytes(DEFAULT_POLICY_MAPPED_OUTPUTS) +
+      f32StorageBytes(DEFAULT_TOKENS * DEFAULT_VALUE_EMBED) +
+      f32StorageBytes(DEFAULT_VALUE_HIDDEN) +
+      f32StorageBytes(3) +
+      f32StorageBytes(3),
+    9,
+  );
   addFootprintCategory(categories, 'legalPriorsBuffers', WGSL_GPU_LEGAL_MAX_MOVES * 4 + 4 * 4 + WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3);
   addFootprintCategory(categories, 'wgslHeadReadback', Math.max(WGSL_HEADS_READBACK_BYTES, WGSL_GPU_LEGAL_READBACK_BYTES), 1);
   addFootprintCategory(categories, 'wgslHeadUniforms', 5 * paddedGpuBytes(4 * 4), 5);
@@ -6973,11 +8234,13 @@ class Lc0WebHybridRuntime {
     const initialization = await Promise.allSettled([
       loadLc0WebModelPack(options.packUrl, {
         verifyShards: options.verifyShards ?? true,
-        tensorNames: Array.from(new Set([
-          ...inputBodyTensorNameList(),
-          ...layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)),
-          ...(encoderProfileOnly ? [] : policyValueHeadTensorNameList()),
-        ])),
+        tensorNames: Array.from(
+          new Set([
+            ...inputBodyTensorNameList(),
+            ...layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)),
+            ...(encoderProfileOnly ? [] : policyValueHeadTensorNameList()),
+          ]),
+        ),
       }),
       requestDevice({ timestampQuery: options.timestampQuery }),
       inputBackend === 'wasm' ? createLc0WasmInputEncoder() : Promise.resolve(undefined),
@@ -7008,7 +8271,8 @@ class Lc0WebHybridRuntime {
       const resourceFailure = initializedResources.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
       const headSessionResult = initializedResources[1];
       if (resourceFailure) {
-        if (headSessionResult.status === 'fulfilled' && headSessionResult.value) await ort.releaseOrtSession(headSessionResult.value.session).catch(() => undefined);
+        if (headSessionResult.status === 'fulfilled' && headSessionResult.value)
+          await ort.releaseOrtSession(headSessionResult.value.session).catch(() => undefined);
         throw resourceFailure.reason;
       }
       const pipelineCache = (initializedResources[0] as PromiseFulfilledResult<WgslPipelineCache>).value;
@@ -7024,23 +8288,42 @@ class Lc0WebHybridRuntime {
       const layerRuntimes: HybridEncoderLayerRuntime[] = [];
       const sharedSmolgenWeight = createStorageBuffer(device, tensorsByLayer[0].smolgen.smolgenWeight.bytes, usage.STORAGE | usage.COPY_DST);
       buffers.push(sharedSmolgenWeight);
-      const needsEncoderPodArgs = encoderUsesTvmPackedF16Qkv(encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(encoderKernelVariant);
+      const needsEncoderPodArgs =
+        encoderUsesTvmPackedF16Qkv(encoderKernelVariant) ||
+        encoderUsesTvmPackedF16AttentionOutProj(encoderKernelVariant) ||
+        encoderUsesTvmPackedF16Ffn(encoderKernelVariant);
       const encoderPodArgs = needsEncoderPodArgs ? createU32UniformBuffer(device, [1], usage.UNIFORM | usage.COPY_DST) : undefined;
       if (encoderPodArgs) buffers.push(encoderPodArgs);
-      const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(device, usage, encoderKernelVariant, encoderPodArgs);
+      const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(
+        device,
+        usage,
+        encoderKernelVariant,
+        encoderPodArgs,
+      );
       buffers.push(...sharedLayerScratchBuffers);
       let layerInput = inputBuffer;
       for (const tensors of tensorsByLayer) {
         const { weights, buffers: weightBuffers } = createHybridEncoderLayerWeights(device, tensors, usage, sharedSmolgenWeight);
         buffers.push(...weightBuffers);
-        const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(device, usage, weights, layerInput, encoderKernelVariant, sharedLayerScratch, pipelineCache);
+        const { runtime, buffers: slotBuffers } = createHybridEncoderLayerSlotRuntime(
+          device,
+          usage,
+          weights,
+          layerInput,
+          encoderKernelVariant,
+          sharedLayerScratch,
+          pipelineCache,
+        );
         buffers.push(...slotBuffers);
         layerRuntimes.push({ ...runtime, weights });
         layerInput = runtime.output;
       }
-      const wgslHeadShared = headBackend === 'wgsl' && headTensors ? createWgslPolicyValueHeadSharedResources(device, headTensors, usage, pipelineCache) : undefined;
+      const wgslHeadShared =
+        headBackend === 'wgsl' && headTensors ? createWgslPolicyValueHeadSharedResources(device, headTensors, usage, pipelineCache) : undefined;
       if (wgslHeadShared) buffers.push(...wgslHeadShared.buffers);
-      const wgslHeads = wgslHeadShared ? createWgslPolicyValueHeadRuntime(device, layerRuntimes[layerRuntimes.length - 1].output, usage, wgslHeadShared) : undefined;
+      const wgslHeads = wgslHeadShared
+        ? createWgslPolicyValueHeadRuntime(device, layerRuntimes[layerRuntimes.length - 1].output, usage, wgslHeadShared)
+        : undefined;
       if (wgslHeads) buffers.push(...wgslHeads.buffers);
       return new Lc0WebHybridRuntime({
         device,
@@ -7085,11 +8368,25 @@ class Lc0WebHybridRuntime {
     const inputBodyGpu = this.inputBodyShared ? createInputBodyGpuRuntime(this.device, inputBuffer, this.usage, this.inputBodyShared) : undefined;
     if (inputBodyGpu) this.buffers.push(...inputBodyGpu.buffers);
     const layerRuntimes: HybridEncoderLayerSlotRuntime[] = [];
-    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(this.device, this.usage, this.encoderKernelVariant, this.encoderPodArgs);
+    const { scratch: sharedLayerScratch, buffers: sharedLayerScratchBuffers } = createHybridEncoderLayerSlotScratch(
+      this.device,
+      this.usage,
+      this.encoderKernelVariant,
+      this.encoderPodArgs,
+    );
     this.buffers.push(...sharedLayerScratchBuffers);
     let layerInput = inputBuffer;
     for (const layer of this.layerRuntimes) {
-      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(this.device, this.usage, layer.weights, layerInput, this.encoderKernelVariant, sharedLayerScratch, this.pipelineCache, this.encoderPodArgs);
+      const { runtime, buffers } = createHybridEncoderLayerSlotRuntime(
+        this.device,
+        this.usage,
+        layer.weights,
+        layerInput,
+        this.encoderKernelVariant,
+        sharedLayerScratch,
+        this.pipelineCache,
+        this.encoderPodArgs,
+      );
       this.buffers.push(...buffers);
       layerRuntimes.push(runtime);
       layerInput = runtime.output;
@@ -7180,7 +8477,10 @@ class Lc0WebHybridRuntime {
     this.retirementPromises.add(retirement);
   }
 
-  private buildInputPayload(input: Lc0EvaluatorInput, historyFill: Lc0HistoryFill): { payload: Float32Array<ArrayBufferLike>; wasmTiming?: Lc0WasmInputEncoderTiming } {
+  private buildInputPayload(
+    input: Lc0EvaluatorInput,
+    historyFill: Lc0HistoryFill,
+  ): { payload: Float32Array<ArrayBufferLike>; wasmTiming?: Lc0WasmInputEncoderTiming } {
     if (this.inputBackend === 'js') return { payload: buildInitialEncoderActivation(input, this.inputTensors, historyFill) };
     if (this.inputBackend === 'wasm') {
       if (!this.wasmInputEncoder) throw new Error('WASM input encoder is not initialized');
@@ -7190,12 +8490,18 @@ class Lc0WebHybridRuntime {
     return { payload: buildInitialEncoderPlanes(input, historyFill) };
   }
 
-  private timingWasmFields(wasmTiming: Lc0WasmInputEncoderTiming | undefined): Pick<Lc0WebHybridTimingBreakdown, 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'> {
+  private timingWasmFields(
+    wasmTiming: Lc0WasmInputEncoderTiming | undefined,
+  ): Pick<Lc0WebHybridTimingBreakdown, 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'> {
     return wasmTiming ? { inputBridgeCopyMs: wasmTiming.bridgeCopyMs, wasmEncodeMs: wasmTiming.wasmEncodeMs, wasmTotalMs: wasmTiming.totalMs } : {};
   }
 
-  private timingWasmLegalPriorsFields(wasmTiming: Lc0WasmLegalPriorTiming | undefined): Pick<Lc0WebHybridTimingBreakdown, 'legalPriorsBridgeCopyMs' | 'legalPriorsWasmRunMs' | 'legalPriorsWasmTotalMs'> {
-    return wasmTiming ? { legalPriorsBridgeCopyMs: wasmTiming.bridgeCopyMs, legalPriorsWasmRunMs: wasmTiming.wasmRunMs, legalPriorsWasmTotalMs: wasmTiming.totalMs } : {};
+  private timingWasmLegalPriorsFields(
+    wasmTiming: Lc0WasmLegalPriorTiming | undefined,
+  ): Pick<Lc0WebHybridTimingBreakdown, 'legalPriorsBridgeCopyMs' | 'legalPriorsWasmRunMs' | 'legalPriorsWasmTotalMs'> {
+    return wasmTiming
+      ? { legalPriorsBridgeCopyMs: wasmTiming.bridgeCopyMs, legalPriorsWasmRunMs: wasmTiming.wasmRunMs, legalPriorsWasmTotalMs: wasmTiming.totalMs }
+      : {};
   }
 
   private wgslHeadReadbackBytes(): number {
@@ -7218,7 +8524,10 @@ class Lc0WebHybridRuntime {
     const layerWeight = encoderLayerWeightFootprint();
     for (const [name, entry] of Object.entries(layerWeight)) addFootprintCategory(categories, name, entry.bytes * this.layers, entry.count * this.layers);
     addFootprintCategory(categories, 'encoderSharedSmolgenWeight', paddedGpuBytes(matrixF16Bytes(DEFAULT_SMOLGEN_HIDDEN, DEFAULT_TOKENS * DEFAULT_TOKENS)), 1);
-    const hasPodArgs = encoderUsesTvmPackedF16Qkv(this.encoderKernelVariant) || encoderUsesTvmPackedF16AttentionOutProj(this.encoderKernelVariant) || encoderUsesTvmPackedF16Ffn(this.encoderKernelVariant);
+    const hasPodArgs =
+      encoderUsesTvmPackedF16Qkv(this.encoderKernelVariant) ||
+      encoderUsesTvmPackedF16AttentionOutProj(this.encoderKernelVariant) ||
+      encoderUsesTvmPackedF16Ffn(this.encoderKernelVariant);
     addEncoderLayerScratchFootprint(categories, this.layers, physicalSlots, hasPodArgs);
     if (this.headBackend === 'wgsl') {
       const headCategories = wgslHeadsFootprintCategories();
@@ -7227,13 +8536,19 @@ class Lc0WebHybridRuntime {
         addFootprintCategory(categories, name, entry.bytes * (shared ? 1 : physicalSlots), entry.count * (shared ? 1 : physicalSlots));
       }
     }
-    if (this.wgslBatchUploadCapacity > 0) addFootprintCategory(categories, 'batchUpload', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * this.wgslBatchUploadCapacity, 1);
+    if (this.wgslBatchUploadCapacity > 0)
+      addFootprintCategory(categories, 'batchUpload', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * this.wgslBatchUploadCapacity, 1);
     for (const capacity of this.wgslDeferredBatchUploadCapacities) {
       if (capacity > 0) addFootprintCategory(categories, 'batchUpload', f32StorageBytes(DEFAULT_TOKENS * DEFAULT_N) * capacity, 1);
     }
     if (this.wgslBatchReadbackCapacity > 0) addFootprintCategory(categories, 'batchReadback', this.wgslHeadReadbackBytes() * this.wgslBatchReadbackCapacity, 1);
     if (this.wgslDeferredReadbackBuffers.length > 0 && this.wgslDeferredReadbackCapacity > 0) {
-      addFootprintCategory(categories, 'batchReadback', this.wgslHeadReadbackBytes() * this.wgslDeferredReadbackCapacity * this.wgslDeferredReadbackBuffers.length, this.wgslDeferredReadbackBuffers.length);
+      addFootprintCategory(
+        categories,
+        'batchReadback',
+        this.wgslHeadReadbackBytes() * this.wgslDeferredReadbackCapacity * this.wgslDeferredReadbackBuffers.length,
+        this.wgslDeferredReadbackBuffers.length,
+      );
     }
     const gpuBufferBytes = footprintBytes(categories);
     const gpuBufferCount = Object.values(categories).reduce((sum, entry) => sum + entry.count, 0);
@@ -7253,7 +8568,13 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  private computeLegalPriors(board: ReturnType<typeof currentBoardAndFen>['board'], fen: string, mappedPolicy: ArrayLike<number>, policyTemperature: number, preparedLegalMoves?: ReturnType<typeof currentBoardAndFen>['preparedLegalMoves']): { legalPriors: Lc0Evaluation['legalPriors']; bestMove?: string; legalPriorsMs: number; wasmTiming?: Lc0WasmLegalPriorTiming } {
+  private computeLegalPriors(
+    board: ReturnType<typeof currentBoardAndFen>['board'],
+    fen: string,
+    mappedPolicy: ArrayLike<number>,
+    policyTemperature: number,
+    preparedLegalMoves?: ReturnType<typeof currentBoardAndFen>['preparedLegalMoves'],
+  ): { legalPriors: Lc0Evaluation['legalPriors']; bestMove?: string; legalPriorsMs: number; wasmTiming?: Lc0WasmLegalPriorTiming } {
     const legalPriorsStarted = nowMs();
     if (this.legalPriorsBackend === 'wasm') {
       if (!this.wasmLegalPriors) throw new Error('WASM legal-prior backend is not initialized');
@@ -7264,13 +8585,31 @@ class Lc0WebHybridRuntime {
     return { legalPriors, bestMove: legalPriors[0]?.uci, legalPriorsMs: nowMs() - legalPriorsStarted };
   }
 
-  async encode(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill }): Promise<{
+  async encode(
+    input: Lc0EvaluatorInput,
+    options: { historyFill: Lc0HistoryFill },
+  ): Promise<{
     board: ReturnType<typeof currentBoardAndFen>['board'];
     fen: string;
     preparedLegalMoves?: ReturnType<typeof currentBoardAndFen>['preparedLegalMoves'];
     output: Float32Array<ArrayBufferLike>;
     encoderDispatchSyncedMs: number;
-    timing: Pick<Lc0WebHybridTimingBreakdown, 'inputBuildMs' | 'inputUploadMs' | 'commandEncodeMs' | 'queueSubmitMs' | 'readbackSyncedMs' | 'readbackBytes' | 'readbackMapCount' | 'dispatchCount' | 'inputBackend' | 'encoderKernelVariant' | 'inputBridgeCopyMs' | 'wasmEncodeMs' | 'wasmTotalMs'>;
+    timing: Pick<
+      Lc0WebHybridTimingBreakdown,
+      | 'inputBuildMs'
+      | 'inputUploadMs'
+      | 'commandEncodeMs'
+      | 'queueSubmitMs'
+      | 'readbackSyncedMs'
+      | 'readbackBytes'
+      | 'readbackMapCount'
+      | 'dispatchCount'
+      | 'inputBackend'
+      | 'encoderKernelVariant'
+      | 'inputBridgeCopyMs'
+      | 'wasmEncodeMs'
+      | 'wasmTotalMs'
+    >;
   }> {
     const { board, fen, preparedLegalMoves } = currentBoardAndFen(input);
     const inputBuildStarted = nowMs();
@@ -7306,7 +8645,12 @@ class Lc0WebHybridRuntime {
     this.device.queue.submit([commandBuffer]);
     const queueSubmitMs = nowMs() - queueSubmitStarted;
     const readbackStarted = nowMs();
-    const output = await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
+    const output = await readF32OutputOnce(
+      this.device,
+      this.layerRuntimes[this.layerRuntimes.length - 1].output,
+      this.readbackBuffer,
+      DEFAULT_TOKENS * DEFAULT_N,
+    );
     const readbackSyncedMs = nowMs() - readbackStarted;
     return {
       board,
@@ -7314,22 +8658,38 @@ class Lc0WebHybridRuntime {
       preparedLegalMoves,
       output,
       encoderDispatchSyncedMs: nowMs() - blockStarted,
-      timing: { inputBuildMs, inputUploadMs, commandEncodeMs, queueSubmitMs, readbackSyncedMs, readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4, readbackMapCount: 1, dispatchCount: dispatchCounter.count, inputBackend: this.inputBackend, encoderKernelVariant: this.encoderKernelVariant, ...this.timingWasmFields(wasmTiming) },
+      timing: {
+        inputBuildMs,
+        inputUploadMs,
+        commandEncodeMs,
+        queueSubmitMs,
+        readbackSyncedMs,
+        readbackBytes: DEFAULT_TOKENS * DEFAULT_N * 4,
+        readbackMapCount: 1,
+        dispatchCount: dispatchCounter.count,
+        inputBackend: this.inputBackend,
+        encoderKernelVariant: this.encoderKernelVariant,
+        ...this.timingWasmFields(wasmTiming),
+      },
     };
   }
 
-  async profileEncoder(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; iterations: number; warmup: number; profileMode?: Lc0WebHybridEncoderProfileMode }): Promise<Lc0WebHybridEncoderProfileResult> {
+  async profileEncoder(
+    input: Lc0EvaluatorInput,
+    options: { historyFill: Lc0HistoryFill; iterations: number; warmup: number; profileMode?: Lc0WebHybridEncoderProfileMode },
+  ): Promise<Lc0WebHybridEncoderProfileResult> {
     const iterations = clampInteger(options.iterations, 1, 1, 100);
     const warmup = clampInteger(options.warmup, 1, 0, 20);
     const requestedProfileMode = options.profileMode ?? 'gpu-timestamp';
-    const timestampReady = requestedProfileMode === 'gpu-timestamp'
-      && this.gpuTimestampSupported
-      && !!this.device.createQuerySet
-      && !!this.usage.QUERY_RESOLVE;
+    const timestampReady = requestedProfileMode === 'gpu-timestamp' && this.gpuTimestampSupported && !!this.device.createQuerySet && !!this.usage.QUERY_RESOLVE;
     const profileMode: Lc0WebHybridEncoderProfileMode = timestampReady ? 'gpu-timestamp' : 'sync-staged';
     for (let i = 0; i < warmup; i++) await this.encode(input, { historyFill: options.historyFill });
     const aggregate = new Map<Lc0WebHybridEncoderProfileStageName, { label: string; totalMs: number; iterations: number }>();
-    const byLayer = Array.from({ length: this.layerRuntimes.length }, (_, layer) => ({ layer, totalMs: 0, stages: new Map<Lc0WebHybridEncoderProfileStageName, { label: string; totalMs: number; iterations: number }>() }));
+    const byLayer = Array.from({ length: this.layerRuntimes.length }, (_, layer) => ({
+      layer,
+      totalMs: 0,
+      stages: new Map<Lc0WebHybridEncoderProfileStageName, { label: string; totalMs: number; iterations: number }>(),
+    }));
     const addAggregate = (stage: Lc0WebHybridEncoderProfileStageName, label: string, elapsedMs: number): void => {
       const entry = aggregate.get(stage) ?? { label, totalMs: 0, iterations: 0 };
       entry.totalMs += elapsedMs;
@@ -7345,8 +8705,16 @@ class Lc0WebHybridRuntime {
       layer.stages.set(stage, entry);
       addAggregate(stage, label, elapsedMs);
     };
-    const toResult = (profiledStageTotalMs: number, readbackSyncedMs: number, output: Float32Array<ArrayBufferLike>, note: string): Lc0WebHybridEncoderProfileResult => {
-      const toStageTiming = (stage: Lc0WebHybridEncoderProfileStageName, entry: { label: string; totalMs: number; iterations: number }): Lc0WebHybridEncoderProfileStageTiming => ({
+    const toResult = (
+      profiledStageTotalMs: number,
+      readbackSyncedMs: number,
+      output: Float32Array<ArrayBufferLike>,
+      note: string,
+    ): Lc0WebHybridEncoderProfileResult => {
+      const toStageTiming = (
+        stage: Lc0WebHybridEncoderProfileStageName,
+        entry: { label: string; totalMs: number; iterations: number },
+      ): Lc0WebHybridEncoderProfileStageTiming => ({
         stage,
         label: entry.label,
         iterations: entry.iterations,
@@ -7369,11 +8737,15 @@ class Lc0WebHybridRuntime {
         profiledStageTotalMs,
         readbackSyncedMs,
         outputSample: Array.from(output.slice(0, 8)),
-        aggregateStageTimings: Array.from(aggregate.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
+        aggregateStageTimings: Array.from(aggregate.entries())
+          .map(([stage, entry]) => toStageTiming(stage, entry))
+          .sort((a, b) => b.totalMs - a.totalMs),
         layerTimings: byLayer.map((layer) => ({
           layer: layer.layer,
           totalMs: layer.totalMs,
-          stages: Array.from(layer.stages.entries()).map(([stage, entry]) => toStageTiming(stage, entry)).sort((a, b) => b.totalMs - a.totalMs),
+          stages: Array.from(layer.stages.entries())
+            .map(([stage, entry]) => toStageTiming(stage, entry))
+            .sort((a, b) => b.totalMs - a.totalMs),
         })),
         note,
         executionFootprint: this.executionFootprint(),
@@ -7401,7 +8773,12 @@ class Lc0WebHybridRuntime {
         let queryIndex = 0;
         try {
           const encoder = this.device.createCommandEncoder();
-          const encodeTimestampStage = (stage: Lc0WebHybridEncoderProfileStageName, label: string, layerIndex: number | undefined, encode: (pass: ComputePassLike) => void): void => {
+          const encodeTimestampStage = (
+            stage: Lc0WebHybridEncoderProfileStageName,
+            label: string,
+            layerIndex: number | undefined,
+            encode: (pass: ComputePassLike) => void,
+          ): void => {
             const begin = queryIndex++;
             const end = queryIndex++;
             records.push({ stage, label, layerIndex, begin, end });
@@ -7409,7 +8786,8 @@ class Lc0WebHybridRuntime {
             encode(pass);
             pass.end();
           };
-          if (this.inputBackend !== 'js') encodeTimestampStage('inputBody', 'input body projection', undefined, (pass) => encodeInputBodyPass(pass, this.inputBodyGpu!));
+          if (this.inputBackend !== 'js')
+            encodeTimestampStage('inputBody', 'input body projection', undefined, (pass) => encodeInputBodyPass(pass, this.inputBodyGpu!));
           for (let layerIndex = 0; layerIndex < this.layerRuntimes.length; layerIndex++) {
             const layer = this.layerRuntimes[layerIndex];
             encodeTimestampStage('smolgenCompress', 'smolgen compress', layerIndex, (pass) => encodeSmolgenCompressPass(pass, layer.smolgenPipelines));
@@ -7422,7 +8800,9 @@ class Lc0WebHybridRuntime {
             encodeTimestampStage('attentionScores', 'attention scores', layerIndex, (pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines));
             encodeTimestampStage('softmax', 'softmax', layerIndex, (pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines));
             encodeTimestampStage('attentionValue', 'attention value', layerIndex, (pass) => encodeAttentionValuePass(pass, layer.attentionPipelines));
-            encodeTimestampStage('outputProjection', 'attention output projection', layerIndex, (pass) => encodeAttentionOutputProjectionPass(pass, layer.attentionPipelines));
+            encodeTimestampStage('outputProjection', 'attention output projection', layerIndex, (pass) =>
+              encodeAttentionOutputProjectionPass(pass, layer.attentionPipelines),
+            );
             encodeTimestampStage('ln1', 'attention ln1', layerIndex, (pass) => encodeAttentionNormPass(pass, layer.attentionPipelines));
             encodeTimestampStage('ffnDense1', 'FFN dense1', layerIndex, (pass) => encodeFfnDense1Pass(pass, layer.ffnPipelines));
             encodeTimestampStage('ffnDense2Residual', 'FFN dense2 + residual', layerIndex, (pass) => encodeFfnDense2ResidualPass(pass, layer.ffnPipelines));
@@ -7451,7 +8831,12 @@ class Lc0WebHybridRuntime {
       output = await readF32OutputOnce(this.device, this.layerRuntimes[this.layerRuntimes.length - 1].output, this.readbackBuffer, DEFAULT_TOKENS * DEFAULT_N);
       const readbackSyncedMs = nowMs() - readbackStarted;
       const profiledStageTotalMs = Array.from(aggregate.values()).reduce((sum, entry) => sum + entry.totalMs, 0);
-      return toResult(profiledStageTotalMs, readbackSyncedMs, output, 'GPU timestamp profile encodes the full encoder as one command buffer per iteration and reads timestamp queries once, avoiding per-stage queue waits. Pass boundaries are still inserted around stages, so use this for lower-perturbation attribution rather than exact route latency.');
+      return toResult(
+        profiledStageTotalMs,
+        readbackSyncedMs,
+        output,
+        'GPU timestamp profile encodes the full encoder as one command buffer per iteration and reads timestamp queries once, avoiding per-stage queue waits. Pass boundaries are still inserted around stages, so use this for lower-perturbation attribution rather than exact route latency.',
+      );
     }
 
     const submitAndMeasure = async (encode: (pass: ComputePassLike) => void): Promise<number> => {
@@ -7508,13 +8893,28 @@ class Lc0WebHybridRuntime {
         addLayer(layerIndex, 'smolgenLn2', 'smolgen ln2', await submitAndMeasure((pass) => encodeSmolgenLn2Pass(pass, layer.smolgenPipelines)));
         addLayer(layerIndex, 'smolgenProject', 'smolgen project', await submitAndMeasure((pass) => encodeSmolgenProjectPass(pass, layer.smolgenPipelines)));
         addLayer(layerIndex, 'qkvProjection', 'QKV projection', await submitAndMeasure((pass) => encodeAttentionQkvPass(pass, layer.attentionPipelines)));
-        addLayer(layerIndex, 'attentionScores', 'attention scores', await submitAndMeasure((pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines)));
+        addLayer(
+          layerIndex,
+          'attentionScores',
+          'attention scores',
+          await submitAndMeasure((pass) => encodeAttentionScoresPass(pass, layer.attentionPipelines)),
+        );
         addLayer(layerIndex, 'softmax', 'softmax', await submitAndMeasure((pass) => encodeAttentionSoftmaxPass(pass, layer.attentionPipelines)));
         addLayer(layerIndex, 'attentionValue', 'attention value', await submitAndMeasure((pass) => encodeAttentionValuePass(pass, layer.attentionPipelines)));
-        addLayer(layerIndex, 'outputProjection', 'attention output projection', await submitAndMeasure((pass) => encodeAttentionOutputProjectionPass(pass, layer.attentionPipelines)));
+        addLayer(
+          layerIndex,
+          'outputProjection',
+          'attention output projection',
+          await submitAndMeasure((pass) => encodeAttentionOutputProjectionPass(pass, layer.attentionPipelines)),
+        );
         addLayer(layerIndex, 'ln1', 'attention ln1', await submitAndMeasure((pass) => encodeAttentionNormPass(pass, layer.attentionPipelines)));
         addLayer(layerIndex, 'ffnDense1', 'FFN dense1', await submitAndMeasure((pass) => encodeFfnDense1Pass(pass, layer.ffnPipelines)));
-        addLayer(layerIndex, 'ffnDense2Residual', 'FFN dense2 + residual', await submitAndMeasure((pass) => encodeFfnDense2ResidualPass(pass, layer.ffnPipelines)));
+        addLayer(
+          layerIndex,
+          'ffnDense2Residual',
+          'FFN dense2 + residual',
+          await submitAndMeasure((pass) => encodeFfnDense2ResidualPass(pass, layer.ffnPipelines)),
+        );
         addLayer(layerIndex, 'ln2', 'FFN ln2', await submitAndMeasure((pass) => encodeFfnLn2Pass(pass, layer.ffnPipelines)));
       }
       const readbackStarted = nowMs();
@@ -7522,7 +8922,12 @@ class Lc0WebHybridRuntime {
       readbackSyncedMs += nowMs() - readbackStarted;
     }
     const profiledStageTotalMs = Array.from(aggregate.values()).reduce((sum, entry) => sum + entry.totalMs, 0);
-    return toResult(profiledStageTotalMs, readbackSyncedMs, output, 'Sync-staged profiling intentionally submits and waits after each stage, so totals are sync-perturbed and should be used for relative attribution rather than direct route latency.');
+    return toResult(
+      profiledStageTotalMs,
+      readbackSyncedMs,
+      output,
+      'Sync-staged profiling intentionally submits and waits after each stage, so totals are sync-perturbed and should be used for relative attribution rather than direct route latency.',
+    );
   }
 
   async evaluate(input: Lc0EvaluatorInput, options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult> {
@@ -7586,7 +8991,12 @@ class Lc0WebHybridRuntime {
       const wdl: [number, number, number] = [Number(wdlValues[0]), Number(wdlValues[1]), Number(wdlValues[2])];
       const legalPriorsStarted = nowMs();
       const legalPriorsResult = gpuLegalOutput
-        ? { legalPriors: gpuLegalOutput.legalPriors, bestMove: gpuLegalOutput.legalPriors[0]?.uci, legalPriorsMs: (legalPriorsGpuSetupMs ?? 0) + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
+        ? {
+            legalPriors: gpuLegalOutput.legalPriors,
+            bestMove: gpuLegalOutput.legalPriors[0]?.uci,
+            legalPriorsMs: (legalPriorsGpuSetupMs ?? 0) + (nowMs() - legalPriorsStarted),
+            wasmTiming: undefined,
+          }
         : this.computeLegalPriors(board, fen, mappedPolicy, options.policyTemperature, preparedLegalMoves);
       const { legalPriors, bestMove, legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
       return {
@@ -7630,7 +9040,12 @@ class Lc0WebHybridRuntime {
     const encoded = await this.encode(input, { historyFill: options.historyFill });
     const heads = await runCachedPolicyValueHeadsOrt(encoded.output, this.headSession);
     const wdl: [number, number, number] = [Number(heads.wdl[0]), Number(heads.wdl[1]), Number(heads.wdl[2])];
-    const { legalPriors, bestMove, legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = this.computeLegalPriors(encoded.board, encoded.fen, heads.mappedPolicy, options.policyTemperature, encoded.preparedLegalMoves);
+    const {
+      legalPriors,
+      bestMove,
+      legalPriorsMs,
+      wasmTiming: legalPriorsWasmTiming,
+    } = this.computeLegalPriors(encoded.board, encoded.fen, heads.mappedPolicy, options.policyTemperature, encoded.preparedLegalMoves);
     return {
       status: 'LC0WEB_HYBRID_EVALUATION_DONE',
       backend: 'lc0web-wgsl-encoder-ort-heads',
@@ -7671,19 +9086,27 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  private async submitWgslBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }, readbackBuffer: BufferLike, sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {}): Promise<SubmittedWgslHybridBatch> {
+  private async submitWgslBatch(
+    inputs: Lc0EvaluatorInput[],
+    options: { historyFill: Lc0HistoryFill; policyTemperature: number },
+    readbackBuffer: BufferLike,
+    sequenceOptions: { batchSequenceIndex?: number; deferredReadbackSlot?: number } = {},
+  ): Promise<SubmittedWgslHybridBatch> {
     const totalStarted = nowMs();
-    const slots = sequenceOptions.deferredReadbackSlot === undefined
-      ? this.ensureWgslBatchSlots(inputs.length)
-      : this.ensureWgslDeferredBatchSlots(inputs.length, sequenceOptions.deferredReadbackSlot);
-    const uploadBuffer = sequenceOptions.deferredReadbackSlot === undefined
-      ? this.ensureWgslBatchUploadBuffer(inputs.length)
-      : this.ensureWgslDeferredBatchUploadBuffer(inputs.length, sequenceOptions.deferredReadbackSlot);
+    const slots =
+      sequenceOptions.deferredReadbackSlot === undefined
+        ? this.ensureWgslBatchSlots(inputs.length)
+        : this.ensureWgslDeferredBatchSlots(inputs.length, sequenceOptions.deferredReadbackSlot);
+    const uploadBuffer =
+      sequenceOptions.deferredReadbackSlot === undefined
+        ? this.ensureWgslBatchUploadBuffer(inputs.length)
+        : this.ensureWgslDeferredBatchUploadBuffer(inputs.length, sequenceOptions.deferredReadbackSlot);
     const outputElements = DEFAULT_TOKENS * DEFAULT_N;
     const inputElements = this.inputBackend !== 'js' ? DEFAULT_INPUT_PLANES * DEFAULT_TOKENS : outputElements;
     const boardsAndFens = inputs.map((input) => currentBoardAndFen(input));
     const legalPriorsSetupStarted = nowMs();
-    const legalCandidates = this.legalPriorsBackend === 'gpu' ? boardsAndFens.map(({ board, preparedLegalMoves }) => legalPolicyCandidates(board, preparedLegalMoves)) : undefined;
+    const legalCandidates =
+      this.legalPriorsBackend === 'gpu' ? boardsAndFens.map(({ board, preparedLegalMoves }) => legalPolicyCandidates(board, preparedLegalMoves)) : undefined;
     let legalPriorsSetupMs = legalCandidates ? nowMs() - legalPriorsSetupStarted : undefined;
     const inputBuildStarted = nowMs();
     const combinedInput = new Float32Array(inputs.length * inputElements);
@@ -7754,10 +9177,14 @@ class Lc0WebHybridRuntime {
     const readbackCopySubmitMs = nowMs() - readbackCopySubmitStarted;
     const submittedAt = nowMs();
     const queueState: SubmittedWgslHybridBatchQueueState = { startedAt: nowMs(), promise: Promise.resolve() };
-    queueState.promise = (this.device.queue.onSubmittedWorkDone?.() ?? Promise.resolve()).then(() => { queueState.settledAt = nowMs(); });
+    queueState.promise = (this.device.queue.onSubmittedWorkDone?.() ?? Promise.resolve()).then(() => {
+      queueState.settledAt = nowMs();
+    });
     const readbackMapRequestStarted = nowMs();
     const readbackMapState: SubmittedWgslHybridBatchReadbackMapState = { startedAt: nowMs(), promise: Promise.resolve() };
-    readbackMapState.promise = readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ).then(() => { readbackMapState.settledAt = nowMs(); });
+    readbackMapState.promise = readbackBuffer.mapAsync(gpuGlobals().GPUMapMode!.READ).then(() => {
+      readbackMapState.settledAt = nowMs();
+    });
     const readbackMapRequestMs = nowMs() - readbackMapRequestStarted;
     let jsLegalCandidates: LegalPolicyCandidate[][] | undefined;
     let legalPriorsPrepMs: number | undefined;
@@ -7801,7 +9228,11 @@ class Lc0WebHybridRuntime {
     };
   }
 
-  private async cleanupStartedReadbackMap(readbackBuffer: BufferLike, readbackMapState: SubmittedWgslHybridBatchReadbackMapState, queueState?: SubmittedWgslHybridBatchQueueState): Promise<void> {
+  private async cleanupStartedReadbackMap(
+    readbackBuffer: BufferLike,
+    readbackMapState: SubmittedWgslHybridBatchReadbackMapState,
+    queueState?: SubmittedWgslHybridBatchQueueState,
+  ): Promise<void> {
     try {
       await Promise.all([readbackMapState.promise, queueState?.promise ?? Promise.resolve()]);
       readbackBuffer.unmap();
@@ -7811,7 +9242,11 @@ class Lc0WebHybridRuntime {
     }
   }
 
-  private async finishWgslBatch(submitted: SubmittedWgslHybridBatch, options: { policyTemperature: number }, readbackMode: 'immediate' | 'deferred-double-buffered'): Promise<Lc0WebHybridEvaluationResult[]> {
+  private async finishWgslBatch(
+    submitted: SubmittedWgslHybridBatch,
+    options: { policyTemperature: number },
+    readbackMode: 'immediate' | 'deferred-double-buffered',
+  ): Promise<Lc0WebHybridEvaluationResult[]> {
     let readbackMapped = false;
     try {
       const headStarted = nowMs();
@@ -7844,7 +9279,8 @@ class Lc0WebHybridRuntime {
         const diagnosticFen = submitted.boardsAndFens[i].fen;
         const diagnosticBatchFens = submitted.boardsAndFens.map((entry) => entry.fen).join(' | ');
         const diagnosticSuffix = `slot ${i}, mode ${readbackMode}, sequence ${submitted.sequenceId}, batch ${submitted.batchSequenceIndex ?? 'single'}, position ${submitted.deferredReadbackSlot ?? 'immediate'}, fen ${diagnosticFen}, batchFens ${diagnosticBatchFens}`;
-        if (mappedPolicyF32 && !arrayHasNonzeroAndVariation(mappedPolicyF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for ${diagnosticSuffix}`);
+        if (mappedPolicyF32 && !arrayHasNonzeroAndVariation(mappedPolicyF32))
+          throw new Error(`WGSL hybrid batch heads produced zero or uniform mapped policy for ${diagnosticSuffix}`);
         if (!arrayHasNonzeroAndVariation(wdlF32)) throw new Error(`WGSL hybrid batch heads produced zero or uniform WDL for ${diagnosticSuffix}`);
         const mappedPolicy = mappedPolicyF32 ? Array.from(mappedPolicyF32) : [];
         const wdlValues = Array.from(wdlF32);
@@ -7852,16 +9288,29 @@ class Lc0WebHybridRuntime {
         const legalPriorsStarted = nowMs();
         const legalPriorsSetupMs = gpuLegalCandidates ? (submitted.legalPriorsSetupMs ?? 0) / submitted.inputs.length : 0;
         const legalPriorsPrepMs = submitted.jsLegalCandidates ? (submitted.legalPriorsPrepMs ?? 0) / submitted.inputs.length : 0;
-        const readbackOverlapHiddenMs = submitted.jsLegalCandidates ? Math.min(submitted.legalPriorsPrepMs ?? 0, readbackMapAsyncMs) / submitted.inputs.length : 0;
+        const readbackOverlapHiddenMs = submitted.jsLegalCandidates
+          ? Math.min(submitted.legalPriorsPrepMs ?? 0, readbackMapAsyncMs) / submitted.inputs.length
+          : 0;
         const jsLegalCandidates = submitted.jsLegalCandidates?.[i];
         const legalPriorsResult = gpuLegalCandidates
-          ? { legalPriors: legalPriorsFromGpuOutput(gpuLegalCandidates, readbackFloats.slice(base, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS)), bestMove: undefined as string | undefined, legalPriorsMs: legalPriorsSetupMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined }
+          ? {
+              legalPriors: legalPriorsFromGpuOutput(gpuLegalCandidates, readbackFloats.slice(base, base + WGSL_GPU_LEGAL_OUTPUT_FLOATS)),
+              bestMove: undefined as string | undefined,
+              legalPriorsMs: legalPriorsSetupMs + (nowMs() - legalPriorsStarted),
+              wasmTiming: undefined,
+            }
           : jsLegalCandidates
             ? (() => {
                 const legalPriors = legalPolicyPriorsFromCandidates(jsLegalCandidates, mappedPolicy, options.policyTemperature);
                 return { legalPriors, bestMove: legalPriors[0]?.uci, legalPriorsMs: legalPriorsPrepMs + (nowMs() - legalPriorsStarted), wasmTiming: undefined };
               })()
-            : this.computeLegalPriors(submitted.boardsAndFens[i].board, submitted.boardsAndFens[i].fen, mappedPolicy, options.policyTemperature, submitted.boardsAndFens[i].preparedLegalMoves);
+            : this.computeLegalPriors(
+                submitted.boardsAndFens[i].board,
+                submitted.boardsAndFens[i].fen,
+                mappedPolicy,
+                options.policyTemperature,
+                submitted.boardsAndFens[i].preparedLegalMoves,
+              );
         const legalPriors = legalPriorsResult.legalPriors;
         const bestMove = gpuLegalCandidates ? legalPriors[0]?.uci : legalPriorsResult.bestMove;
         const { legalPriorsMs, wasmTiming: legalPriorsWasmTiming } = legalPriorsResult;
@@ -7912,7 +9361,9 @@ class Lc0WebHybridRuntime {
             inputBackend: this.inputBackend,
             legalPriorsBackend: this.legalPriorsBackend,
             encoderKernelVariant: this.encoderKernelVariant,
-            ...(this.inputBackend === 'wasm' ? { inputBridgeCopyMs: submitted.inputBridgeCopyMs, wasmEncodeMs: submitted.wasmEncodeMs, wasmTotalMs: submitted.wasmTotalMs } : {}),
+            ...(this.inputBackend === 'wasm'
+              ? { inputBridgeCopyMs: submitted.inputBridgeCopyMs, wasmEncodeMs: submitted.wasmEncodeMs, wasmTotalMs: submitted.wasmTotalMs }
+              : {}),
             ...this.timingWasmLegalPriorsFields(legalPriorsWasmTiming),
           },
         });
@@ -7920,14 +9371,20 @@ class Lc0WebHybridRuntime {
       return out;
     } finally {
       if (readbackMapped) {
-        try { submitted.readbackBuffer.unmap(); }
-        catch { /* best-effort cleanup after a failed mapped-range read */ }
+        try {
+          submitted.readbackBuffer.unmap();
+        } catch {
+          /* best-effort cleanup after a failed mapped-range read */
+        }
       }
       if (submitted.deferredReadbackSlot !== undefined) this.wgslDeferredReadbackInUse.delete(submitted.deferredReadbackSlot);
     }
   }
 
-  async evaluateBatch(inputs: Lc0EvaluatorInput[], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[]> {
+  async evaluateBatch(
+    inputs: Lc0EvaluatorInput[],
+    options: { historyFill: Lc0HistoryFill; policyTemperature: number },
+  ): Promise<Lc0WebHybridEvaluationResult[]> {
     if (inputs.length === 0) return [];
     if (this.headBackend !== 'wgsl' || this.wgslBatchMode === 'serial') {
       const out: Lc0WebHybridEvaluationResult[] = [];
@@ -7939,7 +9396,10 @@ class Lc0WebHybridRuntime {
     return this.finishWgslBatch(submitted, options, 'immediate');
   }
 
-  async evaluateWgslBatchesDeferredReadback(batches: Lc0EvaluatorInput[][], options: { historyFill: Lc0HistoryFill; policyTemperature: number }): Promise<Lc0WebHybridEvaluationResult[][]> {
+  async evaluateWgslBatchesDeferredReadback(
+    batches: Lc0EvaluatorInput[][],
+    options: { historyFill: Lc0HistoryFill; policyTemperature: number },
+  ): Promise<Lc0WebHybridEvaluationResult[][]> {
     if (this.headBackend !== 'wgsl') throw new Error('deferred readback benchmark requires the WGSL-head backend');
     const out: Lc0WebHybridEvaluationResult[][] = new Array(batches.length);
     const maxBatchLength = Math.max(0, ...batches.map((batch) => batch.length));
@@ -7968,7 +9428,8 @@ class Lc0WebHybridRuntime {
         pending = undefined;
       }
       const deferredReadbackSlot = i % 2;
-      if (this.wgslDeferredReadbackInUse.has(deferredReadbackSlot)) throw new Error(`WGSL deferred readback slot ${deferredReadbackSlot} reused before its prior result was mapped`);
+      if (this.wgslDeferredReadbackInUse.has(deferredReadbackSlot))
+        throw new Error(`WGSL deferred readback slot ${deferredReadbackSlot} reused before its prior result was mapped`);
       const readbackBuffer = this.ensureWgslDeferredReadbackBuffer(batch.length, deferredReadbackSlot);
       this.wgslDeferredReadbackInUse.add(deferredReadbackSlot);
       let submitted: SubmittedWgslHybridBatch;
@@ -8005,11 +9466,17 @@ class Lc0WebHybridRuntime {
       if (this.headSession) await ort.releaseOrtSession(this.headSession.session).catch(() => undefined);
       for (const buffer of this.buffers) {
         if (this.retiredBuffers.has(buffer)) continue;
-        try { buffer.destroy?.(); }
-        catch { /* best-effort cleanup before final device destruction */ }
+        try {
+          buffer.destroy?.();
+        } catch {
+          /* best-effort cleanup before final device destruction */
+        }
       }
-      try { this.device.destroy?.(); }
-      catch { /* disposal is idempotent and failure-safe */ }
+      try {
+        this.device.destroy?.();
+      } catch {
+        /* disposal is idempotent and failure-safe */
+      }
     })();
     return this.disposePromise;
   }
@@ -8081,18 +9548,69 @@ function mean(values: number[]): number {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 }
 
-function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffered', wallMs: number, batches: Lc0WebHybridEvaluationResult[][]): Lc0WebWgslDeferredReadbackBenchModeResult {
+function summarizeHybridEvaluations(
+  mode: 'immediate' | 'deferred-double-buffered',
+  wallMs: number,
+  batches: Lc0WebHybridEvaluationResult[][],
+): Lc0WebWgslDeferredReadbackBenchModeResult {
   const flat = batches.flat();
-  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = ['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'queueDrainFenceLatencyMs', 'readbackCopyEncodeMs', 'readbackCopySubmitMs', 'readbackSyncedMs', 'readbackMapRequestMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'legalPriorsMs', 'legalPriorsPrepMs', 'readbackOverlapCpuMs', 'readbackOverlapHiddenMs', 'legalPriorsBridgeCopyMs', 'legalPriorsWasmRunMs', 'legalPriorsWasmTotalMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount'];
-  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>(['totalEvalMs', 'inputBuildMs', 'inputUploadMs', 'commandEncodeMs', 'queueSubmitMs', 'queueDrainFenceLatencyMs', 'readbackCopyEncodeMs', 'readbackCopySubmitMs', 'readbackSyncedMs', 'readbackMapRequestMs', 'readbackMapAsyncMs', 'readbackMapAsyncWaitMs', 'readbackMapCopyMs', 'deferredReadbackDelayMs', 'headRunMs', 'readbackBytes', 'readbackMapCount', 'dispatchCount']);
+  const timingKeys: Array<keyof Lc0WebHybridTimingBreakdown> = [
+    'totalEvalMs',
+    'inputBuildMs',
+    'inputUploadMs',
+    'commandEncodeMs',
+    'queueSubmitMs',
+    'queueDrainFenceLatencyMs',
+    'readbackCopyEncodeMs',
+    'readbackCopySubmitMs',
+    'readbackSyncedMs',
+    'readbackMapRequestMs',
+    'readbackMapAsyncMs',
+    'readbackMapAsyncWaitMs',
+    'readbackMapCopyMs',
+    'deferredReadbackDelayMs',
+    'headRunMs',
+    'legalPriorsMs',
+    'legalPriorsPrepMs',
+    'readbackOverlapCpuMs',
+    'readbackOverlapHiddenMs',
+    'legalPriorsBridgeCopyMs',
+    'legalPriorsWasmRunMs',
+    'legalPriorsWasmTotalMs',
+    'readbackBytes',
+    'readbackMapCount',
+    'dispatchCount',
+  ];
+  const physicalBatchScopedKeys = new Set<keyof Lc0WebHybridTimingBreakdown>([
+    'totalEvalMs',
+    'inputBuildMs',
+    'inputUploadMs',
+    'commandEncodeMs',
+    'queueSubmitMs',
+    'queueDrainFenceLatencyMs',
+    'readbackCopyEncodeMs',
+    'readbackCopySubmitMs',
+    'readbackSyncedMs',
+    'readbackMapRequestMs',
+    'readbackMapAsyncMs',
+    'readbackMapAsyncWaitMs',
+    'readbackMapCopyMs',
+    'deferredReadbackDelayMs',
+    'headRunMs',
+    'readbackBytes',
+    'readbackMapCount',
+    'dispatchCount',
+  ]);
   const timingMeans: Partial<Record<keyof Lc0WebHybridTimingBreakdown, number>> = {};
   for (const key of timingKeys) {
-    const values = flat.map((entry) => {
-      const value = entry.timing[key];
-      if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-      const physicalBatchSize = Math.max(1, Math.floor(Number(entry.timing.physicalBatchSize ?? 1)));
-      return physicalBatchScopedKeys.has(key) ? value / physicalBatchSize : value;
-    }).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const values = flat
+      .map((entry) => {
+        const value = entry.timing[key];
+        if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+        const physicalBatchSize = Math.max(1, Math.floor(Number(entry.timing.physicalBatchSize ?? 1)));
+        return physicalBatchScopedKeys.has(key) ? value / physicalBatchSize : value;
+      })
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     if (values.length) timingMeans[key] = mean(values);
   }
   return {
@@ -8108,7 +9626,9 @@ function summarizeHybridEvaluations(mode: 'immediate' | 'deferred-double-buffere
 
 function buildRoundRobinBatches(inputs: Lc0EvaluatorInput[], batchSize: number, batches: number): Lc0EvaluatorInput[][] {
   if (!inputs.length) throw new Error('deferred readback benchmark requires at least one input');
-  return Array.from({ length: batches }, (_, batchIndex) => Array.from({ length: batchSize }, (_, slot) => inputs[(batchIndex * batchSize + slot) % inputs.length]));
+  return Array.from({ length: batches }, (_, batchIndex) =>
+    Array.from({ length: batchSize }, (_, slot) => inputs[(batchIndex * batchSize + slot) % inputs.length]),
+  );
 }
 
 export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
@@ -8141,7 +9661,13 @@ export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
   try {
     const runImmediate = async (batches: Lc0EvaluatorInput[][]): Promise<Lc0WebHybridEvaluationResult[][]> => {
       const out: Lc0WebHybridEvaluationResult[][] = [];
-      for (const batch of batches) out.push(await runtime.evaluateBatch(batch, { historyFill: options.historyFill ?? 'fen_only', policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE }));
+      for (const batch of batches)
+        out.push(
+          await runtime.evaluateBatch(batch, {
+            historyFill: options.historyFill ?? 'fen_only',
+            policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE,
+          }),
+        );
       return out;
     };
     if (warmup) await runImmediate(buildRoundRobinBatches(options.inputs, batchSize, warmup));
@@ -8150,10 +9676,17 @@ export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
     const immediateResults = await runImmediate(immediateBatches);
     const immediate = summarizeHybridEvaluations('immediate', nowMs() - started, immediateResults);
 
-    if (warmup) await runtime.evaluateWgslBatchesDeferredReadback(buildRoundRobinBatches(options.inputs, batchSize, warmup), { historyFill: options.historyFill ?? 'fen_only', policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE });
+    if (warmup)
+      await runtime.evaluateWgslBatchesDeferredReadback(buildRoundRobinBatches(options.inputs, batchSize, warmup), {
+        historyFill: options.historyFill ?? 'fen_only',
+        policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE,
+      });
     const deferredBatches = buildRoundRobinBatches(options.inputs, batchSize, iterations);
     started = nowMs();
-    const deferredResults = await runtime.evaluateWgslBatchesDeferredReadback(deferredBatches, { historyFill: options.historyFill ?? 'fen_only', policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE });
+    const deferredResults = await runtime.evaluateWgslBatchesDeferredReadback(deferredBatches, {
+      historyFill: options.historyFill ?? 'fen_only',
+      policyTemperature: options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE,
+    });
     const deferred = summarizeHybridEvaluations('deferred-double-buffered', nowMs() - started, deferredResults);
 
     return {
@@ -8177,7 +9710,10 @@ export async function runLc0WebWgslDeferredReadbackBenchmark(options: {
   }
 }
 
-type Lc0WebHybridEvaluatorRuntime = Pick<Lc0WebHybridRuntime, 'evaluate' | 'evaluateBatch' | 'evaluateWgslBatchesDeferredReadback' | 'executionFootprint' | 'dispose'>;
+type Lc0WebHybridEvaluatorRuntime = Pick<
+  Lc0WebHybridRuntime,
+  'evaluate' | 'evaluateBatch' | 'evaluateWgslBatchesDeferredReadback' | 'executionFootprint' | 'dispose'
+>;
 
 export interface Lc0WebHybridEvaluatorDependencies {
   createRuntime?: (options: Lc0WebHybridRuntimeCreateOptions) => Promise<Lc0WebHybridEvaluatorRuntime>;
@@ -8230,11 +9766,13 @@ export class Lc0WebHybridEvaluator {
         legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
       });
-      runtimePromise.then((runtime) => {
-        if (this.runtimePromise === runtimePromise) this.currentRuntime = runtime;
-      }).catch(() => {
-        if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
-      });
+      runtimePromise
+        .then((runtime) => {
+          if (this.runtimePromise === runtimePromise) this.currentRuntime = runtime;
+        })
+        .catch(() => {
+          if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
+        });
       this.runtimePromise = runtimePromise;
     }
     return this.runtimePromise;
@@ -8247,15 +9785,20 @@ export class Lc0WebHybridEvaluator {
   private enqueueEvaluation<T>(work: () => Promise<T>): Promise<T> {
     if (this.disposed) return Promise.reject(new Error('LC0 WebGPU hybrid evaluator has been disposed'));
     const run = this.evaluationQueue.then(work, work);
-    this.evaluationQueue = run.then(() => undefined, () => undefined);
+    this.evaluationQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
     return run;
   }
 
   async evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
-    return this.enqueueEvaluation(async () => (await this.runtime()).evaluate(input, {
-      historyFill: this.historyFill,
-      policyTemperature: this.policyTemperature,
-    }));
+    return this.enqueueEvaluation(async () =>
+      (await this.runtime()).evaluate(input, {
+        historyFill: this.historyFill,
+        policyTemperature: this.policyTemperature,
+      }),
+    );
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
@@ -8272,7 +9815,8 @@ export class Lc0WebHybridEvaluator {
     return this.enqueueEvaluation(async () => {
       const runtime = await this.runtime();
       const options = { historyFill: this.historyFill, policyTemperature: this.policyTemperature };
-      if (this.headBackend === 'wgsl' && this.wgslBatchMode === 'physical' && batches.length > 1) return runtime.evaluateWgslBatchesDeferredReadback(batches, options);
+      if (this.headBackend === 'wgsl' && this.wgslBatchMode === 'physical' && batches.length > 1)
+        return runtime.evaluateWgslBatchesDeferredReadback(batches, options);
       const out: Lc0Evaluation[][] = [];
       for (const batch of batches) out.push(await runtime.evaluateBatch(batch, options));
       return out;
@@ -8397,8 +9941,10 @@ export async function runLc0WebWgslHeadsVsOrtFixtures(options: {
         wgslMappedPolicySample: heads.mappedPolicySample,
         ortMappedPolicySample: heads.ortHeads.mappedPolicySample,
       };
-      if (mappedPolicyDiff.maxAbsError > mappedPolicyTolerance) throw new Error(`WGSL heads fixture ${fixture.id} mapped-policy maxAbsDiff=${mappedPolicyDiff.maxAbsError}, tolerance=${mappedPolicyTolerance}`);
-      if (wdlDiff.maxAbsError > wdlTolerance) throw new Error(`WGSL heads fixture ${fixture.id} WDL maxAbsDiff=${wdlDiff.maxAbsError}, tolerance=${wdlTolerance}`);
+      if (mappedPolicyDiff.maxAbsError > mappedPolicyTolerance)
+        throw new Error(`WGSL heads fixture ${fixture.id} mapped-policy maxAbsDiff=${mappedPolicyDiff.maxAbsError}, tolerance=${mappedPolicyTolerance}`);
+      if (wdlDiff.maxAbsError > wdlTolerance)
+        throw new Error(`WGSL heads fixture ${fixture.id} WDL maxAbsDiff=${wdlDiff.maxAbsError}, tolerance=${wdlTolerance}`);
       if (!result.bestMoveMatch) throw new Error(`WGSL heads fixture ${fixture.id} best move ${result.wgslBestMove} != ORT ${result.ortBestMove}`);
       evaluations.push(result);
     }
@@ -8535,9 +10081,21 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
     const attentionAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.alpha.bytes), usage.STORAGE | usage.COPY_DST);
     const ln1Scale = createStorageBuffer(device, tensors.lnScale.bytes, usage.STORAGE | usage.COPY_DST);
     const ln1Bias = createStorageBuffer(device, tensors.lnBias.bytes, usage.STORAGE | usage.COPY_DST);
-    const ffnDense1Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense1Weight.bytes, DEFAULT_N, DEFAULT_FFN_HIDDEN, usage.STORAGE | usage.COPY_DST);
+    const ffnDense1Weight = createTransposedF16StorageBuffer(
+      device,
+      tensors.ffnDense1Weight.bytes,
+      DEFAULT_N,
+      DEFAULT_FFN_HIDDEN,
+      usage.STORAGE | usage.COPY_DST,
+    );
     const ffnDense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
-    const ffnDense2Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
+    const ffnDense2Weight = createTransposedF16StorageBuffer(
+      device,
+      tensors.ffnDense2Weight.bytes,
+      DEFAULT_FFN_HIDDEN,
+      DEFAULT_N,
+      usage.STORAGE | usage.COPY_DST,
+    );
     const ffnDense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
     const ffnAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
     const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
@@ -8552,10 +10110,60 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
     const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE });
     const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
     const readback = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
-    buffers.push(input, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output, readback);
+    buffers.push(
+      input,
+      qWeight,
+      qBias,
+      kWeight,
+      kBias,
+      vWeight,
+      vBias,
+      scale,
+      smolgenBias,
+      outWeight,
+      outBias,
+      attentionAlpha,
+      ln1Scale,
+      ln1Bias,
+      ffnDense1Weight,
+      ffnDense1Bias,
+      ffnDense2Weight,
+      ffnDense2Bias,
+      ffnAlpha,
+      ln2Scale,
+      ln2Bias,
+      qkv,
+      scores,
+      probs,
+      attn,
+      attentionSkip,
+      attentionOutput,
+      ffnHidden,
+      ffnSkip,
+      output,
+      readback,
+    );
     const attentionPipelines = createAttentionOutputPipelines(device, {
-      input, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv, scores, probs, attn,
-      outWeight, outBias, alpha: attentionAlpha, skip: attentionSkip, lnScale: ln1Scale, lnBias: ln1Bias, output: attentionOutput,
+      input,
+      qWeight,
+      qBias,
+      kWeight,
+      kBias,
+      vWeight,
+      vBias,
+      scale,
+      smolgenBias,
+      qkv,
+      scores,
+      probs,
+      attn,
+      outWeight,
+      outBias,
+      alpha: attentionAlpha,
+      skip: attentionSkip,
+      lnScale: ln1Scale,
+      lnBias: ln1Bias,
+      output: attentionOutput,
     });
     const ffnPipelines = createEncoder0FfnPipelines(device, {
       input: attentionOutput,
@@ -8582,30 +10190,29 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       pass.end();
       return encoder.finish();
     };
-    const encodeQkv = (count: number) => encodePipelineStage(
-      attentionPipelines.qkv,
-      attentionPipelines.qkvBind,
-      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8)),
-      count,
-    );
-    const encodeAttentionScores = (count: number) => encodePipelineStage(
-      attentionPipelines.score,
-      attentionPipelines.scoreBind,
-      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS),
-      count,
-    );
-    const encodeSoftmax = (count: number) => encodePipelineStage(
-      attentionPipelines.softmax,
-      attentionPipelines.softmaxBind,
-      (pass) => pass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS),
-      count,
-    );
-    const encodeAttentionValue = (count: number) => encodePipelineStage(
-      attentionPipelines.value,
-      attentionPipelines.valueBind,
-      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS),
-      count,
-    );
+    const encodeQkv = (count: number) =>
+      encodePipelineStage(
+        attentionPipelines.qkv,
+        attentionPipelines.qkvBind,
+        (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8)),
+        count,
+      );
+    const encodeAttentionScores = (count: number) =>
+      encodePipelineStage(
+        attentionPipelines.score,
+        attentionPipelines.scoreBind,
+        (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_TOKENS / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS),
+        count,
+      );
+    const encodeSoftmax = (count: number) =>
+      encodePipelineStage(attentionPipelines.softmax, attentionPipelines.softmaxBind, (pass) => pass.dispatchWorkgroups(DEFAULT_HEADS * DEFAULT_TOKENS), count);
+    const encodeAttentionValue = (count: number) =>
+      encodePipelineStage(
+        attentionPipelines.value,
+        attentionPipelines.valueBind,
+        (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_HEAD_DIM / 8), Math.ceil(DEFAULT_TOKENS / 8), DEFAULT_HEADS),
+        count,
+      );
     const encodeOutputProjectionLn1 = (count: number): unknown => {
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
@@ -8620,24 +10227,21 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
       pass.end();
       return encoder.finish();
     };
-    const encodeFfnDense1 = (count: number) => encodePipelineStage(
-      ffnPipelines.dense1,
-      ffnPipelines.dense1Bind,
-      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_FFN_HIDDEN / 8), Math.ceil(DEFAULT_TOKENS / 8)),
-      count,
-    );
-    const encodeFfnDense2Residual = (count: number) => encodePipelineStage(
-      ffnPipelines.dense2,
-      ffnPipelines.dense2Bind,
-      (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8)),
-      count,
-    );
-    const encodeLn2 = (count: number) => encodePipelineStage(
-      ffnPipelines.ln2,
-      ffnPipelines.ln2Bind,
-      (pass) => pass.dispatchWorkgroups(DEFAULT_TOKENS),
-      count,
-    );
+    const encodeFfnDense1 = (count: number) =>
+      encodePipelineStage(
+        ffnPipelines.dense1,
+        ffnPipelines.dense1Bind,
+        (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_FFN_HIDDEN / 8), Math.ceil(DEFAULT_TOKENS / 8)),
+        count,
+      );
+    const encodeFfnDense2Residual = (count: number) =>
+      encodePipelineStage(
+        ffnPipelines.dense2,
+        ffnPipelines.dense2Bind,
+        (pass) => pass.dispatchWorkgroups(Math.ceil(DEFAULT_N / 8), Math.ceil(DEFAULT_TOKENS / 8)),
+        count,
+      );
+    const encodeLn2 = (count: number) => encodePipelineStage(ffnPipelines.ln2, ffnPipelines.ln2Bind, (pass) => pass.dispatchWorkgroups(DEFAULT_TOKENS), count);
     const encodeAttention = (count: number) => {
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
@@ -8815,10 +10419,9 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
   const layerTensorNames = prefixes.map((prefix) => lc0WebEncoderBlockTensorNames(prefix));
   const pack = await loadLc0WebModelPack(options.packUrl, {
     verifyShards: options.verifyShards ?? true,
-    tensorNames: Array.from(new Set([
-      ...layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)),
-      ...(compareHeads ? policyValueHeadTensorNameList() : []),
-    ])),
+    tensorNames: Array.from(
+      new Set([...layerTensorNames.flatMap((names) => encoderBlockTensorNameList(names)), ...(compareHeads ? policyValueHeadTensorNameList() : [])]),
+    ),
   });
   const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
   const headTensors = compareHeads ? loadPolicyValueHeadTensors(pack) : undefined;
@@ -8851,9 +10454,21 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
       const attentionAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.alpha.bytes), usage.STORAGE | usage.COPY_DST);
       const ln1Scale = createStorageBuffer(device, tensors.lnScale.bytes, usage.STORAGE | usage.COPY_DST);
       const ln1Bias = createStorageBuffer(device, tensors.lnBias.bytes, usage.STORAGE | usage.COPY_DST);
-      const ffnDense1Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense1Weight.bytes, DEFAULT_N, DEFAULT_FFN_HIDDEN, usage.STORAGE | usage.COPY_DST);
+      const ffnDense1Weight = createTransposedF16StorageBuffer(
+        device,
+        tensors.ffnDense1Weight.bytes,
+        DEFAULT_N,
+        DEFAULT_FFN_HIDDEN,
+        usage.STORAGE | usage.COPY_DST,
+      );
       const ffnDense1Bias = createStorageBuffer(device, tensors.ffnDense1Bias.bytes, usage.STORAGE | usage.COPY_DST);
-      const ffnDense2Weight = createTransposedF16StorageBuffer(device, tensors.ffnDense2Weight.bytes, DEFAULT_FFN_HIDDEN, DEFAULT_N, usage.STORAGE | usage.COPY_DST);
+      const ffnDense2Weight = createTransposedF16StorageBuffer(
+        device,
+        tensors.ffnDense2Weight.bytes,
+        DEFAULT_FFN_HIDDEN,
+        DEFAULT_N,
+        usage.STORAGE | usage.COPY_DST,
+      );
       const ffnDense2Bias = createStorageBuffer(device, tensors.ffnDense2Bias.bytes, usage.STORAGE | usage.COPY_DST);
       const ffnAlpha = createStorageBuffer(device, paddedF16ScalarBytes(tensors.ffnAlpha.bytes), usage.STORAGE | usage.COPY_DST);
       const ln2Scale = createStorageBuffer(device, tensors.ln2Scale.bytes, usage.STORAGE | usage.COPY_DST);
@@ -8868,10 +10483,59 @@ export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStack
       const ffnSkip = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE });
       const output = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_SRC });
       const readback = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
-      buffers.push(qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, outWeight, outBias, attentionAlpha, ln1Scale, ln1Bias, ffnDense1Weight, ffnDense1Bias, ffnDense2Weight, ffnDense2Bias, ffnAlpha, ln2Scale, ln2Bias, qkv, scores, probs, attn, attentionSkip, attentionOutput, ffnHidden, ffnSkip, output, readback);
+      buffers.push(
+        qWeight,
+        qBias,
+        kWeight,
+        kBias,
+        vWeight,
+        vBias,
+        scale,
+        smolgenBias,
+        outWeight,
+        outBias,
+        attentionAlpha,
+        ln1Scale,
+        ln1Bias,
+        ffnDense1Weight,
+        ffnDense1Bias,
+        ffnDense2Weight,
+        ffnDense2Bias,
+        ffnAlpha,
+        ln2Scale,
+        ln2Bias,
+        qkv,
+        scores,
+        probs,
+        attn,
+        attentionSkip,
+        attentionOutput,
+        ffnHidden,
+        ffnSkip,
+        output,
+        readback,
+      );
       const attentionPipelines = createAttentionOutputPipelines(device, {
-        input: gpuInput, qWeight, qBias, kWeight, kBias, vWeight, vBias, scale, smolgenBias, qkv, scores, probs, attn,
-        outWeight, outBias, alpha: attentionAlpha, skip: attentionSkip, lnScale: ln1Scale, lnBias: ln1Bias, output: attentionOutput,
+        input: gpuInput,
+        qWeight,
+        qBias,
+        kWeight,
+        kBias,
+        vWeight,
+        vBias,
+        scale,
+        smolgenBias,
+        qkv,
+        scores,
+        probs,
+        attn,
+        outWeight,
+        outBias,
+        alpha: attentionAlpha,
+        skip: attentionSkip,
+        lnScale: ln1Scale,
+        lnBias: ln1Bias,
+        output: attentionOutput,
       });
       const ffnPipelines = createEncoder0FfnPipelines(device, {
         input: attentionOutput,

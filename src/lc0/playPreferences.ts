@@ -31,7 +31,7 @@ function finiteNumber(value: unknown, fallback: number): number {
 }
 
 export function normalizePlayPreferences(value: unknown, validEngineIds: ReadonlySet<string>): PlayPreferences {
-  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const engineId = typeof raw.engineId === 'string' && validEngineIds.has(raw.engineId) ? raw.engineId : DEFAULT_PLAY_PREFERENCES.engineId;
   const color = raw.color === 'black' || raw.color === 'random' ? raw.color : 'white';
   const maiaStyle = raw.maiaStyle === 'argmax' ? 'argmax' : 'sample';

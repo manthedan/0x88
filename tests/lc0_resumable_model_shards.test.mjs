@@ -1,22 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import {
-  clearResumableLc0ModelShardCache,
-  loadResumableLc0ModelForOrt,
-} from '../src/lc0/modelCache.ts';
-import {
-  createBenchmarkRunDirectory,
-  parseArgs as parseBenchmarkArgs,
-} from '../scripts/bench_resumable_model_shards.mjs';
-import {
-  generateResumableModelShards,
-  writeFileAtomically,
-} from '../scripts/generate_resumable_model_shards.mjs';
+import { createBenchmarkRunDirectory, parseArgs as parseBenchmarkArgs } from '../scripts/bench_resumable_model_shards.mjs';
+import { generateResumableModelShards, writeFileAtomically } from '../scripts/generate_resumable_model_shards.mjs';
 import {
   FileModelShardStore,
   localFileFetch,
@@ -24,6 +14,7 @@ import {
   reconstructResumableModelShards,
   writeReconstructedModelAtomically,
 } from '../scripts/reconstruct_resumable_model_shards.mjs';
+import { clearResumableLc0ModelShardCache, loadResumableLc0ModelForOrt } from '../src/lc0/modelCache.ts';
 
 const MIB = 1024 * 1024;
 const CHUNK_BYTES = 16 * MIB;
@@ -124,10 +115,15 @@ function responseWithUrl(body, init, url) {
 
 class MemoryShardStore {
   constructor(entries = []) {
-    this.entries = new Map(entries.map((entry) => [entry.sha256, {
-      bytes: entry.bytes.slice(0),
-      lastUsedAt: entry.lastUsedAt ?? 0,
-    }]));
+    this.entries = new Map(
+      entries.map((entry) => [
+        entry.sha256,
+        {
+          bytes: entry.bytes.slice(0),
+          lastUsedAt: entry.lastUsedAt ?? 0,
+        },
+      ]),
+    );
     this.deleted = [];
     this.touched = [];
   }
@@ -275,7 +271,9 @@ test('resumable shard generation uses ordered 16 MiB content hashes and reconstr
   });
   assert.equal(hashRepaired.uniqueBytesWritten, CHUNK_BYTES);
   assert.equal(
-    createHash('sha256').update(await readFile(firstShardPath)).digest('hex'),
+    createHash('sha256')
+      .update(await readFile(firstShardPath))
+      .digest('hex'),
     entry.manifest.shards[0].sha256,
   );
 
@@ -332,29 +330,34 @@ test('oversized shard responses are cancelled before unbounded buffering', async
   let cancelled = false;
   let shardFetches = 0;
   await assert.rejects(
-    loadResumableLc0ModelForOrt(pathToFileURL(entry.manifestPath).href, loaderOptions(entry, {
-      concurrency: 1,
-      corruptionRetries: 0,
-      fetchFn: async (input, init) => {
-        const url = typeof input === 'string' ? input : input.url;
-        if (!url.endsWith('.bin')) return fileFetch(input, init);
-        shardFetches += 1;
-        let sentExpectedBytes = false;
-        return new Response(new ReadableStream({
-          pull(controller) {
-            if (!sentExpectedBytes) {
-              sentExpectedBytes = true;
-              controller.enqueue(new Uint8Array(CHUNK_BYTES));
-            } else {
-              controller.enqueue(Uint8Array.of(1));
-            }
-          },
-          cancel() {
-            cancelled = true;
-          },
-        }));
-      },
-    })),
+    loadResumableLc0ModelForOrt(
+      pathToFileURL(entry.manifestPath).href,
+      loaderOptions(entry, {
+        concurrency: 1,
+        corruptionRetries: 0,
+        fetchFn: async (input, init) => {
+          const url = typeof input === 'string' ? input : input.url;
+          if (!url.endsWith('.bin')) return fileFetch(input, init);
+          shardFetches += 1;
+          let sentExpectedBytes = false;
+          return new Response(
+            new ReadableStream({
+              pull(controller) {
+                if (!sentExpectedBytes) {
+                  sentExpectedBytes = true;
+                  controller.enqueue(new Uint8Array(CHUNK_BYTES));
+                } else {
+                  controller.enqueue(Uint8Array.of(1));
+                }
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          );
+        },
+      }),
+    ),
     /corruption persisted/,
   );
   assert.equal(shardFetches, 1);
@@ -386,11 +389,13 @@ test('local file fetch streams JSON and shard bodies while propagating aborts', 
 
   const abortBytes = Buffer.alloc(CHUNK_BYTES, 0x35);
   manifest.decoded = { bytes: abortBytes.byteLength, sha256: sha256(abortBytes) };
-  manifest.shards = [{
-    bytes: abortBytes.byteLength,
-    sha256: manifest.decoded.sha256,
-    url: 'model.bin',
-  }];
+  manifest.shards = [
+    {
+      bytes: abortBytes.byteLength,
+      sha256: manifest.decoded.sha256,
+      url: 'model.bin',
+    },
+  ];
   await writeFile(manifestPath, JSON.stringify(manifest));
   await writeFile(shardPath, abortBytes);
   await (await fetchFile(pathToFileURL(manifestPath).href)).json();
@@ -447,10 +452,14 @@ test('reconstruction wrapper confines shard files to the manifest publication ro
     ['HTTPS URL', 'https://models.example/outside.bin', /must be relative/],
   ].entries()) {
     await writeFile(manifestPath, JSON.stringify(singleShardManifest(shard, shardUrl)));
-    await assert.rejects(reconstructResumableModelShards({
-      ...options,
-      cacheDir: join(root, `cache-rejected-url-${index}`),
-    }), expected, name);
+    await assert.rejects(
+      reconstructResumableModelShards({
+        ...options,
+        cacheDir: join(root, `cache-rejected-url-${index}`),
+      }),
+      expected,
+      name,
+    );
   }
 
   await symlink(root, join(publicationRoot, 'outside-link'));
@@ -531,7 +540,10 @@ test('filesystem shard cache bounds oversized reads and propagates aborts', asyn
     const read = store.getBounded(hash, bytes.byteLength, controller.signal);
     setImmediate(() => controller.abort());
     await assert.rejects(read, { name: 'AbortError' });
-    assert.equal((await store.list()).some((entry) => entry.sha256 === hash), true);
+    assert.equal(
+      (await store.list()).some((entry) => entry.sha256 === hash),
+      true,
+    );
   });
 
   await t.test('concurrent stores use collision-resistant temporary paths', async () => {
@@ -542,10 +554,7 @@ test('filesystem shard cache bounds oversized reads and propagates aborts', asyn
     const originalNow = Date.now;
     Date.now = () => 1;
     try {
-      await Promise.all([
-        first.put(hash, bytes.buffer),
-        second.put(hash, bytes.buffer),
-      ]);
+      await Promise.all([first.put(hash, bytes.buffer), second.put(hash, bytes.buffer)]);
     } finally {
       Date.now = originalNow;
     }
@@ -711,17 +720,21 @@ test('remote manifest bodies are bounded before JSON parsing and validation', as
         researchOnly: true,
         maxManifestBytes: 32,
         shardStore: new MemoryShardStore(),
-        fetchFn: async () => new Response(new ReadableStream({
-          pull(controller) {
-            controller.enqueue(Buffer.from('{}'));
-            controller.close();
-          },
-          cancel() {
-            cancelled = true;
-          },
-        }), {
-          headers: { 'content-length': '33' },
-        }),
+        fetchFn: async () =>
+          new Response(
+            new ReadableStream({
+              pull(controller) {
+                controller.enqueue(Buffer.from('{}'));
+                controller.close();
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            {
+              headers: { 'content-length': '33' },
+            },
+          ),
       }),
       /manifest exceeded configured limit 32 bytes/,
     );
@@ -735,14 +748,17 @@ test('remote manifest bodies are bounded before JSON parsing and validation', as
         researchOnly: true,
         maxManifestBytes: 32,
         shardStore: new MemoryShardStore(),
-        fetchFn: async () => new Response(new ReadableStream({
-          start(controller) {
-            controller.enqueue(Buffer.alloc(33, 0x7b));
-          },
-          cancel() {
-            cancelled = true;
-          },
-        })),
+        fetchFn: async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(Buffer.alloc(33, 0x7b));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          ),
       }),
       /manifest exceeded configured limit 32 bytes/,
     );
@@ -754,20 +770,23 @@ test('remote manifest bodies are bounded before JSON parsing and validation', as
     const manifest = singleShardManifest(bytes);
     const manifestBody = JSON.stringify(manifest);
     const maxManifestBytes = Buffer.byteLength(manifestBody);
-    const store = new MemoryShardStore([{
-      sha256: manifest.shards[0].sha256,
-      bytes: bytes.buffer,
-    }]);
+    const store = new MemoryShardStore([
+      {
+        sha256: manifest.shards[0].sha256,
+        bytes: bytes.buffer,
+      },
+    ]);
     const result = await loadResumableLc0ModelForOrt(manifestUrl, {
       researchOnly: true,
       maxManifestBytes,
       shardStore: store,
-      fetchFn: async () => new Response(manifestBody, {
-        headers: {
-          'content-encoding': 'gzip',
-          'content-length': String(maxManifestBytes + 1),
-        },
-      }),
+      fetchFn: async () =>
+        new Response(manifestBody, {
+          headers: {
+            'content-encoding': 'gzip',
+            'content-length': String(maxManifestBytes + 1),
+          },
+        }),
     });
     assert.deepEqual(Buffer.from(result.model), bytes);
 
@@ -777,19 +796,23 @@ test('remote manifest bodies are bounded before JSON parsing and validation', as
         researchOnly: true,
         maxManifestBytes: maxManifestBytes - 1,
         shardStore: store,
-        fetchFn: async () => new Response(new ReadableStream({
-          start(controller) {
-            controller.enqueue(Buffer.from(manifestBody));
-          },
-          cancel() {
-            cancelled = true;
-          },
-        }), {
-          headers: {
-            'content-encoding': 'gzip',
-            'content-length': '1',
-          },
-        }),
+        fetchFn: async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(Buffer.from(manifestBody));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            {
+              headers: {
+                'content-encoding': 'gzip',
+                'content-length': '1',
+              },
+            },
+          ),
       }),
       new RegExp(`manifest exceeded configured limit ${maxManifestBytes - 1} bytes`),
     );
@@ -915,26 +938,19 @@ test('cache byte eviction removes one unknown-size entry without draining known 
     { sha256: activeHash, bytes: activeBytes.buffer, lastUsedAt: 3 },
   ]);
   const list = store.list.bind(store);
-  store.list = async () => (await list()).map((entry) => (
-    entry.sha256 === unknownHash ? { ...entry, bytes: Infinity } : entry
-  ));
-  const result = await loadResumableLc0ModelForOrt(
-    'https://models.example/research/unknown-cache-size.resumable.json',
-    {
-      researchOnly: true,
-      maxCacheEntries: Infinity,
-      maxCacheBytes: knownBytes.byteLength + activeBytes.byteLength,
-      shardStore: store,
-      fetchFn: async () => new Response(JSON.stringify(manifest)),
-    },
-  );
+  store.list = async () => (await list()).map((entry) => (entry.sha256 === unknownHash ? { ...entry, bytes: Infinity } : entry));
+  const result = await loadResumableLc0ModelForOrt('https://models.example/research/unknown-cache-size.resumable.json', {
+    researchOnly: true,
+    maxCacheEntries: Infinity,
+    maxCacheBytes: knownBytes.byteLength + activeBytes.byteLength,
+    shardStore: store,
+    fetchFn: async () => new Response(JSON.stringify(manifest)),
+  });
   assert.equal(result.reusedShards, 1);
   assert.deepEqual(store.deleted, [unknownHash]);
   assert.equal(store.entries.has(knownHash), true);
   assert.equal(store.entries.has(activeHash), true);
-  const retainedKnownBytes = (await store.list())
-    .filter((entry) => Number.isFinite(entry.bytes))
-    .reduce((sum, entry) => sum + entry.bytes, 0);
+  const retainedKnownBytes = (await store.list()).filter((entry) => Number.isFinite(entry.bytes)).reduce((sum, entry) => sum + entry.bytes, 0);
   assert(retainedKnownBytes <= knownBytes.byteLength + activeBytes.byteLength);
 });
 
@@ -1132,9 +1148,7 @@ test('final eviction preserves shards protected by another active load', async (
   const incomingShardUrl = new URL(incomingManifest.shards[0].url, incomingManifestUrl).href;
   const protectedHash = protectedManifest.shards[0].sha256;
   const incomingHash = incomingManifest.shards[0].sha256;
-  const store = new MemoryShardStore([
-    { sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 },
-  ]);
+  const store = new MemoryShardStore([{ sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 }]);
   store.touch = async () => {};
   let protectedReads = 0;
   let releaseProtectedReconstruction;
@@ -1200,12 +1214,8 @@ test('active shard protection is isolated between different custom stores', asyn
   const incomingManifestUrl = 'https://models.example/research/custom-store-incoming.resumable.json';
   const protectedHash = protectedManifest.shards[0].sha256;
   const incomingHash = incomingManifest.shards[0].sha256;
-  const protectedStore = new MemoryShardStore([
-    { sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 },
-  ]);
-  const incomingStore = new MemoryShardStore([
-    { sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 },
-  ]);
+  const protectedStore = new MemoryShardStore([{ sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 }]);
+  const incomingStore = new MemoryShardStore([{ sha256: protectedHash, bytes: protectedBytes.buffer, lastUsedAt: 1 }]);
   protectedStore.touch = async () => {};
   let protectedReads = 0;
   let releaseProtectedReconstruction;
@@ -1311,9 +1321,7 @@ test('failed loads release process-wide shard protection', async () => {
   const replacementManifestUrl = 'https://models.example/research/replacement.resumable.json';
   const replacementShardUrl = new URL(replacementManifest.shards[0].url, replacementManifestUrl).href;
   const failedHash = failedManifest.shards[0].sha256;
-  const store = new MemoryShardStore([
-    { sha256: failedHash, bytes: failedBytes.buffer, lastUsedAt: 1 },
-  ]);
+  const store = new MemoryShardStore([{ sha256: failedHash, bytes: failedBytes.buffer, lastUsedAt: 1 }]);
   store.touch = async () => {};
   const originalGet = store.get.bind(store);
   let failedReads = 0;
@@ -1492,13 +1500,17 @@ test('first shard worker failure aborts siblings and waits for their settlement'
         if (url.endsWith('/slow.bin')) {
           slowStarted();
           return new Promise((resolve, reject) => {
-            init.signal.addEventListener('abort', () => {
-              siblingAborted = true;
-              setTimeout(() => {
-                siblingSettled = true;
-                reject(new DOMException('The operation was aborted', 'AbortError'));
-              }, 10);
-            }, { once: true });
+            init.signal.addEventListener(
+              'abort',
+              () => {
+                siblingAborted = true;
+                setTimeout(() => {
+                  siblingSettled = true;
+                  reject(new DOMException('The operation was aborted', 'AbortError'));
+                }, 10);
+              },
+              { once: true },
+            );
           });
         }
         return new Response(null, { status: 404 });
@@ -1730,16 +1742,19 @@ test('abort around 40% persists completed shards and resume does not redownload 
   const controller = new AbortController();
   let abortCompletedShards = 0;
   await assert.rejects(
-    loadResumableLc0ModelForOrt(pathToFileURL(entry.manifestPath).href, loaderOptions(entry, {
-      concurrency: 1,
-      signal: controller.signal,
-      onProgress(progress) {
-        if (progress.phase === 'download' && progress.completedBytes >= progress.totalBytes * 0.4) {
-          abortCompletedShards = progress.completedShards;
-          controller.abort();
-        }
-      },
-    })),
+    loadResumableLc0ModelForOrt(
+      pathToFileURL(entry.manifestPath).href,
+      loaderOptions(entry, {
+        concurrency: 1,
+        signal: controller.signal,
+        onProgress(progress) {
+          if (progress.phase === 'download' && progress.completedBytes >= progress.totalBytes * 0.4) {
+            abortCompletedShards = progress.completedShards;
+            controller.abort();
+          }
+        },
+      }),
+    ),
     { name: 'AbortError' },
   );
   assert.equal(abortCompletedShards, 3);
@@ -1747,14 +1762,17 @@ test('abort around 40% persists completed shards and resume does not redownload 
 
   const fetched = [];
   const fileFetch = localFileFetch(dirname(entry.manifestPath));
-  const resumed = await loadResumableLc0ModelForOrt(pathToFileURL(entry.manifestPath).href, loaderOptions(entry, {
-    concurrency: 2,
-    fetchFn: async (input, init) => {
-      const url = typeof input === 'string' ? input : input.url;
-      if (url.endsWith('.bin')) fetched.push(url);
-      return fileFetch(input, init);
-    },
-  }));
+  const resumed = await loadResumableLc0ModelForOrt(
+    pathToFileURL(entry.manifestPath).href,
+    loaderOptions(entry, {
+      concurrency: 2,
+      fetchFn: async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.endsWith('.bin')) fetched.push(url);
+        return fileFetch(input, init);
+      },
+    }),
+  );
   assert.equal(resumed.reusedShards, 3);
   assert.equal(resumed.downloadedShards, 3);
   assert.equal(fetched.length, 3);
@@ -1770,13 +1788,16 @@ test('cached corruption is evicted and only the corrupt shard is redownloaded', 
 
   let shardFetches = 0;
   const fileFetch = localFileFetch(dirname(entry.manifestPath));
-  const repaired = await loadResumableLc0ModelForOrt(manifestUrl, loaderOptions(entry, {
-    fetchFn: async (input, init) => {
-      const url = typeof input === 'string' ? input : input.url;
-      if (url.endsWith('.bin')) shardFetches += 1;
-      return fileFetch(input, init);
-    },
-  }));
+  const repaired = await loadResumableLc0ModelForOrt(
+    manifestUrl,
+    loaderOptions(entry, {
+      fetchFn: async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.endsWith('.bin')) shardFetches += 1;
+        return fileFetch(input, init);
+      },
+    }),
+  );
   assert.equal(repaired.corruptShardsEvicted, 1);
   assert.equal(repaired.downloadedShards, 1);
   assert.equal(repaired.reusedShards, 5);
@@ -1790,16 +1811,19 @@ test('corrupt network shard is retried, persisted only when valid, and ordered r
   const targetUrl = new URL(entry.manifest.shards[1].url, manifestUrl).href;
   const attempts = new Map();
   const fileFetch = localFileFetch(dirname(entry.manifestPath));
-  const result = await loadResumableLc0ModelForOrt(manifestUrl, loaderOptions(entry, {
-    concurrency: 2,
-    fetchFn: async (input, init) => {
-      const url = typeof input === 'string' ? input : input.url;
-      const count = (attempts.get(url) ?? 0) + 1;
-      attempts.set(url, count);
-      if (url === targetUrl && count === 1) return new Response(Buffer.alloc(CHUNK_BYTES, 0xff));
-      return fileFetch(input, init);
-    },
-  }));
+  const result = await loadResumableLc0ModelForOrt(
+    manifestUrl,
+    loaderOptions(entry, {
+      concurrency: 2,
+      fetchFn: async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        const count = (attempts.get(url) ?? 0) + 1;
+        attempts.set(url, count);
+        if (url === targetUrl && count === 1) return new Response(Buffer.alloc(CHUNK_BYTES, 0xff));
+        return fileFetch(input, init);
+      },
+    }),
+  );
   assert.equal(attempts.get(targetUrl), 2);
   assert.equal(result.corruptionRetries, 1);
   assert.equal(result.downloadedBytes, MODEL_BYTES + CHUNK_BYTES);
@@ -1809,20 +1833,13 @@ test('corrupt network shard is retried, persisted only when valid, and ordered r
   [reordered.shards[0], reordered.shards[1]] = [reordered.shards[1], reordered.shards[0]];
   const reversedPath = join(entry.root, 'published', 'reordered.resumable.json');
   await writeFile(reversedPath, JSON.stringify(reordered));
-  await assert.rejects(
-    loadResumableLc0ModelForOrt(pathToFileURL(reversedPath).href, loaderOptions(entry)),
-    /decoded sha256 mismatch/,
-  );
+  await assert.rejects(loadResumableLc0ModelForOrt(pathToFileURL(reversedPath).href, loaderOptions(entry)), /decoded sha256 mismatch/);
 });
 
 test('duplicate content hashes fetch once, reconstruct every ordered reference, and stay memory-bounded', async () => {
   const entry = await fixture();
   const duplicate = structuredClone(entry.manifest);
-  duplicate.shards = [
-    entry.manifest.shards[0],
-    entry.manifest.shards[0],
-    entry.manifest.shards.at(-1),
-  ];
+  duplicate.shards = [entry.manifest.shards[0], entry.manifest.shards[0], entry.manifest.shards.at(-1)];
   const first = await readFile(new URL(entry.manifest.shards[0].url, pathToFileURL(entry.manifestPath)));
   const last = await readFile(new URL(entry.manifest.shards.at(-1).url, pathToFileURL(entry.manifestPath)));
   const decoded = Buffer.concat([first, first, last]);
@@ -1874,11 +1891,14 @@ test('duplicate content hashes fetch once, reconstruct every ordered reference, 
 test('persistent shard cache applies explicit bounds and supports research-only cleanup', async () => {
   const entry = await fixture();
   const store = new FileModelShardStore(entry.cacheDir);
-  const result = await loadResumableLc0ModelForOrt(pathToFileURL(entry.manifestPath).href, loaderOptions(entry, {
-    shardStore: store,
-    maxCacheEntries: 2,
-    maxCacheBytes: 2 * CHUNK_BYTES,
-  }));
+  const result = await loadResumableLc0ModelForOrt(
+    pathToFileURL(entry.manifestPath).href,
+    loaderOptions(entry, {
+      shardStore: store,
+      maxCacheEntries: 2,
+      maxCacheBytes: 2 * CHUNK_BYTES,
+    }),
+  );
   assert.equal(result.sha256, entry.expectedSha256);
   const retained = await store.list();
   assert.equal(retained.length, 2);
@@ -1886,10 +1906,7 @@ test('persistent shard cache applies explicit bounds and supports research-only 
   const cleared = await clearResumableLc0ModelShardCache({ researchOnly: true, shardStore: store });
   assert.equal(cleared.removedEntries, 2);
   assert.equal((await store.list()).length, 0);
-  await assert.rejects(
-    clearResumableLc0ModelShardCache({ researchOnly: false, shardStore: store }),
-    /researchOnly: true/,
-  );
+  await assert.rejects(clearResumableLc0ModelShardCache({ researchOnly: false, shardStore: store }), /researchOnly: true/);
 });
 
 test('reconstruction wrapper passes explicit manifest allocation limits to the loader', async () => {
@@ -1918,14 +1935,8 @@ test('reconstruction wrapper passes explicit manifest allocation limits to the l
     reconstructResumableModelShards({ ...options, maxManifestBytes: Buffer.byteLength(manifestBody) - 1 }),
     /manifest exceeded configured limit/,
   );
-  await assert.rejects(
-    reconstructResumableModelShards({ ...options, maxDecodedBytes: 1 }),
-    /decoded bytes exceed configured limit 1/,
-  );
-  await assert.rejects(
-    reconstructResumableModelShards({ ...options, maxShardReferences: 1 }),
-    /shard references exceed configured limit 1/,
-  );
+  await assert.rejects(reconstructResumableModelShards({ ...options, maxDecodedBytes: 1 }), /decoded bytes exceed configured limit 1/);
+  await assert.rejects(reconstructResumableModelShards({ ...options, maxShardReferences: 1 }), /shard references exceed configured limit 1/);
 
   const validManifestBody = JSON.stringify(singleShardManifest(shard, 'model.bin'));
   await writeFile(manifestPath, validManifestBody);
@@ -1990,10 +2001,7 @@ test('reconstruction and benchmark CLIs parse positive safe manifest allocation 
   for (const { parse, required } of parsers) {
     for (const option of ['--max-manifest-bytes', '--max-decoded-bytes', '--max-shard-references']) {
       for (const invalid of ['0', '-1', '1.5', '9007199254740992']) {
-        assert.throws(
-          () => parse(['node', 'script', ...required, option, invalid]),
-          new RegExp(`${option} must be a positive safe integer`),
-        );
+        assert.throws(() => parse(['node', 'script', ...required, option, invalid]), new RegExp(`${option} must be a positive safe integer`));
       }
     }
   }
@@ -2006,10 +2014,7 @@ test('reconstruction wrapper rejects invalid allocation limits before filesystem
   };
   for (const option of ['maxManifestBytes', 'maxDecodedBytes', 'maxShardReferences']) {
     for (const invalid of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
-      await assert.rejects(
-        reconstructResumableModelShards({ ...base, [option]: invalid }),
-        new RegExp(`${option} must be a positive safe integer`),
-      );
+      await assert.rejects(reconstructResumableModelShards({ ...base, [option]: invalid }), new RegExp(`${option} must be a positive safe integer`));
     }
   }
 });

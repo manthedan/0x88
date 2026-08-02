@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { readFile, realpath, lstat, access } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { access, lstat, readFile, realpath } from 'node:fs/promises';
 
 const MANIFEST = 'public/models/maia3/manifest.json';
 const PROVENANCE = 'docs/model_provenance/maia3.md';
@@ -52,7 +52,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.stack ?? error.message : error);
+  console.error(error instanceof Error ? (error.stack ?? error.message) : error);
   if (error?.code === 'ENOENT' || /ENOENT/.test(String(error))) {
     console.error('\nMaia3 model is not staged (clean checkout?). Run: npm run maia3:stage-assets');
   }

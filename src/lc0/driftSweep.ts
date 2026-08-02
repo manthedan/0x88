@@ -91,12 +91,7 @@ export function sweepFixtureInput(fixture: SweepFixture): Lc0EvaluatorInput {
   throw new Error(`Sweep fixture ${fixture.id} has neither moves nor fen`);
 }
 
-export async function runEvalSweep(
-  label: string,
-  evaluator: SweepEvaluator,
-  fixtures: SweepFixture[],
-  topK = 5,
-): Promise<EvalSweepResult> {
+export async function runEvalSweep(label: string, evaluator: SweepEvaluator, fixtures: SweepFixture[], topK = 5): Promise<EvalSweepResult> {
   const records: SweepEvalRecord[] = [];
   const startedAll = nowMs();
   for (const fixture of fixtures) {

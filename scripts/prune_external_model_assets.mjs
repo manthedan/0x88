@@ -32,14 +32,15 @@ function removeMatchingFiles(dir, predicate) {
 // lightweight manifests/docs in dist for diagnostics, but remove local blobs,
 // generated sidecars, source archives, and precompressed copies so Netlify only
 // hosts the app shell.
-removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : /\.onnx(?:\.(?:br|gz))?$/.test(name));
+removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => (isDir ? name.endsWith('.lc0web') : /\.onnx(?:\.(?:br|gz))?$/.test(name)));
 removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && /\.onnx(?:\.(?:br|gz))?$/.test(name));
 remove(join(root, 'models', 'bt4_soap_rem_c19000_final.onnx'));
 remove(join(root, 'models', 'monty'));
 remove(join(root, 'monty'));
 for (const dir of EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES) {
-  removeMatchingFiles(join(root, dir), (name, path, isDir) => isDir ? false
-    : !isSameOriginThreadedStockfishScript(relative(root, path)) && isExternalArtifactName(name));
+  removeMatchingFiles(join(root, dir), (name, path, isDir) =>
+    isDir ? false : !isSameOriginThreadedStockfishScript(relative(root, path)) && isExternalArtifactName(name),
+  );
 }
 
 console.log(JSON.stringify({ status: 'EXTERNAL_DEPLOY_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));

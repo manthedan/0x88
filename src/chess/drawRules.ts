@@ -1,4 +1,4 @@
-import { boardToFen, type BoardState } from './board.ts';
+import { type BoardState, boardToFen } from './board.ts';
 
 export type AutomaticDrawReason = 'threefold' | 'fiftyMove' | 'insufficientMaterial';
 
@@ -32,8 +32,13 @@ export function insufficientMaterial(board: BoardState): boolean {
     const role = piece[1];
     if (role === 'p' || role === 'r' || role === 'q') return false;
     if (role === 'n') {
-      if (color === 'w') { whiteMinors++; whiteKnights++; }
-      else { blackMinors++; blackKnights++; }
+      if (color === 'w') {
+        whiteMinors++;
+        whiteKnights++;
+      } else {
+        blackMinors++;
+        blackKnights++;
+      }
     } else if (role === 'b') {
       if (color === 'w') whiteMinors++;
       else blackMinors++;

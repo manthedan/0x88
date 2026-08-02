@@ -1,12 +1,12 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { constants as fsConstants, createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, constants as fsConstants } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
-import { constants as zlibConstants, createBrotliCompress } from 'node:zlib';
+import { createBrotliCompress, constants as zlibConstants } from 'node:zlib';
 import {
   ARTIFACT_RELEASE_V1_SCHEMA,
   ARTIFACT_RELEASE_V2_SCHEMAS,
@@ -30,7 +30,9 @@ const DEFAULT_SOURCE_MANIFESTS = [
 const DEFAULT_OUTPUT_DIRECTORY = '.local-dev-artifacts/artifact-releases';
 
 function usage() {
-  console.log(`Usage: node scripts/write_artifact_release_manifests.mjs [options]\n\nOptions:\n  --root DIR             Repository root (default .)\n  --release-id ID        Immutable release id (default date + git short sha)\n  --channel NAME         Channel name to write (default stable)\n  --out-dir DIR          Staging output root (default .local-dev-artifacts/artifact-releases under --root)\n  --asset-origin URL     Absolute asset origin prefix (default https://assets.0x88.app)\n  --manifest PATH        Source manifest to include; may be repeated\n  --base-release PATH    Carry forward immutable entries from an existing v1/v2 release\n  --generated-at ISO     Override generatedAt for reproducible checks\n  --no-brotli            Emit identity representations only\n  --brotli-quality N     Brotli quality 0-11 (default 5)\n  --check                Verify existing outputs match instead of writing\n  -h, --help             Show help\n`);
+  console.log(
+    `Usage: node scripts/write_artifact_release_manifests.mjs [options]\n\nOptions:\n  --root DIR             Repository root (default .)\n  --release-id ID        Immutable release id (default date + git short sha)\n  --channel NAME         Channel name to write (default stable)\n  --out-dir DIR          Staging output root (default .local-dev-artifacts/artifact-releases under --root)\n  --asset-origin URL     Absolute asset origin prefix (default https://assets.0x88.app)\n  --manifest PATH        Source manifest to include; may be repeated\n  --base-release PATH    Carry forward immutable entries from an existing v1/v2 release\n  --generated-at ISO     Override generatedAt for reproducible checks\n  --no-brotli            Emit identity representations only\n  --brotli-quality N     Brotli quality 0-11 (default 5)\n  --check                Verify existing outputs match instead of writing\n  -h, --help             Show help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -38,18 +40,63 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
-    if (arg === '--root' && next) { args.root = next; i += 1; continue; }
-    if (arg === '--release-id' && next) { args.releaseId = next; i += 1; continue; }
-    if (arg === '--channel' && next) { args.channel = next; i += 1; continue; }
-    if (arg === '--out-dir' && next) { args.outDir = next; i += 1; continue; }
-    if (arg === '--asset-origin' && next) { args.assetOrigin = next.replace(/\/+$/, ''); i += 1; continue; }
-    if (arg === '--manifest' && next) { args.manifests.push(next); i += 1; continue; }
-    if (arg === '--base-release' && next) { args.baseRelease = next; i += 1; continue; }
-    if (arg === '--generated-at' && next) { args.generatedAt = next; i += 1; continue; }
-    if (arg === '--no-brotli') { args.brotli = false; continue; }
-    if (arg === '--brotli-quality' && next) { args.brotliQuality = Number(next); i += 1; continue; }
-    if (arg === '--check') { args.check = true; continue; }
-    if (arg === '-h' || arg === '--help') { usage(); process.exit(0); }
+    if (arg === '--root' && next) {
+      args.root = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--release-id' && next) {
+      args.releaseId = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--channel' && next) {
+      args.channel = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--out-dir' && next) {
+      args.outDir = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--asset-origin' && next) {
+      args.assetOrigin = next.replace(/\/+$/, '');
+      i += 1;
+      continue;
+    }
+    if (arg === '--manifest' && next) {
+      args.manifests.push(next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--base-release' && next) {
+      args.baseRelease = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--generated-at' && next) {
+      args.generatedAt = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--no-brotli') {
+      args.brotli = false;
+      continue;
+    }
+    if (arg === '--brotli-quality' && next) {
+      args.brotliQuality = Number(next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--check') {
+      args.check = true;
+      continue;
+    }
+    if (arg === '-h' || arg === '--help') {
+      usage();
+      process.exit(0);
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
   if (!args.releaseId) args.releaseId = defaultReleaseId(args.root);
@@ -72,9 +119,7 @@ function parseArgs(argv) {
 }
 
 function isIsoTimestamp(value) {
-  return typeof value === 'string'
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-    && Number.isFinite(Date.parse(value));
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
 }
 
 function defaultReleaseId(root) {
@@ -200,13 +245,15 @@ async function materializeRepresentations(artifact, args) {
   const identityTarget = resolve(args.outDir, identityKey);
   const sourcePath = isAbsolute(artifact.localPath) ? artifact.localPath : resolve(args.root, artifact.localPath);
   await installWriteOnce(sourcePath, identityTarget, raw, args.check);
-  const representations = [{
-    encoding: 'identity',
-    url: artifactUrlForKey(identityKey, args.assetOrigin),
-    sha256: raw.sha256,
-    bytes: raw.bytes,
-    localPath: storedLocalPath(identityTarget, args),
-  }];
+  const representations = [
+    {
+      encoding: 'identity',
+      url: artifactUrlForKey(identityKey, args.assetOrigin),
+      sha256: raw.sha256,
+      bytes: raw.bytes,
+      localPath: storedLocalPath(identityTarget, args),
+    },
+  ];
   if (args.brotli) {
     const tempDirectory = args.check ? await mkdtemp(join(tmpdir(), 'lc0-artifact-brotli-')) : undefined;
     const tempPath = tempDirectory
@@ -298,7 +345,9 @@ async function verifyLocalArtifact(artifact, args) {
   const digest = await localFileDigest(absolute);
   if (!digest) throw new Error(`Missing local artifact for ${artifact.logicalUrl}: ${artifact.localPath}`);
   if (digest.bytes !== artifact.bytes || digest.sha256 !== artifact.sha256) {
-    throw new Error(`Manifest metadata mismatch for ${artifact.logicalUrl}: local ${digest.bytes}/${digest.sha256}, manifest ${artifact.bytes}/${artifact.sha256}`);
+    throw new Error(
+      `Manifest metadata mismatch for ${artifact.logicalUrl}: local ${digest.bytes}/${digest.sha256}, manifest ${artifact.bytes}/${artifact.sha256}`,
+    );
   }
   return artifact;
 }
@@ -375,10 +424,7 @@ async function migrateV1Artifacts(base, localArtifacts, currentLogicalUrls, args
   return inspected.map(({ artifact, metadata, mismatches }) => {
     const sourcePath = sourceByRaw.get(`${metadata.sha256}/${metadata.bytes}`);
     if (!sourcePath && mismatches.length) {
-      throw new Error(
-        `Corrupt local v1 migration source for ${metadata.logicalUrl} in base release ${base.releaseId}: `
-        + mismatches.join('; '),
-      );
+      throw new Error(`Corrupt local v1 migration source for ${metadata.logicalUrl} in base release ${base.releaseId}: ` + mismatches.join('; '));
     }
     return {
       logicalUrl: metadata.logicalUrl,
@@ -412,7 +458,7 @@ async function collectArtifacts(args) {
       }
     }
     if (Array.isArray(manifest.packs)) {
-      for (const pack of manifest.packs) artifacts.push(...await artifactsFromPackEntry(pack, manifestPath, manifestPath, args));
+      for (const pack of manifest.packs) artifacts.push(...(await artifactsFromPackEntry(pack, manifestPath, manifestPath, args)));
     }
     if (Array.isArray(manifest.artifacts)) {
       for (const entry of manifest.artifacts) {
@@ -517,12 +563,14 @@ function migrationProvenance(artifact, rawSha256) {
   const logicalUrl = logicalIdentity(artifact) ?? 'unknown artifact';
   const match = migration.key?.match(/^artifacts\/sha256\/([a-f0-9]{64})\/([^/]+)$/);
   const sourceUrlKey = migration.url ? artifactKeyFromReleaseUrl(migration.url) : undefined;
-  if (migration.schema !== 'lc0_browser.artifact_migration_source.v1'
-    || !migration.releaseId
-    || migration.releaseId !== artifact.carriedForwardFrom
-    || match?.[1] !== rawSha256
-    || match?.[2] === 'identity'
-    || sourceUrlKey !== migration.key) {
+  if (
+    migration.schema !== 'lc0_browser.artifact_migration_source.v1' ||
+    !migration.releaseId ||
+    migration.releaseId !== artifact.carriedForwardFrom ||
+    match?.[1] !== rawSha256 ||
+    match?.[2] === 'identity' ||
+    sourceUrlKey !== migration.key
+  ) {
     throw new Error(`Incompatible migration provenance for ${logicalUrl}`);
   }
   return {
@@ -547,21 +595,20 @@ function validateRawAliases(artifacts) {
     };
     if (group.bytes !== raw.bytes) {
       throw new Error(
-        `Conflicting raw byte lengths for decoded SHA-256 ${raw.sha256}: `
-        + `${group.bytes} for ${group.logicalUrls.join(', ')}, ${raw.bytes} for ${logicalUrl}`,
+        `Conflicting raw byte lengths for decoded SHA-256 ${raw.sha256}: ` +
+          `${group.bytes} for ${group.logicalUrls.join(', ')}, ${raw.bytes} for ${logicalUrl}`,
       );
     }
     if (group.contentType !== contentType) {
       throw new Error(
-        `Incompatible contentType metadata for decoded SHA-256 ${raw.sha256}: `
-        + `${group.contentType} for ${group.logicalUrls.join(', ')}, ${contentType} for ${logicalUrl}`,
+        `Incompatible contentType metadata for decoded SHA-256 ${raw.sha256}: ` +
+          `${group.contentType} for ${group.logicalUrls.join(', ')}, ${contentType} for ${logicalUrl}`,
       );
     }
     group.logicalUrls.push(logicalUrl);
     if (provenance) {
       const existing = group.provenanceByKey.get(provenance.key);
-      if (existing
-        && (existing.releaseId !== provenance.releaseId || existing.url !== provenance.url)) {
+      if (existing && (existing.releaseId !== provenance.releaseId || existing.url !== provenance.url)) {
         throw new Error(`Incompatible migration provenance for decoded SHA-256 ${raw.sha256} at ${provenance.key}`);
       }
       group.provenanceByKey.set(provenance.key, provenance);
@@ -578,12 +625,14 @@ async function reusableGeneratedAt(path, args) {
   } catch {
     throw new Error(`Existing immutable release manifest is not valid JSON: ${path}`);
   }
-  if (existing.schema !== ARTIFACT_RELEASE_V2_SCHEMAS[0]
-    || existing.releaseId !== args.releaseId
-    || existing.channel !== args.channel
-    || existing.immutable !== true
-    || existing.representationKeyIncludesEncoding !== true
-    || existing.integrityIdentity !== 'decoded-sha256') {
+  if (
+    existing.schema !== ARTIFACT_RELEASE_V2_SCHEMAS[0] ||
+    existing.releaseId !== args.releaseId ||
+    existing.channel !== args.channel ||
+    existing.immutable !== true ||
+    existing.representationKeyIncludesEncoding !== true ||
+    existing.integrityIdentity !== 'decoded-sha256'
+  ) {
     throw new Error(`Existing immutable release identity does not match requested release: ${path}`);
   }
   if (!isIsoTimestamp(existing.generatedAt)) {
@@ -596,7 +645,7 @@ async function main() {
   const args = parseArgs(process.argv);
   const releasePath = join(args.outDir, 'releases', `${args.releaseId}.json`);
   const channelPath = join(args.outDir, 'channels', `${args.channel}.json`);
-  const generatedAt = await reusableGeneratedAt(releasePath, args) ?? new Date().toISOString();
+  const generatedAt = (await reusableGeneratedAt(releasePath, args)) ?? new Date().toISOString();
   const collected = await collectArtifacts(args);
   const updatedSourceManifests = collected.sourceManifests;
   const localArtifacts = [...collected.artifacts];
@@ -618,11 +667,11 @@ async function main() {
     baseReleaseId = base.releaseId;
     if (base.schema === ARTIFACT_RELEASE_V1_SCHEMA) {
       migratedV1Artifacts = await migrateV1Artifacts(base, localArtifacts, currentLogicalUrls, args);
-    }
-    else inheritedArtifacts = (base.artifacts ?? []).map((artifact) => ({
-      ...artifact,
-      carriedForwardFrom: artifact.carriedForwardFrom ?? base.releaseId,
-    }));
+    } else
+      inheritedArtifacts = (base.artifacts ?? []).map((artifact) => ({
+        ...artifact,
+        carriedForwardFrom: artifact.carriedForwardFrom ?? base.releaseId,
+      }));
     sourceManifests = [...new Set([...(base.sourceManifests ?? []), ...sourceManifests])];
   }
   // Newly supplied source manifests are release artifacts too. Inherited
@@ -648,12 +697,14 @@ async function main() {
       carriedForwardFrom: artifact.carriedForwardFrom,
       migrationSource: artifact.migrationSource,
       raw: { sha256: artifact.sha256, bytes: artifact.bytes },
-      representations: [{
-        encoding: 'identity',
-        url: identityUrl,
-        sha256: artifact.sha256,
-        bytes: artifact.bytes,
-      }],
+      representations: [
+        {
+          encoding: 'identity',
+          url: identityUrl,
+          sha256: artifact.sha256,
+          bytes: artifact.bytes,
+        },
+      ],
       url: identityUrl,
       bytes: artifact.bytes,
       sha256: artifact.sha256,
@@ -711,14 +762,20 @@ async function main() {
   releaseCatalogEntries(release);
   await writeReleaseOnce(releasePath, release, args.check);
   await writeMutableOrCheck(channelPath, channel, args.check);
-  console.log(JSON.stringify({
-    ok: true,
-    releasePath,
-    channelPath,
-    artifactCount: artifacts.length,
-    uniqueBodyCount: materializedByRaw.size,
-    releaseSchema: release.schema,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        releasePath,
+        channelPath,
+        artifactCount: artifacts.length,
+        uniqueBodyCount: materializedByRaw.size,
+        releaseSchema: release.schema,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((error) => {

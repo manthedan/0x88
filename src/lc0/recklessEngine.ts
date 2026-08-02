@@ -1,5 +1,5 @@
-import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 
 export interface RecklessOptions {
@@ -207,11 +207,13 @@ export class RecklessEngine implements BrowserUciEngine {
 
   private wasiPreopenFiles(): { name: string; url: string; expectedBytes?: number }[] | undefined {
     if (!this.runtimeOptions.nnueUrl) return undefined;
-    return [{
-      name: RECKLESS_EXTERNAL_NNUE_FILE,
-      url: this.runtimeOptions.nnueUrl,
-      ...(this.runtimeOptions.nnueExpectedBytes === undefined ? {} : { expectedBytes: this.runtimeOptions.nnueExpectedBytes }),
-    }];
+    return [
+      {
+        name: RECKLESS_EXTERNAL_NNUE_FILE,
+        url: this.runtimeOptions.nnueUrl,
+        ...(this.runtimeOptions.nnueExpectedBytes === undefined ? {} : { expectedBytes: this.runtimeOptions.nnueExpectedBytes }),
+      },
+    ];
   }
 
   private recordWasiPreopenProgress(message: { url: string; loadedBytes: number; totalBytes: number }): void {
@@ -229,7 +231,17 @@ export class RecklessEngine implements BrowserUciEngine {
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-wasi' });
     worker.onmessage = (event: MessageEvent) => {
-      const message = event.data as { type: string; id: number; stdout?: string[]; stderr?: string[]; exitCode?: number; error?: string; url?: string; loadedBytes?: number; totalBytes?: number };
+      const message = event.data as {
+        type: string;
+        id: number;
+        stdout?: string[];
+        stderr?: string[];
+        exitCode?: number;
+        error?: string;
+        url?: string;
+        loadedBytes?: number;
+        totalBytes?: number;
+      };
       if (message.type === 'preopen-progress' && message.url && message.loadedBytes !== undefined && message.totalBytes !== undefined) {
         this.recordWasiPreopenProgress({ url: message.url, loadedBytes: message.loadedBytes, totalBytes: message.totalBytes });
         return;
@@ -282,7 +294,8 @@ export class RecklessEngine implements BrowserUciEngine {
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-wasi-persistent' });
     const sharedInput = createSharedInput();
-    worker.onmessage = (event: MessageEvent) => this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string });
+    worker.onmessage = (event: MessageEvent) =>
+      this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string });
     worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Reckless persistent WASI worker error'));
     this.worker = worker;
     this.workerMode = 'persistent';
@@ -296,7 +309,16 @@ export class RecklessEngine implements BrowserUciEngine {
     return worker;
   }
 
-  private handlePersistentMessage(message: { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string; url?: string; loadedBytes?: number; totalBytes?: number }): void {
+  private handlePersistentMessage(message: {
+    type: string;
+    stream?: 'stdout' | 'stderr';
+    line?: string;
+    exitCode?: number;
+    error?: string;
+    url?: string;
+    loadedBytes?: number;
+    totalBytes?: number;
+  }): void {
     if (message.type === 'preopen-progress' && message.url && message.loadedBytes !== undefined && message.totalBytes !== undefined) {
       this.recordWasiPreopenProgress({ url: message.url, loadedBytes: message.loadedBytes, totalBytes: message.totalBytes });
       return;
@@ -362,8 +384,13 @@ export class RecklessEngine implements BrowserUciEngine {
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    this.queueTail = previous.then(() => gate, () => gate);
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.queueTail = previous.then(
+      () => gate,
+      () => gate,
+    );
     await previous.catch(() => undefined);
     try {
       return await fn();
@@ -478,7 +505,19 @@ export class RecklessEngine implements BrowserUciEngine {
   }
 
   private runBrowserApiMessage(
-    message: Omit<{ type: 'prewarm' | 'new-game' | 'search'; id: number; wasmUrl: string; hashMb?: number; fen?: string; depth?: number; movetimeMs?: number; multipv?: number }, 'id' | 'wasmUrl'>,
+    message: Omit<
+      {
+        type: 'prewarm' | 'new-game' | 'search';
+        id: number;
+        wasmUrl: string;
+        hashMb?: number;
+        fen?: string;
+        depth?: number;
+        movetimeMs?: number;
+        multipv?: number;
+      },
+      'id' | 'wasmUrl'
+    >,
     signal?: AbortSignal,
   ): Promise<BrowserApiSearchResult | null> {
     if (signal?.aborted) return Promise.reject(abortError());
@@ -641,7 +680,10 @@ export class RecklessEngine implements BrowserUciEngine {
   async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
     return this.runExclusive(async () => {
       if (this.runtimeOptions.backend === 'browser-api') {
-        const result = await this.runBrowserApiMessage({ type: 'search', fen, depth: this.options.depth, movetimeMs: this.options.movetimeMs, multipv: 1 }, signal);
+        const result = await this.runBrowserApiMessage(
+          { type: 'search', fen, depth: this.options.depth, movetimeMs: this.options.movetimeMs, multipv: 1 },
+          signal,
+        );
         this.lastInfoLines = this.browserApiResultToInfo(result);
         return result?.bestmove ?? this.lastInfoLines[0]?.pvUci[0] ?? null;
       }
@@ -662,7 +704,14 @@ export class RecklessEngine implements BrowserUciEngine {
         this.lastInfoLines = this.browserApiResultToInfo(result);
         return this.lastInfo();
       }
-      const result = await this.runCommands(this.searchCommands(fen, { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs }, opts.multipv ?? 1), opts.signal);
+      const result = await this.runCommands(
+        this.searchCommands(
+          fen,
+          { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs },
+          opts.multipv ?? 1,
+        ),
+        opts.signal,
+      );
       if (result.exitCode !== 0) throw new Error(`Reckless exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return this.lastInfo();

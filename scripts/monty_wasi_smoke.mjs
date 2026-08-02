@@ -12,7 +12,7 @@
 //   nn-6e49a41bd7c0.network  (policy, ~286MB raw)
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory } from '@bjorn3/browser_wasi_shim';
+import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from '@bjorn3/browser_wasi_shim';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -70,12 +70,7 @@ const module = await WebAssembly.compile(await fs.readFile(wasmPath));
 const wasiInstance = new WASI(
   ['monty', ...commands],
   [],
-  [
-    new OpenFile(new File([])),
-    lineCollector(stdout),
-    lineCollector(stderr),
-    new PreopenDirectory('.', netFiles),
-  ],
+  [new OpenFile(new File([])), lineCollector(stdout), lineCollector(stderr), new PreopenDirectory('.', netFiles)],
   { debug: false },
 );
 const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1: wasiInstance.wasiImport });
@@ -90,21 +85,27 @@ const elapsedMs = performance.now() - startedAt;
 const bestmoves = stdout.filter((line) => line.startsWith('bestmove'));
 const lastInfo = stdout.filter((line) => line.startsWith('info ')).at(-1) ?? null;
 
-console.log(JSON.stringify({
-  wasmPath,
-  netDir,
-  nodes,
-  hashMb,
-  contempt,
-  fen,
-  netLoadMs,
-  elapsedMs,
-  exitCode,
-  uciok: stdout.includes('uciok'),
-  bestmoves,
-  lastInfo,
-  stderr,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      wasmPath,
+      netDir,
+      nodes,
+      hashMb,
+      contempt,
+      fen,
+      netLoadMs,
+      elapsedMs,
+      exitCode,
+      uciok: stdout.includes('uciok'),
+      bestmoves,
+      lastInfo,
+      stderr,
+    },
+    null,
+    2,
+  ),
+);
 
 if (exitCode !== 0) process.exit(exitCode);
 if (bestmoves.length !== 1) {

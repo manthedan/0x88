@@ -1,7 +1,7 @@
-import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
-import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
+import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
+import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 
 export interface StormphraxOptions {
   /** Fixed search depth. */
@@ -164,15 +164,22 @@ export class StormphraxEngine implements BrowserUciEngine {
   private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    this.queueTail = previous.then(() => gate, () => gate);
-    return previous.catch(() => undefined).then(async () => {
-      try {
-        return await fn();
-      } finally {
-        release();
-      }
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    this.queueTail = previous.then(
+      () => gate,
+      () => gate,
+    );
+    return previous
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          return await fn();
+        } finally {
+          release();
+        }
+      });
   }
 
   private makeWorker(): Worker {
@@ -257,7 +264,15 @@ export class StormphraxEngine implements BrowserUciEngine {
       const cleanup = () => signal?.removeEventListener('abort', onAbort);
       this.pending.set(id, { resolve, reject, cleanup });
       signal?.addEventListener('abort', onAbort, { once: true });
-      worker.postMessage({ type, id, jsUrl: this.resolvedJsUrl(), wasmUrl: this.resolvedWasmUrl(), dataUrl: this.resolvedDataUrl(), trustedJsUrl: this.trustedJsUrl(), ...payload });
+      worker.postMessage({
+        type,
+        id,
+        jsUrl: this.resolvedJsUrl(),
+        wasmUrl: this.resolvedWasmUrl(),
+        dataUrl: this.resolvedDataUrl(),
+        trustedJsUrl: this.trustedJsUrl(),
+        ...payload,
+      });
     });
   }
 
@@ -388,7 +403,13 @@ export class StormphraxEngine implements BrowserUciEngine {
       const searchStart = this.stdout.length;
       const commandPromise = this.sendCommand(stormphraxGoCommand(this.options), signal);
       try {
-        const bestLine = await this.waitForLine((line) => line.startsWith('bestmove '), 'bestmove', searchStart, signal, stormphraxSearchTimeoutMs(this.options));
+        const bestLine = await this.waitForLine(
+          (line) => line.startsWith('bestmove '),
+          'bestmove',
+          searchStart,
+          signal,
+          stormphraxSearchTimeoutMs(this.options),
+        );
         await commandPromise;
         this.lastInfoLines = this.collectInfoLines(searchStart);
         return parseBestMove(bestLine);

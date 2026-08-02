@@ -1,6 +1,6 @@
-import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
-import { legalMoves, makeMove } from '../chess/movegen.ts';
+import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
+import { legalMoves, makeMove } from '../chess/movegen.ts';
 
 export interface Lc0MoveHistoryFixture {
   id: string;

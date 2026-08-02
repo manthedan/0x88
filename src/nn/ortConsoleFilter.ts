@@ -6,8 +6,7 @@ function ortNativeLogsEnabled(): boolean {
 
 function isOrtNoise(value: unknown): boolean {
   const first = String(value ?? '');
-  return /^(?:\d{4}-\d{2}-\d{2} .*)?\[[VI]:onnxruntime[:\],]/.test(first)
-    || /^\d{4}-\d{2}-\d{2} .* \[[VI]:onnxruntime:/.test(first);
+  return /^(?:\d{4}-\d{2}-\d{2} .*)?\[[VI]:onnxruntime[:\],]/.test(first) || /^\d{4}-\d{2}-\d{2} .* \[[VI]:onnxruntime:/.test(first);
 }
 
 export function installOrtConsoleNoiseFilter(): void {

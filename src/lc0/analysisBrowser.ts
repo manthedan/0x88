@@ -1,51 +1,182 @@
 import { Chessground } from 'chessground';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
-import { boardToFen, parseFen, squareName, START_FEN, type BoardState } from '../chess/board.ts';
+import { type BoardState, boardToFen, parseFen, START_FEN, squareName } from '../chess/board.ts';
+import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
-import { moveToUci, type Move } from '../chess/moveCodec.ts';
-import { boardCheck, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
-import { moveToSan } from '../chess/san.ts';
-import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
-import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
-import { BROWSER_RUNTIME_AUDIT_EVENT, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from '../nn/runtimeAudit.ts';
+import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
+import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { BROWSER_RUNTIME_AUDIT_EVENT, type BrowserRuntimeAuditDetail, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { ANALYSIS_DRAWABLE_BRUSHES, engineBrushes, engineColorKey, evalBarWhitePercent, lc0AnalysisLines, stockfishAnalysisLines, centipawnPuctAnalysisLines, type AnalysisLine } from './analysisFormat.ts';
-import { annotatedPgn, reviewGame, type GameReview, type ReviewPosition, type ReviewedMove } from './gameReview.ts';
+import {
+  ANALYSIS_DRAWABLE_BRUSHES,
+  type AnalysisLine,
+  centipawnPuctAnalysisLines,
+  engineBrushes,
+  engineColorKey,
+  evalBarWhitePercent,
+  lc0AnalysisLines,
+  stockfishAnalysisLines,
+} from './analysisFormat.ts';
+import { boardCheck, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { lineChartSvg } from './charts.ts';
-import { GameTree, type GameNode } from './gameTree.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
-import { buildOpeningPositionIndex, mergeOpeningMoveStats, openingStatsFromIndex, openingStatsForPosition, openingSummary, positionKey, type ImportedGame, type OpeningMoveStat, type OpeningPositionIndex } from './openingStats.ts';
-import { defaultPgnCollectionName, deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, formatPgnCollectionSummary, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, pgnDatabaseAvailable, pgnDatabaseBackupFilename, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, updatePgnCollectionPositionIndex, type PgnCollectionSource, type PgnCollectionSummary } from './pgnDatabase.ts';
+import { annotatedPgn, type GameReview, type ReviewedMove, type ReviewPosition, reviewGame } from './gameReview.ts';
+import { type GameNode, GameTree } from './gameTree.ts';
+import { Maia3BrowserEvaluator, type Maia3Evaluation, maia3WinProbability } from './maia3.ts';
+import {
+  buildOpeningPositionIndex,
+  type ImportedGame,
+  mergeOpeningMoveStats,
+  type OpeningMoveStat,
+  type OpeningPositionIndex,
+  openingStatsForPosition,
+  openingStatsFromIndex,
+  openingSummary,
+  positionKey,
+} from './openingStats.ts';
+import {
+  defaultPgnCollectionName,
+  deletePgnCollection,
+  duplicatePgnCollection,
+  exportPgnDatabaseBackup,
+  formatPgnCollectionSummary,
+  importPgnDatabaseBackup,
+  listPgnCollections,
+  loadPgnCollection,
+  type PgnCollectionSource,
+  type PgnCollectionSummary,
+  pgnDatabaseAvailable,
+  pgnDatabaseBackupFilename,
+  renamePgnCollection,
+  savePgnCollection,
+  searchPgnCollectionsByPosition,
+  updatePgnCollectionPositionIndex,
+} from './pgnDatabase.ts';
 
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
-import { loadLc0ModelForOrt } from './modelCache.ts';
-import { Lc0OnnxEvaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
-import { Lc0PuctSearcher } from './search.ts';
-import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
-import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
-import { formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
-import { RECKLESS_VARIANTS, checkRecklessVariantAsset, hasExplicitRecklessVariant, recklessVariantAssetStatus, recklessVariantByKey, recklessVariantFromParams, normalizeRecklessVariant, resolveDefaultRecklessVariantAssetFallback, supportsWasmRelaxedSimd, type RecklessVariant } from './recklessVariants.ts';
-import { canUsePersistentViridithasWasi } from './viridithasEngine.ts';
-import { VIRIDITHAS_VARIANTS, checkViridithasVariantAsset, hasExplicitViridithasVariant, normalizeViridithasVariant, resolveDefaultViridithasVariantAssetFallback, viridithasVariantAssetStatus, viridithasVariantByKey, viridithasVariantFromParams, type ViridithasVariant } from './viridithasVariants.ts';
-import { BERSERK_VARIANTS, berserkVariantAssetStatus, berserkVariantByKey, berserkVariantFromParams, checkBerserkVariantAsset, hasExplicitBerserkVariant, normalizeBerserkVariant, resolveDefaultBerserkVariantAssetFallback, type BerserkVariant } from './berserkVariants.ts';
-import { berserkCacheKey, cpuEngineHashMbForSurface, createBerserkEngine, createPlentyChessEngine, createRecklessEngine, createViridithasEngine, plentyChessCacheKey, recklessCacheKey, viridithasCacheKey } from './engineProvision.ts';
-import { PLENTYCHESS_VARIANTS, checkPlentyChessVariantAsset, hasExplicitPlentyChessVariant, normalizePlentyChessVariant, plentyChessVariantAssetStatus, plentyChessVariantByKey, plentyChessVariantFromParams, plentyChessVariantUnsupportedReason, resolveDefaultPlentyChessVariantAssetFallback, type PlentyChessVariant } from './plentychessVariants.ts';
-import { createStormphraxEngine, stormphraxCacheKey } from './engineProvision.ts';
-import { STORMPHRAX_VARIANTS, checkStormphraxVariantAsset, hasExplicitStormphraxVariant, normalizeStormphraxVariant, resolveDefaultStormphraxVariantAssetFallback, stormphraxVariantAssetStatus, stormphraxVariantByKey, stormphraxVariantFromParams, stormphraxVariantUnsupportedReason, type StormphraxVariant } from './stormphraxVariants.ts';
-import { BIG_NETS, bigNetAssetStatusSync, bigNetLoadWarning, bigNetOptionState, bt4SupportedSync, checkBigNetAsset, probeBt4Support, type BigNetConfig, type Bt4WorkerSearcher } from './bt4Engine.ts';
-import { acquireBigNetSearcher, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher, type BigNetKey } from './bigNetSessionPool.ts';
-import { ENGINE_FAMILY_PRIORITY, canonicalEngineFamily, defaultEngineStrength, defaultStaticEngineVariant, engineFamilyDefinition, engineFamilyOptions, engineResourceProfile, engineStrengthMeta, isLc0BigNetVariant, isV0DeployProfile, lc0EngineLabel, lc0VariantOptions, normalizeDeployEngineRow, stockfishEngineLabel, stockfishVariantOptions, centipawnEngineLabel, centipawnVariantOptions, type EngineFamily, type EngineRow } from './engineCatalog.ts';
-import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
-import { engineVariantMenuLabel } from './engineVariantLabels.ts';
-import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
+
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { hideLoadingProgress, renderLoadingProgress, type LoadingProgressItem } from './loadingProgress.ts';
-import { DisposableVariantPool } from './disposableVariantPool.ts';
+import {
+  BERSERK_VARIANTS,
+  type BerserkVariant,
+  berserkVariantAssetStatus,
+  berserkVariantByKey,
+  berserkVariantFromParams,
+  checkBerserkVariantAsset,
+  hasExplicitBerserkVariant,
+  normalizeBerserkVariant,
+  resolveDefaultBerserkVariantAssetFallback,
+} from './berserkVariants.ts';
+import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
 import { browserVariantOption } from './browserVariantOption.ts';
+import {
+  BIG_NETS,
+  type BigNetConfig,
+  type Bt4WorkerSearcher,
+  bigNetAssetStatusSync,
+  bigNetLoadWarning,
+  bigNetOptionState,
+  bt4SupportedSync,
+  checkBigNetAsset,
+  probeBt4Support,
+} from './bt4Engine.ts';
+import { DisposableVariantPool } from './disposableVariantPool.ts';
+import {
+  canonicalEngineFamily,
+  centipawnEngineLabel,
+  centipawnVariantOptions,
+  defaultEngineStrength,
+  defaultStaticEngineVariant,
+  ENGINE_FAMILY_PRIORITY,
+  type EngineFamily,
+  type EngineRow,
+  engineFamilyDefinition,
+  engineFamilyOptions,
+  engineResourceProfile,
+  engineStrengthMeta,
+  isLc0BigNetVariant,
+  isV0DeployProfile,
+  lc0EngineLabel,
+  lc0VariantOptions,
+  normalizeDeployEngineRow,
+  stockfishEngineLabel,
+  stockfishVariantOptions,
+} from './engineCatalog.ts';
+import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
+import {
+  berserkCacheKey,
+  cpuEngineHashMbForSurface,
+  createBerserkEngine,
+  createPlentyChessEngine,
+  createRecklessEngine,
+  createStormphraxEngine,
+  createViridithasEngine,
+  plentyChessCacheKey,
+  recklessCacheKey,
+  stormphraxCacheKey,
+  viridithasCacheKey,
+} from './engineProvision.ts';
+import { engineVariantMenuLabel } from './engineVariantLabels.ts';
+import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
+import { loadLc0ModelForOrt } from './modelCache.ts';
+import { type Lc0EvaluationProvider, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import {
+  checkPlentyChessVariantAsset,
+  hasExplicitPlentyChessVariant,
+  normalizePlentyChessVariant,
+  PLENTYCHESS_VARIANTS,
+  type PlentyChessVariant,
+  plentyChessVariantAssetStatus,
+  plentyChessVariantByKey,
+  plentyChessVariantFromParams,
+  plentyChessVariantUnsupportedReason,
+  resolveDefaultPlentyChessVariantAssetFallback,
+} from './plentychessVariants.ts';
+import { formatRecklessBrowserApiLoadStatus } from './recklessEngine.ts';
+import {
+  checkRecklessVariantAsset,
+  hasExplicitRecklessVariant,
+  normalizeRecklessVariant,
+  RECKLESS_VARIANTS,
+  type RecklessVariant,
+  recklessVariantAssetStatus,
+  recklessVariantByKey,
+  recklessVariantFromParams,
+  resolveDefaultRecklessVariantAssetFallback,
+  supportsWasmRelaxedSimd,
+} from './recklessVariants.ts';
+import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
+import { Lc0PuctSearcher } from './search.ts';
+import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
+import {
+  checkStormphraxVariantAsset,
+  hasExplicitStormphraxVariant,
+  normalizeStormphraxVariant,
+  resolveDefaultStormphraxVariantAssetFallback,
+  STORMPHRAX_VARIANTS,
+  type StormphraxVariant,
+  stormphraxVariantAssetStatus,
+  stormphraxVariantByKey,
+  stormphraxVariantFromParams,
+  stormphraxVariantUnsupportedReason,
+} from './stormphraxVariants.ts';
+import { canUsePersistentViridithasWasi } from './viridithasEngine.ts';
+import {
+  checkViridithasVariantAsset,
+  hasExplicitViridithasVariant,
+  normalizeViridithasVariant,
+  resolveDefaultViridithasVariantAssetFallback,
+  VIRIDITHAS_VARIANTS,
+  type ViridithasVariant,
+  viridithasVariantAssetStatus,
+  viridithasVariantByKey,
+  viridithasVariantFromParams,
+} from './viridithasVariants.ts';
+import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
@@ -93,14 +224,18 @@ const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl(sameOriginPathParam(['centipaw
 const CENTIPAWN_META_URL = resolvePublicAssetUrl(sameOriginPathParam(['centipawnMeta'], DEFAULT_CENTIPAWN_META_URL, ['/models/']));
 const LEGACY_CENTIPAWN_RESOLVED_MODEL_URL = resolvePublicAssetUrl(sameOriginPathParam(['tinyModel', 'tinyOnnx'], LEGACY_CENTIPAWN_MODEL_URL, ['/models/']));
 const LEGACY_CENTIPAWN_RESOLVED_META_URL = resolvePublicAssetUrl(sameOriginPathParam(['tinyMeta'], LEGACY_CENTIPAWN_META_URL, ['/models/']));
-const LEGACY_CENTIPAWN_OVERRIDE = !isV0DeployProfile()
-  && (params.has('tinyModel') || params.has('tinyOnnx') || params.has('tinyMeta') || params.has('tinyManifest'));
+const LEGACY_CENTIPAWN_OVERRIDE =
+  !isV0DeployProfile() && (params.has('tinyModel') || params.has('tinyOnnx') || params.has('tinyMeta') || params.has('tinyManifest'));
 const CENTIPAWN_HYBRID_MANIFEST_URL = sameOriginPathParam(
   ['centipawnManifest', 'manifest', 'manifestUrl', 'tinyManifest'],
   LEGACY_CENTIPAWN_OVERRIDE ? LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL : DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL,
   ['/runtimes/'],
 );
-const LC0_WHOLE_MODEL_MANIFEST_URL = sameOriginPathParam(['wholeModelManifest', 'wholeModelManifestUrl', 'tvm' + 'jsManifest'], DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL, ['/runtimes/lc0-' + 'tvm' + 'js-webgpu/']);
+const LC0_WHOLE_MODEL_MANIFEST_URL = sameOriginPathParam(
+  ['wholeModelManifest', 'wholeModelManifestUrl', 'tvm' + 'jsManifest'],
+  DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL,
+  ['/runtimes/lc0-' + 'tvm' + 'js-webgpu/'],
+);
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -167,7 +302,9 @@ function whileAnalysisMounted(callback: () => void): () => void {
   const existing = analysisMountedCallbackCache.get(callback);
   if (existing) return existing;
   const signal = mountAbort.signal;
-  const guarded = () => { if (!isStaleMount(signal)) callback(); };
+  const guarded = () => {
+    if (!isStaleMount(signal)) callback();
+  };
   analysisMountedCallbackCache.set(callback, guarded);
   return guarded;
 }
@@ -213,12 +350,55 @@ interface EngineAnalysisProfile {
   multiPv: number;
   lc0Runtime: Lc0AnalysisRuntime;
 }
-interface BuiltInEngineAnalysisProfile extends EngineAnalysisProfile { id: string; note: string }
+interface BuiltInEngineAnalysisProfile extends EngineAnalysisProfile {
+  id: string;
+  note: string;
+}
 const BUILT_IN_ENGINE_PROFILES: BuiltInEngineAnalysisProfile[] = [
-  { id: 'lc0-stockfish', name: 'Built-in · Lc0 + Stockfish', note: 'Small LC0 plus Stockfish Lite baseline for quick agreement checks.', rows: [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'sf', variant: 'lite', strength: 14 }], multiPv: 3, lc0Runtime: 'onnx' },
-  { id: 'browser-native-survey', name: 'Built-in · Browser-native survey', note: 'Small LC0 plus staged browser-native UCI engines; missing assets stay visible in runtime status.', rows: [{ family: 'lc0', variant: 'small', strength: 300 }, { family: 'viridithas', variant: 'simd', strength: 8 }, { family: 'berserk', variant: 'emscripten', strength: 8 }, { family: 'plentychess', variant: 'emscripten', strength: 8 }], multiPv: 2, lc0Runtime: 'onnx' },
-  { id: 'lc0-wgsl-heads', name: 'Built-in · LC0 WGSL heads probe', note: 'Opt-in LC0 hybrid WGSL-head analysis lane; stable defaults remain unchanged.', rows: [{ family: 'lc0', variant: 'small', strength: 400 }], multiPv: 3, lc0Runtime: 'hybrid-wgsl-heads' },
-  { id: 'lc0-ladder', name: 'Built-in · Lc0 ladder (small/t3/BT4)', note: 'All three Lc0 nets side by side for strength/latency comparison; t3 and BT4 lazy-load in WebGPU workers with tree reuse.', rows: [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'lc0', variant: 't3', strength: 400 }, { family: 'lc0', variant: 'bt4', strength: 400 }], multiPv: 2, lc0Runtime: 'onnx' },
+  {
+    id: 'lc0-stockfish',
+    name: 'Built-in · Lc0 + Stockfish',
+    note: 'Small LC0 plus Stockfish Lite baseline for quick agreement checks.',
+    rows: [
+      { family: 'lc0', variant: 'small', strength: 400 },
+      { family: 'sf', variant: 'lite', strength: 14 },
+    ],
+    multiPv: 3,
+    lc0Runtime: 'onnx',
+  },
+  {
+    id: 'browser-native-survey',
+    name: 'Built-in · Browser-native survey',
+    note: 'Small LC0 plus staged browser-native UCI engines; missing assets stay visible in runtime status.',
+    rows: [
+      { family: 'lc0', variant: 'small', strength: 300 },
+      { family: 'viridithas', variant: 'simd', strength: 8 },
+      { family: 'berserk', variant: 'emscripten', strength: 8 },
+      { family: 'plentychess', variant: 'emscripten', strength: 8 },
+    ],
+    multiPv: 2,
+    lc0Runtime: 'onnx',
+  },
+  {
+    id: 'lc0-wgsl-heads',
+    name: 'Built-in · LC0 WGSL heads probe',
+    note: 'Opt-in LC0 hybrid WGSL-head analysis lane; stable defaults remain unchanged.',
+    rows: [{ family: 'lc0', variant: 'small', strength: 400 }],
+    multiPv: 3,
+    lc0Runtime: 'hybrid-wgsl-heads',
+  },
+  {
+    id: 'lc0-ladder',
+    name: 'Built-in · Lc0 ladder (small/t3/BT4)',
+    note: 'All three Lc0 nets side by side for strength/latency comparison; t3 and BT4 lazy-load in WebGPU workers with tree reuse.',
+    rows: [
+      { family: 'lc0', variant: 'small', strength: 400 },
+      { family: 'lc0', variant: 't3', strength: 400 },
+      { family: 'lc0', variant: 'bt4', strength: 400 },
+    ],
+    multiPv: 2,
+    lc0Runtime: 'onnx',
+  },
 ];
 let engineProfiles: EngineAnalysisProfile[] = [];
 let importedGames: ImportedGame[] = [];
@@ -256,7 +436,10 @@ let searchWorker: Worker | null = null;
 let workerReady = false;
 let workerBackend = '';
 let workerSeq = 0;
-const workerPending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: WorkerSearchProgress) => void }>();
+const workerPending = new Map<
+  number,
+  { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: WorkerSearchProgress) => void }
+>();
 let activeWorkerSearchId: number | null = null;
 
 interface WorkerSearchResult {
@@ -304,9 +487,11 @@ function selectedLc0Runtime(): Lc0AnalysisRuntime {
 
 function lc0WholeModelRuntimeRequested(): boolean {
   if (isV0DeployProfile()) return false;
-  return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
-    || params.get('enableWholeModelWebgpu') === '1'
-    || params.get('enableTvm' + 'js') === '1';
+  return (
+    normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ||
+    params.get('enableWholeModelWebgpu') === '1' ||
+    params.get('enableTvm' + 'js') === '1'
+  );
 }
 
 function installExperimentalLc0RuntimeOption(): void {
@@ -361,14 +546,15 @@ function lc0WholeModelTensorCache(): boolean {
 function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
   const common = { type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false, reportDownloadProgress: MODEL_URL === DEFAULT_MODEL_URL };
   if (runtime === 'onnx') return common;
-  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return {
-    ...common,
-    runtime: LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
-    wholeModelManifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
-    wholeModelBatch: lc0WholeModelPhysicalBatch(),
-    wholeModelTensorCache: lc0WholeModelTensorCache(),
-    evalCacheEntries: 0,
-  };
+  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)
+    return {
+      ...common,
+      runtime: LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
+      wholeModelManifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
+      wholeModelBatch: lc0WholeModelPhysicalBatch(),
+      wholeModelTensorCache: lc0WholeModelTensorCache(),
+      evalCacheEntries: 0,
+    };
   return {
     ...common,
     runtime: 'hybrid',
@@ -431,27 +617,35 @@ async function initWorker(): Promise<string> {
     runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
     manifestUrl: runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
     searchBudget: `multipv=${multiPv()}`,
-    notes: runtime === 'onnx' ? [ready.backend] : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? [ready.backend, 'whole-model runtime is research-only and opt-in'] : [ready.backend, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
+    notes:
+      runtime === 'onnx'
+        ? [ready.backend]
+        : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
+          ? [ready.backend, 'whole-model runtime is research-only and opt-in']
+          : [ready.backend, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
   });
   return workerBackend;
 }
 
-function analysisProgressText(label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number }): string {
+function analysisProgressText(
+  label: string,
+  progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number },
+): string {
   const completed = progress.completedVisits ?? progress.visits;
   const requested = progress.requestedVisits ?? progress.visits;
-  const pct = requested > 0 ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
-  const speed = progress.elapsedMs && progress.elapsedMs > 0
-    ? ` · ${(completed / Math.max(1e-9, progress.elapsedMs / 1000)).toFixed(1)} v/s`
-    : '';
+  const pct = requested > 0 ? ` ${((100 * completed) / requested).toFixed(0)}%` : '';
+  const speed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(completed / Math.max(1e-9, progress.elapsedMs / 1000)).toFixed(1)} v/s` : '';
   return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
 }
 
 function hasBoundedSearchProgress(progress: SearchProgressSnapshot): boolean {
-  return !progress.indeterminate
-    && progress.completed !== undefined
-    && progress.requested !== undefined
-    && progress.requested > 0
-    && progress.requested < Number.MAX_SAFE_INTEGER;
+  return (
+    !progress.indeterminate &&
+    progress.completed !== undefined &&
+    progress.requested !== undefined &&
+    progress.requested > 0 &&
+    progress.requested < Number.MAX_SAFE_INTEGER
+  );
 }
 
 function searchProgressText(progress: SearchProgressSnapshot): string {
@@ -460,7 +654,7 @@ function searchProgressText(progress: SearchProgressSnapshot): string {
   const requested = progress.requested ?? completed;
   const bounded = hasBoundedSearchProgress(progress);
   const count = bounded ? `${completed}/${requested}` : `${completed}`;
-  const pct = bounded ? ` ${(100 * completed / requested).toFixed(0)}%` : '';
+  const pct = bounded ? ` ${((100 * completed) / requested).toFixed(0)}%` : '';
   const elapsed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(progress.elapsedMs / 1000).toFixed(1)}s` : '';
   const nps = progress.nps && progress.nps > 0 ? ` · ${progress.nps.toFixed(1)} ${progress.units}/s` : '';
   const best = progress.best ? ` · best ${progress.best}` : '';
@@ -513,7 +707,12 @@ function showAnalysisProgress(runId: number, fen: string, label: string, progres
   el('message').textContent = analysisProgressText(label, progress);
 }
 
-function showMoveSearchProgress(runId: number, fen: string, label: string, progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: Move | null; value: number; elapsedMs?: number }): void {
+function showMoveSearchProgress(
+  runId: number,
+  fen: string,
+  label: string,
+  progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: Move | null; value: number; elapsedMs?: number },
+): void {
   showAnalysisProgress(runId, fen, label, {
     visits: progress.visits,
     requestedVisits: progress.requestedVisits ?? progress.visits,
@@ -538,11 +737,19 @@ function clearEngineSearchProgress(runId: number, label: string): void {
   renderAnalysisSearchProgress();
 }
 
-
-async function workerLc0Lines(runId: number, fen: string, visits: number, positions: BoardState[], requestedMultiPv: number, label = 'Lc0'): Promise<AnalysisLine[]> {
+async function workerLc0Lines(
+  runId: number,
+  fen: string,
+  visits: number,
+  positions: BoardState[],
+  requestedMultiPv: number,
+  label = 'Lc0',
+): Promise<AnalysisLine[]> {
   const response = await postWorker<{ result: WorkerSearchResult }>(
     { type: 'search', input: { positions }, visits, batchSize: 1, multiPv: requestedMultiPv, reportProgress: true },
-    (id) => { activeWorkerSearchId = id; },
+    (id) => {
+      activeWorkerSearchId = id;
+    },
     (progress) => showAnalysisProgress(runId, fen, label, progress),
   );
   return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
@@ -553,11 +760,17 @@ function el(id: string): HTMLElement {
   if (!node) throw new Error(`Missing #${id}`);
   return node;
 }
-function maybeEl(id: string): HTMLElement | null { return document.getElementById(id); }
-function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputElement; }
-function selectEl(id: string): HTMLSelectElement { return el(id) as HTMLSelectElement; }
+function maybeEl(id: string): HTMLElement | null {
+  return document.getElementById(id);
+}
+function inputEl(id: string): HTMLInputElement {
+  return el(id) as HTMLInputElement;
+}
+function selectEl(id: string): HTMLSelectElement {
+  return el(id) as HTMLSelectElement;
+}
 function htmlEscape(value: unknown): string {
-  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
 function modelProgressEl(): HTMLElement {
@@ -603,19 +816,35 @@ function hideModelProgress(): void {
   hideLoadingProgressItem('model');
 }
 function storageGet(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 function storageSet(key: string, value: string): void {
-  try { localStorage.setItem(key, value); } catch { /* profiles are optional */ }
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* profiles are optional */
+  }
 }
 function storageRemove(key: string): void {
-  try { localStorage.removeItem(key); } catch { /* profiles are optional */ }
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* profiles are optional */
+  }
 }
-function setShapes(shapes: DrawShape[]) { ground?.setAutoShapes(shapes); }
+function setShapes(shapes: DrawShape[]) {
+  ground?.setAutoShapes(shapes);
+}
 function uciShape(uci: string, brush: string): DrawShape | null {
   return uci.length >= 4 ? { orig: uci.slice(0, 2) as Key, dest: uci.slice(2, 4) as Key, brush } : null;
 }
-function multiPv(): number { return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3)); }
+function multiPv(): number {
+  return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3));
+}
 
 function centipawnRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' | 'tvmjs-webgpu' {
   if (variant.endsWith('-ort')) return 'ort';
@@ -664,7 +893,11 @@ function centipawnEvaluatorCacheKey(variant: string): string {
 }
 
 function activeCentipawnEvaluatorKeys(): Set<string> {
-  return new Set(activeEngineRows().filter((row) => row.family === 'centipawn').map((row) => centipawnEvaluatorCacheKey(row.variant)));
+  return new Set(
+    activeEngineRows()
+      .filter((row) => row.family === 'centipawn')
+      .map((row) => centipawnEvaluatorCacheKey(row.variant)),
+  );
 }
 
 async function centipawnEvaluator(variant: string): Promise<Evaluator> {
@@ -676,20 +909,23 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
   const generation = centipawnEvaluatorGeneration;
   const created = (async () => {
     const model = centipawnModelForVariant(variant);
-    const loaded = await createBrowserSquareformerRuntimeEvaluator({
-      id: model.modelId,
-      modelId: model.modelId,
-      label: centipawnEngineLabel(variant),
-      onnx: model.onnx,
-      meta: model.meta,
-      runtime,
-      manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
-    }, {
-      runtime,
-      manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
-      fallback,
-      audit: { surface: 'analysis', searchBudget: `multipv=${multiPv()}` },
-    });
+    const loaded = await createBrowserSquareformerRuntimeEvaluator(
+      {
+        id: model.modelId,
+        modelId: model.modelId,
+        label: centipawnEngineLabel(variant),
+        onnx: model.onnx,
+        meta: model.meta,
+        runtime,
+        manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
+      },
+      {
+        runtime,
+        manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
+        fallback,
+        audit: { surface: 'analysis', searchBudget: `multipv=${multiPv()}` },
+      },
+    );
     console.info('[lc0-analysis] loaded Centipawn evaluator', {
       requestedRuntime: loaded.requestedRuntime,
       resolvedRuntime: loaded.resolvedRuntime,
@@ -697,7 +933,12 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
       manifestUrl: loaded.manifestUrl,
       fallbackReason: loaded.fallbackReason,
     });
-    const cached = new CachedEvaluator(loaded.evaluator, { maxEntries: 4096, includeHistory: true, includeLegalMoves: true, label: `centipawn-analysis:${runtime}` });
+    const cached = new CachedEvaluator(loaded.evaluator, {
+      maxEntries: 4096,
+      includeHistory: true,
+      includeLegalMoves: true,
+      label: `centipawn-analysis:${runtime}`,
+    });
     if (centipawnEvaluatorGeneration !== generation || !activeCentipawnEvaluatorKeys().has(key)) {
       destroyCentipawnEvaluator(cached);
       const error = new Error('Centipawn evaluator was disposed before it finished loading');
@@ -776,7 +1017,8 @@ function bigNetSelectableSync(config: BigNetConfig): boolean {
   return bigNetAssetStatusSync(config) === 'present';
 }
 function bigNetUnavailableText(config: BigNetConfig): string {
-  if (bigNetAssetStatusSync(config) === 'missing') return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
+  if (bigNetAssetStatusSync(config) === 'missing')
+    return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
   if (bigNetAssetStatusSync(config) === 'unknown') return `Lc0 ${config.name} model asset is still being checked.`;
   return '';
 }
@@ -785,7 +1027,8 @@ function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRo
     const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
       const { config } = bigNetFor(next.variant);
-      const allowed = bigNetSelectableSync(config) && allowBt4Prompt && window.confirm(`${bigNetLoadWarning(config)}\n\nLoad the saved Lc0 ${config.name} profile row?`);
+      const allowed =
+        bigNetSelectableSync(config) && allowBt4Prompt && window.confirm(`${bigNetLoadWarning(config)}\n\nLoad the saved Lc0 ${config.name} profile row?`);
       if (!allowed) next.variant = 'small';
     }
     return next;
@@ -794,20 +1037,32 @@ function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRo
 function normalizeEngineProfiles(parsed: unknown): EngineAnalysisProfile[] {
   const entries = Array.isArray(parsed)
     ? parsed
-    : (parsed && typeof parsed === 'object' && (parsed as { kind?: unknown }).kind === ENGINE_PROFILE_BACKUP_KIND && Array.isArray((parsed as { profiles?: unknown }).profiles) ? (parsed as { profiles: unknown[] }).profiles : []);
-  return entries.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object') return [];
-    const raw = entry as Partial<EngineAnalysisProfile>;
-    const name = String(raw.name ?? '').trim();
-    if (!name || name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX) || !Array.isArray(raw.rows)) return [];
-    const rows = raw.rows.map((row, index) => sanitizeEngineRow(row, index)).filter((row): row is EngineRow => !!row);
-    if (!rows.length) return [];
-    return [{ name, rows, multiPv: Math.max(1, Math.min(10, Math.floor(Number(raw.multiPv) || 3))), lc0Runtime: normalizeLc0Runtime(raw.lc0Runtime ?? 'onnx') }];
-  }).sort((a, b) => a.name.localeCompare(b.name));
+    : parsed &&
+        typeof parsed === 'object' &&
+        (parsed as { kind?: unknown }).kind === ENGINE_PROFILE_BACKUP_KIND &&
+        Array.isArray((parsed as { profiles?: unknown }).profiles)
+      ? (parsed as { profiles: unknown[] }).profiles
+      : [];
+  return entries
+    .flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const raw = entry as Partial<EngineAnalysisProfile>;
+      const name = String(raw.name ?? '').trim();
+      if (!name || name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX) || !Array.isArray(raw.rows)) return [];
+      const rows = raw.rows.map((row, index) => sanitizeEngineRow(row, index)).filter((row): row is EngineRow => !!row);
+      if (!rows.length) return [];
+      return [
+        { name, rows, multiPv: Math.max(1, Math.min(10, Math.floor(Number(raw.multiPv) || 3))), lc0Runtime: normalizeLc0Runtime(raw.lc0Runtime ?? 'onnx') },
+      ];
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 function loadEngineProfiles(): EngineAnalysisProfile[] {
-  try { return normalizeEngineProfiles(JSON.parse(storageGet(ENGINE_PROFILE_STORAGE_KEY) ?? '[]') as unknown); }
-  catch { return []; }
+  try {
+    return normalizeEngineProfiles(JSON.parse(storageGet(ENGINE_PROFILE_STORAGE_KEY) ?? '[]') as unknown);
+  } catch {
+    return [];
+  }
 }
 function persistEngineProfiles(): void {
   storageSet(ENGINE_PROFILE_STORAGE_KEY, JSON.stringify(engineProfiles));
@@ -816,16 +1071,33 @@ function profileSummary(profile: EngineAnalysisProfile, note = ''): string {
   const rows = profile.rows.map((row) => `${rowLabel(row)} ${clampStrengthForRow(row)} ${strengthMeta(row.family).unit}`).join(' · ');
   return `${note ? `${note} ` : ''}${rows || 'no engines'} · MultiPV ${profile.multiPv} · LC0 ${lc0RuntimeLabel(profile.lc0Runtime)}`;
 }
-function builtInProfileValue(id: string): string { return `${BUILT_IN_PROFILE_VALUE_PREFIX}${id}`; }
+function builtInProfileValue(id: string): string {
+  return `${BUILT_IN_PROFILE_VALUE_PREFIX}${id}`;
+}
 function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_KEY) ?? ''): void {
-  const builtInOptions = BUILT_IN_ENGINE_PROFILES.map((profile) => `<option value="${htmlEscape(builtInProfileValue(profile.id))}"${builtInProfileValue(profile.id) === selected ? ' selected' : ''}>${htmlEscape(profile.name)}</option>`);
-  const savedOptions = engineProfiles.map((profile) => `<option value="${htmlEscape(profile.name)}"${profile.name === selected ? ' selected' : ''}>${htmlEscape(profile.name)}</option>`);
-  selectEl('engineProfileSelect').innerHTML = ['<option value="">manual / default</option>', '<optgroup label="Built-in profiles">', ...builtInOptions, '</optgroup>', '<optgroup label="Saved profiles">', ...savedOptions, '</optgroup>'].join('');
+  const builtInOptions = BUILT_IN_ENGINE_PROFILES.map(
+    (profile) =>
+      `<option value="${htmlEscape(builtInProfileValue(profile.id))}"${builtInProfileValue(profile.id) === selected ? ' selected' : ''}>${htmlEscape(profile.name)}</option>`,
+  );
+  const savedOptions = engineProfiles.map(
+    (profile) => `<option value="${htmlEscape(profile.name)}"${profile.name === selected ? ' selected' : ''}>${htmlEscape(profile.name)}</option>`,
+  );
+  selectEl('engineProfileSelect').innerHTML = [
+    '<option value="">manual / default</option>',
+    '<optgroup label="Built-in profiles">',
+    ...builtInOptions,
+    '</optgroup>',
+    '<optgroup label="Saved profiles">',
+    ...savedOptions,
+    '</optgroup>',
+  ].join('');
   const builtIn = BUILT_IN_ENGINE_PROFILES.find((profile) => builtInProfileValue(profile.id) === selected);
   const saved = engineProfiles.find((profile) => profile.name === selected);
   const profile = builtIn ?? saved;
   inputEl('engineProfileName').value = saved?.name ?? '';
-  el('engineProfileSummary').textContent = profile ? profileSummary(profile, builtIn?.note) : 'Manual engine setup. Choose a built-in profile or save the current engine rows.';
+  el('engineProfileSummary').textContent = profile
+    ? profileSummary(profile, builtIn?.note)
+    : 'Manual engine setup. Choose a built-in profile or save the current engine rows.';
 }
 function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): void {
   const runtimeChanged = selectedLc0Runtime() !== profile.lc0Runtime;
@@ -844,8 +1116,14 @@ function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?
 }
 function saveCurrentEngineProfile(): void {
   const name = inputEl('engineProfileName').value.trim();
-  if (!name) { el('message').textContent = 'Name the engine profile before saving.'; return; }
-  if (name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX)) { el('message').textContent = `Saved profile names cannot start with “${BUILT_IN_PROFILE_VALUE_PREFIX}”.`; return; }
+  if (!name) {
+    el('message').textContent = 'Name the engine profile before saving.';
+    return;
+  }
+  if (name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX)) {
+    el('message').textContent = `Saved profile names cannot start with “${BUILT_IN_PROFILE_VALUE_PREFIX}”.`;
+    return;
+  }
   if (activeEngineRows().some((row) => row.variant === 'custom')) {
     el('message').textContent = 'Custom URL variants are not saved in profiles yet; choose a built-in variant first.';
     return;
@@ -867,7 +1145,9 @@ async function importEngineProfilesFile(file: File | undefined): Promise<void> {
   try {
     const incoming = normalizeEngineProfiles(JSON.parse(await file.text()) as unknown);
     if (!incoming.length) throw new Error('No valid engine profiles found');
-    engineProfiles = [...incoming, ...engineProfiles.filter((profile) => !incoming.some((entry) => entry.name === profile.name))].sort((a, b) => a.name.localeCompare(b.name));
+    engineProfiles = [...incoming, ...engineProfiles.filter((profile) => !incoming.some((entry) => entry.name === profile.name))].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
     persistEngineProfiles();
     applyEngineProfile(incoming[0], { selected: incoming[0].name });
     el('message').textContent = `Imported ${incoming.length} engine profiles and applied “${incoming[0].name}”. Custom URL variants were ignored.`;
@@ -903,7 +1183,9 @@ function deleteSelectedEngineProfile(): void {
 function strengthMeta(family: EngineFamily) {
   return engineStrengthMeta(family, 'analysis');
 }
-function defaultStrength(family: EngineFamily): number { return defaultEngineStrength(family, 'analysis'); }
+function defaultStrength(family: EngineFamily): number {
+  return defaultEngineStrength(family, 'analysis');
+}
 
 function availableRecklessVariants(): RecklessVariant[] {
   const variants = [...RECKLESS_VARIANTS];
@@ -940,7 +1222,6 @@ function berserkVariantForKey(variantKey: string): BerserkVariant {
   return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
 }
 
-
 function availablePlentyChessVariants(): PlentyChessVariant[] {
   if (REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return [...PLENTYCHESS_VARIANTS, REQUESTED_PLENTYCHESS_VARIANT];
   return [...PLENTYCHESS_VARIANTS];
@@ -962,7 +1243,6 @@ function stormphraxVariantForKey(variantKey: string): StormphraxVariant {
   if (key === 'custom' && REQUESTED_STORMPHRAX_VARIANT.key === 'custom') return REQUESTED_STORMPHRAX_VARIANT;
   return stormphraxVariantByKey(key);
 }
-
 
 // "Add engine" fills the next missing family by priority
 // (Lc0 → SF → Reckless → Viridithas → Berserk → PlentyChess → Centipawn),
@@ -1014,52 +1294,68 @@ function analysisEngineFamilyOptions(): { value: EngineFamily; label: string }[]
 
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
   if (isV0DeployProfile() && !['lc0', 'centipawn', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax'].includes(family)) return [];
-  if (family === 'centipawn') return centipawnVariantOptions().map((option) => option.value === 'bt4-custom' && centipawnHybridManifestStatus === 'missing'
-    ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
-    : option);
-  if (family === 'lc0') return lc0VariantOptions(true).map((option) => {
-    if (!isLc0BigNetVariant(option.value)) return option;
-    const config = BIG_NETS[option.value];
-    if (bigNetAssetStatusSync(config) === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderEngineList));
-    const state = bigNetOptionState(config);
-    return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
-  });
+  if (family === 'centipawn')
+    return centipawnVariantOptions().map((option) =>
+      option.value === 'bt4-custom' && centipawnHybridManifestStatus === 'missing'
+        ? { ...option, disabled: true, label: `${option.label} (bundle missing)` }
+        : option,
+    );
+  if (family === 'lc0')
+    return lc0VariantOptions(true).map((option) => {
+      if (!isLc0BigNetVariant(option.value)) return option;
+      const config = BIG_NETS[option.value];
+      if (bigNetAssetStatusSync(config) === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderEngineList));
+      const state = bigNetOptionState(config);
+      return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
+    });
   if (family === 'sf') return stockfishVariantOptions();
-  if (family === 'viridithas') return availableViridithasVariants().map((v) => {
-    const status = viridithasVariantAssetStatus(v);
-    const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
-    if (!unsupported && v.key === 'relaxed-simd' && assetProbePending(status)) void checkViridithasVariantAsset(v, whileAnalysisMounted(renderEngineList));
-    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
-      assetStatus: status,
-      unsupportedReason: unsupported ? 'unsupported by this browser' : null,
-      requirePresent: v.key === 'relaxed-simd',
+  if (family === 'viridithas')
+    return availableViridithasVariants().map((v) => {
+      const status = viridithasVariantAssetStatus(v);
+      const unsupported = v.key === 'relaxed-simd' && !supportsWasmRelaxedSimd();
+      if (!unsupported && v.key === 'relaxed-simd' && assetProbePending(status)) void checkViridithasVariantAsset(v, whileAnalysisMounted(renderEngineList));
+      return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
+        assetStatus: status,
+        unsupportedReason: unsupported ? 'unsupported by this browser' : null,
+        requirePresent: v.key === 'relaxed-simd',
+      });
     });
-  });
-  if (family === 'berserk') return availableBerserkVariants().map((v) => {
-    const status = berserkVariantAssetStatus(v);
-    const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
-    if (!unsupported && assetProbePending(status)) void checkBerserkVariantAsset(v, whileAnalysisMounted(renderEngineList));
-    const needsGeneratedAsset = v.key === 'emscripten-simd' || v.key === 'emscripten-relaxed';
-    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
-      assetStatus: status,
-      unsupportedReason: unsupported ? 'unsupported by this browser' : null,
-      requirePresent: needsGeneratedAsset,
+  if (family === 'berserk')
+    return availableBerserkVariants().map((v) => {
+      const status = berserkVariantAssetStatus(v);
+      const unsupported = v.key === 'emscripten-relaxed' && !supportsWasmRelaxedSimd();
+      if (!unsupported && assetProbePending(status)) void checkBerserkVariantAsset(v, whileAnalysisMounted(renderEngineList));
+      const needsGeneratedAsset = v.key === 'emscripten-simd' || v.key === 'emscripten-relaxed';
+      return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
+        assetStatus: status,
+        unsupportedReason: unsupported ? 'unsupported by this browser' : null,
+        requirePresent: needsGeneratedAsset,
+      });
     });
-  });
-  if (family === 'plentychess') return availablePlentyChessVariants().map((v) => {
-    const status = plentyChessVariantAssetStatus(v);
-    const unsupportedReason = plentyChessVariantUnsupportedReason(v);
-    const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
-    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(v, whileAnalysisMounted(renderEngineList));
-    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
-  });
-  if (family === 'stormphrax') return availableStormphraxVariants().map((v) => {
-    const status = stormphraxVariantAssetStatus(v);
-    const unsupportedReason = stormphraxVariantUnsupportedReason(v);
-    const needsGeneratedAsset = v.key === 'emscripten-relaxed';
-    if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileAnalysisMounted(renderEngineList));
-    return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), { assetStatus: status, unsupportedReason, requirePresent: needsGeneratedAsset });
-  });
+  if (family === 'plentychess')
+    return availablePlentyChessVariants().map((v) => {
+      const status = plentyChessVariantAssetStatus(v);
+      const unsupportedReason = plentyChessVariantUnsupportedReason(v);
+      const needsGeneratedAsset = v.key === 'emscripten-sse41' || v.key === 'emscripten-relaxed';
+      if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkPlentyChessVariantAsset(v, whileAnalysisMounted(renderEngineList));
+      return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
+        assetStatus: status,
+        unsupportedReason,
+        requirePresent: needsGeneratedAsset,
+      });
+    });
+  if (family === 'stormphrax')
+    return availableStormphraxVariants().map((v) => {
+      const status = stormphraxVariantAssetStatus(v);
+      const unsupportedReason = stormphraxVariantUnsupportedReason(v);
+      const needsGeneratedAsset = v.key === 'emscripten-relaxed';
+      if (!unsupportedReason && needsGeneratedAsset && assetProbePending(status)) void checkStormphraxVariantAsset(v, whileAnalysisMounted(renderEngineList));
+      return browserVariantOption(v.key, engineVariantMenuLabel(family, v.key, v.label), {
+        assetStatus: status,
+        unsupportedReason,
+        requirePresent: needsGeneratedAsset,
+      });
+    });
   const recklessVariants = availableRecklessVariants().filter((v) => !isV0DeployProfile() || ['full', 'simd', 'relaxed-simd'].includes(v.key));
   return recklessVariants.map((v) => {
     const status = recklessVariantAssetStatus(v);
@@ -1103,12 +1399,14 @@ function analysisSelectionCacheKey(fen: string, rows = activeEngineRows()): stri
 
 function activeEngineRows(): EngineRow[] {
   const seen = new Set<string>();
-  return engineRows.map((row, index) => normalizeDeployEngineRow(row, 'analysis', index)).filter((r) => {
-    const k = `${r.family}:${r.variant}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  return engineRows
+    .map((row, index) => normalizeDeployEngineRow(row, 'analysis', index))
+    .filter((r) => {
+      const k = `${r.family}:${r.variant}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
 }
 
 function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
@@ -1126,28 +1424,42 @@ function renderEngineList(): void {
     return normalized;
   });
   const families = analysisEngineFamilyOptions();
-  el('engineList').innerHTML = engineRows.map((row, i) => {
-    const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
-    const varSel = variantOptions(row.family).map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`).join('');
-    const meta = strengthMeta(row.family);
-    const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
-    return `<div class="engine-row">${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select><span class="arrow">→</span><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
-  }).join('');
+  el('engineList').innerHTML = engineRows
+    .map((row, i) => {
+      const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
+      const varSel = variantOptions(row.family)
+        .map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`)
+        .join('');
+      const meta = strengthMeta(row.family);
+      const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
+      return `<div class="engine-row">${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select><span class="arrow">→</span><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
+    })
+    .join('');
   el('comparisonSection').hidden = activeEngineRows().length < 2;
 }
 
-async function workerBigNetLines(runId: number, variant: string, fen: string, visits: number, positions: BoardState[], requestedMultiPv: number): Promise<AnalysisLine[]> {
+async function workerBigNetLines(
+  runId: number,
+  variant: string,
+  fen: string,
+  visits: number,
+  positions: BoardState[],
+  requestedMultiPv: number,
+): Promise<AnalysisLine[]> {
   const { config, searcher } = bigNetFor(variant);
   const label = `Lc0 ${config.name}`;
   searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
   try {
-    const result = await searcher.search({ positions }, {
-      visits,
-      multiPv: requestedMultiPv,
-      batchSize: config.recommendedBatchSize,
-      batchPipelineDepth: config.recommendedPipelineDepth,
-      onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
-    });
+    const result = await searcher.search(
+      { positions },
+      {
+        visits,
+        multiPv: requestedMultiPv,
+        batchSize: config.recommendedBatchSize,
+        batchPipelineDepth: config.recommendedPipelineDepth,
+        onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
+      },
+    );
     return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
   } finally {
     hideModelProgress();
@@ -1156,7 +1468,11 @@ async function workerBigNetLines(runId: number, variant: string, fen: string, vi
 
 // Lc0 big nets use hosted ONNX assets and prefer WebGPU, with a slow CPU fallback.
 async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<void> {
-  await Promise.all([probeBt4Support(), checkBigNetAsset(BIG_NETS.bt4, whileAnalysisMounted(renderRecklessRuntimeInfo)), checkBigNetAsset(BIG_NETS.t3, whileAnalysisMounted(renderRecklessRuntimeInfo))]);
+  await Promise.all([
+    probeBt4Support(),
+    checkBigNetAsset(BIG_NETS.bt4, whileAnalysisMounted(renderRecklessRuntimeInfo)),
+    checkBigNetAsset(BIG_NETS.t3, whileAnalysisMounted(renderRecklessRuntimeInfo)),
+  ]);
   if (isStaleMount(mountSignal)) return;
   for (const row of engineRows) {
     if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
@@ -1167,17 +1483,28 @@ async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<
 
 function renderRecklessRuntimeInfo(): void {
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
-  const bigNetTexts = isV0DeployProfile() ? [] : (['bt4', 't3'] as const).map((key) => {
-    const config = BIG_NETS[key];
-    const asset = bigNetAssetStatusSync(config);
-    if (asset === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderRecklessRuntimeInfo));
-    const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? `asset missing · ${config.modelUrl} · run node scripts/lc0_prepare_model_assets.mjs` : 'checking asset';
-    return `Lc0 ${config.name}: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · ${assetText}`;
-  });
+  const bigNetTexts = isV0DeployProfile()
+    ? []
+    : (['bt4', 't3'] as const).map((key) => {
+        const config = BIG_NETS[key];
+        const asset = bigNetAssetStatusSync(config);
+        if (asset === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderRecklessRuntimeInfo));
+        const assetText =
+          asset === 'present'
+            ? 'asset ok'
+            : asset === 'missing'
+              ? `asset missing · ${config.modelUrl} · run node scripts/lc0_prepare_model_assets.mjs`
+              : 'checking asset';
+        return `Lc0 ${config.name}: ${bt4SupportedSync() ? 'WebGPU ok' : 'WebGPU unavailable'} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · ${assetText}`;
+      });
   const bt4Text = bigNetTexts.join(' | ');
-  const fallbackMode = (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) ? 'persistent available' : 'one-shot fallback';
+  const fallbackMode = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated ? 'persistent available' : 'one-shot fallback';
   const centipawnRows = activeEngineRows().filter((row) => row.family === 'centipawn');
-  const centipawnParts = centipawnRows.length ? centipawnRows.map((row) => `${centipawnEngineLabel(row.variant)} · SquareFormer ${centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`) : [];
+  const centipawnParts = centipawnRows.length
+    ? centipawnRows.map(
+        (row) => `${centipawnEngineLabel(row.variant)} · SquareFormer ${centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`,
+      )
+    : [];
   const recklessRows = activeEngineRows().filter((row) => row.family === 'reckless');
   const recklessVariants = recklessRows.length ? recklessRows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
   const recklessParts = recklessVariants.map((variant) => {
@@ -1185,7 +1512,14 @@ function renderRecklessRuntimeInfo(): void {
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? fallbackMode;
     const asset = recklessVariantAssetStatus(variant);
-    if (assetProbePending(asset)) void checkRecklessVariantAsset(variant, whileAnalysisMounted(() => { renderEngineList(); renderRecklessRuntimeInfo(); }));
+    if (assetProbePending(asset))
+      void checkRecklessVariantAsset(
+        variant,
+        whileAnalysisMounted(() => {
+          renderEngineList();
+          renderRecklessRuntimeInfo();
+        }),
+      );
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     const targetUrl = status?.wasmUrl ?? variant.wasmUrl;
     const assetUrlText = variant.nnueUrl ? `${targetUrl} + ${variant.nnueUrl}` : targetUrl;
@@ -1204,7 +1538,9 @@ function renderRecklessRuntimeInfo(): void {
     return `${variant.label} · ${mode} · ${sab} · ${assetText} · ${status?.wasmUrl ?? variant.wasmUrl}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}${asset === 'missing' ? ' · build locally with npm run viridithas:build-wasi or viridithas:build-simd-wasi' : ''}`;
   });
   const berserkRows = activeEngineRows().filter((row) => row.family === 'berserk');
-  const berserkVariants = berserkRows.length ? berserkRows.map((row) => berserkVariantForKey(row.variant)) : [REQUESTED_BERSERK_VARIANT].filter((variant) => !!variant.jsUrl);
+  const berserkVariants = berserkRows.length
+    ? berserkRows.map((row) => berserkVariantForKey(row.variant))
+    : [REQUESTED_BERSERK_VARIANT].filter((variant) => !!variant.jsUrl);
   const berserkParts = berserkVariants.map((variant) => {
     const engine = berserkEngines.peek(variant);
     const asset = berserkVariantAssetStatus(variant);
@@ -1232,7 +1568,8 @@ function renderRecklessRuntimeInfo(): void {
     const assetText = unsupportedReason ?? (asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset');
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText} · ${variant.jsUrl}`;
   });
-  el('recklessRuntimeInfo').textContent = `${bt4Text} · Centipawn: ${centipawnParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'} · Stormphrax: ${stormphraxParts.join(' | ') || 'not selected'}`;
+  el('recklessRuntimeInfo').textContent =
+    `${bt4Text} · Centipawn: ${centipawnParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'} · Stormphrax: ${stormphraxParts.join(' | ') || 'not selected'}`;
 }
 
 function threadedStockfishAvailable(): boolean {
@@ -1245,20 +1582,33 @@ function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
   // flavor whenever isolation allows it (flavor is fixed per page lifetime).
   const threaded = threadedStockfishAvailable();
   if (kind === 'lite') {
-    if (!stockfishLite) stockfishLite = new StockfishEngine({ depth: 14, hashMb: cpuEngineHashMbForSurface('analysis') }, stockfishFlavorUrl(threaded ? 'lite-threaded' : 'lite-single'));
+    if (!stockfishLite)
+      stockfishLite = new StockfishEngine(
+        { depth: 14, hashMb: cpuEngineHashMbForSurface('analysis') },
+        stockfishFlavorUrl(threaded ? 'lite-threaded' : 'lite-single'),
+      );
     return stockfishLite;
   }
-  if (!stockfishFull) stockfishFull = new StockfishEngine({ depth: 14, hashMb: cpuEngineHashMbForSurface('analysis') }, stockfishFlavorUrl(threaded ? 'threaded' : 'single'));
+  if (!stockfishFull)
+    stockfishFull = new StockfishEngine({ depth: 14, hashMb: cpuEngineHashMbForSurface('analysis') }, stockfishFlavorUrl(threaded ? 'threaded' : 'single'));
   return stockfishFull;
 }
 
 const ANALYSIS_CPU_ENGINE_OPTIONS = { surface: 'analysis' } as const;
 
-const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) => createRecklessEngine(variant, renderRecklessRuntimeInfo, ANALYSIS_CPU_ENGINE_OPTIONS));
-const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) => createViridithasEngine(variant, { forceOneShot: true }, ANALYSIS_CPU_ENGINE_OPTIONS));
+const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) =>
+  createRecklessEngine(variant, renderRecklessRuntimeInfo, ANALYSIS_CPU_ENGINE_OPTIONS),
+);
+const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) =>
+  createViridithasEngine(variant, { forceOneShot: true }, ANALYSIS_CPU_ENGINE_OPTIONS),
+);
 const berserkEngines = new DisposableVariantPool(berserkCacheKey, (variant: BerserkVariant) => createBerserkEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS));
-const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (variant: PlentyChessVariant) => createPlentyChessEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS));
-const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) => createStormphraxEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS));
+const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (variant: PlentyChessVariant) =>
+  createPlentyChessEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS),
+);
+const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) =>
+  createStormphraxEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS),
+);
 
 function getRecklessFor(variantKey: string) {
   return recklessEngines.getOrCreate(recklessVariantForKey(variantKey));
@@ -1336,7 +1686,7 @@ function renderBoard() {
   const config = {
     orientation,
     fen: tree.current.fen.split(' ')[0],
-    turnColor: board.turn === 'w' ? 'white' as const : 'black' as const,
+    turnColor: board.turn === 'w' ? ('white' as const) : ('black' as const),
     coordinates: true,
     // Allows synthetic pointer events so automated browser checks can move pieces.
     trustAllEvents: true,
@@ -1345,7 +1695,7 @@ function renderBoard() {
     animation: { enabled: true, duration: 160 },
     movable: {
       free: false,
-      color: board.turn === 'w' ? 'white' as const : 'black' as const,
+      color: board.turn === 'w' ? ('white' as const) : ('black' as const),
       dests: legalDests(board),
       events: { after: onUserMove },
     },
@@ -1381,8 +1731,14 @@ function renderLegend(lines: AnalysisLine[]) {
     colorKeys.set(key, arr);
   }
   const familyLabels: Record<string, string> = {
-    green: 'Lc0', blue: 'Stockfish', red: 'Reckless',
-    purple: 'Viridithas', orange: 'Berserk', cyan: 'PlentyChess', pink: 'Engine', yellow: 'Engine',
+    green: 'Lc0',
+    blue: 'Stockfish',
+    red: 'Reckless',
+    purple: 'Viridithas',
+    orange: 'Berserk',
+    cyan: 'PlentyChess',
+    pink: 'Engine',
+    yellow: 'Engine',
   };
   const keys = engines.map((engine) => {
     const key = engineColorKey(engine);
@@ -1390,8 +1746,9 @@ function renderLegend(lines: AnalysisLine[]) {
     return { label, swatch: engineBrushes(engine).swatch };
   });
   if (hasBook) keys.push({ label: 'Book', swatch: BOOK_SWATCH });
-  el('engineLegend').innerHTML = keys.map((key) =>
-    `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${htmlEscape(key.label)}</span>`).join('');
+  el('engineLegend').innerHTML = keys
+    .map((key) => `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${htmlEscape(key.label)}</span>`)
+    .join('');
 }
 
 function firstSanMove(line: AnalysisLine): string {
@@ -1412,12 +1769,13 @@ function comparisonEngineName(engine: string): string {
 }
 
 function renderEngineComparison(lines: AnalysisLine[]): void {
-  const bestByEngine = [...new Map(lines
-    .filter((line) => line.multipv === 1 && line.pvUci[0])
-    .map((line) => [line.engine, line])).values()];
+  const bestByEngine = [...new Map(lines.filter((line) => line.multipv === 1 && line.pvUci[0]).map((line) => [line.engine, line])).values()];
   const body = el('engineCompare').querySelector('tbody')!;
   if (!bestByEngine.length) {
-    const progressRows = [...searchProgressByEngine.values()].map((progress) => `<tr><td>${engineLogoHtmlForName(progress.label)}</td><td colspan="3" class="small">searching</td><td class="pv">${searchProgressHtml(progress)}</td></tr>`);
+    const progressRows = [...searchProgressByEngine.values()].map(
+      (progress) =>
+        `<tr><td>${engineLogoHtmlForName(progress.label)}</td><td colspan="3" class="small">searching</td><td class="pv">${searchProgressHtml(progress)}</td></tr>`,
+    );
     el('engineConsensus').textContent = progressRows.length ? 'Analysis in progress.' : analyzing ? 'Preparing selected engines.' : 'No analysis yet.';
     body.innerHTML = progressRows.length
       ? progressRows.join('')
@@ -1435,44 +1793,53 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   }
   const consensus = [...moveCounts.entries()].sort((a, b) => b[1].count - a[1].count)[0];
   const consensusUci = consensus?.[0] ?? '';
-  const consensusText = consensus
-    ? `${consensus[1].count}/${bestByEngine.length} engines prefer ${consensus[1].san}`
-    : 'No first-move consensus.';
+  const consensusText = consensus ? `${consensus[1].count}/${bestByEngine.length} engines prefer ${consensus[1].san}` : 'No first-move consensus.';
   const spreadText = evalSpread === null ? 'eval spread unavailable' : `eval spread ${signedCp(evalSpread)} cp`;
   el('engineConsensus').textContent = `${consensusText} · ${spreadText}`;
   const reference = finiteScores.length ? finiteScores[0] : undefined;
-  body.innerHTML = bestByEngine.map((line) => {
-    const swatch = engineBrushes(line.engine).swatch;
-    const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
-    const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
-    const label = `<span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(comparisonEngineName(line.engine))}</span>`;
-    return `<tr data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}; cursor:pointer">`
-      + `<td>${label}</td>`
-      + `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}</td>`
-      + `<td class="mono">${htmlEscape(line.scoreText)}</td>`
-      + `<td class="mono">${htmlEscape(delta)}</td>`
-      + `<td class="pv">${htmlEscape(line.pvSan)}</td>`
-      + '</tr>';
-  }).join('');
+  body.innerHTML = bestByEngine
+    .map((line) => {
+      const swatch = engineBrushes(line.engine).swatch;
+      const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
+      const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
+      const label = `<span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(comparisonEngineName(line.engine))}</span>`;
+      return (
+        `<tr data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}; cursor:pointer">` +
+        `<td>${label}</td>` +
+        `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}</td>` +
+        `<td class="mono">${htmlEscape(line.scoreText)}</td>` +
+        `<td class="mono">${htmlEscape(delta)}</td>` +
+        `<td class="pv">${htmlEscape(line.pvSan)}</td>` +
+        '</tr>'
+      );
+    })
+    .join('');
 }
 
 function renderLines() {
   const lines = lineCache.get(tree.current.fen) ?? [];
   renderLegend(lines);
   renderEngineComparison(lines);
-  el('lines').innerHTML = lines.map((line) => {
-    if (line.error) {
-      const swatch = engineBrushes(line.engine).swatch;
-      return `<li data-uci="" style="border-left:3px solid ${swatch};opacity:0.6">`
-        + `<span class="score">${engineLogoHtmlForName(line.engine)} ✗</span>`
-        + `<span class="pv small" style="color:var(--text-dim)">${htmlEscape(line.error)}</span></li>`;
-    }
-    const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
-    const swatch = engineBrushes(line.engine).swatch;
-    return `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">`
-      + `<span class="score ${cls}">${engineLogoHtmlForName(line.engine)} ${htmlEscape(line.scoreText)}</span>`
-      + `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`;
-  }).join('') || '<li class="small placeholder">Make a move or press Analyze to begin.</li>';
+  el('lines').innerHTML =
+    lines
+      .map((line) => {
+        if (line.error) {
+          const swatch = engineBrushes(line.engine).swatch;
+          return (
+            `<li data-uci="" style="border-left:3px solid ${swatch};opacity:0.6">` +
+            `<span class="score">${engineLogoHtmlForName(line.engine)} ✗</span>` +
+            `<span class="pv small" style="color:var(--text-dim)">${htmlEscape(line.error)}</span></li>`
+          );
+        }
+        const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
+        const swatch = engineBrushes(line.engine).swatch;
+        return (
+          `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">` +
+          `<span class="score ${cls}">${engineLogoHtmlForName(line.engine)} ${htmlEscape(line.scoreText)}</span>` +
+          `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`
+        );
+      })
+      .join('') || '<li class="small placeholder">Make a move or press Analyze to begin.</li>';
 }
 
 function moveNumberPrefix(node: GameNode, force: boolean): string {
@@ -1500,7 +1867,10 @@ function moveToken(node: GameNode, force: boolean): string {
 
 function renderMoveList() {
   nodeIndex.clear();
-  const collect = (n: GameNode) => { nodeIndex.set(n.id, n); n.children.forEach(collect); };
+  const collect = (n: GameNode) => {
+    nodeIndex.set(n.id, n);
+    n.children.forEach(collect);
+  };
   collect(tree.root);
   let html = '';
   let node: GameNode | undefined = tree.root.children[0];
@@ -1521,19 +1891,30 @@ function renderMoveList() {
 function renderOpening() {
   const body = el('opening').querySelector('tbody')!;
   const hasDatabasePositionStats = databasePositionKey === positionKey(tree.current.fen) && databasePositionStats.length > 0;
-  if (!importedGames.length && !hasDatabasePositionStats) { body.innerHTML = '<tr><td colspan="3" class="small">import games or search the local DB to see opening stats</td></tr>'; return; }
+  if (!importedGames.length && !hasDatabasePositionStats) {
+    body.innerHTML = '<tr><td colspan="3" class="small">import games or search the local DB to see opening stats</td></tr>';
+    return;
+  }
   const stats = currentBookStats();
   const summary = openingSummary(stats);
-  if (hasDatabasePositionStats && !importedGames.length) el('importInfo').textContent = `local DB search · ${databasePositionCollectionCount} collections · ${summary.total} from here`;
+  if (hasDatabasePositionStats && !importedGames.length)
+    el('importInfo').textContent = `local DB search · ${databasePositionCollectionCount} collections · ${summary.total} from here`;
   else el('importInfo').textContent = `${importedGames.length} games · ${summary.total} from here`;
-  if (!stats.length) { body.innerHTML = '<tr><td colspan="3" class="small">no games reached this position</td></tr>'; return; }
-  body.innerHTML = stats.map((stat) => {
-    const pct = (n: number) => (stat.count ? (n / stat.count) * 100 : 0).toFixed(0);
-    return `<tr class="mv" data-uci="${htmlEscape(stat.uci)}"><td class="san">${htmlEscape(stat.san)}</td>`
-      + `<td class="num">${stat.count}</td>`
-      + `<td><div class="wdlbar" title="W ${stat.whiteWins} / D ${stat.draws} / B ${stat.blackWins}">`
-      + `<div class="w" style="width:${pct(stat.whiteWins)}%"></div><div class="d" style="width:${pct(stat.draws)}%"></div><div class="b" style="width:${pct(stat.blackWins)}%"></div></div></td></tr>`;
-  }).join('');
+  if (!stats.length) {
+    body.innerHTML = '<tr><td colspan="3" class="small">no games reached this position</td></tr>';
+    return;
+  }
+  body.innerHTML = stats
+    .map((stat) => {
+      const pct = (n: number) => (stat.count ? (n / stat.count) * 100 : 0).toFixed(0);
+      return (
+        `<tr class="mv" data-uci="${htmlEscape(stat.uci)}"><td class="san">${htmlEscape(stat.san)}</td>` +
+        `<td class="num">${stat.count}</td>` +
+        `<td><div class="wdlbar" title="W ${stat.whiteWins} / D ${stat.draws} / B ${stat.blackWins}">` +
+        `<div class="w" style="width:${pct(stat.whiteWins)}%"></div><div class="d" style="width:${pct(stat.draws)}%"></div><div class="b" style="width:${pct(stat.blackWins)}%"></div></div></td></tr>`
+      );
+    })
+    .join('');
 }
 
 function setImportedPgn(raw: string, messagePrefix = 'imported'): number {
@@ -1558,18 +1939,25 @@ function selectedPgnCollectionId(): string {
 
 function renderPgnDatabaseList(selected = activePgnCollectionId): void {
   const list = el('pgnDbList');
-  if (!pgnDatabaseAvailable()) { list.innerHTML = '<div class="empty">IndexedDB unavailable; local PGN collections cannot be listed.</div>'; return; }
+  if (!pgnDatabaseAvailable()) {
+    list.innerHTML = '<div class="empty">IndexedDB unavailable; local PGN collections cannot be listed.</div>';
+    return;
+  }
   if (!pgnCollections.length) {
     list.innerHTML = '<div class="empty">No saved collections yet. Import PGN, name it, then Save to DB.</div>';
     return;
   }
-  list.innerHTML = pgnCollections.map((entry) => {
-    const selectedClass = entry.id === selected ? ' selected' : '';
-    const indexed = entry.indexedPositionCount ? `${entry.indexedPositionCount} indexed positions` : 'index rebuilds on load/import';
-    return `<button type="button" class="pgn-db-card${selectedClass}" data-id="${htmlEscape(entry.id)}">`
-      + `<span class="name">${htmlEscape(entry.name)}</span><span class="meta">${entry.gameCount} games</span>`
-      + `<span class="meta">${htmlEscape(formatPgnCollectionSummary(entry))}</span><span class="meta">${indexed}</span></button>`;
-  }).join('');
+  list.innerHTML = pgnCollections
+    .map((entry) => {
+      const selectedClass = entry.id === selected ? ' selected' : '';
+      const indexed = entry.indexedPositionCount ? `${entry.indexedPositionCount} indexed positions` : 'index rebuilds on load/import';
+      return (
+        `<button type="button" class="pgn-db-card${selectedClass}" data-id="${htmlEscape(entry.id)}">` +
+        `<span class="name">${htmlEscape(entry.name)}</span><span class="meta">${entry.gameCount} games</span>` +
+        `<span class="meta">${htmlEscape(formatPgnCollectionSummary(entry))}</span><span class="meta">${indexed}</span></button>`
+      );
+    })
+    .join('');
 }
 
 function clearPgnDatabaseSearchResults(message = 'Search position checks saved collections and shows matching collection hits here.'): void {
@@ -1589,14 +1977,21 @@ function renderPgnDatabaseSearchResults(results: PgnDatabaseSearchResult[]): voi
     container.innerHTML = '<div class="empty">No saved collection reached this position.</div>';
     return;
   }
-  container.innerHTML = results.map((result) => {
-    const total = result.total;
-    const moves = result.stats.slice(0, 5).map((stat) => `${stat.san} ${stat.count}`).join(' · ');
-    const extra = result.stats.length > 5 ? ` · +${result.stats.length - 5} moves` : '';
-    return `<div class="pgn-db-hit"><div class="name">${htmlEscape(result.summary.name)}</div>`
-      + `<div class="meta">${total} games reached this position · ${htmlEscape(formatPgnCollectionSummary(result.summary))}</div>`
-      + `<div class="moves">${htmlEscape(moves || 'terminal/no next move')}${extra}</div></div>`;
-  }).join('');
+  container.innerHTML = results
+    .map((result) => {
+      const total = result.total;
+      const moves = result.stats
+        .slice(0, 5)
+        .map((stat) => `${stat.san} ${stat.count}`)
+        .join(' · ');
+      const extra = result.stats.length > 5 ? ` · +${result.stats.length - 5} moves` : '';
+      return (
+        `<div class="pgn-db-hit"><div class="name">${htmlEscape(result.summary.name)}</div>` +
+        `<div class="meta">${total} games reached this position · ${htmlEscape(formatPgnCollectionSummary(result.summary))}</div>` +
+        `<div class="moves">${htmlEscape(moves || 'terminal/no next move')}${extra}</div></div>`
+      );
+    })
+    .join('');
 }
 
 function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
@@ -1624,7 +2019,12 @@ function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
   el('importPgnDb').toggleAttribute('disabled', false);
   el('searchPgnDbPosition').toggleAttribute('disabled', false);
   const current = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
-  select.innerHTML = ['<option value="">new collection</option>', ...pgnCollections.map((entry) => `<option value="${htmlEscape(entry.id)}"${entry.id === current ? ' selected' : ''}>${htmlEscape(entry.name)} (${entry.gameCount})</option>`)].join('');
+  select.innerHTML = [
+    '<option value="">new collection</option>',
+    ...pgnCollections.map(
+      (entry) => `<option value="${htmlEscape(entry.id)}"${entry.id === current ? ' selected' : ''}>${htmlEscape(entry.name)} (${entry.gameCount})</option>`,
+    ),
+  ].join('');
   el('loadPgnDb').toggleAttribute('disabled', !current);
   el('deletePgnDb').toggleAttribute('disabled', !current);
   el('renamePgnDb').toggleAttribute('disabled', !current);
@@ -1673,7 +2073,10 @@ function suggestPgnDatabaseName(): void {
 
 function importGames() {
   const raw = inputEl('importGamesInput').value.trim();
-  if (!raw) { el('importInfo').textContent = 'paste or fetch PGN first'; return; }
+  if (!raw) {
+    el('importInfo').textContent = 'paste or fetch PGN first';
+    return;
+  }
   try {
     lastImportSource = 'manual';
     lastImportUsername = '';
@@ -1690,14 +2093,20 @@ function importGames() {
 async function fetchGames() {
   const site = selectEl('importSite').value as ImportSite;
   const username = inputEl('importUser').value.trim();
-  if (!username) { el('importInfo').textContent = 'enter a username'; return; }
+  if (!username) {
+    el('importInfo').textContent = 'enter a username';
+    return;
+  }
   const opts = { max: Number(inputEl('importMax').value) || 40, color: selectEl('importColor').value as ImportColor };
   el('fetchGames').toggleAttribute('disabled', true);
   el('importInfo').textContent = `fetching ${username}'s games from ${site}…`;
   try {
     const pgn = await fetchGameHistoryPgn(site, username, opts, fetch);
     inputEl('importGamesInput').value = pgn;
-    if (!pgn.trim()) { el('importInfo').textContent = 'no games found'; return; }
+    if (!pgn.trim()) {
+      el('importInfo').textContent = 'no games found';
+      return;
+    }
     lastImportSource = site;
     lastImportUsername = username;
     lastImportColor = opts.color;
@@ -1732,7 +2141,10 @@ function downloadTextFile(filename: string, content: string, type: string): void
 
 function downloadPgn() {
   const pgn = inputEl('importGamesInput').value;
-  if (!pgn.trim()) { el('importInfo').textContent = 'nothing to download'; return; }
+  if (!pgn.trim()) {
+    el('importInfo').textContent = 'nothing to download';
+    return;
+  }
   const name = safeFilename(inputEl('importUser').value.trim() || inputEl('pgnDbName').value.trim() || 'games');
   downloadTextFile(`${name}.pgn`, pgn, 'application/x-chess-pgn');
   el('importInfo').textContent = `downloaded ${name}.pgn`;
@@ -1741,7 +2153,10 @@ function downloadPgn() {
 async function saveCurrentPgnCollection(): Promise<void> {
   const mountSignal = mountAbort.signal;
   const raw = inputEl('importGamesInput').value.trim();
-  if (!raw) { el('pgnDbInfo').textContent = 'Paste, fetch, or load PGN before saving to the local database.'; return; }
+  if (!raw) {
+    el('pgnDbInfo').textContent = 'Paste, fetch, or load PGN before saving to the local database.';
+    return;
+  }
   let gameCount = 0;
   try {
     // Always parse the textarea at save time: users can edit PGN after an
@@ -1779,11 +2194,18 @@ async function saveCurrentPgnCollection(): Promise<void> {
 async function loadSelectedPgnCollection(): Promise<void> {
   const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
-  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to load.'; return; }
+  if (!id) {
+    el('pgnDbInfo').textContent = 'Choose a saved PGN collection to load.';
+    return;
+  }
   try {
     const record = await loadPgnCollection(id);
     if (isStaleMount(mountSignal)) return;
-    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections('', mountSignal); return; }
+    if (!record) {
+      el('pgnDbInfo').textContent = 'Saved PGN collection not found.';
+      await refreshPgnDatabaseCollections('', mountSignal);
+      return;
+    }
     activePgnCollectionId = record.id;
     lastImportSource = record.source;
     lastImportUsername = record.username ?? '';
@@ -1807,7 +2229,10 @@ async function loadSelectedPgnCollection(): Promise<void> {
 async function renameSelectedPgnCollection(): Promise<void> {
   const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
-  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to rename.'; return; }
+  if (!id) {
+    el('pgnDbInfo').textContent = 'Choose a saved PGN collection to rename.';
+    return;
+  }
   try {
     const record = await renamePgnCollection(id, inputEl('pgnDbName').value);
     if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
@@ -1822,7 +2247,10 @@ async function renameSelectedPgnCollection(): Promise<void> {
 async function duplicateSelectedPgnCollection(): Promise<void> {
   const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
-  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to duplicate.'; return; }
+  if (!id) {
+    el('pgnDbInfo').textContent = 'Choose a saved PGN collection to duplicate.';
+    return;
+  }
   const summary = pgnCollections.find((entry) => entry.id === id);
   const requestedName = inputEl('pgnDbName').value.trim();
   const duplicateName = requestedName && requestedName !== summary?.name ? requestedName : `${summary?.name ?? 'PGN collection'} copy`;
@@ -1841,11 +2269,18 @@ async function duplicateSelectedPgnCollection(): Promise<void> {
 async function exportSelectedPgnCollection(): Promise<void> {
   const mountSignal = mountAbort.signal;
   const id = selectedPgnCollectionId();
-  if (!id) { el('pgnDbInfo').textContent = 'Choose a saved PGN collection to export.'; return; }
+  if (!id) {
+    el('pgnDbInfo').textContent = 'Choose a saved PGN collection to export.';
+    return;
+  }
   try {
     const record = await loadPgnCollection(id);
     if (isStaleMount(mountSignal)) return;
-    if (!record) { el('pgnDbInfo').textContent = 'Saved PGN collection not found.'; await refreshPgnDatabaseCollections('', mountSignal); return; }
+    if (!record) {
+      el('pgnDbInfo').textContent = 'Saved PGN collection not found.';
+      await refreshPgnDatabaseCollections('', mountSignal);
+      return;
+    }
     const filename = `${safeFilename(record.name, 'collection')}.pgn`;
     downloadTextFile(filename, record.pgn, 'application/x-chess-pgn');
     el('pgnDbInfo').textContent = `Exported “${record.name}” as ${filename}.`;
@@ -1855,12 +2290,16 @@ async function exportSelectedPgnCollection(): Promise<void> {
 }
 
 async function exportPgnDatabase(): Promise<void> {
-  if (!pgnDatabaseAvailable()) { el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.'; return; }
+  if (!pgnDatabaseAvailable()) {
+    el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.';
+    return;
+  }
   try {
     const backup = await exportPgnDatabaseBackup();
     const filename = pgnDatabaseBackupFilename(new Date(backup.exportedAt));
     downloadTextFile(filename, JSON.stringify(backup, null, 2), 'application/json');
-    el('pgnDbInfo').textContent = `Exported ${backup.collections.length} PGN collections as ${filename}. Raw PGN is included; position indexes are rebuildable.`;
+    el('pgnDbInfo').textContent =
+      `Exported ${backup.collections.length} PGN collections as ${filename}. Raw PGN is included; position indexes are rebuildable.`;
   } catch (error) {
     el('pgnDbInfo').textContent = `Database export failed: ${(error as Error).message}`;
   }
@@ -1884,7 +2323,10 @@ async function importPgnDatabaseFile(file: File | undefined): Promise<void> {
 }
 
 async function searchCurrentPositionInPgnDatabase(): Promise<void> {
-  if (!pgnDatabaseAvailable()) { el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.'; return; }
+  if (!pgnDatabaseAvailable()) {
+    el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.';
+    return;
+  }
   el('searchPgnDbPosition').toggleAttribute('disabled', true);
   try {
     const searchFen = tree.current.fen;
@@ -1903,7 +2345,10 @@ async function searchCurrentPositionInPgnDatabase(): Promise<void> {
       importedPositionIndex = null;
       bookCache.clear();
       const summary = openingSummary(databasePositionStats);
-      const names = results.slice(0, 3).map((result) => result.summary.name).join(', ');
+      const names = results
+        .slice(0, 3)
+        .map((result) => result.summary.name)
+        .join(', ');
       const extra = results.length > 3 ? `, +${results.length - 3} more` : '';
       el('pgnDbInfo').textContent = `Found ${summary.total} games from this position in ${results.length} local collections: ${names}${extra}.`;
       renderPgnDatabaseSearchResults(results);
@@ -1952,7 +2397,10 @@ function renderAll() {
 function mainlineNodes(): GameNode[] {
   const nodes: GameNode[] = [tree.root];
   let node: GameNode | undefined = tree.root.children[0];
-  while (node) { nodes.push(node); node = node.children[0]; }
+  while (node) {
+    nodes.push(node);
+    node = node.children[0];
+  }
   return nodes;
 }
 
@@ -1978,16 +2426,24 @@ function clearReviewIfMainlineChanged(): void {
   if (lastReview && reviewSignature() !== lastReviewSignature) clearReviewState('Review cleared after game changed.');
 }
 
-interface ReviewEngineChoice { engine: { analyze(fen: string, opts?: { multipv?: number; depth?: number; signal?: AbortSignal }): Promise<{ scoreCp?: number; mateIn?: number; pvUci: string[] }[]> }; label: string; depth: number; }
+interface ReviewEngineChoice {
+  engine: {
+    analyze(fen: string, opts?: { multipv?: number; depth?: number; signal?: AbortSignal }): Promise<{ scoreCp?: number; mateIn?: number; pvUci: string[] }[]>;
+  };
+  label: string;
+  depth: number;
+}
 
 /** First selected UCI-family engine reviews the game; SF Lite d12 is the fallback. */
 function reviewEngineChoice(): ReviewEngineChoice {
   for (const row of activeEngineRows()) {
-    if (row.family === 'sf') return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
+    if (row.family === 'sf')
+      return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
     if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), label: recklessVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'viridithas') return { engine: getViridithasFor(row.variant), label: viridithasVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), label: berserkVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'plentychess') return { engine: getPlentyChessFor(row.variant), label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'plentychess')
+      return { engine: getPlentyChessFor(row.variant), label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'stormphrax') return { engine: getStormphraxFor(row.variant), label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
   }
   return { engine: getStockfish('lite'), label: 'SF Lite', depth: 12 };
@@ -2002,13 +2458,18 @@ function winWhiteFromInfo(fen: string, info: { scoreCp?: number; mateIn?: number
 }
 
 const REVIEW_CLASS_LABEL: Record<ReviewedMove['class'], string> = {
-  best: 'Best', good: 'Good', inaccuracy: 'Inaccuracy', mistake: 'Mistake', blunder: 'Blunder', forced: 'Forced',
+  best: 'Best',
+  good: 'Good',
+  inaccuracy: 'Inaccuracy',
+  mistake: 'Mistake',
+  blunder: 'Blunder',
+  forced: 'Forced',
 };
 
 function reviewSummaryHtml(review: GameReview): string {
   const side = (label: string, accuracy: number, counts: GameReview['counts']['white']) =>
-    `<div><div class="small">${label}</div><div class="acc">${accuracy.toFixed(1)}%</div>`
-    + `<div class="small">${counts.blunder}×<span class="review-badge blunder">??</span> ${counts.mistake}×<span class="review-badge mistake">?</span> ${counts.inaccuracy}×<span class="review-badge inaccuracy">?!</span></div></div>`;
+    `<div><div class="small">${label}</div><div class="acc">${accuracy.toFixed(1)}%</div>` +
+    `<div class="small">${counts.blunder}×<span class="review-badge blunder">??</span> ${counts.mistake}×<span class="review-badge mistake">?</span> ${counts.inaccuracy}×<span class="review-badge inaccuracy">?!</span></div></div>`;
   return `<div class="review-summary">${side('White accuracy', review.accuracy.white, review.counts.white)}${side('Black accuracy', review.accuracy.black, review.counts.black)}</div>`;
 }
 
@@ -2016,26 +2477,38 @@ function renderReview(review: GameReview, nodes: GameNode[]): void {
   el('reviewSummary').hidden = false;
   el('reviewSummary').innerHTML = reviewSummaryHtml(review);
   el('reviewChart').hidden = false;
-  el('reviewChart').innerHTML = lineChartSvg([{
-    label: 'White win %',
-    color: '#4a7a2a',
-    points: review.moves.map((move) => ({ x: move.ply, y: move.winAfter })),
-  }], { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%`, height: 110 });
+  el('reviewChart').innerHTML = lineChartSvg(
+    [
+      {
+        label: 'White win %',
+        color: '#4a7a2a',
+        points: review.moves.map((move) => ({ x: move.ply, y: move.winAfter })),
+      },
+    ],
+    { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%`, height: 110 },
+  );
   const critical = el('reviewCritical');
   critical.hidden = review.criticalMoves.length === 0;
-  critical.innerHTML = review.criticalMoves.map((move) => {
-    const node = nodes[move.ply];
-    const moveNo = `${Math.ceil(move.ply / 2)}${move.side === 'w' ? '.' : '…'}`;
-    return `<li data-node="${node?.id ?? ''}"><span class="review-badge ${move.class}">${REVIEW_CLASS_LABEL[move.class]}</span> `
-      + `<span class="mono">${moveNo} ${htmlEscape(move.san)}</span> · win ${Math.round(move.winBefore * 100)}%→${Math.round(move.winAfter * 100)}%`
-      + `${move.bestUci ? ` · best <span class="mono">${htmlEscape(move.bestUci)}</span>` : ''}</li>`;
-  }).join('');
+  critical.innerHTML = review.criticalMoves
+    .map((move) => {
+      const node = nodes[move.ply];
+      const moveNo = `${Math.ceil(move.ply / 2)}${move.side === 'w' ? '.' : '…'}`;
+      return (
+        `<li data-node="${node?.id ?? ''}"><span class="review-badge ${move.class}">${REVIEW_CLASS_LABEL[move.class]}</span> ` +
+        `<span class="mono">${moveNo} ${htmlEscape(move.san)}</span> · win ${Math.round(move.winBefore * 100)}%→${Math.round(move.winAfter * 100)}%` +
+        `${move.bestUci ? ` · best <span class="mono">${htmlEscape(move.bestUci)}</span>` : ''}</li>`
+      );
+    })
+    .join('');
 }
 
 async function runGameReview(): Promise<void> {
   if (reviewAbort) return;
   const nodes = mainlineNodes();
-  if (nodes.length < 2) { el('reviewStatus').textContent = 'Load a PGN or play some moves first.'; return; }
+  if (nodes.length < 2) {
+    el('reviewStatus').textContent = 'Load a PGN or play some moves first.';
+    return;
+  }
   const { engine, label, depth } = reviewEngineChoice();
   const controller = new AbortController();
   reviewAbort = controller;
@@ -2144,7 +2617,9 @@ async function withEngineTimeout<T>(label: string, parentSignal: AbortSignal, ti
   const timeoutMessage = `${label} timed out after ${Math.round(timeoutMs / 1000)}s`;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let abortReject: ((error: DOMException) => void) | null = null;
-  const abortPromise = new Promise<never>((_, reject) => { abortReject = reject; });
+  const abortPromise = new Promise<never>((_, reject) => {
+    abortReject = reject;
+  });
   const onAbort = () => {
     controller.abort();
     abortReject?.(new DOMException('Analysis aborted', 'AbortError'));
@@ -2271,7 +2746,10 @@ async function prepareCpuEngine(
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
   const rows = activeEngineRows();
-  if (!rows.length) { el('message').textContent = 'Add an engine to analyze.'; return; }
+  if (!rows.length) {
+    el('message').textContent = 'Add an engine to analyze.';
+    return;
+  }
   const runId = ++activeAnalysisRunId;
   // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
   // worker LC0 / big-net searches, so a new position takes over immediately.
@@ -2300,56 +2778,70 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
     const publishLines = () => {
       lineCache.set(fen, lineGroups.flat());
-      if (tree.current.fen === fen) { renderLines(); renderEvalBar(); setShapes(bestShapes()); }
+      if (tree.current.fen === fen) {
+        renderLines();
+        renderEvalBar();
+        setShapes(bestShapes());
+      }
     };
     if (lineGroups.some((lines) => lines.length > 0)) publishLines();
     else renderEngineComparison([]);
     const tasks: Promise<void>[] = [];
     let hadTaskFailure = false;
     const pushTask = (index: number, cacheKey: string, label: string, taskFactory: (beginSearch: () => void) => Promise<AnalysisLine[]>) => {
-      tasks.push((async () => {
-        if (controller.signal.aborted || mountAbort.signal.aborted) return;
-        try {
-          const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
-          if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
-          if (lines.length) engineLineCache.set(cacheKey, lines);
-          else engineLineCache.delete(cacheKey);
-          lineGroups[index] = lines;
-          publishLines();
-        } catch (error) {
-          if (controller.signal.aborted || mountAbort.signal.aborted || (error as Error).name === 'AbortError') throw error;
-          hadTaskFailure = true;
-          const errMsg = (error as Error)?.message ?? String(error);
-          console.warn(`${label} analysis failed`, error);
-          if (runId === activeAnalysisRunId && analysisAbort === controller && analyzing) {
-            engineLineCache.delete(cacheKey);
-            lineGroups[index] = [{ engine: label, pvUci: [], multipv: 1, scoreText: '—', detail: 'failed', pvSan: '', error: errMsg }];
+      tasks.push(
+        (async () => {
+          if (controller.signal.aborted || mountAbort.signal.aborted) return;
+          try {
+            const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
+            if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
+            if (lines.length) engineLineCache.set(cacheKey, lines);
+            else engineLineCache.delete(cacheKey);
+            lineGroups[index] = lines;
             publishLines();
+          } catch (error) {
+            if (controller.signal.aborted || mountAbort.signal.aborted || (error as Error).name === 'AbortError') throw error;
+            hadTaskFailure = true;
+            const errMsg = (error as Error)?.message ?? String(error);
+            console.warn(`${label} analysis failed`, error);
+            if (runId === activeAnalysisRunId && analysisAbort === controller && analyzing) {
+              engineLineCache.delete(cacheKey);
+              lineGroups[index] = [{ engine: label, pvUci: [], multipv: 1, scoreText: '—', detail: 'failed', pvSan: '', error: errMsg }];
+              publishLines();
+            }
+          } finally {
+            clearEngineSearchProgress(runId, label);
           }
-        } finally {
-          clearEngineSearchProgress(runId, label);
-        }
-      })());
+        })(),
+      );
     };
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       const cacheKey = engineAnalysisCacheKey(fen, row);
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () => workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv));
+        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () =>
+          workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv),
+        );
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
         if (workerReady) pushTask(index, cacheKey, label, () => workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label));
         else if (searcher) {
           const lc0Searcher = searcher;
-          pushTask(index, cacheKey, label, () => lc0Searcher.search({ positions: analysisPositions }, {
-            visits: row.strength,
-            multiPv: analysisMultiPv,
-            signal: controller.signal,
-            yieldEveryMs: 16,
-            onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
-          })
-            .then((result) => lc0AnalysisLines(result, fen, 'Lc0')));
+          pushTask(index, cacheKey, label, () =>
+            lc0Searcher
+              .search(
+                { positions: analysisPositions },
+                {
+                  visits: row.strength,
+                  multiPv: analysisMultiPv,
+                  signal: controller.signal,
+                  yieldEveryMs: 16,
+                  onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
+                },
+              )
+              .then((result) => lc0AnalysisLines(result, fen, 'Lc0')),
+          );
         }
       } else if (row.family === 'centipawn') {
         const positions = analysisPositions;
@@ -2384,70 +2876,144 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       } else if (row.family === 'sf') {
         const kind = row.variant === 'full' ? 'full' : 'lite';
         const label = kind === 'lite' ? 'SF Lite' : 'SF';
-        const stockfishUrl = stockfishFlavorUrl(threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : (kind === 'lite' ? 'lite-single' : 'single'));
-        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
-          const engine = getStockfish(kind);
-          engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
-          await prepareCpuEngine(row, `sf:${kind}`, label, controller.signal, [stockfishUrl, jsSidecarWasmUrl(stockfishUrl)], (signal) => engine.newGame(signal), beginSearch);
-          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
-          return stockfishAnalysisLines(infos, fen, label);
-        }));
+        const stockfishUrl = stockfishFlavorUrl(
+          threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : kind === 'lite' ? 'lite-single' : 'single',
+        );
+        pushTask(index, cacheKey, label, (beginSearch) =>
+          withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
+            const engine = getStockfish(kind);
+            engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
+            await prepareCpuEngine(
+              row,
+              `sf:${kind}`,
+              label,
+              controller.signal,
+              [stockfishUrl, jsSidecarWasmUrl(stockfishUrl)],
+              (signal) => engine.newGame(signal),
+              beginSearch,
+            );
+            const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
+              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+            );
+            return stockfishAnalysisLines(infos, fen, label);
+          }),
+        );
       } else if (row.family === 'viridithas') {
         const variant = viridithasVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = getViridithasFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
-          await prepareCpuEngine(row, `viridithas:${row.variant}`, label, controller.signal, [variant.wasmUrl], async (signal) => {
-            engine.setOptions({ depth: 1, movetimeMs: undefined });
-            await engine.bestMove(START_FEN, signal);
-          }, beginSearch);
-          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
-          renderRecklessRuntimeInfo();
-          return stockfishAnalysisLines(infos, fen, label);
-        }));
+        pushTask(index, cacheKey, label, (beginSearch) =>
+          withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
+            await prepareCpuEngine(
+              row,
+              `viridithas:${row.variant}`,
+              label,
+              controller.signal,
+              [variant.wasmUrl],
+              async (signal) => {
+                engine.setOptions({ depth: 1, movetimeMs: undefined });
+                await engine.bestMove(START_FEN, signal);
+              },
+              beginSearch,
+            );
+            const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
+              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+            );
+            renderRecklessRuntimeInfo();
+            return stockfishAnalysisLines(infos, fen, label);
+          }),
+        );
       } else if (row.family === 'berserk') {
         const variant = berserkVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = getBerserkFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
-          engine.setOptions({ threads: lease.threads });
-          await prepareCpuEngine(row, `berserk:${row.variant}`, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl, variant.nnueUrl], (signal) => engine.newGame(signal), beginSearch);
-          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
-          renderRecklessRuntimeInfo();
-          return stockfishAnalysisLines(infos, fen, label);
-        }));
+        pushTask(index, cacheKey, label, (beginSearch) =>
+          withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
+            engine.setOptions({ threads: lease.threads });
+            await prepareCpuEngine(
+              row,
+              `berserk:${row.variant}`,
+              label,
+              controller.signal,
+              [variant.jsUrl, variant.wasmUrl, variant.dataUrl, variant.nnueUrl],
+              (signal) => engine.newGame(signal),
+              beginSearch,
+            );
+            const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
+              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+            );
+            renderRecklessRuntimeInfo();
+            return stockfishAnalysisLines(infos, fen, label);
+          }),
+        );
       } else if (row.family === 'plentychess') {
         const variant = plentyChessVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = getPlentyChessFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
-          engine.setOptions({ threads: lease.threads });
-          await prepareCpuEngine(row, `plentychess:${row.variant}`, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal), beginSearch);
-          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
-          renderRecklessRuntimeInfo();
-          return stockfishAnalysisLines(infos, fen, label);
-        }));
+        pushTask(index, cacheKey, label, (beginSearch) =>
+          withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
+            engine.setOptions({ threads: lease.threads });
+            await prepareCpuEngine(
+              row,
+              `plentychess:${row.variant}`,
+              label,
+              controller.signal,
+              [variant.jsUrl, variant.wasmUrl, variant.dataUrl],
+              (signal) => engine.newGame(signal),
+              beginSearch,
+            );
+            const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
+              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+            );
+            renderRecklessRuntimeInfo();
+            return stockfishAnalysisLines(infos, fen, label);
+          }),
+        );
       } else if (row.family === 'stormphrax') {
         const variant = stormphraxVariantForKey(row.variant);
         const label = variant.label;
         const engine = getStormphraxFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
-          engine.setOptions({ threads: lease.threads });
-          await prepareCpuEngine(row, `stormphrax:${row.variant}`, label, controller.signal, [variant.jsUrl, variant.wasmUrl, variant.dataUrl], (signal) => engine.newGame(signal), beginSearch);
-          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
-          renderRecklessRuntimeInfo();
-          return stockfishAnalysisLines(infos, fen, label);
-        }));
+        pushTask(index, cacheKey, label, (beginSearch) =>
+          withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
+            engine.setOptions({ threads: lease.threads });
+            await prepareCpuEngine(
+              row,
+              `stormphrax:${row.variant}`,
+              label,
+              controller.signal,
+              [variant.jsUrl, variant.wasmUrl, variant.dataUrl],
+              (signal) => engine.newGame(signal),
+              beginSearch,
+            );
+            const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
+              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+            );
+            renderRecklessRuntimeInfo();
+            return stockfishAnalysisLines(infos, fen, label);
+          }),
+        );
       } else {
         const variant = recklessVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = getRecklessFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) => withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
-          await prepareCpuEngine(row, `reckless:${row.variant}`, label, controller.signal, [variant.wasmUrl, variant.nnueUrl], (signal) => engine.newGame(signal), beginSearch);
-          const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) => engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }));
-          renderRecklessRuntimeInfo();
-          return stockfishAnalysisLines(infos, fen, label);
-        }));
+        pushTask(index, cacheKey, label, (beginSearch) =>
+          withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
+            await prepareCpuEngine(
+              row,
+              `reckless:${row.variant}`,
+              label,
+              controller.signal,
+              [variant.wasmUrl, variant.nnueUrl],
+              (signal) => engine.newGame(signal),
+              beginSearch,
+            );
+            const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
+              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+            );
+            renderRecklessRuntimeInfo();
+            return stockfishAnalysisLines(infos, fen, label);
+          }),
+        );
       }
     }
     await Promise.all(tasks);
@@ -2455,11 +3021,15 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     publishLines();
     if (!hadTaskFailure) completeAnalysisKeys.add(selectionCacheKey);
     const message = document.getElementById('message');
-    if (message) message.textContent = hadTaskFailure ? `Analysis completed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}` : `Analysis complete · ${selectedLabels}`;
+    if (message)
+      message.textContent = hadTaskFailure
+        ? `Analysis completed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`
+        : `Analysis complete · ${selectedLabels}`;
   } catch (error) {
     controller.abort();
     const message = document.getElementById('message');
-    if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message && runId === activeAnalysisRunId && analysisAbort === controller) message.textContent = `Analysis failed: ${(error as Error).message}`;
+    if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message && runId === activeAnalysisRunId && analysisAbort === controller)
+      message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
     if (analysisAbort === controller && runId === activeAnalysisRunId && !mountAbort.signal.aborted) {
       analyzing = false;
@@ -2477,7 +3047,10 @@ function afterNavigation() {
   renderAll();
   scheduleMaia3Panel();
   if (inputEl('autoAnalyze').checked && !completeAnalysisKeys.has(analysisSelectionCacheKey(tree.current.fen))) void analyzeCurrent();
-  else { renderEvalBar(); setShapes(bestShapes()); }
+  else {
+    renderEvalBar();
+    setShapes(bestShapes());
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2540,7 +3113,9 @@ async function enableMaia3Panel(): Promise<void> {
 function scheduleMaia3Panel(): void {
   if (!maia3PanelEvaluator) return;
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
-  maia3PanelTimer = setTimeout(() => { void renderMaia3Panel(); }, 120);
+  maia3PanelTimer = setTimeout(() => {
+    void renderMaia3Panel();
+  }, 120);
 }
 
 /** Best engine move for the current position, for the agreement marks. */
@@ -2556,10 +3131,16 @@ async function renderMaia3Panel(): Promise<void> {
   const seq = ++maia3PanelSeq;
   const fen = tree.current.fen || START_FEN;
   const board = parseFen(fen);
-  if (!legalMoves(board).length) { el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>'; return; }
-  let evaluations;
+  if (!legalMoves(board).length) {
+    el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>';
+    return;
+  }
+  let evaluations: Maia3Evaluation[];
   try {
-    evaluations = await evaluator.evaluateConditions(board, MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })));
+    evaluations = await evaluator.evaluateConditions(
+      board,
+      MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })),
+    );
   } catch (error) {
     maia3PanelStatus(`Maia3 evaluation failed: ${(error as Error).message}`);
     return;
@@ -2569,12 +3150,15 @@ async function renderMaia3Panel(): Promise<void> {
   const sanByUci = new Map(legalMoves(board).map((move) => [moveToUci(move), moveToSan(board, move)]));
   const rows = evaluations.map((evaluation, i) => {
     const score = maia3WinProbability(evaluation);
-    const top = evaluation.legalPriors.slice(0, 3).map((entry) => {
-      const san = sanByUci.get(entry.uci) ?? entry.uci;
-      const agree = engineUci && entry.uci === engineUci ? ' ✓' : '';
-      const width = Math.max(3, Math.round(entry.prior * 70));
-      return `<span class="maia3-move">${san}${agree} <span class="maia3-bar" style="width:${width}px"></span> ${(entry.prior * 100).toFixed(0)}%</span>`;
-    }).join('');
+    const top = evaluation.legalPriors
+      .slice(0, 3)
+      .map((entry) => {
+        const san = sanByUci.get(entry.uci) ?? entry.uci;
+        const agree = engineUci && entry.uci === engineUci ? ' ✓' : '';
+        const width = Math.max(3, Math.round(entry.prior * 70));
+        return `<span class="maia3-move">${san}${agree} <span class="maia3-bar" style="width:${width}px"></span> ${(entry.prior * 100).toFixed(0)}%</span>`;
+      })
+      .join('');
     return `<div class="maia3-row"><span class="maia3-elo">${MAIA3_PANEL_RATINGS[i]}</span><span class="maia3-score" title="Expected points for White in a human game at this rating">${score.toFixed(2)}</span>${top}</div>`;
   });
   el('maia3Grid').innerHTML = rows.join('');
@@ -2583,7 +3167,10 @@ async function renderMaia3Panel(): Promise<void> {
 async function onUserMove(from: Key, to: Key) {
   const board = tree.current.fen ? parseFen(tree.current.fen) : parseFen(START_FEN);
   const matching = matchUserMoves(board, from, to);
-  if (!matching.length) { renderBoard(); return; }
+  if (!matching.length) {
+    renderBoard();
+    return;
+  }
   if (matching.length > 1) {
     // Promotion: let the user pick instead of silently auto-queening.
     showPromotionOverlay({
@@ -2591,7 +3178,10 @@ async function onUserMove(from: Key, to: Key) {
       orientation,
       color: board.turn,
       choices: matching,
-      onPick: (move) => { tree.addMove(move); afterNavigation(); },
+      onPick: (move) => {
+        tree.addMove(move);
+        afterNavigation();
+      },
       onCancel: () => renderBoard(),
     });
     return;
@@ -2647,18 +3237,45 @@ function hoverLine(pvUci: string[], engine: string) {
 }
 
 function wireEvents() {
-  el('maia3Enable').addEventListener('click', () => { void enableMaia3Panel(); });
-  el('navStart').addEventListener('click', () => { tree.toStart(); afterNavigation(); });
-  el('navBack').addEventListener('click', () => { tree.back(); afterNavigation(); });
-  el('navForward').addEventListener('click', () => { tree.forward(); afterNavigation(); });
-  el('navEnd').addEventListener('click', () => { tree.toEnd(); afterNavigation(); });
-  el('flip').addEventListener('click', () => { orientation = orientation === 'white' ? 'black' : 'white'; renderBoard(); });
+  el('maia3Enable').addEventListener('click', () => {
+    void enableMaia3Panel();
+  });
+  el('navStart').addEventListener('click', () => {
+    tree.toStart();
+    afterNavigation();
+  });
+  el('navBack').addEventListener('click', () => {
+    tree.back();
+    afterNavigation();
+  });
+  el('navForward').addEventListener('click', () => {
+    tree.forward();
+    afterNavigation();
+  });
+  el('navEnd').addEventListener('click', () => {
+    tree.toEnd();
+    afterNavigation();
+  });
+  el('flip').addEventListener('click', () => {
+    orientation = orientation === 'white' ? 'black' : 'white';
+    renderBoard();
+  });
   el('loadFen').addEventListener('click', loadFen);
-  inputEl('fenInput').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') loadFen(); });
-  el('reset').addEventListener('click', () => { tree = new GameTree(); lineCache.clear(); completeAnalysisKeys.clear(); el('message').textContent = 'Reset.'; afterNavigation(); });
+  inputEl('fenInput').addEventListener('keydown', (event) => {
+    if ((event as KeyboardEvent).key === 'Enter') loadFen();
+  });
+  el('reset').addEventListener('click', () => {
+    tree = new GameTree();
+    lineCache.clear();
+    completeAnalysisKeys.clear();
+    el('message').textContent = 'Reset.';
+    afterNavigation();
+  });
   el('loadPgn').addEventListener('click', loadPgn);
   el('copyPgn').addEventListener('click', copyPgn);
-  el('analyze').addEventListener('click', () => { void analyzeCurrent({ force: true }); });
+  el('analyze').addEventListener('click', () => {
+    void analyzeCurrent({ force: true });
+  });
   el('stop').addEventListener('click', () => {
     cancelActiveAnalysisRun();
   });
@@ -2676,8 +3293,15 @@ function wireEvents() {
       if (engineRows[i].family === 'lc0' && isLc0BigNetVariant(target.value)) {
         // One-time gate before the large lazy load.
         const { config } = bigNetFor(target.value);
-        if (!bigNetSelectableSync(config)) { el('message').textContent = bigNetUnavailableText(config); target.value = engineRows[i].variant; return; }
-        if (!window.confirm(`${bigNetLoadWarning(config)}\n\nUse Lc0 ${config.name}?`)) { target.value = engineRows[i].variant; return; }
+        if (!bigNetSelectableSync(config)) {
+          el('message').textContent = bigNetUnavailableText(config);
+          target.value = engineRows[i].variant;
+          return;
+        }
+        if (!window.confirm(`${bigNetLoadWarning(config)}\n\nUse Lc0 ${config.name}?`)) {
+          target.value = engineRows[i].variant;
+          return;
+        }
       }
       engineRows[i].variant = target.value;
     } else if (target.classList.contains('row-strength')) {
@@ -2693,7 +3317,10 @@ function wireEvents() {
   el('engineProfileSelect').addEventListener('change', () => {
     const value = selectEl('engineProfileSelect').value;
     const builtIn = BUILT_IN_ENGINE_PROFILES.find((entry) => builtInProfileValue(entry.id) === value);
-    if (builtIn) { applyEngineProfile(builtIn, { selected: value, persistLast: false, note: builtIn.note }); return; }
+    if (builtIn) {
+      applyEngineProfile(builtIn, { selected: value, persistLast: false, note: builtIn.note });
+      return;
+    }
     const profile = engineProfiles.find((entry) => entry.name === value);
     if (profile) applyEngineProfile(profile);
     else {
@@ -2712,8 +3339,12 @@ function wireEvents() {
   el('deleteEngineProfile').addEventListener('click', deleteSelectedEngineProfile);
   el('exportEngineProfiles').addEventListener('click', exportEngineProfiles);
   el('importEngineProfiles').addEventListener('click', () => inputEl('importEngineProfilesFile').click());
-  el('importEngineProfilesFile').addEventListener('change', () => { void importEngineProfilesFile(inputEl('importEngineProfilesFile').files?.[0]); });
-  inputEl('engineProfileName').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') saveCurrentEngineProfile(); });
+  el('importEngineProfilesFile').addEventListener('change', () => {
+    void importEngineProfilesFile(inputEl('importEngineProfilesFile').files?.[0]);
+  });
+  inputEl('engineProfileName').addEventListener('keydown', (event) => {
+    if ((event as KeyboardEvent).key === 'Enter') saveCurrentEngineProfile();
+  });
   el('engineList').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest('.row-rm') as HTMLElement | null;
     if (!button) return;
@@ -2734,27 +3365,45 @@ function wireEvents() {
     lineCache.delete(tree.current.fen);
     scheduleAnalyzeCurrent();
   });
-  el('lc0RuntimeSelect').addEventListener('change', () => { void reloadLc0Backend(); });
-  el('multiPvInput').addEventListener('change', () => { lineCache.delete(tree.current.fen); scheduleAnalyzeCurrent(); });
-  el('reviewGame').addEventListener('click', () => { void runGameReview(); });
+  el('lc0RuntimeSelect').addEventListener('change', () => {
+    void reloadLc0Backend();
+  });
+  el('multiPvInput').addEventListener('change', () => {
+    lineCache.delete(tree.current.fen);
+    scheduleAnalyzeCurrent();
+  });
+  el('reviewGame').addEventListener('click', () => {
+    void runGameReview();
+  });
   el('reviewStop').addEventListener('click', () => reviewAbort?.abort());
-  el('reviewCopyPgn').addEventListener('click', () => { void copyReviewPgn(); });
+  el('reviewCopyPgn').addEventListener('click', () => {
+    void copyReviewPgn();
+  });
   el('reviewCritical').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-node]');
     if (!target) return;
     const node = nodeIndex.get(Number(target.getAttribute('data-node')));
-    if (node) { tree.goTo(node); afterNavigation(); }
+    if (node) {
+      tree.goTo(node);
+      afterNavigation();
+    }
   });
   el('movelist').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-node]');
     if (!target) return;
     const node = nodeIndex.get(Number(target.getAttribute('data-node')));
-    if (node) { tree.goTo(node); afterNavigation(); }
+    if (node) {
+      tree.goTo(node);
+      afterNavigation();
+    }
   });
   el('lines').addEventListener('click', (event) => {
     const li = (event.target as HTMLElement).closest('li[data-uci]');
     const uci = li?.getAttribute('data-uci');
-    if (uci) { tree.addUci(uci); afterNavigation(); }
+    if (uci) {
+      tree.addUci(uci);
+      afterNavigation();
+    }
   });
   el('lines').addEventListener('mouseover', (event) => {
     const li = (event.target as HTMLElement).closest('li[data-pv]');
@@ -2762,21 +3411,35 @@ function wireEvents() {
     if (pv) hoverLine(pv.split(' ').filter(Boolean), li!.getAttribute('data-engine') ?? 'LC0');
   });
   el('lines').addEventListener('mouseout', () => setShapes(bestShapes()));
-  el('engineCompare').querySelector('tbody')!.addEventListener('click', (event) => {
-    const tr = (event.target as HTMLElement).closest('tr[data-uci]');
-    const uci = tr?.getAttribute('data-uci');
-    if (uci) { tree.addUci(uci); afterNavigation(); }
-  });
-  el('engineCompare').querySelector('tbody')!.addEventListener('mouseover', (event) => {
-    const tr = (event.target as HTMLElement).closest('tr[data-pv]');
-    const pv = tr?.getAttribute('data-pv');
-    if (pv) hoverLine(pv.split(' ').filter(Boolean), tr!.getAttribute('data-engine') ?? 'LC0');
-  });
-  el('engineCompare').querySelector('tbody')!.addEventListener('mouseout', () => setShapes(bestShapes()));
+  el('engineCompare')
+    .querySelector('tbody')!
+    .addEventListener('click', (event) => {
+      const tr = (event.target as HTMLElement).closest('tr[data-uci]');
+      const uci = tr?.getAttribute('data-uci');
+      if (uci) {
+        tree.addUci(uci);
+        afterNavigation();
+      }
+    });
+  el('engineCompare')
+    .querySelector('tbody')!
+    .addEventListener('mouseover', (event) => {
+      const tr = (event.target as HTMLElement).closest('tr[data-pv]');
+      const pv = tr?.getAttribute('data-pv');
+      if (pv) hoverLine(pv.split(' ').filter(Boolean), tr!.getAttribute('data-engine') ?? 'LC0');
+    });
+  el('engineCompare')
+    .querySelector('tbody')!
+    .addEventListener('mouseout', () => setShapes(bestShapes()));
   el('importGames').addEventListener('click', importGames);
-  el('fetchGames').addEventListener('click', () => { void fetchGames(); });
+  el('fetchGames').addEventListener('click', () => {
+    void fetchGames();
+  });
   el('downloadPgn').addEventListener('click', downloadPgn);
-  el('pgnDbSelect').addEventListener('change', () => { activePgnCollectionId = selectedPgnCollectionId(); renderPgnDatabaseCollections(activePgnCollectionId); });
+  el('pgnDbSelect').addEventListener('change', () => {
+    activePgnCollectionId = selectedPgnCollectionId();
+    renderPgnDatabaseCollections(activePgnCollectionId);
+  });
   el('pgnDbList').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.pgn-db-card');
     const id = button?.dataset.id;
@@ -2785,17 +3448,37 @@ function wireEvents() {
     selectEl('pgnDbSelect').value = id;
     renderPgnDatabaseCollections(id);
   });
-  el('savePgnDb').addEventListener('click', () => { void saveCurrentPgnCollection(); });
-  el('loadPgnDb').addEventListener('click', () => { void loadSelectedPgnCollection(); });
-  el('deletePgnDb').addEventListener('click', () => { void deleteSelectedPgnCollection(); });
-  el('renamePgnDb').addEventListener('click', () => { void renameSelectedPgnCollection(); });
-  el('duplicatePgnDb').addEventListener('click', () => { void duplicateSelectedPgnCollection(); });
-  el('exportPgnDbCollection').addEventListener('click', () => { void exportSelectedPgnCollection(); });
-  el('exportPgnDb').addEventListener('click', () => { void exportPgnDatabase(); });
+  el('savePgnDb').addEventListener('click', () => {
+    void saveCurrentPgnCollection();
+  });
+  el('loadPgnDb').addEventListener('click', () => {
+    void loadSelectedPgnCollection();
+  });
+  el('deletePgnDb').addEventListener('click', () => {
+    void deleteSelectedPgnCollection();
+  });
+  el('renamePgnDb').addEventListener('click', () => {
+    void renameSelectedPgnCollection();
+  });
+  el('duplicatePgnDb').addEventListener('click', () => {
+    void duplicateSelectedPgnCollection();
+  });
+  el('exportPgnDbCollection').addEventListener('click', () => {
+    void exportSelectedPgnCollection();
+  });
+  el('exportPgnDb').addEventListener('click', () => {
+    void exportPgnDatabase();
+  });
   el('importPgnDb').addEventListener('click', () => inputEl('importPgnDbFile').click());
-  el('importPgnDbFile').addEventListener('change', () => { void importPgnDatabaseFile(inputEl('importPgnDbFile').files?.[0]); });
-  el('searchPgnDbPosition').addEventListener('click', () => { void searchCurrentPositionInPgnDatabase(); });
-  inputEl('pgnDbName').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void saveCurrentPgnCollection(); });
+  el('importPgnDbFile').addEventListener('change', () => {
+    void importPgnDatabaseFile(inputEl('importPgnDbFile').files?.[0]);
+  });
+  el('searchPgnDbPosition').addEventListener('click', () => {
+    void searchCurrentPositionInPgnDatabase();
+  });
+  inputEl('pgnDbName').addEventListener('keydown', (event) => {
+    if ((event as KeyboardEvent).key === 'Enter') void saveCurrentPgnCollection();
+  });
   inputEl('importGamesInput').addEventListener('input', () => {
     activePgnCollectionId = '';
     lastImportSource = 'manual';
@@ -2806,7 +3489,9 @@ function wireEvents() {
     databasePositionCollectionCount = 0;
     renderPgnDatabaseCollections('');
   });
-  inputEl('importUser').addEventListener('keydown', (event) => { if ((event as KeyboardEvent).key === 'Enter') void fetchGames(); });
+  inputEl('importUser').addEventListener('keydown', (event) => {
+    if ((event as KeyboardEvent).key === 'Enter') void fetchGames();
+  });
   el('opening').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest('tr[data-uci]');
     const uci = row?.getAttribute('data-uci');
@@ -2815,11 +3500,19 @@ function wireEvents() {
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = (event: KeyboardEvent) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
-    if (event.key === 'ArrowLeft') { tree.back(); afterNavigation(); }
-    else if (event.key === 'ArrowRight') { tree.forward(); afterNavigation(); }
-    else if (event.key === 'ArrowUp') { tree.toStart(); afterNavigation(); }
-    else if (event.key === 'ArrowDown') { tree.toEnd(); afterNavigation(); }
-    else return;
+    if (event.key === 'ArrowLeft') {
+      tree.back();
+      afterNavigation();
+    } else if (event.key === 'ArrowRight') {
+      tree.forward();
+      afterNavigation();
+    } else if (event.key === 'ArrowUp') {
+      tree.toStart();
+      afterNavigation();
+    } else if (event.key === 'ArrowDown') {
+      tree.toEnd();
+      afterNavigation();
+    } else return;
     event.preventDefault();
   };
   document.addEventListener('keydown', analysisKeydownHandler);
@@ -2979,12 +3672,32 @@ async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
 
 async function init(mountSignal: AbortSignal) {
   if (!isV0DeployProfile()) {
-    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
+    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(
+      REQUESTED_RECKLESS_VARIANT,
+      REQUESTED_RECKLESS_EXPLICIT,
+      whileAnalysisMounted(renderRecklessRuntimeInfo),
+    );
   }
-  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
-  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
-  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
-  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, whileAnalysisMounted(renderRecklessRuntimeInfo));
+  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(
+    REQUESTED_VIRIDITHAS_VARIANT,
+    REQUESTED_VIRIDITHAS_EXPLICIT,
+    whileAnalysisMounted(renderRecklessRuntimeInfo),
+  );
+  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(
+    REQUESTED_BERSERK_VARIANT,
+    REQUESTED_BERSERK_EXPLICIT,
+    whileAnalysisMounted(renderRecklessRuntimeInfo),
+  );
+  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(
+    REQUESTED_PLENTYCHESS_VARIANT,
+    REQUESTED_PLENTYCHESS_EXPLICIT,
+    whileAnalysisMounted(renderRecklessRuntimeInfo),
+  );
+  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(
+    REQUESTED_STORMPHRAX_VARIANT,
+    REQUESTED_STORMPHRAX_EXPLICIT,
+    whileAnalysisMounted(renderRecklessRuntimeInfo),
+  );
   if (isStaleMount(mountSignal)) return;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
   analysisPagehideHandler = (event: PageTransitionEvent) => {
@@ -3013,7 +3726,12 @@ async function init(mountSignal: AbortSignal) {
   renderAll();
   renderEngineList();
   renderRecklessRuntimeInfo();
-  void probeEngineLogos(whileAnalysisMounted(() => { renderEngineList(); renderAll(); }));
+  void probeEngineLogos(
+    whileAnalysisMounted(() => {
+      renderEngineList();
+      renderAll();
+    }),
+  );
   wireEvents();
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   void refreshBt4Availability();
@@ -3060,7 +3778,9 @@ export function mountAnalysisBrowser(): () => void {
   analysisMountedCallbackCache = new WeakMap();
   // Test hook for automated browser checks: synthetic chessground drags are
   // unreliable, so smokes call this to route through the real user-move path.
-  const hook = (from: string, to: string) => { void onUserMove(from as Key, to as Key); };
+  const hook = (from: string, to: string) => {
+    void onUserMove(from as Key, to as Key);
+  };
   (globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void }).__analysisUserMove = hook;
   void init(controller.signal);
   return () => {

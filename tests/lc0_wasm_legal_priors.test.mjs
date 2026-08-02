@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
 import { legalPolicyPriors } from '../src/lc0/onnxEvaluator.ts';
 import { LC0_POLICY_SIZE } from '../src/lc0/policyMap.ts';
@@ -51,10 +51,7 @@ test('SIMD WASM legal-prior path supports top-K candidate output', async () => {
 
 test('SIMD WASM legal-prior errors include last-error detail', async () => {
   const wasm = await createLc0WasmLegalPriors(wasmBytes);
-  assert.throws(
-    () => wasm.evaluateFen('8/8/8/8/8/8/8/8 x - - 0 1', logits, { temperature }),
-    /LC0 WASM legal-prior failed: 8 \(invalid FEN active color\)/,
-  );
+  assert.throws(() => wasm.evaluateFen('8/8/8/8/8/8/8/8 x - - 0 1', logits, { temperature }), /LC0 WASM legal-prior failed: 8 \(invalid FEN active color\)/);
 });
 
 test('SIMD WASM legal-prior path rejects stale castling rights like JS movegen', async () => {

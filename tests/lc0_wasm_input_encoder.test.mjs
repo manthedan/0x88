@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import { boardToFen } from '../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
@@ -51,10 +51,7 @@ test('SIMD WASM LC0 input encoder preserves JS partial-FEN defaults', async () =
 
 test('SIMD WASM LC0 input encoder preserves large safe FEN counters', async () => {
   const wasm = await createLc0WasmInputEncoder(wasmBytes);
-  for (const fen of [
-    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 65537',
-    '8/8/8/8/8/8/8/8 w - - 4294967297 1',
-  ]) {
+  for (const fen of ['rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 65537', '8/8/8/8/8/8/8/8 w - - 4294967297 1']) {
     const expected = encodeLc0Classical112(fen);
     const actual = wasm.encodeFen(fen);
     assertEncodedEqual(actual, expected, fen);

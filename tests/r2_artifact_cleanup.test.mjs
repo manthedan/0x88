@@ -20,10 +20,12 @@ test('R2 cleanup plan protects retained release artifacts and migration-compatib
   const oldKey = `artifacts/sha256/${'2'.repeat(64)}/old-model.onnx`;
   const freshOrphan = `artifacts/sha256/${'3'.repeat(64)}/fresh.onnx`;
   const sourceOrphan = `artifacts/sha256/${'4'.repeat(64)}/engine-corresponding-source.tar.gz`;
-  const releases = [{
-    releaseId: 'stable-release',
-    artifacts: [{ logicalUrl: '/models/lc0/model.onnx', artifactUrl: `/${retainedKey}` }],
-  }];
+  const releases = [
+    {
+      releaseId: 'stable-release',
+      artifacts: [{ logicalUrl: '/models/lc0/model.onnx', artifactUrl: `/${retainedKey}` }],
+    },
+  ];
   const plan = buildCleanupPlan({
     now,
     retentionDays: 30,
@@ -61,18 +63,22 @@ test('R2 cleanup plan preserves v1 logical objects referenced by retained non-st
       { releaseId: 'stable-release', artifacts: [] },
       {
         releaseId: 'rollback-release',
-        artifacts: [{
-          logicalUrl: '/legacy/engine.wasm',
-          artifactUrl: `/artifacts/sha256/${'8'.repeat(64)}/engine.wasm`,
-        }],
+        artifacts: [
+          {
+            logicalUrl: '/legacy/engine.wasm',
+            artifactUrl: `/artifacts/sha256/${'8'.repeat(64)}/engine.wasm`,
+          },
+        ],
       },
     ],
     objects: [object('legacy/engine.wasm', 10, '2025-01-01T00:00:00.000Z')],
   });
 
-  assert.equal(plan.candidates.some((entry) => entry.key === 'legacy/engine.wasm'), false);
-  assert.ok(plan.protected.some((entry) => entry.key === 'legacy/engine.wasm'
-    && /rollback and migration client compatibility/.test(entry.reason)));
+  assert.equal(
+    plan.candidates.some((entry) => entry.key === 'legacy/engine.wasm'),
+    false,
+  );
+  assert.ok(plan.protected.some((entry) => entry.key === 'legacy/engine.wasm' && /rollback and migration client compatibility/.test(entry.reason)));
 });
 
 test('R2 cleanup plan requires manual review for unreferenced SHA-only v2 objects', () => {
@@ -85,10 +91,7 @@ test('R2 cleanup plan requires manual review for unreferenced SHA-only v2 object
     retentionDays: 30,
     channel: undefined,
     releases: [],
-    objects: [
-      object(identityKey, 10, '2025-01-01T00:00:00.000Z'),
-      object(brKey, 8, '2025-01-01T00:00:00.000Z'),
-    ],
+    objects: [object(identityKey, 10, '2025-01-01T00:00:00.000Z'), object(brKey, 8, '2025-01-01T00:00:00.000Z')],
   });
 
   assert.equal(plan.candidateCount, 0);
@@ -147,7 +150,10 @@ test('R2 cleanup plan protects every shared v2 representation and reports catalo
   assert.deepEqual(plan.missingReferencedArtifacts, [{ key: brKey, releases: ['stable-v2'] }]);
   assert.ok(plan.protected.some((entry) => entry.key === identityKey && entry.reason === 'referenced by stable release'));
   assert.ok(plan.protected.some((entry) => entry.key === migratedV1Key && entry.reason === 'referenced by stable release'));
-  assert.equal(plan.candidates.some((entry) => entry.key === identityKey), false);
+  assert.equal(
+    plan.candidates.some((entry) => entry.key === identityKey),
+    false,
+  );
 });
 
 test('R2 cleanup plan releases legacy migration bodies only after their v2 release is no longer retained', () => {
@@ -156,34 +162,39 @@ test('R2 cleanup plan releases legacy migration bodies only after their v2 relea
   const retainedRelease = {
     schema: 'lc0_browser.artifact_release_manifest.v2',
     releaseId: 'rollback-v2',
-    artifacts: [{
-      logicalUrl: '/models/legacy-model.onnx',
-      carriedForwardFrom: 'legacy-v1',
-      migrationSource: {
-        schema: 'lc0_browser.artifact_migration_source.v1',
-        releaseId: 'legacy-v1',
-        key: migrationKey,
-        url: `/${migrationKey}`,
+    artifacts: [
+      {
+        logicalUrl: '/models/legacy-model.onnx',
+        carriedForwardFrom: 'legacy-v1',
+        migrationSource: {
+          schema: 'lc0_browser.artifact_migration_source.v1',
+          releaseId: 'legacy-v1',
+          key: migrationKey,
+          url: `/${migrationKey}`,
+        },
+        raw: { sha256: rawSha, bytes: 3 },
+        representations: [
+          {
+            encoding: 'identity',
+            url: `/artifacts/sha256/${rawSha}/identity`,
+            sha256: rawSha,
+            bytes: 3,
+          },
+        ],
       },
-      raw: { sha256: rawSha, bytes: 3 },
-      representations: [{
-        encoding: 'identity',
-        url: `/artifacts/sha256/${rawSha}/identity`,
-        sha256: rawSha,
-        bytes: 3,
-      }],
-    }],
+    ],
   };
   const objects = [object(migrationKey, 3, '2025-01-01T00:00:00.000Z')];
 
   const retained = buildCleanupPlan({ now, retentionDays: 30, releases: [retainedRelease], objects });
-  assert.equal(retained.candidates.some((entry) => entry.key === migrationKey), false);
-  assert.ok(retained.protected.some((entry) => entry.key === migrationKey
-    && entry.reason === 'referenced by retained release'));
+  assert.equal(
+    retained.candidates.some((entry) => entry.key === migrationKey),
+    false,
+  );
+  assert.ok(retained.protected.some((entry) => entry.key === migrationKey && entry.reason === 'referenced by retained release'));
 
   const unretained = buildCleanupPlan({ now, retentionDays: 30, releases: [], objects });
-  assert.ok(unretained.candidates.some((entry) => entry.key === migrationKey
-    && entry.category === 'hashed-orphan'));
+  assert.ok(unretained.candidates.some((entry) => entry.key === migrationKey && entry.category === 'hashed-orphan'));
 });
 
 test('R2 cleanup plan fails closed on malformed v2 migration source metadata', () => {
@@ -191,29 +202,30 @@ test('R2 cleanup plan fails closed on malformed v2 migration source metadata', (
   const release = {
     schema: 'lc0_browser.artifact_release_manifest.v2',
     releaseId: 'malformed-migration',
-    artifacts: [{
-      logicalUrl: '/models/model.onnx',
-      carriedForwardFrom: 'legacy-v1',
-      migrationSource: {
-        schema: 'lc0_browser.artifact_migration_source.v1',
-        releaseId: 'legacy-v1',
-        key: `artifacts/sha256/${rawSha}/br/not-a-v1-body`,
-        url: `/artifacts/sha256/${rawSha}/br/not-a-v1-body`,
+    artifacts: [
+      {
+        logicalUrl: '/models/model.onnx',
+        carriedForwardFrom: 'legacy-v1',
+        migrationSource: {
+          schema: 'lc0_browser.artifact_migration_source.v1',
+          releaseId: 'legacy-v1',
+          key: `artifacts/sha256/${rawSha}/br/not-a-v1-body`,
+          url: `/artifacts/sha256/${rawSha}/br/not-a-v1-body`,
+        },
+        raw: { sha256: rawSha, bytes: 3 },
+        representations: [
+          {
+            encoding: 'identity',
+            url: `/artifacts/sha256/${rawSha}/identity`,
+            sha256: rawSha,
+            bytes: 3,
+          },
+        ],
       },
-      raw: { sha256: rawSha, bytes: 3 },
-      representations: [{
-        encoding: 'identity',
-        url: `/artifacts/sha256/${rawSha}/identity`,
-        sha256: rawSha,
-        bytes: 3,
-      }],
-    }],
+    ],
   };
 
-  assert.throws(
-    () => buildCleanupPlan({ now, releases: [release], objects: [] }),
-    /Invalid v1 migration source metadata.*manual review/,
-  );
+  assert.throws(() => buildCleanupPlan({ now, releases: [release], objects: [] }), /Invalid v1 migration source metadata.*manual review/);
 });
 
 test('R2 cleanup plan carries source kind and logical metadata into protected v2 catalog objects', () => {
@@ -222,17 +234,21 @@ test('R2 cleanup plan carries source kind and logical metadata into protected v2
   const release = {
     schema: 'lc0_browser.artifact_release_manifest.v2',
     releaseId: 'source-release',
-    artifacts: [{
-      logicalUrl: '/stockfish/stockfish-corresponding-source.tar.gz',
-      kind: 'source',
-      raw: { sha256: rawSha, bytes: 3 },
-      representations: [{
-        encoding: 'identity',
-        url: `/${identityKey}`,
-        sha256: rawSha,
-        bytes: 3,
-      }],
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/stockfish/stockfish-corresponding-source.tar.gz',
+        kind: 'source',
+        raw: { sha256: rawSha, bytes: 3 },
+        representations: [
+          {
+            encoding: 'identity',
+            url: `/${identityKey}`,
+            sha256: rawSha,
+            bytes: 3,
+          },
+        ],
+      },
+    ],
   };
   const plan = buildCleanupPlan({
     now,
@@ -257,17 +273,16 @@ test('R2 cleanup plan rejects malformed v2 releases instead of planning around m
   const release = (representations) => ({
     schema: 'lc0_browser.artifact_release_manifest.v2',
     releaseId: 'malformed-v2',
-    artifacts: [{
-      logicalUrl: '/models/model.onnx',
-      raw: { sha256: rawSha, bytes: 3 },
-      representations,
-    }],
+    artifacts: [
+      {
+        logicalUrl: '/models/model.onnx',
+        raw: { sha256: rawSha, bytes: 3 },
+        representations,
+      },
+    ],
   });
 
-  assert.throws(
-    () => buildCleanupPlan({ now, releases: [release([])], objects: [] }),
-    /V2 artifact has no representations/,
-  );
+  assert.throws(() => buildCleanupPlan({ now, releases: [release([])], objects: [] }), /V2 artifact has no representations/);
   assert.throws(
     () => buildCleanupPlan({ now, releases: [release([identity, { ...identity }])], objects: [] }),
     /must have exactly one identity representation.*found 2/,
@@ -275,7 +290,15 @@ test('R2 cleanup plan rejects malformed v2 releases instead of planning around m
 });
 
 test('parseArgs requires hashed opt-in separately from execute', () => {
-  const args = parseArgs(['node', 'script', '--execute', '--delete-category', 'legacy-logical-duplicate,legacy-unreferenced-metadata', '--retention-days', '7']);
+  const args = parseArgs([
+    'node',
+    'script',
+    '--execute',
+    '--delete-category',
+    'legacy-logical-duplicate,legacy-unreferenced-metadata',
+    '--retention-days',
+    '7',
+  ]);
   assert.equal(args.execute, true);
   assert.equal(args.allowDeleteHashed, false);
   assert.deepEqual([...args.deleteCategories].sort(), ['legacy-logical-duplicate', 'legacy-unreferenced-metadata']);
@@ -285,20 +308,28 @@ test('parseArgs requires hashed opt-in separately from execute', () => {
 test('listR2Objects follows Cloudflare result_info cursors across pages', async (t) => {
   const calls = [];
   const originalFetch = globalThis.fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   globalThis.fetch = async (url) => {
     calls.push(String(url));
     const isSecondPage = String(url).includes('cursor=next-page');
-    return new Response(JSON.stringify({
-      success: true,
-      result: isSecondPage ? [object('b')] : [object('a')],
-      result_info: isSecondPage ? { cursor: undefined } : { cursor: 'next-page' },
-    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(
+      JSON.stringify({
+        success: true,
+        result: isSecondPage ? [object('b')] : [object('a')],
+        result_info: isSecondPage ? { cursor: undefined } : { cursor: 'next-page' },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
   };
 
   const objects = await listR2Objects({ accountId: 'account', apiToken: 'token', bucket: 'bucket' });
 
-  assert.deepEqual(objects.map((entry) => entry.key), ['a', 'b']);
+  assert.deepEqual(
+    objects.map((entry) => entry.key),
+    ['a', 'b'],
+  );
   assert.equal(calls.length, 2);
   assert.match(calls[1], /cursor=next-page/);
 });

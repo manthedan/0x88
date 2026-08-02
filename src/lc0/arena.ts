@@ -69,13 +69,17 @@ export function applyGameResult(standings: Map<string, Standing>, whiteId: strin
   white.games += 1;
   black.games += 1;
   if (result === '1/2-1/2') {
-    white.draws += 1; black.draws += 1;
-    white.score += 0.5; black.score += 0.5;
+    white.draws += 1;
+    black.draws += 1;
+    white.score += 0.5;
+    black.score += 0.5;
   } else if (result === '1-0') {
-    white.wins += 1; black.losses += 1;
+    white.wins += 1;
+    black.losses += 1;
     white.score += 1;
   } else {
-    black.wins += 1; white.losses += 1;
+    black.wins += 1;
+    white.losses += 1;
     black.score += 1;
   }
 }

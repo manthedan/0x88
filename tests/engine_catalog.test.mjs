@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  canonicalEngineFamily,
+  centipawnEngineLabel,
+  centipawnVariantOptions,
+  defaultEngineStrength,
+  defaultStaticEngineVariant,
   ENGINE_FAMILY_CATALOG,
   ENGINE_FAMILY_DEFINITIONS,
   ENGINE_FAMILY_PRIORITY,
-  V0_ENGINE_FAMILY_PRIORITY,
-  canonicalEngineFamily,
-  defaultEngineStrength,
-  defaultStaticEngineVariant,
   engineFamilyOptions,
   enginePlayLevels,
   enginePlayOptions,
@@ -18,14 +19,16 @@ import {
   lc0VariantOptions,
   stockfishEngineLabel,
   stockfishVariantOptions,
-  centipawnEngineLabel,
-  centipawnVariantOptions,
+  V0_ENGINE_FAMILY_PRIORITY,
 } from '../src/lc0/engineCatalog.ts';
 
 test('engine family catalog covers the staged selector families in UI order', () => {
   assert.deepEqual(ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'stormphrax', 'centipawn']);
   assert.deepEqual(V0_ENGINE_FAMILY_PRIORITY, ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax', 'centipawn']);
-  assert.deepEqual(engineFamilyOptions().map((option) => option.value), ENGINE_FAMILY_PRIORITY);
+  assert.deepEqual(
+    engineFamilyOptions().map((option) => option.value),
+    ENGINE_FAMILY_PRIORITY,
+  );
   assert.equal(ENGINE_FAMILY_PRIORITY.at(-1), 'centipawn');
   assert.equal(V0_ENGINE_FAMILY_PRIORITY.at(-1), 'centipawn');
   assert.equal(ENGINE_FAMILY_CATALOG.centipawn.shortLabel, 'Centi');
@@ -45,10 +48,10 @@ test('unified family definitions drive order, resources, strengths, and Play opt
     assert.deepEqual(engineStrengthMeta(family, 'arena'), definition.strength.arena);
     assert.deepEqual(engineStrengthMeta(family, 'analysis'), definition.strength.analysis);
   }
-  assert.deepEqual(enginePlayOptions().map((option) => option.id), [
-    'leela-queen-odds', 'sf-lite', 'sf-full', 'lc0-small', 'lc0-t3', 'lc0-bt4',
-    'reckless', 'viridithas', 'berserk', 'plentychess', 'stormphrax', 'centipawn',
-  ]);
+  assert.deepEqual(
+    enginePlayOptions().map((option) => option.id),
+    ['leela-queen-odds', 'sf-lite', 'sf-full', 'lc0-small', 'lc0-t3', 'lc0-bt4', 'reckless', 'viridithas', 'berserk', 'plentychess', 'stormphrax', 'centipawn'],
+  );
   assert.deepEqual(enginePlayLevels('stormphrax'), [2, 4, 6, 9, 12]);
   assert.throws(() => enginePlayLevels('sf'), /does not use the shared Play strength ladder/);
 });
@@ -85,11 +88,20 @@ test('static LC0 and Stockfish variants expose labels and gating metadata', () =
   assert.equal(stockfishEngineLabel('lite', 'analysis'), 'SF Lite');
   assert.equal(centipawnEngineLabel('bt4-ort'), 'Centipawn · ORT');
   assert.equal(centipawnEngineLabel('bt4-custom'), 'Centipawn · TVMJS strict');
-  assert.deepEqual(centipawnVariantOptions().map((option) => option.value), ['bt4-auto', 'bt4-ort', 'bt4-custom']);
-  assert.deepEqual(centipawnVariantOptions().map((option) => option.label), ['v1 · TVMJS auto', 'v1 · ORT', 'v1 · TVMJS strict']);
+  assert.deepEqual(
+    centipawnVariantOptions().map((option) => option.value),
+    ['bt4-auto', 'bt4-ort', 'bt4-custom'],
+  );
+  assert.deepEqual(
+    centipawnVariantOptions().map((option) => option.label),
+    ['v1 · TVMJS auto', 'v1 · ORT', 'v1 · TVMJS strict'],
+  );
   assert.deepEqual(ENGINE_FAMILY_DEFINITIONS.centipawn.variants.v0Allowed, ['bt4-auto', 'bt4-ort']);
   assert.equal(ENGINE_FAMILY_DEFINITIONS.centipawn.play.options[0]?.variant, 'bt4-auto');
-  assert.deepEqual(stockfishVariantOptions().map((option) => option.value), ['lite', 'full']);
+  assert.deepEqual(
+    stockfishVariantOptions().map((option) => option.value),
+    ['lite', 'full'],
+  );
   assert.equal(lc0VariantOptions(false).find((option) => option.value === 'bt4')?.disabled, true);
   assert.equal(lc0VariantOptions(true).find((option) => option.value === 'bt4')?.disabled, false);
 });

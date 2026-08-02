@@ -66,5 +66,8 @@ export function syncThemeToDom(): () => void {
     });
   } catch {}
 
-  return () => { unsubTheme(); unsubBoard(); };
+  return () => {
+    unsubTheme();
+    unsubBoard();
+  };
 }

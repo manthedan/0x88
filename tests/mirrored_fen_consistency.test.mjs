@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import test from 'node:test';
 
 test('mirrored FEN legal moves, action ids, and symmetric priors are consistent', () => {
   const output = execFileSync('node', ['--experimental-strip-types', 'eval/mirrored_fen_consistency_check.mjs'], { encoding: 'utf8' });

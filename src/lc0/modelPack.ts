@@ -188,7 +188,7 @@ export async function loadLc0WebModelPack(manifestUrlInput: string, options: Lc0
   const verifyTensors = options.verifyTensors ?? false;
   const manifestResponse = await fetchFn(manifestUrl);
   if (!manifestResponse.ok) throw new Error(`lc0web manifest fetch failed for ${manifestUrl}: ${manifestResponse.status}`);
-  const manifest = await manifestResponse.json() as unknown;
+  const manifest = (await manifestResponse.json()) as unknown;
   validateLc0WebModelPackManifest(manifest);
 
   if (!loadWeights) {
@@ -196,9 +196,7 @@ export async function loadLc0WebModelPack(manifestUrlInput: string, options: Lc0
   }
 
   const wantedTensorNames = options.tensorNames ? new Set(options.tensorNames) : undefined;
-  const selectedTensors = wantedTensorNames
-    ? manifest.weights.tensors.filter((tensor) => wantedTensorNames.has(tensor.name))
-    : manifest.weights.tensors;
+  const selectedTensors = wantedTensorNames ? manifest.weights.tensors.filter((tensor) => wantedTensorNames.has(tensor.name)) : manifest.weights.tensors;
   if (wantedTensorNames && selectedTensors.length !== wantedTensorNames.size) {
     const found = new Set(selectedTensors.map((tensor) => tensor.name));
     const missing = [...wantedTensorNames].filter((name) => !found.has(name));

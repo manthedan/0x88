@@ -1,8 +1,8 @@
-import { parseFen, START_FEN, type BoardState } from './board.ts';
-import { legalMoves } from './movegen.ts';
+import { type GameNode, GameTree } from '../lc0/gameTree.ts';
+import { type BoardState, parseFen, START_FEN } from './board.ts';
 import { type Move } from './moveCodec.ts';
+import { legalMoves } from './movegen.ts';
 import { moveToSan } from './san.ts';
-import { GameTree, type GameNode } from '../lc0/gameTree.ts';
 
 export interface PgnGame {
   tags: Record<string, string>;
@@ -52,8 +52,11 @@ export function splitPgnGames(text: string): string[] {
 function parseTags(text: string): Record<string, string> {
   const tags: Record<string, string> = {};
   const re = /\[(\w+)\s+"([^"]*)"\]/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text))) tags[match[1]] = match[2];
+  let match = re.exec(text);
+  while (match) {
+    tags[match[1]] = match[2];
+    match = re.exec(text);
+  }
   return tags;
 }
 
@@ -74,7 +77,10 @@ function tokenizeMovetext(movetext: string): Token[] {
   const n = movetext.length;
   while (i < n) {
     const ch = movetext[i];
-    if (/\s/.test(ch)) { i++; continue; }
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
     if (ch === '{') {
       const end = movetext.indexOf('}', i);
       const stop = end === -1 ? n : end;
@@ -82,9 +88,21 @@ function tokenizeMovetext(movetext: string): Token[] {
       i = stop + 1;
       continue;
     }
-    if (ch === '(') { tokens.push({ type: 'open' }); i++; continue; }
-    if (ch === ')') { tokens.push({ type: 'close' }); i++; continue; }
-    if (ch === ';') { const end = movetext.indexOf('\n', i); i = end === -1 ? n : end + 1; continue; }
+    if (ch === '(') {
+      tokens.push({ type: 'open' });
+      i++;
+      continue;
+    }
+    if (ch === ')') {
+      tokens.push({ type: 'close' });
+      i++;
+      continue;
+    }
+    if (ch === ';') {
+      const end = movetext.indexOf('\n', i);
+      i = end === -1 ? n : end + 1;
+      continue;
+    }
     if (ch === '$') {
       let j = i + 1;
       while (j < n && /\d/.test(movetext[j])) j++;
@@ -97,11 +115,17 @@ function tokenizeMovetext(movetext: string): Token[] {
     while (j < n && !/[\s(){};]/.test(movetext[j])) j++;
     let word = movetext.slice(i, j);
     i = j;
-    if (RESULTS.has(word)) { tokens.push({ type: 'result', value: word }); continue; }
+    if (RESULTS.has(word)) {
+      tokens.push({ type: 'result', value: word });
+      continue;
+    }
     // Strip a leading move number like "12." or "12..." possibly fused to the SAN.
     word = word.replace(/^\d+\.(\.\.)?/, '');
     if (!word || word === '...') continue;
-    if (RESULTS.has(word)) { tokens.push({ type: 'result', value: word }); continue; }
+    if (RESULTS.has(word)) {
+      tokens.push({ type: 'result', value: word });
+      continue;
+    }
     tokens.push({ type: 'move', value: word });
   }
   return tokens;
@@ -120,11 +144,26 @@ export function parsePgnGame(text: string): PgnGame {
   const stack: GameNode[] = [];
   let result = tags.Result || '*';
   for (const token of tokens) {
-    if (token.type === 'open') { stack.push(last); last = last.parent ?? tree.root; continue; }
-    if (token.type === 'close') { last = stack.pop() ?? tree.root; continue; }
-    if (token.type === 'result') { result = token.value; continue; }
-    if (token.type === 'nag') { continue; }
-    if (token.type === 'comment') { if (last !== tree.root) last.comment = last.comment ? `${last.comment} ${token.value}` : token.value; continue; }
+    if (token.type === 'open') {
+      stack.push(last);
+      last = last.parent ?? tree.root;
+      continue;
+    }
+    if (token.type === 'close') {
+      last = stack.pop() ?? tree.root;
+      continue;
+    }
+    if (token.type === 'result') {
+      result = token.value;
+      continue;
+    }
+    if (token.type === 'nag') {
+      continue;
+    }
+    if (token.type === 'comment') {
+      if (last !== tree.root) last.comment = last.comment ? `${last.comment} ${token.value}` : token.value;
+      continue;
+    }
     // move
     tree.current = last;
     const move = sanToMove(parseFen(last.fen), token.value);
@@ -142,9 +181,7 @@ export function parsePgnGames(text: string): PgnGame[] {
 
 function serializeNode(node: GameNode, withNumber: boolean): string {
   const board = parseFen(node.parent!.fen);
-  const number = board.turn === 'w'
-    ? `${board.fullmove}. `
-    : withNumber ? `${board.fullmove}... ` : '';
+  const number = board.turn === 'w' ? `${board.fullmove}. ` : withNumber ? `${board.fullmove}... ` : '';
   const comment = node.comment ? ` {${node.comment}}` : '';
   return `${number}${node.san}${comment}`;
 }
@@ -179,7 +216,9 @@ export function serializeMovetext(tree: GameTree): string {
 /** Serialize a full PGN (tags + movetext + result). */
 export function gameTreeToPgn(tree: GameTree, tags: Record<string, string> = {}, result = '*'): string {
   const tagPairs = { Event: '?', Site: '?', Date: '????.??.??', Round: '?', White: '?', Black: '?', Result: result, ...tags };
-  const header = Object.entries(tagPairs).map(([k, v]) => `[${k} "${v}"]`).join('\n');
+  const header = Object.entries(tagPairs)
+    .map(([k, v]) => `[${k} "${v}"]`)
+    .join('\n');
   const movetext = serializeMovetext(tree);
   return `${header}\n\n${movetext} ${result}`.trim();
 }

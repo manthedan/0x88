@@ -1,8 +1,8 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
-import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
 class PoisonIllegalEvaluator {
@@ -57,7 +57,9 @@ class DominantFirstMoveEvaluator {
   evaluate(board, context = {}) {
     const legal = context.legalMoves ?? legalMoves(board);
     const policy = new Map();
-    legal.forEach((move, i) => policy.set(moveToActionId(move), i === 0 ? 1 : 0));
+    legal.forEach((move, i) => {
+      policy.set(moveToActionId(move), i === 0 ? 1 : 0);
+    });
     return { policy, wdl: [0.34, 0.32, 0.34] };
   }
 
@@ -87,7 +89,10 @@ test('PUCT masks illegal evaluator policy mass instead of selecting illegal move
   assert.ok(result.move, 'expected a legal move');
   assert.ok(legalUcis(board).has(moveToUci(result.move)), `selected illegal move ${moveToUci(result.move)}`);
   assert.equal(result.policy.length, legalMoves(board).length, 'root policy should only contain legal moves');
-  assert.ok(result.policy.every((entry) => legalUcis(board).has(moveToUci(entry.move))), 'root policy contains illegal moves');
+  assert.ok(
+    result.policy.every((entry) => legalUcis(board).has(moveToUci(entry.move))),
+    'root policy contains illegal moves',
+  );
 });
 
 test('batched PUCT retries in-flight leaf collisions to keep evaluator batches full', async () => {
@@ -97,7 +102,11 @@ test('batched PUCT retries in-flight leaf collisions to keep evaluator batches f
   assert.equal(result.stats?.completedVisits, 4);
   assert.equal(result.stats?.maxEvalBatch, 4, `expected a full physical leaf batch, got ${evaluator.batchSizes.join(',')}`);
   assert.ok((result.stats?.batchLeafCollisions ?? 0) > 0, 'collision retry path was exercised');
-  assert.equal(result.root?.edges.reduce((sum, edge) => sum + edge.virtualVisits, 0), 0, 'temporary virtual visits were unwound');
+  assert.equal(
+    result.root?.edges.reduce((sum, edge) => sum + edge.virtualVisits, 0),
+    0,
+    'temporary virtual visits were unwound',
+  );
 });
 
 test('pipelined PUCT backup mode skips cross-batch in-flight leaf collisions', async () => {
@@ -111,7 +120,11 @@ test('pipelined PUCT backup mode skips cross-batch in-flight leaf collisions', a
   });
   assert.equal(result.stats?.completedVisits, 8);
   assert.ok((result.stats?.batchLeafCollisions ?? 0) > 0, 'cross-batch in-flight collision path was exercised');
-  assert.equal(result.root?.edges.reduce((sum, edge) => sum + edge.virtualVisits, 0), 0, 'temporary virtual visits were unwound');
+  assert.equal(
+    result.root?.edges.reduce((sum, edge) => sum + edge.virtualVisits, 0),
+    0,
+    'temporary virtual visits were unwound',
+  );
 });
 
 test('PUCT can stop early when the best root move is stable', async () => {

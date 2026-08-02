@@ -1,20 +1,20 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
+import { ORT_RUNTIME_ASSET_FILES } from '../scripts/ort_runtime_assets.mjs';
 import {
   ORT_RUNTIME_ARTIFACT_FILES,
   ortRuntimeArtifactKindForCurrentThread,
   requestedOrtWasmArtifact,
-  resolveOrtPthreadRuntimeUrls,
   resolvedOrtExecutionProviders,
+  resolveOrtPthreadRuntimeUrls,
+  resolveOrtWasmThreads,
   setOrtRuntimeArtifactKindForCurrentThread,
   setRequestedOrtExecutionProviderForCurrentThread,
   setRequestedOrtWasmArtifactForCurrentThread,
   setRequestedOrtWasmThreadsForCurrentThread,
-  resolveOrtWasmThreads,
   shouldFallbackToWasmAfterOrtFailure,
   validateOrtWasmArtifactSelection,
 } from '../src/nn/ortRuntime.ts';
-import { ORT_RUNTIME_ASSET_FILES } from '../scripts/ort_runtime_assets.mjs';
 
 /** Simulate a browser thread (Node has no `location` and no `navigator.gpu`). */
 function withBrowserEnv(webgpuPresent, fn) {
@@ -68,12 +68,15 @@ test('CPU-only ORT runtime URLs resolve from the same staged base', () => {
 });
 
 test('runtime artifact filenames match the deploy staging allowlist', () => {
-  assert.deepEqual([
-    ORT_RUNTIME_ARTIFACT_FILES.asyncify.mjs,
-    ORT_RUNTIME_ARTIFACT_FILES.asyncify.wasm,
-    ORT_RUNTIME_ARTIFACT_FILES.wasm.mjs,
-    ORT_RUNTIME_ARTIFACT_FILES.wasm.wasm,
-  ], [...ORT_RUNTIME_ASSET_FILES]);
+  assert.deepEqual(
+    [
+      ORT_RUNTIME_ARTIFACT_FILES.asyncify.mjs,
+      ORT_RUNTIME_ARTIFACT_FILES.asyncify.wasm,
+      ORT_RUNTIME_ARTIFACT_FILES.wasm.mjs,
+      ORT_RUNTIME_ARTIFACT_FILES.wasm.wasm,
+    ],
+    [...ORT_RUNTIME_ASSET_FILES],
+  );
 });
 
 test('browsers without WebGPU load the CPU-only ORT runtime for every non-strict EP', () => {
@@ -154,14 +157,8 @@ test('strict webgpu provider selection never resolves directly to wasm', () => {
 });
 
 test('custom ORT WASM artifacts require matched glue and binary URLs', () => {
-  assert.throws(
-    () => validateOrtWasmArtifactSelection({ variant: 'relaxed', wasmUrl: '/ort/relaxed.wasm' }),
-    /matching mjsUrl and wasmUrl/,
-  );
-  assert.throws(
-    () => validateOrtWasmArtifactSelection({ variant: 'fixed' }),
-    /requires matching mjsUrl and wasmUrl/,
-  );
+  assert.throws(() => validateOrtWasmArtifactSelection({ variant: 'relaxed', wasmUrl: '/ort/relaxed.wasm' }), /matching mjsUrl and wasmUrl/);
+  assert.throws(() => validateOrtWasmArtifactSelection({ variant: 'fixed' }), /requires matching mjsUrl and wasmUrl/);
   assert.throws(
     () => validateOrtWasmArtifactSelection({ variant: 'bundled', mjsUrl: '/ort/fixed.mjs', wasmUrl: '/ort/fixed.wasm' }),
     /bundled ORT WASM variant cannot specify/,

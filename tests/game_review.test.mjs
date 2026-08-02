@@ -42,7 +42,10 @@ test('reviewGame computes per-side losses, classes, and accuracy', () => {
   assert.equal(review.counts.white.blunder, 1);
   assert.equal(review.counts.black.blunder, 1);
   assert.ok(review.accuracy.white < 50 && review.accuracy.black < 50);
-  assert.deepEqual(review.criticalMoves.map((m) => m.ply), [1, 2]);
+  assert.deepEqual(
+    review.criticalMoves.map((m) => m.ply),
+    [1, 2],
+  );
 });
 
 test('reviewGame honors best-move matches, forced moves, and black-to-move starts', () => {
@@ -67,27 +70,44 @@ test('reviewGame honors best-move matches, forced moves, and black-to-move start
 
 test('criticalMoves excludes best/forced moves even with large measured swings', () => {
   // Mate delivered: huge nominal swing but the engine best move was played.
-  const review = reviewGame([
-    { winWhite: 0.0, bestUci: 'd4f3' },
-    { winWhite: 0.0, bestUci: null },
-  ], [{ san: 'Nf3#', uci: 'd4f3' }], 'b');
+  const review = reviewGame(
+    [
+      { winWhite: 0.0, bestUci: 'd4f3' },
+      { winWhite: 0.0, bestUci: null },
+    ],
+    [{ san: 'Nf3#', uci: 'd4f3' }],
+    'b',
+  );
   assert.equal(review.moves[0].class, 'best');
   assert.equal(review.criticalMoves.length, 0);
 });
 
 test('reviewGame validates position/move count alignment', () => {
-  assert.throws(() => reviewGame([{ winWhite: 0.5, bestUci: null }], [{ san: 'e4', uci: 'e2e4' }, { san: 'e5', uci: 'e7e5' }]), /one position per move/);
+  assert.throws(
+    () =>
+      reviewGame(
+        [{ winWhite: 0.5, bestUci: null }],
+        [
+          { san: 'e4', uci: 'e2e4' },
+          { san: 'e5', uci: 'e7e5' },
+        ],
+      ),
+    /one position per move/,
+  );
 });
 
 test('annotatedPgn emits NAGs, win comments, and best-move notes', () => {
-  const review = reviewGame([
-    { winWhite: 0.55, bestUci: 'e2e4' },
-    { winWhite: 0.3, bestUci: 'd7d5' },
-    { winWhite: 0.3, bestUci: 'b1c3' },
-  ], [
-    { san: 'a3', uci: 'a2a3' },
-    { san: 'd5', uci: 'd7d5' },
-  ]);
+  const review = reviewGame(
+    [
+      { winWhite: 0.55, bestUci: 'e2e4' },
+      { winWhite: 0.3, bestUci: 'd7d5' },
+      { winWhite: 0.3, bestUci: 'b1c3' },
+    ],
+    [
+      { san: 'a3', uci: 'a2a3' },
+      { san: 'd5', uci: 'd7d5' },
+    ],
+  );
   const pgn = annotatedPgn(review, { tags: { White: 'A', Black: 'B' }, result: '0-1' });
   assert.ok(pgn.includes('[White "A"]'));
   assert.ok(pgn.includes('1. a3??'));

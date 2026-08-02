@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createHash } from 'node:crypto';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5198;
@@ -68,8 +68,10 @@ function parseArgs(argv) {
       return argv[++i];
     };
     if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') { args.baseUrl = next(); args.explicitBaseUrl = true; }
-    else if (arg === '--host') args.host = next();
+    else if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.explicitBaseUrl = true;
+    } else if (arg === '--host') args.host = next();
     else if (arg === '--port') args.port = Number(next());
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--session') args.session = next();
@@ -89,14 +91,24 @@ function parseArgs(argv) {
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   args.session = shortSessionName(args.session);
-  for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['fixture-limit', args.fixtureLimit], ['top-k', args.topK]]) {
+  for (const [name, value] of [
+    ['port', args.port],
+    ['timeout', args.timeoutMs],
+    ['fixture-limit', args.fixtureLimit],
+    ['top-k', args.topK],
+  ]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
-  for (const [name, value] of [['max-prior-diff', args.maxPriorDiff], ['max-wdl-diff', args.maxWdlDiff], ['max-logit-diff', args.maxLogitDiff]]) {
+  for (const [name, value] of [
+    ['max-prior-diff', args.maxPriorDiff],
+    ['max-wdl-diff', args.maxWdlDiff],
+    ['max-logit-diff', args.maxLogitDiff],
+  ]) {
     if (!Number.isFinite(value) || value < 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel))
+    throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
   return args;
 }
 
@@ -142,11 +154,14 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
       try {
         const parsed = stdout ? JSON.parse(stdout.trim()) : null;
         if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
+          if (parsed.success === false)
+            return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);
-      } catch (error) { return finish(reject, error); }
+      } catch (error) {
+        return finish(reject, error);
+      }
     });
   });
 }
@@ -159,7 +174,9 @@ function textFromGetResult(result) {
 
 function startServer(args) {
   if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let output = '';
   let readySettled = false;
   server.ready = new Promise((resolve, reject) => {
@@ -174,8 +191,14 @@ function startServer(args) {
       output += chunk.toString('utf8');
       if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
     };
-    server.stdout.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
-    server.stderr.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
+    server.stdout.on('data', (chunk) => {
+      process.stderr.write(`[vite] ${chunk}`);
+      onOutput(chunk);
+    });
+    server.stderr.on('data', (chunk) => {
+      process.stderr.write(`[vite] ${chunk}`);
+      onOutput(chunk);
+    });
     server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
   });
   return server;
@@ -189,15 +212,20 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
       const response = await fetch(new URL('/single-engine', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) { lastError = error; }
+    } catch (error) {
+      lastError = error;
+    }
     await delay(250);
   }
   throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
 }
 
 async function closeAgentSession(args) {
-  try { await runAgent(args, ['close'], 5_000); }
-  catch (error) { process.stderr.write(`[gpu-legal-parity] warning: failed to close session: ${error.message ?? error}\n`); }
+  try {
+    await runAgent(args, ['close'], 5_000);
+  } catch (error) {
+    process.stderr.write(`[gpu-legal-parity] warning: failed to close session: ${error.message ?? error}\n`);
+  }
 }
 
 async function runBrowserProbe(args) {
@@ -222,13 +250,18 @@ async function runBrowserProbe(args) {
       await delay(500);
     }
     throw new Error(`Timed out waiting for GPU_LEGAL_PARITY_DONE after ${args.timeoutMs}ms (last #benchResult: ${lastText || 'empty'})`);
-  } finally { await closeAgentSession(args); }
+  } finally {
+    await closeAgentSession(args);
+  }
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return usage();
-  if (args.dryRun) { console.log(probeUrl(args)); return; }
+  if (args.dryRun) {
+    console.log(probeUrl(args));
+    return;
+  }
   const server = startServer(args);
   try {
     if (server) await server.ready;
@@ -265,9 +298,13 @@ async function main() {
     if (Number(result.maxLogitAbsDiff) > args.maxLogitDiff) driftFailures.push(`logit ${result.maxLogitAbsDiff} > ${args.maxLogitDiff}`);
     if (result.bestMoveMatches !== result.fixtures || result.topKMatches !== result.fixtures || result.maxMissingFromGpu !== 0 || driftFailures.length) {
       const driftMessage = driftFailures.length ? `, drift ${driftFailures.join('; ')}` : '';
-      throw new Error(`GPU legal parity failed: best ${result.bestMoveMatches}/${result.fixtures}, topK ${result.topKMatches}/${result.fixtures}, missing ${result.maxMissingFromGpu}${driftMessage}`);
+      throw new Error(
+        `GPU legal parity failed: best ${result.bestMoveMatches}/${result.fixtures}, topK ${result.topKMatches}/${result.fixtures}, missing ${result.maxMissingFromGpu}${driftMessage}`,
+      );
     }
-  } finally { server?.kill('SIGTERM'); }
+  } finally {
+    server?.kill('SIGTERM');
+  }
 }
 
 main().catch((error) => {

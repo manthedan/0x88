@@ -35,7 +35,11 @@ Options:
 }
 
 function parseList(raw, parse, name) {
-  const values = String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean).map(parse);
+  const values = String(raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(parse);
   if (!values.length || values.some((value) => value === undefined || Number.isNaN(value))) throw new Error(`Invalid --${name}: ${raw}`);
   return values;
 }
@@ -69,8 +73,10 @@ function parseArgs(argv) {
     if (arg === '--out') args.out = next();
     else if (arg === '--host') args.host = next();
     else if (arg === '--port') args.port = Number(next());
-    else if (arg === '--base-url') { args.baseUrl = next(); args.explicitBaseUrl = true; }
-    else if (arg === '--visits') args.visits = Number(next());
+    else if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.explicitBaseUrl = true;
+    } else if (arg === '--visits') args.visits = Number(next());
     else if (arg === '--batches') args.batches = parseList(next(), Number, 'batches');
     else if (arg === '--modes') args.modes = parseList(next(), (value) => value, 'modes');
     else if (arg === '--layers') args.layers = Number(next());
@@ -88,13 +94,25 @@ function parseArgs(argv) {
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   for (const mode of args.modes) if (!['serial', 'physical'].includes(mode)) throw new Error(`Invalid mode: ${mode}`);
-  for (const [name, value] of [['port', args.port], ['visits', args.visits], ['layers', args.layers], ['timeout', args.timeoutMs]]) {
+  for (const [name, value] of [
+    ['port', args.port],
+    ['visits', args.visits],
+    ['layers', args.layers],
+    ['timeout', args.timeoutMs],
+  ]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   for (const [name, values] of [['batches', args.batches]]) {
     if (values.some((value) => !Number.isFinite(value) || value <= 0)) throw new Error(`Invalid --${name}: ${values.join(',')}`);
   }
-  for (const [name, value] of [['eval-iters', args.evalIters], ['eval-warmup', args.evalWarmup], ['batch-eval-iters', args.batchEvalIters], ['batch-eval-warmup', args.batchEvalWarmup], ['search-iters', args.searchIters], ['search-warmup', args.searchWarmup]]) {
+  for (const [name, value] of [
+    ['eval-iters', args.evalIters],
+    ['eval-warmup', args.evalWarmup],
+    ['batch-eval-iters', args.batchEvalIters],
+    ['batch-eval-warmup', args.batchEvalWarmup],
+    ['search-iters', args.searchIters],
+    ['search-warmup', args.searchWarmup],
+  ]) {
     if (!Number.isFinite(value) || value < 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   return args;
@@ -175,22 +193,39 @@ function compactCell(result, combo) {
 async function runCell(args, combo, index, total) {
   const session = `lc0-wgsl-batch-bench-${process.pid}-${index}`;
   const commandArgs = [
-    'run', 'lc0:browser-hybrid-search-bench', '--',
-    '--base-url', args.baseUrl,
-    '--agent-browser', args.agentBrowser,
-    '--session', session,
-    '--head-backend', 'wgsl',
-    '--wgsl-batch-mode', combo.mode,
-    '--visits', String(args.visits),
-    '--batch', String(combo.batch),
-    '--layers', String(args.layers),
-    '--eval-iters', String(args.evalIters),
-    '--eval-warmup', String(args.evalWarmup),
-    '--batch-eval-iters', String(args.batchEvalIters),
-    '--batch-eval-warmup', String(args.batchEvalWarmup),
-    '--search-iters', String(args.searchIters),
-    '--search-warmup', String(args.searchWarmup),
-    '--timeout', String(args.timeoutMs),
+    'run',
+    'lc0:browser-hybrid-search-bench',
+    '--',
+    '--base-url',
+    args.baseUrl,
+    '--agent-browser',
+    args.agentBrowser,
+    '--session',
+    session,
+    '--head-backend',
+    'wgsl',
+    '--wgsl-batch-mode',
+    combo.mode,
+    '--visits',
+    String(args.visits),
+    '--batch',
+    String(combo.batch),
+    '--layers',
+    String(args.layers),
+    '--eval-iters',
+    String(args.evalIters),
+    '--eval-warmup',
+    String(args.evalWarmup),
+    '--batch-eval-iters',
+    String(args.batchEvalIters),
+    '--batch-eval-warmup',
+    String(args.batchEvalWarmup),
+    '--search-iters',
+    String(args.searchIters),
+    '--search-warmup',
+    String(args.searchWarmup),
+    '--timeout',
+    String(args.timeoutMs),
   ];
   process.stderr.write(`[wgsl-batch] ${index}/${total} mode=${combo.mode} batch=${combo.batch}\n`);
   const started = Date.now();

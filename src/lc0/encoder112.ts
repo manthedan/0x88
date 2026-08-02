@@ -1,4 +1,4 @@
-import { parseFen, START_FEN, type BoardState, type Color, type PieceRole } from '../chess/board.ts';
+import { type BoardState, type Color, type PieceRole, parseFen, START_FEN } from '../chess/board.ts';
 import { repetitionKey } from '../chess/drawRules.ts';
 
 export const LC0_CLASSICAL_112_PLANES = 112;
@@ -74,12 +74,14 @@ function setPiecePlanes(board: BoardState, masks: bigint[], historySlot: number,
 }
 
 function isExactStartPosition(board: BoardState): boolean {
-  return board.turn === START_BOARD.turn &&
+  return (
+    board.turn === START_BOARD.turn &&
     board.castling === START_BOARD.castling &&
     board.epSquare === START_BOARD.epSquare &&
     board.halfmove === START_BOARD.halfmove &&
     board.fullmove === START_BOARD.fullmove &&
-    board.squares.every((piece, i) => piece === START_BOARD.squares[i]);
+    board.squares.every((piece, i) => piece === START_BOARD.squares[i])
+  );
 }
 
 function boardBeforeEpDoublePush(board: BoardState): BoardState {
@@ -127,10 +129,9 @@ function setClassicalAuxPlanes(board: BoardState, masks: bigint[], values: numbe
 function parseHistoryInput(input: Lc0EncoderInput): { board: BoardState; historyBoards: BoardState[]; explicitHistory: boolean } {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     if (input.positions.length === 0) throw new Error('LC0 history input requires at least one position');
-    const chronological = input.positions.map((position) => typeof position === 'string' ? parseFen(position) : position);
-    const preparedExplicit = 'prepared' in input
-      ? (input as Lc0PositionHistoryInput & { prepared?: { explicitHistory?: boolean } }).prepared?.explicitHistory
-      : undefined;
+    const chronological = input.positions.map((position) => (typeof position === 'string' ? parseFen(position) : position));
+    const preparedExplicit =
+      'prepared' in input ? (input as Lc0PositionHistoryInput & { prepared?: { explicitHistory?: boolean } }).prepared?.explicitHistory : undefined;
     return { board: chronological[chronological.length - 1], historyBoards: [...chronological].reverse(), explicitHistory: preparedExplicit ?? true };
   }
   const board = typeof input === 'string' ? parseFen(input) : input;

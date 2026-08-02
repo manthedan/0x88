@@ -30,7 +30,8 @@ function readVarInt(bytes, cursor) {
 function skipBlockType(bytes, pos) {
   const first = bytes[pos];
   // empty, value-type, and reference-type block signatures are a single byte.
-  if (first === 0x40 || first === 0x7f || first === 0x7e || first === 0x7d || first === 0x7c || first === 0x7b || first === 0x70 || first === 0x6f) return pos + 1;
+  if (first === 0x40 || first === 0x7f || first === 0x7e || first === 0x7d || first === 0x7c || first === 0x7b || first === 0x70 || first === 0x6f)
+    return pos + 1;
   // Otherwise it is a signed type index.
   return readVarInt(bytes, pos);
 }
@@ -52,18 +53,111 @@ function findCodeSection(bytes) {
 }
 
 const SIMD_NAMES = new Map([
-  [0, 'v128.load'], [1, 'v128.load8x8_s'], [2, 'v128.load8x8_u'], [3, 'v128.load16x4_s'], [4, 'v128.load16x4_u'],
-  [5, 'v128.load32x2_s'], [6, 'v128.load32x2_u'], [7, 'v128.load8_splat'], [8, 'v128.load16_splat'], [9, 'v128.load32_splat'], [10, 'v128.load64_splat'],
-  [11, 'v128.store'], [12, 'v128.const'], [13, 'i8x16.shuffle'], [14, 'i8x16.swizzle'], [15, 'i8x16.splat'], [16, 'i16x8.splat'], [17, 'i32x4.splat'], [18, 'i64x2.splat'], [19, 'f32x4.splat'], [20, 'f64x2.splat'],
-  [21, 'i8x16.extract_lane_s'], [22, 'i8x16.extract_lane_u'], [23, 'i8x16.replace_lane'], [24, 'i16x8.extract_lane_s'], [25, 'i16x8.extract_lane_u'], [26, 'i16x8.replace_lane'], [27, 'i32x4.extract_lane'], [28, 'i32x4.replace_lane'], [29, 'i64x2.extract_lane'], [30, 'i64x2.replace_lane'], [31, 'f32x4.extract_lane'], [32, 'f32x4.replace_lane'], [33, 'f64x2.extract_lane'], [34, 'f64x2.replace_lane'],
-  [35, 'i8x16.eq'], [36, 'i8x16.ne'], [37, 'i8x16.lt_s'], [38, 'i8x16.lt_u'], [39, 'i8x16.gt_s'], [40, 'i8x16.gt_u'], [41, 'i8x16.le_s'], [42, 'i8x16.le_u'], [43, 'i8x16.ge_s'], [44, 'i8x16.ge_u'],
-  [45, 'i16x8.eq'], [46, 'i16x8.ne'], [47, 'i16x8.lt_s'], [48, 'i16x8.lt_u'], [49, 'i16x8.gt_s'], [50, 'i16x8.gt_u'], [51, 'i16x8.le_s'], [52, 'i16x8.le_u'], [53, 'i16x8.ge_s'], [54, 'i16x8.ge_u'],
-  [55, 'i32x4.eq'], [56, 'i32x4.ne'], [57, 'i32x4.lt_s'], [58, 'i32x4.lt_u'], [59, 'i32x4.gt_s'], [60, 'i32x4.gt_u'], [61, 'i32x4.le_s'], [62, 'i32x4.le_u'], [63, 'i32x4.ge_s'], [64, 'i32x4.ge_u'],
-  [77, 'v128.not'], [78, 'v128.and'], [79, 'v128.andnot'], [80, 'v128.or'], [81, 'v128.xor'], [82, 'v128.bitselect'], [83, 'v128.any_true'],
-  [84, 'v128.load8_lane'], [85, 'v128.load16_lane'], [86, 'v128.load32_lane'], [87, 'v128.load64_lane'], [88, 'v128.store8_lane'], [89, 'v128.store16_lane'], [90, 'v128.store32_lane'], [91, 'v128.store64_lane'], [92, 'v128.load32_zero'], [93, 'v128.load64_zero'],
-  [94, 'f32x4.demote_f64x2_zero'], [95, 'f64x2.promote_low_f32x4'],
-  [110, 'i8x16.add'], [113, 'i8x16.sub'], [142, 'i16x8.add'], [145, 'i16x8.sub'], [174, 'i32x4.add'], [177, 'i32x4.sub'], [228, 'f32x4.add'], [231, 'f32x4.sub'],
-  [257, 'i8x16.relaxed_swizzle'], [258, 'i32x4.relaxed_trunc_f32x4_s'], [259, 'i32x4.relaxed_trunc_f32x4_u'], [260, 'i32x4.relaxed_trunc_f64x2_s_zero'], [261, 'f32x4.relaxed_madd'], [262, 'f32x4.relaxed_nmadd'], [263, 'f64x2.relaxed_madd'], [264, 'f64x2.relaxed_nmadd'], [269, 'f32x4.relaxed_min'], [270, 'f32x4.relaxed_max'], [273, 'i16x8.relaxed_q15mulr_s'], [274, 'i16x8.relaxed_dot_i8x16_i7x16_s'], [275, 'i32x4.relaxed_dot_i8x16_i7x16_add_s'],
+  [0, 'v128.load'],
+  [1, 'v128.load8x8_s'],
+  [2, 'v128.load8x8_u'],
+  [3, 'v128.load16x4_s'],
+  [4, 'v128.load16x4_u'],
+  [5, 'v128.load32x2_s'],
+  [6, 'v128.load32x2_u'],
+  [7, 'v128.load8_splat'],
+  [8, 'v128.load16_splat'],
+  [9, 'v128.load32_splat'],
+  [10, 'v128.load64_splat'],
+  [11, 'v128.store'],
+  [12, 'v128.const'],
+  [13, 'i8x16.shuffle'],
+  [14, 'i8x16.swizzle'],
+  [15, 'i8x16.splat'],
+  [16, 'i16x8.splat'],
+  [17, 'i32x4.splat'],
+  [18, 'i64x2.splat'],
+  [19, 'f32x4.splat'],
+  [20, 'f64x2.splat'],
+  [21, 'i8x16.extract_lane_s'],
+  [22, 'i8x16.extract_lane_u'],
+  [23, 'i8x16.replace_lane'],
+  [24, 'i16x8.extract_lane_s'],
+  [25, 'i16x8.extract_lane_u'],
+  [26, 'i16x8.replace_lane'],
+  [27, 'i32x4.extract_lane'],
+  [28, 'i32x4.replace_lane'],
+  [29, 'i64x2.extract_lane'],
+  [30, 'i64x2.replace_lane'],
+  [31, 'f32x4.extract_lane'],
+  [32, 'f32x4.replace_lane'],
+  [33, 'f64x2.extract_lane'],
+  [34, 'f64x2.replace_lane'],
+  [35, 'i8x16.eq'],
+  [36, 'i8x16.ne'],
+  [37, 'i8x16.lt_s'],
+  [38, 'i8x16.lt_u'],
+  [39, 'i8x16.gt_s'],
+  [40, 'i8x16.gt_u'],
+  [41, 'i8x16.le_s'],
+  [42, 'i8x16.le_u'],
+  [43, 'i8x16.ge_s'],
+  [44, 'i8x16.ge_u'],
+  [45, 'i16x8.eq'],
+  [46, 'i16x8.ne'],
+  [47, 'i16x8.lt_s'],
+  [48, 'i16x8.lt_u'],
+  [49, 'i16x8.gt_s'],
+  [50, 'i16x8.gt_u'],
+  [51, 'i16x8.le_s'],
+  [52, 'i16x8.le_u'],
+  [53, 'i16x8.ge_s'],
+  [54, 'i16x8.ge_u'],
+  [55, 'i32x4.eq'],
+  [56, 'i32x4.ne'],
+  [57, 'i32x4.lt_s'],
+  [58, 'i32x4.lt_u'],
+  [59, 'i32x4.gt_s'],
+  [60, 'i32x4.gt_u'],
+  [61, 'i32x4.le_s'],
+  [62, 'i32x4.le_u'],
+  [63, 'i32x4.ge_s'],
+  [64, 'i32x4.ge_u'],
+  [77, 'v128.not'],
+  [78, 'v128.and'],
+  [79, 'v128.andnot'],
+  [80, 'v128.or'],
+  [81, 'v128.xor'],
+  [82, 'v128.bitselect'],
+  [83, 'v128.any_true'],
+  [84, 'v128.load8_lane'],
+  [85, 'v128.load16_lane'],
+  [86, 'v128.load32_lane'],
+  [87, 'v128.load64_lane'],
+  [88, 'v128.store8_lane'],
+  [89, 'v128.store16_lane'],
+  [90, 'v128.store32_lane'],
+  [91, 'v128.store64_lane'],
+  [92, 'v128.load32_zero'],
+  [93, 'v128.load64_zero'],
+  [94, 'f32x4.demote_f64x2_zero'],
+  [95, 'f64x2.promote_low_f32x4'],
+  [110, 'i8x16.add'],
+  [113, 'i8x16.sub'],
+  [142, 'i16x8.add'],
+  [145, 'i16x8.sub'],
+  [174, 'i32x4.add'],
+  [177, 'i32x4.sub'],
+  [228, 'f32x4.add'],
+  [231, 'f32x4.sub'],
+  [257, 'i8x16.relaxed_swizzle'],
+  [258, 'i32x4.relaxed_trunc_f32x4_s'],
+  [259, 'i32x4.relaxed_trunc_f32x4_u'],
+  [260, 'i32x4.relaxed_trunc_f64x2_s_zero'],
+  [261, 'f32x4.relaxed_madd'],
+  [262, 'f32x4.relaxed_nmadd'],
+  [263, 'f64x2.relaxed_madd'],
+  [264, 'f64x2.relaxed_nmadd'],
+  [269, 'f32x4.relaxed_min'],
+  [270, 'f32x4.relaxed_max'],
+  [273, 'i16x8.relaxed_q15mulr_s'],
+  [274, 'i16x8.relaxed_dot_i8x16_i7x16_s'],
+  [275, 'i32x4.relaxed_dot_i8x16_i7x16_add_s'],
 ]);
 
 function simdFamily(op) {
@@ -104,52 +198,108 @@ function scanInstructionStream(bytes, start, end, counts) {
   while (pos < end) {
     const opcode = bytes[pos++];
     switch (opcode) {
-      case 0x02: case 0x03: case 0x04:
-        pos = skipBlockType(bytes, pos); break;
-      case 0x0c: case 0x0d: case 0x10: case 0x12: case 0x20: case 0x21: case 0x22: case 0x23: case 0x24: case 0x25: case 0x26: case 0xd2:
-        [, pos] = readVarUint(bytes, pos); break;
+      case 0x02:
+      case 0x03:
+      case 0x04:
+        pos = skipBlockType(bytes, pos);
+        break;
+      case 0x0c:
+      case 0x0d:
+      case 0x10:
+      case 0x12:
+      case 0x20:
+      case 0x21:
+      case 0x22:
+      case 0x23:
+      case 0x24:
+      case 0x25:
+      case 0x26:
+      case 0xd2:
+        [, pos] = readVarUint(bytes, pos);
+        break;
       case 0x0e: {
-        let count; [count, pos] = readVarUint(bytes, pos);
+        let count;
+        [count, pos] = readVarUint(bytes, pos);
         for (let i = 0; i <= count; i += 1) [, pos] = readVarUint(bytes, pos);
         break;
       }
       case 0x11:
-        [, pos] = readVarUint(bytes, pos); [, pos] = readVarUint(bytes, pos); break;
+        [, pos] = readVarUint(bytes, pos);
+        [, pos] = readVarUint(bytes, pos);
+        break;
       case 0x1c: {
-        let count; [count, pos] = readVarUint(bytes, pos);
+        let count;
+        [count, pos] = readVarUint(bytes, pos);
         pos += count;
         break;
       }
-      case 0x28: case 0x29: case 0x2a: case 0x2b: case 0x2c: case 0x2d: case 0x2e: case 0x2f:
-      case 0x30: case 0x31: case 0x32: case 0x33: case 0x34: case 0x35: case 0x36: case 0x37:
-      case 0x38: case 0x39: case 0x3a: case 0x3b: case 0x3c: case 0x3d: case 0x3e:
-        pos = skipMemarg(bytes, pos); break;
-      case 0x3f: case 0x40:
-        pos += 1; break;
-      case 0x41: case 0x42:
-        pos = readVarInt(bytes, pos); break;
+      case 0x28:
+      case 0x29:
+      case 0x2a:
+      case 0x2b:
+      case 0x2c:
+      case 0x2d:
+      case 0x2e:
+      case 0x2f:
+      case 0x30:
+      case 0x31:
+      case 0x32:
+      case 0x33:
+      case 0x34:
+      case 0x35:
+      case 0x36:
+      case 0x37:
+      case 0x38:
+      case 0x39:
+      case 0x3a:
+      case 0x3b:
+      case 0x3c:
+      case 0x3d:
+      case 0x3e:
+        pos = skipMemarg(bytes, pos);
+        break;
+      case 0x3f:
+      case 0x40:
+        pos += 1;
+        break;
+      case 0x41:
+      case 0x42:
+        pos = readVarInt(bytes, pos);
+        break;
       case 0x43:
-        pos += 4; break;
+        pos += 4;
+        break;
       case 0x44:
-        pos += 8; break;
+        pos += 8;
+        break;
       case 0xd0:
-        pos += 1; break;
+        pos += 1;
+        break;
       case 0xfc: {
-        let subop; [subop, pos] = readVarUint(bytes, pos);
-        if (subop === 8) { [, pos] = readVarUint(bytes, pos); [, pos] = readVarUint(bytes, pos); }
-        else if (subop === 9 || subop === 11 || subop === 13 || subop === 15 || subop === 16 || subop === 17) [, pos] = readVarUint(bytes, pos);
-        else if (subop === 10 || subop === 12 || subop === 14) { [, pos] = readVarUint(bytes, pos); [, pos] = readVarUint(bytes, pos); }
+        let subop;
+        [subop, pos] = readVarUint(bytes, pos);
+        if (subop === 8) {
+          [, pos] = readVarUint(bytes, pos);
+          [, pos] = readVarUint(bytes, pos);
+        } else if (subop === 9 || subop === 11 || subop === 13 || subop === 15 || subop === 16 || subop === 17) [, pos] = readVarUint(bytes, pos);
+        else if (subop === 10 || subop === 12 || subop === 14) {
+          [, pos] = readVarUint(bytes, pos);
+          [, pos] = readVarUint(bytes, pos);
+        }
         break;
       }
       case 0xfd: {
-        let subop; [subop, pos] = readVarUint(bytes, pos);
+        let subop;
+        [subop, pos] = readVarUint(bytes, pos);
         counts.set(subop, (counts.get(subop) ?? 0) + 1);
         pos = skipSimdImmediate(bytes, pos, subop);
         break;
       }
       case 0xfe: {
-        let subop; [subop, pos] = readVarUint(bytes, pos);
-        if (subop === 0x03) pos += 1; // atomic.fence reserved byte
+        let subop;
+        [subop, pos] = readVarUint(bytes, pos);
+        if (subop === 0x03)
+          pos += 1; // atomic.fence reserved byte
         else pos = skipMemarg(bytes, pos);
         break;
       }
@@ -163,13 +313,16 @@ function scanInstructionStream(bytes, start, end, counts) {
 
 function scanSimd(code) {
   let pos = 0;
-  let functionCount; [functionCount, pos] = readVarUint(code, pos);
+  let functionCount;
+  [functionCount, pos] = readVarUint(code, pos);
   const counts = new Map();
   for (let fn = 0; fn < functionCount; fn += 1) {
-    let bodySize; [bodySize, pos] = readVarUint(code, pos);
+    let bodySize;
+    [bodySize, pos] = readVarUint(code, pos);
     const bodyEnd = pos + bodySize;
     if (bodyEnd > code.length) throw new Error(`function ${fn} overruns code section`);
-    let localDecls; [localDecls, pos] = readVarUint(code, pos);
+    let localDecls;
+    [localDecls, pos] = readVarUint(code, pos);
     for (let i = 0; i < localDecls; i += 1) {
       [, pos] = readVarUint(code, pos);
       pos += 1;
@@ -219,13 +372,13 @@ for (const file of files) {
   console.log(`  relaxedOps=${relaxedOps.map(([op, count]) => `${SIMD_NAMES.get(op)}:${count}`).join(', ') || 'none'}`);
   if (requiredOp) {
     const requiredEntry = [...SIMD_NAMES.entries()].find(([, name]) => name === requiredOp);
-    const count = requiredEntry ? counts.get(requiredEntry[0]) ?? 0 : 0;
+    const count = requiredEntry ? (counts.get(requiredEntry[0]) ?? 0) : 0;
     console.log(`  requiredOp=${requiredOp}:${count}`);
     if (count === 0) requirementFailed = true;
   }
   if (forbiddenOp) {
     const forbiddenEntry = [...SIMD_NAMES.entries()].find(([, name]) => name === forbiddenOp);
-    const count = forbiddenEntry ? counts.get(forbiddenEntry[0]) ?? 0 : 0;
+    const count = forbiddenEntry ? (counts.get(forbiddenEntry[0]) ?? 0) : 0;
     console.log(`  forbiddenOp=${forbiddenOp}:${count}`);
     if (count > 0) requirementFailed = true;
   }

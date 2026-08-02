@@ -1,18 +1,15 @@
+import { type SquareformerTvmAttentionShape, SquareformerTvmAttentionWebgpuBlock } from './squareformerTvmAttentionWebgpu.ts';
 import {
-  SquareformerTvmLayerNormQkvWebgpuBlock,
-  type SquareformerTvmLayerNormQkvKernels,
-  type SquareformerTvmLayerNormQkvWeights,
-} from './squareformerTvmLayerNormQkvWebgpu.ts';
-import {
-  SquareformerTvmAttentionWebgpuBlock,
-  type SquareformerTvmAttentionShape,
-} from './squareformerTvmAttentionWebgpu.ts';
-import {
-  SquareformerTvmAttnOutLnFfnWebgpuBlock,
   type SquareformerTvmAttnOutLnFfnKernels,
+  SquareformerTvmAttnOutLnFfnWebgpuBlock,
   type SquareformerTvmAttnOutLnFfnWeights,
 } from './squareformerTvmAttnOutLnFfnWebgpu.ts';
 import type { SquareformerGpuBuffer, SquareformerTvmFfnShape } from './squareformerTvmFfnWebgpu.ts';
+import {
+  type SquareformerTvmLayerNormQkvKernels,
+  SquareformerTvmLayerNormQkvWebgpuBlock,
+  type SquareformerTvmLayerNormQkvWeights,
+} from './squareformerTvmLayerNormQkvWebgpu.ts';
 
 type GPUBuffer = SquareformerGpuBuffer;
 type GPUDevice = {
@@ -24,10 +21,11 @@ type GPUCommandEncoder = {
 };
 
 export type SquareformerTvmFullLayerKernels = SquareformerTvmLayerNormQkvKernels & SquareformerTvmAttnOutLnFfnKernels;
-export type SquareformerTvmFullLayerWeights = Omit<SquareformerTvmLayerNormQkvWeights, 'layerNormWeight' | 'layerNormBias'> & SquareformerTvmAttnOutLnFfnWeights & {
-  n1LayerNormWeight: Float32Array;
-  n1LayerNormBias: Float32Array;
-};
+export type SquareformerTvmFullLayerWeights = Omit<SquareformerTvmLayerNormQkvWeights, 'layerNormWeight' | 'layerNormBias'> &
+  SquareformerTvmAttnOutLnFfnWeights & {
+    n1LayerNormWeight: Float32Array;
+    n1LayerNormBias: Float32Array;
+  };
 
 export type SquareformerTvmFullLayerShape = SquareformerTvmFfnShape & {
   heads: number;
@@ -52,7 +50,13 @@ export class SquareformerTvmFullLayerWebgpuBlock {
     this.output = output;
   }
 
-  static async create(device: GPUDevice, kernels: SquareformerTvmFullLayerKernels, weights: SquareformerTvmFullLayerWeights, shape: SquareformerTvmFullLayerShape, epsilons: { n1?: number; n2?: number } = {}): Promise<SquareformerTvmFullLayerWebgpuBlock> {
+  static async create(
+    device: GPUDevice,
+    kernels: SquareformerTvmFullLayerKernels,
+    weights: SquareformerTvmFullLayerWeights,
+    shape: SquareformerTvmFullLayerShape,
+    epsilons: { n1?: number; n2?: number } = {},
+  ): Promise<SquareformerTvmFullLayerWebgpuBlock> {
     const qkvWeights: SquareformerTvmLayerNormQkvWeights = {
       layerNormWeight: weights.n1LayerNormWeight,
       layerNormBias: weights.n1LayerNormBias,

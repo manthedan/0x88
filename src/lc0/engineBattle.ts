@@ -1,7 +1,7 @@
-import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
+import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { automaticDrawReason } from '../chess/drawRules.ts';
-import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
+import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import type { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import type { Lc0PuctSearcher } from './search.ts';
 
@@ -134,10 +134,16 @@ export async function runMatch(engineA: BattleEngine, engineB: BattleEngine, gam
   let cancelled = false;
   const results: GameResult[] = [];
   for (let i = 0; i < games; i++) {
-    if (options.signal?.aborted) { cancelled = true; break; }
+    if (options.signal?.aborted) {
+      cancelled = true;
+      break;
+    }
     const aIsWhite = i % 2 === 0;
     const result = await playGame(aIsWhite ? engineA : engineB, aIsWhite ? engineB : engineA, options);
-    if (result.reason === 'cancelled') { cancelled = true; break; }
+    if (result.reason === 'cancelled') {
+      cancelled = true;
+      break;
+    }
     results.push(result);
     played += 1;
     if (result.result === '1/2-1/2') draws += 1;

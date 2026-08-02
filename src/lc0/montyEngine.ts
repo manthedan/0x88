@@ -144,7 +144,17 @@ export class MontyEngine implements BrowserUciEngine {
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'monty-wasi' });
     worker.onmessage = (event: MessageEvent) => {
-      const message = event.data as { type: string; id: number; stdout?: string[]; stderr?: string[]; exitCode?: number; error?: string; url?: string; loadedBytes?: number; totalBytes?: number };
+      const message = event.data as {
+        type: string;
+        id: number;
+        stdout?: string[];
+        stderr?: string[];
+        exitCode?: number;
+        error?: string;
+        url?: string;
+        loadedBytes?: number;
+        totalBytes?: number;
+      };
       if (this.handleProgressMessage(message)) return;
       const pending = this.pending.get(message.id);
       if (!pending) return;
@@ -163,16 +173,43 @@ export class MontyEngine implements BrowserUciEngine {
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'monty-wasi-persistent' });
     const sharedInput = createSharedInput();
-    worker.onmessage = (event: MessageEvent) => this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string; url?: string; loadedBytes?: number; totalBytes?: number });
+    worker.onmessage = (event: MessageEvent) =>
+      this.handlePersistentMessage(
+        event.data as {
+          type: string;
+          stream?: 'stdout' | 'stderr';
+          line?: string;
+          exitCode?: number;
+          error?: string;
+          url?: string;
+          loadedBytes?: number;
+          totalBytes?: number;
+        },
+      );
     worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Monty persistent WASI worker error'));
     this.worker = worker;
     this.workerMode = 'persistent';
     this.sharedInput = sharedInput;
-    worker.postMessage({ type: 'start-persistent', wasmUrl: this.wasmUrl, inputBuffer: sharedInput.buffer, executableName: 'monty', preopenFiles: this.preopenFiles() });
+    worker.postMessage({
+      type: 'start-persistent',
+      wasmUrl: this.wasmUrl,
+      inputBuffer: sharedInput.buffer,
+      executableName: 'monty',
+      preopenFiles: this.preopenFiles(),
+    });
     return worker;
   }
 
-  private handlePersistentMessage(message: { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string; url?: string; loadedBytes?: number; totalBytes?: number }): void {
+  private handlePersistentMessage(message: {
+    type: string;
+    stream?: 'stdout' | 'stderr';
+    line?: string;
+    exitCode?: number;
+    error?: string;
+    url?: string;
+    loadedBytes?: number;
+    totalBytes?: number;
+  }): void {
     if (this.handleProgressMessage(message)) return;
     if (message.type === 'persistent-ready') return;
     if (message.type === 'persistent-line') {
@@ -183,7 +220,8 @@ export class MontyEngine implements BrowserUciEngine {
         active.stdout.push(message.line);
         if (message.line === 'uciok') this.persistentInitialized = true;
       }
-      if (active.resolveWhenLine(message.line, message.stream ?? 'stdout')) this.resolvePersistent({ stdout: active.stdout, stderr: active.stderr, exitCode: 0 });
+      if (active.resolveWhenLine(message.line, message.stream ?? 'stdout'))
+        this.resolvePersistent({ stdout: active.stdout, stderr: active.stderr, exitCode: 0 });
       return;
     }
     if (message.type === 'persistent-error') {
@@ -225,8 +263,13 @@ export class MontyEngine implements BrowserUciEngine {
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    this.queueTail = previous.then(() => gate, () => gate);
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.queueTail = previous.then(
+      () => gate,
+      () => gate,
+    );
     await previous.catch(() => undefined);
     try {
       return await fn();
@@ -321,7 +364,11 @@ export class MontyEngine implements BrowserUciEngine {
     });
   }
 
-  private async runCommandsUntil(commands: string[], signal?: AbortSignal, resolveWhenLine?: (line: string, stream: 'stdout' | 'stderr') => boolean): Promise<RunResult> {
+  private async runCommandsUntil(
+    commands: string[],
+    signal?: AbortSignal,
+    resolveWhenLine?: (line: string, stream: 'stdout' | 'stderr') => boolean,
+  ): Promise<RunResult> {
     if (!this.persistentDisabled && canUsePersistentMontyWasi()) {
       try {
         return await this.runPersistentCommands(commands, signal, resolveWhenLine);
@@ -353,11 +400,7 @@ export class MontyEngine implements BrowserUciEngine {
   }
 
   private searchCommands(fen: string, options: MontyOptions, multipv = 1): string[] {
-    return [
-      ...this.setupCommands(options, multipv),
-      fen === 'startpos' ? 'position startpos' : `position fen ${fen}`,
-      this.goCommand(options),
-    ];
+    return [...this.setupCommands(options, multipv), fen === 'startpos' ? 'position startpos' : `position fen ${fen}`, this.goCommand(options)];
   }
 
   private parseInfo(stdout: string[]): StockfishInfoLine[] {
@@ -375,7 +418,12 @@ export class MontyEngine implements BrowserUciEngine {
       const mate = line.match(/\bscore mate (-?\d+)/);
       const nodes = line.match(/\bnodes (\d+)/);
       const nps = line.match(/\bnps (\d+)/);
-      const pvUci = line.match(/ pv (.+)$/)?.[1].trim().split(/\s+/).filter(Boolean) ?? [];
+      const pvUci =
+        line
+          .match(/ pv (.+)$/)?.[1]
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean) ?? [];
       latest.set(multipv, {
         multipv,
         depth,

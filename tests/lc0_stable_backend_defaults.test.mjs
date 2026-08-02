@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { Lc0WebHybridEvaluator } from '../src/lc0/wgslMatmulAddProbe.ts';
 
 test('lc0web hybrid evaluator keeps stable ORT-head defaults protected', () => {
@@ -33,11 +33,15 @@ test('lc0web hybrid evaluator requires explicit opt-in for experimental WGSL/WAS
 });
 
 test('lc0web hybrid evaluator rejects GPU legal priors without WGSL heads before runtime init', () => {
-  assert.throws(() => new Lc0WebHybridEvaluator({
-    packUrl: '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json',
-    verifyShards: false,
-    legalPriorsBackend: 'gpu',
-  }), /GPU legal-prior backend requires WGSL heads/);
+  assert.throws(
+    () =>
+      new Lc0WebHybridEvaluator({
+        packUrl: '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json',
+        verifyShards: false,
+        legalPriorsBackend: 'gpu',
+      }),
+    /GPU legal-prior backend requires WGSL heads/,
+  );
 });
 
 test('lc0web hybrid evaluator allows explicit mixed TVM FFN opt-in', () => {

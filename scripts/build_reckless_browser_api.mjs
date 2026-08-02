@@ -1,7 +1,7 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
 
 const source = resolve(process.env.RECKLESS_SOURCE_DIR ?? '.local_engines/reckless-wasi-src');
 const workdir = resolve(process.env.RECKLESS_BROWSER_API_BUILD_DIR ?? '.local_engines/reckless-browser-api-build');
@@ -45,7 +45,9 @@ function patchRecklessForWasmSimdNnue(root) {
     `#[cfg(all(not(target_feature = "neon"), not(target_feature = "avx512vbmi2")))]\npub unsafe fn find_nnz(\n`,
     `#[cfg(all(not(target_arch = "wasm32"), not(target_feature = "neon"), not(target_feature = "avx512vbmi2")))]\npub unsafe fn find_nnz(\n`,
   );
-  writeFileSync(`${root}/src/nnue/simd/wasm32.rs`, String.raw`use std::{arch::wasm32::*, mem::size_of};
+  writeFileSync(
+    `${root}/src/nnue/simd/wasm32.rs`,
+    String.raw`use std::{arch::wasm32::*, mem::size_of};
 
 pub const F32_LANES: usize = size_of::<v128>() / size_of::<f32>();
 pub const I32_LANES: usize = size_of::<v128>() / size_of::<i32>();
@@ -114,11 +116,14 @@ pub unsafe fn horizontal_sum(x: [v128; 4]) -> f32 {
 }
 
 pub unsafe fn nnz_bitmask(x: v128) -> u16 { u8x16_bitmask(i32x4_gt(x, i32x4_splat(0))) }
-`);
+`,
+  );
   const vectorizedPath = `${root}/src/nnue/forward/vectorized.rs`;
   const vectorized = readFileSync(vectorizedPath, 'utf8');
   if (!vectorized.includes('target_arch = "wasm32", target_feature = "simd128"))]\npub unsafe fn find_nnz')) {
-    writeFileSync(vectorizedPath, `${vectorized}
+    writeFileSync(
+      vectorizedPath,
+      `${vectorized}
 
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 pub unsafe fn find_nnz(ft_out: &Aligned<[u8; L1_SIZE]>, _: &[SparseEntry]) -> (Aligned<[u16; L1_SIZE / 4]>, usize) {
@@ -136,16 +141,13 @@ pub unsafe fn find_nnz(ft_out: &Aligned<[u8; L1_SIZE]>, _: &[SparseEntry]) -> (A
     }
     (indexes, count)
 }
-`);
+`,
+    );
   }
 }
 
 function patchRecklessForBrowserApiNnue(root) {
-  replace(
-    `${root}/src/nnue.rs`,
-    `use std::sync::Arc;`,
-    `use std::sync::{Arc, OnceLock};`,
-  );
+  replace(`${root}/src/nnue.rs`, `use std::sync::Arc;`, `use std::sync::{Arc, OnceLock};`);
   replace(
     `${root}/src/nnue.rs`,
     `const DEQUANT_MULTIPLIER: f32 = (1 << FT_SHIFT) as f32 / (FT_QUANT * FT_QUANT * L1_QUANT) as f32;
@@ -232,7 +234,9 @@ if (!existsSync(`${source}/Cargo.toml`)) {
 const sourceNnue = readFileSync(`${source}/src/nnue.rs`, 'utf8');
 const sourceL1Size = Number(sourceNnue.match(/const L1_SIZE: usize = (\d+);/)?.[1] ?? '768');
 if (sourceL1Size !== 768 && !allowCustomNnueShape) {
-  throw new Error(`Reckless browser API builds expect the full v60 NNUE shape (L1_SIZE=768), but ${source} has L1_SIZE=${sourceL1Size}. Run npm run reckless:build-wasi, or set RECKLESS_SOURCE_DIR to a full Reckless source tree.`);
+  throw new Error(
+    `Reckless browser API builds expect the full v60 NNUE shape (L1_SIZE=768), but ${source} has L1_SIZE=${sourceL1Size}. Run npm run reckless:build-wasi, or set RECKLESS_SOURCE_DIR to a full Reckless source tree.`,
+  );
 }
 
 rmSync(workdir, { recursive: true, force: true });
@@ -245,7 +249,9 @@ replace(
   `[features]\ndefault = ["syzygy"]\nsyzygy = []\nspsa = []\n\n[lib]\ncrate-type = ["cdylib", "rlib"]\n`,
 );
 
-writeFileSync(`${workdir}/src/lib.rs`, `#![allow(unsafe_op_in_unsafe_fn)]
+writeFileSync(
+  `${workdir}/src/lib.rs`,
+  `#![allow(unsafe_op_in_unsafe_fn)]
 #![warn(clippy::large_types_passed_by_value)]
 #![warn(clippy::trivially_copy_pass_by_ref)]
 #![warn(clippy::redundant_clone)]
@@ -277,9 +283,12 @@ pub mod tb;
 #[cfg(feature = "syzygy")]
 #[allow(warnings)]
 pub mod bindings;
-`);
+`,
+);
 
-writeFileSync(`${workdir}/src/browser_api.rs`, String.raw`use std::{sync::{Arc, Mutex, OnceLock}, time::Duration};
+writeFileSync(
+  `${workdir}/src/browser_api.rs`,
+  String.raw`use std::{sync::{Arc, Mutex, OnceLock}, time::Duration};
 
 use crate::{
     board::{Board, NullBoardObserver},
@@ -656,7 +665,8 @@ pub extern "C" fn reckless_api_error_ptr(handle: u32) -> *const u8 {
 pub extern "C" fn reckless_api_error_len(handle: u32) -> usize {
     with_handle(handle, |h| h.error.len()).unwrap_or(0)
 }
-`);
+`,
+);
 
 if (enableWasmSimdNnue) patchRecklessForWasmSimdNnue(workdir);
 patchRecklessForBrowserApiNnue(workdir);

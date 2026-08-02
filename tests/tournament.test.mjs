@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  TournamentStandings,
   buildSchedule,
   eloError95,
   eloFromScore,
   gauntletPairings,
   roundRobinPairings,
+  TournamentStandings,
   tournamentPairings,
 } from '../src/lc0/tournament.ts';
 
@@ -37,15 +37,21 @@ test('schedule expands pairings over openings with per-game color alternation', 
   const games = buildSchedule([{ a: 'p', b: 'q' }], ['open1', 'open2'], 2);
   assert.equal(games.length, 4);
   // game index 0 within the pairing: p is white for every opening
-  assert.deepEqual(games.slice(0, 2).map((g) => [g.whiteId, g.blackId, g.opening]), [
-    ['p', 'q', 'open1'],
-    ['p', 'q', 'open2'],
-  ]);
+  assert.deepEqual(
+    games.slice(0, 2).map((g) => [g.whiteId, g.blackId, g.opening]),
+    [
+      ['p', 'q', 'open1'],
+      ['p', 'q', 'open2'],
+    ],
+  );
   // game index 1: colors flip
-  assert.deepEqual(games.slice(2).map((g) => [g.whiteId, g.blackId, g.opening]), [
-    ['q', 'p', 'open1'],
-    ['q', 'p', 'open2'],
-  ]);
+  assert.deepEqual(
+    games.slice(2).map((g) => [g.whiteId, g.blackId, g.opening]),
+    [
+      ['q', 'p', 'open1'],
+      ['q', 'p', 'open2'],
+    ],
+  );
   assert.ok(games.every((g) => g.pairingKey === 'p|q'));
 });
 
@@ -89,7 +95,10 @@ test('standings track points, records, and elo across a small tournament', () =>
   standings.record('c', 'b', '1-0');
 
   const table = standings.table();
-  assert.deepEqual(table.map((row) => row.name), ['Alpha', 'Beta', 'Gamma']);
+  assert.deepEqual(
+    table.map((row) => row.name),
+    ['Alpha', 'Beta', 'Gamma'],
+  );
 
   const alpha = table[0];
   assert.equal(alpha.games, 4);

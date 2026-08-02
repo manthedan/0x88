@@ -9,11 +9,17 @@ if (!existsSync(model)) throw new Error(`Model not found: ${model}`);
 
 const player = await Lc0PolicyOnlyPlayer.create(readFileSync(model));
 const choice = await player.chooseMove(fen);
-console.log(JSON.stringify({
-  fen,
-  move: choice.move,
-  wdl: choice.evaluation.wdl,
-  q: choice.evaluation.q,
-  mlh: choice.evaluation.mlh,
-  topPriors: choice.evaluation.legalPriors.slice(0, 10).map(({ uci, index, prior }) => ({ uci, index, prior })),
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      fen,
+      move: choice.move,
+      wdl: choice.evaluation.wdl,
+      q: choice.evaluation.q,
+      mlh: choice.evaluation.mlh,
+      topPriors: choice.evaluation.legalPriors.slice(0, 10).map(({ uci, index, prior }) => ({ uci, index, prior })),
+    },
+    null,
+    2,
+  ),
+);

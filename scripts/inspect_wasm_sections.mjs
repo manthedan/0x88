@@ -1,10 +1,21 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, resolve, relative } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
 
 const SECTION_NAMES = new Map([
-  [0, 'custom'], [1, 'type'], [2, 'import'], [3, 'function'], [4, 'table'], [5, 'memory'], [6, 'global'],
-  [7, 'export'], [8, 'start'], [9, 'element'], [10, 'code'], [11, 'data'], [12, 'dataCount'],
+  [0, 'custom'],
+  [1, 'type'],
+  [2, 'import'],
+  [3, 'function'],
+  [4, 'table'],
+  [5, 'memory'],
+  [6, 'global'],
+  [7, 'export'],
+  [8, 'start'],
+  [9, 'element'],
+  [10, 'code'],
+  [11, 'data'],
+  [12, 'dataCount'],
 ]);
 
 function readU32(bytes, cursor) {
@@ -36,20 +47,24 @@ function skipConstExpr(bytes, cursor, end) {
 
 function parseDataSection(bytes, start, end) {
   let pos = start;
-  const count = readU32(bytes, pos); pos = count.next;
+  const count = readU32(bytes, pos);
+  pos = count.next;
   let payloadBytes = 0;
   const segmentPayloads = [];
   for (let i = 0; i < count.value; i += 1) {
-    const flags = readU32(bytes, pos); pos = flags.next;
+    const flags = readU32(bytes, pos);
+    pos = flags.next;
     if (flags.value === 0) {
       pos = skipConstExpr(bytes, pos, end);
     } else if (flags.value === 2) {
-      const memoryIndex = readU32(bytes, pos); pos = memoryIndex.next;
+      const memoryIndex = readU32(bytes, pos);
+      pos = memoryIndex.next;
       pos = skipConstExpr(bytes, pos, end);
     } else if (flags.value !== 1) {
       throw new Error(`unsupported data segment flags ${flags.value}`);
     }
-    const len = readU32(bytes, pos); pos = len.next;
+    const len = readU32(bytes, pos);
+    pos = len.next;
     payloadBytes += len.value;
     segmentPayloads.push(len.value);
     pos += len.value;
@@ -67,7 +82,8 @@ function inspect(file) {
   const sections = [];
   while (pos < bytes.length) {
     const id = bytes[pos++];
-    const size = readU32(bytes, pos); pos = size.next;
+    const size = readU32(bytes, pos);
+    pos = size.next;
     const start = pos;
     const end = pos + size.value;
     if (end > bytes.length) throw new Error(`${file} section overruns file`);

@@ -22,14 +22,21 @@ test('gauntletPairings pits champions against challengers only', () => {
 });
 
 test('applyGameResult and rankedStandings track scores and order', () => {
-  const standings = initStandings([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }]);
-  applyGameResult(standings, 'a', 'b', '1-0');   // A beats B
+  const standings = initStandings([
+    { id: 'a', name: 'A' },
+    { id: 'b', name: 'B' },
+    { id: 'c', name: 'C' },
+  ]);
+  applyGameResult(standings, 'a', 'b', '1-0'); // A beats B
   applyGameResult(standings, 'b', 'a', '1/2-1/2'); // A draws B
-  applyGameResult(standings, 'c', 'a', '1-0');   // C beats A
+  applyGameResult(standings, 'c', 'a', '1-0'); // C beats A
 
   const a = standings.get('a');
-  assert.equal(a.wins, 1); assert.equal(a.draws, 1); assert.equal(a.losses, 1);
-  assert.equal(a.score, 1.5); assert.equal(a.games, 3);
+  assert.equal(a.wins, 1);
+  assert.equal(a.draws, 1);
+  assert.equal(a.losses, 1);
+  assert.equal(a.score, 1.5);
+  assert.equal(a.games, 3);
   assert.equal(standings.get('b').score, 0.5);
   assert.equal(standings.get('c').score, 1);
 

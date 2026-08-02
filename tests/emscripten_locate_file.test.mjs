@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { resolveEmscriptenAssetUrl } from '../src/lc0/emscriptenLocateFile.ts';
+import { runInNewContext } from 'node:vm';
 import { workerScript as berserkWorkerScript } from '../src/lc0/berserkEngine.ts';
+import { resolveEmscriptenAssetUrl } from '../src/lc0/emscriptenLocateFile.ts';
 import { workerScript as plentyChessWorkerScript } from '../src/lc0/plentychessEngine.ts';
 import { workerScript as stormphraxWorkerScript } from '../src/lc0/stormphraxEngine.ts';
-import { runInNewContext } from 'node:vm';
 
 const JS = 'https://assets.example/plentychess/plentychess-emscripten-relaxed-simd128.js';
 const WASM = 'https://assets.example/plentychess/plentychess-emscripten-relaxed-simd128.wasm';
@@ -25,25 +25,15 @@ test('the wasm sidecar stays per-variant', () => {
 });
 
 test('unpinned assets resolve relative to the glue URL', () => {
-  assert.equal(
-    resolveEmscriptenAssetUrl('something.else', { jsUrl: JS, wasmUrl: WASM, dataUrl: DATA }),
-    'https://assets.example/plentychess/something.else',
-  );
+  assert.equal(resolveEmscriptenAssetUrl('something.else', { jsUrl: JS, wasmUrl: WASM, dataUrl: DATA }), 'https://assets.example/plentychess/something.else');
   // No dataUrl pinned: fall back to sibling resolution rather than returning undefined.
-  assert.equal(
-    resolveEmscriptenAssetUrl('x.data', { jsUrl: JS, wasmUrl: null, dataUrl: null }),
-    'https://assets.example/plentychess/x.data',
-  );
+  assert.equal(resolveEmscriptenAssetUrl('x.data', { jsUrl: JS, wasmUrl: null, dataUrl: null }), 'https://assets.example/plentychess/x.data');
 });
 
 test('redirection is extension-based, never name-based', () => {
   // Honouring the requested basename is exactly the bug: every tier asks for a
   // different .data name and they must all land on the same canonical file.
-  for (const name of [
-    'berserk-emscripten.data',
-    'berserk-emscripten-simd128.data',
-    'berserk-emscripten-relaxed-simd128.data',
-  ]) {
+  for (const name of ['berserk-emscripten.data', 'berserk-emscripten-simd128.data', 'berserk-emscripten-relaxed-simd128.data']) {
     assert.equal(resolveEmscriptenAssetUrl(name, { jsUrl: JS, dataUrl: DATA }), DATA, name);
   }
 });
@@ -53,7 +43,9 @@ async function exerciseWorkerScript(script, factoryName) {
   const messages = [];
   const self = {
     location: { href: 'https://app.example/worker.js', origin: 'https://app.example' },
-    postMessage(message) { messages.push(message); },
+    postMessage(message) {
+      messages.push(message);
+    },
   };
   self[factoryName] = (options) => {
     located = {
@@ -84,10 +76,14 @@ test('every Emscripten worker can resolve its pinned sidecars at runtime', async
     ['stormphrax', 'Stormphrax', stormphraxWorkerScript()],
   ]) {
     const { located, messages } = await exerciseWorkerScript(script, factoryName);
-    assert.deepEqual(located, {
-      wasm: 'https://app.example/engine/variant.wasm',
-      data: 'https://app.example/engine/canonical.data',
-    }, family);
+    assert.deepEqual(
+      located,
+      {
+        wasm: 'https://app.example/engine/variant.wasm',
+        data: 'https://app.example/engine/canonical.data',
+      },
+      family,
+    );
     assert.equal(messages.at(-1)?.type, 'ready', family);
     assert.equal(messages.at(-1)?.id, 7, family);
   }

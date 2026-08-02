@@ -12,7 +12,10 @@ test('LC0 f32 ONNX evaluator reproduces native startpos root priors', { skip: !e
   const top = Object.fromEntries(evaluation.legalPriors.slice(0, 5).map((entry) => [entry.uci, entry.prior]));
 
   assert.equal(evaluation.bestMove, 'd2d4');
-  assert.deepEqual(evaluation.legalPriors.slice(0, 5).map((entry) => entry.uci), ['d2d4', 'g1f3', 'e2e4', 'c2c4', 'g2g3']);
+  assert.deepEqual(
+    evaluation.legalPriors.slice(0, 5).map((entry) => entry.uci),
+    ['d2d4', 'g1f3', 'e2e4', 'c2c4', 'g2g3'],
+  );
   assert.ok(Math.abs(top.d2d4 - 0.1804) < 0.002, `d2d4 ${top.d2d4}`);
   assert.ok(Math.abs(top.g1f3 - 0.1568) < 0.005, `g1f3 ${top.g1f3}`);
   assert.ok(Math.abs(top.e2e4 - 0.0955) < 0.005, `e2e4 ${top.e2e4}`);

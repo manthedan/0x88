@@ -4,21 +4,26 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve } from 'node:path';
-import { createBrotliCompress, createGzip } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
+import { createBrotliCompress, createGzip } from 'node:zlib';
 
 const DEFAULT_OUT = 'artifacts/tvm/static_content_encoding_smoke.json';
 const DEFAULT_PATH = 'public/runtimes/lc0-tvmjs-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/tvmjs_runtime.wasm';
 
 function usage() {
-  console.log(`Usage: node scripts/check_static_content_encoding.mjs [options]\n\nCreates temporary .br/.gz sidecars for one local artifact, serves them with a minimal static server,\nand verifies HEAD responses set the expected Content-Encoding and original Content-Type.\n\nOptions:\n  --file PATH       Artifact to probe (default ${DEFAULT_PATH})\n  --out PATH        Output JSON path (default ${DEFAULT_OUT})\n  --keep-temp       Keep temporary sidecar directory\n  -h, --help        Show help\n`);
+  console.log(
+    `Usage: node scripts/check_static_content_encoding.mjs [options]\n\nCreates temporary .br/.gz sidecars for one local artifact, serves them with a minimal static server,\nand verifies HEAD responses set the expected Content-Encoding and original Content-Type.\n\nOptions:\n  --file PATH       Artifact to probe (default ${DEFAULT_PATH})\n  --out PATH        Output JSON path (default ${DEFAULT_OUT})\n  --keep-temp       Keep temporary sidecar directory\n  -h, --help        Show help\n`,
+  );
 }
 
 function parseArgs(argv) {
   const args = { file: DEFAULT_PATH, out: DEFAULT_OUT, keepTemp: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
+    const next = () => {
+      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
+      return argv[++i];
+    };
     if (arg === '--file') args.file = next();
     else if (arg === '--out') args.out = next();
     else if (arg === '--keep-temp') args.keepTemp = true;
@@ -42,7 +47,10 @@ async function compressSidecars(file) {
 }
 
 function accepts(req, encoding) {
-  return String(req.headers['accept-encoding'] ?? '').split(',').map((part) => part.trim().toLowerCase().split(';')[0]).includes(encoding);
+  return String(req.headers['accept-encoding'] ?? '')
+    .split(',')
+    .map((part) => part.trim().toLowerCase().split(';')[0])
+    .includes(encoding);
 }
 
 function startServer(root, fileName) {
@@ -56,8 +64,13 @@ function startServer(root, fileName) {
     }
     let selected = join(root, fileName);
     let encoding = null;
-    if (accepts(req, 'br')) { selected = `${selected}.br`; encoding = 'br'; }
-    else if (accepts(req, 'gzip')) { selected = `${selected}.gz`; encoding = 'gzip'; }
+    if (accepts(req, 'br')) {
+      selected = `${selected}.br`;
+      encoding = 'br';
+    } else if (accepts(req, 'gzip')) {
+      selected = `${selected}.gz`;
+      encoding = 'gzip';
+    }
     const stats = await stat(selected);
     res.setHeader('Content-Type', contentTypeFor(fileName));
     res.setHeader('Content-Length', String(stats.size));
@@ -106,16 +119,13 @@ async function main() {
   try {
     const { port } = server.address();
     const url = `http://127.0.0.1:${port}/${encodeURIComponent(fileName)}`;
-    const probes = [
-      await probe(url, 'br, gzip'),
-      await probe(url, 'gzip'),
-      await probe(url, 'identity'),
-    ];
+    const probes = [await probe(url, 'br, gzip'), await probe(url, 'gzip'), await probe(url, 'identity')];
     const byAccept = Object.fromEntries(probes.map((entry) => [entry.acceptEncoding, entry]));
-    const ok = byAccept['br, gzip']?.contentEncoding === 'br'
-      && byAccept.gzip?.contentEncoding === 'gzip'
-      && byAccept.identity?.contentEncoding === undefined
-      && probes.every((entry) => entry.ok && entry.contentType === contentTypeFor(fileName));
+    const ok =
+      byAccept['br, gzip']?.contentEncoding === 'br' &&
+      byAccept.gzip?.contentEncoding === 'gzip' &&
+      byAccept.identity?.contentEncoding === undefined &&
+      probes.every((entry) => entry.ok && entry.contentType === contentTypeFor(fileName));
     const sidecarStats = {
       rawBytes: sourceStats.size,
       brBytes: (await stat(`${tempFile}.br`)).size,
@@ -129,7 +139,8 @@ async function main() {
       fileName,
       sidecarStats,
       probes,
-      caveat: 'Local static-server smoke only. Production remains dependent on host/CDN metadata, rewrites, and Content-Encoding behavior for the exact published path.',
+      caveat:
+        'Local static-server smoke only. Production remains dependent on host/CDN metadata, rewrites, and Content-Encoding behavior for the exact published path.',
       tempRoot: args.keepTemp ? tempRoot : undefined,
     };
     await mkdir(dirname(args.out), { recursive: true });

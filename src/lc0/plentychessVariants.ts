@@ -1,5 +1,6 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
+
 export { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export type PlentyChessVariantKey = 'emscripten' | 'emscripten-sse41' | 'emscripten-relaxed' | 'custom';
@@ -133,7 +134,9 @@ export const PLENTYCHESS_VARIANTS: readonly PlentyChessVariant[] = [
 ];
 
 export function normalizePlentyChessVariant(raw: string | null | undefined): PlentyChessVariantKey {
-  const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
+  const value = String(raw ?? '')
+    .toLowerCase()
+    .replace(/[ _-]+/g, '');
   if (value === 'custom') return 'custom';
   if (value === 'emscriptenrelaxed' || value === 'relaxed' || value === 'relaxedsimd' || value === 'relaxedsimd128') return 'emscripten-relaxed';
   if (value === 'emscriptensse41' || value === 'sse41' || value === 'sse4') return 'emscripten-sse41';
@@ -167,7 +170,11 @@ export function defaultPlentyChessVariantKey(): PlentyChessVariantKey {
  * falls back to sse41, and a missing sse41 artifact falls back to the base
  * Emscripten build. Supported explicit selections are honored as-is.
  */
-export async function resolveDefaultPlentyChessVariantAssetFallback(variant: PlentyChessVariant, explicit: boolean, onChange?: () => void): Promise<PlentyChessVariant> {
+export async function resolveDefaultPlentyChessVariantAssetFallback(
+  variant: PlentyChessVariant,
+  explicit: boolean,
+  onChange?: () => void,
+): Promise<PlentyChessVariant> {
   if (!supportsPlentyChessVariant(variant)) return PLENTYCHESS_EMSCRIPTEN_VARIANT;
   if (explicit || variant.key === 'emscripten' || variant.key === 'custom') return variant;
   const status = await checkPlentyChessVariantAsset(variant, onChange);
@@ -181,21 +188,33 @@ export async function resolveDefaultPlentyChessVariantAssetFallback(variant: Ple
 export function plentyChessVariantByKey(key: string): PlentyChessVariant {
   const normalized = normalizePlentyChessVariant(key);
   if (normalized === 'emscripten-sse41') return supportsWasmSimd() ? PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT : PLENTYCHESS_EMSCRIPTEN_VARIANT;
-  if (normalized === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT : supportsWasmSimd() ? PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT : PLENTYCHESS_EMSCRIPTEN_VARIANT;
-  if (normalized === 'custom') return {
-    key: 'custom',
-    label: 'PlentyChess Custom',
-    jsUrl: PLENTYCHESS_EMSCRIPTEN_JS_URL,
-    wasmUrl: PLENTYCHESS_EMSCRIPTEN_WASM_URL,
-    dataUrl: PLENTYCHESS_EMSCRIPTEN_DATA_URL,
-    sourceNetworkUrl: PLENTYCHESS_SOURCE_NETWORK_URL,
-    note: 'Custom PlentyChess Emscripten JS URL.',
-  };
+  if (normalized === 'emscripten-relaxed')
+    return supportsWasmRelaxedSimd()
+      ? PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT
+      : supportsWasmSimd()
+        ? PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT
+        : PLENTYCHESS_EMSCRIPTEN_VARIANT;
+  if (normalized === 'custom')
+    return {
+      key: 'custom',
+      label: 'PlentyChess Custom',
+      jsUrl: PLENTYCHESS_EMSCRIPTEN_JS_URL,
+      wasmUrl: PLENTYCHESS_EMSCRIPTEN_WASM_URL,
+      dataUrl: PLENTYCHESS_EMSCRIPTEN_DATA_URL,
+      sourceNetworkUrl: PLENTYCHESS_SOURCE_NETWORK_URL,
+      note: 'Custom PlentyChess Emscripten JS URL.',
+    };
   return PLENTYCHESS_EMSCRIPTEN_VARIANT;
 }
 
 export function hasExplicitPlentyChessVariant(params: URLSearchParams): boolean {
-  return params.has('plentyChessJs') || params.has('plentyChessWasm') || params.has('plentyChessData') || params.has('plentyChessVariant') || params.has('plentychess');
+  return (
+    params.has('plentyChessJs') ||
+    params.has('plentyChessWasm') ||
+    params.has('plentyChessData') ||
+    params.has('plentyChessVariant') ||
+    params.has('plentychess')
+  );
 }
 
 export function plentyChessVariantFromParams(params: URLSearchParams): PlentyChessVariant {
@@ -225,14 +244,24 @@ export function checkPlentyChessVariantAsset(variant: PlentyChessVariant, onChan
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing) return existing.then((status) => { onChange?.(); return status; });
+  if (existing)
+    return existing.then((status) => {
+      onChange?.();
+      return status;
+    });
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
     onChange?.();
     return Promise.resolve('missing');
   }
   assetStatuses.set(key, 'checking');
-  const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
+  const promise = Promise.all(
+    assetUrls(variant).map((url) =>
+      fetch(url, { method: 'HEAD', cache: 'no-store' })
+        .then((response) => response.ok)
+        .catch(() => false),
+    ),
+  )
     .then((results) => (results.every(Boolean) ? 'present' : 'missing') as PlentyChessAssetStatus)
     .then((status) => {
       assetStatuses.set(key, status);

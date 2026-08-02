@@ -1,4 +1,4 @@
-import { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory, Fd, wasi } from '@bjorn3/browser_wasi_shim';
+import { ConsoleStdout, Fd, File, OpenFile, PreopenDirectory, WASI, wasi } from '@bjorn3/browser_wasi_shim';
 
 /** Extra file fetched over HTTP and exposed to the engine via the WASI preopened cwd (e.g. Monty's detached networks). */
 type PreopenFileSpec = { name: string; url: string; expectedBytes?: number };
@@ -244,47 +244,47 @@ export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number):
   const existing = inFlightPreopenBytes.get(dedupeKey);
   if (existing) return existing;
   const request = (async () => {
-      const response = await fetch(url, { cache: 'force-cache' });
-      if (!response.ok) throw new Error(`failed to fetch preopen asset ${url}: HTTP ${response.status}`);
-      const decodedBytes = validatedDecodedLength(response, url, expectedBytes);
-      const limitBytes = preopenLimit(expectedBytes, decodedBytes);
-      const totalBytes = preopenProgressTotal(expectedBytes, decodedBytes);
-      if (!response.body) {
-        if (expectedBytes !== undefined) throw preopenLengthMismatch(url, 0, expectedBytes);
-        throw new Error(`preopen asset ${url} returned no response body`);
+    const response = await fetch(url, { cache: 'force-cache' });
+    if (!response.ok) throw new Error(`failed to fetch preopen asset ${url}: HTTP ${response.status}`);
+    const decodedBytes = validatedDecodedLength(response, url, expectedBytes);
+    const limitBytes = preopenLimit(expectedBytes, decodedBytes);
+    const totalBytes = preopenProgressTotal(expectedBytes, decodedBytes);
+    if (!response.body) {
+      if (expectedBytes !== undefined) throw preopenLengthMismatch(url, 0, expectedBytes);
+      throw new Error(`preopen asset ${url} returned no response body`);
+    }
+    const reader = response.body.getReader();
+    let bytes: Uint8Array<ArrayBuffer> = new Uint8Array(initialPreopenCapacity(decodedBytes, limitBytes));
+    let loadedBytes = 0;
+    let lastReport = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const requiredBytes = loadedBytes + value.byteLength;
+      if (requiredBytes > limitBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw preopenOverflow(url, requiredBytes, limitBytes);
       }
-      const reader = response.body.getReader();
-      let bytes: Uint8Array<ArrayBuffer> = new Uint8Array(initialPreopenCapacity(decodedBytes, limitBytes));
-      let loadedBytes = 0;
-      let lastReport = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const requiredBytes = loadedBytes + value.byteLength;
-        if (requiredBytes > limitBytes) {
-          await reader.cancel().catch(() => undefined);
-          throw preopenOverflow(url, requiredBytes, limitBytes);
-        }
-        if (requiredBytes > bytes.byteLength) bytes = growPreopenBuffer(bytes, requiredBytes, loadedBytes, limitBytes);
-        bytes.set(value, loadedBytes);
-        loadedBytes += value.byteLength;
-        const now = Date.now();
-        if (now - lastReport > 250) {
-          lastReport = now;
-          post({ type: 'preopen-progress', url, loadedBytes, totalBytes });
-        }
+      if (requiredBytes > bytes.byteLength) bytes = growPreopenBuffer(bytes, requiredBytes, loadedBytes, limitBytes);
+      bytes.set(value, loadedBytes);
+      loadedBytes += value.byteLength;
+      const now = Date.now();
+      if (now - lastReport > 250) {
+        lastReport = now;
+        post({ type: 'preopen-progress', url, loadedBytes, totalBytes });
       }
-      if (expectedBytes !== undefined && loadedBytes !== expectedBytes) {
-        throw preopenLengthMismatch(url, loadedBytes, expectedBytes);
-      }
-      if (decodedBytes !== undefined && loadedBytes !== decodedBytes) {
-        throw preopenLengthMismatch(url, loadedBytes, decodedBytes);
-      }
-      post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
-      const buffer = bytes.buffer as ArrayBuffer;
-      const verified = loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
-      if (expectedBytes !== undefined || decodedBytes !== undefined) cacheVerifiedPreopenBytes(dedupeKey, verified);
-      return verified;
+    }
+    if (expectedBytes !== undefined && loadedBytes !== expectedBytes) {
+      throw preopenLengthMismatch(url, loadedBytes, expectedBytes);
+    }
+    if (decodedBytes !== undefined && loadedBytes !== decodedBytes) {
+      throw preopenLengthMismatch(url, loadedBytes, decodedBytes);
+    }
+    post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
+    const buffer = bytes.buffer as ArrayBuffer;
+    const verified = loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
+    if (expectedBytes !== undefined || decodedBytes !== undefined) cacheVerifiedPreopenBytes(dedupeKey, verified);
+    return verified;
   })();
   inFlightPreopenBytes.set(dedupeKey, request);
   try {
@@ -319,18 +319,18 @@ export const recklessWasiWorkerInternalsForTests = {
   },
 };
 
-async function runWasiUci(wasmUrl: string, executableName: string, commands: string[], preopenFiles?: PreopenFileSpec[]): Promise<{ stdout: string[]; stderr: string[]; exitCode: number }> {
+async function runWasiUci(
+  wasmUrl: string,
+  executableName: string,
+  commands: string[],
+  preopenFiles?: PreopenFileSpec[],
+): Promise<{ stdout: string[]; stderr: string[]; exitCode: number }> {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const wasiInstance = new WASI(
     [executableName, ...commands],
     [],
-    [
-      new OpenFile(new File([])),
-      lineCollector(stdout, undefined, isUsefulUciStdoutLine),
-      lineCollector(stderr),
-      await buildPreopenDirectory(preopenFiles),
-    ],
+    [new OpenFile(new File([])), lineCollector(stdout, undefined, isUsefulUciStdoutLine), lineCollector(stderr), await buildPreopenDirectory(preopenFiles)],
     { debug: false },
   );
   const instance = await WebAssembly.instantiate(await compileModule(wasmUrl), {
@@ -340,7 +340,12 @@ async function runWasiUci(wasmUrl: string, executableName: string, commands: str
   return { stdout, stderr, exitCode };
 }
 
-async function runPersistentWasiUci(wasmUrl: string, inputBuffer: SharedArrayBuffer, executableName = 'reckless', preopenFiles?: PreopenFileSpec[]): Promise<void> {
+async function runPersistentWasiUci(
+  wasmUrl: string,
+  inputBuffer: SharedArrayBuffer,
+  executableName = 'reckless',
+  preopenFiles?: PreopenFileSpec[],
+): Promise<void> {
   const wasiInstance = new WASI(
     [executableName],
     [],
@@ -369,7 +374,8 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
     return;
   }
   if (message.type === 'start-persistent') {
-    void runPersistentWasiUci(message.wasmUrl, message.inputBuffer, message.executableName, message.preopenFiles)
-      .catch((error) => post({ type: 'persistent-error', error: (error as Error).message }));
+    void runPersistentWasiUci(message.wasmUrl, message.inputBuffer, message.executableName, message.preopenFiles).catch((error) =>
+      post({ type: 'persistent-error', error: (error as Error).message }),
+    );
   }
 });

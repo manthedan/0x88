@@ -1,4 +1,4 @@
-import { squareIndex, squareName, type PieceRole } from './board.ts';
+import { type PieceRole, squareIndex, squareName } from './board.ts';
 
 export interface Move {
   from: number;

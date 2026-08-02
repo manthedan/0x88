@@ -9,18 +9,21 @@ import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from '../src/lc0/policyMap.
 const fixtures = JSON.parse(readFileSync('fixtures/lc0/fen_only.json', 'utf8'));
 
 test('LC0 FEN-only fixture suite covers agreed edge cases', () => {
-  assert.deepEqual(fixtures.map((fixture) => fixture.id), [
-    'startpos',
-    'black-to-move-after-e4',
-    'castling-rights',
-    'black-castling-rights',
-    'en-passant-available',
-    'black-en-passant-available',
-    'promotion-near',
-    'black-promotion-near',
-    'in-check-king-evasion',
-    'rule50-nonzero',
-  ]);
+  assert.deepEqual(
+    fixtures.map((fixture) => fixture.id),
+    [
+      'startpos',
+      'black-to-move-after-e4',
+      'castling-rights',
+      'black-castling-rights',
+      'en-passant-available',
+      'black-en-passant-available',
+      'promotion-near',
+      'black-promotion-near',
+      'in-check-king-evasion',
+      'rule50-nonzero',
+    ],
+  );
 });
 
 test('LC0 FEN-only fixtures parse, expose expected legal moves, and map to policy indices', () => {

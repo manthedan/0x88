@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import {
-  artifactKeyFromReleaseUrl,
-  buildArtifactReleaseCatalog,
-  isArtifactReleaseV2,
-} from './engine_artifact_registry.mjs';
+import { artifactKeyFromReleaseUrl, buildArtifactReleaseCatalog, isArtifactReleaseV2 } from './engine_artifact_registry.mjs';
 
 const DEFAULT_BUCKET = 'browser-chess-models';
 const DEFAULT_RETENTION_DAYS = 90;
@@ -12,13 +8,12 @@ const CONTROL_PREFIXES = ['channels/', 'releases/'];
 const HASHED_PREFIX = 'artifacts/sha256/';
 const SOURCE_ARCHIVE_RE = /(?:corresponding-source|source).*\.tar\.gz$/i;
 const SHA_ONLY_V2_KEY_RE = /^artifacts\/sha256\/[a-f0-9]{64}\/(?:identity|br\/[a-f0-9]{64})$/;
-const SAFE_DELETE_CATEGORIES = new Set([
-  'legacy-logical-duplicate',
-  'legacy-unreferenced-metadata',
-]);
+const SAFE_DELETE_CATEGORIES = new Set(['legacy-logical-duplicate', 'legacy-unreferenced-metadata']);
 
 function usage() {
-  console.log(`Usage: node scripts/plan_r2_artifact_cleanup.mjs [options]\n\nBuilds a conservative R2 cleanup plan for the artifact bucket. Dry-run is the default.\n\nOptions:\n  --bucket NAME              R2 bucket (default ${DEFAULT_BUCKET})\n  --account-id ID            Cloudflare account id (or CLOUDFLARE_ACCOUNT_ID)\n  --api-token TOKEN          Cloudflare API token (or CLOUDFLARE_API_TOKEN)\n  --retention-days N         Minimum age before hashed orphan deletion candidates (default ${DEFAULT_RETENTION_DAYS})\n  --execute                  Delete selected candidates; default is dry-run only\n  --delete-category NAME     Candidate category to delete. Repeatable or comma-separated.\n                             Safe categories: ${[...SAFE_DELETE_CATEGORIES].join(', ')}\n  --allow-delete-hashed      Allow deleting hashed-orphan candidates too; requires --execute and --delete-category hashed-orphan\n  --now ISO                  Override current time for deterministic tests\n  --json                     Emit only JSON\n  -h, --help                 Show help\n\nThe script never deletes channels/ or releases/. It never deletes any\nartifacts/sha256/* object referenced by a retained release manifest.\n`);
+  console.log(
+    `Usage: node scripts/plan_r2_artifact_cleanup.mjs [options]\n\nBuilds a conservative R2 cleanup plan for the artifact bucket. Dry-run is the default.\n\nOptions:\n  --bucket NAME              R2 bucket (default ${DEFAULT_BUCKET})\n  --account-id ID            Cloudflare account id (or CLOUDFLARE_ACCOUNT_ID)\n  --api-token TOKEN          Cloudflare API token (or CLOUDFLARE_API_TOKEN)\n  --retention-days N         Minimum age before hashed orphan deletion candidates (default ${DEFAULT_RETENTION_DAYS})\n  --execute                  Delete selected candidates; default is dry-run only\n  --delete-category NAME     Candidate category to delete. Repeatable or comma-separated.\n                             Safe categories: ${[...SAFE_DELETE_CATEGORIES].join(', ')}\n  --allow-delete-hashed      Allow deleting hashed-orphan candidates too; requires --execute and --delete-category hashed-orphan\n  --now ISO                  Override current time for deterministic tests\n  --json                     Emit only JSON\n  -h, --help                 Show help\n\nThe script never deletes channels/ or releases/. It never deletes any\nartifacts/sha256/* object referenced by a retained release manifest.\n`,
+  );
 }
 
 export function parseArgs(argv) {
@@ -36,20 +31,56 @@ export function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
-    if (arg === '--bucket' && next) { args.bucket = next; i += 1; continue; }
-    if (arg === '--account-id' && next) { args.accountId = next; i += 1; continue; }
-    if (arg === '--api-token' && next) { args.apiToken = next; i += 1; continue; }
-    if (arg === '--retention-days' && next) { args.retentionDays = Number(next); i += 1; continue; }
-    if (arg === '--delete-category' && next) {
-      for (const category of next.split(',').map((value) => value.trim()).filter(Boolean)) args.deleteCategories.add(category);
+    if (arg === '--bucket' && next) {
+      args.bucket = next;
       i += 1;
       continue;
     }
-    if (arg === '--now' && next) { args.now = new Date(next); i += 1; continue; }
-    if (arg === '--execute') { args.execute = true; continue; }
-    if (arg === '--allow-delete-hashed') { args.allowDeleteHashed = true; continue; }
-    if (arg === '--json') { args.json = true; continue; }
-    if (arg === '-h' || arg === '--help') { args.help = true; continue; }
+    if (arg === '--account-id' && next) {
+      args.accountId = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--api-token' && next) {
+      args.apiToken = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--retention-days' && next) {
+      args.retentionDays = Number(next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--delete-category' && next) {
+      for (const category of next
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean))
+        args.deleteCategories.add(category);
+      i += 1;
+      continue;
+    }
+    if (arg === '--now' && next) {
+      args.now = new Date(next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--execute') {
+      args.execute = true;
+      continue;
+    }
+    if (arg === '--allow-delete-hashed') {
+      args.allowDeleteHashed = true;
+      continue;
+    }
+    if (arg === '--json') {
+      args.json = true;
+      continue;
+    }
+    if (arg === '-h' || arg === '--help') {
+      args.help = true;
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
   if (!Number.isFinite(args.retentionDays) || args.retentionDays < 0) throw new Error('--retention-days must be a non-negative number');
@@ -86,12 +117,14 @@ function validatedMigrationSourceKey(artifact) {
   const rawSha256 = artifact.raw?.sha256?.toLowerCase();
   const match = migration.key?.match(/^artifacts\/sha256\/([a-f0-9]{64})\/([^/]+)$/);
   const sourceUrlKey = migration.url ? artifactKeyFromReleaseUrl(migration.url) : undefined;
-  if (migration.schema !== 'lc0_browser.artifact_migration_source.v1'
-    || !migration.releaseId
-    || migration.releaseId !== artifact.carriedForwardFrom
-    || match?.[1] !== rawSha256
-    || match?.[2] === 'identity'
-    || sourceUrlKey !== migration.key) {
+  if (
+    migration.schema !== 'lc0_browser.artifact_migration_source.v1' ||
+    !migration.releaseId ||
+    migration.releaseId !== artifact.carriedForwardFrom ||
+    match?.[1] !== rawSha256 ||
+    match?.[2] === 'identity' ||
+    sourceUrlKey !== migration.key
+  ) {
     throw new Error(`Invalid v1 migration source metadata for ${logicalUrl}; cleanup requires manual review`);
   }
   return migration.key;
@@ -99,11 +132,16 @@ function validatedMigrationSourceKey(artifact) {
 
 function artifactReferences(releases) {
   const catalog = buildArtifactReleaseCatalog(releases);
-  const refs = new Map([...catalog].map(([key, entry]) => [key, {
-    releases: new Set(entry.releases),
-    logicalUrls: entry.logicalUrls,
-    kinds: entry.kinds,
-  }]));
+  const refs = new Map(
+    [...catalog].map(([key, entry]) => [
+      key,
+      {
+        releases: new Set(entry.releases),
+        logicalUrls: entry.logicalUrls,
+        kinds: entry.kinds,
+      },
+    ]),
+  );
   for (const release of releases) {
     if (!isArtifactReleaseV2(release)) continue;
     const releaseId = release.releaseId ?? release.id ?? 'unknown-release';
@@ -197,20 +235,28 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
     if (key.startsWith(HASHED_PREFIX)) {
       const refs = artifactRefs.get(key);
       if (refs?.releases.size) {
-        protectedObjects.push(protectedFrom(object, stableArtifactRefs.has(key) ? 'referenced by stable release' : 'referenced by retained release', {
-          releases: [...refs.releases].sort(),
-          logicalUrls: refs.logicalUrls,
-          kinds: refs.kinds,
-        }));
+        protectedObjects.push(
+          protectedFrom(object, stableArtifactRefs.has(key) ? 'referenced by stable release' : 'referenced by retained release', {
+            releases: [...refs.releases].sort(),
+            logicalUrls: refs.logicalUrls,
+            kinds: refs.kinds,
+          }),
+        );
         continue;
       }
       const ageDays = objectAgeDays(object, now);
       if (SHA_ONLY_V2_KEY_RE.test(key)) {
-        protectedObjects.push(protectedFrom(object, 'unreferenced SHA-only v2 artifact; logical filename and artifact kind are unavailable, so manual review is required', { ageDays }));
+        protectedObjects.push(
+          protectedFrom(object, 'unreferenced SHA-only v2 artifact; logical filename and artifact kind are unavailable, so manual review is required', {
+            ageDays,
+          }),
+        );
         continue;
       }
       if (SOURCE_ARCHIVE_RE.test(key)) {
-        protectedObjects.push(protectedFrom(object, 'unreferenced source archive; preserve for license/source obligations unless manually reviewed', { ageDays }));
+        protectedObjects.push(
+          protectedFrom(object, 'unreferenced source archive; preserve for license/source obligations unless manually reviewed', { ageDays }),
+        );
         continue;
       }
       if (ageDays === undefined || ageDays < retentionDays) {
@@ -223,13 +269,15 @@ export function buildCleanupPlan({ objects, releases, channel, now = new Date(),
 
     const logicalRefsForObject = logicalRefs.get(key);
     if (logicalRefsForObject?.size) {
-      protectedObjects.push(protectedFrom(
-        object,
-        stableLogicalRefs.has(key)
-          ? 'legacy logical object referenced by active stable release; preserve for migration client compatibility'
-          : 'legacy logical object referenced by retained release; preserve for rollback and migration client compatibility',
-        { releases: [...logicalRefsForObject].sort() },
-      ));
+      protectedObjects.push(
+        protectedFrom(
+          object,
+          stableLogicalRefs.has(key)
+            ? 'legacy logical object referenced by active stable release; preserve for migration client compatibility'
+            : 'legacy logical object referenced by retained release; preserve for rollback and migration client compatibility',
+          { releases: [...logicalRefsForObject].sort() },
+        ),
+      );
       continue;
     }
     if (isLegacyMetadataKey(key)) {
@@ -329,7 +377,8 @@ function validateDeleteArgs(args, plan) {
   }
   const selected = plan.candidates.filter((candidate) => args.deleteCategories.has(candidate.category));
   for (const candidate of selected) {
-    if (candidate.key.startsWith(HASHED_PREFIX) && !args.allowDeleteHashed) throw new Error(`Refusing to delete hashed object without --allow-delete-hashed: ${candidate.key}`);
+    if (candidate.key.startsWith(HASHED_PREFIX) && !args.allowDeleteHashed)
+      throw new Error(`Refusing to delete hashed object without --allow-delete-hashed: ${candidate.key}`);
     if (isControlKey(candidate.key)) throw new Error(`Refusing to delete control manifest object: ${candidate.key}`);
   }
   return selected;
@@ -341,7 +390,10 @@ async function deleteR2Object(args, key) {
 
 export async function main(argv = process.argv) {
   const args = parseArgs(argv);
-  if (args.help) { usage(); return; }
+  if (args.help) {
+    usage();
+    return;
+  }
   const objects = await listR2Objects(args);
   const { releases, channel } = await loadReleaseManifests(args, objects);
   const plan = buildCleanupPlan({ objects, releases, channel, now: args.now, retentionDays: args.retentionDays });
@@ -357,21 +409,27 @@ export async function main(argv = process.argv) {
   }
   if (args.json) console.log(JSON.stringify(plan, null, 2));
   else {
-    console.log(JSON.stringify({
-      schema: plan.schema,
-      bucket: plan.bucket,
-      execute: plan.execute,
-      stableReleaseId: plan.stableReleaseId,
-      objectCount: plan.objectCount,
-      releaseCount: plan.releaseCount,
-      candidateCount: plan.candidateCount,
-      candidateBytes: plan.candidateBytes,
-      summaryByCategory: plan.summaryByCategory,
-      missingReferencedArtifacts: plan.missingReferencedArtifacts,
-      selectedForDeletion: plan.selectedForDeletion,
-      deletedCount: plan.deletedCount,
-      deletedBytes: plan.deletedBytes,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          schema: plan.schema,
+          bucket: plan.bucket,
+          execute: plan.execute,
+          stableReleaseId: plan.stableReleaseId,
+          objectCount: plan.objectCount,
+          releaseCount: plan.releaseCount,
+          candidateCount: plan.candidateCount,
+          candidateBytes: plan.candidateBytes,
+          summaryByCategory: plan.summaryByCategory,
+          missingReferencedArtifacts: plan.missingReferencedArtifacts,
+          selectedForDeletion: plan.selectedForDeletion,
+          deletedCount: plan.deletedCount,
+          deletedBytes: plan.deletedBytes,
+        },
+        null,
+        2,
+      ),
+    );
   }
 }
 

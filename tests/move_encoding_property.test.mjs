@@ -1,8 +1,8 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFen, boardToFen } from '../src/chess/board.ts';
-import { legalMoves, makeMove } from '../src/chess/movegen.ts';
+import test from 'node:test';
+import { boardToFen, parseFen } from '../src/chess/board.ts';
 import { moveFromUci, moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 
 function rng(seed) {
   let x = seed >>> 0;

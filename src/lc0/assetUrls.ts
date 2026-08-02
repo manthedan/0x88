@@ -26,11 +26,13 @@ function queryAssetBase(allowModelBaseAlias: boolean): string | undefined {
 
 function trustedConfiguredAssetBase(allowModelBaseAlias: boolean): string | undefined {
   const globals = globalThis as { LC0_BROWSER_ASSET_BASE_URL?: string; TINY_LEELA_ASSET_BASE_URL?: string };
-  return cleanBase(globals.LC0_BROWSER_ASSET_BASE_URL)
-    ?? cleanBase(globals.TINY_LEELA_ASSET_BASE_URL)
-    ?? cleanBase(env.VITE_LC0_BROWSER_ASSET_BASE_URL)
-    ?? cleanBase(env.VITE_TINY_LEELA_ASSET_BASE_URL)
-    ?? (allowModelBaseAlias ? cleanBase(env.VITE_LC0_MODEL_BASE_URL) : undefined);
+  return (
+    cleanBase(globals.LC0_BROWSER_ASSET_BASE_URL) ??
+    cleanBase(globals.TINY_LEELA_ASSET_BASE_URL) ??
+    cleanBase(env.VITE_LC0_BROWSER_ASSET_BASE_URL) ??
+    cleanBase(env.VITE_TINY_LEELA_ASSET_BASE_URL) ??
+    (allowModelBaseAlias ? cleanBase(env.VITE_LC0_MODEL_BASE_URL) : undefined)
+  );
 }
 
 function configuredAssetBase(allowModelBaseAlias: boolean): string | undefined {

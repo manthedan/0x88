@@ -14,15 +14,15 @@
 <label><input id="tensorCache" type="checkbox" /> Fetch manifest tensor-cache sidecar</label>
 <label>ORT compare <select id="ortCompare"><option value="none">none</option><option value="f16">f16</option><option value="f32">f32</option><option value="both">both</option></select></label>
 <label>ORT EP <select id="ortEp"><option value="webgpu">webgpu</option><option value="wasm">wasm</option><option value="webgpu,wasm">webgpu,wasm</option></select></label>
-<button id="run">Run smoke</button>
+<button id="run" type="button">Run smoke</button>
 <pre id="log"></pre>
 <script type="module">
 import { boardToFen, parseFen } from '/src/chess/board.ts';
-import { legalMoves, makeMove } from '/src/chess/movegen.ts';
 import { moveFromUci, moveToUci } from '/src/chess/moveCodec.ts';
+import { legalMoves, makeMove } from '/src/chess/movegen.ts';
 import { encodeLc0Classical112 } from '/src/lc0/encoder112.ts';
-import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from '/src/lc0/policyMap.ts';
 import { Lc0OnnxEvaluator } from '/src/lc0/onnxEvaluator.ts';
+import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from '/src/lc0/policyMap.ts';
 import { Lc0PuctSearcher } from '/src/lc0/search.ts';
 import { StockfishEngine } from '/src/lc0/stockfishEngine.ts';
 import { setRequestedOrtExecutionProviderForCurrentThread } from '/src/nn/ortRuntime.ts';

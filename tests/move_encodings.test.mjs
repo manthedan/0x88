@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  POLICY_INDEX,
   actionIdToMove,
   assertCanonicalMoveEncoding,
   chessBenchAvClassToMove,
@@ -11,11 +10,14 @@ import {
   moveToResidualPolicyIndex,
   moveToSquareformerPolicyIndex,
   moveToUci,
+  POLICY_INDEX,
 } from '../src/chess/moveEncodings.ts';
 
 const promos = [undefined, 'n', 'b', 'r', 'q'];
 
-function uciOf(move) { return moveToUci(move); }
+function uciOf(move) {
+  return moveToUci(move);
+}
 
 test('canonical action-id mapping roundtrips every source/destination/promotion candidate', () => {
   for (let from = 0; from < 64; from++) {

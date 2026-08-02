@@ -58,7 +58,9 @@ export function defaultStockfishUrl(): string {
 export const DEFAULT_STOCKFISH_URL = defaultStockfishUrl();
 
 export function normalizeStockfishFlavor(raw: string | null | undefined): StockfishFlavor {
-  const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
+  const value = String(raw ?? '')
+    .toLowerCase()
+    .replace(/[ _]/g, '-');
   if (value === 'single' || value === 'full-single' || value === 'full') return 'single';
   if (value === 'lite-threaded' || value === 'lite-threads' || value === 'lite-multi') return 'lite-threaded';
   if (value === 'threaded' || value === 'full-threaded' || value === 'threads' || value === 'multi') return 'threaded';
@@ -71,19 +73,27 @@ export function stockfishFlavorRequiresIsolation(flavor: StockfishFlavor): boole
 
 export function stockfishFlavorLabel(flavor: StockfishFlavor): string {
   switch (flavor) {
-    case 'single': return 'Stockfish full single';
-    case 'lite-threaded': return 'Stockfish lite threaded';
-    case 'threaded': return 'Stockfish full threaded';
-    default: return 'Stockfish lite single';
+    case 'single':
+      return 'Stockfish full single';
+    case 'lite-threaded':
+      return 'Stockfish lite threaded';
+    case 'threaded':
+      return 'Stockfish full threaded';
+    default:
+      return 'Stockfish lite single';
   }
 }
 
 export function stockfishFlavorUrl(flavor: StockfishFlavor): string {
   switch (flavor) {
-    case 'single': return STOCKFISH_SINGLE_URL;
-    case 'lite-threaded': return STOCKFISH_LITE_THREADED_URL;
-    case 'threaded': return STOCKFISH_THREADED_URL;
-    default: return defaultStockfishUrl();
+    case 'single':
+      return STOCKFISH_SINGLE_URL;
+    case 'lite-threaded':
+      return STOCKFISH_LITE_THREADED_URL;
+    case 'threaded':
+      return STOCKFISH_THREADED_URL;
+    default:
+      return defaultStockfishUrl();
   }
 }
 
@@ -172,7 +182,11 @@ export function parseStockfishInfo(line: string): StockfishInfoLine | null {
   const mate = line.match(/\bscore mate (-?\d+)/);
   const nodes = line.match(/\bnodes (\d+)/);
   const nps = line.match(/\bnps (\d+)/);
-  const pv = line.match(/ pv (.+)$/)?.[1].trim().split(/\s+/) ?? [];
+  const pv =
+    line
+      .match(/ pv (.+)$/)?.[1]
+      .trim()
+      .split(/\s+/) ?? [];
   return {
     multipv,
     depth,
@@ -233,8 +247,13 @@ export class StockfishEngine implements BrowserUciEngine {
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    this.queueTail = previous.then(() => gate, () => gate);
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.queueTail = previous.then(
+      () => gate,
+      () => gate,
+    );
     await previous.catch(() => undefined);
     try {
       return await fn();
@@ -292,7 +311,11 @@ export class StockfishEngine implements BrowserUciEngine {
         this.worker = worker;
         worker.onmessage = (event: MessageEvent) => {
           const line = typeof event.data === 'string' ? event.data : String(event.data);
-          if (line === 'uciok') { this.applyOptions(); worker.postMessage('isready'); return; }
+          if (line === 'uciok') {
+            this.applyOptions();
+            worker.postMessage('isready');
+            return;
+          }
           if (line === 'readyok') {
             if (this.resolveReady) {
               const resolveReady = this.resolveReady;

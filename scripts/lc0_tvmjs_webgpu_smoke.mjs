@@ -16,10 +16,33 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const args = { batch: 8, fixtures: true, fixtureOffset: 0, fixtureCount: undefined, tensorCache: false, fensFile: '', ortCompare: 'none', ortEp: 'webgpu', searchVisits: 0, searchFixtures: 2, searchRepeats: 1, searchPipelineDepth: 1, stockfishScoreDepth: undefined, stockfishScoreMs: undefined, host: DEFAULT_HOST, port: DEFAULT_PORT, timeoutMs: DEFAULT_TIMEOUT_MS, agentBrowser: DEFAULT_AGENT_BROWSER, noServer: false };
+  const args = {
+    batch: 8,
+    fixtures: true,
+    fixtureOffset: 0,
+    fixtureCount: undefined,
+    tensorCache: false,
+    fensFile: '',
+    ortCompare: 'none',
+    ortEp: 'webgpu',
+    searchVisits: 0,
+    searchFixtures: 2,
+    searchRepeats: 1,
+    searchPipelineDepth: 1,
+    stockfishScoreDepth: undefined,
+    stockfishScoreMs: undefined,
+    host: DEFAULT_HOST,
+    port: DEFAULT_PORT,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    agentBrowser: DEFAULT_AGENT_BROWSER,
+    noServer: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
+    const next = () => {
+      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
+      return argv[++i];
+    };
     if (arg === '--batch') args.batch = Number(next());
     else if (arg === '--manifest') args.manifest = next();
     else if (arg === '--fixtures') args.fixtures = true;
@@ -27,8 +50,10 @@ function parseArgs(argv) {
     else if (arg === '--fixture-offset') args.fixtureOffset = Number(next());
     else if (arg === '--fixture-count') args.fixtureCount = Number(next());
     else if (arg === '--tensor-cache') args.tensorCache = true;
-    else if (arg === '--fens') { args.fensFile = next(); args.fixtures = true; }
-    else if (arg === '--ort-compare') args.ortCompare = next();
+    else if (arg === '--fens') {
+      args.fensFile = next();
+      args.fixtures = true;
+    } else if (arg === '--ort-compare') args.ortCompare = next();
     else if (arg === '--ort-ep') args.ortEp = next();
     else if (arg === '--ort-model') args.ortModel = next();
     else if (arg === '--fixture-baseline') args.fixtureBaseline = next();
@@ -45,8 +70,10 @@ function parseArgs(argv) {
     else if (arg === '--kernel-profile-invokes') args.kernelProfileInvokes = Number(next());
     else if (arg === '--stockfish-score-depth') args.stockfishScoreDepth = Number(next());
     else if (arg === '--stockfish-score-ms') args.stockfishScoreMs = Number(next());
-    else if (arg === '--base-url') { args.baseUrl = next(); args.noServer = true; }
-    else if (arg === '--host') args.host = next();
+    else if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.noServer = true;
+    } else if (arg === '--host') args.host = next();
     else if (arg === '--port') args.port = Number(next());
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--agent-browser') args.agentBrowser = next();
@@ -58,15 +85,19 @@ function parseArgs(argv) {
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (![1, 4, 8, 16, 32].includes(args.batch)) throw new Error(`Invalid --batch ${args.batch}; expected 1, 4, 8, 16, or 32`);
   if (!Number.isFinite(args.fixtureOffset) || args.fixtureOffset < 0) throw new Error(`Invalid --fixture-offset ${args.fixtureOffset}`);
-  if (args.fixtureCount !== undefined && (!Number.isFinite(args.fixtureCount) || args.fixtureCount <= 0)) throw new Error(`Invalid --fixture-count ${args.fixtureCount}`);
+  if (args.fixtureCount !== undefined && (!Number.isFinite(args.fixtureCount) || args.fixtureCount <= 0))
+    throw new Error(`Invalid --fixture-count ${args.fixtureCount}`);
   if (!['none', 'f16', 'f32', 'both'].includes(args.ortCompare)) throw new Error(`Invalid --ort-compare ${args.ortCompare}`);
   if (!['webgpu', 'wasm', 'webgpu,wasm'].includes(args.ortEp)) throw new Error(`Invalid --ort-ep ${args.ortEp}`);
   if (!Number.isFinite(args.searchVisits) || args.searchVisits < 0) throw new Error(`Invalid --search-visits ${args.searchVisits}`);
   if (!Number.isFinite(args.searchFixtures) || args.searchFixtures <= 0) throw new Error(`Invalid --search-fixtures ${args.searchFixtures}`);
   if (!Number.isFinite(args.searchRepeats) || args.searchRepeats <= 0) throw new Error(`Invalid --search-repeats ${args.searchRepeats}`);
-  if (!Number.isFinite(args.searchPipelineDepth) || args.searchPipelineDepth <= 0) throw new Error(`Invalid --search-pipeline-depth ${args.searchPipelineDepth}`);
-  if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0)) throw new Error(`Invalid --stockfish-score-depth ${args.stockfishScoreDepth}`);
-  if (args.stockfishScoreMs !== undefined && (!Number.isFinite(args.stockfishScoreMs) || args.stockfishScoreMs <= 0)) throw new Error(`Invalid --stockfish-score-ms ${args.stockfishScoreMs}`);
+  if (!Number.isFinite(args.searchPipelineDepth) || args.searchPipelineDepth <= 0)
+    throw new Error(`Invalid --search-pipeline-depth ${args.searchPipelineDepth}`);
+  if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0))
+    throw new Error(`Invalid --stockfish-score-depth ${args.stockfishScoreDepth}`);
+  if (args.stockfishScoreMs !== undefined && (!Number.isFinite(args.stockfishScoreMs) || args.stockfishScoreMs <= 0))
+    throw new Error(`Invalid --stockfish-score-ms ${args.stockfishScoreMs}`);
   if (!Number.isFinite(args.port) || args.port <= 0) throw new Error(`Invalid --port ${args.port}`);
   if (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0) throw new Error(`Invalid --timeout ${args.timeoutMs}`);
   return args;
@@ -78,10 +109,23 @@ function spawnCapture(command, commandArgs, options = {}) {
     const child = spawn(command, commandArgs, { stdio: ['pipe', 'pipe', 'pipe'], ...spawnOptions });
     const chunks = { stdout: [], stderr: [] };
     let settled = false;
-    const finish = (fn, value) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); fn(value); };
-    const timer = timeoutMs ? setTimeout(() => { child.kill('SIGKILL'); finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`)); }, timeoutMs) : undefined;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn(value);
+    };
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          child.kill('SIGKILL');
+          finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+      : undefined;
     child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
-    child.stderr.on('data', (chunk) => { chunks.stderr.push(chunk); if (echoStderr) process.stderr.write(chunk); });
+    child.stderr.on('data', (chunk) => {
+      chunks.stderr.push(chunk);
+      if (echoStderr) process.stderr.write(chunk);
+    });
     child.on('error', (error) => finish(reject, error));
     child.on('close', (status) => {
       const stdout = Buffer.concat(chunks.stdout).toString('utf8');
@@ -128,14 +172,26 @@ function startServer(args) {
   let settled = false;
   server.ready = new Promise((resolve, reject) => {
     const timer = setTimeout(() => settle(reject, new Error(`Vite did not become ready on ${args.port}: ${output.trim()}`)), 30_000);
-    const settle = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); fn(value); };
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
     const onOutput = (chunk) => {
       output += chunk.toString('utf8');
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips ANSI escape sequences from vite output
       const plainOutput = output.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
       if (/ready in \d+\s*ms/.test(plainOutput) || plainOutput.includes(`:${args.port}/`)) settle(resolve);
     };
-    server.stdout.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
-    server.stderr.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
+    server.stdout.on('data', (chunk) => {
+      process.stderr.write(`[vite] ${chunk}`);
+      onOutput(chunk);
+    });
+    server.stderr.on('data', (chunk) => {
+      process.stderr.write(`[vite] ${chunk}`);
+      onOutput(chunk);
+    });
     server.on('exit', (status, signal) => settle(reject, new Error(`Vite exited before ready (${status ?? signal}): ${output.trim()}`)));
   });
   return server;
@@ -149,21 +205,31 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
       const response = await fetch(new URL('/lab/lc0-tvmjs-webgpu-smoke.html', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) { lastError = error; }
+    } catch (error) {
+      lastError = error;
+    }
     await delay(250);
   }
   throw new Error(`server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
 }
 
 async function closeSession(args, session) {
-  try { await runAgent(args, ['close'], 5_000, session); } catch { /* best effort */ }
+  try {
+    await runAgent(args, ['close'], 5_000, session);
+  } catch {
+    /* best effort */
+  }
 }
 
 async function pollResult(args, session, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let last;
   while (Date.now() < deadline) {
-    last = await evalPage(args, session, `(() => ({ result: window.lc0TvmjsLastResult ?? null, error: window.lc0TvmjsLastError ?? null, log: document.getElementById('log')?.textContent ?? '' }))()`);
+    last = await evalPage(
+      args,
+      session,
+      `(() => ({ result: window.lc0TvmjsLastResult ?? null, error: window.lc0TvmjsLastError ?? null, log: document.getElementById('log')?.textContent ?? '' }))()`,
+    );
     if (last?.error) throw new Error(`browser smoke failed: ${last.error}`);
     if (last?.result) return last;
     if (String(last?.log ?? '').includes('SMOKE_ERROR')) throw new Error(`browser smoke failed: ${last.log}`);
@@ -174,14 +240,20 @@ async function pollResult(args, session, timeoutMs) {
 
 async function loadFenSuite(args) {
   if (!args.fensFile) return [];
-  const rows = (await readFile(args.fensFile, 'utf8')).split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
+  const rows = (await readFile(args.fensFile, 'utf8'))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
   if (!rows.length) throw new Error(`No FEN rows found in ${args.fensFile}`);
   return rows;
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) { usage(); return; }
+  if (args.help) {
+    usage();
+    return;
+  }
   const server = startServer(args);
   try {
     if (server) await server.ready;
@@ -251,7 +323,9 @@ async function main() {
         stockfishScoreMs: args.stockfishScoreMs,
         ok: true,
         result: status.result,
-        logTail: String(status.log ?? '').split('\n').slice(-20),
+        logTail: String(status.log ?? '')
+          .split('\n')
+          .slice(-20),
       };
       // --tie-epsilon: best-move mismatches whose competing priors sit within
       // epsilon are recorded as tie-tolerated instead of failing the gate.
@@ -280,10 +354,22 @@ async function main() {
       for (const [dtype, comparison] of Object.entries(artifact.result.ortComparisons ?? {})) {
         if (comparison?.skipped) continue;
         if (comparison?.comparable > 0 && comparison.bestMoveMatches !== comparison.comparable) {
-          const toleratedRows = (comparison.rows ?? []).filter((row) => row.tvmBestMove && row.ortBestMove
-            && row.tvmBestMove !== row.ortBestMove
-            && tieEps !== undefined && Number.isFinite(row.maxTopPriorAbsDiff) && row.maxTopPriorAbsDiff <= tieEps);
-          if (toleratedRows.length) artifact.tieTolerated.ort[dtype] = toleratedRows.map((row) => ({ id: row.id, tvm: row.tvmBestMove, ort: row.ortBestMove, maxTopPriorAbsDiff: row.maxTopPriorAbsDiff }));
+          const toleratedRows = (comparison.rows ?? []).filter(
+            (row) =>
+              row.tvmBestMove &&
+              row.ortBestMove &&
+              row.tvmBestMove !== row.ortBestMove &&
+              tieEps !== undefined &&
+              Number.isFinite(row.maxTopPriorAbsDiff) &&
+              row.maxTopPriorAbsDiff <= tieEps,
+          );
+          if (toleratedRows.length)
+            artifact.tieTolerated.ort[dtype] = toleratedRows.map((row) => ({
+              id: row.id,
+              tvm: row.tvmBestMove,
+              ort: row.ortBestMove,
+              maxTopPriorAbsDiff: row.maxTopPriorAbsDiff,
+            }));
           if (comparison.bestMoveMatches + toleratedRows.length !== comparison.comparable) {
             artifact.ok = false;
             artifact.error = `${dtype} ORT best-move parity failed: ${comparison.bestMoveMatches}/${comparison.comparable}`;

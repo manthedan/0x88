@@ -34,15 +34,26 @@ const EVAL_KEYS = [
 const POSITION_EVAL_KEYS = ['legalPriorsMs'];
 
 function usage() {
-  console.log(`Usage: node scripts/summarize_lc0_tvmjs_timing_breakdown.mjs --in PATH [--in PATH ...] [options]\n\nSummarizes observed TVMJS/WebGPU timing buckets from smoke or TVMJS-vs-hybrid matrix artifacts.\nResearch-only: this reports measured buckets and explicit caveats; it does not infer live GPU residency or promotion readiness.\n\nOptions:\n  --in PATH    Input JSON artifact; may be repeated or comma-separated\n  --out PATH   Output JSON summary (default ${DEFAULT_OUT})\n  --no-write   Print only\n  -h, --help   Show help\n`);
+  console.log(
+    `Usage: node scripts/summarize_lc0_tvmjs_timing_breakdown.mjs --in PATH [--in PATH ...] [options]\n\nSummarizes observed TVMJS/WebGPU timing buckets from smoke or TVMJS-vs-hybrid matrix artifacts.\nResearch-only: this reports measured buckets and explicit caveats; it does not infer live GPU residency or promotion readiness.\n\nOptions:\n  --in PATH    Input JSON artifact; may be repeated or comma-separated\n  --out PATH   Output JSON summary (default ${DEFAULT_OUT})\n  --no-write   Print only\n  -h, --help   Show help\n`,
+  );
 }
 
 function parseArgs(argv) {
   const args = { inputs: [], out: DEFAULT_OUT, write: true };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
-    if (arg === '--in') args.inputs.push(...next().split(',').map((item) => item.trim()).filter(Boolean));
+    const next = () => {
+      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
+      return argv[++i];
+    };
+    if (arg === '--in')
+      args.inputs.push(
+        ...next()
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      );
     else if (arg === '--out') args.out = next();
     else if (arg === '--no-write') args.write = false;
     else if (arg === '-h' || arg === '--help') args.help = true;
@@ -151,11 +162,16 @@ function normalizeArtifact(path, artifact) {
         searchEvalPositionTimingRows: numberOrUndefined(search.tvmEvalPositionTimingRows),
         searchEvalPositionTiming,
         meanEvalPhaseMs: Object.fromEntries(EVAL_KEYS.map((key) => [key, timingMean(evalTiming, key)]).filter(([, value]) => value !== undefined)),
-        meanEvalPositionPhaseMs: Object.fromEntries(POSITION_EVAL_KEYS.map((key) => [key, timingMean(evalPositionTiming, key)]).filter(([, value]) => value !== undefined)),
+        meanEvalPositionPhaseMs: Object.fromEntries(
+          POSITION_EVAL_KEYS.map((key) => [key, timingMean(evalPositionTiming, key)]).filter(([, value]) => value !== undefined),
+        ),
         meanSearchEvalPhaseMs: Object.fromEntries(EVAL_KEYS.map((key) => [key, timingMean(searchEvalTiming, key)]).filter(([, value]) => value !== undefined)),
-        meanSearchEvalPositionPhaseMs: Object.fromEntries(POSITION_EVAL_KEYS.map((key) => [key, timingMean(searchEvalPositionTiming, key)]).filter(([, value]) => value !== undefined)),
+        meanSearchEvalPositionPhaseMs: Object.fromEntries(
+          POSITION_EVAL_KEYS.map((key) => [key, timingMean(searchEvalPositionTiming, key)]).filter(([, value]) => value !== undefined),
+        ),
       },
-      caveat: 'Search overhead cannot be inferred exactly without engine-level cache hit/miss and batch-fill counters; use per-eval buckets as profiling evidence, not as a promotion gate.',
+      caveat:
+        'Search overhead cannot be inferred exactly without engine-level cache hit/miss and batch-fill counters; use per-eval buckets as profiling evidence, not as a promotion gate.',
     };
   }
   throw new Error(`${path}: unsupported artifact schema ${artifact.schema ?? '<missing>'}`);
@@ -168,21 +184,27 @@ function aggregate(records) {
   return {
     artifactCount: records.length,
     okArtifacts: records.filter((record) => record.ok).length,
-    searchMeanMs: searchMeans.length ? {
-      min: Math.min(...searchMeans),
-      mean: searchMeans.reduce((a, b) => a + b, 0) / searchMeans.length,
-      max: Math.max(...searchMeans),
-    } : undefined,
-    invokeMs: invokeMeans.length ? {
-      min: Math.min(...invokeMeans),
-      mean: invokeMeans.reduce((a, b) => a + b, 0) / invokeMeans.length,
-      max: Math.max(...invokeMeans),
-    } : undefined,
-    startupKnownMs: startupTotals.length ? {
-      min: Math.min(...startupTotals),
-      mean: startupTotals.reduce((a, b) => a + b, 0) / startupTotals.length,
-      max: Math.max(...startupTotals),
-    } : undefined,
+    searchMeanMs: searchMeans.length
+      ? {
+          min: Math.min(...searchMeans),
+          mean: searchMeans.reduce((a, b) => a + b, 0) / searchMeans.length,
+          max: Math.max(...searchMeans),
+        }
+      : undefined,
+    invokeMs: invokeMeans.length
+      ? {
+          min: Math.min(...invokeMeans),
+          mean: invokeMeans.reduce((a, b) => a + b, 0) / invokeMeans.length,
+          max: Math.max(...invokeMeans),
+        }
+      : undefined,
+    startupKnownMs: startupTotals.length
+      ? {
+          min: Math.min(...startupTotals),
+          mean: startupTotals.reduce((a, b) => a + b, 0) / startupTotals.length,
+          max: Math.max(...startupTotals),
+        }
+      : undefined,
   };
 }
 

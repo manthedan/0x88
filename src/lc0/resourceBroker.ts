@@ -232,9 +232,7 @@ export class EngineResourceBroker {
         next.reject(new Error(`Engine ${next.engineId} is no longer registered with the resource broker`));
         continue;
       }
-      const threads = this.policy === 'exclusive'
-        ? clampThreads(this.cpuBudget(), profile)
-        : this.sharedGrant(next.engineId, profile);
+      const threads = this.policy === 'exclusive' ? clampThreads(this.cpuBudget(), profile) : this.sharedGrant(next.engineId, profile);
       next.grant(this.makeLease(next.engineId, profile, threads));
     }
   }
@@ -261,14 +259,10 @@ export class EngineResourceBroker {
 
     const currentActive = this.activeCpuLeases();
     const hasQueue = this.queue.length > 0;
-    const canStart = this.policy === 'exclusive'
-      ? currentActive === 0 && !hasQueue
-      : currentActive < this.maxConcurrentCpu && !hasQueue;
+    const canStart = this.policy === 'exclusive' ? currentActive === 0 && !hasQueue : currentActive < this.maxConcurrentCpu && !hasQueue;
 
     if (canStart) {
-      const threads = this.policy === 'exclusive'
-        ? clampThreads(this.cpuBudget(), profile)
-        : this.sharedGrant(request.engineId, profile);
+      const threads = this.policy === 'exclusive' ? clampThreads(this.cpuBudget(), profile) : this.sharedGrant(request.engineId, profile);
       return this.makeLease(request.engineId, profile, threads);
     }
 

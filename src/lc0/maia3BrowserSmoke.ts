@@ -1,6 +1,6 @@
-import { START_FEN, parseFen } from '../chess/board.ts';
-import { legalMoves } from '../chess/movegen.ts';
+import { parseFen, START_FEN } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
+import { legalMoves } from '../chess/movegen.ts';
 import { Maia3BrowserEvaluator, type Maia3MovePolicyEntry, type Maia3MoveStyle } from './maia3.ts';
 
 interface Fixture {
@@ -49,12 +49,21 @@ function top(policy: Maia3MovePolicyEntry[], n = 5): Maia3MovePolicyEntry[] {
   return policy.slice(0, n).map((entry) => ({ uci: entry.uci, prior: entry.prior, logit: entry.logit, index: entry.index }));
 }
 
-function validateFixture(name: string, expectedLegal: string[], policy: Maia3MovePolicyEntry[], move: string | null, expectedMoves: string[] | undefined): string[] {
+function validateFixture(
+  name: string,
+  expectedLegal: string[],
+  policy: Maia3MovePolicyEntry[],
+  move: string | null,
+  expectedMoves: string[] | undefined,
+): string[] {
   const errors: string[] = [];
   const legalSet = new Set(expectedLegal);
   const policyUcis = policy.map((entry) => entry.uci).sort();
   const duplicatePolicyUcis = policyUcis.filter((uci, i) => i > 0 && policyUcis[i - 1] === uci);
-  const duplicateIndices = policy.map((entry) => entry.index).sort((a, b) => a - b).filter((index, i, sorted) => i > 0 && sorted[i - 1] === index);
+  const duplicateIndices = policy
+    .map((entry) => entry.index)
+    .sort((a, b) => a - b)
+    .filter((index, i, sorted) => i > 0 && sorted[i - 1] === index);
   if (duplicatePolicyUcis.length) errors.push(`${name}: duplicate legal policy UCIs ${duplicatePolicyUcis.join(',')}`);
   if (duplicateIndices.length) errors.push(`${name}: duplicate legal policy indices ${duplicateIndices.join(',')}`);
   if (policy.length !== expectedLegal.length) errors.push(`${name}: policy has ${policy.length} legal moves, expected ${expectedLegal.length}`);
@@ -169,7 +178,7 @@ async function main(): Promise<void> {
         // conditions per run; first run dropped as warmup.
         const gridSize = parsePositiveInt(params.get('gridSize'), 0);
         if (gridSize > 0) {
-          const conditions = Array.from({ length: gridSize }, (_, i) => ({ selfElo: 600 + ((2000 / Math.max(1, gridSize - 1)) * i | 0), oppoElo: 1500 }));
+          const conditions = Array.from({ length: gridSize }, (_, i) => ({ selfElo: 600 + (((2000 / Math.max(1, gridSize - 1)) * i) | 0), oppoElo: 1500 }));
           const runs = 6;
           let total = 0;
           for (let run = 0; run < runs; run += 1) {

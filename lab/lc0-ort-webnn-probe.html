@@ -4,7 +4,7 @@
 <style>body { font-family: system-ui, sans-serif; margin: 2rem; } pre { background: #111; color: #eee; padding: 1rem; white-space: pre-wrap; }</style>
 <h1>LC0 ORT WebNN EP probe</h1>
 <p>Research-only: runs the same f16 LC0 model through ORT's webnn EP (deviceType from <code>?device=gpu|npu|cpu</code>) and the webgpu EP, compares outputs and eval latency. Requires Chrome launched with <code>--enable-features=WebMachineLearningNeuralNetwork</code>.</p>
-<button id="run">Run probe</button>
+<button id="run" type="button">Run probe</button>
 <pre id="log"></pre>
 <script type="module">
 import * as ort from 'onnxruntime-web';

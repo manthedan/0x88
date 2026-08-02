@@ -1,12 +1,30 @@
 import { START_FEN } from '../chess/board.ts';
 import { BerserkEngine } from './berserkEngine.ts';
-import { BERSERK_EMSCRIPTEN_VARIANT, berserkVariantAssetStatus, checkBerserkVariantAsset, type BerserkVariant } from './berserkVariants.ts';
+import { BERSERK_EMSCRIPTEN_VARIANT, type BerserkVariant, berserkVariantAssetStatus, checkBerserkVariantAsset } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
-import { PLENTYCHESS_EMSCRIPTEN_VARIANT, checkPlentyChessVariantAsset, plentyChessVariantAssetStatus, type PlentyChessVariant } from './plentychessVariants.ts';
-import { RecklessEngine, canUsePersistentRecklessWasi, type RecklessOptions } from './recklessEngine.ts';
-import { RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_LITE_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_SIMD_VARIANT, checkRecklessVariantAsset, recklessVariantAssetStatus, supportsWasmRelaxedSimd, type RecklessVariant } from './recklessVariants.ts';
-import { ViridithasEngine, canUsePersistentViridithasWasi } from './viridithasEngine.ts';
-import { VIRIDITHAS_DEFAULT_VARIANT, VIRIDITHAS_SIMD_VARIANT, checkViridithasVariantAsset, viridithasVariantAssetStatus, type ViridithasVariant } from './viridithasVariants.ts';
+import { checkPlentyChessVariantAsset, PLENTYCHESS_EMSCRIPTEN_VARIANT, type PlentyChessVariant, plentyChessVariantAssetStatus } from './plentychessVariants.ts';
+import { canUsePersistentRecklessWasi, RecklessEngine, type RecklessOptions } from './recklessEngine.ts';
+import {
+  checkRecklessVariantAsset,
+  RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT,
+  RECKLESS_BROWSER_API_SIMD_VARIANT,
+  RECKLESS_BROWSER_API_VARIANT,
+  RECKLESS_FULL_VARIANT,
+  RECKLESS_LITE_VARIANT,
+  RECKLESS_RELAXED_SIMD_VARIANT,
+  RECKLESS_SIMD_VARIANT,
+  type RecklessVariant,
+  recklessVariantAssetStatus,
+  supportsWasmRelaxedSimd,
+} from './recklessVariants.ts';
+import { canUsePersistentViridithasWasi, ViridithasEngine } from './viridithasEngine.ts';
+import {
+  checkViridithasVariantAsset,
+  VIRIDITHAS_DEFAULT_VARIANT,
+  VIRIDITHAS_SIMD_VARIANT,
+  type ViridithasVariant,
+  viridithasVariantAssetStatus,
+} from './viridithasVariants.ts';
 
 interface BenchPosition {
   label: string;
@@ -54,7 +72,11 @@ interface BenchSummaryRow {
 }
 
 type BenchMode = 'persistent' | 'one-shot' | 'batch';
-type BenchVariant = (RecklessVariant & { engine: 'reckless' }) | (ViridithasVariant & { engine: 'viridithas' }) | (BerserkVariant & { engine: 'berserk' }) | (PlentyChessVariant & { engine: 'plentychess' });
+type BenchVariant =
+  | (RecklessVariant & { engine: 'reckless' })
+  | (ViridithasVariant & { engine: 'viridithas' })
+  | (BerserkVariant & { engine: 'berserk' })
+  | (PlentyChessVariant & { engine: 'plentychess' });
 type BenchEngine = RecklessEngine | ViridithasEngine | BerserkEngine | PlentyChessEngine;
 
 interface BenchConfig {
@@ -102,23 +124,37 @@ function el(id: string): HTMLElement {
   if (!node) throw new Error(`Missing #${id}`);
   return node;
 }
-function inputEl(id: string): HTMLInputElement { return el(id) as HTMLInputElement; }
-function textareaEl(id: string): HTMLTextAreaElement { return el(id) as HTMLTextAreaElement; }
-function htmlEscape(value: unknown): string {
-  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+function inputEl(id: string): HTMLInputElement {
+  return el(id) as HTMLInputElement;
 }
-function repeats(): number { return Math.max(1, Math.floor(Number(inputEl('repeatsInput').value) || 5)); }
-function hashMb(): number { return Math.max(1, Math.floor(Number(inputEl('hashInput').value) || 16)); }
-function clearHashBetweenRuns(): boolean { return inputEl('clearHashInput').checked; }
+function textareaEl(id: string): HTMLTextAreaElement {
+  return el(id) as HTMLTextAreaElement;
+}
+function htmlEscape(value: unknown): string {
+  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+function repeats(): number {
+  return Math.max(1, Math.floor(Number(inputEl('repeatsInput').value) || 5));
+}
+function hashMb(): number {
+  return Math.max(1, Math.floor(Number(inputEl('hashInput').value) || 16));
+}
+function clearHashBetweenRuns(): boolean {
+  return inputEl('clearHashInput').checked;
+}
 
 function parsePositiveIntegers(raw: string): number[] {
-  return raw.split(/[\s,]+/).map((part) => Math.floor(Number(part))).filter((value) => Number.isFinite(value) && value > 0);
+  return raw
+    .split(/[\s,]+/)
+    .map((part) => Math.floor(Number(part)))
+    .filter((value) => Number.isFinite(value) && value > 0);
 }
 
 function selectedBudgets(): BenchBudget[] {
   const budgets: BenchBudget[] = [];
   for (const depth of parsePositiveIntegers(inputEl('depthsInput').value)) budgets.push({ label: `depth ${depth}`, options: { depth, hashMb: hashMb() } });
-  for (const movetimeMs of parsePositiveIntegers(inputEl('movetimesInput').value)) budgets.push({ label: `movetime ${movetimeMs}ms`, options: { movetimeMs, hashMb: hashMb() } });
+  for (const movetimeMs of parsePositiveIntegers(inputEl('movetimesInput').value))
+    budgets.push({ label: `movetime ${movetimeMs}ms`, options: { movetimeMs, hashMb: hashMb() } });
   return budgets;
 }
 
@@ -128,7 +164,8 @@ function normalizeFen(raw: string): string {
 }
 
 function selectedPositions(): BenchPosition[] {
-  const lines = textareaEl('fenInput').value.split(/\r?\n/)
+  const lines = textareaEl('fenInput')
+    .value.split(/\r?\n/)
     .map((line) => line.replace(/(^|\s+)#.*$/, '').trim())
     .filter(Boolean);
   const positions = lines.map((line, index) => {
@@ -165,8 +202,12 @@ function selectedModes(): BenchMode[] {
   if (inputEl('benchBatch').checked) modes.push('batch');
   return modes;
 }
-function setStatus(text: string): void { el('status').textContent = text; }
-function variantArtifactUrl(variant: BenchVariant): string { return variant.engine === 'berserk' || variant.engine === 'plentychess' ? (variant.jsUrl ?? variant.wasmUrl) : variant.wasmUrl; }
+function setStatus(text: string): void {
+  el('status').textContent = text;
+}
+function variantArtifactUrl(variant: BenchVariant): string {
+  return variant.engine === 'berserk' || variant.engine === 'plentychess' ? (variant.jsUrl ?? variant.wasmUrl) : variant.wasmUrl;
+}
 
 function groupKey(row: Pick<BenchRow, 'variant' | 'mode' | 'position' | 'fen' | 'budget'>): string {
   return `${row.variant}\u0000${row.mode}\u0000${row.position}\u0000${row.fen}\u0000${row.budget}`;
@@ -244,7 +285,14 @@ function reportConfig(config: BenchConfig) {
       ...(variant.engine === 'berserk' ? { jsUrl: variant.jsUrl, dataUrl: variant.dataUrl, nnueUrl: variant.nnueUrl } : {}),
       ...(variant.engine === 'plentychess' ? { jsUrl: variant.jsUrl, dataUrl: variant.dataUrl } : {}),
       note: variant.note,
-      asset: variant.engine === 'viridithas' ? viridithasVariantAssetStatus(variant) : variant.engine === 'berserk' ? berserkVariantAssetStatus(variant) : variant.engine === 'plentychess' ? plentyChessVariantAssetStatus(variant) : recklessVariantAssetStatus(variant),
+      asset:
+        variant.engine === 'viridithas'
+          ? viridithasVariantAssetStatus(variant)
+          : variant.engine === 'berserk'
+            ? berserkVariantAssetStatus(variant)
+            : variant.engine === 'plentychess'
+              ? plentyChessVariantAssetStatus(variant)
+              : recklessVariantAssetStatus(variant),
     })),
     modes: config.modes,
     budgets: config.budgets.map((budget) => ({ label: budget.label, options: budget.options })),
@@ -272,40 +320,80 @@ function csvEscape(value: unknown): string {
 }
 
 function csvReport(): string {
-  const headers = ['variant', 'mode', 'position', 'budget', 'run', 'wall_ms', 'depth', 'score_cp', 'mate_in', 'nodes', 'nps', 'best_move', 'pv_uci', 'runtime', 'wasm_url', 'fen'];
+  const headers = [
+    'variant',
+    'mode',
+    'position',
+    'budget',
+    'run',
+    'wall_ms',
+    'depth',
+    'score_cp',
+    'mate_in',
+    'nodes',
+    'nps',
+    'best_move',
+    'pv_uci',
+    'runtime',
+    'wasm_url',
+    'fen',
+  ];
   const lines = [headers.join(',')];
   for (const row of rows) {
-    lines.push([
-      row.variant,
-      row.mode,
-      row.position,
-      row.budget,
-      row.run,
-      row.wallMs.toFixed(3),
-      row.depth ?? '',
-      row.scoreCp ?? '',
-      row.mateIn ?? '',
-      row.nodes ?? '',
-      row.nps ?? '',
-      row.bestMove ?? '',
-      row.pvUci.join(' '),
-      row.runtime,
-      row.wasmUrl,
-      row.fen,
-    ].map(csvEscape).join(','));
+    lines.push(
+      [
+        row.variant,
+        row.mode,
+        row.position,
+        row.budget,
+        row.run,
+        row.wallMs.toFixed(3),
+        row.depth ?? '',
+        row.scoreCp ?? '',
+        row.mateIn ?? '',
+        row.nodes ?? '',
+        row.nps ?? '',
+        row.bestMove ?? '',
+        row.pvUci.join(' '),
+        row.runtime,
+        row.wasmUrl,
+        row.fen,
+      ]
+        .map(csvEscape)
+        .join(','),
+    );
   }
   return `${lines.join('\n')}\n`;
 }
 
 function render(): void {
   const body = el('results').querySelector('tbody')!;
-  body.innerHTML = rows.map((row) => `<tr><td>${htmlEscape(row.variant)}</td><td>${row.mode}</td><td>${htmlEscape(row.position)}</td><td>${htmlEscape(row.budget)}</td><td>${htmlEscape(row.run)}</td><td class="num">${row.wallMs.toFixed(1)}</td><td class="num">${row.depth ?? '—'}</td><td class="num">${row.nodes?.toLocaleString() ?? '—'}</td><td class="num">${row.nps?.toLocaleString() ?? '—'}</td><td>${htmlEscape(row.bestMove ?? '—')}</td><td>${htmlEscape(row.runtime)}</td></tr>`).join('');
+  body.innerHTML = rows
+    .map(
+      (row) =>
+        `<tr><td>${htmlEscape(row.variant)}</td><td>${row.mode}</td><td>${htmlEscape(row.position)}</td><td>${htmlEscape(row.budget)}</td><td>${htmlEscape(row.run)}</td><td class="num">${row.wallMs.toFixed(1)}</td><td class="num">${row.depth ?? '—'}</td><td class="num">${row.nodes?.toLocaleString() ?? '—'}</td><td class="num">${row.nps?.toLocaleString() ?? '—'}</td><td>${htmlEscape(row.bestMove ?? '—')}</td><td>${htmlEscape(row.runtime)}</td></tr>`,
+    )
+    .join('');
   const summaryBody = el('summary').querySelector('tbody')!;
-  summaryBody.innerHTML = summaryRows().map((row) => `<tr><td>${htmlEscape(row.variant)}</td><td>${row.mode}</td><td>${htmlEscape(row.position)}</td><td>${htmlEscape(row.budget)}</td><td class="num">${row.coldMs?.toFixed(1) ?? '—'}</td><td class="num">${row.warmAvgMs?.toFixed(1) ?? '—'}</td><td class="num">${row.warmMinMs?.toFixed(1) ?? '—'}</td><td class="num">${row.warmMaxMs?.toFixed(1) ?? '—'}</td><td class="num">${row.avgNodes?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? '—'}</td><td class="num">${row.avgNps?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? '—'}</td></tr>`).join('');
+  summaryBody.innerHTML = summaryRows()
+    .map(
+      (row) =>
+        `<tr><td>${htmlEscape(row.variant)}</td><td>${row.mode}</td><td>${htmlEscape(row.position)}</td><td>${htmlEscape(row.budget)}</td><td class="num">${row.coldMs?.toFixed(1) ?? '—'}</td><td class="num">${row.warmAvgMs?.toFixed(1) ?? '—'}</td><td class="num">${row.warmMinMs?.toFixed(1) ?? '—'}</td><td class="num">${row.warmMaxMs?.toFixed(1) ?? '—'}</td><td class="num">${row.avgNodes?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? '—'}</td><td class="num">${row.avgNps?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? '—'}</td></tr>`,
+    )
+    .join('');
   el('jsonOut').textContent = JSON.stringify(report(), null, 2);
 }
 
-async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: BenchMode, position: BenchPosition, budget: BenchBudget, run: string, signal: AbortSignal, clearPersistentHash: boolean): Promise<void> {
+async function timeSearch(
+  engine: BenchEngine,
+  variant: BenchVariant,
+  mode: BenchMode,
+  position: BenchPosition,
+  budget: BenchBudget,
+  run: string,
+  signal: AbortSignal,
+  clearPersistentHash: boolean,
+): Promise<void> {
   if (mode === 'persistent' && clearPersistentHash) {
     if (variant.engine === 'reckless' && engine instanceof RecklessEngine) await engine.newGame(signal);
     if (variant.engine === 'viridithas' && engine instanceof ViridithasEngine) await engine.newGame(signal);
@@ -337,12 +425,27 @@ async function timeSearch(engine: BenchEngine, variant: BenchVariant, mode: Benc
   render();
 }
 
-async function timeViridithasBatch(engine: ViridithasEngine, variant: BenchVariant & { engine: 'viridithas' }, positions: BenchPosition[], budget: BenchBudget, run: string, signal: AbortSignal, clearHashBetweenSearches: boolean): Promise<void> {
+async function timeViridithasBatch(
+  engine: ViridithasEngine,
+  variant: BenchVariant & { engine: 'viridithas' },
+  positions: BenchPosition[],
+  budget: BenchBudget,
+  run: string,
+  signal: AbortSignal,
+  clearHashBetweenSearches: boolean,
+): Promise<void> {
   const start = performance.now();
-  const searches = await engine.bestMovesBatch(positions.map((position) => position.fen), signal, { clearHashBetweenSearches });
+  const searches = await engine.bestMovesBatch(
+    positions.map((position) => position.fen),
+    signal,
+    { clearHashBetweenSearches },
+  );
   const wallMs = performance.now() - start;
   const infos = searches.map((search) => search.info).filter((info): info is NonNullable<typeof info> => info !== null);
-  const nodes = infos.map((info) => info.nodes).filter((value): value is number => value !== undefined).reduce((sum, value) => sum + value, 0);
+  const nodes = infos
+    .map((info) => info.nodes)
+    .filter((value): value is number => value !== undefined)
+    .reduce((sum, value) => sum + value, 0);
   const depths = infos.map((info) => info.depth).filter((value) => Number.isFinite(value));
   rows.push({
     variant: variant.label,
@@ -372,75 +475,197 @@ async function runBench(): Promise<void> {
   rows.length = 0;
   reportSnapshot = { runtime: runtimeMetadata(), config };
   render();
-  if (!config.variants.length || !config.modes.length || !config.budgets.length || !config.positions.length) { setStatus('Select at least one variant, mode, position, and budget.'); return; }
+  if (!config.variants.length || !config.modes.length || !config.budgets.length || !config.positions.length) {
+    setStatus('Select at least one variant, mode, position, and budget.');
+    return;
+  }
   inputEl('run').toggleAttribute('disabled', true);
   inputEl('stop').toggleAttribute('disabled', false);
   const persistentAvailable = canUsePersistentRecklessWasi();
-  setStatus(`Checking assets… isolation=${String((globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true)} persistentAvailable=${persistentAvailable}`);
+  setStatus(
+    `Checking assets… isolation=${String((globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true)} persistentAvailable=${persistentAvailable}`,
+  );
   try {
     for (const variant of config.variants) {
-      const assetStatus = variant.engine === 'viridithas'
-        ? await checkViridithasVariantAsset(variant, render)
-        : variant.engine === 'berserk'
-          ? await checkBerserkVariantAsset(variant, render)
-          : variant.engine === 'plentychess'
-            ? await checkPlentyChessVariantAsset(variant, render)
-            : await checkRecklessVariantAsset(variant, render);
+      const assetStatus =
+        variant.engine === 'viridithas'
+          ? await checkViridithasVariantAsset(variant, render)
+          : variant.engine === 'berserk'
+            ? await checkBerserkVariantAsset(variant, render)
+            : variant.engine === 'plentychess'
+              ? await checkPlentyChessVariantAsset(variant, render)
+              : await checkRecklessVariantAsset(variant, render);
       if (assetStatus === 'missing') {
-        rows.push({ variant: variant.label, mode: config.modes[0] ?? 'one-shot', position: 'asset', fen: '', budget: 'asset check', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'asset missing', wasmUrl: variantArtifactUrl(variant) });
+        rows.push({
+          variant: variant.label,
+          mode: config.modes[0] ?? 'one-shot',
+          position: 'asset',
+          fen: '',
+          budget: 'asset check',
+          run: 'skipped',
+          wallMs: 0,
+          bestMove: null,
+          depth: null,
+          scoreCp: null,
+          mateIn: null,
+          nodes: null,
+          nps: null,
+          pvUci: [],
+          runtime: 'asset missing',
+          wasmUrl: variantArtifactUrl(variant),
+        });
         render();
         continue;
       }
       for (const mode of config.modes) {
         if (abort.signal.aborted) return;
         if (variant.engine === 'reckless' && variant.key === 'relaxed-simd' && !supportsWasmRelaxedSimd()) {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'relaxed-simd', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'relaxed SIMD unsupported', wasmUrl: variant.wasmUrl });
+          rows.push({
+            variant: variant.label,
+            mode,
+            position: 'runtime',
+            fen: '',
+            budget: 'relaxed-simd',
+            run: 'skipped',
+            wallMs: 0,
+            bestMove: null,
+            depth: null,
+            scoreCp: null,
+            mateIn: null,
+            nodes: null,
+            nps: null,
+            pvUci: [],
+            runtime: 'relaxed SIMD unsupported',
+            wasmUrl: variant.wasmUrl,
+          });
           render();
           continue;
         }
         if (mode === 'persistent' && variant.engine === 'viridithas' && !canUsePersistentViridithasWasi()) {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variantArtifactUrl(variant) });
+          rows.push({
+            variant: variant.label,
+            mode,
+            position: 'runtime',
+            fen: '',
+            budget: 'persistent',
+            run: 'skipped',
+            wallMs: 0,
+            bestMove: null,
+            depth: null,
+            scoreCp: null,
+            mateIn: null,
+            nodes: null,
+            nps: null,
+            pvUci: [],
+            runtime: 'persistent unavailable',
+            wasmUrl: variantArtifactUrl(variant),
+          });
           render();
           continue;
         }
         if (mode === 'batch' && variant.engine === 'reckless') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'batch', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'batch mode is Viridithas-only', wasmUrl: variantArtifactUrl(variant) });
+          rows.push({
+            variant: variant.label,
+            mode,
+            position: 'runtime',
+            fen: '',
+            budget: 'batch',
+            run: 'skipped',
+            wallMs: 0,
+            bestMove: null,
+            depth: null,
+            scoreCp: null,
+            mateIn: null,
+            nodes: null,
+            nps: null,
+            pvUci: [],
+            runtime: 'batch mode is Viridithas-only',
+            wasmUrl: variantArtifactUrl(variant),
+          });
           render();
           continue;
         }
         if (mode !== 'persistent' && (variant.engine === 'berserk' || variant.engine === 'plentychess')) {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: mode, run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: `${variant.label} Emscripten adapter benchmarks as a resident worker only`, wasmUrl: variantArtifactUrl(variant) });
+          rows.push({
+            variant: variant.label,
+            mode,
+            position: 'runtime',
+            fen: '',
+            budget: mode,
+            run: 'skipped',
+            wallMs: 0,
+            bestMove: null,
+            depth: null,
+            scoreCp: null,
+            mateIn: null,
+            nodes: null,
+            nps: null,
+            pvUci: [],
+            runtime: `${variant.label} Emscripten adapter benchmarks as a resident worker only`,
+            wasmUrl: variantArtifactUrl(variant),
+          });
           render();
           continue;
         }
         if (mode === 'persistent' && variant.engine === 'reckless' && !persistentAvailable && variant.backend !== 'browser-api') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'persistent', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'persistent unavailable', wasmUrl: variantArtifactUrl(variant) });
+          rows.push({
+            variant: variant.label,
+            mode,
+            position: 'runtime',
+            fen: '',
+            budget: 'persistent',
+            run: 'skipped',
+            wallMs: 0,
+            bestMove: null,
+            depth: null,
+            scoreCp: null,
+            mateIn: null,
+            nodes: null,
+            nps: null,
+            pvUci: [],
+            runtime: 'persistent unavailable',
+            wasmUrl: variantArtifactUrl(variant),
+          });
           render();
           continue;
         }
         if (mode === 'one-shot' && variant.engine === 'reckless' && variant.backend === 'browser-api') {
-          rows.push({ variant: variant.label, mode, position: 'runtime', fen: '', budget: 'one-shot', run: 'skipped', wallMs: 0, bestMove: null, depth: null, scoreCp: null, mateIn: null, nodes: null, nps: null, pvUci: [], runtime: 'browser API reuses a resident worker/engine; one-shot mode is WASI/UCI only', wasmUrl: variantArtifactUrl(variant) });
+          rows.push({
+            variant: variant.label,
+            mode,
+            position: 'runtime',
+            fen: '',
+            budget: 'one-shot',
+            run: 'skipped',
+            wallMs: 0,
+            bestMove: null,
+            depth: null,
+            scoreCp: null,
+            mateIn: null,
+            nodes: null,
+            nps: null,
+            pvUci: [],
+            runtime: 'browser API reuses a resident worker/engine; one-shot mode is WASI/UCI only',
+            wasmUrl: variantArtifactUrl(variant),
+          });
           render();
           continue;
         }
         for (const budget of config.budgets) {
-          const engine: BenchEngine = variant.engine === 'viridithas'
-            ? new ViridithasEngine(budget.options, variant.wasmUrl, { forceOneShot: mode !== 'persistent', disablePersistentFallback: mode === 'persistent' })
-            : variant.engine === 'berserk'
-              ? new BerserkEngine({ ...budget.options, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl)
-              : variant.engine === 'plentychess'
-                ? new PlentyChessEngine({ ...budget.options, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl)
-                : new RecklessEngine(
-                budget.options,
-                variant.wasmUrl,
-                {
-                  backend: variant.backend ?? 'wasi',
-                  nnueUrl: variant.nnueUrl,
-                  nnueExpectedBytes: variant.nnueExpectedBytes,
-                  forceOneShot: mode === 'one-shot',
-                  disablePersistentFallback: mode === 'persistent',
-                },
-              );
+          const engine: BenchEngine =
+            variant.engine === 'viridithas'
+              ? new ViridithasEngine(budget.options, variant.wasmUrl, { forceOneShot: mode !== 'persistent', disablePersistentFallback: mode === 'persistent' })
+              : variant.engine === 'berserk'
+                ? new BerserkEngine({ ...budget.options, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl)
+                : variant.engine === 'plentychess'
+                  ? new PlentyChessEngine({ ...budget.options, threads: 1 }, variant.jsUrl, variant.wasmUrl, variant.dataUrl)
+                  : new RecklessEngine(budget.options, variant.wasmUrl, {
+                      backend: variant.backend ?? 'wasi',
+                      nnueUrl: variant.nnueUrl,
+                      nnueExpectedBytes: variant.nnueExpectedBytes,
+                      forceOneShot: mode === 'one-shot',
+                      disablePersistentFallback: mode === 'persistent',
+                    });
           try {
             if (mode === 'batch' && variant.engine === 'viridithas' && engine instanceof ViridithasEngine) {
               setStatus(`Running ${variant.label} batch ${budget.label} first pass across ${config.positions.length} positions…`);
@@ -495,21 +720,38 @@ function downloadText(text: string, filename: string, mime: string): void {
   URL.revokeObjectURL(url);
 }
 
-el('run').addEventListener('click', () => { void runBench(); });
+el('run').addEventListener('click', () => {
+  void runBench();
+});
 el('stop').addEventListener('click', () => abort?.abort());
 el('loadFenSuite').addEventListener('click', () => {
   textareaEl('fenInput').value = ROTATED_FEN_SUITE_TEXT;
   render();
   setStatus(`Loaded ${selectedPositions().length}-position rotated FEN suite.`);
 });
-el('copyJson').addEventListener('click', () => { void copyText(JSON.stringify(report(), null, 2), 'JSON report'); });
-el('copyCsv').addEventListener('click', () => { void copyText(csvReport(), 'CSV'); });
+el('copyJson').addEventListener('click', () => {
+  void copyText(JSON.stringify(report(), null, 2), 'JSON report');
+});
+el('copyCsv').addEventListener('click', () => {
+  void copyText(csvReport(), 'CSV');
+});
 el('downloadJson').addEventListener('click', () => downloadText(JSON.stringify(report(), null, 2), 'reckless-benchmark-report.json', 'application/json'));
 el('downloadCsv').addEventListener('click', () => downloadText(csvReport(), 'reckless-benchmark-runs.csv', 'text/csv'));
-for (const variant of [RECKLESS_FULL_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT]) void checkRecklessVariantAsset(variant, render);
+for (const variant of [
+  RECKLESS_FULL_VARIANT,
+  RECKLESS_SIMD_VARIANT,
+  RECKLESS_RELAXED_SIMD_VARIANT,
+  RECKLESS_BROWSER_API_VARIANT,
+  RECKLESS_BROWSER_API_SIMD_VARIANT,
+  RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT,
+  RECKLESS_LITE_VARIANT,
+])
+  void checkRecklessVariantAsset(variant, render);
 void checkViridithasVariantAsset(VIRIDITHAS_DEFAULT_VARIANT, render);
 void checkViridithasVariantAsset(VIRIDITHAS_SIMD_VARIANT, render);
 void checkBerserkVariantAsset(BERSERK_EMSCRIPTEN_VARIANT, render);
 void checkPlentyChessVariantAsset(PLENTYCHESS_EMSCRIPTEN_VARIANT, render);
-setStatus(`Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · relaxedSIMD=${supportsWasmRelaxedSimd()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · Berserk Emscripten=${BERSERK_EMSCRIPTEN_VARIANT.jsUrl} · PlentyChess Emscripten=${PLENTYCHESS_EMSCRIPTEN_VARIANT.jsUrl} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
+setStatus(
+  `Ready. recklessPersistent=${canUsePersistentRecklessWasi()} · relaxedSIMD=${supportsWasmRelaxedSimd()} · viridithasPersistent=${canUsePersistentViridithasWasi()} · Berserk Emscripten=${BERSERK_EMSCRIPTEN_VARIANT.jsUrl} · PlentyChess Emscripten=${PLENTYCHESS_EMSCRIPTEN_VARIANT.jsUrl} · SAB=${typeof SharedArrayBuffer !== 'undefined'}`,
+);
 render();

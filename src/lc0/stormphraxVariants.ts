@@ -102,7 +102,9 @@ export const STORMPHRAX_RELAXED_VARIANT: StormphraxVariant = {
 export const STORMPHRAX_VARIANTS: readonly StormphraxVariant[] = [STORMPHRAX_EMSCRIPTEN_VARIANT, STORMPHRAX_RELAXED_VARIANT];
 
 export function normalizeStormphraxVariant(raw: string | null | undefined): StormphraxVariantKey {
-  const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
+  const value = String(raw ?? '')
+    .toLowerCase()
+    .replace(/[ _-]+/g, '');
   if (value === 'custom') return 'custom';
   if (value === 'relaxed' || value === 'relaxedsimd' || value === 'emscriptenrelaxed' || value === 'emscriptenrelaxedsimd128') return 'emscripten-relaxed';
   return 'emscripten';
@@ -137,7 +139,9 @@ export function stormphraxVariantByKey(key: string): StormphraxVariant {
 }
 
 export function hasExplicitStormphraxVariant(params: URLSearchParams): boolean {
-  return params.has('stormphraxJs') || params.has('stormphraxWasm') || params.has('stormphraxData') || params.has('stormphraxVariant') || params.has('stormphrax');
+  return (
+    params.has('stormphraxJs') || params.has('stormphraxWasm') || params.has('stormphraxData') || params.has('stormphraxVariant') || params.has('stormphrax')
+  );
 }
 
 export function stormphraxVariantFromParams(params: URLSearchParams): StormphraxVariant {
@@ -167,7 +171,11 @@ export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing) return existing.then((status) => { onChange?.(); return status; });
+  if (existing)
+    return existing.then((status) => {
+      onChange?.();
+      return status;
+    });
   if (!isLocalDevelopmentOrigin() && variant.key !== 'custom' && !supportsStormphraxVariant(variant)) {
     assetStatuses.set(key, 'missing');
     onChange?.();
@@ -176,7 +184,13 @@ export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange
   assetStatuses.set(key, 'checking');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
-  const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal }).then((response) => response.ok).catch(() => false)))
+  const promise = Promise.all(
+    assetUrls(variant).map((url) =>
+      fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal })
+        .then((response) => response.ok)
+        .catch(() => false),
+    ),
+  )
     .then((results) => (results.every(Boolean) ? 'present' : 'missing') as StormphraxAssetStatus)
     .then((status) => {
       assetStatuses.set(key, status);
@@ -190,7 +204,11 @@ export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange
   return promise;
 }
 
-export async function resolveDefaultStormphraxVariantAssetFallback(variant: StormphraxVariant, explicit: boolean, onChange?: () => void): Promise<StormphraxVariant> {
+export async function resolveDefaultStormphraxVariantAssetFallback(
+  variant: StormphraxVariant,
+  explicit: boolean,
+  onChange?: () => void,
+): Promise<StormphraxVariant> {
   if (explicit || variant.key !== 'emscripten-relaxed') return variant;
   const status = await checkStormphraxVariantAsset(variant, onChange);
   return status === 'missing' ? STORMPHRAX_EMSCRIPTEN_VARIANT : variant;

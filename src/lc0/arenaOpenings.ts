@@ -1,6 +1,6 @@
-import { boardToFen, parseFen, START_FEN, type BoardState } from '../chess/board.ts';
-import { makeMove } from '../chess/movegen.ts';
+import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
+import { makeMove } from '../chess/movegen.ts';
 import { sanToMove } from '../chess/pgn.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 
@@ -86,11 +86,12 @@ function parseFenOpening(name: string, body: string): ArenaOpening | null {
 }
 
 function uciTokens(body: string): string[] | null {
-  const tokens = body.split(/[\s,]+/).map((token) => token.trim()).filter(Boolean);
+  const tokens = body
+    .split(/[\s,]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
   if (!tokens.length) return null;
-  return tokens.every((token) => /^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(token))
-    ? tokens.map((token) => token.toLowerCase())
-    : null;
+  return tokens.every((token) => /^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(token)) ? tokens.map((token) => token.toLowerCase()) : null;
 }
 
 function parseUciOpening(name: string, body: string): ArenaOpening | null {
@@ -171,7 +172,10 @@ export function parseArenaOpenings(text: string): ArenaOpening[] {
   return openings;
 }
 
-export function scheduleOpenings<T extends { white: string; black: string }>(pairings: readonly T[], openings: readonly ArenaOpening[]): (T & { opening: ArenaOpening })[] {
+export function scheduleOpenings<T extends { white: string; black: string }>(
+  pairings: readonly T[],
+  openings: readonly ArenaOpening[],
+): (T & { opening: ArenaOpening })[] {
   const selected = openings.length ? openings : [{ name: 'Start position', fen: START_FEN }];
   const games: (T & { opening: ArenaOpening })[] = [];
   for (const opening of selected) {

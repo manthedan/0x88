@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseBestMove, parseStockfishInfo, StockfishEngine, DEFAULT_STOCKFISH_HASH_MB, defaultStockfishUrl, normalizeStockfishFlavor, stockfishFlavorRequiresIsolation, stockfishFlavorUrl, stockfishGoCommand, stockfishWorkerUrl } from '../src/lc0/stockfishEngine.ts';
-import { CPU_ENGINE_HASH_MB_BY_SURFACE, DEFAULT_CPU_ENGINE_HASH_MB, cpuEngineHashMbForSurface } from '../src/lc0/cpuEngineMemory.ts';
+import { CPU_ENGINE_HASH_MB_BY_SURFACE, cpuEngineHashMbForSurface, DEFAULT_CPU_ENGINE_HASH_MB } from '../src/lc0/cpuEngineMemory.ts';
+import {
+  DEFAULT_STOCKFISH_HASH_MB,
+  defaultStockfishUrl,
+  normalizeStockfishFlavor,
+  parseBestMove,
+  parseStockfishInfo,
+  StockfishEngine,
+  stockfishFlavorRequiresIsolation,
+  stockfishFlavorUrl,
+  stockfishGoCommand,
+  stockfishWorkerUrl,
+} from '../src/lc0/stockfishEngine.ts';
 
 /** Minimal UCI worker double: answers `uci`/`isready` and records every command. */
 class MockStockfishWorker {
@@ -186,30 +197,18 @@ test('StockfishEngine always sends a Hash setoption instead of the 16 MB built-i
     const engine = new StockfishEngine({ depth: 14 }, '/stockfish/stockfish-18-lite-single.js');
     await engine.prewarm();
     const worker = MockStockfishWorker.instances[0];
-    assert.deepEqual(worker.messages, [
-      'uci',
-      `setoption name Hash value ${DEFAULT_STOCKFISH_HASH_MB}`,
-      'isready',
-    ]);
+    assert.deepEqual(worker.messages, ['uci', `setoption name Hash value ${DEFAULT_STOCKFISH_HASH_MB}`, 'isready']);
     // Stockfish ignores out-of-range spin values, so the clamp must hold the
     // wasm32 ceiling of 2048 MB and a 1 MB floor.
     engine.setOptions({ hashMb: 999999 });
     engine.setOptions({ hashMb: 0 });
-    assert.deepEqual(worker.messages.slice(3), [
-      'setoption name Hash value 2048',
-      'setoption name Hash value 1',
-    ]);
+    assert.deepEqual(worker.messages.slice(3), ['setoption name Hash value 2048', 'setoption name Hash value 1']);
     engine.dispose();
 
     MockStockfishWorker.instances = [];
     const explicit = new StockfishEngine({ depth: 4, threads: 1, hashMb: 128 }, '/stockfish/stockfish-18-lite-single.js');
     await explicit.prewarm();
-    assert.deepEqual(MockStockfishWorker.instances[0].messages, [
-      'uci',
-      'setoption name Threads value 1',
-      'setoption name Hash value 128',
-      'isready',
-    ]);
+    assert.deepEqual(MockStockfishWorker.instances[0].messages, ['uci', 'setoption name Threads value 1', 'setoption name Hash value 128', 'isready']);
     explicit.dispose();
   } finally {
     if (previousWorker === undefined) delete globalThis.Worker;
@@ -338,10 +337,7 @@ test('StockfishEngine disposal rejects queued searches without restarting a work
     const queued = engine.bestMove('8/8/8/8/4P3/8/8/4K3 b - - 0 1');
     await sleep(5);
     engine.dispose();
-    await Promise.all([
-      assert.rejects(first, (error) => error.name === 'AbortError'),
-      assert.rejects(queued, (error) => error.name === 'AbortError'),
-    ]);
+    await Promise.all([assert.rejects(first, (error) => error.name === 'AbortError'), assert.rejects(queued, (error) => error.name === 'AbortError')]);
     assert.equal(HangingStockfishWorker.instances.length, 1, 'queued search recreated a worker after disposal');
   } finally {
     if (previousWorker === undefined) delete globalThis.Worker;

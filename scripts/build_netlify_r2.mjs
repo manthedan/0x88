@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { mkdtemp, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -42,33 +42,61 @@ async function main() {
   const publicDir = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-public-'));
   try {
     const prep = await timed('prepare pruned public assets', () => prepareNetlifyR2PublicAssets('public', publicDir), timings);
-    console.error(`[netlify-r2-build] public assets: copied ${prep.copiedFiles} files, skipped ${prep.skippedFiles} files and ${prep.skippedDirs} dirs (${(prep.skippedBytes / 1_000_000).toFixed(1)} MB)`);
+    console.error(
+      `[netlify-r2-build] public assets: copied ${prep.copiedFiles} files, skipped ${prep.skippedFiles} files and ${prep.skippedDirs} dirs (${(prep.skippedBytes / 1_000_000).toFixed(1)} MB)`,
+    );
     await timed('clean prior build output', () => cleanSvelteKitBuild(dist), timings);
-    await timed('vite build', () => {
-      run('vite', ['build', '--outDir', dist], {
-        env: {
-          ...process.env,
-          BUILD_SCOPE: process.env.BUILD_SCOPE || 'product',
-          VITE_LC0_ARTIFACT_CHANNEL_URL: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || 'https://assets.0x88.app/channels/stable.json',
-          VITE_LC0_BROWSER_ASSET_BASE_URL: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || 'https://assets.0x88.app',
-          VITE_BROWSER_CHESS_DEPLOY_PROFILE: deployProfile,
-          NETLIFY_R2_RELEASE_DIST: dist,
-          NETLIFY_R2_PUBLIC_ASSETS: publicDir,
-        },
-      });
-    }, timings);
+    await timed(
+      'vite build',
+      () => {
+        run('vite', ['build', '--outDir', dist], {
+          env: {
+            ...process.env,
+            BUILD_SCOPE: process.env.BUILD_SCOPE || 'product',
+            VITE_LC0_ARTIFACT_CHANNEL_URL: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || 'https://assets.0x88.app/channels/stable.json',
+            VITE_LC0_BROWSER_ASSET_BASE_URL: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || 'https://assets.0x88.app',
+            VITE_BROWSER_CHESS_DEPLOY_PROFILE: deployProfile,
+            NETLIFY_R2_RELEASE_DIST: dist,
+            NETLIFY_R2_PUBLIC_ASSETS: publicDir,
+          },
+        });
+      },
+      timings,
+    );
     await timed('verify SvelteKit runtime id', () => checkSvelteKitRuntimeId(dist), timings);
-    await timed('prune external assets', () => {
-      run(process.execPath, ['scripts/prune_external_model_assets.mjs', dist]);
-    }, timings);
+    await timed(
+      'prune external assets',
+      () => {
+        run(process.execPath, ['scripts/prune_external_model_assets.mjs', dist]);
+      },
+      timings,
+    );
     if (deployProfile === 'v0') {
-      await timed('prune v0 assets', () => {
-        run(process.execPath, ['scripts/prune_v0_deploy_assets.mjs', dist]);
-      }, timings);
+      await timed(
+        'prune v0 assets',
+        () => {
+          run(process.execPath, ['scripts/prune_v0_deploy_assets.mjs', dist]);
+        },
+        timings,
+      );
     }
-    await timed('precompress artifacts', () => {
-      run(process.execPath, ['scripts/precompress_engine_artifacts.mjs', dist, '--allow-missing', '--exclude', 'monty', '--exclude', 'stockfish', '--cache-dir', precompressCacheDir]);
-    }, timings);
+    await timed(
+      'precompress artifacts',
+      () => {
+        run(process.execPath, [
+          'scripts/precompress_engine_artifacts.mjs',
+          dist,
+          '--allow-missing',
+          '--exclude',
+          'monty',
+          '--exclude',
+          'stockfish',
+          '--cache-dir',
+          precompressCacheDir,
+        ]);
+      },
+      timings,
+    );
     const total = timings.reduce((sum, entry) => sum + entry.ms, 0);
     console.error(`[netlify-r2-build] total: ${formatMs(total)} dist=${relative(process.cwd(), dist) || '.'}`);
   } finally {

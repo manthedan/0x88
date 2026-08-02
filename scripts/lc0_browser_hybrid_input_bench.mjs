@@ -7,7 +7,9 @@ const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 240_000;
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_input_bench.mjs [options]\n\nRuns the browser LC0 hybrid input-path benchmark over all 16 representative fixtures.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --backends LIST      Input backends to compare (default js,wasm; choices js,wgsl,wasm)\n  --legal-priors-backend MODE\n                       Legal-prior backend used for all input-backend cells: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --iters N            Timed iterations per fixture/backend (default 1)\n  --warmup N           Warmup evals per backend (default 1)\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`);
+  console.log(
+    `Usage: node --experimental-strip-types scripts/lc0_browser_hybrid_input_bench.mjs [options]\n\nRuns the browser LC0 hybrid input-path benchmark over all 16 representative fixtures.\n\nOptions:\n  --base-url URL        Use an existing dev server (default http://${DEFAULT_HOST}:${DEFAULT_PORT})\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --layers N           Encoder layers for hybrid path (default 10)\n  --head-backend MODE  Hybrid head backend: ort or wgsl (default ort)\n  --backends LIST      Input backends to compare (default js,wasm; choices js,wgsl,wasm)\n  --legal-priors-backend MODE\n                       Legal-prior backend used for all input-backend cells: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --iters N            Timed iterations per fixture/backend (default 1)\n  --warmup N           Warmup evals per backend (default 1)\n  --pack-verify        Enable shard sha256 verification (default skipped for benchmarking)\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -57,12 +59,21 @@ function parseArgs(argv) {
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!['ort', 'wgsl'].includes(args.headBackend)) throw new Error(`Invalid --head-backend: ${args.headBackend}`);
-  for (const backend of args.backends.split(',').map((entry) => entry.trim()).filter(Boolean)) {
+  for (const backend of args.backends
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)) {
     if (!['js', 'wgsl', 'wasm'].includes(backend)) throw new Error(`Invalid input backend in --backends: ${backend}`);
   }
   if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
   if (args.legalPriorsBackend === 'gpu' && args.headBackend !== 'wgsl') throw new Error('--legal-priors-backend gpu requires --head-backend wgsl');
-  for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['layers', args.layers], ['iters', args.iters], ['warmup', args.warmup]]) {
+  for (const [name, value] of [
+    ['port', args.port],
+    ['timeout', args.timeoutMs],
+    ['layers', args.layers],
+    ['iters', args.iters],
+    ['warmup', args.warmup],
+  ]) {
     if (!Number.isFinite(value) || value < 0 || (name !== 'warmup' && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
   }
   return args;
@@ -109,7 +120,8 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
       try {
         const parsed = stdout ? JSON.parse(stdout.trim()) : null;
         if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
+          if (parsed.success === false)
+            return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);

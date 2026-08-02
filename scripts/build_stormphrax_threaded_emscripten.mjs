@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 // PROTOTYPE ONLY -- research build for docs/threaded_emscripten_smp_prototype_2026-07-25.md
 //
 // This is a deliberate fork of scripts/build_stormphrax_emscripten.mjs whose only
@@ -23,7 +24,6 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const engineDir = path.resolve(process.env.STORMPHRAX_BUILD_DIR ?? path.join(root, '.local_engines', 'stormphrax-emscripten-src'));
@@ -36,8 +36,7 @@ const netUrl = process.env.STORMPHRAX_NET_URL ?? `https://github.com/Ciekce/stor
 const netSha256 = process.env.STORMPHRAX_NET_SHA256 ?? '04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf';
 const patchPath = path.resolve(process.env.STORMPHRAX_PATCH ?? path.join(root, 'patches', 'stormphrax-emscripten.patch'));
 const jsOut = path.resolve(
-  process.env.STORMPHRAX_EMSCRIPTEN_JS_OUT
-    ?? path.join(root, '.local_engines', 'stormphrax-threaded-out', 'stormphrax-emscripten-threaded.js'),
+  process.env.STORMPHRAX_EMSCRIPTEN_JS_OUT ?? path.join(root, '.local_engines', 'stormphrax-threaded-out', 'stormphrax-emscripten-threaded.js'),
 );
 const outBase = path.basename(jsOut, '.js');
 const emsdkImage = process.env.STORMPHRAX_EMSDK_IMAGE ?? 'emscripten/emsdk:6.0.2';
@@ -95,7 +94,6 @@ fs.copyFileSync(netPath, path.join(engineDir, netName));
 
 run('git', ['apply', '--ignore-space-change', '--ignore-whitespace', patchPath], { cwd: engineDir });
 
-
 const sources = [
   ...walkSources(path.join(engineDir, 'src')).sort(),
   '3rdparty/fmt/src/format.cc',
@@ -117,23 +115,39 @@ const emxxArgs = [
   '-msse4.1',
   ...(relaxedSimd ? ['-mrelaxed-simd'] : []),
   '-pthread',
-  '-s', 'USE_PTHREADS=1',
-  '-s', `PTHREAD_POOL_SIZE=${poolSize}`,
-  '-s', 'PTHREAD_POOL_SIZE_STRICT=0',
-  '-s', `DEFAULT_PTHREAD_STACK_SIZE=${pthreadStackSize}`,
-  '-s', 'MODULARIZE=1',
-  '-s', 'EXPORT_NAME="Stormphrax"',
-  '-s', 'ENVIRONMENT=node,web,worker',
-  '-s', 'ALLOW_MEMORY_GROWTH=1',
-  '-s', `INITIAL_MEMORY=${process.env.STORMPHRAX_INITIAL_MEMORY ?? '536870912'}`,
-  '-s', `MAXIMUM_MEMORY=${process.env.STORMPHRAX_MAXIMUM_MEMORY ?? '2147483648'}`,
-  '-s', `STACK_SIZE=${process.env.STORMPHRAX_STACK_SIZE ?? '67108864'}`,
-  '-s', 'EXIT_RUNTIME=0',
-  '-s', 'EXPORTED_RUNTIME_METHODS=ccall',
-  '-s', 'EXPORTED_FUNCTIONS=["_main","_command","_isReady","_isSearching"]',
-  '--preload-file', `${netName}@/${netName}`,
+  '-s',
+  'USE_PTHREADS=1',
+  '-s',
+  `PTHREAD_POOL_SIZE=${poolSize}`,
+  '-s',
+  'PTHREAD_POOL_SIZE_STRICT=0',
+  '-s',
+  `DEFAULT_PTHREAD_STACK_SIZE=${pthreadStackSize}`,
+  '-s',
+  'MODULARIZE=1',
+  '-s',
+  'EXPORT_NAME="Stormphrax"',
+  '-s',
+  'ENVIRONMENT=node,web,worker',
+  '-s',
+  'ALLOW_MEMORY_GROWTH=1',
+  '-s',
+  `INITIAL_MEMORY=${process.env.STORMPHRAX_INITIAL_MEMORY ?? '536870912'}`,
+  '-s',
+  `MAXIMUM_MEMORY=${process.env.STORMPHRAX_MAXIMUM_MEMORY ?? '2147483648'}`,
+  '-s',
+  `STACK_SIZE=${process.env.STORMPHRAX_STACK_SIZE ?? '67108864'}`,
+  '-s',
+  'EXIT_RUNTIME=0',
+  '-s',
+  'EXPORTED_RUNTIME_METHODS=ccall',
+  '-s',
+  'EXPORTED_FUNCTIONS=["_main","_command","_isReady","_isSearching"]',
+  '--preload-file',
+  `${netName}@/${netName}`,
   ...sources,
-  '-o', `${outBase}.js`,
+  '-o',
+  `${outBase}.js`,
 ];
 
 if (process.env.STORMPHRAX_EMXX || canRun('em++')) {

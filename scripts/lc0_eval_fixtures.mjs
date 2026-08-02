@@ -13,14 +13,16 @@ for (const fixture of fixtures) {
   const positions = fixture.moves ? buildBoardHistoryFromMoves(fixture.moves, fixture.startFen) : undefined;
   const input = positions ? { positions } : fixture.fen;
   const evaluation = await evaluator.evaluate(input);
-  console.log(JSON.stringify({
-    id: fixture.id,
-    fen: fixture.fen ?? boardToFen(positions[positions.length - 1]),
-    ...(fixture.moves ? { startFen: fixture.startFen, moves: fixture.moves } : {}),
-    bestMove: evaluation.bestMove,
-    wdl: evaluation.wdl,
-    q: evaluation.q,
-    mlh: evaluation.mlh,
-    topPriors: evaluation.legalPriors.slice(0, 10).map(({ uci, index, prior }) => ({ uci, index, prior })),
-  }));
+  console.log(
+    JSON.stringify({
+      id: fixture.id,
+      fen: fixture.fen ?? boardToFen(positions[positions.length - 1]),
+      ...(fixture.moves ? { startFen: fixture.startFen, moves: fixture.moves } : {}),
+      bestMove: evaluation.bestMove,
+      wdl: evaluation.wdl,
+      q: evaluation.q,
+      mlh: evaluation.mlh,
+      topPriors: evaluation.legalPriors.slice(0, 10).map(({ uci, index, prior }) => ({ uci, index, prior })),
+    }),
+  );
 }

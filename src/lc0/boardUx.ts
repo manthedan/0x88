@@ -2,9 +2,9 @@
 // behave identically: live check highlighting and a lichess-style in-board
 // promotion overlay (instead of auto-queening or detached buttons).
 import type { Key } from 'chessground/types';
-import { squareName, type BoardState, type Color } from '../chess/board.ts';
-import { inCheck, legalMoves } from '../chess/movegen.ts';
+import { type BoardState, type Color, squareName } from '../chess/board.ts';
 import type { Move } from '../chess/moveCodec.ts';
+import { inCheck, legalMoves } from '../chess/movegen.ts';
 
 /**
  * Chessground `check` config value for a position: chessground only renders

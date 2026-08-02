@@ -27,9 +27,15 @@ if (bundledCopies.length) {
   throw new Error(`Vite emitted duplicate ORT WASM assets: ${bundledCopies.map((path) => relative(process.cwd(), path)).join(', ')}`);
 }
 
-console.log(JSON.stringify({
-  status: 'ORT_WASM_DEDUP_CHECK_DONE',
-  root: relative(process.cwd(), root) || '.',
-  canonical: canonical.map((path) => relative(process.cwd(), path)),
-  bundledCopies: [],
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      status: 'ORT_WASM_DEDUP_CHECK_DONE',
+      root: relative(process.cwd(), root) || '.',
+      canonical: canonical.map((path) => relative(process.cwd(), path)),
+      bundledCopies: [],
+    },
+    null,
+    2,
+  ),
+);

@@ -6,10 +6,7 @@ import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './
 import { isRequiredOrtRuntimeAsset } from './ort_runtime_assets.mjs';
 
 const externalArtifactDirectories = new Set(EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES);
-const sameOriginThreadedStockfishScripts = new Set([
-  'stockfish/stockfish-18-lite.js',
-  'stockfish/stockfish-18.js',
-]);
+const sameOriginThreadedStockfishScripts = new Set(['stockfish/stockfish-18-lite.js', 'stockfish/stockfish-18.js']);
 
 export function isSameOriginThreadedStockfishScript(relPath) {
   return sameOriginThreadedStockfishScripts.has(relPath.replace(/\\/g, '/'));

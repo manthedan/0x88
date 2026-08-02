@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseFen, boardToFen, START_FEN } from '../src/chess/board.ts';
-import { makeMove } from '../src/chess/movegen.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveFromUci, moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { makeMove } from '../src/chess/movegen.ts';
 import { applyEloContempt, searchRoot } from '../src/search/puct.ts';
 
 // ---------------------------------------------------------------------------
@@ -17,20 +17,20 @@ import { applyEloContempt, searchRoot } from '../src/search/puct.ts';
 const MONTY_ORACLE = [
   // [contempt, [material w,d,l %], [expected contempt w,d,l %]]
   [200, [28.44, 56.32, 15.24], [29.56, 55.88, 14.55]],
-  [200, [34.12, 50.79, 15.10], [35.49, 50.17, 14.34]],
-  [200, [92.17, 6.53, 1.30], [92.71, 6.09, 1.21]],
-  [200, [0.28, 5.53, 94.19], [0.30, 5.78, 93.93]],
-  [200, [0.70, 98.85, 0.45], [0.71, 98.85, 0.44]],
+  [200, [34.12, 50.79, 15.1], [35.49, 50.17, 14.34]],
+  [200, [92.17, 6.53, 1.3], [92.71, 6.09, 1.21]],
+  [200, [0.28, 5.53, 94.19], [0.3, 5.78, 93.93]],
+  [200, [0.7, 98.85, 0.45], [0.71, 98.85, 0.44]],
   [600, [28.44, 56.32, 15.24], [31.88, 54.87, 13.25]],
-  [600, [34.12, 50.79, 15.10], [38.29, 48.79, 12.92]],
-  [600, [92.17, 6.53, 1.30], [93.68, 5.28, 1.03]],
-  [600, [0.28, 5.53, 94.19], [0.33, 6.30, 93.37]],
-  [600, [0.70, 98.85, 0.45], [0.73, 98.84, 0.43]],
+  [600, [34.12, 50.79, 15.1], [38.29, 48.79, 12.92]],
+  [600, [92.17, 6.53, 1.3], [93.68, 5.28, 1.03]],
+  [600, [0.28, 5.53, 94.19], [0.33, 6.3, 93.37]],
+  [600, [0.7, 98.85, 0.45], [0.73, 98.84, 0.43]],
   [-400, [28.44, 56.32, 15.24], [26.27, 57.02, 16.71]],
-  [-400, [34.12, 50.79, 15.10], [31.46, 51.83, 16.71]],
-  [-400, [92.17, 6.53, 1.30], [90.98, 7.51, 1.51]],
+  [-400, [34.12, 50.79, 15.1], [31.46, 51.83, 16.71]],
+  [-400, [92.17, 6.53, 1.3], [90.98, 7.51, 1.51]],
   [-400, [0.28, 5.53, 94.19], [0.26, 5.06, 94.68]],
-  [-400, [0.70, 98.85, 0.45], [0.68, 98.86, 0.46]],
+  [-400, [0.7, 98.85, 0.45], [0.68, 98.86, 0.46]],
 ];
 
 const pct = (wdl) => wdl.map((x) => x / 100);
@@ -88,7 +88,7 @@ const flatEvaluator = {
   async evaluate(board, context) {
     const moves = context?.legalMoves ?? [];
     const uniform = moves.length ? 1 / moves.length : 0;
-    return { policy: new Map(moves.map((move) => [moveToActionId(move), uniform])), wdl: [0.36, 0.30, 0.34] };
+    return { policy: new Map(moves.map((move) => [moveToActionId(move), uniform])), wdl: [0.36, 0.3, 0.34] };
   },
 };
 

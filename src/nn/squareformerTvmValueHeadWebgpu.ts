@@ -71,7 +71,9 @@ fn value_head_kernel(@builtin(workgroup_id) blockIdx : vec3<u32>, @builtin(local
 }
 `;
 
-function assertLength(name: string, actual: number, expected: number) { if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`); }
+function assertLength(name: string, actual: number, expected: number) {
+  if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`);
+}
 function createInitializedBuffer(device: GPUDevice, label: string, data: Float32Array, usage: number): GPUBuffer {
   const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage, mappedAtCreation: true });
   new Float32Array(buffer.getMappedRange()).set(data);
@@ -95,9 +97,22 @@ export class SquareformerTvmValueHeadWebgpuBlock {
   private qWeight: GPUBuffer;
   private qBias: GPUBuffer;
 
-  private constructor(private device: GPUDevice, shape: SquareformerTvmFfnShape, pipeline: GPUComputePipeline, buffers: {
-    input: GPUBuffer; wdl: GPUBuffer; q: GPUBuffer; wdlReadback: GPUBuffer; qReadback: GPUBuffer; wdlWeight: GPUBuffer; wdlBias: GPUBuffer; qWeight: GPUBuffer; qBias: GPUBuffer;
-  }) {
+  private constructor(
+    private device: GPUDevice,
+    shape: SquareformerTvmFfnShape,
+    pipeline: GPUComputePipeline,
+    buffers: {
+      input: GPUBuffer;
+      wdl: GPUBuffer;
+      q: GPUBuffer;
+      wdlReadback: GPUBuffer;
+      qReadback: GPUBuffer;
+      wdlWeight: GPUBuffer;
+      wdlBias: GPUBuffer;
+      qWeight: GPUBuffer;
+      qBias: GPUBuffer;
+    },
+  ) {
     this.shape = shape;
     this.pipeline = pipeline;
     this.input = buffers.input;
@@ -111,7 +126,11 @@ export class SquareformerTvmValueHeadWebgpuBlock {
     this.qBias = buffers.qBias;
   }
 
-  static async create(device: GPUDevice, weights: SquareformerTvmValueHeadWeights, shape: Partial<SquareformerTvmFfnShape> = {}): Promise<SquareformerTvmValueHeadWebgpuBlock> {
+  static async create(
+    device: GPUDevice,
+    weights: SquareformerTvmValueHeadWeights,
+    shape: Partial<SquareformerTvmFfnShape> = {},
+  ): Promise<SquareformerTvmValueHeadWebgpuBlock> {
     const fullShape = { rows: 64, dModel: 128, dFf: 256, ...shape };
     if (fullShape.rows !== 64 || fullShape.dModel !== 128) throw new Error(`value head expects rows=64,dModel=128; got ${JSON.stringify(fullShape)}`);
     assertLength('wdlWeight', weights.wdlWeight.length, 3 * fullShape.dModel);
@@ -119,7 +138,11 @@ export class SquareformerTvmValueHeadWebgpuBlock {
     assertLength('qWeight', weights.qWeight.length, fullShape.dModel);
     assertLength('qBias', weights.qBias.length, 1);
     const module = device.createShaderModule({ label: 'squareformer-tvm-value-head', code: VALUE_HEAD_WGSL });
-    const pipeline = await device.createComputePipelineAsync({ label: 'squareformer-tvm-value-head', layout: 'auto', compute: { module, entryPoint: 'value_head_kernel' } });
+    const pipeline = await device.createComputePipelineAsync({
+      label: 'squareformer-tvm-value-head',
+      layout: 'auto',
+      compute: { module, entryPoint: 'value_head_kernel' },
+    });
     const inputBytes = fullShape.rows * fullShape.dModel * 4;
     const buffers = {
       input: createStorageBuffer(device, 'squareformer-tvm-value-input', inputBytes, GPUBufferUsage.COPY_DST),
@@ -143,19 +166,22 @@ export class SquareformerTvmValueHeadWebgpuBlock {
   encode(commandEncoder: GPUCommandEncoder, inputBuffer: GPUBuffer = this.input): { wdl: GPUBuffer; q: GPUBuffer } {
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-value-head' });
     pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-value-bindings',
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.wdl } },
-        { binding: 1, resource: { buffer: this.q } },
-        { binding: 2, resource: { buffer: inputBuffer } },
-        { binding: 3, resource: { buffer: this.wdlWeight } },
-        { binding: 4, resource: { buffer: this.wdlBias } },
-        { binding: 5, resource: { buffer: this.qWeight } },
-        { binding: 6, resource: { buffer: this.qBias } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-value-bindings',
+        layout: this.pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.wdl } },
+          { binding: 1, resource: { buffer: this.q } },
+          { binding: 2, resource: { buffer: inputBuffer } },
+          { binding: 3, resource: { buffer: this.wdlWeight } },
+          { binding: 4, resource: { buffer: this.wdlBias } },
+          { binding: 5, resource: { buffer: this.qWeight } },
+          { binding: 6, resource: { buffer: this.qBias } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(4, 1, 1);
     pass.end();
     return { wdl: this.wdl, q: this.q };
@@ -186,6 +212,7 @@ export class SquareformerTvmValueHeadWebgpuBlock {
   }
 
   destroy(): void {
-    for (const buffer of [this.input, this.wdl, this.q, this.wdlReadback, this.qReadback, this.wdlWeight, this.wdlBias, this.qWeight, this.qBias]) buffer.destroy();
+    for (const buffer of [this.input, this.wdl, this.q, this.wdlReadback, this.qReadback, this.wdlWeight, this.wdlBias, this.qWeight, this.qBias])
+      buffer.destroy();
   }
 }

@@ -5,14 +5,19 @@ import { dirname } from 'node:path';
 const DEFAULT_OUT = 'artifacts/tvm/lc0_tvmjs_startup_amortization_summary.json';
 
 function usage() {
-  console.log(`Usage: node scripts/summarize_lc0_tvmjs_startup_amortization.mjs --in MATRIX.json [options]\n\nSummarizes startup/init and simple amortization telemetry from a TVMJS-vs-hybrid matrix artifact.\nThis is research evidence only; ORT startup/init is reported only if present in the input artifact.\n\nOptions:\n  --in PATH      TVMJS-vs-hybrid matrix artifact\n  --out PATH     Output JSON summary (default ${DEFAULT_OUT})\n  -h, --help     Show help\n`);
+  console.log(
+    `Usage: node scripts/summarize_lc0_tvmjs_startup_amortization.mjs --in MATRIX.json [options]\n\nSummarizes startup/init and simple amortization telemetry from a TVMJS-vs-hybrid matrix artifact.\nThis is research evidence only; ORT startup/init is reported only if present in the input artifact.\n\nOptions:\n  --in PATH      TVMJS-vs-hybrid matrix artifact\n  --out PATH     Output JSON summary (default ${DEFAULT_OUT})\n  -h, --help     Show help\n`,
+  );
 }
 
 function parseArgs(argv) {
   const args = { out: DEFAULT_OUT };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
+    const next = () => {
+      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
+      return argv[++i];
+    };
     if (arg === '--in') args.in = next();
     else if (arg === '--out') args.out = next();
     else if (arg === '-h' || arg === '--help') args.help = true;
@@ -80,7 +85,8 @@ async function main() {
     generatedAt: new Date().toISOString(),
     sourceArtifact: args.in,
     ok: artifact.ok === true,
-    caveat: 'Research summary only. TVMJS startup fields are a sum of observed phase timings, not proof of a strictly serialized critical path. ORT startup/init is unknown unless the source artifact explicitly includes it.',
+    caveat:
+      'Research summary only. TVMJS startup fields are a sum of observed phase timings, not proof of a strictly serialized critical path. ORT startup/init is unknown unless the source artifact explicitly includes it.',
     parameters: artifact.parameters,
     rows,
     tvmjs: {

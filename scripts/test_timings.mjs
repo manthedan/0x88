@@ -65,7 +65,10 @@ function runFile(file, timeout) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) { usage(); return; }
+  if (args.help) {
+    usage();
+    return;
+  }
   const files = selectedFiles(args);
   if (args.dryRun) {
     console.log(files.join('\n'));

@@ -12,7 +12,7 @@
 //     --wasm public/reckless/reckless.wasm,public/reckless/reckless-simd128.wasm \
 //     --depths 7,8 --positions 20 --hash 16 [--nnue path/to/reckless.nnue] [--json out.json]
 import fs from 'node:fs/promises';
-import { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory } from '@bjorn3/browser_wasi_shim';
+import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from '@bjorn3/browser_wasi_shim';
 
 const ROTATED_FEN_SUITE = [
   ['Start position', 'startpos'],
@@ -49,7 +49,10 @@ for (let i = 2; i < process.argv.length; i += 1) {
   }
 }
 
-const wasmPaths = (args.get('wasm') ?? 'public/reckless/reckless.wasm,public/reckless/reckless-simd128.wasm,public/reckless/reckless-relaxed-simd128.wasm').split(',').map((s) => s.trim()).filter(Boolean);
+const wasmPaths = (args.get('wasm') ?? 'public/reckless/reckless.wasm,public/reckless/reckless-simd128.wasm,public/reckless/reckless-relaxed-simd128.wasm')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 const depths = (args.get('depths') ?? '7,8').split(',').map((s) => Math.max(1, Math.floor(Number(s))));
 const positionCount = Math.max(1, Math.min(ROTATED_FEN_SUITE.length, Math.floor(Number(args.get('positions') ?? ROTATED_FEN_SUITE.length))));
 const hashMb = Math.max(1, Math.floor(Number(args.get('hash') ?? 16)));
@@ -175,7 +178,13 @@ for (const path of wasmPaths.slice(1)) {
     pairs += 1;
     const same = ref.bestmove === row.bestmove && ref.score === row.score && ref.nodes === row.nodes && ref.pv === row.pv;
     if (same) exact += 1;
-    else mismatches.push({ position: row.position, depth: row.depth, baseline: { bestmove: ref.bestmove, score: ref.score, nodes: ref.nodes }, candidate: { bestmove: row.bestmove, score: row.score, nodes: row.nodes } });
+    else
+      mismatches.push({
+        position: row.position,
+        depth: row.depth,
+        baseline: { bestmove: ref.bestmove, score: ref.score, nodes: ref.nodes },
+        candidate: { bestmove: row.bestmove, score: row.score, nodes: row.nodes },
+      });
   }
   parity[path] = { pairs, exact, mismatches: mismatches.slice(0, 10) };
 }

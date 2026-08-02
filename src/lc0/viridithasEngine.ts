@@ -1,7 +1,7 @@
-import type { BrowserUciEngine } from './browserUciEngine.ts';
-import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
-import type { RecklessOptions } from './recklessEngine.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import type { BrowserUciEngine } from './browserUciEngine.ts';
+import type { RecklessOptions } from './recklessEngine.ts';
+import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 
 export const DEFAULT_VIRIDITHAS_WASM_URL = resolvePublicAssetUrl('/viridithas/viridithas.wasm');
 
@@ -115,7 +115,11 @@ export class ViridithasEngine implements BrowserUciEngine {
   private queueTail: Promise<void> = Promise.resolve();
   private lastInfoLines: StockfishInfoLine[] = [];
 
-  constructor(private options: RecklessOptions = {}, private readonly wasmUrl = DEFAULT_VIRIDITHAS_WASM_URL, private readonly runtimeOptions: ViridithasRuntimeOptions = {}) {}
+  constructor(
+    private options: RecklessOptions = {},
+    private readonly wasmUrl = DEFAULT_VIRIDITHAS_WASM_URL,
+    private readonly runtimeOptions: ViridithasRuntimeOptions = {},
+  ) {}
 
   setOptions(next: RecklessOptions): void {
     this.options = { ...this.options, ...next };
@@ -144,7 +148,8 @@ export class ViridithasEngine implements BrowserUciEngine {
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'viridithas-wasi-persistent' });
     const sharedInput = createSharedInput();
-    worker.onmessage = (event: MessageEvent) => this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string });
+    worker.onmessage = (event: MessageEvent) =>
+      this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string });
     worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Viridithas persistent WASI worker error'));
     this.worker = worker;
     this.workerMode = 'persistent';
@@ -165,7 +170,8 @@ export class ViridithasEngine implements BrowserUciEngine {
         // prior ucinewgame/isready sync must not make later searches skip `uci`.
         if (message.line === 'uciok') this.persistentInitialized = true;
       }
-      if (active.resolveWhenLine(message.line, message.stream ?? 'stdout')) this.resolvePersistent({ stdout: active.stdout, stderr: active.stderr, exitCode: 0 });
+      if (active.resolveWhenLine(message.line, message.stream ?? 'stdout'))
+        this.resolvePersistent({ stdout: active.stdout, stderr: active.stderr, exitCode: 0 });
       return;
     }
     if (message.type === 'persistent-error') {
@@ -207,8 +213,13 @@ export class ViridithasEngine implements BrowserUciEngine {
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    this.queueTail = previous.then(() => gate, () => gate);
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.queueTail = previous.then(
+      () => gate,
+      () => gate,
+    );
     await previous.catch(() => undefined);
     try {
       return await fn();
@@ -305,7 +316,11 @@ export class ViridithasEngine implements BrowserUciEngine {
     });
   }
 
-  private async runCommandsUntil(commands: string[], signal?: AbortSignal, resolveWhenLine?: (line: string, stream: 'stdout' | 'stderr') => boolean): Promise<RunResult> {
+  private async runCommandsUntil(
+    commands: string[],
+    signal?: AbortSignal,
+    resolveWhenLine?: (line: string, stream: 'stdout' | 'stderr') => boolean,
+  ): Promise<RunResult> {
     if (!this.runtimeOptions.forceOneShot && !this.persistentDisabled && canUsePersistentViridithasWasi()) {
       try {
         return await this.runPersistentCommands(commands, signal, resolveWhenLine);
@@ -334,11 +349,7 @@ export class ViridithasEngine implements BrowserUciEngine {
   }
 
   private searchCommands(fen: string, options: RecklessOptions, multipv = 1): string[] {
-    return [
-      ...this.setupCommands(options, multipv),
-      `position fen ${fen}`,
-      goCommand(options),
-    ];
+    return [...this.setupCommands(options, multipv), `position fen ${fen}`, goCommand(options)];
   }
 
   private batchSearchCommands(fens: string[], options: RecklessOptions, multipv = 1, clearHashBetweenSearches = true): string[] {
@@ -365,7 +376,12 @@ export class ViridithasEngine implements BrowserUciEngine {
       const mate = line.match(/\bscore mate (-?\d+)/);
       const nodes = line.match(/\bnodes (\d+)/);
       const nps = line.match(/\bnps (\d+)/);
-      const pvUci = line.match(/ pv (.+)$/)?.[1].trim().split(/\s+/).filter(Boolean) ?? [];
+      const pvUci =
+        line
+          .match(/ pv (.+)$/)?.[1]
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean) ?? [];
       latest.set(multipv, {
         multipv,
         depth,
@@ -463,7 +479,14 @@ export class ViridithasEngine implements BrowserUciEngine {
 
   async analyze(fen: string, opts: { multipv?: number; depth?: number; movetimeMs?: number; signal?: AbortSignal } = {}): Promise<StockfishInfoLine[]> {
     return this.runExclusive(async () => {
-      const result = await this.runCommands(this.searchCommands(fen, { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs }, opts.multipv ?? 1), opts.signal);
+      const result = await this.runCommands(
+        this.searchCommands(
+          fen,
+          { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs },
+          opts.multipv ?? 1,
+        ),
+        opts.signal,
+      );
       if (result.exitCode !== 0) throw new Error(`Viridithas exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return this.lastInfo();

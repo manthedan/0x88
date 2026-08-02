@@ -35,14 +35,18 @@ remove(join(root, 'viridithas'));
 removeMatchingFiles(join(root, 'reckless'), (name) => name.endsWith('.wasm') || name.endsWith('.nnue') || name.endsWith('.tar.gz'));
 remove(join(root, 'models', 'monty'));
 removeMatchingFiles(join(root, 'ort'), (name) => name.endsWith('.map'));
-removeMatchingFiles(join(root, 'stockfish'), (name) => ![
-  'stockfish-18-lite.js',
-  'stockfish-18-lite.wasm',
-  'stockfish-18-lite-single.js',
-  'stockfish-18-lite-single.wasm',
-  'stockfish-18-lite-single-relaxed.js',
-  'stockfish-18-lite-single-relaxed.wasm',
-  'stockfish-18.js',
-].includes(name));
+removeMatchingFiles(
+  join(root, 'stockfish'),
+  (name) =>
+    ![
+      'stockfish-18-lite.js',
+      'stockfish-18-lite.wasm',
+      'stockfish-18-lite-single.js',
+      'stockfish-18-lite-single.wasm',
+      'stockfish-18-lite-single-relaxed.js',
+      'stockfish-18-lite-single-relaxed.wasm',
+      'stockfish-18.js',
+    ].includes(name),
+);
 
 console.log(JSON.stringify({ status: 'V0_DEPLOY_ASSET_PRUNE_DONE', root: relative(process.cwd(), root) || '.', removed }, null, 2));

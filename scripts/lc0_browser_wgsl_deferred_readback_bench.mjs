@@ -30,8 +30,10 @@ function parseArgs(argv) {
       if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
       return argv[++i];
     };
-    if (arg === '--base-url') { args.baseUrl = next(); args.explicitBaseUrl = true; }
-    else if (arg === '--port') args.port = Number(next());
+    if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.explicitBaseUrl = true;
+    } else if (arg === '--port') args.port = Number(next());
     else if (arg === '--host') args.host = next();
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--session') args.session = next();
@@ -51,14 +53,24 @@ function parseArgs(argv) {
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
-  for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['layers', args.layers], ['batch', args.batch], ['iters', args.iters], ['warmup', args.warmup], ['fixture-limit', args.fixtureLimit]]) {
+  for (const [name, value] of [
+    ['port', args.port],
+    ['timeout', args.timeoutMs],
+    ['layers', args.layers],
+    ['batch', args.batch],
+    ['iters', args.iters],
+    ['warmup', args.warmup],
+    ['fixture-limit', args.fixtureLimit],
+  ]) {
     if (!Number.isFinite(value) || value < 0 || (!['warmup'].includes(name) && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
   }
   return args;
 }
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_deferred_readback_bench.mjs [--batch 4] [--iters 4] [--warmup 1] [--fixture-limit 4]\n`);
+  console.log(
+    `Usage: node --experimental-strip-types scripts/lc0_browser_wgsl_deferred_readback_bench.mjs [--batch 4] [--iters 4] [--warmup 1] [--fixture-limit 4]\n`,
+  );
 }
 
 function benchmarkUrl(args) {
@@ -83,8 +95,17 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
     const child = spawn(args.agentBrowser, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     const chunks = { stdout: [], stderr: [] };
     let settled = false;
-    const finish = (fn, value) => { if (!settled) { settled = true; clearTimeout(timer); fn(value); } };
-    const timer = setTimeout(() => { child.kill('SIGKILL'); finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} timed out after ${timeoutMs}ms`)); }, timeoutMs);
+    const finish = (fn, value) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        fn(value);
+      }
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
     child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
     child.stderr.on('data', (chunk) => chunks.stderr.push(chunk));
     child.on('error', (error) => finish(reject, error));
@@ -99,14 +120,19 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);
-      } catch (error) { return finish(reject, error); }
+      } catch (error) {
+        return finish(reject, error);
+      }
     });
   });
 }
 
 async function closeAgentSession(args) {
-  try { await runAgent(args, ['close'], 5_000); }
-  catch (error) { process.stderr.write(`[lc0-wgsl-deferred-readback] warning: failed to close session: ${error.message ?? error}\n`); }
+  try {
+    await runAgent(args, ['close'], 5_000);
+  } catch (error) {
+    process.stderr.write(`[lc0-wgsl-deferred-readback] warning: failed to close session: ${error.message ?? error}\n`);
+  }
 }
 
 async function waitForServer(baseUrl, timeoutMs) {
@@ -117,7 +143,9 @@ async function waitForServer(baseUrl, timeoutMs) {
       const response = await fetch(new URL('/single-engine', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) { lastError = error; }
+    } catch (error) {
+      lastError = error;
+    }
     await delay(250);
   }
   throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
@@ -156,19 +184,29 @@ async function runBrowserBenchmark(args) {
       }
     }
     throw new Error(`Timed out waiting for WGSL_DEFERRED_READBACK_BENCH_DONE after ${args.timeoutMs}ms`);
-  } finally { await closeAgentSession(args); }
+  } finally {
+    await closeAgentSession(args);
+  }
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return usage();
-  if (args.dryRun) { console.log(benchmarkUrl(args)); return; }
+  if (args.dryRun) {
+    console.log(benchmarkUrl(args));
+    return;
+  }
   const server = startServer(args);
   try {
     await waitForServer(args.baseUrl, 30_000);
     const result = await runBrowserBenchmark(args);
     console.log(JSON.stringify(result, null, 2));
-  } finally { server?.kill('SIGTERM'); }
+  } finally {
+    server?.kill('SIGTERM');
+  }
 }
 
-main().catch((error) => { console.error(error.stack ?? error.message); process.exit(1); });
+main().catch((error) => {
+  console.error(error.stack ?? error.message);
+  process.exit(1);
+});

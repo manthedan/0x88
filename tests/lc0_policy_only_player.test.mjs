@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { START_FEN, parseFen } from '../src/chess/board.ts';
+import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { Lc0PolicyOnlyPlayer } from '../src/lc0/policyOnlyPlayer.ts';
@@ -11,11 +11,16 @@ const NATIVE_PRIORS = 'fixtures/lc0/native_fen_only_blas.jsonl';
 
 function nativeCastlingToStandard(uci) {
   switch (uci) {
-    case 'e1h1': return 'e1g1';
-    case 'e1a1': return 'e1c1';
-    case 'e8h8': return 'e8g8';
-    case 'e8a8': return 'e8c8';
-    default: return uci;
+    case 'e1h1':
+      return 'e1g1';
+    case 'e1a1':
+      return 'e1c1';
+    case 'e8h8':
+      return 'e8g8';
+    case 'e8a8':
+      return 'e8c8';
+    default:
+      return uci;
   }
 }
 
@@ -41,8 +46,13 @@ test('LC0 policy-only player returns evaluator argmax without search', async () 
   assert.deepEqual(choice.evaluation.wdl, [0.2, 0.6, 0.2]);
 });
 
-test('LC0 policy-only player matches native BLAS fixture best moves', { skip: (!existsSync(MODEL) || !existsSync(NATIVE_PRIORS)) && 'missing model or native prior artifact' }, async () => {
-  const nativeRecords = readFileSync(NATIVE_PRIORS, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+test('LC0 policy-only player matches native BLAS fixture best moves', {
+  skip: (!existsSync(MODEL) || !existsSync(NATIVE_PRIORS)) && 'missing model or native prior artifact',
+}, async () => {
+  const nativeRecords = readFileSync(NATIVE_PRIORS, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
   const player = await Lc0PolicyOnlyPlayer.create(readFileSync(MODEL));
   for (const native of nativeRecords) {
     const choice = await player.chooseMove(native.fen);

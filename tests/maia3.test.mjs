@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 import { parseFen } from '../src/chess/board.ts';
 import { boardToMaia3Tokens, chooseFromMaia3Policy, maia3InternalsForTests, maia3MoveIndex } from '../src/lc0/maia3.ts';
@@ -50,8 +50,20 @@ test('Maia3 legal mask includes castling, en passant, and all promotion pieces',
   assert.ok(enPassant.includes('e5f6'));
 
   const whitePromos = maia3InternalsForTests.legalMaia3Moves(parseFen('8/1P5k/8/8/8/8/8/K7 w - - 0 1'));
-  assert.deepEqual(whitePromos.filter((entry) => entry.uci.startsWith('b7b8')).map((entry) => entry.uci).sort(), ['b7b8b', 'b7b8n', 'b7b8q', 'b7b8r']);
-  assert.deepEqual(whitePromos.filter((entry) => entry.uci.startsWith('b7b8')).map((entry) => entry.index).sort((a, b) => a - b), [4132, 4133, 4134, 4135]);
+  assert.deepEqual(
+    whitePromos
+      .filter((entry) => entry.uci.startsWith('b7b8'))
+      .map((entry) => entry.uci)
+      .sort(),
+    ['b7b8b', 'b7b8n', 'b7b8q', 'b7b8r'],
+  );
+  assert.deepEqual(
+    whitePromos
+      .filter((entry) => entry.uci.startsWith('b7b8'))
+      .map((entry) => entry.index)
+      .sort((a, b) => a - b),
+    [4132, 4133, 4134, 4135],
+  );
 });
 
 test('Maia3 legal mask is empty for terminal no-legal positions', () => {

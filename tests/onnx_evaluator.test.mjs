@@ -65,7 +65,11 @@ test('move-token ONNX evaluator fails loudly when fixed legal width overflows', 
     onnx_fixed_legal_moves: 1,
     num_move_features: 20,
   };
-  const session = { run: async () => { throw new Error('session.run should not be reached on legal overflow'); } };
+  const session = {
+    run: async () => {
+      throw new Error('session.run should not be reached on legal overflow');
+    },
+  };
   const evaluator = new OnnxEvaluator(session, meta);
   await assert.rejects(() => evaluator.evaluate(parseFen(START_FEN)), /legal move overflow: model accepts 1 legal moves but position has 20/);
 });

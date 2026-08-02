@@ -1,8 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const engineDir = path.resolve(process.env.BERSERK_BUILD_DIR ?? path.join(root, '.local_engines', 'berserk-emscripten-src'));
@@ -71,7 +71,9 @@ function fetchAndVerifyNetwork() {
   if (actualName !== netName) problems.push(`expected filename ${netName} for this content, got ${actualName}`);
   if (problems.length) {
     fs.rmSync(netPath, { force: true });
-    throw new Error(`Berserk network verification FAILED for ${netUrl}\n  ${problems.join('\n  ')}\nThe unverified download was deleted. Refusing to build against an unknown network.`);
+    throw new Error(
+      `Berserk network verification FAILED for ${netUrl}\n  ${problems.join('\n  ')}\nThe unverified download was deleted. Refusing to build against an unknown network.`,
+    );
   }
   console.log(`Verified Berserk network ${netName} (sha256 ${digest})`);
 }
@@ -89,7 +91,7 @@ function publishSharedData(builtDataPath) {
     if (sharedDigest !== builtDigest) {
       throw new Error(
         `Shared Berserk .data mismatch: ${outBase}.data (sha256 ${builtDigest}) differs from ${sharedDataPath} (sha256 ${sharedDigest}).\n` +
-        'All Berserk variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
+          'All Berserk variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
       );
     }
     console.log(`Shared ${sharedDataPath} already matches ${outBase}.data (sha256 ${builtDigest})`);
@@ -161,11 +163,12 @@ const sources = [
 // SIMD builds compile Berserk's own SSE4.1 NNUE path through Emscripten's SSE
 // intrinsic emulation headers; the relaxed build additionally swaps the
 // patched m128 dpbusd helpers to the relaxed integer dot.
-const simdFlags = process.env.BERSERK_WASM_RELAXED_SIMD === '1'
-  ? ['-msse4.1', '-msimd128', '-mrelaxed-simd']
-  : process.env.BERSERK_WASM_SIMD === '1'
-    ? ['-msse4.1', '-msimd128']
-    : [];
+const simdFlags =
+  process.env.BERSERK_WASM_RELAXED_SIMD === '1'
+    ? ['-msse4.1', '-msimd128', '-mrelaxed-simd']
+    : process.env.BERSERK_WASM_SIMD === '1'
+      ? ['-msse4.1', '-msimd128']
+      : [];
 
 const emccArgs = [
   '-std=gnu11',
@@ -250,6 +253,8 @@ for (const [tmp, out] of staged) {
 // is loud rather than something release tooling later hashes and ships.
 for (const [, out] of staged) {
   if (!fs.existsSync(out) || fs.statSync(out).size === 0) {
-    throw new Error(`Publish incomplete: ${out} is missing or empty. The output directory now holds a mixed artifact set; re-run this build before packaging or deploying.`);
+    throw new Error(
+      `Publish incomplete: ${out} is missing or empty. The output directory now holds a mixed artifact set; re-run this build before packaging or deploying.`,
+    );
   }
 }

@@ -14,19 +14,31 @@ const REQUIRED_FAMILIES = ['lc0', 'centipawn', 'sf', 'reckless', 'viridithas', '
 const REQUIRED_RUNTIME_TOKENS = ['Centipawn:', 'Reckless:', 'Viridithas:', 'Berserk:', 'PlentyChess:', 'Stormphrax:'];
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_analysis_browser_smoke.mjs [options]\n\nRuns a fast browser smoke for /app/analysis UI wiring. It verifies the multi-engine selector, profile controls, local PGN database controls, runtime status text, and actionable browser console errors.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned smoke URL without running\n  -h, --help            Show this help\n`);
+  console.log(
+    `Usage: node scripts/lc0_analysis_browser_smoke.mjs [options]\n\nRuns a fast browser smoke for /app/analysis UI wiring. It verifies the multi-engine selector, profile controls, local PGN database controls, runtime status text, and actionable browser console errors.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port when auto-starting (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --dry-run             Print planned smoke URL without running\n  -h, --help            Show this help\n`,
+  );
 }
 
 function parseArgs(argv) {
-  const args = { host: DEFAULT_HOST, port: DEFAULT_PORT, agentBrowser: DEFAULT_AGENT_BROWSER, timeoutMs: DEFAULT_TIMEOUT_MS, noServer: false, explicitBaseUrl: false, dryRun: false };
+  const args = {
+    host: DEFAULT_HOST,
+    port: DEFAULT_PORT,
+    agentBrowser: DEFAULT_AGENT_BROWSER,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    noServer: false,
+    explicitBaseUrl: false,
+    dryRun: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => {
       if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
       return argv[++i];
     };
-    if (arg === '--base-url') { args.baseUrl = next(); args.explicitBaseUrl = true; }
-    else if (arg === '--host') args.host = next();
+    if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.explicitBaseUrl = true;
+    } else if (arg === '--host') args.host = next();
     else if (arg === '--port') args.port = Number(next());
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--timeout') args.timeoutMs = Number(next());
@@ -38,7 +50,10 @@ function parseArgs(argv) {
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
-  for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs]]) {
+  for (const [name, value] of [
+    ['port', args.port],
+    ['timeout', args.timeoutMs],
+  ]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   return args;
@@ -50,10 +65,12 @@ function spawnCapture(command, commandArgs, options = {}) {
     const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
     const chunks = { stdout: [], stderr: [] };
     let settled = false;
-    const timer = timeoutMs ? setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
-    }, timeoutMs) : undefined;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          child.kill('SIGKILL');
+          finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+      : undefined;
     const finish = (fn, value) => {
       if (settled) return;
       settled = true;
@@ -77,7 +94,9 @@ function spawnCapture(command, commandArgs, options = {}) {
 
 function startServer(args) {
   if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let output = '';
   let readySettled = false;
   server.ready = new Promise((resolve, reject) => {
@@ -92,8 +111,14 @@ function startServer(args) {
       output += chunk.toString('utf8');
       if (/ready in \d+\s*ms/.test(output) || output.includes(`:${args.port}/`)) settle(resolve);
     };
-    server.stdout.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
-    server.stderr.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
+    server.stdout.on('data', (chunk) => {
+      process.stderr.write(`[vite] ${chunk}`);
+      onOutput(chunk);
+    });
+    server.stderr.on('data', (chunk) => {
+      process.stderr.write(`[vite] ${chunk}`);
+      onOutput(chunk);
+    });
     server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
   });
   return server;
@@ -157,7 +182,11 @@ function normalizeConsoleEntries(payload) {
   if (Array.isArray(payload?.messages)) return payload.messages;
   if (Array.isArray(payload?.logs)) return payload.logs;
   if (Array.isArray(payload?.result)) return payload.result;
-  if (typeof payload?.text === 'string') return payload.text.split('\n').filter(Boolean).map((text) => ({ text }));
+  if (typeof payload?.text === 'string')
+    return payload.text
+      .split('\n')
+      .filter(Boolean)
+      .map((text) => ({ text }));
   return [];
 }
 
@@ -184,7 +213,10 @@ async function runSmoke(args) {
   process.stderr.write(`[analysis-smoke] ${url}\n`);
   try {
     await runAgent(args, ['open', String(url)], 30_000, session);
-    const snapshot = await waitForEval(args, session, `(() => {
+    const snapshot = await waitForEval(
+      args,
+      session,
+      `(() => {
       const optionValues = (selector) => [...document.querySelectorAll(selector)].map((option) => option.value);
       const text = (selector) => document.querySelector(selector)?.textContent ?? '';
       return {
@@ -209,16 +241,40 @@ async function runSmoke(args) {
         runtimeText: text('#recklessRuntimeInfo'),
         pgnDbInfo: text('#pgnDbInfo'),
       };
-    })()`, (value) => {
-      if (!value || typeof value !== 'object') return false;
-      if (!REQUIRED_FAMILIES.every((family) => value.families?.includes(family))) return false;
-      if (!value.hasProfileSelect || !value.hasProfileName || !value.hasSaveProfile || !value.hasDeleteProfile || !value.hasExportProfiles || !value.hasImportProfiles || !value.hasProfileSummary) return false;
-      if (!['builtin:lc0-stockfish', 'builtin:browser-native-survey', 'builtin:lc0-wgsl-heads'].every((option) => value.profileOptionValues?.includes(option))) return false;
-      if (!value.hasPgnDbSelect || !value.hasPgnDbName || !value.hasSavePgnDb || !value.hasLoadPgnDb || !value.hasSearchPgnDbPosition || !value.hasPgnDbList || !value.hasPgnDbSearchResults) return false;
-      if (!value.hasEngineCompare) return false;
-      if (value.runtimeText === 'Reckless: detecting runtime…') return false;
-      return REQUIRED_RUNTIME_TOKENS.every((token) => value.runtimeText?.includes(token));
-    }, args.timeoutMs);
+    })()`,
+      (value) => {
+        if (!value || typeof value !== 'object') return false;
+        if (!REQUIRED_FAMILIES.every((family) => value.families?.includes(family))) return false;
+        if (
+          !value.hasProfileSelect ||
+          !value.hasProfileName ||
+          !value.hasSaveProfile ||
+          !value.hasDeleteProfile ||
+          !value.hasExportProfiles ||
+          !value.hasImportProfiles ||
+          !value.hasProfileSummary
+        )
+          return false;
+        if (
+          !['builtin:lc0-stockfish', 'builtin:browser-native-survey', 'builtin:lc0-wgsl-heads'].every((option) => value.profileOptionValues?.includes(option))
+        )
+          return false;
+        if (
+          !value.hasPgnDbSelect ||
+          !value.hasPgnDbName ||
+          !value.hasSavePgnDb ||
+          !value.hasLoadPgnDb ||
+          !value.hasSearchPgnDbPosition ||
+          !value.hasPgnDbList ||
+          !value.hasPgnDbSearchResults
+        )
+          return false;
+        if (!value.hasEngineCompare) return false;
+        if (value.runtimeText === 'Reckless: detecting runtime…') return false;
+        return REQUIRED_RUNTIME_TOKENS.every((token) => value.runtimeText?.includes(token));
+      },
+      args.timeoutMs,
+    );
     const missingFamilies = REQUIRED_FAMILIES.filter((family) => !snapshot.families.includes(family));
     if (missingFamilies.length) throw new Error(`Missing engine families: ${missingFamilies.join(', ')}`);
     const missingRuntimeTokens = REQUIRED_RUNTIME_TOKENS.filter((token) => !snapshot.runtimeText.includes(token));

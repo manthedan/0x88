@@ -3,13 +3,15 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
+import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_hybrid_search_reuse_cache_matrix.mjs [options]\n\nRuns repeated-position hybrid search benchmarks over tree-reuse and eval-cache settings.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_search_reuse_cache_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --visits LIST         Comma-separated visits list (default 32,128)\n  --preset NAME         Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batches LIST        Comma-separated batch sizes (default 1,4)\n  --batch-pipeline-depth N\n                        LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default ort,wgsl)\n  --input-backend NAME  Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME Hybrid encoder kernel (default hand)\n  --legal-priors-backend NAME\n                        Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --reuse-tree LIST     Comma-separated booleans (default 0,1)\n  --eval-cache LIST     Comma-separated cache entry counts (default 0,2048)\n  --layers N            Encoder layers (default 10)\n  --eval-iters N        Warm eval timed iterations per cell (default 0)\n  --eval-warmup N       Warm eval warmup iterations per cell (default 0)\n  --search-iters N      Repeated timed searches per cell (default 5)\n  --search-warmup N     Repeated warmup searches per cell (default 0)\n  --timeout MS          Per-cell browser timeout (default 180000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`);
+  console.log(
+    `Usage: node scripts/lc0_browser_hybrid_search_reuse_cache_matrix.mjs [options]\n\nRuns repeated-position hybrid search benchmarks over tree-reuse and eval-cache settings.\n\nOptions:\n  --out PATH            Matrix artifact path (default /tmp/lc0_hybrid_search_reuse_cache_matrix.json)\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --base-url URL        Use an existing server instead of starting Vite\n  --visits LIST         Comma-separated visits list (default 32,128)\n  --preset NAME         Runtime/search preset, e.g. ${LC0_WEBGPU_RESEARCH_B4_PRESET} (only fills unset runtime knobs)\n  --batches LIST        Comma-separated batch sizes (default 1,4)\n  --batch-pipeline-depth N\n                        LC0 batch pipeline depth (default 1; >1 is speculative search semantics)\n  --head-backends LIST  Comma-separated head backends: ort,wgsl (default ort,wgsl)\n  --input-backend NAME  Hybrid input backend: js, wgsl, or wasm (default js)\n  --encoder-kernel NAME Hybrid encoder kernel (default hand)\n  --legal-priors-backend NAME\n                        Hybrid legal-priors backend: js, wasm, or gpu (default js; gpu requires WGSL heads)\n  --reuse-tree LIST     Comma-separated booleans (default 0,1)\n  --eval-cache LIST     Comma-separated cache entry counts (default 0,2048)\n  --layers N            Encoder layers (default 10)\n  --eval-iters N        Warm eval timed iterations per cell (default 0)\n  --eval-warmup N       Warm eval warmup iterations per cell (default 0)\n  --search-iters N      Repeated timed searches per cell (default 5)\n  --search-warmup N     Repeated warmup searches per cell (default 0)\n  --timeout MS          Per-cell browser timeout (default 180000)\n  --agent-browser BIN   Browser automation binary\n  --dry-run             Print planned cells and exit\n  -h, --help            Show this help\n`,
+  );
 }
 
 function parseBool(raw) {
@@ -20,8 +22,13 @@ function parseBool(raw) {
 }
 
 function parseList(raw, parse, name) {
-  const values = String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean).map(parse);
-  if (!values.length || values.some((value) => value === undefined || (typeof value === 'number' && Number.isNaN(value)))) throw new Error(`Invalid --${name}: ${raw}`);
+  const values = String(raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(parse);
+  if (!values.length || values.some((value) => value === undefined || (typeof value === 'number' && Number.isNaN(value))))
+    throw new Error(`Invalid --${name}: ${raw}`);
   return values;
 }
 
@@ -87,14 +94,30 @@ function parseArgs(argv) {
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   for (const backend of args.headBackends) if (!['ort', 'wgsl'].includes(backend)) throw new Error(`Invalid backend: ${backend}`);
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel))
+    throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
   if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
-  if (args.legalPriorsBackend === 'gpu' && args.headBackends.some((backend) => backend !== 'wgsl')) throw new Error('--legal-priors-backend gpu requires --head-backends wgsl');
-  if (args.batchPipelineDepth > 1) process.stderr.write('[reuse-cache] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the parity-preserving baseline.\n');
-  for (const [name, value] of [['port', args.port], ['batch-pipeline-depth', args.batchPipelineDepth], ['layers', args.layers], ['eval-iters', args.evalIters], ['eval-warmup', args.evalWarmup], ['search-iters', args.searchIters], ['search-warmup', args.searchWarmup], ['timeout', args.timeoutMs]]) {
-    if (!Number.isFinite(value) || value < 0 || (!['eval-iters', 'eval-warmup', 'search-warmup'].includes(name) && value <= 0)) throw new Error(`Invalid --${name}: ${value}`);
+  if (args.legalPriorsBackend === 'gpu' && args.headBackends.some((backend) => backend !== 'wgsl'))
+    throw new Error('--legal-priors-backend gpu requires --head-backends wgsl');
+  if (args.batchPipelineDepth > 1)
+    process.stderr.write('[reuse-cache] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the parity-preserving baseline.\n');
+  for (const [name, value] of [
+    ['port', args.port],
+    ['batch-pipeline-depth', args.batchPipelineDepth],
+    ['layers', args.layers],
+    ['eval-iters', args.evalIters],
+    ['eval-warmup', args.evalWarmup],
+    ['search-iters', args.searchIters],
+    ['search-warmup', args.searchWarmup],
+    ['timeout', args.timeoutMs],
+  ]) {
+    if (!Number.isFinite(value) || value < 0 || (!['eval-iters', 'eval-warmup', 'search-warmup'].includes(name) && value <= 0))
+      throw new Error(`Invalid --${name}: ${value}`);
   }
-  for (const [name, values] of [['visits', args.visits], ['batches', args.batches]]) {
+  for (const [name, values] of [
+    ['visits', args.visits],
+    ['batches', args.batches],
+  ]) {
     if (values.some((value) => !Number.isFinite(value) || value <= 0)) throw new Error(`Invalid --${name}: ${values.join(',')}`);
   }
   if (args.evalCacheEntries.some((value) => !Number.isFinite(value) || value < 0)) throw new Error(`Invalid --eval-cache: ${args.evalCacheEntries.join(',')}`);
@@ -180,29 +203,50 @@ function compactCell(result, combo) {
 async function runCell(args, combo, index, total) {
   const session = `lc0-hybrid-reuse-cache-${process.pid}-${index}`;
   const commandArgs = [
-    'run', 'lc0:browser-hybrid-search-bench', '--',
-    '--base-url', args.baseUrl,
-    '--agent-browser', args.agentBrowser,
-    '--session', session,
-    '--head-backend', combo.headBackend,
-    '--visits', String(combo.visits),
-    '--batch', String(combo.batch),
-    '--batch-pipeline-depth', String(args.batchPipelineDepth),
-    '--layers', String(args.layers),
-    '--input-backend', args.inputBackend,
-    '--encoder-kernel', args.encoderKernel,
-    '--legal-priors-backend', args.legalPriorsBackend,
-    '--eval-iters', String(args.evalIters),
-    '--eval-warmup', String(args.evalWarmup),
-    '--search-iters', String(args.searchIters),
-    '--search-warmup', String(args.searchWarmup),
+    'run',
+    'lc0:browser-hybrid-search-bench',
+    '--',
+    '--base-url',
+    args.baseUrl,
+    '--agent-browser',
+    args.agentBrowser,
+    '--session',
+    session,
+    '--head-backend',
+    combo.headBackend,
+    '--visits',
+    String(combo.visits),
+    '--batch',
+    String(combo.batch),
+    '--batch-pipeline-depth',
+    String(args.batchPipelineDepth),
+    '--layers',
+    String(args.layers),
+    '--input-backend',
+    args.inputBackend,
+    '--encoder-kernel',
+    args.encoderKernel,
+    '--legal-priors-backend',
+    args.legalPriorsBackend,
+    '--eval-iters',
+    String(args.evalIters),
+    '--eval-warmup',
+    String(args.evalWarmup),
+    '--search-iters',
+    String(args.searchIters),
+    '--search-warmup',
+    String(args.searchWarmup),
     combo.reuseTree ? '--reuse-tree' : '--no-reuse-tree',
     combo.reuseTree ? '--no-reset-between-searches' : '--reset-between-searches',
-    '--eval-cache-entries', String(combo.evalCacheEntries),
-    '--timeout', String(args.timeoutMs),
+    '--eval-cache-entries',
+    String(combo.evalCacheEntries),
+    '--timeout',
+    String(args.timeoutMs),
   ];
   if (args.preset) commandArgs.push('--preset', args.preset);
-  process.stderr.write(`[reuse-cache] ${index}/${total} backend=${combo.headBackend} visits=${combo.visits} batch=${combo.batch} depth=${args.batchPipelineDepth} input=${args.inputBackend} encoder=${args.encoderKernel} legal=${args.legalPriorsBackend} reuse=${combo.reuseTree ? 1 : 0} cache=${combo.evalCacheEntries}\n`);
+  process.stderr.write(
+    `[reuse-cache] ${index}/${total} backend=${combo.headBackend} visits=${combo.visits} batch=${combo.batch} depth=${args.batchPipelineDepth} input=${args.inputBackend} encoder=${args.encoderKernel} legal=${args.legalPriorsBackend} reuse=${combo.reuseTree ? 1 : 0} cache=${combo.evalCacheEntries}\n`,
+  );
   const started = Date.now();
   const { stdout } = await spawnCapture('npm', commandArgs, { echoStderr: true });
   const result = JSON.parse(stdout.slice(stdout.indexOf('{')));

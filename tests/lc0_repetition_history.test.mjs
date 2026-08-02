@@ -3,14 +3,17 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { boardToFen } from '../src/chess/board.ts';
 import { automaticDrawReason } from '../src/chess/drawRules.ts';
+import { encodeLc0Classical112, LC0_PLANES_PER_HISTORY } from '../src/lc0/encoder112.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
-import { LC0_PLANES_PER_HISTORY, encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 
 const fixtures = JSON.parse(readFileSync(new URL('../fixtures/lc0/repetition_history.json', import.meta.url), 'utf8'));
 const ALL = (1n << 64n) - 1n;
 
 test('LC0 repetition history fixture replays to a threefold draw', () => {
-  assert.deepEqual(fixtures.map((fixture) => fixture.id), ['threefold-knight-shuffle-history']);
+  assert.deepEqual(
+    fixtures.map((fixture) => fixture.id),
+    ['threefold-knight-shuffle-history'],
+  );
   for (const fixture of fixtures) {
     const positions = buildBoardHistoryFromMoves(fixture.moves, fixture.startFen);
     const board = positions[positions.length - 1];

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve } from 'node:path';
+import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { COMPRESSIBLE_ARTIFACT_EXTENSIONS, PRECOMPRESS_ARTIFACT_DIRECTORIES } from './engine_artifact_registry.mjs';
 
 const root = resolve(process.argv[2] ?? 'public');
@@ -12,12 +12,16 @@ const force = process.argv.includes('--force');
 const cacheDirArg = process.argv.find((arg) => arg.startsWith('--cache-dir='));
 const cacheDir = cacheDirArg
   ? resolve(cacheDirArg.slice('--cache-dir='.length))
-  : (process.argv.includes('--cache-dir') ? resolve(process.argv[process.argv.indexOf('--cache-dir') + 1] ?? '') : undefined);
-const excludedEngines = new Set(process.argv.flatMap((arg, index, args) => {
-  if (arg === '--exclude') return args[index + 1] ? [args[index + 1]] : [];
-  if (arg.startsWith('--exclude=')) return [arg.slice('--exclude='.length)];
-  return [];
-}));
+  : process.argv.includes('--cache-dir')
+    ? resolve(process.argv[process.argv.indexOf('--cache-dir') + 1] ?? '')
+    : undefined;
+const excludedEngines = new Set(
+  process.argv.flatMap((arg, index, args) => {
+    if (arg === '--exclude') return args[index + 1] ? [args[index + 1]] : [];
+    if (arg.startsWith('--exclude=')) return [arg.slice('--exclude='.length)];
+    return [];
+  }),
+);
 // All directories that serve large fetchable artifacts. Missing dirs are
 // skipped under --allow-missing.
 const engines = PRECOMPRESS_ARTIFACT_DIRECTORIES.filter((engine) => !excludedEngines.has(engine));
@@ -111,7 +115,9 @@ for (const source of sources) {
       // Brotli q11 takes minutes on the multi-hundred-MB nets for ~1% extra over
       // q5; use fast quality past 64MB so deploy builds stay quick.
       const brotliQuality = input.byteLength > 64 * 1024 * 1024 ? 5 : 11;
-      br = await writeCachedCompressed(source, '.br', input, (bytes) => brotliCompressSync(bytes, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality } }));
+      br = await writeCachedCompressed(source, '.br', input, (bytes) =>
+        brotliCompressSync(bytes, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality } }),
+      );
     } else {
       br = keptCompressed(source, '.br');
     }
@@ -120,6 +126,6 @@ for (const source of sources) {
     br = keptCompressed(source, '.br');
   }
   const rel = relative(process.cwd(), source);
-  const action = gz.skipped && br.skipped ? 'kept' : (gz.cached && br.cached ? 'cached' : 'wrote');
+  const action = gz.skipped && br.skipped ? 'kept' : gz.cached && br.cached ? 'cached' : 'wrote';
   console.log(`${action} ${rel} -> gzip ${gz.bytes} bytes, brotli ${br.bytes} bytes`);
 }

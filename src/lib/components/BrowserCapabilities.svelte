@@ -1,28 +1,28 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+import { onMount } from 'svelte';
 
-  let ready = false;
-  let webgpu = false;
-  let isolated = false;
-  let sharedMemory = false;
-  let threads = 1;
-  let cacheStorage = false;
+let ready = false;
+let webgpu = false;
+let isolated = false;
+let sharedMemory = false;
+let threads = 1;
+let cacheStorage = false;
 
-  onMount(() => {
-    void (async () => {
-      try {
-        const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
-        webgpu = !!gpu && !!(await gpu.requestAdapter());
-      } catch {
-        webgpu = false;
-      }
-      isolated = globalThis.crossOriginIsolated === true;
-      sharedMemory = typeof SharedArrayBuffer !== 'undefined';
-      threads = Math.max(1, navigator.hardwareConcurrency || 1);
-      cacheStorage = 'caches' in globalThis;
-      ready = true;
-    })();
-  });
+onMount(() => {
+  void (async () => {
+    try {
+      const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+      webgpu = !!gpu && !!(await gpu.requestAdapter());
+    } catch {
+      webgpu = false;
+    }
+    isolated = globalThis.crossOriginIsolated === true;
+    sharedMemory = typeof SharedArrayBuffer !== 'undefined';
+    threads = Math.max(1, navigator.hardwareConcurrency || 1);
+    cacheStorage = 'caches' in globalThis;
+    ready = true;
+  })();
+});
 </script>
 
 <details class="capabilities" data-testid="browser-capabilities">

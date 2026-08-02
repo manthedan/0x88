@@ -1,11 +1,23 @@
-import { boardToFen, type BoardState } from '../chess/board.ts';
-import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
-import { moveToActionId, moveToUci, type Move } from '../chess/moveCodec.ts';
+import { type BoardState, boardToFen } from '../chess/board.ts';
 import { automaticDrawReason } from '../chess/drawRules.ts';
+import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
+import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import type { Evaluation, EvaluationBatchRequest, Evaluator } from '../nn/evaluator.ts';
 
-export interface SearchPolicyEntry { move: Move; visits: number; prior: number; q: number; probability: number; }
-export interface PrincipalVariationEntry { move: Move; visits: number; prior: number; q: number; depth: number; }
+export interface SearchPolicyEntry {
+  move: Move;
+  visits: number;
+  prior: number;
+  q: number;
+  probability: number;
+}
+export interface PrincipalVariationEntry {
+  move: Move;
+  visits: number;
+  prior: number;
+  q: number;
+  depth: number;
+}
 export type PrincipalVariationSelector = 'visits' | 'q' | 'puct';
 export interface ProgressiveWideningOptions {
   /** Policy mass admitted before widening. Set to 1 to disable top-p pruning. */
@@ -29,7 +41,16 @@ export interface ProgressiveWideningOptions {
   minExploreScale?: number;
   maxExploreScale?: number;
 }
-export interface SearchResult { move: Move | null; visits: number; value: number; policy: SearchPolicyEntry[]; principalVariation?: PrincipalVariationEntry[]; multiPvLines?: PrincipalVariationEntry[][]; stats?: SearchStats; root?: Node; }
+export interface SearchResult {
+  move: Move | null;
+  visits: number;
+  value: number;
+  policy: SearchPolicyEntry[];
+  principalVariation?: PrincipalVariationEntry[];
+  multiPvLines?: PrincipalVariationEntry[][];
+  stats?: SearchStats;
+  root?: Node;
+}
 export interface SearchProgress {
   move: Move | null;
   visits: number;
@@ -176,7 +197,14 @@ export interface SearchOptions {
   movesLeftScaledFactor?: number;
   movesLeftQuadraticFactor?: number;
 }
-export interface GumbelRootOptions { candidateCount?: number; seed?: number; gumbelScale?: number; qWeight?: number; priorWeight?: number; visitPenalty?: number; }
+export interface GumbelRootOptions {
+  candidateCount?: number;
+  seed?: number;
+  gumbelScale?: number;
+  qWeight?: number;
+  priorWeight?: number;
+  visitPenalty?: number;
+}
 
 export interface SearchTraceRootChild {
   uci: string;
@@ -424,9 +452,7 @@ function valueFromEvaluation(evaln: Evaluation, context: SearchPolicyContext, tu
   if (!aux || maxAlpha <= 0) return clamp(baseValue, -1, 1);
   const auxWdl = normalizeWdl(aux, context.valueWdlAuxTemp);
   const auxValue = valueFromWdl(auxWdl);
-  const alpha = context.valueWdlBlendMode === 'confidence'
-    ? maxAlpha * wdlConfidence(auxWdl) * (1 - wdlConfidence(baseWdl))
-    : maxAlpha;
+  const alpha = context.valueWdlBlendMode === 'confidence' ? maxAlpha * wdlConfidence(auxWdl) * (1 - wdlConfidence(baseWdl)) : maxAlpha;
   return clamp((1 - alpha) * baseValue + alpha * auxValue, -1, 1);
 }
 
@@ -448,11 +474,27 @@ function edgeQVariance(edges: Edge[], context: SearchPolicyContext): number {
   if (context.cpuctVarianceWeight <= 0 || edges.length < 2) return 0;
   const weights = edges.map((edge) => Math.max(edge.prior, 1e-9));
   const total = weights.reduce((a, b) => a + b, 0) || 1;
-  const qForVariance = (edge: Edge) => edge.visits > 0
-    ? edgeQForParent(edge, context.fpu)
-    : context.fpuStrategy === 'lc0-reduction'
-      ? parentQForNode({ board: null as unknown as BoardState, historyFens: [], historyBoards: [], explicitHistory: false, expanded: true, terminalValue: null, edges }, context.fpu) - context.fpuReduction * Math.sqrt(visitedPolicyMass({ board: null as unknown as BoardState, historyFens: [], historyBoards: [], explicitHistory: false, expanded: true, terminalValue: null, edges }))
-      : context.fpu;
+  const qForVariance = (edge: Edge) =>
+    edge.visits > 0
+      ? edgeQForParent(edge, context.fpu)
+      : context.fpuStrategy === 'lc0-reduction'
+        ? parentQForNode(
+            { board: null as unknown as BoardState, historyFens: [], historyBoards: [], explicitHistory: false, expanded: true, terminalValue: null, edges },
+            context.fpu,
+          ) -
+          context.fpuReduction *
+            Math.sqrt(
+              visitedPolicyMass({
+                board: null as unknown as BoardState,
+                historyFens: [],
+                historyBoards: [],
+                explicitHistory: false,
+                expanded: true,
+                terminalValue: null,
+                edges,
+              }),
+            )
+        : context.fpu;
   const qs = edges.map(qForVariance);
   const mean = qs.reduce((sum, q, i) => sum + q * weights[i], 0) / total;
   return qs.reduce((sum, q, i) => sum + weights[i] * (q - mean) * (q - mean), 0) / total;
@@ -472,7 +514,7 @@ function butterflyKey(side: BoardState['turn'] | undefined, move: Move): string 
 function butterflyScore(edge: Edge, context: SearchPolicyContext): number {
   if (context.butterflyWeight === 0 || !context.butterflyTable) return 0;
   const raw = context.butterflyTable.get(butterflyKey(edge.side, edge.move)) ?? 0;
-  return context.butterflyWeight * Math.tanh(raw) * context.butterflyMaxBonus / (1 + edgeSelectVisits(edge));
+  return (context.butterflyWeight * Math.tanh(raw) * context.butterflyMaxBonus) / (1 + edgeSelectVisits(edge));
 }
 
 function updateButterfly(edge: Edge, parentValue: number, context: SearchPolicyContext): void {
@@ -526,7 +568,7 @@ export class ClassicPUCTPolicy implements SearchPolicy {
     const sqrtParent = Math.sqrt(parentVisits + 1);
     const q = edgeQForParentInNode(edge, node, context);
     const sv = edgeSelectVisits(edge);
-    const u = computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, node.edges, context) * edge.prior * sqrtParent / (1 + sv);
+    const u = (computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, node.edges, context) * edge.prior * sqrtParent) / (1 + sv);
     return q + u + butterflyScore(edge, context) + movesLeftUtility(node, edge, context);
   }
 
@@ -549,22 +591,35 @@ export class ClassicPUCTPolicy implements SearchPolicy {
     if (tau === 0) {
       const better = (a: Edge, b: Edge) => {
         if (b.visits !== a.visits) return b.visits > a.visits;
-        const aq = edgeQForParentInNode(a, node, context), bq = edgeQForParentInNode(b, node, context);
+        const aq = edgeQForParentInNode(a, node, context),
+          bq = edgeQForParentInNode(b, node, context);
         if (bq !== aq) return bq > aq;
         return b.prior > a.prior;
       };
-      const best = edges.reduce((a, b) => better(a, b) ? b : a);
-      return edges.map((edge) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParentInNode(edge, node, context), probability: edge === best ? 1 : 0 }));
+      const best = edges.reduce((a, b) => (better(a, b) ? b : a));
+      return edges.map((edge) => ({
+        move: edge.move,
+        visits: edge.visits,
+        prior: edge.prior,
+        q: edgeQForParentInNode(edge, node, context),
+        probability: edge === best ? 1 : 0,
+      }));
     }
     const maxVisits = Math.max(...edges.map((edge) => Math.max(edge.visits, 1e-9)));
     const weights = edges.map((edge) => Math.pow(Math.max(edge.visits, 1e-9) / maxVisits, 1 / tau));
     const total = weights.reduce((a, b) => a + b, 0) || 1;
-    return edges.map((edge, i) => ({ move: edge.move, visits: edge.visits, prior: edge.prior, q: edgeQForParentInNode(edge, node, context), probability: weights[i] / total }));
+    return edges.map((edge, i) => ({
+      move: edge.move,
+      visits: edge.visits,
+      prior: edge.prior,
+      q: edgeQForParentInNode(edge, node, context),
+      probability: weights[i] / total,
+    }));
   }
 
   chooseFinalMove(entries: SearchPolicyEntry[]): SearchPolicyEntry | null {
     if (!entries.length) return null;
-    return entries.reduce((a, b) => b.probability > a.probability ? b : a);
+    return entries.reduce((a, b) => (b.probability > a.probability ? b : a));
   }
 }
 
@@ -667,14 +722,19 @@ export class ProgressiveWideningPUCTPolicy extends ClassicPUCTPolicy {
     const sqrtParent = Math.sqrt(parentVisits + 1);
     const q = edgeQForParentInNode(edge, node, context);
     const sv = edgeSelectVisits(edge);
-    const exploreScale = this.options.giniExploreScale === 0
-      ? 1
-      : this.options.giniExploreMode === 'sharp'
-        // Monty-shaped: sharp/low-Gini policies get extra exploration so search
-        // does not overtrust a very peaked policy prefix. Pivot at Gini ~= 0.5.
-        ? clamp(1 + this.options.giniExploreScale * (-Math.log(clamp(state.policyGini + 0.001, 0.001, 1)) - Math.LN2), this.options.minExploreScale, this.options.maxExploreScale)
-        : clamp(1 + this.options.giniExploreScale * (state.policyGini - 0.5), this.options.minExploreScale, this.options.maxExploreScale);
-    const u = computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, node.edges, context) * exploreScale * edge.prior * sqrtParent / (1 + sv);
+    const exploreScale =
+      this.options.giniExploreScale === 0
+        ? 1
+        : this.options.giniExploreMode === 'sharp'
+          ? // Monty-shaped: sharp/low-Gini policies get extra exploration so search
+            // does not overtrust a very peaked policy prefix. Pivot at Gini ~= 0.5.
+            clamp(
+              1 + this.options.giniExploreScale * (-Math.log(clamp(state.policyGini + 0.001, 0.001, 1)) - Math.LN2),
+              this.options.minExploreScale,
+              this.options.maxExploreScale,
+            )
+          : clamp(1 + this.options.giniExploreScale * (state.policyGini - 0.5), this.options.minExploreScale, this.options.maxExploreScale);
+    const u = (computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, node.edges, context) * exploreScale * edge.prior * sqrtParent) / (1 + sv);
     return q + u + butterflyScore(edge, context);
   }
 }
@@ -685,7 +745,7 @@ export class ActionValuePUCTPolicy extends ClassicPUCTPolicy {
     const av = edge.actionValuePrior ?? 0;
     // AV is a parent-perspective prior. It guides unvisited/low-visit moves and
     // decays as backed-up search evidence accumulates.
-    return base + context.avWeight * av / (1 + edgeSelectVisits(edge));
+    return base + (context.avWeight * av) / (1 + edgeSelectVisits(edge));
   }
 }
 
@@ -693,12 +753,14 @@ export class AuxPUCTPolicy extends ClassicPUCTPolicy {
   scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
     const base = super.scoreEdge(node, edge, context);
     const sv = 1 + edgeSelectVisits(edge);
-    return base
-      + context.avWeight * (edge.actionValuePrior ?? 0) / sv
-      + context.rankWeight * (edge.rankScore ?? 0) / sv
-      - context.regretWeight * (edge.regret ?? 0) / sv
-      - context.riskWeight * (edge.risk ?? 0) / sv
-      + context.uncertaintyWeight * (edge.uncertainty ?? 0) / sv;
+    return (
+      base +
+      (context.avWeight * (edge.actionValuePrior ?? 0)) / sv +
+      (context.rankWeight * (edge.rankScore ?? 0)) / sv -
+      (context.regretWeight * (edge.regret ?? 0)) / sv -
+      (context.riskWeight * (edge.risk ?? 0)) / sv +
+      (context.uncertaintyWeight * (edge.uncertainty ?? 0)) / sv
+    );
   }
 }
 
@@ -719,7 +781,10 @@ function gumbel01(rng: () => number): number {
   return -Math.log(-Math.log(u));
 }
 
-interface GumbelRootState { candidates: Set<Edge>; noise: Map<Edge, number>; }
+interface GumbelRootState {
+  candidates: Set<Edge>;
+  noise: Map<Edge, number>;
+}
 
 export class GumbelRootPolicy extends ClassicPUCTPolicy {
   private options: Required<GumbelRootOptions>;
@@ -742,10 +807,12 @@ export class GumbelRootPolicy extends ClassicPUCTPolicy {
   private rootState(node: Node): GumbelRootState {
     let state = this.states.get(node);
     if (state) return state;
-    const scored = node.edges.map((edge) => {
-      const noise = gumbel01(this.rng) * this.options.gumbelScale;
-      return { edge, noise, score: Math.log(Math.max(edge.prior, 1e-12)) + noise };
-    }).sort((a, b) => b.score - a.score);
+    const scored = node.edges
+      .map((edge) => {
+        const noise = gumbel01(this.rng) * this.options.gumbelScale;
+        return { edge, noise, score: Math.log(Math.max(edge.prior, 1e-12)) + noise };
+      })
+      .sort((a, b) => b.score - a.score);
     const keep = new Set(scored.slice(0, Math.min(this.options.candidateCount, scored.length)).map((x) => x.edge));
     const noise = new Map(scored.map((x) => [x.edge, x.noise]));
     state = { candidates: keep, noise };
@@ -760,31 +827,50 @@ export class GumbelRootPolicy extends ClassicPUCTPolicy {
     const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
     const q = edgeQForParentInNode(edge, node, context);
     const sv = edgeSelectVisits(edge);
-    const puct = computeCpuct(context, parentVisits) * edge.prior * Math.sqrt(parentVisits + 1) / (1 + sv);
+    const puct = (computeCpuct(context, parentVisits) * edge.prior * Math.sqrt(parentVisits + 1)) / (1 + sv);
     const g = state.noise.get(edge) ?? 0;
     const logPrior = Math.log(Math.max(edge.prior, 1e-12));
     // Root-only Gumbel demo policy: sample a policy-prior candidate set with
     // log(P)+Gumbel, then spend low visits on candidates using a conservative
     // sequential-halving-like score. Non-root selection remains classic PUCT.
-    return this.options.qWeight * q
-      + this.options.priorWeight * (logPrior + g) / (1 + sv)
-      + puct
-      - this.options.visitPenalty * sv;
+    return this.options.qWeight * q + (this.options.priorWeight * (logPrior + g)) / (1 + sv) + puct - this.options.visitPenalty * sv;
   }
-
 }
 
 export const classicPuctPolicy = new ClassicPUCTPolicy();
 export const progressiveWideningPuctPolicy = new ProgressiveWideningPUCTPolicy();
-export const montyLitePuctPolicy = new ProgressiveWideningPUCTPolicy({ topP: 0.85, minActions: 6, visitsPerAction: 8, actionsPerStep: 2, wideningSchedule: 'exponential', visitThresholdPower: 2, includeForcing: true, giniExploreScale: 0.5, giniExploreMode: 'sharp' });
+export const montyLitePuctPolicy = new ProgressiveWideningPUCTPolicy({
+  topP: 0.85,
+  minActions: 6,
+  visitsPerAction: 8,
+  actionsPerStep: 2,
+  wideningSchedule: 'exponential',
+  visitThresholdPower: 2,
+  includeForcing: true,
+  giniExploreScale: 0.5,
+  giniExploreMode: 'sharp',
+});
 export const actionValuePuctPolicy = new ActionValuePUCTPolicy();
 export const auxPuctPolicy = new AuxPUCTPolicy();
 
 function makeStats(visits: number): SearchStats {
-  return { requestedVisits: visits, completedVisits: 0, expansions: 0, terminalHits: 0, evalCalls: 0, batchEvalCalls: 0, maxEvalBatch: 0, neuralEvalMisses: 0, cacheHits: 0 };
+  return {
+    requestedVisits: visits,
+    completedVisits: 0,
+    expansions: 0,
+    terminalHits: 0,
+    evalCalls: 0,
+    batchEvalCalls: 0,
+    maxEvalBatch: 0,
+    neuralEvalMisses: 0,
+    cacheHits: 0,
+  };
 }
 
-interface EvaluatorMetricsSnapshot { hits: number; misses: number; }
+interface EvaluatorMetricsSnapshot {
+  hits: number;
+  misses: number;
+}
 
 function evaluatorMetrics(evaluator: Evaluator): EvaluatorMetricsSnapshot | null {
   const maybe = evaluator as Evaluator & { metrics?: () => { hits?: number; misses?: number } };
@@ -858,7 +944,8 @@ function finalizeEvaluationTimingStats(stats: SearchStats): void {
   const totals = stats.evalBackendTimingTotals;
   if (!samples || !totals) return;
   stats.evalBackendTimingMeans = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number((value / samples).toFixed(6))]));
-  if (positions) stats.evalBackendTimingPerPositionMeans = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number((value / positions).toFixed(6))]));
+  if (positions)
+    stats.evalBackendTimingPerPositionMeans = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number((value / positions).toFixed(6))]));
 }
 
 function rootVisitCount(root: Node): number {
@@ -874,8 +961,16 @@ function rootVisitDominanceStop(root: Node, maxRootVisits: number): boolean {
   return visits[0] > visits[1] + remaining;
 }
 
-interface KldEarlyStopState { lastDistribution?: number[]; lastBest?: number; stableChecks: number; }
-interface BestStableEarlyStopState { lastBest?: number; lastBestQ?: number; stableChecks: number; }
+interface KldEarlyStopState {
+  lastDistribution?: number[];
+  lastBest?: number;
+  stableChecks: number;
+}
+interface BestStableEarlyStopState {
+  lastBest?: number;
+  lastBestQ?: number;
+  stableChecks: number;
+}
 
 function rootVisitDistribution(root: Node): number[] {
   const total = Math.max(1, rootVisitCount(root));
@@ -949,7 +1044,14 @@ function rootBestStableEarlyStop(root: Node, context: SearchPolicyContext, optio
   return state.stableChecks >= Math.max(1, Math.floor(options.bestStableChecks ?? 2));
 }
 
-function rootEarlyStopReason(root: Node, context: SearchPolicyContext, options: SearchOptions, visitTarget: number, kldState: KldEarlyStopState, bestState: BestStableEarlyStopState): SearchStats['stopReason'] | undefined {
+function rootEarlyStopReason(
+  root: Node,
+  context: SearchPolicyContext,
+  options: SearchOptions,
+  visitTarget: number,
+  kldState: KldEarlyStopState,
+  bestState: BestStableEarlyStopState,
+): SearchStats['stopReason'] | undefined {
   // Early-stop telemetry should only report a real early exit, not completion
   // exactly at the scheduled visit cap.
   if (rootVisitCount(root) >= visitTarget) return undefined;
@@ -984,7 +1086,11 @@ function browserParam(name: string): string | null {
 }
 
 function debugTokens(value: string | null | undefined): string[] {
-  return String(value ?? '').toLowerCase().split(/[,+\s]+/).map((s) => s.trim()).filter(Boolean);
+  return String(value ?? '')
+    .toLowerCase()
+    .split(/[,+\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function latencyDebugEnabled(): boolean {
@@ -996,7 +1102,10 @@ function latencyDebugEnabled(): boolean {
 
 function logSearchLatency(label: string, payload: Record<string, unknown>): void {
   if (!latencyDebugEnabled()) return;
-  console.info(`Centipawn latency: ${label}`, Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? Number(value.toFixed(2)) : value])));
+  console.info(
+    `Centipawn latency: ${label}`,
+    Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? Number(value.toFixed(2)) : value])),
+  );
 }
 
 function yieldToUi(): Promise<void> {
@@ -1019,7 +1128,12 @@ export function searchNodeKey(board: BoardState, historyFens: string[] = []): st
   return `${boardToFen(board)}\nh:${historyFens.join('|')}`;
 }
 
-function makeSearchRoot(board: BoardState, historyFens: string[] = [], historyBoards: readonly BoardState[] = [], explicitHistory = historyFens.length > 0): Node {
+function makeSearchRoot(
+  board: BoardState,
+  historyFens: string[] = [],
+  historyBoards: readonly BoardState[] = [],
+  explicitHistory = historyFens.length > 0,
+): Node {
   return { board, historyFens, historyBoards, explicitHistory, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: true };
 }
 
@@ -1043,7 +1157,18 @@ function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, No
     cached.isRoot = false;
     return cached;
   }
-  const child = { board: childBoard, historyFens: childHistory, historyBoards: [parent.board, ...parent.historyBoards], explicitHistory: true, expanded: false, terminalValue: null, edges: [], visits: 0, searchValueKey: parent.searchValueKey, isRoot: false };
+  const child = {
+    board: childBoard,
+    historyFens: childHistory,
+    historyBoards: [parent.board, ...parent.historyBoards],
+    explicitHistory: true,
+    expanded: false,
+    terminalValue: null,
+    edges: [],
+    visits: 0,
+    searchValueKey: parent.searchValueKey,
+    isRoot: false,
+  };
   transpositionTable?.set(key, child);
   return child;
 }
@@ -1100,27 +1225,39 @@ function selectBestEdge(node: Node, searchPolicy: SearchPolicy, context: SearchP
   let bestScore = -Infinity;
   for (const edge of node.edges) {
     const score = searchPolicy.scoreEdge(node, edge, context);
-    if (score > bestScore) { best = edge; bestScore = score; }
+    if (score > bestScore) {
+      best = edge;
+      bestScore = score;
+    }
   }
   return best;
 }
 
 function comparePvEdges(a: Edge, b: Edge, context: SearchPolicyContext, selector: PrincipalVariationSelector, node?: Node, searchPolicy?: SearchPolicy): Edge {
   if (selector === 'q') {
-    const aq = edgeQForParentInNode(a, node, context), bq = edgeQForParentInNode(b, node, context);
+    const aq = edgeQForParentInNode(a, node, context),
+      bq = edgeQForParentInNode(b, node, context);
     if (bq !== aq) return bq > aq ? b : a;
   } else if (selector === 'puct' && node && searchPolicy) {
-    const as = searchPolicy.scoreEdge(node, a, context), bs = searchPolicy.scoreEdge(node, b, context);
+    const as = searchPolicy.scoreEdge(node, a, context),
+      bs = searchPolicy.scoreEdge(node, b, context);
     if (bs !== as) return bs > as ? b : a;
   } else if (b.visits !== a.visits) {
     return b.visits > a.visits ? b : a;
   }
-  const aq = edgeQForParentInNode(a, node, context), bq = edgeQForParentInNode(b, node, context);
+  const aq = edgeQForParentInNode(a, node, context),
+    bq = edgeQForParentInNode(b, node, context);
   if (bq !== aq) return bq > aq ? b : a;
   return b.prior > a.prior ? b : a;
 }
 
-function extractPrincipalVariation(root: Node, context: SearchPolicyContext, searchPolicy: SearchPolicy, maxDepth: number, selector: PrincipalVariationSelector): PrincipalVariationEntry[] {
+function extractPrincipalVariation(
+  root: Node,
+  context: SearchPolicyContext,
+  searchPolicy: SearchPolicy,
+  maxDepth: number,
+  selector: PrincipalVariationSelector,
+): PrincipalVariationEntry[] {
   const pv: PrincipalVariationEntry[] = [];
   let node: Node | null = root;
   const depthLimit = Math.max(1, Math.floor(maxDepth));
@@ -1138,20 +1275,29 @@ function extractPrincipalVariation(root: Node, context: SearchPolicyContext, sea
 
 // MultiPV: one principal variation per top visited root move, each line starting
 // with its root move and then following the usual best-visited continuation.
-function extractMultiPv(root: Node, context: SearchPolicyContext, searchPolicy: SearchPolicy, maxDepth: number, selector: PrincipalVariationSelector, count: number): PrincipalVariationEntry[][] {
+function extractMultiPv(
+  root: Node,
+  context: SearchPolicyContext,
+  searchPolicy: SearchPolicy,
+  maxDepth: number,
+  selector: PrincipalVariationSelector,
+  count: number,
+): PrincipalVariationEntry[][] {
   const depthLimit = Math.max(1, Math.floor(maxDepth));
   const rootEdges = root.edges
     .filter((edge) => edge.visits > 0)
     .sort((a, b) => b.visits - a.visits || b.prior - a.prior)
     .slice(0, Math.max(1, Math.floor(count)));
   return rootEdges.map((rootEdge) => {
-    const line: PrincipalVariationEntry[] = [{
-      move: rootEdge.move,
-      visits: rootEdge.visits,
-      prior: rootEdge.prior,
-      q: edgeQForParentInNode(rootEdge, root, context),
-      depth: 1,
-    }];
+    const line: PrincipalVariationEntry[] = [
+      {
+        move: rootEdge.move,
+        visits: rootEdge.visits,
+        prior: rootEdge.prior,
+        q: edgeQForParentInNode(rootEdge, root, context),
+        depth: 1,
+      },
+    ];
     if (rootEdge.child) {
       for (const entry of extractPrincipalVariation(rootEdge.child, context, searchPolicy, depthLimit - 1, selector)) {
         line.push({ ...entry, depth: entry.depth + 1 });
@@ -1161,16 +1307,23 @@ function extractMultiPv(root: Node, context: SearchPolicyContext, searchPolicy: 
   });
 }
 
-function buildSearchProgress(root: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, options: SearchOptions, requestedVisits: number, startedMs: number): SearchProgress {
+function buildSearchProgress(
+  root: Node,
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  stats: SearchStats,
+  options: SearchOptions,
+  requestedVisits: number,
+  startedMs: number,
+): SearchProgress {
   const policy = searchPolicy.rootPolicy(root.edges, context, root);
   const bestEntry = searchPolicy.chooseFinalMove(policy, context);
   const pvDepth = options.pvDepth ?? 12;
   const pvSelector = options.pvSelector ?? 'visits';
   const principalVariation = options.includePv === false ? undefined : extractPrincipalVariation(root, context, searchPolicy, pvDepth, pvSelector);
   const multiPvCount = Math.max(0, Math.floor(options.multiPv ?? 0));
-  const multiPvLines = options.includePv === false || multiPvCount <= 1
-    ? undefined
-    : extractMultiPv(root, context, searchPolicy, pvDepth, pvSelector, multiPvCount);
+  const multiPvLines =
+    options.includePv === false || multiPvCount <= 1 ? undefined : extractMultiPv(root, context, searchPolicy, pvDepth, pvSelector, multiPvCount);
   const realizedVisits = Math.max(root.visits ?? 0, rootVisitCount(root));
   return {
     move: bestEntry?.move ?? null,
@@ -1193,19 +1346,30 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
     // No legal moves: checkmate is loss for the side to move, stalemate is draw.
     node.terminalValue = inCheck(node.board) ? -1 : contemptDrawValue(context, node.board.turn);
     node.edges = [];
-    if (stats) { stats.expansions += 1; stats.terminalHits += 1; }
+    if (stats) {
+      stats.expansions += 1;
+      stats.terminalHits += 1;
+    }
     return node.terminalValue;
   }
   if (automaticDrawReason(node.board, node.historyFens)) {
     node.expanded = true;
     node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
-    if (stats) { stats.expansions += 1; stats.terminalHits += 1; }
+    if (stats) {
+      stats.expansions += 1;
+      stats.terminalHits += 1;
+    }
     return node.terminalValue;
   }
   const beforeMetrics = stats ? evaluatorMetrics(evaluator) : null;
   if (stats) stats.evalCalls += 1;
-  const evaln = await evaluator.evaluate(node.board, { historyFens: node.historyFens, historyBoards: node.historyBoards, explicitHistory: node.explicitHistory, legalMoves: moves });
+  const evaln = await evaluator.evaluate(node.board, {
+    historyFens: node.historyFens,
+    historyBoards: node.historyBoards,
+    explicitHistory: node.explicitHistory,
+    legalMoves: moves,
+  });
   if (stats) {
     recordEvaluatorMetricsDelta(evaluator, beforeMetrics, 1, stats);
     recordEvaluationTimingBatch(stats, [evaln]);
@@ -1215,9 +1379,19 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
   return value;
 }
 
-async function simulate(node: Node, evaluator: Evaluator, searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, transpositionTable?: Map<string, Node>): Promise<number> {
+async function simulate(
+  node: Node,
+  evaluator: Evaluator,
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  stats: SearchStats,
+  transpositionTable?: Map<string, Node>,
+): Promise<number> {
   if (!node.expanded) return expand(node, evaluator, context, stats);
-  if (node.terminalValue !== null) { stats.terminalHits += 1; return node.terminalValue; }
+  if (node.terminalValue !== null) {
+    stats.terminalHits += 1;
+    return node.terminalValue;
+  }
   const best = selectBestEdge(node, searchPolicy, context);
   if (!best.child) best.child = makeChild(node, best.move, transpositionTable, stats);
   const childValue = await simulate(best.child, evaluator, searchPolicy, context, stats, transpositionTable);
@@ -1230,9 +1404,7 @@ interface SelectedLeaf {
   path: Edge[];
 }
 
-type PreparedLeaf =
-  | { kind: 'terminal'; sel: SelectedLeaf; value: number }
-  | { kind: 'eval'; sel: SelectedLeaf; slot: number };
+type PreparedLeaf = { kind: 'terminal'; sel: SelectedLeaf; value: number } | { kind: 'eval'; sel: SelectedLeaf; slot: number };
 
 const searchTraceGenerationIds = new WeakMap<SearchStats, number>();
 
@@ -1275,7 +1447,15 @@ function preparedLeafTraceItem(item: PreparedLeaf, index: number, value?: number
   };
 }
 
-function recordPreparedBatchTrace(stats: SearchStats, root: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext, batch: PreparedLeafBatch, pipelineDepth: number, batchIndex: number): void {
+function recordPreparedBatchTrace(
+  stats: SearchStats,
+  root: Node,
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  batch: PreparedLeafBatch,
+  pipelineDepth: number,
+  batchIndex: number,
+): void {
   if (!stats.searchTrace) return;
   stats.searchTrace.push({
     event: 'batch-prepared',
@@ -1287,7 +1467,18 @@ function recordPreparedBatchTrace(stats: SearchStats, root: Node, searchPolicy: 
   });
 }
 
-function recordBackupTrace(stats: SearchStats, root: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext, batch: PreparedLeafBatch, item: PreparedLeaf, itemIndex: number, value: number, pipelineDepth: number, batchIndex: number): void {
+function recordBackupTrace(
+  stats: SearchStats,
+  root: Node,
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  batch: PreparedLeafBatch,
+  item: PreparedLeaf,
+  itemIndex: number,
+  value: number,
+  pipelineDepth: number,
+  batchIndex: number,
+): void {
   if (!stats.searchTrace) return;
   stats.searchTrace.push({
     event: 'backup-applied',
@@ -1304,7 +1495,14 @@ function unwindVirtualVisits(path: Edge[]): void {
   for (const edge of path) edge.virtualVisits = Math.max(0, edge.virtualVisits - 1);
 }
 
-function selectLeaf(node: Node, searchPolicy: SearchPolicy, context: SearchPolicyContext, path: Edge[] = [], transpositionTable?: Map<string, Node>, stats?: SearchStats): SelectedLeaf {
+function selectLeaf(
+  node: Node,
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  path: Edge[] = [],
+  transpositionTable?: Map<string, Node>,
+  stats?: SearchStats,
+): SelectedLeaf {
   if (!node.expanded || node.terminalValue !== null) return { node, path };
   const best = selectBestEdge(node, searchPolicy, context);
   best.virtualVisits += 1;
@@ -1369,14 +1567,23 @@ interface PreparedLeafBatch {
   evalMoves: Move[][];
 }
 
-function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, transpositionTable: Map<string, Node> | undefined, collisionMode: SearchBatchCollisionMode, collisionRetryLimit: number, inFlightEvalLeaves?: Set<Node>, generationId = 0): PreparedLeafBatch {
+function collectPreparedLeafBatch(
+  root: Node,
+  want: number,
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  stats: SearchStats,
+  transpositionTable: Map<string, Node> | undefined,
+  collisionMode: SearchBatchCollisionMode,
+  collisionRetryLimit: number,
+  inFlightEvalLeaves?: Set<Node>,
+  generationId = 0,
+): PreparedLeafBatch {
   const selected: SelectedLeaf[] = [];
   const batchInFlightEvalLeaves = new Set<Node>();
   const retryVirtualPaths: Edge[][] = [];
   let attempts = 0;
-  const maxAttempts = collisionMode === 'retry'
-    ? Math.max(want, want + Math.max(0, Math.floor(collisionRetryLimit)))
-    : want;
+  const maxAttempts = collisionMode === 'retry' ? Math.max(want, want + Math.max(0, Math.floor(collisionRetryLimit))) : want;
   while (selected.length < want && attempts < maxAttempts) {
     attempts += 1;
     const sel = selectLeaf(root, searchPolicy, context, [], transpositionTable, stats);
@@ -1406,7 +1613,11 @@ function collectPreparedLeafBatch(root: Node, want: number, searchPolicy: Search
   const evalIndex = new Map<Node, number>();
   const prepared: PreparedLeaf[] = [];
   for (const sel of selected) {
-    if (sel.node.terminalValue !== null) { prepared.push({ kind: 'terminal', sel, value: sel.node.terminalValue }); stats.terminalHits += 1; continue; }
+    if (sel.node.terminalValue !== null) {
+      prepared.push({ kind: 'terminal', sel, value: sel.node.terminalValue });
+      stats.terminalHits += 1;
+      continue;
+    }
     if (sel.node.expanded) {
       unwindVirtualVisits(sel.path);
       throw new Error('selectLeaf returned an expanded non-terminal node');
@@ -1438,10 +1649,21 @@ function recordEvalBatchStats(batch: PreparedLeafBatch, stats: SearchStats): voi
   stats.evalBatchSizeHistogram = { ...(stats.evalBatchSizeHistogram ?? {}), [batchKey]: (stats.evalBatchSizeHistogram?.[batchKey] ?? 0) + 1 };
 }
 
-function finishPreparedLeafBatch(batch: PreparedLeafBatch, evals: Evaluation[], searchPolicy: SearchPolicy, context: SearchPolicyContext, stats: SearchStats, root: Node, pipelineDepth: number, batchIndex: number): void {
-  if (evals.length !== batch.evalNodes.length) throw new Error(`pipelined evaluation generation ${batch.generationId} returned ${evals.length} result(s) for ${batch.evalNodes.length} node(s)`);
+function finishPreparedLeafBatch(
+  batch: PreparedLeafBatch,
+  evals: Evaluation[],
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  stats: SearchStats,
+  root: Node,
+  pipelineDepth: number,
+  batchIndex: number,
+): void {
+  if (evals.length !== batch.evalNodes.length)
+    throw new Error(`pipelined evaluation generation ${batch.generationId} returned ${evals.length} result(s) for ${batch.evalNodes.length} node(s)`);
   const values = batch.evalNodes.map((node, i) => {
-    if (node.expanded || node.terminalValue !== null) throw new Error(`stale pipelined evaluation for generation ${batch.generationId} slot ${i}: node was already expanded before results were applied`);
+    if (node.expanded || node.terminalValue !== null)
+      throw new Error(`stale pipelined evaluation for generation ${batch.generationId} slot ${i}: node was already expanded before results were applied`);
     stats.expansions += 1;
     return finishExpansion(node, batch.evalMoves[i], evals[i], context);
   });
@@ -1459,7 +1681,22 @@ function finishPreparedLeafBatch(batch: PreparedLeafBatch, evals: Evaluation[], 
   }
 }
 
-async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4, onProgress?: () => void) {
+async function runBatchedVisits(
+  root: Node,
+  evaluator: Evaluator,
+  visits: number,
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  batchSize: number,
+  stats: SearchStats,
+  signal?: AbortSignal,
+  yieldEveryMs = 0,
+  transpositionTable?: Map<string, Node>,
+  deadlineMs?: number,
+  collisionMode: SearchBatchCollisionMode = 'retry',
+  collisionRetryLimit = batchSize * 4,
+  onProgress?: () => void,
+) {
   let done = 0;
   let lastYield = nowMs();
   while (done < visits && !deadlineExpired(deadlineMs)) {
@@ -1469,9 +1706,7 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
     const inFlightEvalLeaves = new Set<Node>();
     const retryVirtualPaths: Edge[][] = [];
     let attempts = 0;
-    const maxAttempts = collisionMode === 'retry'
-      ? Math.max(want, want + Math.max(0, Math.floor(collisionRetryLimit)))
-      : want;
+    const maxAttempts = collisionMode === 'retry' ? Math.max(want, want + Math.max(0, Math.floor(collisionRetryLimit))) : want;
     while (selected.length < want && attempts < maxAttempts) {
       attempts += 1;
       const sel = selectLeaf(root, searchPolicy, context, [], transpositionTable, stats);
@@ -1496,7 +1731,11 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
     const evalIndex = new Map<Node, number>();
     const prepared: PreparedLeaf[] = [];
     for (const sel of selected) {
-      if (sel.node.terminalValue !== null) { prepared.push({ kind: 'terminal', sel, value: sel.node.terminalValue }); stats.terminalHits += 1; continue; }
+      if (sel.node.terminalValue !== null) {
+        prepared.push({ kind: 'terminal', sel, value: sel.node.terminalValue });
+        stats.terminalHits += 1;
+        continue;
+      }
       if (sel.node.expanded) {
         unwindVirtualVisits(sel.path);
         throw new Error('selectLeaf returned an expanded non-terminal node');
@@ -1520,7 +1759,12 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
 
     let evals: Evaluation[] = [];
     if (evalNodes.length) {
-      const contexts = evalNodes.map((node, i) => ({ historyFens: node.historyFens, historyBoards: node.historyBoards, explicitHistory: node.explicitHistory, legalMoves: evalMoves[i] }));
+      const contexts = evalNodes.map((node, i) => ({
+        historyFens: node.historyFens,
+        historyBoards: node.historyBoards,
+        explicitHistory: node.explicitHistory,
+        legalMoves: evalMoves[i],
+      }));
       stats.evalCalls += evalNodes.length;
       stats.maxEvalBatch = Math.max(stats.maxEvalBatch, evalNodes.length);
       const batchKey = String(evalNodes.length);
@@ -1528,15 +1772,22 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
       const beforeMetrics = evaluatorMetrics(evaluator);
       if (evaluator.evaluateBatch) {
         stats.batchEvalCalls += 1;
-        evals = await evaluator.evaluateBatch(evalNodes.map((node) => node.board), contexts);
+        evals = await evaluator.evaluateBatch(
+          evalNodes.map((node) => node.board),
+          contexts,
+        );
       } else {
         evals = await Promise.all(evalNodes.map((node, i) => evaluator.evaluate(node.board, contexts[i])));
       }
       recordEvaluatorMetricsDelta(evaluator, beforeMetrics, evalNodes.length, stats);
       recordEvaluationTimingBatch(stats, evals);
     }
-    if (stats.searchTrace) stats.searchTrace.push({ event: 'evals-returned', generationId: traceBatch.generationId, pipelineDepth: 1, evalBatchSizes: [evals.length] });
-    const values = evalNodes.map((node, i) => { stats.expansions += 1; return finishExpansion(node, evalMoves[i], evals[i], context); });
+    if (stats.searchTrace)
+      stats.searchTrace.push({ event: 'evals-returned', generationId: traceBatch.generationId, pipelineDepth: 1, evalBatchSizes: [evals.length] });
+    const values = evalNodes.map((node, i) => {
+      stats.expansions += 1;
+      return finishExpansion(node, evalMoves[i], evals[i], context);
+    });
     for (let itemIndex = 0; itemIndex < prepared.length; itemIndex++) {
       const item = prepared[itemIndex];
       let value: number | undefined;
@@ -1562,7 +1813,8 @@ async function runBatchedVisits(root: Node, evaluator: Evaluator, visits: number
 }
 
 function assertEvaluationBatchSequenceShape(evalResults: Evaluation[][], evalBatches: EvaluationBatchRequest[]): void {
-  if (evalResults.length !== evalBatches.length) throw new Error(`evaluateBatchSequence returned ${evalResults.length} batch(es) for ${evalBatches.length} request batch(es)`);
+  if (evalResults.length !== evalBatches.length)
+    throw new Error(`evaluateBatchSequence returned ${evalResults.length} batch(es) for ${evalBatches.length} request batch(es)`);
   for (let i = 0; i < evalBatches.length; i++) {
     const expected = evalBatches[i].boards.length;
     const actual = evalResults[i]?.length ?? 0;
@@ -1571,10 +1823,17 @@ function assertEvaluationBatchSequenceShape(evalResults: Evaluation[][], evalBat
 }
 
 async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: PreparedLeafBatch[], stats: SearchStats): Promise<Evaluation[][]> {
-  const evalBatches = batches.map((batch) => ({
-    boards: batch.evalNodes.map((node) => node.board),
-    contexts: batch.evalNodes.map((node, i) => ({ historyFens: node.historyFens, historyBoards: node.historyBoards, explicitHistory: node.explicitHistory, legalMoves: batch.evalMoves[i] })),
-  })).filter((batch) => batch.boards.length > 0);
+  const evalBatches = batches
+    .map((batch) => ({
+      boards: batch.evalNodes.map((node) => node.board),
+      contexts: batch.evalNodes.map((node, i) => ({
+        historyFens: node.historyFens,
+        historyBoards: node.historyBoards,
+        explicitHistory: node.explicitHistory,
+        legalMoves: batch.evalMoves[i],
+      })),
+    }))
+    .filter((batch) => batch.boards.length > 0);
   if (!evalBatches.length) return batches.map(() => []);
   for (const batch of batches) recordEvalBatchStats(batch, stats);
   const beforeMetrics = evaluatorMetrics(evaluator);
@@ -1595,7 +1854,12 @@ async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: Prepar
     for (const batch of evalBatches) evalResults.push(await Promise.all(batch.boards.map((node, i) => evaluator.evaluate(node, batch.contexts[i]))));
   }
   assertEvaluationBatchSequenceShape(evalResults, evalBatches as EvaluationBatchRequest[]);
-  recordEvaluatorMetricsDelta(evaluator, beforeMetrics, evalBatches.reduce((sum, batch) => sum + batch.boards.length, 0), stats);
+  recordEvaluatorMetricsDelta(
+    evaluator,
+    beforeMetrics,
+    evalBatches.reduce((sum, batch) => sum + batch.boards.length, 0),
+    stats,
+  );
   recordEvaluationTimingBatches(stats, evalResults);
   const out: Evaluation[][] = [];
   let evalBatchIndex = 0;
@@ -1603,7 +1867,23 @@ async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: Prepar
   return out;
 }
 
-async function runPipelinedBatchedVisits(root: Node, evaluator: Evaluator, visits: number, searchPolicy: SearchPolicy, context: SearchPolicyContext, batchSize: number, pipelineDepth: number, stats: SearchStats, signal?: AbortSignal, yieldEveryMs = 0, transpositionTable?: Map<string, Node>, deadlineMs?: number, collisionMode: SearchBatchCollisionMode = 'retry', collisionRetryLimit = batchSize * 4, onProgress?: () => void) {
+async function runPipelinedBatchedVisits(
+  root: Node,
+  evaluator: Evaluator,
+  visits: number,
+  searchPolicy: SearchPolicy,
+  context: SearchPolicyContext,
+  batchSize: number,
+  pipelineDepth: number,
+  stats: SearchStats,
+  signal?: AbortSignal,
+  yieldEveryMs = 0,
+  transpositionTable?: Map<string, Node>,
+  deadlineMs?: number,
+  collisionMode: SearchBatchCollisionMode = 'retry',
+  collisionRetryLimit = batchSize * 4,
+  onProgress?: () => void,
+) {
   let scheduled = 0;
   let lastYield = nowMs();
   const inFlightEvalLeaves = new Set<Node>();
@@ -1612,7 +1892,18 @@ async function runPipelinedBatchedVisits(root: Node, evaluator: Evaluator, visit
     const batches: PreparedLeafBatch[] = [];
     while (batches.length < pipelineDepth && scheduled < visits && !deadlineExpired(deadlineMs)) {
       const want = Math.min(batchSize, visits - scheduled);
-      const batch = collectPreparedLeafBatch(root, want, searchPolicy, context, stats, transpositionTable, collisionMode, collisionRetryLimit, inFlightEvalLeaves, nextSearchTraceGenerationId(stats));
+      const batch = collectPreparedLeafBatch(
+        root,
+        want,
+        searchPolicy,
+        context,
+        stats,
+        transpositionTable,
+        collisionMode,
+        collisionRetryLimit,
+        inFlightEvalLeaves,
+        nextSearchTraceGenerationId(stats),
+      );
       if (!batch.prepared.length) break;
       batches.push(batch);
       scheduled += batch.prepared.length;
@@ -1653,7 +1944,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     cpuctBase: options.cpuctBase ?? 38739,
     cpuctFactor: options.cpuctFactor ?? 3.894,
     fpuStrategy: options.fpuStrategy ?? 'constant',
-    fpuReduction: options.fpuReduction ?? 0.330,
+    fpuReduction: options.fpuReduction ?? 0.33,
     avWeight: options.avWeight ?? 0.25,
     rankWeight: options.rankWeight ?? 0,
     regretWeight: options.regretWeight ?? 0,
@@ -1687,8 +1978,16 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   if (options.traceSearchVisits) stats.searchTrace = [];
   const requestedHistory = options.historyFens ?? [];
   const currentSearchValueKey = searchValueKey(context);
-  const reusableRoot = !options.rootMoves && options.root && boardToFen(options.root.board) === boardToFen(board) && sameHistory(options.root.historyFens, requestedHistory) && nodeSearchValueCompatible(options.root, currentSearchValueKey) ? options.root : null;
-  const root: Node = reusableRoot ?? makeSearchRoot(board, requestedHistory, options.historyBoards ?? [], options.explicitHistory ?? (requestedHistory.length > 0));
+  const reusableRoot =
+    !options.rootMoves &&
+    options.root &&
+    boardToFen(options.root.board) === boardToFen(board) &&
+    sameHistory(options.root.historyFens, requestedHistory) &&
+    nodeSearchValueCompatible(options.root, currentSearchValueKey)
+      ? options.root
+      : null;
+  const root: Node =
+    reusableRoot ?? makeSearchRoot(board, requestedHistory, options.historyBoards ?? [], options.explicitHistory ?? requestedHistory.length > 0);
   root.searchValueKey = currentSearchValueKey;
   root.isRoot = true;
   stats.rootReused = !!reusableRoot;
@@ -1714,7 +2013,12 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     } else {
       const beforeMetrics = evaluatorMetrics(evaluator);
       stats.evalCalls += 1;
-      const evaln = await evaluator.evaluate(root.board, { historyFens: root.historyFens, historyBoards: root.historyBoards, explicitHistory: root.explicitHistory, legalMoves: options.rootMoves });
+      const evaln = await evaluator.evaluate(root.board, {
+        historyFens: root.historyFens,
+        historyBoards: root.historyBoards,
+        explicitHistory: root.explicitHistory,
+        legalMoves: options.rootMoves,
+      });
       recordEvaluatorMetricsDelta(evaluator, beforeMetrics, 1, stats);
       recordEvaluationTimingBatch(stats, [evaln]);
       rootValue = finishExpansion(root, options.rootMoves, evaln, context);
@@ -1725,7 +2029,17 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   }
   if (!root.edges.length) {
     finalizeEvaluationTimingStats(stats);
-    logSearchLatency('puct.search', { totalMs: nowMs() - tSearch0, requestedVisits: visits, completedVisits: 0, expansions: stats.expansions, terminalHits: stats.terminalHits, evalCalls: stats.evalCalls, batchEvalCalls: stats.batchEvalCalls, maxEvalBatch: stats.maxEvalBatch, stopReason: 'terminal-root' });
+    logSearchLatency('puct.search', {
+      totalMs: nowMs() - tSearch0,
+      requestedVisits: visits,
+      completedVisits: 0,
+      expansions: stats.expansions,
+      terminalHits: stats.terminalHits,
+      evalCalls: stats.evalCalls,
+      batchEvalCalls: stats.batchEvalCalls,
+      maxEvalBatch: stats.maxEvalBatch,
+      stopReason: 'terminal-root',
+    });
     return { move: null, visits: 0, value: rootValue, policy: [], stats };
   }
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
@@ -1760,10 +2074,42 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     if (!cacheAware) {
       stats.stopReason = 'no-cache-metrics-fixed-visits';
       if (batchSize > 1 || batchPipelineDepth > 1) {
-        if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
-        else await runBatchedVisits(root, evaluator, visitsToRun, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
-      }
-      else {
+        if (batchPipelineDepth > 1)
+          await runPipelinedBatchedVisits(
+            root,
+            evaluator,
+            visitsToRun,
+            searchPolicy,
+            context,
+            batchSize,
+            batchPipelineDepth,
+            stats,
+            signal,
+            yieldEveryMs,
+            options.transpositionTable,
+            deadlineMs,
+            options.batchCollisionMode,
+            options.batchCollisionRetryLimit,
+            emitProgress,
+          );
+        else
+          await runBatchedVisits(
+            root,
+            evaluator,
+            visitsToRun,
+            searchPolicy,
+            context,
+            batchSize,
+            stats,
+            signal,
+            yieldEveryMs,
+            options.transpositionTable,
+            deadlineMs,
+            options.batchCollisionMode,
+            options.batchCollisionRetryLimit,
+            emitProgress,
+          );
+      } else {
         let lastYield = nowMs();
         for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
           throwIfAborted(signal);
@@ -1782,7 +2128,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     } else {
       const startMisses = stats.neuralEvalMisses ?? 0;
       let lastYield = nowMs();
-      while (((stats.neuralEvalMisses ?? 0) - startMisses) < visits && rootVisitCount(root) < maxRootVisits && !deadlineExpired(deadlineMs)) {
+      while ((stats.neuralEvalMisses ?? 0) - startMisses < visits && rootVisitCount(root) < maxRootVisits && !deadlineExpired(deadlineMs)) {
         throwIfAborted(signal);
         const room = Math.max(0, maxRootVisits - rootVisitCount(root));
         const remainingMissBudget = Math.max(1, visits - ((stats.neuralEvalMisses ?? 0) - startMisses));
@@ -1792,10 +2138,42 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
         const chunk = Math.max(1, Math.min(batchSize * batchPipelineDepth, room, Math.max(batchSize, remainingMissBudget)));
         const beforeCompleted = stats.completedVisits;
         if (batchSize > 1 || batchPipelineDepth > 1) {
-          if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
-          else await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
-        }
-        else {
+          if (batchPipelineDepth > 1)
+            await runPipelinedBatchedVisits(
+              root,
+              evaluator,
+              chunk,
+              searchPolicy,
+              context,
+              batchSize,
+              batchPipelineDepth,
+              stats,
+              signal,
+              yieldEveryMs,
+              options.transpositionTable,
+              deadlineMs,
+              options.batchCollisionMode,
+              options.batchCollisionRetryLimit,
+              emitProgress,
+            );
+          else
+            await runBatchedVisits(
+              root,
+              evaluator,
+              chunk,
+              searchPolicy,
+              context,
+              batchSize,
+              stats,
+              signal,
+              yieldEveryMs,
+              options.transpositionTable,
+              deadlineMs,
+              options.batchCollisionMode,
+              options.batchCollisionRetryLimit,
+              emitProgress,
+            );
+        } else {
           await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
           stats.completedVisits += 1;
         }
@@ -1816,15 +2194,49 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
           throwIfAborted(signal);
         }
       }
-      if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) ? 'movetime' : ((stats.neuralEvalMisses ?? 0) - startMisses) >= visits ? 'neural-budget' : 'max-visits';
+      if (!stats.stopReason)
+        stats.stopReason = deadlineExpired(deadlineMs) ? 'movetime' : (stats.neuralEvalMisses ?? 0) - startMisses >= visits ? 'neural-budget' : 'max-visits';
     }
   } else if (batchSize > 1 || batchPipelineDepth > 1) {
     let done = 0;
     while (done < visitsToRun && !deadlineExpired(deadlineMs)) {
       const chunk = Math.min(batchSize * batchPipelineDepth, visitsToRun - done);
       const beforeCompleted = stats.completedVisits;
-      if (batchPipelineDepth > 1) await runPipelinedBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, batchPipelineDepth, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
-      else await runBatchedVisits(root, evaluator, chunk, searchPolicy, context, batchSize, stats, signal, yieldEveryMs, options.transpositionTable, deadlineMs, options.batchCollisionMode, options.batchCollisionRetryLimit, emitProgress);
+      if (batchPipelineDepth > 1)
+        await runPipelinedBatchedVisits(
+          root,
+          evaluator,
+          chunk,
+          searchPolicy,
+          context,
+          batchSize,
+          batchPipelineDepth,
+          stats,
+          signal,
+          yieldEveryMs,
+          options.transpositionTable,
+          deadlineMs,
+          options.batchCollisionMode,
+          options.batchCollisionRetryLimit,
+          emitProgress,
+        );
+      else
+        await runBatchedVisits(
+          root,
+          evaluator,
+          chunk,
+          searchPolicy,
+          context,
+          batchSize,
+          stats,
+          signal,
+          yieldEveryMs,
+          options.transpositionTable,
+          deadlineMs,
+          options.batchCollisionMode,
+          options.batchCollisionRetryLimit,
+          emitProgress,
+        );
       done += Math.max(0, stats.completedVisits - beforeCompleted);
       if (stats.completedVisits === beforeCompleted) break;
       if (deadlineExpired(deadlineMs)) break;
@@ -1867,10 +2279,11 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const pvSelector = options.pvSelector ?? 'visits';
   const principalVariation = options.includePv ? extractPrincipalVariation(root, context, searchPolicy, pvDepth, pvSelector) : undefined;
   const multiPvCount = Math.max(0, Math.floor(options.multiPv ?? 0));
-  const multiPvLines = options.includePv && multiPvCount > 1
-    ? extractMultiPv(root, context, searchPolicy, pvDepth, pvSelector, multiPvCount)
-    : undefined;
-  const realizedVisits = Math.max(root.visits, root.edges.reduce((sum, edge) => sum + edge.visits, 0));
+  const multiPvLines = options.includePv && multiPvCount > 1 ? extractMultiPv(root, context, searchPolicy, pvDepth, pvSelector, multiPvCount) : undefined;
+  const realizedVisits = Math.max(
+    root.visits,
+    root.edges.reduce((sum, edge) => sum + edge.visits, 0),
+  );
   finalizeEvaluationTimingStats(stats);
   logSearchLatency('puct.search', {
     totalMs: nowMs() - tSearch0,
@@ -1899,7 +2312,16 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     evalBackendTimingPositions: stats.evalBackendTimingPositions ?? 0,
     evalBackendTimingMeans: stats.evalBackendTimingMeans ?? {},
   });
-  return { move: bestEntry?.move ?? null, visits: realizedVisits, value: bestEntry?.q ?? rootValue, policy, ...(principalVariation ? { principalVariation } : {}), ...(multiPvLines ? { multiPvLines } : {}), stats, root };
+  return {
+    move: bestEntry?.move ?? null,
+    visits: realizedVisits,
+    value: bestEntry?.q ?? rootValue,
+    policy,
+    ...(principalVariation ? { principalVariation } : {}),
+    ...(multiPvLines ? { multiPvLines } : {}),
+    stats,
+    root,
+  };
 }
 
 export async function chooseMove(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {

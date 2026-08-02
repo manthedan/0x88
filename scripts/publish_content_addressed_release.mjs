@@ -13,11 +13,13 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { constants as zlibConstants, createBrotliCompress } from 'node:zlib';
+import { createBrotliCompress, constants as zlibConstants } from 'node:zlib';
 
 function usage(message) {
   if (message) console.error(message);
-  console.error('Usage: publish_content_addressed_release.mjs --release-id ID --asset NAME=PATH [--asset NAME=PATH ...] [--root DIR] [--channel NAME] [--no-brotli] [--brotli-quality 0..11]');
+  console.error(
+    'Usage: publish_content_addressed_release.mjs --release-id ID --asset NAME=PATH [--asset NAME=PATH ...] [--root DIR] [--channel NAME] [--no-brotli] [--brotli-quality 0..11]',
+  );
   process.exit(2);
 }
 
@@ -26,18 +28,29 @@ const options = { root: 'public', channel: 'stable', assets: [], brotli: true, b
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   const value = args[i + 1];
-  if (arg === '--root' && value) { options.root = value; i++; }
-  else if (arg === '--release-id' && value) { options.releaseId = value; i++; }
-  else if (arg === '--channel' && value) { options.channel = value; i++; }
-  else if (arg === '--asset' && value) { options.assets.push(value); i++; }
-  else if (arg === '--no-brotli') options.brotli = false;
-  else if (arg === '--brotli-quality' && value) { options.brotliQuality = Number(value); i++; }
-  else usage(`Unknown or incomplete argument: ${arg}`);
+  if (arg === '--root' && value) {
+    options.root = value;
+    i++;
+  } else if (arg === '--release-id' && value) {
+    options.releaseId = value;
+    i++;
+  } else if (arg === '--channel' && value) {
+    options.channel = value;
+    i++;
+  } else if (arg === '--asset' && value) {
+    options.assets.push(value);
+    i++;
+  } else if (arg === '--no-brotli') options.brotli = false;
+  else if (arg === '--brotli-quality' && value) {
+    options.brotliQuality = Number(value);
+    i++;
+  } else usage(`Unknown or incomplete argument: ${arg}`);
 }
 if (!options.releaseId || !/^[A-Za-z0-9._-]+$/.test(options.releaseId)) usage('--release-id is required and must be path-safe');
 if (!/^[A-Za-z0-9._-]+$/.test(options.channel)) usage('--channel must be path-safe');
 if (!options.assets.length) usage('At least one --asset NAME=PATH is required');
-if (!Number.isInteger(options.brotliQuality) || options.brotliQuality < 0 || options.brotliQuality > 11) usage('--brotli-quality must be an integer from 0 through 11');
+if (!Number.isInteger(options.brotliQuality) || options.brotliQuality < 0 || options.brotliQuality > 11)
+  usage('--brotli-quality must be an integer from 0 through 11');
 
 function parseAsset(spec) {
   const equals = spec.indexOf('=');
@@ -144,11 +157,18 @@ writeJsonOnce(resolve(root, releaseUrl.slice(1)), release);
 
 const channelPath = resolve(root, 'channels', `${options.channel}.json`);
 mkdirSync(dirname(channelPath), { recursive: true });
-writeFileSync(channelPath, `${JSON.stringify({
-  schema: 'lc0-webgpu.artifact-channel.v2',
-  channel: options.channel,
-  releaseId: options.releaseId,
-  releaseUrl,
-}, null, 2)}\n`);
+writeFileSync(
+  channelPath,
+  `${JSON.stringify(
+    {
+      schema: 'lc0-webgpu.artifact-channel.v2',
+      channel: options.channel,
+      releaseId: options.releaseId,
+      releaseUrl,
+    },
+    null,
+    2,
+  )}\n`,
+);
 
 console.log(JSON.stringify({ status: 'CONTENT_ADDRESSED_RELEASE_V2_READY', root, releaseUrl, channel: options.channel, artifacts }, null, 2));

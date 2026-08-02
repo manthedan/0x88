@@ -1,9 +1,19 @@
-import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
+
 export { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
-export type RecklessVariantKey = 'full' | 'simd' | 'relaxed-simd' | 'lite' | 'wasi-simd-external' | 'browser-api' | 'browser-api-simd' | 'browser-api-simd-external' | 'custom';
+export type RecklessVariantKey =
+  | 'full'
+  | 'simd'
+  | 'relaxed-simd'
+  | 'lite'
+  | 'wasi-simd-external'
+  | 'browser-api'
+  | 'browser-api-simd'
+  | 'browser-api-simd-external'
+  | 'custom';
 
 export interface RecklessVariant {
   key: RecklessVariantKey;
@@ -123,13 +133,31 @@ export const RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT: RecklessVariant = {
   nnueExpectedBytes: RECKLESS_V60_NNUE_BYTES,
 };
 
-export const RECKLESS_VARIANTS = [RECKLESS_SIMD_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_FULL_VARIANT, RECKLESS_WASI_SIMD_EXTERNAL_VARIANT, RECKLESS_BROWSER_API_VARIANT, RECKLESS_BROWSER_API_SIMD_VARIANT, RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, RECKLESS_LITE_VARIANT] as const;
+export const RECKLESS_VARIANTS = [
+  RECKLESS_SIMD_VARIANT,
+  RECKLESS_RELAXED_SIMD_VARIANT,
+  RECKLESS_FULL_VARIANT,
+  RECKLESS_WASI_SIMD_EXTERNAL_VARIANT,
+  RECKLESS_BROWSER_API_VARIANT,
+  RECKLESS_BROWSER_API_SIMD_VARIANT,
+  RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT,
+  RECKLESS_LITE_VARIANT,
+] as const;
 
 export function normalizeRecklessVariant(raw: string | null | undefined): RecklessVariantKey {
-  const value = String(raw ?? '').toLowerCase().replace(/[ _]/g, '-');
+  const value = String(raw ?? '')
+    .toLowerCase()
+    .replace(/[ _]/g, '-');
   if (value === 'lite' || value === 'small' || value === 'v53') return 'lite';
   if (value === 'wasi-simd-external' || value === 'wasi-external' || value === 'persistent-external') return 'wasi-simd-external';
-  if (value === 'api-simd-external' || value === 'browser-api-simd-external' || value === 'direct-simd-external' || value === 'native-simd-external' || value === 'external-simd') return 'browser-api-simd-external';
+  if (
+    value === 'api-simd-external' ||
+    value === 'browser-api-simd-external' ||
+    value === 'direct-simd-external' ||
+    value === 'native-simd-external' ||
+    value === 'external-simd'
+  )
+    return 'browser-api-simd-external';
   if (value === 'api-simd' || value === 'browser-api-simd' || value === 'direct-simd' || value === 'native-simd') return 'browser-api-simd';
   if (value === 'api' || value === 'browser-api' || value === 'direct' || value === 'native') return 'browser-api';
   if (value === 'relaxed' || value === 'relaxed-simd' || value === 'relaxed-simd128' || value === 'full-relaxed-simd') return 'relaxed-simd';
@@ -195,7 +223,11 @@ export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: (
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing) return existing.then((status) => { onChange?.(); return status; });
+  if (existing)
+    return existing.then((status) => {
+      onChange?.();
+      return status;
+    });
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
     onChange?.();
@@ -203,7 +235,13 @@ export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: (
   }
   assetStatuses.set(key, 'checking');
   const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
-  const promise = Promise.all(urls.map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
+  const promise = Promise.all(
+    urls.map((url) =>
+      fetch(url, { method: 'HEAD', cache: 'no-store' })
+        .then((response) => response.ok)
+        .catch(() => false),
+    ),
+  )
     .then((results) => (results.every(Boolean) ? 'present' : 'missing') as RecklessAssetStatus)
     .then((status) => {
       assetStatuses.set(key, status);

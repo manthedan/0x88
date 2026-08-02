@@ -12,7 +12,9 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 
 function usage() {
-  console.log(`Usage: node --experimental-strip-types scripts/lc0_tvmjs_webgpu_fixed_suite.mjs [options]\n\nRuns a production-style fixed-position research bridge for the isolated LC0 TVMJS/WebGPU path.\nIt does not add TVMJS to the stable runtime registry or arena runtime UI; it delegates to lc0_tvmjs_webgpu_smoke.mjs and emits a fixed-suite-style report.\n\nOptions:\n  --fens FILE               Newline-separated FEN suite\n  --source-report PATH      Existing runtime arena JSON to derive LC0-to-move FENs from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in source runtime PGN (default 2)\n  --max-positions N         Max fixed positions to run (default 16)\n  --skip-plies N            Ignore source PGN positions before this absolute ply (default 0)\n  --batch N                 TVMJS batch artifact: 1, 4, or 8 (default 8)\n  --visits N                Fixed search visits per position (default 16)\n  --repeats N               Repeat each search row for timing stability (default 1)\n  --ort-compare MODE        ORT comparison: f16, f32, both, none (default f16)\n  --ort-ep EP               ORT EP for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --ort-model TPL           ORT model path template with {batch}/{dtype} placeholders (default t1 family)\n  --fixture-baseline PATH   Native fixture baseline JSONL served path\n  --tie-epsilon X           Forwarded to the child smoke: tolerate near-tie best-move mismatches within X prior mass\n  --stockfish-score-depth N Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N    Score TVMJS/ORT post-search moves by movetime\n  --suite-out PATH          Write normalized FEN suite to PATH (default next to --out)\n  --smoke-out PATH          Child TVMJS smoke artifact path (default next to --out)\n  --report-out PATH         Fixed-suite-style report path (default next to --out)\n  --out PATH                Aggregate bridge JSON path (default ${DEFAULT_OUT})\n  --base-url URL            Use existing dev server for child smoke\n  --host HOST               Vite host when child starts server (default ${DEFAULT_HOST})\n  --port N                  Vite port when child starts server (default ${DEFAULT_PORT})\n  --timeout MS              Child smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN       Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --no-server               Forward --no-server to child smoke\n  --dry-run                 Print resolved commands and artifacts without running or writing\n  -h, --help                Show help\n`);
+  console.log(
+    `Usage: node --experimental-strip-types scripts/lc0_tvmjs_webgpu_fixed_suite.mjs [options]\n\nRuns a production-style fixed-position research bridge for the isolated LC0 TVMJS/WebGPU path.\nIt does not add TVMJS to the stable runtime registry or arena runtime UI; it delegates to lc0_tvmjs_webgpu_smoke.mjs and emits a fixed-suite-style report.\n\nOptions:\n  --fens FILE               Newline-separated FEN suite\n  --source-report PATH      Existing runtime arena JSON to derive LC0-to-move FENs from\n  --source-runtime NAME     Runtime in source report (default hybrid-wgsl-heads)\n  --source-game N           1-based game number in source runtime PGN (default 2)\n  --max-positions N         Max fixed positions to run (default 16)\n  --skip-plies N            Ignore source PGN positions before this absolute ply (default 0)\n  --batch N                 TVMJS batch artifact: 1, 4, or 8 (default 8)\n  --visits N                Fixed search visits per position (default 16)\n  --repeats N               Repeat each search row for timing stability (default 1)\n  --ort-compare MODE        ORT comparison: f16, f32, both, none (default f16)\n  --ort-ep EP               ORT EP for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --ort-model TPL           ORT model path template with {batch}/{dtype} placeholders (default t1 family)\n  --fixture-baseline PATH   Native fixture baseline JSONL served path\n  --tie-epsilon X           Forwarded to the child smoke: tolerate near-tie best-move mismatches within X prior mass\n  --stockfish-score-depth N Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N    Score TVMJS/ORT post-search moves by movetime\n  --suite-out PATH          Write normalized FEN suite to PATH (default next to --out)\n  --smoke-out PATH          Child TVMJS smoke artifact path (default next to --out)\n  --report-out PATH         Fixed-suite-style report path (default next to --out)\n  --out PATH                Aggregate bridge JSON path (default ${DEFAULT_OUT})\n  --base-url URL            Use existing dev server for child smoke\n  --host HOST               Vite host when child starts server (default ${DEFAULT_HOST})\n  --port N                  Vite port when child starts server (default ${DEFAULT_PORT})\n  --timeout MS              Child smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN       Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --no-server               Forward --no-server to child smoke\n  --dry-run                 Print resolved commands and artifacts without running or writing\n  -h, --help                Show help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -44,7 +46,10 @@ function parseArgs(argv) {
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
+    const next = () => {
+      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
+      return argv[++i];
+    };
     if (arg === '--fens') args.fensFile = next();
     else if (arg === '--source-report') args.sourceReport = next();
     else if (arg === '--source-runtime') args.sourceRuntime = next();
@@ -66,8 +71,10 @@ function parseArgs(argv) {
     else if (arg === '--smoke-out') args.smokeOut = next();
     else if (arg === '--report-out') args.reportOut = next();
     else if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') { args.baseUrl = next(); args.noServer = true; }
-    else if (arg === '--host') args.host = next();
+    else if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.noServer = true;
+    } else if (arg === '--host') args.host = next();
     else if (arg === '--port') args.port = Number(next());
     else if (arg === '--timeout') args.timeoutMs = Number(next());
     else if (arg === '--agent-browser') args.agentBrowser = next();
@@ -86,8 +93,10 @@ function parseArgs(argv) {
   if (![1, 4, 8, 16, 32].includes(args.batch)) throw new Error(`Invalid --batch ${args.batch}; expected 1, 4, 8, 16, or 32`);
   if (!['none', 'f16', 'f32', 'both'].includes(args.ortCompare)) throw new Error(`Invalid --ort-compare ${args.ortCompare}`);
   if (!['webgpu', 'wasm', 'webgpu,wasm'].includes(args.ortEp)) throw new Error(`Invalid --ort-ep ${args.ortEp}`);
-  if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0)) throw new Error(`Invalid --stockfish-score-depth ${args.stockfishScoreDepth}`);
-  if (args.stockfishScoreMs !== undefined && (!Number.isFinite(args.stockfishScoreMs) || args.stockfishScoreMs <= 0)) throw new Error(`Invalid --stockfish-score-ms ${args.stockfishScoreMs}`);
+  if (args.stockfishScoreDepth !== undefined && (!Number.isFinite(args.stockfishScoreDepth) || args.stockfishScoreDepth <= 0))
+    throw new Error(`Invalid --stockfish-score-depth ${args.stockfishScoreDepth}`);
+  if (args.stockfishScoreMs !== undefined && (!Number.isFinite(args.stockfishScoreMs) || args.stockfishScoreMs <= 0))
+    throw new Error(`Invalid --stockfish-score-ms ${args.stockfishScoreMs}`);
   const stem = args.out.replace(/\.json$/i, '');
   args.suiteOut ||= `${stem}.fens`;
   args.smokeOut ||= `${stem}.smoke.json`;
@@ -129,7 +138,9 @@ async function loadFens(args) {
 }
 
 function hashLines(lines) {
-  return createHash('sha256').update(`${lines.join('\n')}\n`).digest('hex');
+  return createHash('sha256')
+    .update(`${lines.join('\n')}\n`)
+    .digest('hex');
 }
 
 function spawnCapture(command, commandArgs, options = {}) {
@@ -139,10 +150,23 @@ function spawnCapture(command, commandArgs, options = {}) {
     const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
     const chunks = { stdout: [], stderr: [] };
     let settled = false;
-    const finish = (fn, value) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); fn(value); };
-    const timer = timeoutMs ? setTimeout(() => { child.kill('SIGKILL'); finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`)); }, timeoutMs) : undefined;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn(value);
+    };
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          child.kill('SIGKILL');
+          finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+      : undefined;
     child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
-    child.stderr.on('data', (chunk) => { chunks.stderr.push(chunk); if (echoStderr) process.stderr.write(chunk); });
+    child.stderr.on('data', (chunk) => {
+      chunks.stderr.push(chunk);
+      if (echoStderr) process.stderr.write(chunk);
+    });
     child.on('error', (error) => finish(reject, error));
     child.on('close', (status) => {
       const stdout = Buffer.concat(chunks.stdout).toString('utf8');
@@ -154,7 +178,32 @@ function spawnCapture(command, commandArgs, options = {}) {
 }
 
 function childCommands(args) {
-  const smoke = ['scripts/lc0_tvmjs_webgpu_smoke.mjs', '--batch', String(args.batch), '--fixtures', '--fixture-count', String(args.fenCount), '--fens', args.suiteOut, '--ort-compare', args.ortCompare, '--ort-ep', args.ortEp, '--search-visits', String(args.visits), '--search-fixtures', String(args.fenCount), '--search-repeats', String(args.repeats), '--timeout', String(args.timeoutMs), '--agent-browser', args.agentBrowser, '--out', args.smokeOut];
+  const smoke = [
+    'scripts/lc0_tvmjs_webgpu_smoke.mjs',
+    '--batch',
+    String(args.batch),
+    '--fixtures',
+    '--fixture-count',
+    String(args.fenCount),
+    '--fens',
+    args.suiteOut,
+    '--ort-compare',
+    args.ortCompare,
+    '--ort-ep',
+    args.ortEp,
+    '--search-visits',
+    String(args.visits),
+    '--search-fixtures',
+    String(args.fenCount),
+    '--search-repeats',
+    String(args.repeats),
+    '--timeout',
+    String(args.timeoutMs),
+    '--agent-browser',
+    args.agentBrowser,
+    '--out',
+    args.smokeOut,
+  ];
   if (args.manifest) smoke.push('--manifest', args.manifest);
   if (args.ortModel) smoke.push('--ort-model', args.ortModel);
   if (args.fixtureBaseline) smoke.push('--fixture-baseline', args.fixtureBaseline);
@@ -172,22 +221,31 @@ function childCommands(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) { usage(); return; }
+  if (args.help) {
+    usage();
+    return;
+  }
   const fens = await loadFens(args);
   if (!fens.length) throw new Error('No fixed-suite FENs resolved');
   args.fenCount = fens.length;
   const fensSha256 = hashLines(fens);
   const commands = childCommands(args);
   if (args.dryRun) {
-    console.log(JSON.stringify({
-      schema: 'lc0_browser.tvmjs_webgpu_fixed_suite_research_bridge.dry_run.v1',
-      ok: true,
-      researchOnly: true,
-      noStableRuntimePromotion: true,
-      fens: { count: fens.length, sha256: fensSha256, wouldWrite: args.suiteOut },
-      artifacts: { aggregate: args.out, smoke: args.smokeOut, report: args.reportOut, suite: args.suiteOut },
-      commands,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          schema: 'lc0_browser.tvmjs_webgpu_fixed_suite_research_bridge.dry_run.v1',
+          ok: true,
+          researchOnly: true,
+          noStableRuntimePromotion: true,
+          fens: { count: fens.length, sha256: fensSha256, wouldWrite: args.suiteOut },
+          artifacts: { aggregate: args.out, smoke: args.smokeOut, report: args.reportOut, suite: args.suiteOut },
+          commands,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -210,8 +268,18 @@ async function main() {
       'This bridge mirrors fixed-suite inputs and report shape, but delegates execution to lc0_tvmjs_webgpu_smoke.mjs until a promotion-grade runtime integration exists.',
       'Generated TVMJS wasm/runtime artifacts remain local/ignored unless release policy changes.',
     ],
-    source: args.fensFile ? { type: 'fens', path: args.fensFile } : { type: 'source-report', path: args.sourceReport, runtime: args.sourceRuntime, game: args.sourceGame, skipPlies: args.skipPlies },
-    config: { batch: args.batch, visits: args.visits, repeats: args.repeats, ortCompare: args.ortCompare, ortEp: args.ortEp, stockfishScoreDepth: args.stockfishScoreDepth, stockfishScoreMs: args.stockfishScoreMs },
+    source: args.fensFile
+      ? { type: 'fens', path: args.fensFile }
+      : { type: 'source-report', path: args.sourceReport, runtime: args.sourceRuntime, game: args.sourceGame, skipPlies: args.skipPlies },
+    config: {
+      batch: args.batch,
+      visits: args.visits,
+      repeats: args.repeats,
+      ortCompare: args.ortCompare,
+      ortEp: args.ortEp,
+      stockfishScoreDepth: args.stockfishScoreDepth,
+      stockfishScoreMs: args.stockfishScoreMs,
+    },
     fens: { count: fens.length, sha256: fensSha256, path: args.suiteOut },
     artifacts: { smoke: args.smokeOut, report: args.reportOut, suite: args.suiteOut },
     commands,

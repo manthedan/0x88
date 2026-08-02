@@ -1,14 +1,20 @@
-import * as ort from './ortRuntime.ts';
-import { boardToFen, opposite, type BoardState, type Color, type Piece } from '../chess/board.ts';
-import { isStmWhiteRankflip, normalizePositionForStmWhite, normalizedMoveToOriginal } from '../chess/boardNormalization.ts';
+import { type BoardState, boardToFen, type Color, opposite, type Piece } from '../chess/board.ts';
+import { isStmWhiteRankflip, normalizedMoveToOriginal, normalizePositionForStmWhite } from '../chess/boardNormalization.ts';
+import { type Move, moveToActionId } from '../chess/moveCodec.ts';
+import { moveToChessBenchAvClass, moveToResidualPolicyIndex, POLICY_MAP } from '../chess/moveEncodings.ts';
 import { inCheck, kingSquare, legalMoves, makeMove } from '../chess/movegen.ts';
-import { moveToActionId, type Move } from '../chess/moveCodec.ts';
-import { POLICY_MAP, moveToChessBenchAvClass, moveToResidualPolicyIndex } from '../chess/moveEncodings.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
+import * as ort from './ortRuntime.ts';
 
 const PIECES = 'PNBRQKpnbrqk';
-const INPUT_CACHE_ENTRIES = Math.max(0, Math.min(65536, Math.floor(Number(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('evalInputCacheEntries') ?? '4096')) || 4096));
+const INPUT_CACHE_ENTRIES = Math.max(
+  0,
+  Math.min(
+    65536,
+    Math.floor(Number(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('evalInputCacheEntries') ?? '4096')) || 4096,
+  ),
+);
 
 function lruGet<K, V>(map: Map<K, V>, key: K): V | undefined {
   const value = map.get(key);
@@ -70,10 +76,11 @@ function normalizePolicy(policyRaw: ArrayLike<number>, board: BoardState, legalO
   }
   const policy = new Map<number, number>();
   if (legal.length && legalMass <= 0) for (const move of legal) policy.set(moveToActionId(normalizedMoveToOriginal(move, flipped)), 1 / legal.length);
-  else for (const move of legal) {
-    const index = policyIndex(move);
-    policy.set(moveToActionId(normalizedMoveToOriginal(move, flipped)), index === undefined ? 0 : probs[index] / legalMass);
-  }
+  else
+    for (const move of legal) {
+      const index = policyIndex(move);
+      policy.set(moveToActionId(normalizedMoveToOriginal(move, flipped)), index === undefined ? 0 : probs[index] / legalMass);
+    }
   return policy;
 }
 
@@ -90,8 +97,26 @@ function legalCandidateInputs(boards: BoardState[], contexts: EvaluationContext[
 const ROLE_INDEX: Record<string, number> = { p: 1, n: 2, b: 3, r: 4, q: 5, k: 6 };
 const PIECE_VALUE_BY_ROLE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const PROMO_INDEX: Record<string, number> = { n: 1, b: 2, r: 3, q: 4 };
-const KNIGHT_OFFSETS = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
-const KING_OFFSETS = [[1, 1], [1, 0], [1, -1], [0, 1], [0, -1], [-1, 1], [-1, 0], [-1, -1]];
+const KNIGHT_OFFSETS = [
+  [1, 2],
+  [2, 1],
+  [-1, 2],
+  [-2, 1],
+  [1, -2],
+  [2, -1],
+  [-1, -2],
+  [-2, -1],
+];
+const KING_OFFSETS = [
+  [1, 1],
+  [1, 0],
+  [1, -1],
+  [0, 1],
+  [0, -1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
+];
 
 const fileOf = (sq: number) => sq % 8;
 const rankOf = (sq: number) => Math.floor(sq / 8);
@@ -130,7 +155,7 @@ function pieceAttacksSquare(board: BoardState, from: number, piece: Piece, to: n
   if (role === 'n') return KNIGHT_OFFSETS.some(([f, r]) => f === df && r === dr);
   if (role === 'k') return KING_OFFSETS.some(([f, r]) => f === df && r === dr);
   if (role === 'b') return Math.abs(df) === Math.abs(dr) && df !== 0 && rayClear(board, from, to, Math.sign(df), Math.sign(dr));
-  if (role === 'r') return ((df === 0) !== (dr === 0)) && (df !== 0 || dr !== 0) && rayClear(board, from, to, Math.sign(df), Math.sign(dr));
+  if (role === 'r') return (df === 0) !== (dr === 0) && (df !== 0 || dr !== 0) && rayClear(board, from, to, Math.sign(df), Math.sign(dr));
   if (role === 'q') {
     const bishopLike = Math.abs(df) === Math.abs(dr) && df !== 0;
     const rookLike = (df === 0) !== (dr === 0);
@@ -163,7 +188,12 @@ function terminalWdl(board: BoardState): [number, number, number] {
   return [0, 0, 1];
 }
 
-export function moveformerLegalInputs(boards: BoardState[], width: number, featureCount: number, contexts: EvaluationContext[] = []): { moves: Move[][]; actionIds: BigInt64Array; features: Float32Array; mask: Float32Array; width: number } {
+export function moveformerLegalInputs(
+  boards: BoardState[],
+  width: number,
+  featureCount: number,
+  contexts: EvaluationContext[] = [],
+): { moves: Move[][]; actionIds: BigInt64Array; features: Float32Array; mask: Float32Array; width: number } {
   const moves = boards.map((board, i) => contexts[i]?.legalMoves ?? legalMoves(board));
   const actionIds = new BigInt64Array(boards.length * width);
   const features = new Float32Array(boards.length * width * featureCount);
@@ -189,7 +219,7 @@ export function moveformerLegalInputs(boards: BoardState[], width: number, featu
       const movingType = ROLE_INDEX[movingRole] ?? 0;
       const capturedType = ROLE_INDEX[capturedRole] ?? 0;
       const capturedValue = PIECE_VALUE_BY_ROLE[capturedRole] ?? 0;
-      const promoValue = move.promotion ? ((PIECE_VALUE_BY_ROLE[move.promotion] ?? 0) - 1) : 0;
+      const promoValue = move.promotion ? (PIECE_VALUE_BY_ROLE[move.promotion] ?? 0) - 1 : 0;
       const isEp = movingRole === 'p' && move.to === board.epSquare && !!captured && !board.squares[move.to] && fileOf(move.from) !== fileOf(move.to);
       const isCastle = movingRole === 'k' && Math.abs(fileOf(move.to) - fileOf(move.from)) === 2;
       const fromEnemy = attackerCount(board, enemyColor, move.from);
@@ -230,13 +260,16 @@ export function moveformerLegalInputs(boards: BoardState[], width: number, featu
 
 function addPiecePlanes(data: Float32Array, fen: string, offset: number, inputPlanes: number) {
   const placement = fen.split(/\s+/)[0];
-  let rank = 0, file = 0;
+  let rank = 0,
+    file = 0;
   for (const ch of placement) {
-    if (ch === '/') { rank++; file = 0; }
-    else if (/\d/.test(ch)) file += Number(ch);
+    if (ch === '/') {
+      rank++;
+      file = 0;
+    } else if (/\d/.test(ch)) file += Number(ch);
     else {
       const pi = PIECES.indexOf(ch);
-      if (pi >= 0) data[((offset + pi) * 64) + rank * 8 + file] = 1;
+      if (pi >= 0) data[(offset + pi) * 64 + rank * 8 + file] = 1;
       file++;
     }
   }
@@ -248,17 +281,26 @@ export function onnxInputPlanes(board: BoardState, meta: Pick<OnnxStudentMeta, '
   const data = new Float32Array(inputPlanes * 64);
   addPiecePlanes(data, fen, 0, inputPlanes);
   for (let h = 0; h < meta.history_plies && h < historyFens.length; h++) addPiecePlanes(data, historyFens[h], 12 * (h + 1), inputPlanes);
-  const parts = fen.split(/\s+/); const side = parts[1] ?? 'w'; const castling = parts[2] ?? '-'; const ep = parts[3] ?? '-';
+  const parts = fen.split(/\s+/);
+  const side = parts[1] ?? 'w';
+  const castling = parts[2] ?? '-';
+  const ep = parts[3] ?? '-';
   const state0 = 12 * (meta.history_plies + 1);
-  const fillPlane = (p: number, v: number) => { if (p >= 0 && p < inputPlanes) data.fill(v, p * 64, (p + 1) * 64); };
+  const fillPlane = (p: number, v: number) => {
+    if (p >= 0 && p < inputPlanes) data.fill(v, p * 64, (p + 1) * 64);
+  };
   fillPlane(state0, side === 'w' ? 1 : -1);
   if (inputPlanes - state0 >= 10) {
-    ['K', 'Q', 'k', 'q'].forEach((flag, i) => { if (castling.includes(flag)) fillPlane(state0 + 1 + i, 1); });
+    ['K', 'Q', 'k', 'q'].forEach((flag, i) => {
+      if (castling.includes(flag)) fillPlane(state0 + 1 + i, 1);
+    });
     if (ep !== '-' && ep.length >= 2) {
-      const ef = ep.charCodeAt(0) - 97; const er = 8 - Number(ep[1]);
+      const ef = ep.charCodeAt(0) - 97;
+      const er = 8 - Number(ep[1]);
       if (er >= 0 && er < 8 && ef >= 0 && ef < 8) data[(state0 + 5) * 64 + er * 8 + ef] = 1;
     }
-    fillPlane(state0 + 6, 1); fillPlane(state0 + 7, side === 'w' ? 1 : 0);
+    fillPlane(state0 + 6, 1);
+    fillPlane(state0 + 7, side === 'w' ? 1 : 0);
     // Check planes are intentionally zero for now; add runtime parity once history plumbing lands.
   } else fillPlane(state0 + 1, 1);
   return data;
@@ -271,7 +313,8 @@ function outputNames(outputs: Record<string, ort.Tensor>): string {
 function requiredFloatOutput(outputs: Record<string, ort.Tensor>, name: string): Float32Array {
   const tensor = outputs[name];
   if (!tensor) throw new Error(`ONNX output missing required tensor '${name}'. Available outputs: ${outputNames(outputs)}`);
-  if (!(tensor.data instanceof Float32Array)) throw new Error(`ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
+  if (!(tensor.data instanceof Float32Array))
+    throw new Error(`ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
   return tensor.data;
 }
 
@@ -279,7 +322,8 @@ function optionalFloatOutput(outputs: Record<string, ort.Tensor>, ...names: stri
   for (const name of names) {
     const tensor = outputs[name];
     if (!tensor) continue;
-    if (!(tensor.data instanceof Float32Array)) throw new Error(`ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
+    if (!(tensor.data instanceof Float32Array))
+      throw new Error(`ONNX output '${name}' expected float32 data, got ${Object.prototype.toString.call(tensor.data)}`);
     return tensor.data;
   }
   return undefined;
@@ -305,7 +349,10 @@ function sessionOptions(): ort.InferenceSession.SessionOptions {
   const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
   const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
   const epEnv = globalThis.process?.env?.TINY_LEELA_ORT_EP ?? globalThis.process?.env?.ORT_EXECUTION_PROVIDERS ?? '';
-  const executionProviders = epEnv.split(',').map((s) => s.trim()).filter(Boolean);
+  const executionProviders = epEnv
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (executionProviders.length) opts.executionProviders = executionProviders;
   if (Number.isFinite(threads) && threads > 0) {
     opts.intraOpNumThreads = Math.floor(threads);
@@ -320,7 +367,9 @@ export class OnnxEvaluator implements Evaluator {
   private historyFens: string[];
   private planeCache = new Map<string, Float32Array>();
   constructor(session: ort.InferenceSession, meta: OnnxStudentMeta, historyFens: string[] = []) {
-    this.session = session; this.meta = meta; this.historyFens = historyFens;
+    this.session = session;
+    this.meta = meta;
+    this.historyFens = historyFens;
     if (meta.policy_map !== POLICY_MAP) throw new Error(`Unsupported policy map: ${meta.policy_map}`);
   }
 
@@ -366,7 +415,9 @@ export class OnnxEvaluator implements Evaluator {
       const legal = moveformerLegalInputs(evalBoards, width, featureCount, evalContexts);
       const overflow = legal.moves.findIndex((moves) => moves.length > width);
       if (overflow >= 0 && this.meta.allow_legal_overflow_zero_prior !== true) {
-        throw new Error(`Move-token ONNX legal move overflow: model accepts ${width} legal moves but position has ${legal.moves[overflow].length}. Use a larger legal bucket/export (for example k128), dynamic legal export, or set meta.allow_legal_overflow_zero_prior=true to keep legacy zero-prior truncation. fen=${boardToFen(boards[overflow])}`);
+        throw new Error(
+          `Move-token ONNX legal move overflow: model accepts ${width} legal moves but position has ${legal.moves[overflow].length}. Use a larger legal bucket/export (for example k128), dynamic legal export, or set meta.allow_legal_overflow_zero_prior=true to keep legacy zero-prior truncation. fen=${boardToFen(boards[overflow])}`,
+        );
       }
       feeds.legal_action_ids = new ort.Tensor('int64', legal.actionIds, [boards.length, width]);
       feeds.legal_features = new ort.Tensor('float32', legal.features, [boards.length, width, featureCount]);
@@ -411,7 +462,15 @@ export class OnnxEvaluator implements Evaluator {
           for (let j = width; j < legal.moves[i].length; j++) policy.set(moveToActionId(normalizedMoveToOriginal(legal.moves[i][j], normalized[i].flipped)), 0);
         }
         const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
-        out.push({ policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0], ...(actionValues.size ? { actionValues } : {}), ...(rankScores.size ? { rankScores } : {}), ...(regrets.size ? { regrets } : {}), ...(risks.size ? { risks } : {}), ...(uncertainties.size ? { uncertainties } : {}) });
+        out.push({
+          policy,
+          wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0],
+          ...(actionValues.size ? { actionValues } : {}),
+          ...(rankScores.size ? { rankScores } : {}),
+          ...(regrets.size ? { regrets } : {}),
+          ...(risks.size ? { risks } : {}),
+          ...(uncertainties.size ? { uncertainties } : {}),
+        });
       }
       const tDone = ort.tinyLeelaNowMs();
       ort.tinyLeelaLogLatency('onnx.evaluateBatch.moveToken', {
@@ -450,7 +509,12 @@ export class OnnxEvaluator implements Evaluator {
     const policySize = this.meta.moves?.length ?? Math.floor(policyRaw.length / boards.length);
     const out: Evaluation[] = [];
     for (let i = 0; i < boards.length; i++) {
-      const policy = normalizePolicy(policyRaw.subarray(i * policySize, (i + 1) * policySize), evalBoards[i], evalContexts[i]?.legalMoves, normalized[i].flipped);
+      const policy = normalizePolicy(
+        policyRaw.subarray(i * policySize, (i + 1) * policySize),
+        evalBoards[i],
+        evalContexts[i]?.legalMoves,
+        normalized[i].flipped,
+      );
       const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
       const actionValues = new Map<number, number>();
       const rankScores = new Map<number, number>();
@@ -467,7 +531,15 @@ export class OnnxEvaluator implements Evaluator {
           if (uncertaintyRaw) uncertainties.set(actionId, Number(uncertaintyRaw[i * candidateWidth + j] ?? 0));
         }
       }
-      out.push({ policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0], ...(actionValues.size ? { actionValues } : {}), ...(rankScores.size ? { rankScores } : {}), ...(regrets.size ? { regrets } : {}), ...(risks.size ? { risks } : {}), ...(uncertainties.size ? { uncertainties } : {}) });
+      out.push({
+        policy,
+        wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0],
+        ...(actionValues.size ? { actionValues } : {}),
+        ...(rankScores.size ? { rankScores } : {}),
+        ...(regrets.size ? { regrets } : {}),
+        ...(risks.size ? { risks } : {}),
+        ...(uncertainties.size ? { uncertainties } : {}),
+      });
     }
     const tDone = ort.tinyLeelaNowMs();
     ort.tinyLeelaLogLatency('onnx.evaluateBatch', {

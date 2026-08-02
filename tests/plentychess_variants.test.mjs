@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  checkPlentyChessVariantAsset,
+  defaultPlentyChessVariantKey,
+  hasExplicitPlentyChessVariant,
+  normalizePlentyChessVariant,
   PLENTYCHESS_EMSCRIPTEN_DATA_URL,
   PLENTYCHESS_EMSCRIPTEN_JS_URL,
   PLENTYCHESS_EMSCRIPTEN_RELAXED_VARIANT,
@@ -10,23 +14,22 @@ import {
   PLENTYCHESS_MAIN_NETWORK,
   PLENTYCHESS_SOURCE_NETWORK_URL,
   PLENTYCHESS_VARIANTS,
-  checkPlentyChessVariantAsset,
-  defaultPlentyChessVariantKey,
-  hasExplicitPlentyChessVariant,
-  supportsWasmRelaxedSimd,
-  supportsWasmSimd,
-  normalizePlentyChessVariant,
   plentyChessVariantAssetStatus,
   plentyChessVariantByKey,
   plentyChessVariantFromParams,
   plentyChessVariantUnsupportedReason,
   resolveDefaultPlentyChessVariantAssetFallback,
+  supportsWasmRelaxedSimd,
+  supportsWasmSimd,
 } from '../src/lc0/plentychessVariants.ts';
 
 test('PlentyChess variant metadata pins the smoked Emscripten sidecars', () => {
   assert.equal(PLENTYCHESS_MAIN_NETWORK, '0134-2r24-s0.bin');
   assert.equal(PLENTYCHESS_SOURCE_NETWORK_URL, 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin');
-  assert.deepEqual(PLENTYCHESS_VARIANTS.map((variant) => variant.key), ['emscripten', 'emscripten-sse41', 'emscripten-relaxed']);
+  assert.deepEqual(
+    PLENTYCHESS_VARIANTS.map((variant) => variant.key),
+    ['emscripten', 'emscripten-sse41', 'emscripten-relaxed'],
+  );
   // Default follows the relaxed > sse41 ladder after explicitly validating
   // baseline wasm SIMD support; without SIMD, the base option stays selected
   // but disabled by the browser UI.
@@ -63,7 +66,9 @@ test('PlentyChess URL params support explicit and custom Emscripten sidecars', (
   assert.equal(hasExplicitPlentyChessVariant(new URLSearchParams('plentyChessJs=/plentychess/custom.js')), true);
   assert.equal(plentyChessVariantFromParams(new URLSearchParams('')).key, defaultPlentyChessVariantKey());
   assert.equal(plentyChessVariantFromParams(new URLSearchParams('plentychess=custom')).key, 'custom');
-  const custom = plentyChessVariantFromParams(new URLSearchParams('plentyChessJs=/plentychess/custom.js&plentyChessWasm=/plentychess/custom.wasm&plentyChessData=/plentychess/custom.data'));
+  const custom = plentyChessVariantFromParams(
+    new URLSearchParams('plentyChessJs=/plentychess/custom.js&plentyChessWasm=/plentychess/custom.wasm&plentyChessData=/plentychess/custom.data'),
+  );
   assert.equal(custom.key, 'custom');
   assert.equal(custom.jsUrl, '/plentychess/custom.js');
   assert.equal(custom.wasmUrl, '/plentychess/custom.wasm');
@@ -76,7 +81,10 @@ test('IPv6 loopback still probes local generated PlentyChess assets', async () =
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: false };
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '[::1]' },
@@ -150,7 +158,11 @@ test('PlentyChess asset checks require JS, WASM, and data sidecars', async () =>
     assert.equal(plentyChessVariantAssetStatus(present), 'unknown');
     assert.equal(await checkPlentyChessVariantAsset(present), 'present');
     assert.equal(plentyChessVariantAssetStatus(present), 'present');
-    assert.deepEqual(calls.slice(0, 3), [['/ok/plenty.js', 'HEAD', 'no-store'], ['/ok/plenty.wasm', 'HEAD', 'no-store'], ['/ok/plenty.data', 'HEAD', 'no-store']]);
+    assert.deepEqual(calls.slice(0, 3), [
+      ['/ok/plenty.js', 'HEAD', 'no-store'],
+      ['/ok/plenty.wasm', 'HEAD', 'no-store'],
+      ['/ok/plenty.data', 'HEAD', 'no-store'],
+    ]);
 
     const missing = { ...PLENTYCHESS_EMSCRIPTEN_VARIANT, jsUrl: '/missing/plenty.js', wasmUrl: '/ok/plenty.wasm', dataUrl: '/ok/plenty.data' };
     assert.equal(await checkPlentyChessVariantAsset(missing), 'missing');

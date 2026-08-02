@@ -1,12 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import {
-  engineLogoFamilyForEngineFamily,
-  engineLogoFamilyForName,
-  engineLogoUrl,
-  probeEngineLogos,
-} from '../src/lc0/engineLogos.ts';
+import test from 'node:test';
+import { engineLogoFamilyForEngineFamily, engineLogoFamilyForName, engineLogoUrl, probeEngineLogos } from '../src/lc0/engineLogos.ts';
 
 test('engine logo helper maps displayed engine names to bundled logo families', () => {
   assert.equal(engineLogoFamilyForName('Lc0 BT4'), 'lc0');
@@ -45,8 +40,8 @@ test('analysis and arena probe bundled logos in every deploy profile', async () 
     readFile(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8'),
   ]);
-  assert.match(analysisSource, /void probeEngineLogos\(whileAnalysisMounted/);
-  assert.match(arenaSource, /void probeEngineLogos\(whileArenaMounted/);
+  assert.match(analysisSource, /void probeEngineLogos\(\s*whileAnalysisMounted/);
+  assert.match(arenaSource, /void probeEngineLogos\(\s*whileArenaMounted/);
   assert.doesNotMatch(analysisSource, /if \(!isV0DeployProfile\(\)\) void probeEngineLogos/);
   assert.doesNotMatch(arenaSource, /if \(!isV0DeployProfile\(\)\) void probeEngineLogos/);
 });
@@ -63,10 +58,11 @@ test('concurrent engine logo probes retain every re-render callback', async () =
   const originalFetch = globalThis.fetch;
   const callbacks = [];
   try {
-    globalThis.fetch = async () => new Response(null, {
-      status: 200,
-      headers: { 'content-type': 'image/png' },
-    });
+    globalThis.fetch = async () =>
+      new Response(null, {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      });
     const first = probeEngineLogos(() => callbacks.push('first'));
     const second = probeEngineLogos(() => callbacks.push('second'));
     await Promise.all([first, second]);

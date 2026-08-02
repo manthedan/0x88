@@ -1,8 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const engineDir = path.resolve(process.env.STORMPHRAX_BUILD_DIR ?? path.join(root, '.local_engines', 'stormphrax-emscripten-src'));
@@ -52,7 +52,7 @@ function publishSharedData(builtDataPath) {
     if (sharedDigest !== builtDigest) {
       throw new Error(
         `Shared Stormphrax .data mismatch: ${outBase}.data (sha256 ${builtDigest}) differs from ${sharedDataPath} (sha256 ${sharedDigest}).\n` +
-        'All Stormphrax variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
+          'All Stormphrax variants share one .data URL, so they must preload identical bytes. Rebuild every variant from the same network, or delete the stale shared .data and rebuild.',
       );
     }
     console.log(`Shared ${sharedDataPath} already matches ${outBase}.data (sha256 ${builtDigest})`);
@@ -129,20 +129,33 @@ const emxxArgs = [
   '-mssse3',
   '-msse4.1',
   ...(relaxedSimd ? ['-mrelaxed-simd'] : []),
-  '-s', 'USE_PTHREADS=0',
-  '-s', 'MODULARIZE=1',
-  '-s', 'EXPORT_NAME="Stormphrax"',
-  '-s', 'ENVIRONMENT=node,web,worker',
-  '-s', 'ALLOW_MEMORY_GROWTH=1',
-  '-s', `INITIAL_MEMORY=${process.env.STORMPHRAX_INITIAL_MEMORY ?? '536870912'}`,
-  '-s', `MAXIMUM_MEMORY=${process.env.STORMPHRAX_MAXIMUM_MEMORY ?? '2147483648'}`,
-  '-s', `STACK_SIZE=${process.env.STORMPHRAX_STACK_SIZE ?? '67108864'}`,
-  '-s', 'EXIT_RUNTIME=0',
-  '-s', 'EXPORTED_RUNTIME_METHODS=ccall',
-  '-s', 'EXPORTED_FUNCTIONS=["_main","_command","_isReady","_isSearching"]',
-  '--preload-file', `${netName}@/${netName}`,
+  '-s',
+  'USE_PTHREADS=0',
+  '-s',
+  'MODULARIZE=1',
+  '-s',
+  'EXPORT_NAME="Stormphrax"',
+  '-s',
+  'ENVIRONMENT=node,web,worker',
+  '-s',
+  'ALLOW_MEMORY_GROWTH=1',
+  '-s',
+  `INITIAL_MEMORY=${process.env.STORMPHRAX_INITIAL_MEMORY ?? '536870912'}`,
+  '-s',
+  `MAXIMUM_MEMORY=${process.env.STORMPHRAX_MAXIMUM_MEMORY ?? '2147483648'}`,
+  '-s',
+  `STACK_SIZE=${process.env.STORMPHRAX_STACK_SIZE ?? '67108864'}`,
+  '-s',
+  'EXIT_RUNTIME=0',
+  '-s',
+  'EXPORTED_RUNTIME_METHODS=ccall',
+  '-s',
+  'EXPORTED_FUNCTIONS=["_main","_command","_isReady","_isSearching"]',
+  '--preload-file',
+  `${netName}@/${netName}`,
   ...sources,
-  '-o', `${outBase}.js`,
+  '-o',
+  `${outBase}.js`,
 ];
 
 if (process.env.STORMPHRAX_EMXX || canRun('em++')) {
@@ -188,6 +201,8 @@ for (const [tmp, out] of staged) {
 // is loud rather than something release tooling later hashes and ships.
 for (const [, out] of staged) {
   if (!fs.existsSync(out) || fs.statSync(out).size === 0) {
-    throw new Error(`Publish incomplete: ${out} is missing or empty. The output directory now holds a mixed artifact set; re-run this build before packaging or deploying.`);
+    throw new Error(
+      `Publish incomplete: ${out} is missing or empty. The output directory now holds a mixed artifact set; re-run this build before packaging or deploying.`,
+    );
   }
 }

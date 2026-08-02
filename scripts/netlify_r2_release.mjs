@@ -1,13 +1,13 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
-import { checkOrtRuntimeAssets } from './check_ort_runtime_assets.mjs';
 import { checkDeployCachePolicy } from './check_deploy_cache_policy.mjs';
+import { checkOrtRuntimeAssets } from './check_ort_runtime_assets.mjs';
+import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
 import { isSameOriginThreadedStockfishScript } from './prepare_netlify_r2_public_assets.mjs';
 
 const DEFAULT_ASSET_BASE_URL = 'https://assets.0x88.app';
@@ -15,7 +15,9 @@ const DEFAULT_CHANNEL_URL = `${DEFAULT_ASSET_BASE_URL}/channels/stable.json`;
 const STAMP_FILE = 'release-build.json';
 
 function usage() {
-  console.log(`Usage: node scripts/netlify_r2_release.mjs [options]\n\nOptions:\n  --dist DIR          Built dist directory (default dist-client)\n  --channel-url URL   Artifact channel URL baked into the app shell\n  --asset-base URL    R2/Worker origin for engine/model asset URLs (default https://assets.0x88.app)\n  --build-if-needed   Run the R2/pruned build when the dist stamp is missing/stale\n  --check             Verify the current dist is stamped and pruned; do not build/deploy\n  --deploy            Deploy the verified dist with netlify deploy --no-build\n  --prod              Pass --prod to netlify deploy\n  --message TEXT      Netlify deploy message\n  --npm-bin BIN       npm executable (default npm)\n  --netlify-bin BIN   netlify executable (default netlify)\n  --json              Print machine-readable summary\n  -h, --help          Show help\n`);
+  console.log(
+    `Usage: node scripts/netlify_r2_release.mjs [options]\n\nOptions:\n  --dist DIR          Built dist directory (default dist-client)\n  --channel-url URL   Artifact channel URL baked into the app shell\n  --asset-base URL    R2/Worker origin for engine/model asset URLs (default https://assets.0x88.app)\n  --build-if-needed   Run the R2/pruned build when the dist stamp is missing/stale\n  --check             Verify the current dist is stamped and pruned; do not build/deploy\n  --deploy            Deploy the verified dist with netlify deploy --no-build\n  --prod              Pass --prod to netlify deploy\n  --message TEXT      Netlify deploy message\n  --npm-bin BIN       npm executable (default npm)\n  --netlify-bin BIN   netlify executable (default netlify)\n  --json              Print machine-readable summary\n  -h, --help          Show help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -35,18 +37,60 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
-    if (arg === '--dist' && next) { args.dist = next; i += 1; continue; }
-    if (arg === '--channel-url' && next) { args.channelUrl = next; i += 1; continue; }
-    if (arg === '--asset-base' && next) { args.assetBase = next.replace(/\/+$/, ''); i += 1; continue; }
-    if (arg === '--message' && next) { args.message = next; i += 1; continue; }
-    if (arg === '--npm-bin' && next) { args.npmBin = next; i += 1; continue; }
-    if (arg === '--netlify-bin' && next) { args.netlifyBin = next; i += 1; continue; }
-    if (arg === '--build-if-needed') { args.buildIfNeeded = true; continue; }
-    if (arg === '--check') { args.check = true; continue; }
-    if (arg === '--deploy') { args.deploy = true; continue; }
-    if (arg === '--prod') { args.prod = true; continue; }
-    if (arg === '--json') { args.json = true; continue; }
-    if (arg === '-h' || arg === '--help') { usage(); process.exit(0); }
+    if (arg === '--dist' && next) {
+      args.dist = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--channel-url' && next) {
+      args.channelUrl = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--asset-base' && next) {
+      args.assetBase = next.replace(/\/+$/, '');
+      i += 1;
+      continue;
+    }
+    if (arg === '--message' && next) {
+      args.message = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--npm-bin' && next) {
+      args.npmBin = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--netlify-bin' && next) {
+      args.netlifyBin = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--build-if-needed') {
+      args.buildIfNeeded = true;
+      continue;
+    }
+    if (arg === '--check') {
+      args.check = true;
+      continue;
+    }
+    if (arg === '--deploy') {
+      args.deploy = true;
+      continue;
+    }
+    if (arg === '--prod') {
+      args.prod = true;
+      continue;
+    }
+    if (arg === '--json') {
+      args.json = true;
+      continue;
+    }
+    if (arg === '-h' || arg === '--help') {
+      usage();
+      process.exit(0);
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
   if (args.check && (args.buildIfNeeded || args.deploy)) {
@@ -89,7 +133,9 @@ function captureBuffer(command, args) {
 
 async function sha256Path(path) {
   if (!existsSync(path)) return undefined;
-  return createHash('sha256').update(await readFile(path)).digest('hex');
+  return createHash('sha256')
+    .update(await readFile(path))
+    .digest('hex');
 }
 
 function gitBuildState() {
@@ -175,15 +221,13 @@ function findForbiddenExternalAssets(root) {
       }
     }
   }
-  walk(join(root, 'models', 'lc0'), (name, _path, isDir) => isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx'));
+  walk(join(root, 'models', 'lc0'), (name, _path, isDir) => (isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx')));
   walk(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
   walk(join(root, 'models'), (name, _path, isDir) => !isDir && name === 'bt4_soap_rem_c19000_final.onnx');
   walk(join(root, 'models', 'monty'), (_name, _path, _isDir) => true);
   walk(join(root, 'monty'), (_name, _path, _isDir) => true);
   for (const dir of EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES) {
-    walk(join(root, dir), (name, path, isDir) => !isDir
-      && !isSameOriginThreadedStockfishScript(relative(root, path))
-      && isExternalArtifactName(name));
+    walk(join(root, dir), (name, path, isDir) => !isDir && !isSameOriginThreadedStockfishScript(relative(root, path)) && isExternalArtifactName(name));
   }
   return forbidden.map((item) => ({ ...item, path: relative(process.cwd(), item.path) }));
 }
@@ -216,7 +260,13 @@ async function main() {
     }
     await timed('build R2 Netlify dist', timings, () => {
       run(args.npmBin, ['run', 'build:netlify:r2'], {
-        env: { ...process.env, BUILD_SCOPE: 'product', VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl, VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase, NETLIFY_R2_RELEASE_DIST: dist },
+        env: {
+          ...process.env,
+          BUILD_SCOPE: 'product',
+          VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl,
+          VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase,
+          NETLIFY_R2_RELEASE_DIST: dist,
+        },
       });
     });
     await timed('verify rebuilt pruned dist', timings, () => verifyPrunedDist(dist));

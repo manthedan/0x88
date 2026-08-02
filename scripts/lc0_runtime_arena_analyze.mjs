@@ -3,7 +3,9 @@ import { readdir, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_runtime_arena_analyze.mjs <report.json|report-dir>... [options]\n\nBuilds normalized LC0 browser runtime arena summaries from report JSON files.\n\nOptions:\n  --out PATH              Write full analysis JSON\n  --summary-tsv PATH      Write normalized summary TSV\n  --divergence-tsv PATH   Write LC0 same-position move divergence TSV\n  -h, --help              Show this help\n`);
+  console.log(
+    `Usage: node scripts/lc0_runtime_arena_analyze.mjs <report.json|report-dir>... [options]\n\nBuilds normalized LC0 browser runtime arena summaries from report JSON files.\n\nOptions:\n  --out PATH              Write full analysis JSON\n  --summary-tsv PATH      Write normalized summary TSV\n  --divergence-tsv PATH   Write LC0 same-position move divergence TSV\n  -h, --help              Show this help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -93,7 +95,9 @@ function pgnPlyStats(pgn) {
   const totalPlies = games.reduce((sum, game) => sum + game.plies, 0);
   const byEngine = {};
   for (const game of games) for (const [name, count] of Object.entries(game.byEngine)) byEngine[name] = (byEngine[name] ?? 0) + count;
-  const lc0Plies = Object.entries(byEngine).filter(([name]) => /\b(lc0|leela)\b/i.test(name)).reduce((sum, [, count]) => sum + count, 0);
+  const lc0Plies = Object.entries(byEngine)
+    .filter(([name]) => /\b(lc0|leela)\b/i.test(name))
+    .reduce((sum, [, count]) => sum + count, 0);
   const opponentPlies = totalPlies - lc0Plies;
   return { games, totalPlies, lc0Plies, opponentPlies, byEngine };
 }
@@ -173,11 +177,18 @@ function median(values) {
 }
 
 function scoreText(matchScore) {
-  return String(matchScore ?? '').match(/\s(\d+|\d+½|½)\s+–\s+(\d+|\d+½|½)\s/)?.[0]?.trim() ?? String(matchScore ?? '');
+  return (
+    String(matchScore ?? '')
+      .match(/\s(\d+|\d+½|½)\s+–\s+(\d+|\d+½|½)\s/)?.[0]
+      ?.trim() ?? String(matchScore ?? '')
+  );
 }
 
 function positionKey(fen) {
-  return String(fen ?? '').split(/\s+/).slice(0, 4).join(' ');
+  return String(fen ?? '')
+    .split(/\s+/)
+    .slice(0, 4)
+    .join(' ');
 }
 
 function summarizeResult(report, result, file) {
@@ -279,7 +290,9 @@ function collectLc0Decisions(reports) {
       sharedPositions,
       divergentPositions,
       divergenceRate: rounded(safeDiv(divergentPositions, sharedPositions), 4),
-      pairAgreement: Object.fromEntries([...pairStats.entries()].map(([pair, stat]) => [pair, { ...stat, agreementRate: rounded(safeDiv(stat.same, stat.shared), 4) }])),
+      pairAgreement: Object.fromEntries(
+        [...pairStats.entries()].map(([pair, stat]) => [pair, { ...stat, agreementRate: rounded(safeDiv(stat.same, stat.shared), 4) }]),
+      ),
       examples,
     });
   }
@@ -291,10 +304,12 @@ function collectPgnFirstDivergences(reports) {
   for (const entry of reports) {
     const movetimeMs = entry.report.config?.movetimeMs;
     if (!byMovetime.has(movetimeMs)) byMovetime.set(movetimeMs, []);
-    byMovetime.get(movetimeMs).push(...(entry.report.results ?? []).map((result) => ({
-      runtime: result.runtime,
-      games: splitPgnGames(result.pgn).map(moveTokens),
-    })));
+    byMovetime.get(movetimeMs).push(
+      ...(entry.report.results ?? []).map((result) => ({
+        runtime: result.runtime,
+        games: splitPgnGames(result.pgn).map(moveTokens),
+      })),
+    );
   }
   const groups = [];
   for (const [movetimeMs, results] of byMovetime.entries()) {
@@ -319,7 +334,13 @@ function collectPgnFirstDivergences(reports) {
         }
       }
       if (!divergence && new Set(Object.values(runtimeMoves).map((moves) => moves.length)).size > 1) {
-        divergence = { ply: minLen + 1, moveNumber: Math.floor(minLen / 2) + 1, side: minLen % 2 === 0 ? 'white' : 'black', sanByRuntime: Object.fromEntries(runtimes.map((runtime) => [runtime, runtimeMoves[runtime][minLen] ?? '<game ended>'])), previousMoves: runtimeMoves[runtimes[0]].slice(Math.max(0, minLen - 8), minLen) };
+        divergence = {
+          ply: minLen + 1,
+          moveNumber: Math.floor(minLen / 2) + 1,
+          side: minLen % 2 === 0 ? 'white' : 'black',
+          sanByRuntime: Object.fromEntries(runtimes.map((runtime) => [runtime, runtimeMoves[runtime][minLen] ?? '<game ended>'])),
+          previousMoves: runtimeMoves[runtimes[0]].slice(Math.max(0, minLen - 8), minLen),
+        };
       }
       games.push({ game: gameIndex + 1, runtimes, firstDivergence: divergence });
     }
@@ -350,7 +371,9 @@ function collectStockfishCpLoss(reports) {
     const examples = [];
     let sharedEvaluatedPositions = 0;
     for (const position of positions.values()) {
-      const entries = Object.entries(position.byRuntime).map(([runtime, rows]) => [runtime, rows[0]]).filter(([, row]) => row);
+      const entries = Object.entries(position.byRuntime)
+        .map(([runtime, rows]) => [runtime, rows[0]])
+        .filter(([, row]) => row);
       if (entries.length < 2) continue;
       sharedEvaluatedPositions += 1;
       const bestCp = Math.max(...entries.map(([, row]) => row.stockfishLc0PerspectiveCpAfterMove));
@@ -372,13 +395,18 @@ function collectStockfishCpLoss(reports) {
     groups.push({
       movetimeMs,
       sharedEvaluatedPositions,
-      byRuntime: Object.fromEntries([...byRuntime.entries()].map(([runtime, stat]) => [runtime, {
-        positions: stat.positions,
-        avgRelativeCpLoss: rounded(stat.losses.reduce((sum, value) => sum + value, 0) / stat.losses.length, 3),
-        medianRelativeCpLoss: rounded(median(stat.losses), 3),
-        avgStockfishLc0PerspectiveCpAfterMove: rounded(stat.cps.reduce((sum, value) => sum + value, 0) / stat.cps.length, 3),
-        divergentMovePositions: stat.divergentMovePositions,
-      }])),
+      byRuntime: Object.fromEntries(
+        [...byRuntime.entries()].map(([runtime, stat]) => [
+          runtime,
+          {
+            positions: stat.positions,
+            avgRelativeCpLoss: rounded(stat.losses.reduce((sum, value) => sum + value, 0) / stat.losses.length, 3),
+            medianRelativeCpLoss: rounded(median(stat.losses), 3),
+            avgStockfishLc0PerspectiveCpAfterMove: rounded(stat.cps.reduce((sum, value) => sum + value, 0) / stat.cps.length, 3),
+            divergentMovePositions: stat.divergentMovePositions,
+          },
+        ]),
+      ),
       examples,
     });
   }
@@ -387,8 +415,27 @@ function collectStockfishCpLoss(reports) {
 
 function summaryTsv(analysis) {
   const lossByMsRuntime = new Map();
-  for (const group of analysis.stockfishCpLoss) for (const [runtime, stat] of Object.entries(group.byRuntime)) lossByMsRuntime.set(`${group.movetimeMs}\t${runtime}`, stat);
-  const header = ['ms', 'runtime', 'score', 'games', 'plies', 'lc0_plies', 'elapsed_s', 'lc0_searches', 'lc0_searches_per_s', 'lc0_visits_per_s', 'lc0_evals_per_s', 'visits_per_lc0_ply', 'evals_per_lc0_ply', 'sf_eval_lc0_moves', 'avg_sf_cp_after_lc0_move', 'avg_relative_sf_cp_loss', 'sf_nodes_per_s'].join('\t');
+  for (const group of analysis.stockfishCpLoss)
+    for (const [runtime, stat] of Object.entries(group.byRuntime)) lossByMsRuntime.set(`${group.movetimeMs}\t${runtime}`, stat);
+  const header = [
+    'ms',
+    'runtime',
+    'score',
+    'games',
+    'plies',
+    'lc0_plies',
+    'elapsed_s',
+    'lc0_searches',
+    'lc0_searches_per_s',
+    'lc0_visits_per_s',
+    'lc0_evals_per_s',
+    'visits_per_lc0_ply',
+    'evals_per_lc0_ply',
+    'sf_eval_lc0_moves',
+    'avg_sf_cp_after_lc0_move',
+    'avg_relative_sf_cp_loss',
+    'sf_nodes_per_s',
+  ].join('\t');
   const rows = analysis.normalized.map((row) => {
     const loss = lossByMsRuntime.get(`${row.movetimeMs}\t${row.runtime}`) ?? {};
     return [
@@ -418,7 +465,16 @@ function divergenceTsv(analysis) {
   const header = ['ms', 'fen', 'moves_by_runtime'].join('\t');
   const rows = [];
   for (const group of analysis.decisionDivergence) {
-    for (const example of group.examples) rows.push([group.movetimeMs, example.fen, Object.entries(example.movesByRuntime).map(([runtime, move]) => `${runtime}:${move}`).join(',')].join('\t'));
+    for (const example of group.examples)
+      rows.push(
+        [
+          group.movetimeMs,
+          example.fen,
+          Object.entries(example.movesByRuntime)
+            .map(([runtime, move]) => `${runtime}:${move}`)
+            .join(','),
+        ].join('\t'),
+      );
   }
   return `${header}\n${rows.join('\n')}\n`;
 }
@@ -433,7 +489,8 @@ async function main() {
     if (report.status !== 'LC0_RUNTIME_ARENA_BENCH_DONE') continue;
     reports.push({ file, report });
   }
-  const normalized = reports.flatMap(({ file, report }) => (report.results ?? []).map((result) => summarizeResult(report, result, file)))
+  const normalized = reports
+    .flatMap(({ file, report }) => (report.results ?? []).map((result) => summarizeResult(report, result, file)))
     .sort((a, b) => Number(a.movetimeMs) - Number(b.movetimeMs) || String(a.runtime).localeCompare(String(b.runtime)));
   const analysis = {
     status: 'LC0_RUNTIME_ARENA_ANALYSIS_DONE',
@@ -456,13 +513,22 @@ async function main() {
   if (args.divergenceTsv) await writeFile(args.divergenceTsv, divergenceTsv(analysis));
   console.log(summaryTsv(analysis));
   for (const group of analysis.decisionDivergence) {
-    console.log(`movetime ${group.movetimeMs}ms: ${group.divergentPositions}/${group.sharedPositions} shared logged LC0 positions had different selected moves`);
+    console.log(
+      `movetime ${group.movetimeMs}ms: ${group.divergentPositions}/${group.sharedPositions} shared logged LC0 positions had different selected moves`,
+    );
   }
   for (const group of analysis.pgnFirstDivergence) {
     for (const game of group.games) {
       const d = game.firstDivergence;
       if (!d) console.log(`movetime ${group.movetimeMs}ms game ${game.game}: no PGN divergence across runtimes`);
-      else console.log(`movetime ${group.movetimeMs}ms game ${game.game}: first PGN divergence at ply ${d.ply} (${d.moveNumber}${d.side === 'black' ? '...' : '.'}) ${Object.entries(d.sanByRuntime).map(([runtime, san]) => `${runtime}:${san}`).join(' | ')}`);
+      else
+        console.log(
+          `movetime ${group.movetimeMs}ms game ${game.game}: first PGN divergence at ply ${d.ply} (${d.moveNumber}${d.side === 'black' ? '...' : '.'}) ${Object.entries(
+            d.sanByRuntime,
+          )
+            .map(([runtime, san]) => `${runtime}:${san}`)
+            .join(' | ')}`,
+        );
     }
   }
   for (const group of analysis.stockfishCpLoss) {

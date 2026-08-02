@@ -75,7 +75,11 @@ export function defaultViridithasVariantKey(): ViridithasVariant['key'] {
  * relaxed artifact falls back to simd128, and a missing simd128 artifact
  * falls back to scalar. Explicit user selections are honored as-is.
  */
-export async function resolveDefaultViridithasVariantAssetFallback(variant: ViridithasVariant, explicit: boolean, onChange?: () => void): Promise<ViridithasVariant> {
+export async function resolveDefaultViridithasVariantAssetFallback(
+  variant: ViridithasVariant,
+  explicit: boolean,
+  onChange?: () => void,
+): Promise<ViridithasVariant> {
   if (explicit || variant.key === 'default' || variant.key === 'custom') return variant;
   const status = await checkViridithasVariantAsset(variant, onChange);
   if (status !== 'missing') return variant;
@@ -85,11 +89,7 @@ export async function resolveDefaultViridithasVariantAssetFallback(variant: Viri
   return VIRIDITHAS_DEFAULT_VARIANT;
 }
 
-export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [
-  VIRIDITHAS_SIMD_VARIANT,
-  VIRIDITHAS_RELAXED_SIMD_VARIANT,
-  VIRIDITHAS_DEFAULT_VARIANT,
-];
+export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [VIRIDITHAS_SIMD_VARIANT, VIRIDITHAS_RELAXED_SIMD_VARIANT, VIRIDITHAS_DEFAULT_VARIANT];
 
 function sameOriginViridithasAsset(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
@@ -103,9 +103,10 @@ function sameOriginViridithasAsset(raw: string | null | undefined): string | und
   }
 }
 
-
 export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
-  const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
+  const value = String(raw ?? '')
+    .toLowerCase()
+    .replace(/[ _-]+/g, '');
   if (value === 'relaxedsimd' || value === 'relaxed' || value === 'relaxedsimd128') return 'relaxed-simd';
   if (value === 'simd' || value === 'simd128' || value === 'wasmsimd') return 'simd';
   if (value === 'scalar' || value === 'default') return 'default';
@@ -115,7 +116,8 @@ export function normalizeViridithasVariant(raw: string | null | undefined): Viri
 
 export function viridithasVariantByKey(key: string): ViridithasVariant {
   const normalized = normalizeViridithasVariant(key);
-  if (normalized === 'relaxed-simd') return supportsWasmRelaxedSimd() ? VIRIDITHAS_RELAXED_SIMD_VARIANT : supportsWasmSimd() ? VIRIDITHAS_SIMD_VARIANT : VIRIDITHAS_DEFAULT_VARIANT;
+  if (normalized === 'relaxed-simd')
+    return supportsWasmRelaxedSimd() ? VIRIDITHAS_RELAXED_SIMD_VARIANT : supportsWasmSimd() ? VIRIDITHAS_SIMD_VARIANT : VIRIDITHAS_DEFAULT_VARIANT;
   return VIRIDITHAS_VARIANTS.find((variant) => variant.key === normalized) ?? VIRIDITHAS_DEFAULT_VARIANT;
 }
 
@@ -125,7 +127,8 @@ export function hasExplicitViridithasVariant(params: URLSearchParams): boolean {
 
 export function viridithasVariantFromParams(params: URLSearchParams): ViridithasVariant {
   const customUrl = sameOriginViridithasAsset(params.get('viridithasWasm'));
-  if (customUrl) return { key: 'custom', label: 'Viridithas Custom', wasmUrl: customUrl, note: 'Custom same-origin Viridithas WASM URL from ?viridithasWasm=…' };
+  if (customUrl)
+    return { key: 'custom', label: 'Viridithas Custom', wasmUrl: customUrl, note: 'Custom same-origin Viridithas WASM URL from ?viridithasWasm=…' };
   return viridithasVariantByKey(params.get('viridithas') ?? params.get('viridithasVariant') ?? defaultViridithasVariantKey());
 }
 
@@ -151,7 +154,7 @@ export function checkViridithasVariantAsset(variant: ViridithasVariant, onChange
   }
   variant.assetStatus = 'checking';
   const promise = fetch(variant.wasmUrl, { method: 'HEAD' })
-    .then((response) => response.ok ? 'ok' : 'missing' as ViridithasAssetStatus)
+    .then((response) => (response.ok ? 'ok' : ('missing' as ViridithasAssetStatus)))
     .catch(() => 'missing' as ViridithasAssetStatus)
     .then((status) => {
       variant.assetStatus = status;

@@ -5,15 +5,7 @@
  * registry: build commands and public-tree paths must not be bundled into the
  * browser, while all deployment scripts should agree on the same inventory.
  */
-export const EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES = Object.freeze([
-  'berserk',
-  'plentychess',
-  'stormphrax',
-  'reckless',
-  'stockfish',
-  'viridithas',
-  'runtimes',
-]);
+export const EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES = Object.freeze(['berserk', 'plentychess', 'stormphrax', 'reckless', 'stockfish', 'viridithas', 'runtimes']);
 
 export const PRECOMPRESS_ARTIFACT_DIRECTORIES = Object.freeze([
   ...EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES.filter((directory) => directory !== 'runtimes'),
@@ -22,28 +14,19 @@ export const PRECOMPRESS_ARTIFACT_DIRECTORIES = Object.freeze([
   'monty',
 ]);
 
-export const COMPRESSIBLE_ARTIFACT_EXTENSIONS = Object.freeze([
-  '.js', '.mjs', '.wasm', '.data', '.nn', '.nnue', '.bin', '.onnx',
-]);
+export const COMPRESSIBLE_ARTIFACT_EXTENSIONS = Object.freeze(['.js', '.mjs', '.wasm', '.data', '.nn', '.nnue', '.bin', '.onnx']);
 
 export const ARTIFACT_RELEASE_V1_SCHEMA = 'lc0_browser.artifact_release_manifest.v1';
-export const ARTIFACT_RELEASE_V2_SCHEMAS = Object.freeze([
-  'lc0_browser.artifact_release_manifest.v2',
-  'lc0-webgpu.artifact-release.v2',
-]);
+export const ARTIFACT_RELEASE_V2_SCHEMAS = Object.freeze(['lc0_browser.artifact_release_manifest.v2', 'lc0-webgpu.artifact-release.v2']);
 export const ARTIFACT_CHANNEL_V1_SCHEMA = 'lc0_browser.artifact_channel_manifest.v1';
-export const ARTIFACT_CHANNEL_V2_SCHEMAS = Object.freeze([
-  'lc0_browser.artifact_channel_manifest.v2',
-  'lc0-webgpu.artifact-channel.v2',
-]);
+export const ARTIFACT_CHANNEL_V2_SCHEMAS = Object.freeze(['lc0_browser.artifact_channel_manifest.v2', 'lc0-webgpu.artifact-channel.v2']);
 
 export function isArtifactReleaseV2(release) {
   return ARTIFACT_RELEASE_V2_SCHEMAS.includes(release?.schema);
 }
 
 export function isArtifactChannelManifest(channel) {
-  return channel?.schema === ARTIFACT_CHANNEL_V1_SCHEMA
-    || ARTIFACT_CHANNEL_V2_SCHEMAS.includes(channel?.schema);
+  return channel?.schema === ARTIFACT_CHANNEL_V1_SCHEMA || ARTIFACT_CHANNEL_V2_SCHEMAS.includes(channel?.schema);
 }
 
 export function artifactKeyFromReleaseUrl(rawUrl) {
@@ -58,8 +41,7 @@ export function artifactKeyFromReleaseUrl(rawUrl) {
 }
 
 export function releaseCatalogEntries(release) {
-  const legacyV1 = release?.schema === ARTIFACT_RELEASE_V1_SCHEMA
-    || (!release?.schema && (release?.artifacts ?? []).every((artifact) => artifact.artifactUrl));
+  const legacyV1 = release?.schema === ARTIFACT_RELEASE_V1_SCHEMA || (!release?.schema && (release?.artifacts ?? []).every((artifact) => artifact.artifactUrl));
   if (!legacyV1 && !isArtifactReleaseV2(release)) {
     throw new Error(`Unexpected release schema: ${release?.schema}`);
   }
@@ -93,9 +75,7 @@ export function releaseCatalogEntries(release) {
         throw new Error(`Invalid v2 representation metadata for ${logicalUrl}`);
       }
       if (representation.encoding === 'identity') {
-        if (key !== `artifacts/sha256/${rawSha256}/identity`
-          || encodedSha256 !== rawSha256
-          || representation.bytes !== rawBytes) {
+        if (key !== `artifacts/sha256/${rawSha256}/identity` || encodedSha256 !== rawSha256 || representation.bytes !== rawBytes) {
           throw new Error(`Invalid identity representation for ${logicalUrl}`);
         }
       } else if (representation.encoding === 'br') {
@@ -130,28 +110,35 @@ export function buildArtifactReleaseCatalog(releases) {
       byKey.set(entry.key, existing);
     }
   }
-  return new Map([...byKey].map(([key, entry]) => [key, {
-    key,
-    releases: [...entry.releases].sort(),
-    logicalUrls: [...entry.logicalUrls].sort(),
-    encodings: [...entry.encodings].sort(),
-    kinds: [...entry.kinds].sort(),
-  }]));
+  return new Map(
+    [...byKey].map(([key, entry]) => [
+      key,
+      {
+        key,
+        releases: [...entry.releases].sort(),
+        logicalUrls: [...entry.logicalUrls].sort(),
+        encodings: [...entry.encodings].sort(),
+        kinds: [...entry.kinds].sort(),
+      },
+    ]),
+  );
 }
 
 export function isExternalArtifactName(name) {
-  return name.endsWith('.onnx')
-    || name.endsWith('.lc0web')
-    || name.endsWith('.wasm')
-    || name.endsWith('.data')
-    || name.endsWith('.nn')
-    || name.endsWith('.nnue')
-    || name.endsWith('.bin')
-    || name.endsWith('.tar.gz')
-    || name.endsWith('.gz')
-    || name.endsWith('.br')
-    || name.endsWith('.js')
-    || name.endsWith('.mjs');
+  return (
+    name.endsWith('.onnx') ||
+    name.endsWith('.lc0web') ||
+    name.endsWith('.wasm') ||
+    name.endsWith('.data') ||
+    name.endsWith('.nn') ||
+    name.endsWith('.nnue') ||
+    name.endsWith('.bin') ||
+    name.endsWith('.tar.gz') ||
+    name.endsWith('.gz') ||
+    name.endsWith('.br') ||
+    name.endsWith('.js') ||
+    name.endsWith('.mjs')
+  );
 }
 
 export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
@@ -190,11 +177,7 @@ export const BROWSER_ENGINE_ASSET_GROUPS = Object.freeze([
     status: 'experimental-selectable',
     command: 'npm run reckless:build-release',
     docs: 'docs/engine_catalog.md#reckless-family',
-    assets: [
-      '/reckless/reckless.wasm',
-      '/reckless/reckless-simd128.wasm',
-      '/reckless/reckless-relaxed-simd128.wasm',
-    ],
+    assets: ['/reckless/reckless.wasm', '/reckless/reckless-simd128.wasm', '/reckless/reckless-relaxed-simd128.wasm'],
     optionalAssets: [
       '/reckless/reckless-simd128-external.wasm',
       '/reckless/reckless-browser-api.wasm',

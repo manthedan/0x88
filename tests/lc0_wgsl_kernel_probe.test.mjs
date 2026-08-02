@@ -1,15 +1,34 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import {
+  createLc0WebGpuPipelineCache,
+  createTinyAttentionOutputOnnxForTest,
+  createTinyEncoder0BlockOnnxForTest,
+  createTinyEncoder0FfnOnnxForTest,
+  createTinyMatmulAddOnnxForTest,
+  createTinyPolicyValueHeadsOnnxForTest,
+  f16BitsToF32,
+  Lc0WebHybridEvaluator,
+  lc0WebEncoderBlockTensorNames,
+  retireLc0WebGpuBufferAfterSubmittedWork,
+} from '../src/lc0/wgslMatmulAddProbe.ts';
 import * as ort from '../src/nn/ortRuntime.ts';
-import { createLc0WebGpuPipelineCache, createTinyAttentionOutputOnnxForTest, createTinyEncoder0BlockOnnxForTest, createTinyEncoder0FfnOnnxForTest, createTinyMatmulAddOnnxForTest, createTinyPolicyValueHeadsOnnxForTest, f16BitsToF32, Lc0WebHybridEvaluator, lc0WebEncoderBlockTensorNames, retireLc0WebGpuBufferAfterSubmittedWork } from '../src/lc0/wgslMatmulAddProbe.ts';
 
 test('superseded WebGPU buffers retire only after submitted queue work completes', async () => {
   let releaseQueue;
   const events = [];
-  const queueDone = new Promise((resolve) => { releaseQueue = resolve; });
+  const queueDone = new Promise((resolve) => {
+    releaseQueue = resolve;
+  });
   const retirement = retireLc0WebGpuBufferAfterSubmittedWork(
-    { onSubmittedWorkDone: async () => { events.push('wait'); await queueDone; events.push('done'); } },
+    {
+      onSubmittedWorkDone: async () => {
+        events.push('wait');
+        await queueDone;
+        events.push('done');
+      },
+    },
     { destroy: () => events.push('destroy') },
   );
   await Promise.resolve();
@@ -21,7 +40,17 @@ test('superseded WebGPU buffers retire only after submitted queue work completes
 
 test('buffer retirement reports unsupported queue completion without unsafe destruction', async () => {
   let destroyed = false;
-  assert.equal(await retireLc0WebGpuBufferAfterSubmittedWork({}, { destroy: () => { destroyed = true; } }), false);
+  assert.equal(
+    await retireLc0WebGpuBufferAfterSubmittedWork(
+      {},
+      {
+        destroy: () => {
+          destroyed = true;
+        },
+      },
+    ),
+    false,
+  );
   assert.equal(destroyed, false);
 });
 
@@ -29,8 +58,16 @@ test('failed queue completion never destroys a superseded WebGPU buffer eagerly'
   let destroyed = false;
   await assert.rejects(
     retireLc0WebGpuBufferAfterSubmittedWork(
-      { onSubmittedWorkDone: async () => { throw new Error('device lost'); } },
-      { destroy: () => { destroyed = true; } },
+      {
+        onSubmittedWorkDone: async () => {
+          throw new Error('device lost');
+        },
+      },
+      {
+        destroy: () => {
+          destroyed = true;
+        },
+      },
     ),
     /device lost/,
   );
@@ -41,21 +78,26 @@ test('immutable WebGPU shader modules and pipelines initialize once in parallel'
   let shaderModules = 0;
   let activePipelines = 0;
   let maxActivePipelines = 0;
-  const cache = await createLc0WebGpuPipelineCache({
-    createShaderModule: ({ label }) => ({ label, id: ++shaderModules }),
-    createComputePipeline: () => { throw new Error('sync pipeline fallback should not run'); },
-    createComputePipelineAsync: async ({ compute }) => {
-      activePipelines += 1;
-      maxActivePipelines = Math.max(maxActivePipelines, activePipelines);
-      await Promise.resolve();
-      activePipelines -= 1;
-      return { module: compute.module, getBindGroupLayout: () => ({}) };
+  const cache = await createLc0WebGpuPipelineCache(
+    {
+      createShaderModule: ({ label }) => ({ label, id: ++shaderModules }),
+      createComputePipeline: () => {
+        throw new Error('sync pipeline fallback should not run');
+      },
+      createComputePipelineAsync: async ({ compute }) => {
+        activePipelines += 1;
+        maxActivePipelines = Math.max(maxActivePipelines, activePipelines);
+        await Promise.resolve();
+        activePipelines -= 1;
+        return { module: compute.module, getBindGroupLayout: () => ({}) };
+      },
     },
-  }, [
-    { key: 'a', label: 'A', code: 'shader-a' },
-    { key: 'b', label: 'B', code: 'shader-b' },
-    { key: 'a', label: 'duplicate ignored', code: 'shader-a-duplicate' },
-  ]);
+    [
+      { key: 'a', label: 'A', code: 'shader-a' },
+      { key: 'b', label: 'B', code: 'shader-b' },
+      { key: 'a', label: 'duplicate ignored', code: 'shader-a-duplicate' },
+    ],
+  );
   assert.equal(shaderModules, 2);
   assert.equal(cache.modules.size, 2);
   assert.equal(cache.pipelines.size, 2);
@@ -64,19 +106,27 @@ test('immutable WebGPU shader modules and pipelines initialize once in parallel'
 
 test('parallel WebGPU pipeline initialization settles all work before rejecting', async () => {
   const settled = [];
-  await assert.rejects(createLc0WebGpuPipelineCache({
-    createShaderModule: ({ label }) => ({ label }),
-    createComputePipeline: () => { throw new Error('sync pipeline fallback should not run'); },
-    createComputePipelineAsync: async ({ compute }) => {
-      await Promise.resolve();
-      settled.push(compute.module.label);
-      if (compute.module.label === 'A') throw new Error('compile failed');
-      return { getBindGroupLayout: () => ({}) };
-    },
-  }, [
-    { key: 'a', label: 'A', code: 'shader-a' },
-    { key: 'b', label: 'B', code: 'shader-b' },
-  ]), /compile failed/);
+  await assert.rejects(
+    createLc0WebGpuPipelineCache(
+      {
+        createShaderModule: ({ label }) => ({ label }),
+        createComputePipeline: () => {
+          throw new Error('sync pipeline fallback should not run');
+        },
+        createComputePipelineAsync: async ({ compute }) => {
+          await Promise.resolve();
+          settled.push(compute.module.label);
+          if (compute.module.label === 'A') throw new Error('compile failed');
+          return { getBindGroupLayout: () => ({}) };
+        },
+      },
+      [
+        { key: 'a', label: 'A', code: 'shader-a' },
+        { key: 'b', label: 'B', code: 'shader-b' },
+      ],
+    ),
+    /compile failed/,
+  );
   assert.deepEqual(settled.sort(), ['A', 'B']);
 });
 
@@ -85,9 +135,9 @@ test('hybrid WebGPU slots share immutable input/head resources and report truthf
   assert.match(source, /type InputBodyGpuSharedResources =/);
   assert.match(source, /type WgslPolicyValueHeadSharedResources =/);
   assert.match(source, /createWgslPolicyValueHeadRuntime\(this\.device, layerInput, this\.usage, this\.wgslHeadShared\)/);
-  assert.match(source, /createHybridEncoderLayerSlotRuntime\([^;]+this\.pipelineCache, this\.encoderPodArgs\)/s);
+  assert.match(source, /createHybridEncoderLayerSlotRuntime\([^;]+this\.pipelineCache,\s*this\.encoderPodArgs,?\s*\)/s);
   assert.match(source, /createLc0WebGpuPipelineCache\(device, hybridPipelineDescriptors/);
-  assert.match(source, /createHybridEncoderLayerSlotScratch\(this\.device, this\.usage, this\.encoderKernelVariant, this\.encoderPodArgs\)/);
+  assert.match(source, /createHybridEncoderLayerSlotScratch\(\s*this\.device,\s*this\.usage,\s*this\.encoderKernelVariant,\s*this\.encoderPodArgs,?\s*\)/);
   assert.match(source, /if \(deviceResult\.status === 'fulfilled'\) deviceResult\.value\.device\.destroy\?\.\(\)/);
   assert.match(source, /encoderProfileOnly: true/);
   assert.match(source, /\.\.\.\(encoderProfileOnly \? \[\] : policyValueHeadTensorNameList\(\)\)/);
@@ -103,9 +153,15 @@ test('hybrid WebGPU disposal drains queued evaluations and awaits runtime cleanu
   let releaseFirstEvaluation;
   let releaseRuntimeCleanup;
   let markRuntimeCleanupStarted;
-  const firstEvaluationGate = new Promise((resolve) => { releaseFirstEvaluation = resolve; });
-  const runtimeCleanupGate = new Promise((resolve) => { releaseRuntimeCleanup = resolve; });
-  const runtimeCleanupStarted = new Promise((resolve) => { markRuntimeCleanupStarted = resolve; });
+  const firstEvaluationGate = new Promise((resolve) => {
+    releaseFirstEvaluation = resolve;
+  });
+  const runtimeCleanupGate = new Promise((resolve) => {
+    releaseRuntimeCleanup = resolve;
+  });
+  const runtimeCleanupStarted = new Promise((resolve) => {
+    markRuntimeCleanupStarted = resolve;
+  });
   const events = [];
   let evaluationCalls = 0;
   let runtimeCreates = 0;
@@ -136,7 +192,12 @@ test('hybrid WebGPU disposal drains queued evaluations and awaits runtime cleanu
   };
   const evaluator = new Lc0WebHybridEvaluator(
     { packUrl: '/fake.lc0web.json', verifyShards: false },
-    { createRuntime: async () => { runtimeCreates += 1; return runtime; } },
+    {
+      createRuntime: async () => {
+        runtimeCreates += 1;
+        return runtime;
+      },
+    },
   );
 
   const first = evaluator.evaluate('first');
@@ -146,7 +207,9 @@ test('hybrid WebGPU disposal drains queued evaluations and awaits runtime cleanu
   assert.deepEqual(events, ['evaluate-1-start']);
 
   let disposalSettled = false;
-  const disposal = evaluator.dispose().then(() => { disposalSettled = true; });
+  const disposal = evaluator.dispose().then(() => {
+    disposalSettled = true;
+  });
   await Promise.resolve();
   assert.equal(disposalSettled, false);
   assert.deepEqual(events, ['evaluate-1-start']);
@@ -155,34 +218,24 @@ test('hybrid WebGPU disposal drains queued evaluations and awaits runtime cleanu
   await first;
   await second;
   await runtimeCleanupStarted;
-  assert.deepEqual(events, [
-    'evaluate-1-start',
-    'evaluate-1-end',
-    'evaluate-2-start',
-    'evaluate-2-end',
-    'runtime-dispose-start',
-  ]);
+  assert.deepEqual(events, ['evaluate-1-start', 'evaluate-1-end', 'evaluate-2-start', 'evaluate-2-end', 'runtime-dispose-start']);
   assert.equal(disposalSettled, false);
 
   releaseRuntimeCleanup();
   await Promise.all([disposal, evaluator.dispose()]);
   assert.equal(disposalSettled, true);
   assert.equal(runtimeCreates, 1);
-  assert.deepEqual(events, [
-    'evaluate-1-start',
-    'evaluate-1-end',
-    'evaluate-2-start',
-    'evaluate-2-end',
-    'runtime-dispose-start',
-    'runtime-dispose-end',
-  ]);
+  assert.deepEqual(events, ['evaluate-1-start', 'evaluate-1-end', 'evaluate-2-start', 'evaluate-2-end', 'runtime-dispose-start', 'runtime-dispose-end']);
   await assert.rejects(evaluator.evaluate('after-dispose'), /has been disposed/);
   assert.equal(runtimeCreates, 1);
 });
 
 test('hybrid WebGPU runtime disposal awaits session release before final device destruction', async () => {
   const source = await readFile(new URL('../src/lc0/wgslMatmulAddProbe.ts', import.meta.url), 'utf8');
-  const runtimeDispose = source.slice(source.indexOf('  async dispose(): Promise<void> {'), source.indexOf('\n}\n\nexport async function runLc0WebHybridEvaluation'));
+  const runtimeDispose = source.slice(
+    source.indexOf('  async dispose(): Promise<void> {'),
+    source.indexOf('\n}\n\nexport async function runLc0WebHybridEvaluation'),
+  );
   assert.match(runtimeDispose, /await this\.device\.queue\.onSubmittedWorkDone\?\.\(\)/);
   assert.match(runtimeDispose, /await Promise\.all\(Array\.from\(this\.retirementPromises\)\)/);
   assert.match(runtimeDispose, /await ort\.releaseOrtSession\(this\.headSession\.session\)/);
@@ -198,7 +251,7 @@ test('f16BitsToF32 decodes representative IEEE half values used by lc0web kernel
   assert.equal(f16BitsToF32(0x7c00), Infinity);
   assert.equal(f16BitsToF32(0xfc00), -Infinity);
   assert.ok(Number.isNaN(f16BitsToF32(0x7e00)));
-  assert.ok(Math.abs(f16BitsToF32(0x0001) - 5.960464477539063e-8) < 1e-15);
+  assert.ok(Math.abs(f16BitsToF32(0x0001) - 5.9604644775390625e-8) < 1e-15);
 });
 
 test('lc0web encoder block tensor names can target later encoder prefixes', () => {

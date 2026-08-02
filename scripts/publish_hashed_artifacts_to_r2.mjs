@@ -1,8 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -17,7 +17,9 @@ import {
 const DEFAULT_ARTIFACT_BASE = 'https://assets.0x88.app';
 
 function usage() {
-  console.log(`Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release .local-dev-artifacts/artifact-releases/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository or materialized release root (default .)\n  --execute           Actually call wrangler/AWS CLI; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --aws-bin BIN       AWS CLI binary used for atomic immutable object creation (default aws)\n  --r2-endpoint URL   R2 S3 endpoint (or R2_ENDPOINT / R2_ACCOUNT_ID)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative representation URLs (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate representation URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nBoth legacy v1 releases and representation-aware v2 releases are accepted. V2 identity\nobjects use artifacts/sha256/<decoded-sha256>/identity; Brotli objects use\nartifacts/sha256/<decoded-sha256>/br/<encoded-sha256>. Existing v2 bodies are\nvalidated with immutable HEAD metadata plus decoded full-body integrity until trusted\nR2 verification metadata is available. Legacy filename-keyed bodies retain v1 checks. Immutable bodies and release manifests are\ncreated atomically with S3 If-None-Match and channel pointers are published last.\n`);
+  console.log(
+    `Usage: node scripts/publish_hashed_artifacts_to_r2.mjs --release .local-dev-artifacts/artifact-releases/releases/ID.json --bucket BUCKET [options]\n\nOptions:\n  --root DIR          Repository or materialized release root (default .)\n  --execute           Actually call wrangler/AWS CLI; default is dry-run\n  --allow-missing     Skip artifacts whose localPath is absent\n  --wrangler-bin BIN  Wrangler binary (default wrangler)\n  --aws-bin BIN       AWS CLI binary used for atomic immutable object creation (default aws)\n  --r2-endpoint URL   R2 S3 endpoint (or R2_ENDPOINT / R2_ACCOUNT_ID)\n  --channel-manifest PATH  Optional generated channel manifest to publish after the release\n  --artifact-base URL Public artifact origin used to probe relative representation URLs (default https://assets.0x88.app)\n  --probe-existing    In dry-run mode, validate representation URLs and mark existing uploads as skipped\n  -h, --help          Show help\n\nBoth legacy v1 releases and representation-aware v2 releases are accepted. V2 identity\nobjects use artifacts/sha256/<decoded-sha256>/identity; Brotli objects use\nartifacts/sha256/<decoded-sha256>/br/<encoded-sha256>. Existing v2 bodies are\nvalidated with immutable HEAD metadata plus decoded full-body integrity until trusted\nR2 verification metadata is available. Legacy filename-keyed bodies retain v1 checks. Immutable bodies and release manifests are\ncreated atomically with S3 If-None-Match and channel pointers are published last.\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -35,18 +37,62 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
-    if (arg === '--root' && next) { args.root = next; i += 1; continue; }
-    if (arg === '--release' && next) { args.release = next; i += 1; continue; }
-    if (arg === '--bucket' && next) { args.bucket = next; i += 1; continue; }
-    if (arg === '--wrangler-bin' && next) { args.wranglerBin = next; i += 1; continue; }
-    if (arg === '--aws-bin' && next) { args.awsBin = next; i += 1; continue; }
-    if (arg === '--r2-endpoint' && next) { args.r2Endpoint = next; i += 1; continue; }
-    if (arg === '--channel-manifest' && next) { args.channelManifest = next; i += 1; continue; }
-    if (arg === '--artifact-base' && next) { args.artifactBase = next; i += 1; continue; }
-    if (arg === '--probe-existing') { args.probeExisting = true; continue; }
-    if (arg === '--execute') { args.execute = true; continue; }
-    if (arg === '--allow-missing') { args.allowMissing = true; continue; }
-    if (arg === '-h' || arg === '--help') { usage(); process.exit(0); }
+    if (arg === '--root' && next) {
+      args.root = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--release' && next) {
+      args.release = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--bucket' && next) {
+      args.bucket = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--wrangler-bin' && next) {
+      args.wranglerBin = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--aws-bin' && next) {
+      args.awsBin = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--r2-endpoint' && next) {
+      args.r2Endpoint = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--channel-manifest' && next) {
+      args.channelManifest = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--artifact-base' && next) {
+      args.artifactBase = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--probe-existing') {
+      args.probeExisting = true;
+      continue;
+    }
+    if (arg === '--execute') {
+      args.execute = true;
+      continue;
+    }
+    if (arg === '--allow-missing') {
+      args.allowMissing = true;
+      continue;
+    }
+    if (arg === '-h' || arg === '--help') {
+      usage();
+      process.exit(0);
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
   if (!args.release) throw new Error('--release is required');
@@ -121,12 +167,14 @@ function validatedMigrationSource(artifact, rawSha256, args) {
   const logicalUrl = artifact.logicalUrl ?? artifact.name;
   const match = migration.key?.match(/^artifacts\/sha256\/([a-f0-9]{64})\/([^/]+)$/);
   const sourceUrlKey = migration.url ? artifactKeyFromUrl(migration.url) : undefined;
-  if (migration.schema !== 'lc0_browser.artifact_migration_source.v1'
-    || !migration.releaseId
-    || migration.releaseId !== artifact.carriedForwardFrom
-    || match?.[1] !== rawSha256
-    || match?.[2] === 'identity'
-    || sourceUrlKey !== migration.key) {
+  if (
+    migration.schema !== 'lc0_browser.artifact_migration_source.v1' ||
+    !migration.releaseId ||
+    migration.releaseId !== artifact.carriedForwardFrom ||
+    match?.[1] !== rawSha256 ||
+    match?.[2] === 'identity' ||
+    sourceUrlKey !== migration.key
+  ) {
     throw new Error(`Invalid v1 migration source metadata for ${logicalUrl}`);
   }
   return {
@@ -142,7 +190,8 @@ function validateV2Representation(artifact, representation) {
   if (!rawSha256 || !Number.isFinite(rawBytes)) throw new Error(`Invalid v2 raw metadata for ${artifact.logicalUrl ?? artifact.name}`);
   const key = artifactKeyFromUrl(representation.url);
   const encodedSha256 = representation.sha256?.toLowerCase();
-  if (!encodedSha256 || !Number.isFinite(representation.bytes)) throw new Error(`Invalid v2 representation metadata for ${artifact.logicalUrl ?? artifact.name}`);
+  if (!encodedSha256 || !Number.isFinite(representation.bytes))
+    throw new Error(`Invalid v2 representation metadata for ${artifact.logicalUrl ?? artifact.name}`);
   if (representation.encoding === 'identity') {
     if (key !== `artifacts/sha256/${rawSha256}/identity` || encodedSha256 !== rawSha256 || representation.bytes !== rawBytes) {
       throw new Error(`Invalid identity representation for ${artifact.logicalUrl ?? artifact.name}`);
@@ -173,18 +222,23 @@ function entriesFromV2Release(release, args) {
       const logicalUrl = artifact.logicalUrl ?? artifact.name;
       const carriedForward = Boolean(artifact.carriedForwardFrom);
       const contentType = artifact.contentType ?? 'application/octet-stream';
-      const localPath = localPathFor(args, representation.localPath ?? (representation.encoding === 'identity' ? artifact.localPath : undefined), validated.key);
+      const localPath = localPathFor(
+        args,
+        representation.localPath ?? (representation.encoding === 'identity' ? artifact.localPath : undefined),
+        validated.key,
+      );
       const existing = byKey.get(validated.key);
       if (existing) {
-        if (existing.bytes !== representation.bytes
-          || existing.sha256 !== validated.encodedSha256
-          || existing.contentType !== contentType
-          || existing.contentEncoding !== (representation.encoding === 'identity' ? undefined : representation.encoding)) {
+        if (
+          existing.bytes !== representation.bytes ||
+          existing.sha256 !== validated.encodedSha256 ||
+          existing.contentType !== contentType ||
+          existing.contentEncoding !== (representation.encoding === 'identity' ? undefined : representation.encoding)
+        ) {
           throw new Error(`Conflicting v2 representation metadata for ${validated.key}`);
         }
         if (logicalUrl && !existing.logicalUrls.includes(logicalUrl)) existing.logicalUrls.push(logicalUrl);
-        if (migrationSource && representation.encoding === 'identity'
-          && !existing.migrationSources.some((source) => source.key === migrationSource.key)) {
+        if (migrationSource && representation.encoding === 'identity' && !existing.migrationSources.some((source) => source.key === migrationSource.key)) {
           existing.migrationSources.push(migrationSource);
         }
         // Equal bodies may be inherited by one logical entry and materialized by
@@ -281,12 +335,15 @@ async function probeExistingEntry(entry) {
   });
   if (response.status === 404) return { state: 'missing', url: entry.url, status: response.status };
   if (!response.ok) throw new Error(`Artifact probe failed for ${entry.url}: HTTP ${response.status}`);
-  const encodedLengthMetadata = positiveIntegerHeader(response.headers, 'X-Artifact-Encoded-Length')
-    ?? positiveIntegerHeader(response.headers, 'Content-Length')
-    ?? (!entry.contentEncoding ? positiveIntegerHeader(response.headers, 'X-Artifact-Content-Length') : undefined);
+  const encodedLengthMetadata =
+    positiveIntegerHeader(response.headers, 'X-Artifact-Encoded-Length') ??
+    positiveIntegerHeader(response.headers, 'Content-Length') ??
+    (!entry.contentEncoding ? positiveIntegerHeader(response.headers, 'X-Artifact-Content-Length') : undefined);
   const encodedLength = encodedLengthMetadata?.value;
   if (encodedLength !== entry.bytes) {
-    throw new Error(`Remote artifact size mismatch for ${entry.logicalUrls.join(', ')}: got ${encodedLengthMetadata?.raw ?? 'missing'}, expected ${entry.bytes}`);
+    throw new Error(
+      `Remote artifact size mismatch for ${entry.logicalUrls.join(', ')}: got ${encodedLengthMetadata?.raw ?? 'missing'}, expected ${entry.bytes}`,
+    );
   }
   const decodedLengthHeader = headerValue(response.headers, 'x-artifact-content-length');
   if (decodedLengthHeader !== null && Number(decodedLengthHeader) !== entry.decodedBytes) {
@@ -298,7 +355,10 @@ async function probeExistingEntry(entry) {
   }
   if (entry.contentEncoding) {
     const actualEncoding = headerValue(response.headers, 'content-encoding');
-    if (actualEncoding !== entry.contentEncoding) throw new Error(`Remote artifact encoding mismatch for ${entry.logicalUrls.join(', ')}: got ${actualEncoding ?? 'identity'}, expected ${entry.contentEncoding}`);
+    if (actualEncoding !== entry.contentEncoding)
+      throw new Error(
+        `Remote artifact encoding mismatch for ${entry.logicalUrls.join(', ')}: got ${actualEncoding ?? 'identity'}, expected ${entry.contentEncoding}`,
+      );
   }
   const actual = await sha256RemoteUrl(entry.url);
   const expectedBodyBytes = entry.verification === 'legacy-full-body' ? entry.bytes : entry.decodedBytes;
@@ -320,18 +380,14 @@ async function probeExistingEntry(entry) {
 }
 
 function normalizedCustomMetadata(metadata) {
-  return Object.fromEntries(
-    Object.entries(metadata ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]),
-  );
+  return Object.fromEntries(Object.entries(metadata ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]));
 }
 
 function verifyImmutableObjectMetadata(target, actual, expected) {
   const expectedEncoding = expected.contentEncoding;
   const actualEncoding = actual.ContentEncoding;
   if (actual.ContentType !== expected.contentType) {
-    throw new Error(
-      `Refusing to accept immutable object ${target}: Content-Type is ${actual.ContentType ?? 'missing'}, expected ${expected.contentType}`,
-    );
+    throw new Error(`Refusing to accept immutable object ${target}: Content-Type is ${actual.ContentType ?? 'missing'}, expected ${expected.contentType}`);
   }
   if (expectedEncoding ? actualEncoding !== expectedEncoding : actualEncoding !== undefined && actualEncoding !== null && actualEncoding !== '') {
     throw new Error(
@@ -339,33 +395,25 @@ function verifyImmutableObjectMetadata(target, actual, expected) {
     );
   }
   if (actual.CacheControl !== expected.cacheControl) {
-    throw new Error(
-      `Refusing to accept immutable object ${target}: Cache-Control is ${actual.CacheControl ?? 'missing'}, expected ${expected.cacheControl}`,
-    );
+    throw new Error(`Refusing to accept immutable object ${target}: Cache-Control is ${actual.CacheControl ?? 'missing'}, expected ${expected.cacheControl}`);
   }
   if (actual.ContentLength !== expected.bytes) {
-    throw new Error(
-      `Refusing to accept immutable object ${target}: Content-Length is ${actual.ContentLength ?? 'missing'}, expected ${expected.bytes}`,
-    );
+    throw new Error(`Refusing to accept immutable object ${target}: Content-Length is ${actual.ContentLength ?? 'missing'}, expected ${expected.bytes}`);
   }
   const actualMetadata = normalizedCustomMetadata(actual.Metadata);
   for (const [key, value] of Object.entries(normalizedCustomMetadata(expected.customMetadata))) {
     if (actualMetadata[key] !== value) {
-      throw new Error(
-        `Refusing to accept immutable object ${target}: metadata ${key} is ${actualMetadata[key] ?? 'missing'}, expected ${value}`,
-      );
+      throw new Error(`Refusing to accept immutable object ${target}: metadata ${key} is ${actualMetadata[key] ?? 'missing'}, expected ${value}`);
     }
   }
 }
 
 function headRemoteImmutableObject(args, target, expected) {
-  const child = spawnSync(args.awsBin, [
-    's3api', 'head-object',
-    '--bucket', args.bucket,
-    '--key', expected.key,
-    '--endpoint-url', args.r2Endpoint,
-    '--region', 'auto',
-  ], { encoding: 'utf8' });
+  const child = spawnSync(
+    args.awsBin,
+    ['s3api', 'head-object', '--bucket', args.bucket, '--key', expected.key, '--endpoint-url', args.r2Endpoint, '--region', 'auto'],
+    { encoding: 'utf8' },
+  );
   const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
   if (child.status !== 0) {
     if (isMissingObjectOutput(output)) return 'missing';
@@ -387,14 +435,11 @@ async function verifyRemoteImmutableObject(args, target, expected) {
   const dir = await mkdtemp(join(tmpdir(), 'lc0-r2-exists-'));
   try {
     const file = join(dir, 'object');
-    const child = spawnSync(args.awsBin, [
-      's3api', 'get-object',
-      '--bucket', args.bucket,
-      '--key', expected.key,
-      '--endpoint-url', args.r2Endpoint,
-      '--region', 'auto',
-      file,
-    ], { encoding: 'utf8' });
+    const child = spawnSync(
+      args.awsBin,
+      ['s3api', 'get-object', '--bucket', args.bucket, '--key', expected.key, '--endpoint-url', args.r2Endpoint, '--region', 'auto', file],
+      { encoding: 'utf8' },
+    );
     if (child.status !== 0) {
       const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
       if (isMissingObjectOutput(output)) return 'missing';
@@ -465,15 +510,25 @@ async function materializeMigrationSource(args, item, workspace) {
     const file = join(dir, 'identity');
     try {
       const sourceTarget = `${args.bucket}/${source.key}`;
-      const child = spawnSync(args.awsBin, [
-        's3api', 'get-object',
-        '--bucket', args.bucket,
-        '--key', source.key,
-        '--range', `bytes=0-${item.decodedBytes}`,
-        '--endpoint-url', args.r2Endpoint,
-        '--region', 'auto',
-        file,
-      ], { encoding: 'utf8' });
+      const child = spawnSync(
+        args.awsBin,
+        [
+          's3api',
+          'get-object',
+          '--bucket',
+          args.bucket,
+          '--key',
+          source.key,
+          '--range',
+          `bytes=0-${item.decodedBytes}`,
+          '--endpoint-url',
+          args.r2Endpoint,
+          '--region',
+          'auto',
+          file,
+        ],
+        { encoding: 'utf8' },
+      );
       if (child.status !== 0) {
         const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
         if (!isMissingObjectOutput(output)) {
@@ -488,10 +543,7 @@ async function materializeMigrationSource(args, item, workspace) {
       }
       const actual = await sha256File(file);
       if (actual.bytes !== item.decodedBytes || actual.sha256 !== item.decodedSha256) {
-        throw new Error(
-          `verification failed: got ${actual.bytes}/${actual.sha256}, `
-          + `expected ${item.decodedBytes}/${item.decodedSha256}`,
-        );
+        throw new Error(`verification failed: got ${actual.bytes}/${actual.sha256}, ` + `expected ${item.decodedBytes}/${item.decodedSha256}`);
       }
       return { dir, file, source };
     } catch (error) {
@@ -500,9 +552,9 @@ async function materializeMigrationSource(args, item, workspace) {
     }
   }
   throw new Error(
-    `No verified v1 migration source was available for ${item.logicalUrls.join(', ')}. Attempted:\n`
-    + attempts.map(({ key, reason }) => `- ${key}: ${reason}`).join('\n')
-    + '\nRestore one listed legacy object or provide matching local decoded bytes before publishing.',
+    `No verified v1 migration source was available for ${item.logicalUrls.join(', ')}. Attempted:\n` +
+      attempts.map(({ key, reason }) => `- ${key}: ${reason}`).join('\n') +
+      '\nRestore one listed legacy object or provide matching local decoded bytes before publishing.',
   );
 }
 
@@ -544,15 +596,24 @@ async function createImmutableObjectAtomically(args, item) {
   }
   const target = `${args.bucket}/${item.key}`;
   const command = [
-    's3api', 'put-object',
-    '--bucket', args.bucket,
-    '--key', item.key,
-    '--body', item.localPath,
-    '--content-type', item.contentType,
-    '--cache-control', item.cacheControl,
-    '--if-none-match', '*',
-    '--endpoint-url', args.r2Endpoint,
-    '--region', 'auto',
+    's3api',
+    'put-object',
+    '--bucket',
+    args.bucket,
+    '--key',
+    item.key,
+    '--body',
+    item.localPath,
+    '--content-type',
+    item.contentType,
+    '--cache-control',
+    item.cacheControl,
+    '--if-none-match',
+    '*',
+    '--endpoint-url',
+    args.r2Endpoint,
+    '--region',
+    'auto',
   ];
   if (item.contentEncoding) command.push('--content-encoding', item.contentEncoding);
   if (item.customMetadata && Object.keys(item.customMetadata).length) {
@@ -577,17 +638,19 @@ async function manifestPublishItems(args, release) {
   }
   const releaseKey = `releases/${release.releaseId}.json`;
   const releaseDigest = await sha256File(args.release);
-  const items = [{
-    type: 'release-manifest',
-    localPath: args.release,
-    key: releaseKey,
-    bytes: releaseDigest.bytes,
-    sha256: releaseDigest.sha256,
-    contentType: 'application/json; charset=utf-8',
-    cacheControl: 'public, max-age=31536000, immutable',
-    remoteState: 'not-checked',
-    uploadAction: 'conditional-create-or-verify',
-  }];
+  const items = [
+    {
+      type: 'release-manifest',
+      localPath: args.release,
+      key: releaseKey,
+      bytes: releaseDigest.bytes,
+      sha256: releaseDigest.sha256,
+      contentType: 'application/json; charset=utf-8',
+      cacheControl: 'public, max-age=31536000, immutable',
+      remoteState: 'not-checked',
+      uploadAction: 'conditional-create-or-verify',
+    },
+  ];
   if (args.channelManifest) {
     const channel = JSON.parse(await readFile(args.channelManifest, 'utf8'));
     if (!isArtifactChannelManifest(channel)) throw new Error(`Unexpected channel schema: ${channel.schema}`);
@@ -629,18 +692,20 @@ async function main() {
     if (localExists) {
       const actual = await sha256File(entry.localPath);
       if (actual.bytes !== entry.bytes) throw new Error(`Size mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.bytes}, expected ${entry.bytes}`);
-      if (actual.sha256 !== entry.sha256) throw new Error(`SHA-256 mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.sha256}, expected ${entry.sha256}`);
+      if (actual.sha256 !== entry.sha256)
+        throw new Error(`SHA-256 mismatch for ${entry.logicalUrls.join(', ')}: got ${actual.sha256}, expected ${entry.sha256}`);
     } else if (!entry.carriedForward && !entry.migrationSources.length) {
-      if (args.allowMissing) { skipped.push({ logicalUrls: entry.logicalUrls, reason: entry.localPath ? 'missing localPath' : 'no localPath', localPath: entry.localPath }); continue; }
+      if (args.allowMissing) {
+        skipped.push({ logicalUrls: entry.logicalUrls, reason: entry.localPath ? 'missing localPath' : 'no localPath', localPath: entry.localPath });
+        continue;
+      }
       throw new Error(`Missing local artifact for ${entry.logicalUrls.join(', ')}: ${entry.localPath ?? 'no localPath'}`);
     }
 
     // HEAD verifies representation metadata and a decoded full-body pass proves
     // integrity. This can become HEAD-only once uploads persist a trustworthy R2
     // verification digest; a hash-shaped key alone is not proof of stored bytes.
-    const probe = (args.probeExisting || args.execute || (!localExists && !entry.migrationSources.length))
-      ? await probeExistingEntry(entry)
-      : undefined;
+    const probe = args.probeExisting || args.execute || (!localExists && !entry.migrationSources.length) ? await probeExistingEntry(entry) : undefined;
     if (!localExists && probe?.state !== 'existing' && !entry.migrationSources.length) {
       throw new Error(`Carried-forward artifact is not available remotely: ${entry.logicalUrls.join(', ')}`);
     }
@@ -659,9 +724,8 @@ async function main() {
       cacheControl: 'public, max-age=31536000, immutable',
       artifactUrl: entry.url,
       remoteState: probe?.state ?? 'not-probed',
-      uploadAction: probe?.state === 'existing'
-        ? 'conditional-create-or-verify'
-        : (migrationPlanned ? 'materialize-from-v1-and-conditional-create' : 'conditional-create'),
+      uploadAction:
+        probe?.state === 'existing' ? 'conditional-create-or-verify' : migrationPlanned ? 'materialize-from-v1-and-conditional-create' : 'conditional-create',
       remoteProbe: probe,
       migrationSources: entry.migrationSources,
     });
@@ -669,19 +733,17 @@ async function main() {
 
   const manifests = await manifestPublishItems(args, release);
   if (args.execute && skipped.length) {
-    throw new Error('Refusing to publish release/channel manifests when artifacts were skipped; rerun without --allow-missing or verify/upload all artifacts first');
+    throw new Error(
+      'Refusing to publish release/channel manifests when artifacts were skipped; rerun without --allow-missing or verify/upload all artifacts first',
+    );
   }
 
   if (args.execute) {
     if (!args.r2Endpoint) {
       throw new Error('Atomic immutable object creation requires --r2-endpoint, R2_ENDPOINT, R2_ACCOUNT_ID, or CLOUDFLARE_ACCOUNT_ID');
     }
-    const needsMigrationWorkspace = planned.some((item) => (
-      (!item.localPath || !existsSync(item.localPath)) && item.migrationSources.length
-    ));
-    const workspace = needsMigrationWorkspace
-      ? await mkdtemp(join(tmpdir(), 'lc0-r2-publish-preflight-'))
-      : undefined;
+    const needsMigrationWorkspace = planned.some((item) => (!item.localPath || !existsSync(item.localPath)) && item.migrationSources.length);
+    const workspace = needsMigrationWorkspace ? await mkdtemp(join(tmpdir(), 'lc0-r2-publish-preflight-')) : undefined;
     let materialized = [];
     try {
       materialized = await preflightArtifactPublish(args, planned, workspace);
@@ -689,9 +751,7 @@ async function main() {
         if (item.uploadAction === 'skip-identical-r2') continue;
         const uploadState = await createImmutableObjectAtomically(args, item);
         item.remoteState = uploadState === 'identical' ? 'identical-r2' : 'created-r2';
-        item.uploadAction = uploadState === 'identical'
-          ? 'skip-identical-r2'
-          : (item.migrationSourceUsed ? 'migrated-and-uploaded' : 'uploaded');
+        item.uploadAction = uploadState === 'identical' ? 'skip-identical-r2' : item.migrationSourceUsed ? 'migrated-and-uploaded' : 'uploaded';
       }
       for (const item of manifests) {
         const target = `${args.bucket}/${item.key}`;
@@ -701,13 +761,11 @@ async function main() {
           item.uploadAction = uploadState === 'identical' ? 'skip-identical' : 'uploaded';
           continue;
         }
-        const child = spawnSync(args.wranglerBin, [
-          'r2', 'object', 'put', target,
-          '--file', item.localPath,
-          '--content-type', item.contentType,
-          '--cache-control', item.cacheControl,
-          '--remote',
-        ], { stdio: 'inherit' });
+        const child = spawnSync(
+          args.wranglerBin,
+          ['r2', 'object', 'put', target, '--file', item.localPath, '--content-type', item.contentType, '--cache-control', item.cacheControl, '--remote'],
+          { stdio: 'inherit' },
+        );
         if (child.status !== 0) throw new Error(`wrangler failed for ${target}`);
       }
     } finally {
@@ -716,19 +774,25 @@ async function main() {
     }
   }
 
-  console.log(JSON.stringify({
-    schema: 'lc0_browser.r2_hashed_artifact_publish_plan.v2',
-    releaseId: release.releaseId,
-    releaseSchema: release.schema,
-    catalogObjectCount: catalog.size,
-    execute: args.execute,
-    bucket: args.bucket,
-    plannedCount: planned.length,
-    skippedCount: skipped.length,
-    planned,
-    skipped,
-    manifests,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        schema: 'lc0_browser.r2_hashed_artifact_publish_plan.v2',
+        releaseId: release.releaseId,
+        releaseSchema: release.schema,
+        catalogObjectCount: catalog.size,
+        execute: args.execute,
+        bucket: args.bucket,
+        plannedCount: planned.length,
+        skippedCount: skipped.length,
+        planned,
+        skipped,
+        manifests,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((error) => {

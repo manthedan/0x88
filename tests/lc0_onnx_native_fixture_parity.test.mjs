@@ -8,16 +8,26 @@ const NATIVE_PRIORS = 'fixtures/lc0/native_fen_only_blas.jsonl';
 
 function nativeCastlingToStandard(uci) {
   switch (uci) {
-    case 'e1h1': return 'e1g1';
-    case 'e1a1': return 'e1c1';
-    case 'e8h8': return 'e8g8';
-    case 'e8a8': return 'e8c8';
-    default: return uci;
+    case 'e1h1':
+      return 'e1g1';
+    case 'e1a1':
+      return 'e1c1';
+    case 'e8h8':
+      return 'e8g8';
+    case 'e8a8':
+      return 'e8c8';
+    default:
+      return uci;
   }
 }
 
-test('LC0 f32 ONNX evaluator matches native BLAS/Eigen FEN-only fixture priors', { skip: (!existsSync(MODEL) || !existsSync(NATIVE_PRIORS)) && 'missing model or native prior artifact' }, async () => {
-  const nativeRecords = readFileSync(NATIVE_PRIORS, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+test('LC0 f32 ONNX evaluator matches native BLAS/Eigen FEN-only fixture priors', {
+  skip: (!existsSync(MODEL) || !existsSync(NATIVE_PRIORS)) && 'missing model or native prior artifact',
+}, async () => {
+  const nativeRecords = readFileSync(NATIVE_PRIORS, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
   const evaluator = await Lc0OnnxEvaluator.create(readFileSync(MODEL));
   for (const native of nativeRecords) {
     const evaluation = await evaluator.evaluate(native.fen);

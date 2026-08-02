@@ -118,7 +118,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
       options: LC0_ENGINE_VARIANTS,
       v0Allowed: ['small', 't3', 'bt4'],
       v0Fallback: 'small',
-      label: (variant) => variant === 'bt4' ? 'Lc0 BT4-it332' : variant === 't3' ? 'Lc0 t3-512' : 'Lc0',
+      label: (variant) => (variant === 'bt4' ? 'Lc0 BT4-it332' : variant === 't3' ? 'Lc0 t3-512' : 'Lc0'),
     },
     play: {
       options: [
@@ -149,9 +149,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
       options: STOCKFISH_ENGINE_VARIANTS,
       v0Allowed: ['lite', 'full'],
       v0Fallback: 'lite',
-      label: (variant, surface) => surface === 'analysis'
-        ? variant === 'lite' ? 'SF Lite' : 'SF'
-        : variant === 'lite' ? 'Stockfish Lite' : 'Stockfish',
+      label: (variant, surface) => (surface === 'analysis' ? (variant === 'lite' ? 'SF Lite' : 'SF') : variant === 'lite' ? 'Stockfish Lite' : 'Stockfish'),
     },
     play: {
       options: [
@@ -299,9 +297,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
       options: CENTIPAWN_ENGINE_VARIANTS,
       v0Allowed: ['bt4-auto', 'bt4-ort'],
       v0Fallback: 'bt4-auto',
-      label: (variant) => variant === 'bt4-ort'
-        ? 'Centipawn · ORT'
-        : variant === 'bt4-custom' ? 'Centipawn · TVMJS strict' : 'Centipawn',
+      label: (variant) => (variant === 'bt4-ort' ? 'Centipawn · ORT' : variant === 'bt4-custom' ? 'Centipawn · TVMJS strict' : 'Centipawn'),
     },
     play: {
       options: [{ id: 'centipawn', label: 'Centipawn', variant: 'bt4-auto', group: 'engine', order: 11, v0: true }],
@@ -316,25 +312,35 @@ function familyDefinitions(): EngineFamilyDefinition[] {
 }
 
 function orderedFamilies(profile: 'default' | 'v0'): readonly EngineFamily[] {
-  return Object.freeze(familyDefinitions()
-    .slice()
-    .sort((a, b) => a.order[profile] - b.order[profile])
-    .map((definition) => definition.id));
+  return Object.freeze(
+    familyDefinitions()
+      .slice()
+      .sort((a, b) => a.order[profile] - b.order[profile])
+      .map((definition) => definition.id),
+  );
 }
 
 export const ENGINE_FAMILY_PRIORITY = orderedFamilies('default');
 export const V0_ENGINE_FAMILY_PRIORITY = orderedFamilies('v0');
 
-export const ENGINE_FAMILY_CATALOG = Object.fromEntries(familyDefinitions().map((definition) => [definition.id, {
-  id: definition.id,
-  label: definition.label,
-  shortLabel: definition.shortLabel,
-  status: definition.status,
-  docHref: definition.docHref,
-  note: definition.note,
-}])) as Record<EngineFamily, EngineFamilyCatalogEntry>;
+export const ENGINE_FAMILY_CATALOG = Object.fromEntries(
+  familyDefinitions().map((definition) => [
+    definition.id,
+    {
+      id: definition.id,
+      label: definition.label,
+      shortLabel: definition.shortLabel,
+      status: definition.status,
+      docHref: definition.docHref,
+      note: definition.note,
+    },
+  ]),
+) as Record<EngineFamily, EngineFamilyCatalogEntry>;
 
-export const ENGINE_RESOURCE_PROFILES = Object.fromEntries(familyDefinitions().map((definition) => [definition.id, definition.resource])) as Record<EngineFamily, EngineFamilyResourceProfile>;
+export const ENGINE_RESOURCE_PROFILES = Object.fromEntries(familyDefinitions().map((definition) => [definition.id, definition.resource])) as Record<
+  EngineFamily,
+  EngineFamilyResourceProfile
+>;
 
 export function engineFamilyDefinition(family: EngineFamily): EngineFamilyDefinition {
   return ENGINE_FAMILY_DEFINITIONS[family] as EngineFamilyDefinition;
@@ -383,13 +389,12 @@ export function normalizeDeployEngineRow(row: EngineRow, surface: EngineSurface,
   const definition = (ENGINE_FAMILY_DEFINITIONS as Partial<Record<string, EngineFamilyDefinition>>)[row.family];
   let next: EngineRow;
   if (!definition) {
-    next = index % 2 === 0
-      ? { family: 'lc0', variant: engineFamilyDefinition('lc0').variants.default, strength: defaultEngineStrength('lc0', surface) }
-      : { family: 'sf', variant: engineFamilyDefinition('sf').variants.default, strength: defaultEngineStrength('sf', surface) };
+    next =
+      index % 2 === 0
+        ? { family: 'lc0', variant: engineFamilyDefinition('lc0').variants.default, strength: defaultEngineStrength('lc0', surface) }
+        : { family: 'sf', variant: engineFamilyDefinition('sf').variants.default, strength: defaultEngineStrength('sf', surface) };
   } else {
-    const variant = isV0DeployProfile() && !definition.variants.v0Allowed.includes(row.variant)
-      ? definition.variants.v0Fallback
-      : row.variant;
+    const variant = isV0DeployProfile() && !definition.variants.v0Allowed.includes(row.variant) ? definition.variants.v0Fallback : row.variant;
     next = { ...row, variant };
   }
   const meta = engineStrengthMeta(next.family, surface);
@@ -441,9 +446,9 @@ export function isEngineFamily(value: string): value is EngineFamily {
   return Object.hasOwn(ENGINE_FAMILY_DEFINITIONS, value);
 }
 
-const LEGACY_ENGINE_FAMILY_ALIASES = Object.fromEntries(familyDefinitions().flatMap((definition) =>
-  (definition.aliases ?? []).map((alias) => [alias, definition.id]),
-)) as Record<string, EngineFamily>;
+const LEGACY_ENGINE_FAMILY_ALIASES = Object.fromEntries(
+  familyDefinitions().flatMap((definition) => (definition.aliases ?? []).map((alias) => [alias, definition.id])),
+) as Record<string, EngineFamily>;
 
 /** Map a possibly-legacy family string to its canonical key, or null when unknown. */
 export function canonicalEngineFamily(value: string): EngineFamily | null {

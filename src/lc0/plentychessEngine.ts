@@ -1,7 +1,7 @@
-import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
-import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
+import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
+import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 
 export interface PlentyChessOptions {
   /** Fixed search depth. */
@@ -157,15 +157,22 @@ export class PlentyChessEngine implements BrowserUciEngine {
   private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    this.queueTail = previous.then(() => gate, () => gate);
-    return previous.catch(() => undefined).then(async () => {
-      try {
-        return await fn();
-      } finally {
-        release();
-      }
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    this.queueTail = previous.then(
+      () => gate,
+      () => gate,
+    );
+    return previous
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          return await fn();
+        } finally {
+          release();
+        }
+      });
   }
 
   private makeWorker(): Worker {
@@ -255,7 +262,15 @@ export class PlentyChessEngine implements BrowserUciEngine {
       const cleanup = () => signal?.removeEventListener('abort', onAbort);
       this.pending.set(id, { resolve, reject, cleanup });
       signal?.addEventListener('abort', onAbort, { once: true });
-      worker.postMessage({ type, id, jsUrl: this.resolvedJsUrl(), wasmUrl: this.resolvedWasmUrl(), dataUrl: this.resolvedDataUrl(), trustedJsUrl: this.trustedJsUrl(), ...payload });
+      worker.postMessage({
+        type,
+        id,
+        jsUrl: this.resolvedJsUrl(),
+        wasmUrl: this.resolvedWasmUrl(),
+        dataUrl: this.resolvedDataUrl(),
+        trustedJsUrl: this.trustedJsUrl(),
+        ...payload,
+      });
     });
   }
 
@@ -401,7 +416,10 @@ export class PlentyChessEngine implements BrowserUciEngine {
       await this.sendCommand(`setoption name MultiPV value ${multipv}`, opts.signal);
       await this.sendCommand(`position fen ${fen}`, opts.signal);
       const searchStart = this.stdout.length;
-      const commandPromise = this.sendCommand(plentyChessGoCommand({ ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }), opts.signal);
+      const commandPromise = this.sendCommand(
+        plentyChessGoCommand({ ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }),
+        opts.signal,
+      );
       try {
         await this.waitForLine((line) => line.startsWith('bestmove '), 'analysis bestmove', searchStart, opts.signal, 60000);
         await commandPromise;

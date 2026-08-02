@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
-import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
 import { Lc0PuctSearcher, Lc0SearchEvaluator } from '../src/lc0/search.ts';
 
@@ -18,16 +18,25 @@ const HIGHER_VISIT_SUITES = [
 ];
 
 function readJsonl(path) {
-  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  return readFileSync(path, 'utf8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 function nativeCastlingToStandard(uci) {
   switch (uci) {
-    case 'e1h1': return 'e1g1';
-    case 'e1a1': return 'e1c1';
-    case 'e8h8': return 'e8g8';
-    case 'e8a8': return 'e8c8';
-    default: return uci;
+    case 'e1h1':
+      return 'e1g1';
+    case 'e1a1':
+      return 'e1c1';
+    case 'e8h8':
+      return 'e8g8';
+    case 'e8a8':
+      return 'e8c8';
+    default:
+      return uci;
   }
 }
 
@@ -113,7 +122,10 @@ test('LC0 pipelined PUCT can submit multiple leaf batches through the sequence A
   assert.equal(result.search.stats?.batchPipelineDepth, 2);
   assert.equal(result.search.stats?.batchPipelineFlushes, 2);
   assert.equal(result.search.stats?.maxBatchPipelineBatches, 2);
-  assert.deepEqual(sequenceShapes, [[2, 2], [2, 2]]);
+  assert.deepEqual(sequenceShapes, [
+    [2, 2],
+    [2, 2],
+  ]);
 });
 
 test('LC0 pipelined PUCT works with singleton physical batches', async () => {
@@ -130,30 +142,35 @@ test('LC0 pipelined PUCT works with singleton physical batches', async () => {
   const result = await new Lc0PuctSearcher(fakeLc0).search(START_FEN, { visits: 4, batchSize: 1, batchPipelineDepth: 2 });
   assert.equal(result.search.stats?.completedVisits, 4);
   assert.equal(result.search.stats?.batchPipelineFlushes, 2);
-  assert.deepEqual(sequenceShapes, [[1, 1], [1, 1]]);
+  assert.deepEqual(sequenceShapes, [
+    [1, 1],
+    [1, 1],
+  ]);
 });
 
 test('LC0 search aggregates backend timings from physical pipeline batches', async () => {
   const fakeLc0 = {
     async evaluateBatchSequence(batches) {
-      return batches.map((batch, batchIndex) => batch.map((input, i) => ({
-        ...fakeLc0Evaluation(input),
-        timing: {
-          totalEvalMs: 20,
-          readbackSyncedMs: 10,
-          deferredReadbackDelayMs: 4,
-          readbackMapAsyncMs: 8,
-          readbackMapCopyMs: 2,
-          legalPriorsMs: i + 1,
-          readbackBytes: 7444 * batch.length,
-          readbackMapCount: 1,
-          physicalBatchSize: batch.length,
-          batchPosition: i,
-          wgslSequenceId: 100 + batchIndex,
-          batchSequenceIndex: batchIndex,
-          deferredReadbackSlot: batchIndex % 2,
-        },
-      })));
+      return batches.map((batch, batchIndex) =>
+        batch.map((input, i) => ({
+          ...fakeLc0Evaluation(input),
+          timing: {
+            totalEvalMs: 20,
+            readbackSyncedMs: 10,
+            deferredReadbackDelayMs: 4,
+            readbackMapAsyncMs: 8,
+            readbackMapCopyMs: 2,
+            legalPriorsMs: i + 1,
+            readbackBytes: 7444 * batch.length,
+            readbackMapCount: 1,
+            physicalBatchSize: batch.length,
+            batchPosition: i,
+            wgslSequenceId: 100 + batchIndex,
+            batchSequenceIndex: batchIndex,
+            deferredReadbackSlot: batchIndex % 2,
+          },
+        })),
+      );
     },
     async evaluate(input) {
       return fakeLc0Evaluation(input);
@@ -179,7 +196,7 @@ test('LC0 search aggregates backend timings from physical pipeline batches', asy
 test('LC0 pipelined PUCT rejects malformed sequence result shapes', async () => {
   const fakeLc0 = {
     async evaluateBatchSequence(batches) {
-      return batches.map((batch, i) => i === 0 ? batch.slice(1).map(fakeLc0Evaluation) : batch.map(fakeLc0Evaluation));
+      return batches.map((batch, i) => (i === 0 ? batch.slice(1).map(fakeLc0Evaluation) : batch.map(fakeLc0Evaluation)));
     },
     async evaluate(input) {
       return fakeLc0Evaluation(input);
@@ -194,7 +211,9 @@ test('LC0 pipelined PUCT rejects malformed sequence result shapes', async () => 
 test('LC0 pipelined neural budget is bounded by remaining misses', async () => {
   let misses = 0;
   const fakeLc0 = {
-    metrics() { return { hits: 0, misses, entries: 0, maxEntries: 0 }; },
+    metrics() {
+      return { hits: 0, misses, entries: 0, maxEntries: 0 };
+    },
     async evaluateBatchSequence(batches) {
       misses += batches.reduce((sum, batch) => sum + batch.length, 0);
       return batches.map((batch) => batch.map(fakeLc0Evaluation));
@@ -303,7 +322,10 @@ test('LC0 movetime search returns best-so-far instead of aborting on soft timeou
   assert.ok(result.move, 'soft timeout still returns a move');
   assert.equal(result.search.stats?.stopReason, 'movetime');
   assert.equal(result.search.stats?.requestedVisits, Number.MAX_SAFE_INTEGER, 'movetime-only search uses deadline rather than a reachable visit cap');
-  assert.ok((result.search.stats?.completedVisits ?? Number.MAX_SAFE_INTEGER) < 200, `completed only best-so-far visits, got ${result.search.stats?.completedVisits}`);
+  assert.ok(
+    (result.search.stats?.completedVisits ?? Number.MAX_SAFE_INTEGER) < 200,
+    `completed only best-so-far visits, got ${result.search.stats?.completedVisits}`,
+  );
 });
 
 test('LC0 search throws AbortError when given an already-aborted signal', async () => {
@@ -335,7 +357,9 @@ test('LC0 search honors a signal aborted mid-flight and stops early', async () =
   assert.ok(evalCount < 200, `aborted search stopped early after ${evalCount} evals`);
 });
 
-test('LC0 fixed-visit PUCT matches native BLAS nodes32 fixture best moves', { skip: (!existsSync(MODEL) || !existsSync(NATIVE_FEN_SEARCH) || !existsSync(NATIVE_HISTORY_SEARCH)) && 'missing model or native search artifacts' }, async () => {
+test('LC0 fixed-visit PUCT matches native BLAS nodes32 fixture best moves', {
+  skip: (!existsSync(MODEL) || !existsSync(NATIVE_FEN_SEARCH) || !existsSync(NATIVE_HISTORY_SEARCH)) && 'missing model or native search artifacts',
+}, async () => {
   const searcher = await Lc0PuctSearcher.create(readFileSync(MODEL));
   const records = [...readJsonl(NATIVE_FEN_SEARCH), ...readJsonl(NATIVE_HISTORY_SEARCH)];
   for (const native of records) {
@@ -356,7 +380,9 @@ test('LC0 fixed-visit PUCT matches native BLAS nodes32 fixture best moves', { sk
 
 for (const { visits, files } of HIGHER_VISIT_SUITES) {
   const present = existsSync(MODEL) && files.every(existsSync);
-  test(`LC0 fixed-visit PUCT matches native BLAS nodes${visits} fixture best moves`, { skip: !present && `missing model or native nodes${visits} artifacts` }, async () => {
+  test(`LC0 fixed-visit PUCT matches native BLAS nodes${visits} fixture best moves`, {
+    skip: !present && `missing model or native nodes${visits} artifacts`,
+  }, async () => {
     const searcher = await Lc0PuctSearcher.create(readFileSync(MODEL));
     const records = files.flatMap(readJsonl);
     for (const native of records) {

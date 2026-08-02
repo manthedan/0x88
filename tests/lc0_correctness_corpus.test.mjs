@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
-import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from '../src/lc0/policyMap.ts';
 
 const corpus = JSON.parse(readFileSync(new URL('../fixtures/lc0/correctness_corpus.json', import.meta.url), 'utf8'));

@@ -9,9 +9,9 @@
 //     --js public/plentychess/plentychess-emscripten.js,public/plentychess/plentychess-emscripten-sse41.js \
 //     --depths 9,11 [--positions 20] [--json out.json]
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 
 const ROTATED_FEN_SUITE = [
   ['Start position', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'],
@@ -48,7 +48,10 @@ for (let i = 2; i < process.argv.length; i += 1) {
   }
 }
 
-const jsPaths = (args.get('js') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+const jsPaths = (args.get('js') ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 if (!jsPaths.length) {
   console.error('Usage: node scripts/emscripten_uci_bench.mjs --js <baseline.js>[,<candidate.js>...] [--depths 9,11] [--positions 20] [--json out.json]');
   process.exit(2);
@@ -163,7 +166,13 @@ for (const jsPath of jsPaths.slice(1)) {
     pairs += 1;
     const same = ref.bestmove === row.bestmove && ref.score === row.score && ref.nodes === row.nodes && ref.pv === row.pv;
     if (same) exact += 1;
-    else mismatches.push({ position: row.position, depth: row.depth, baseline: { bestmove: ref.bestmove, score: ref.score, nodes: ref.nodes }, candidate: { bestmove: row.bestmove, score: row.score, nodes: row.nodes } });
+    else
+      mismatches.push({
+        position: row.position,
+        depth: row.depth,
+        baseline: { bestmove: ref.bestmove, score: ref.score, nodes: ref.nodes },
+        candidate: { bestmove: row.bestmove, score: row.score, nodes: row.nodes },
+      });
   }
   parity[jsPath] = { pairs, exact, mismatches: mismatches.slice(0, 10) };
 }

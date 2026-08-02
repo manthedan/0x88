@@ -20,7 +20,9 @@ function parseArgs(argv) {
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (!options.baseline || !options.candidate || !options.fixtures) {
-    throw new Error('usage: lc0_compare_onnx_models.mjs --baseline MODEL --candidate MODEL --fixtures JSON [--warmup N] [--iterations N] [--threads N] [--out JSON]');
+    throw new Error(
+      'usage: lc0_compare_onnx_models.mjs --baseline MODEL --candidate MODEL --fixtures JSON [--warmup N] [--iterations N] [--threads N] [--out JSON]',
+    );
   }
   for (const path of [options.baseline, options.candidate, options.fixtures]) {
     if (!existsSync(path)) throw new Error(`file not found: ${path}`);
@@ -65,12 +67,7 @@ async function timedEvaluate(evaluator, input) {
 }
 
 function assertFiniteEvaluation(label, evaluation) {
-  const values = [
-    ...evaluation.wdl,
-    evaluation.q,
-    evaluation.mlh,
-    ...evaluation.legalPriors.map((entry) => entry.prior),
-  ];
+  const values = [...evaluation.wdl, evaluation.q, evaluation.mlh, ...evaluation.legalPriors.map((entry) => entry.prior)];
   if (values.some((value) => !Number.isFinite(value))) {
     throw new Error(`${label} produced a non-finite WDL, Q, MLH, or legal-prior value`);
   }
@@ -98,12 +95,8 @@ function compareEvaluations(id, baseline, candidate) {
   return {
     id,
     bestMoveAgreement: baseline.bestMove === candidate.bestMove,
-    mutualTopTwoAgreement: (
-      baselineTop[0] !== undefined
-      && candidateTop[0] !== undefined
-      && candidateTopTwo.has(baselineTop[0].index)
-      && baselineTopTwo.has(candidateTop[0].index)
-    ),
+    mutualTopTwoAgreement:
+      baselineTop[0] !== undefined && candidateTop[0] !== undefined && candidateTopTwo.has(baselineTop[0].index) && baselineTopTwo.has(candidateTop[0].index),
     baselineBestMove: baseline.bestMove,
     candidateBestMove: candidate.bestMove,
     maxWdlAbsError: Math.max(...baseline.wdl.map((value, index) => Math.abs(value - candidate.wdl[index]))),

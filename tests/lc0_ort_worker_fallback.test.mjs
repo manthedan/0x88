@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { workerFallbackReplayAbort } from '../src/lc0/ortWorkerFallback.ts';
 
 test('search cancellation prevents replay after ORT worker fallback', () => {

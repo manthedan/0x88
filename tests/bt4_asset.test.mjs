@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { BT4_NET, bigNetAssetStatusSync, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
 
 function testConfig(modelUrl) {
@@ -31,7 +31,10 @@ test('production skips known-unhosted big-net asset probes', async () => {
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   const config = testConfig('/models/lc0/unit-unhosted-big-net.onnx');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return new Response(null, { status: 200 }); };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(null, { status: 200 });
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '0x88.app' },
@@ -55,7 +58,10 @@ test('IPv6 loopback still probes local big-net assets', async () => {
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   const config = testConfig('/models/lc0/unit-local-big-net.onnx');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return new Response(null, { status: 404 }); };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(null, { status: 404 });
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '[::1]' },

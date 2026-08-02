@@ -8,17 +8,17 @@
 // deploy takes, so a violation cannot reach production.
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { checkHeadersFileUpToDate } from './generate_netlify_headers_file.mjs';
 import {
-  parseHeaderBlocks,
-  valuesByName,
-  effectiveValue,
   cacheControlDirectives,
   conflictingDirectives,
+  effectiveValue,
   maxSeconds,
-  parseRedirects,
   parseBuildTable,
+  parseHeaderBlocks,
+  parseRedirects,
+  valuesByName,
 } from './netlify_headers.mjs';
-import { checkHeadersFileUpToDate } from './generate_netlify_headers_file.mjs';
 
 const INVARIANTS = [
   'header policy is declared only in netlify.toml',
@@ -42,8 +42,7 @@ const INVARIANTS = [
 // release manifest, so they are write-once by construction and by enforcement.
 const ONE_YEAR_SECONDS = 31536000;
 
-const immutableAllowed = (path) =>
-  path === '/artifacts/sha256/*' || path === '/_app/immutable/*' || path === '/releases/*';
+const immutableAllowed = (path) => path === '/artifacts/sha256/*' || path === '/_app/immutable/*' || path === '/releases/*';
 
 // Directive order and case are not significant in these token-list headers, so
 // requirements compare the directive set rather than one exact spelling.
@@ -51,9 +50,9 @@ function directiveSet(value) {
   return value === undefined
     ? undefined
     : [...cacheControlDirectives(value)]
-      .flatMap(([name, args]) => args.map((argument) => (argument === '' ? name : `${name}=${argument}`)))
-      .sort()
-      .join(', ');
+        .flatMap(([name, args]) => args.map((argument) => (argument === '' ? name : `${name}=${argument}`)))
+        .sort()
+        .join(', ');
 }
 
 // Extra Cache-Control directives that cannot weaken a required policy. The
@@ -79,13 +78,15 @@ function parseBuildCommand(tomlText) {
 function publishRedirects(rootPath) {
   const path = resolve(rootPath, 'public/_redirects');
   if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8').split(/\r?\n/).flatMap((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) return [];
-    const [from, to, status] = trimmed.split(/\s+/);
-    if (!from || !to) return [];
-    return [{ from, to, forced: (status ?? '').endsWith('!') }];
-  });
+  return readFileSync(path, 'utf8')
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return [];
+      const [from, to, status] = trimmed.split(/\s+/);
+      if (!from || !to) return [];
+      return [{ from, to, forced: (status ?? '').endsWith('!') }];
+    });
 }
 
 const REQUIRED = [
@@ -193,7 +194,10 @@ export function checkDeployCachePolicy(rootPath = process.cwd()) {
   for (const block of blocks) {
     if (block.path === '/*' || block.path === undefined) continue;
     const values = headers.get(block);
-    for (const [header, required] of [['cross-origin-opener-policy', 'same-origin'], ['cross-origin-embedder-policy', 'require-corp']]) {
+    for (const [header, required] of [
+      ['cross-origin-opener-policy', 'same-origin'],
+      ['cross-origin-embedder-policy', 'require-corp'],
+    ]) {
       const declared = effectiveValue(values, header);
       if (declared !== undefined && declared.toLowerCase() !== required) {
         fail(`netlify.toml overrides ${header} to "${declared}" on ${block.path}, which drops cross-origin isolation for that route`);
@@ -204,7 +208,9 @@ export function checkDeployCachePolicy(rootPath = process.cwd()) {
   // F1: the gate only protects deploys whose build command actually runs it.
   const buildCommand = parseBuildCommand(netlify);
   if (buildCommand !== undefined && !GATED_BUILD_SCRIPTS.some((script) => buildCommand.includes(script))) {
-    fail(`netlify.toml [build].command does not run a gated build script (${GATED_BUILD_SCRIPTS.join(', ')}), so automatic deploys would bypass this check: ${buildCommand}`);
+    fail(
+      `netlify.toml [build].command does not run a gated build script (${GATED_BUILD_SCRIPTS.join(', ')}), so automatic deploys would bypass this check: ${buildCommand}`,
+    );
   }
 
   // F2: Netlify also reads a _redirects file from the publish directory, which

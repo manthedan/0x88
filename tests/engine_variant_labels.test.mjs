@@ -1,21 +1,12 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { engineVariantMenuLabel } from '../src/lc0/engineVariantLabels.ts';
+import test from 'node:test';
+import { BERSERK_EMSCRIPTEN_RELAXED_VARIANT, BERSERK_EMSCRIPTEN_SIMD_VARIANT, BERSERK_EMSCRIPTEN_VARIANT } from '../src/lc0/berserkVariants.ts';
 import { ENGINE_FAMILY_DEFINITIONS } from '../src/lc0/engineCatalog.ts';
-import {
-  RECKLESS_FULL_VARIANT,
-  RECKLESS_RELAXED_SIMD_VARIANT,
-  RECKLESS_SIMD_VARIANT,
-  RECKLESS_VARIANTS,
-} from '../src/lc0/recklessVariants.ts';
-import {
-  BERSERK_EMSCRIPTEN_RELAXED_VARIANT,
-  BERSERK_EMSCRIPTEN_SIMD_VARIANT,
-  BERSERK_EMSCRIPTEN_VARIANT,
-} from '../src/lc0/berserkVariants.ts';
-import { VIRIDITHAS_DEFAULT_VARIANT } from '../src/lc0/viridithasVariants.ts';
+import { engineVariantMenuLabel } from '../src/lc0/engineVariantLabels.ts';
 import { PLENTYCHESS_EMSCRIPTEN_VARIANT } from '../src/lc0/plentychessVariants.ts';
+import { RECKLESS_FULL_VARIANT, RECKLESS_RELAXED_SIMD_VARIANT, RECKLESS_SIMD_VARIANT, RECKLESS_VARIANTS } from '../src/lc0/recklessVariants.ts';
+import { VIRIDITHAS_DEFAULT_VARIANT } from '../src/lc0/viridithasVariants.ts';
 
 test('variant menus omit the family and implementation boilerplate', () => {
   assert.equal(engineVariantMenuLabel('reckless', 'relaxed-simd', 'unused'), 'Relaxed SIMD');
@@ -28,16 +19,14 @@ test('variant menus omit the family and implementation boilerplate', () => {
 });
 
 test('engine result labels stay concise and omit implementation status words', () => {
-  assert.deepEqual([
-    RECKLESS_FULL_VARIANT.label,
-    RECKLESS_SIMD_VARIANT.label,
-    RECKLESS_RELAXED_SIMD_VARIANT.label,
-  ], ['Reckless scalar fallback', 'Reckless SIMD', 'Reckless Relaxed SIMD']);
-  assert.deepEqual([
-    BERSERK_EMSCRIPTEN_VARIANT.label,
-    BERSERK_EMSCRIPTEN_SIMD_VARIANT.label,
-    BERSERK_EMSCRIPTEN_RELAXED_VARIANT.label,
-  ], ['Berserk', 'Berserk SIMD', 'Berserk Relaxed SIMD']);
+  assert.deepEqual(
+    [RECKLESS_FULL_VARIANT.label, RECKLESS_SIMD_VARIANT.label, RECKLESS_RELAXED_SIMD_VARIANT.label],
+    ['Reckless scalar fallback', 'Reckless SIMD', 'Reckless Relaxed SIMD'],
+  );
+  assert.deepEqual(
+    [BERSERK_EMSCRIPTEN_VARIANT.label, BERSERK_EMSCRIPTEN_SIMD_VARIANT.label, BERSERK_EMSCRIPTEN_RELAXED_VARIANT.label],
+    ['Berserk', 'Berserk SIMD', 'Berserk Relaxed SIMD'],
+  );
   assert.equal(VIRIDITHAS_DEFAULT_VARIANT.label, 'Viridithas');
   assert.equal(PLENTYCHESS_EMSCRIPTEN_VARIANT.label, 'PlentyChess');
   for (const variant of RECKLESS_VARIANTS) assert.doesNotMatch(variant.label, /\bFull\b|experimental/i);

@@ -1,17 +1,25 @@
-import { cloneBoard, squareName, type BoardState, type PieceRole } from './board.ts';
+import { type BoardState, cloneBoard, type PieceRole, squareName } from './board.ts';
+import { type Move, moveFromUci, moveToUci } from './moveCodec.ts';
 import { inCheck, legalMoves, makeMove } from './movegen.ts';
-import { moveFromUci, moveToUci, type Move } from './moveCodec.ts';
 
 const PIECE_SAN: Record<Exclude<PieceRole, 'p'>, string> = { n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' };
 const PROMO_SAN: Record<Exclude<PieceRole, 'p' | 'k'>, string> = { n: 'N', b: 'B', r: 'R', q: 'Q' };
 
-function fileName(square: number) { return squareName(square)[0]; }
-function rankName(square: number) { return squareName(square)[1]; }
-function sameMove(a: Move, b: Move) { return a.from === b.from && a.to === b.to && a.promotion === b.promotion; }
+function fileName(square: number) {
+  return squareName(square)[0];
+}
+function rankName(square: number) {
+  return squareName(square)[1];
+}
+function sameMove(a: Move, b: Move) {
+  return a.from === b.from && a.to === b.to && a.promotion === b.promotion;
+}
 function legalEquivalent(board: BoardState, move: Move) {
-  return legalMoves(board).find((candidate) => sameMove(candidate, move))
-    ?? legalMoves(board).find((candidate) => candidate.from === move.from && candidate.to === move.to && !candidate.promotion && !move.promotion)
-    ?? null;
+  return (
+    legalMoves(board).find((candidate) => sameMove(candidate, move)) ??
+    legalMoves(board).find((candidate) => candidate.from === move.from && candidate.to === move.to && !candidate.promotion && !move.promotion) ??
+    null
+  );
 }
 
 function checkSuffix(board: BoardState, move: Move) {
@@ -73,7 +81,10 @@ export function uciLineToSan(board: BoardState, ucis: string[], maxMoves = ucis.
     try {
       const parsed = moveFromUci(uci);
       const move = legalEquivalent(cursor, parsed);
-      if (!move) { sans.push(uci); break; }
+      if (!move) {
+        sans.push(uci);
+        break;
+      }
       sans.push(moveToSan(cursor, move));
       cursor = makeMove(cursor, move);
     } catch {

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, copyFileSync } from 'node:fs';
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 
 const ROOT = process.cwd();
 
@@ -31,14 +31,22 @@ const CONFIGS = {
       'src/lc0/stockfishEngine.ts',
       'src/chess/board.ts',
     ],
-    docs: ['docs/engine_artifact_distribution.md', 'docs/browser_c_engine_porting.md', 'docs/engine_catalog.md', 'docs/berserk_browser_benchmarks.md', 'docs/netlify_engine_artifacts.md', 'public/berserk/README.md'],
+    docs: [
+      'docs/engine_artifact_distribution.md',
+      'docs/browser_c_engine_porting.md',
+      'docs/engine_catalog.md',
+      'docs/berserk_browser_benchmarks.md',
+      'docs/netlify_engine_artifacts.md',
+      'public/berserk/README.md',
+    ],
     assetDir: '.local_engines/berserk-nets',
     assets: [
       {
         name: 'berserk-9b84c340af7e.nn',
         sourceUrl: 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn',
         rawSha256: '9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084',
-        licenseNote: 'Covered by Berserk GPL-3.0 under this release policy: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it is treated as part of the Corresponding Source. See docs/engine_artifact_distribution.md.',
+        licenseNote:
+          'Covered by Berserk GPL-3.0 under this release policy: the net is named as EVALFILE in the engine Makefile, downloaded and hash-verified by the engine build, and required for the binary to run, so it is treated as part of the Corresponding Source. See docs/engine_artifact_distribution.md.',
       },
     ],
     envPrefix: 'BERSERK',
@@ -65,7 +73,14 @@ const CONFIGS = {
       'src/lc0/stockfishEngine.ts',
       'src/chess/board.ts',
     ],
-    docs: ['docs/engine_artifact_distribution.md', 'docs/browser_c_engine_porting.md', 'docs/engine_catalog.md', 'docs/plentychess_browser_port.md', 'docs/netlify_engine_artifacts.md', 'public/plentychess/README.md'],
+    docs: [
+      'docs/engine_artifact_distribution.md',
+      'docs/browser_c_engine_porting.md',
+      'docs/engine_catalog.md',
+      'docs/plentychess_browser_port.md',
+      'docs/netlify_engine_artifacts.md',
+      'public/plentychess/README.md',
+    ],
     assetDir: '.local_engines/plentychess-nets',
     assets: [
       {
@@ -100,14 +115,22 @@ const CONFIGS = {
       'src/lc0/stockfishEngine.ts',
       'src/chess/board.ts',
     ],
-    docs: ['docs/engine_artifact_distribution.md', 'docs/browser_c_engine_porting.md', 'docs/engine_catalog.md', 'docs/stormphrax_browser_port.md', 'docs/netlify_engine_artifacts.md', 'public/stormphrax/README.md'],
+    docs: [
+      'docs/engine_artifact_distribution.md',
+      'docs/browser_c_engine_porting.md',
+      'docs/engine_catalog.md',
+      'docs/stormphrax_browser_port.md',
+      'docs/netlify_engine_artifacts.md',
+      'public/stormphrax/README.md',
+    ],
     assetDir: '.local_engines/stormphrax-nets',
     assets: [
       {
         name: 'undertown.nnue',
         sourceUrl: 'https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue',
         rawSha256: '04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf',
-        licenseNote: 'Stormphrax documents undertown as the self-trained release network for 8.0.0; preserve GPL source and provenance alongside public browser artifacts.',
+        licenseNote:
+          'Stormphrax documents undertown as the self-trained release network for 8.0.0; preserve GPL source and provenance alongside public browser artifacts.',
       },
     ],
     envPrefix: 'STORMPHRAX',
@@ -123,13 +146,14 @@ const CONFIGS = {
     patch: 'patches/viridithas-wasip1.patch',
     buildScript: 'scripts/build_viridithas_wasi.mjs',
     smokeScript: 'scripts/viridithas_wasi_smoke.mjs',
-    adapterFiles: [
-      'src/lc0/viridithasEngine.ts',
-      'src/lc0/viridithasVariants.ts',
-      'src/lc0/stockfishEngine.ts',
-      'src/chess/board.ts',
+    adapterFiles: ['src/lc0/viridithasEngine.ts', 'src/lc0/viridithasVariants.ts', 'src/lc0/stockfishEngine.ts', 'src/chess/board.ts'],
+    docs: [
+      'docs/engine_artifact_distribution.md',
+      'docs/browser_c_engine_porting.md',
+      'docs/engine_catalog.md',
+      'docs/netlify_engine_artifacts.md',
+      'public/viridithas/README.md',
     ],
-    docs: ['docs/engine_artifact_distribution.md', 'docs/browser_c_engine_porting.md', 'docs/engine_catalog.md', 'docs/netlify_engine_artifacts.md', 'public/viridithas/README.md'],
     assetDir: '.local_engines/viridithas-nets',
     assets: [
       {
@@ -152,20 +176,26 @@ const CONFIGS = {
     output: 'public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz',
     buildScript: 'scripts/build_stockfish_relaxed_simd.mjs',
     smokeScript: 'scripts/uci_stockfish_js_wrapper.mjs',
-    adapterFiles: [
-      'src/lc0/stockfishEngine.ts',
-      'src/lc0/wasmFeatures.ts',
-      'src/lc0/engineCatalog.ts',
-      'src/chess/board.ts',
+    adapterFiles: ['src/lc0/stockfishEngine.ts', 'src/lc0/wasmFeatures.ts', 'src/lc0/engineCatalog.ts', 'src/chess/board.ts'],
+    docs: [
+      'docs/engine_artifact_distribution.md',
+      'docs/engine_catalog.md',
+      'docs/netlify_engine_artifacts.md',
+      'docs/stockfish_relaxed_simd_experiment.md',
+      'public/stockfish/README.md',
+      'node_modules/stockfish/README.md',
+      'node_modules/stockfish/Copying.txt',
+      'node_modules/stockfish/package.json',
     ],
-    docs: ['docs/engine_artifact_distribution.md', 'docs/engine_catalog.md', 'docs/netlify_engine_artifacts.md', 'docs/stockfish_relaxed_simd_experiment.md', 'public/stockfish/README.md', 'node_modules/stockfish/README.md', 'node_modules/stockfish/Copying.txt', 'node_modules/stockfish/package.json'],
     assets: [],
     envPrefix: 'STOCKFISH_JS',
   },
 };
 
 function usage() {
-  console.error('Usage: node scripts/write_engine_source_archive.mjs <berserk|plentychess|stormphrax|viridithas|stockfish> [--out path] [--allow-missing-assets]');
+  console.error(
+    'Usage: node scripts/write_engine_source_archive.mjs <berserk|plentychess|stormphrax|viridithas|stockfish> [--out path] [--allow-missing-assets]',
+  );
 }
 
 function argValue(name) {
@@ -290,8 +320,13 @@ async function writeArchiveDocs(config, archiveRoot) {
     assets: config.assets.map((asset) => asset.name),
   };
   await writeFile(join(archiveRoot, 'SOURCE_ARCHIVE.json'), `${JSON.stringify(meta, null, 2)}\n`);
-  const patchNote = config.patch ? `The build script applies ${config.patch} to the upstream snapshot in ${config.sourcePrefix}.` : `No local source patch is applied; the deployed artifacts come from the pinned upstream/package source in ${config.sourcePrefix}.`;
-  await writeFile(join(archiveRoot, 'BUILDING.md'), `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser integration scripts/adapters, docs, and required network/model asset provenance for the generated ${config.engine} browser artifacts.\n\n## Rebuild\n\nInstall Node dependencies and the documented upstream toolchain, then run:\n\n\`\`\`sh\nnpm ci\n${rebuildCommand(config)}\n\`\`\`\n\n${patchNote}\n\nThe build writes outputs under \`out/public/${config.engine}/\` or the upstream build directory as noted by the command above.\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`);
+  const patchNote = config.patch
+    ? `The build script applies ${config.patch} to the upstream snapshot in ${config.sourcePrefix}.`
+    : `No local source patch is applied; the deployed artifacts come from the pinned upstream/package source in ${config.sourcePrefix}.`;
+  await writeFile(
+    join(archiveRoot, 'BUILDING.md'),
+    `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser integration scripts/adapters, docs, and required network/model asset provenance for the generated ${config.engine} browser artifacts.\n\n## Rebuild\n\nInstall Node dependencies and the documented upstream toolchain, then run:\n\n\`\`\`sh\nnpm ci\n${rebuildCommand(config)}\n\`\`\`\n\n${patchNote}\n\nThe build writes outputs under \`out/public/${config.engine}/\` or the upstream build directory as noted by the command above.\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`,
+  );
 }
 
 async function writeArchive(config, outPath, allowMissingAssets) {
@@ -302,20 +337,23 @@ async function writeArchive(config, outPath, allowMissingAssets) {
   mkdirSync(archiveRoot, { recursive: true });
   try {
     await exportUpstream(config, archiveRoot);
-    await copyFiles([
-      'package.json',
-      'package-lock.json',
-      'tsconfig.json',
-      'vite.config.ts',
-      config.patch,
-      config.buildScript,
-      config.smokeScript,
-      'scripts/write_engine_artifact_manifest.mjs',
-      'scripts/precompress_engine_artifacts.mjs',
-      config.smokeHtml,
-      ...config.adapterFiles,
-      ...config.docs,
-    ].filter(Boolean), archiveRoot);
+    await copyFiles(
+      [
+        'package.json',
+        'package-lock.json',
+        'tsconfig.json',
+        'vite.config.ts',
+        config.patch,
+        config.buildScript,
+        config.smokeScript,
+        'scripts/write_engine_artifact_manifest.mjs',
+        'scripts/precompress_engine_artifacts.mjs',
+        config.smokeHtml,
+        ...config.adapterFiles,
+        ...config.docs,
+      ].filter(Boolean),
+      archiveRoot,
+    );
     await copyAssets(config, archiveRoot, allowMissingAssets);
     await writeArchiveDocs(config, archiveRoot);
     await mkdir(dirname(outPath), { recursive: true });

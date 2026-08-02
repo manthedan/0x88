@@ -1,16 +1,10 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { legalMoves } from '../src/chess/movegen.ts';
-import { moveToUci } from '../src/chess/moveCodec.ts';
-import {
-  gameOutcome,
-  lc0PolicyBattleEngine,
-  lc0SearchBattleEngine,
-  playGame,
-  runMatch,
-} from '../src/lc0/engineBattle.ts';
 import { parseFen } from '../src/chess/board.ts';
+import { moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
+import { gameOutcome, lc0PolicyBattleEngine, lc0SearchBattleEngine, playGame, runMatch } from '../src/lc0/engineBattle.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from '../src/lc0/policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from '../src/lc0/search.ts';
@@ -61,14 +55,20 @@ test('playGame draws on max plies and records the move list', async () => {
   // avoided by keeping a rook on the board.
   const shuffleWhite = (positions) => {
     const board = positions[positions.length - 1];
-    const uci = legalMoves(board).map(moveToUci).find((m) => m.startsWith('e1') || m.startsWith('a1'));
+    const uci = legalMoves(board)
+      .map(moveToUci)
+      .find((m) => m.startsWith('e1') || m.startsWith('a1'));
     return uci ?? null;
   };
   const shuffleBlack = (positions) => {
     const board = positions[positions.length - 1];
     return legalMoves(board).map(moveToUci)[0] ?? null;
   };
-  const result = await playGame({ name: 'w', chooseMove: shuffleWhite }, { name: 'b', chooseMove: shuffleBlack }, { startFen: 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', maxPlies: 4 });
+  const result = await playGame(
+    { name: 'w', chooseMove: shuffleWhite },
+    { name: 'b', chooseMove: shuffleBlack },
+    { startFen: 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', maxPlies: 4 },
+  );
   assert.ok(['1/2-1/2', '1-0', '0-1'].includes(result.result));
   assert.ok(result.plies <= 4);
 });
@@ -100,8 +100,15 @@ test('runMatch streams per-game progress via onGame with alternating colors', as
     onGame: (index, total, result, aIsWhite) => seen.push({ index, total, reason: result.reason, aIsWhite }),
   });
   assert.equal(seen.length, 3, 'onGame fires once per game');
-  assert.deepEqual(seen.map((s) => s.index), [0, 1, 2]);
-  assert.deepEqual(seen.map((s) => s.aIsWhite), [true, false, true], 'colors alternate');
+  assert.deepEqual(
+    seen.map((s) => s.index),
+    [0, 1, 2],
+  );
+  assert.deepEqual(
+    seen.map((s) => s.aIsWhite),
+    [true, false, true],
+    'colors alternate',
+  );
   assert.equal(summary.played, 3);
   assert.equal(summary.cancelled, false);
 });

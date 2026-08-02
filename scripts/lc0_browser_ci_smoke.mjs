@@ -10,7 +10,9 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_AGENT_BROWSER = process.env.AGENT_BROWSER_BIN ?? 'agent-browser';
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_ci_smoke.mjs [options]\n\nRuns CI-style browser smokes for the stable hybrid backend, experimental WGSL heads, mapped-policy probe, WGSL-heads-vs-ORT fixtures against both WASM baseline and strict ORT WebGPU, and a final leak check.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fixture-limit N     WGSL heads vs ORT fixture limit (default 3)\n  --max-error N         Probe max abs error tolerance (default 0.001)\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-leak-check     Skip final browser/process leak check\n  --dry-run             Print planned smokes and URLs without running\n  -h, --help            Show this help\n`);
+  console.log(
+    `Usage: node scripts/lc0_browser_ci_smoke.mjs [options]\n\nRuns CI-style browser smokes for the stable hybrid backend, experimental WGSL heads, mapped-policy probe, WGSL-heads-vs-ORT fixtures against both WASM baseline and strict ORT WebGPU, and a final leak check.\n\nOptions:\n  --base-url URL        Use an existing server instead of starting Vite\n  --host HOST           Vite host (default ${DEFAULT_HOST})\n  --port N              Vite port (default ${DEFAULT_PORT})\n  --agent-browser BIN   Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --timeout MS          Per-smoke timeout (default ${DEFAULT_TIMEOUT_MS})\n  --fixture-limit N     WGSL heads vs ORT fixture limit (default 3)\n  --max-error N         Probe max abs error tolerance (default 0.001)\n  --out PATH            Optional JSON artifact path\n  --no-server           Do not auto-start Vite\n  --skip-leak-check     Skip final browser/process leak check\n  --dry-run             Print planned smokes and URLs without running\n  -h, --help            Show this help\n`,
+  );
 }
 
 function parseArgs(argv) {
@@ -50,7 +52,12 @@ function parseArgs(argv) {
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   if (args.explicitBaseUrl) args.noServer = true;
-  for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['fixture-limit', args.fixtureLimit], ['max-error', args.maxError]]) {
+  for (const [name, value] of [
+    ['port', args.port],
+    ['timeout', args.timeoutMs],
+    ['fixture-limit', args.fixtureLimit],
+    ['max-error', args.maxError],
+  ]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   return args;
@@ -62,10 +69,12 @@ function spawnCapture(command, commandArgs, options = {}) {
     const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
     const chunks = { stdout: [], stderr: [] };
     let settled = false;
-    const timer = timeoutMs ? setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
-    }, timeoutMs) : undefined;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          child.kill('SIGKILL');
+          finish(reject, new Error(`${command} ${commandArgs.join(' ')} timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+      : undefined;
     const finish = (fn, value) => {
       if (settled) return;
       settled = true;
@@ -89,7 +98,9 @@ function spawnCapture(command, commandArgs, options = {}) {
 
 function startServer(args) {
   if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let output = '';
   let readySettled = false;
   server.ready = new Promise((resolve, reject) => {
@@ -195,18 +206,31 @@ async function runUrlSmoke(args, smoke) {
 async function runHybridBenchSmoke(args, headBackend) {
   const session = `lc0-ci-${process.pid}-hybrid-${headBackend}`;
   const commandArgs = [
-    'run', 'lc0:browser-hybrid-search-bench', '--',
-    '--base-url', args.baseUrl,
-    '--agent-browser', args.agentBrowser,
-    '--session', session,
-    '--head-backend', headBackend,
-    '--visits', '1',
-    '--batch', '1',
-    '--eval-iters', '1',
-    '--eval-warmup', '0',
-    '--search-iters', '1',
-    '--search-warmup', '0',
-    '--timeout', String(args.timeoutMs),
+    'run',
+    'lc0:browser-hybrid-search-bench',
+    '--',
+    '--base-url',
+    args.baseUrl,
+    '--agent-browser',
+    args.agentBrowser,
+    '--session',
+    session,
+    '--head-backend',
+    headBackend,
+    '--visits',
+    '1',
+    '--batch',
+    '1',
+    '--eval-iters',
+    '1',
+    '--eval-warmup',
+    '0',
+    '--search-iters',
+    '1',
+    '--search-warmup',
+    '0',
+    '--timeout',
+    String(args.timeoutMs),
   ];
   process.stderr.write(`[ci-smoke] hybrid-${headBackend}\n`);
   try {
@@ -250,7 +274,8 @@ function smokePlan(args) {
       validate(result, runArgs) {
         if (result.status !== 'WGSL_HEADS_VS_ORT_FIXTURES_DONE') throw new Error(`unexpected WGSL heads fixture status ${result.status}`);
         if (result.bestMoveMatches !== result.fixtures) throw new Error(`WGSL heads best moves matched ${result.bestMoveMatches}/${result.fixtures}`);
-        if (Number(result.maxMappedPolicyAbsDiff) > runArgs.maxError) throw new Error(`mapped policy diff ${result.maxMappedPolicyAbsDiff} exceeds ${runArgs.maxError}`);
+        if (Number(result.maxMappedPolicyAbsDiff) > runArgs.maxError)
+          throw new Error(`mapped policy diff ${result.maxMappedPolicyAbsDiff} exceeds ${runArgs.maxError}`);
         if (Number(result.maxWdlAbsDiff) > runArgs.maxError) throw new Error(`WDL diff ${result.maxWdlAbsDiff} exceeds ${runArgs.maxError}`);
       },
     },
@@ -262,7 +287,8 @@ function smokePlan(args) {
       validate(result, runArgs) {
         if (result.status !== 'WGSL_HEADS_VS_ORT_FIXTURES_DONE') throw new Error(`unexpected WGSL heads WebGPU fixture status ${result.status}`);
         if (result.bestMoveMatches !== result.fixtures) throw new Error(`WGSL heads WebGPU best moves matched ${result.bestMoveMatches}/${result.fixtures}`);
-        if (Number(result.maxMappedPolicyAbsDiff) > runArgs.maxError) throw new Error(`WebGPU mapped policy diff ${result.maxMappedPolicyAbsDiff} exceeds ${runArgs.maxError}`);
+        if (Number(result.maxMappedPolicyAbsDiff) > runArgs.maxError)
+          throw new Error(`WebGPU mapped policy diff ${result.maxMappedPolicyAbsDiff} exceeds ${runArgs.maxError}`);
         if (Number(result.maxWdlAbsDiff) > runArgs.maxError) throw new Error(`WebGPU WDL diff ${result.maxWdlAbsDiff} exceeds ${runArgs.maxError}`);
       },
     },
@@ -270,15 +296,18 @@ function smokePlan(args) {
 }
 
 async function leakCheck(args, options = {}) {
-  await runAgent(args, ['close', '--all'], 10_000, undefined).catch((error) => process.stderr.write(`[ci-smoke] warning: close --all failed: ${error.message ?? error}\n`));
+  await runAgent(args, ['close', '--all'], 10_000, undefined).catch((error) =>
+    process.stderr.write(`[ci-smoke] warning: close --all failed: ${error.message ?? error}\n`),
+  );
   const cleanupPatterns = ['agent-browser/bin/agent-browser', 'Google Chrome for Testing'];
   if (options.checkVite !== false) cleanupPatterns.push(`vite .*${args.port}`);
   for (const pattern of cleanupPatterns) await spawnCapture('pkill', ['-f', pattern], { timeoutMs: 10_000 }).catch(() => undefined);
   await delay(1000);
   const { stdout } = await spawnCapture('ps', ['-axo', 'pid,rss,command'], { timeoutMs: 10_000 });
-  const pattern = options.checkVite === false
-    ? /Google Chrome for Testing|agent-browser|lc0_browser_hybrid|lc0-policy-only/
-    : new RegExp(`Google Chrome for Testing|agent-browser|vite .*${args.port}|lc0_browser_hybrid|lc0-policy-only`);
+  const pattern =
+    options.checkVite === false
+      ? /Google Chrome for Testing|agent-browser|lc0_browser_hybrid|lc0-policy-only/
+      : new RegExp(`Google Chrome for Testing|agent-browser|vite .*${args.port}|lc0_browser_hybrid|lc0-policy-only`);
   const leaks = stdout.split('\n').filter((line) => pattern.test(line) && !/lc0_browser_ci_smoke|npm run lc0:browser-ci-smoke/.test(line));
   if (leaks.length) throw new Error(`Browser/process leak check failed:\n${leaks.join('\n')}`);
   return { status: 'LC0_BROWSER_CI_SMOKE_LEAK_CHECK_CLEAN' };
@@ -289,7 +318,9 @@ async function main() {
   if (args.help) return usage();
   const plan = smokePlan(args);
   if (args.dryRun) {
-    console.log(JSON.stringify({ baseUrl: args.baseUrl, smokes: plan.map((smoke) => ({ name: smoke.name, kind: smoke.kind, params: smoke.params })) }, null, 2));
+    console.log(
+      JSON.stringify({ baseUrl: args.baseUrl, smokes: plan.map((smoke) => ({ name: smoke.name, kind: smoke.kind, params: smoke.params })) }, null, 2),
+    );
     return;
   }
   const server = startServer(args);
@@ -300,9 +331,7 @@ async function main() {
     if (server) await server.ready;
     await waitForServer(args.baseUrl);
     for (const smoke of plan) {
-      rows.push(smoke.kind === 'hybrid'
-        ? await runHybridBenchSmoke(args, smoke.headBackend)
-        : await runUrlSmoke(args, smoke));
+      rows.push(smoke.kind === 'hybrid' ? await runHybridBenchSmoke(args, smoke.headBackend) : await runUrlSmoke(args, smoke));
     }
   } catch (error) {
     runError = error;

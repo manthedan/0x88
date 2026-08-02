@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   BROWSER_ENGINE_ASSET_GROUPS,
-  EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES,
-  PRECOMPRESS_ARTIFACT_DIRECTORIES,
   buildArtifactReleaseCatalog,
+  EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES,
   isExternalArtifactName,
+  PRECOMPRESS_ARTIFACT_DIRECTORIES,
   releaseCatalogEntries,
 } from '../scripts/engine_artifact_registry.mjs';
 
@@ -43,10 +43,10 @@ test('Stormphrax registry requires baseline and relaxed SIMD sidecars', () => {
   // Code and data are published on different cadences: each SIMD tier needs its
   // own .js/.wasm, but the preload package is byte-identical across tiers, so
   // only the canonical one ships and the glue reaches it via Module.locateFile.
-  assert.deepEqual(group.assets.filter((asset) => asset.includes('relaxed-simd128')), [
-    '/stormphrax/stormphrax-emscripten-relaxed-simd128.js',
-    '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm',
-  ]);
+  assert.deepEqual(
+    group.assets.filter((asset) => asset.includes('relaxed-simd128')),
+    ['/stormphrax/stormphrax-emscripten-relaxed-simd128.js', '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm'],
+  );
 });
 
 test('Emscripten families publish exactly one canonical preload .data', () => {
@@ -132,20 +132,30 @@ test('shared release catalog reads v1 and v2 representation keys and deduplicate
 test('shared release catalog fails closed on corrupt v2 representation keys', () => {
   const rawSha = 'a'.repeat(64);
   const wrongSha = 'b'.repeat(64);
-  assert.throws(() => buildArtifactReleaseCatalog([{
-    schema: 'lc0_browser.artifact_release_manifest.v2',
-    releaseId: 'corrupt',
-    artifacts: [{
-      logicalUrl: '/model.onnx',
-      raw: { sha256: rawSha, bytes: 3 },
-      representations: [{
-        encoding: 'identity',
-        url: `/artifacts/sha256/${wrongSha}/identity`,
-        sha256: rawSha,
-        bytes: 3,
-      }],
-    }],
-  }]), /Invalid identity representation/);
+  assert.throws(
+    () =>
+      buildArtifactReleaseCatalog([
+        {
+          schema: 'lc0_browser.artifact_release_manifest.v2',
+          releaseId: 'corrupt',
+          artifacts: [
+            {
+              logicalUrl: '/model.onnx',
+              raw: { sha256: rawSha, bytes: 3 },
+              representations: [
+                {
+                  encoding: 'identity',
+                  url: `/artifacts/sha256/${wrongSha}/identity`,
+                  sha256: rawSha,
+                  bytes: 3,
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+    /Invalid identity representation/,
+  );
 });
 
 test('shared release catalog requires exactly one identity representation per v2 artifact', () => {
@@ -173,30 +183,32 @@ test('shared release catalog requires exactly one identity representation per v2
     bytes: 2,
   };
 
+  assert.throws(() => buildArtifactReleaseCatalog([release([br])]), /must have exactly one identity representation.*found 0/);
+  assert.throws(() => buildArtifactReleaseCatalog([release([identity, { ...identity }])]), /must have exactly one identity representation.*found 2/);
   assert.throws(
-    () => buildArtifactReleaseCatalog([release([br])]),
-    /must have exactly one identity representation.*found 0/,
-  );
-  assert.throws(
-    () => buildArtifactReleaseCatalog([release([identity, { ...identity }])]),
-    /must have exactly one identity representation.*found 2/,
-  );
-  assert.throws(
-    () => buildArtifactReleaseCatalog([{
-      ...release([]),
-      artifacts: [{ ...artifact, artifactUrl: `/artifacts/sha256/${rawSha}/legacy.onnx` }],
-    }]),
+    () =>
+      buildArtifactReleaseCatalog([
+        {
+          ...release([]),
+          artifacts: [{ ...artifact, artifactUrl: `/artifacts/sha256/${rawSha}/legacy.onnx` }],
+        },
+      ]),
     /V2 artifact has no representations/,
   );
   assert.throws(
-    () => buildArtifactReleaseCatalog([{
-      ...release([]),
-      artifacts: [{
-        ...artifact,
-        artifactUrl: `/artifacts/sha256/${rawSha}/legacy.onnx`,
-        representations: [identity],
-      }],
-    }]),
+    () =>
+      buildArtifactReleaseCatalog([
+        {
+          ...release([]),
+          artifacts: [
+            {
+              ...artifact,
+              artifactUrl: `/artifacts/sha256/${rawSha}/legacy.onnx`,
+              representations: [identity],
+            },
+          ],
+        },
+      ]),
     /V2 artifact contains legacy artifactUrl/,
   );
 });

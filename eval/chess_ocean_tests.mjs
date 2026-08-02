@@ -1,24 +1,34 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { parseFen, boardToFen, START_FEN } from '../src/chess/board.ts';
-import { legalMoves, makeMove, inCheck } from '../src/chess/movegen.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveFromUci, moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { inCheck, legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
-function moveEq(a, b) { return a.from === b.from && a.to === b.to && (a.promotion ?? '') === (b.promotion ?? ''); }
+function moveEq(a, b) {
+  return a.from === b.from && a.to === b.to && (a.promotion ?? '') === (b.promotion ?? '');
+}
 function legalByUci(board, uci) {
   const want = moveFromUci(uci);
   const got = legalMoves(board).find((m) => moveEq(m, want));
   assert.ok(got, `${uci} should be legal in ${boardToFen(board)}`);
   return got;
 }
-function legalUcis(board) { return new Set(legalMoves(board).map(moveToUci)); }
+function legalUcis(board) {
+  return new Set(legalMoves(board).map(moveToUci));
+}
 function policyFor(board, entries) {
   const out = new Map();
   for (const [uci, p] of Object.entries(entries)) out.set(moveToActionId(legalByUci(board, uci)), p);
   return out;
 }
-function evaluator(fn) { return { async evaluate(board, opts = {}) { return fn(board, opts); } }; }
+function evaluator(fn) {
+  return {
+    async evaluate(board, opts = {}) {
+      return fn(board, opts);
+    },
+  };
+}
 
 function testOpeningLegalCountAndRoundtrip() {
   const board = parseFen(START_FEN);
@@ -77,12 +87,18 @@ async function testTerminalAndValuePerspective() {
 async function testRootPriorParityAndBatchSafety() {
   const calls = { batch: 0, boards: 0 };
   const ev = {
-    async evaluate(board) { return { policy: policyFor(board, { g1f3: 0.7, e2e4: 0.3 }), wdl: [0.5, 0, 0.5] }; },
-    async evaluateBatch(boards) { calls.batch++; calls.boards += boards.length; return boards.map((b) => {
-      const ucis = legalMoves(b).map(moveToUci);
-      const entries = Object.fromEntries(ucis.slice(0, Math.min(3, ucis.length)).map((uci, i) => [uci, 1 / (i + 1)]));
-      return { policy: policyFor(b, entries), wdl: [0.5, 0, 0.5] };
-    }); },
+    async evaluate(board) {
+      return { policy: policyFor(board, { g1f3: 0.7, e2e4: 0.3 }), wdl: [0.5, 0, 0.5] };
+    },
+    async evaluateBatch(boards) {
+      calls.batch++;
+      calls.boards += boards.length;
+      return boards.map((b) => {
+        const ucis = legalMoves(b).map(moveToUci);
+        const entries = Object.fromEntries(ucis.slice(0, Math.min(3, ucis.length)).map((uci, i) => [uci, 1 / (i + 1)]));
+        return { policy: policyFor(b, entries), wdl: [0.5, 0, 0.5] };
+      });
+    },
   };
   const r = await searchRoot(parseFen(START_FEN), ev, { visits: 8, batchSize: 4, temperature: 0 });
   assert.ok(calls.batch > 0);

@@ -6,8 +6,15 @@
  * See docs/arena_analysis_roadmap.md stage 2.
  */
 
-export interface ChartPoint { x: number; y: number; }
-export interface ChartSeries { label: string; color: string; points: ChartPoint[]; }
+export interface ChartPoint {
+  x: number;
+  y: number;
+}
+export interface ChartSeries {
+  label: string;
+  color: string;
+  points: ChartPoint[];
+}
 
 export interface LineChartOptions {
   width?: number;
@@ -47,7 +54,10 @@ export function lineChartSvg(series: readonly ChartSeries[], options: LineChartO
   const xMax = Math.max(...xs);
   let yMin = options.yMin ?? Math.min(...ys);
   let yMax = options.yMax ?? Math.max(...ys);
-  if (yMax === yMin) { yMax += 1; yMin -= 1; }
+  if (yMax === yMin) {
+    yMax += 1;
+    yMin -= 1;
+  }
   if (options.yMin === undefined && options.yMax === undefined) {
     const padY = (yMax - yMin) * 0.05;
     yMin -= padY;
@@ -69,7 +79,9 @@ export function lineChartSvg(series: readonly ChartSeries[], options: LineChartO
   }
   if (options.midline !== undefined && options.midline > yMin && options.midline < yMax) {
     const y = py(options.midline);
-    parts.push(`<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="var(--rule,#00000033)" stroke-dasharray="3 3" stroke-width="1"/>`);
+    parts.push(
+      `<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="var(--rule,#00000033)" stroke-dasharray="3 3" stroke-width="1"/>`,
+    );
   }
   // x extents
   parts.push(`<text x="${pad.left}" y="${height - 3}" fill="var(--muted,#777)" ${FONT}>${round2(xMin)}</text>`);
@@ -119,8 +131,12 @@ export function hBarChartSvg(items: readonly BarItem[], options: BarChartOptions
     const y = index * rowHeight + 1;
     const length = Math.max(1, (item.value / maxValue) * barW);
     parts.push(`<text x="${labelW - 4}" y="${y + rowHeight - 4}" text-anchor="end" fill="var(--ink-soft,#444)" ${FONT}>${escapeXml(item.label)}</text>`);
-    parts.push(`<rect x="${labelW}" y="${y + 1.5}" width="${round2(length)}" height="${rowHeight - 5}" rx="2" fill="${item.color ?? '#4a7a2a'}" fill-opacity="0.8"/>`);
-    parts.push(`<text x="${labelW + round2(length) + 4}" y="${y + rowHeight - 4}" fill="var(--muted,#555)" ${FONT}>${escapeXml(`${item.value}${item.detail ? ` ${item.detail}` : ''}`)}</text>`);
+    parts.push(
+      `<rect x="${labelW}" y="${y + 1.5}" width="${round2(length)}" height="${rowHeight - 5}" rx="2" fill="${item.color ?? '#4a7a2a'}" fill-opacity="0.8"/>`,
+    );
+    parts.push(
+      `<text x="${labelW + round2(length) + 4}" y="${y + rowHeight - 4}" fill="var(--muted,#555)" ${FONT}>${escapeXml(`${item.value}${item.detail ? ` ${item.detail}` : ''}`)}</text>`,
+    );
   });
   parts.push('</svg>');
   return parts.join('');

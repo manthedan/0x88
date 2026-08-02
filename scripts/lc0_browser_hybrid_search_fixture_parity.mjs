@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createHash } from 'node:crypto';
-import { applyLc0RuntimePreset, lc0RuntimeConfiguration, LC0_WEBGPU_RESEARCH_B4_PRESET } from './lc0_runtime_presets.mjs';
+import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
@@ -56,7 +56,11 @@ function sanitizeAgentBrowserSessionName(value) {
 }
 
 function parseList(raw, mapper = Number, label = 'list') {
-  const values = String(raw).split(',').map((entry) => entry.trim()).filter(Boolean).map(mapper);
+  const values = String(raw)
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map(mapper);
   if (!values.length) throw new Error(`Invalid --${label}: empty list`);
   return values;
 }
@@ -99,8 +103,10 @@ function parseArgs(argv) {
       return argv[++i];
     };
     if (arg === '--out') args.out = next();
-    else if (arg === '--base-url') { args.baseUrl = next(); args.explicitBaseUrl = true; }
-    else if (arg === '--host') args.host = next();
+    else if (arg === '--base-url') {
+      args.baseUrl = next();
+      args.explicitBaseUrl = true;
+    } else if (arg === '--host') args.host = next();
     else if (arg === '--port') args.port = Number(next());
     else if (arg === '--agent-browser') args.agentBrowser = next();
     else if (arg === '--session') args.session = next();
@@ -112,7 +118,11 @@ function parseArgs(argv) {
     else if (arg === '--batch-pipeline-depths' || arg === '--pipeline-depths') args.batchPipelineDepths = parseList(next(), Number, 'batch-pipeline-depths');
     else if (arg === '--repeats') args.repeats = Number(next());
     else if (arg === '--fixture-limit' || arg === '--fixtures') args.fixtureLimit = Number(next());
-    else if (arg === '--fixture-ids') args.fixtureIds = next().split(',').map((value) => value.trim()).filter(Boolean);
+    else if (arg === '--fixture-ids')
+      args.fixtureIds = next()
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
     else if (arg === '--fens') args.fensFile = next();
     else if (arg === '--trace-root-children') args.traceRootChildren = true;
     else if (arg === '--trace-search-visits') args.traceSearchVisits = true;
@@ -136,13 +146,25 @@ function parseArgs(argv) {
   if (!['js', 'wgsl', 'wasm'].includes(args.inputBackend)) throw new Error(`Invalid --input-backend: ${args.inputBackend}`);
   if (!['js', 'wasm', 'gpu'].includes(args.legalPriorsBackend)) throw new Error(`Invalid --legal-priors-backend: ${args.legalPriorsBackend}`);
   if (args.legalPriorsBackend === 'gpu' && args.headBackend !== 'wgsl') throw new Error('--legal-priors-backend gpu requires --head-backend wgsl');
-  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel)) throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
-  for (const [name, value] of [['port', args.port], ['timeout', args.timeoutMs], ['batch', args.batch], ['repeats', args.repeats], ['fixture-limit', args.fixtureLimit], ['layers', args.layers]]) {
+  if (!['hand', 'tvm-packed-f16', 'mixed-tvm-ffn', 'mixed-tvm-ffn-outproj', 'mixed-tvm-ffn-smolgen-project'].includes(args.encoderKernel))
+    throw new Error(`Invalid --encoder-kernel: ${args.encoderKernel}`);
+  for (const [name, value] of [
+    ['port', args.port],
+    ['timeout', args.timeoutMs],
+    ['batch', args.batch],
+    ['repeats', args.repeats],
+    ['fixture-limit', args.fixtureLimit],
+    ['layers', args.layers],
+  ]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   if (!Number.isFinite(args.progressTimeoutMs) || args.progressTimeoutMs < 0) throw new Error(`Invalid --progress-timeout: ${args.progressTimeoutMs}`);
-  if (args.maxDepthVisitL1 !== undefined && (!Number.isFinite(args.maxDepthVisitL1) || args.maxDepthVisitL1 < 0 || args.maxDepthVisitL1 > 2)) throw new Error(`Invalid --max-depth-visit-l1: ${args.maxDepthVisitL1}`);
-  for (const [name, values] of [['visits', args.visits], ['batch-pipeline-depths', args.batchPipelineDepths]]) {
+  if (args.maxDepthVisitL1 !== undefined && (!Number.isFinite(args.maxDepthVisitL1) || args.maxDepthVisitL1 < 0 || args.maxDepthVisitL1 > 2))
+    throw new Error(`Invalid --max-depth-visit-l1: ${args.maxDepthVisitL1}`);
+  for (const [name, values] of [
+    ['visits', args.visits],
+    ['batch-pipeline-depths', args.batchPipelineDepths],
+  ]) {
     if (values.some((value) => !Number.isFinite(value) || value <= 0)) throw new Error(`Invalid --${name}: ${values.join(',')}`);
   }
   args.session = sanitizeAgentBrowserSessionName(args.session);
@@ -180,8 +202,17 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
     const child = spawn(args.agentBrowser, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     const chunks = { stdout: [], stderr: [] };
     let settled = false;
-    const finish = (fn, value) => { if (!settled) { settled = true; clearTimeout(timer); fn(value); } };
-    const timer = setTimeout(() => { child.kill('SIGKILL'); finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} timed out after ${timeoutMs}ms`)); }, timeoutMs);
+    const finish = (fn, value) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        fn(value);
+      }
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
     child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
     child.stderr.on('data', (chunk) => chunks.stderr.push(chunk));
     child.on('error', (error) => finish(reject, error));
@@ -196,14 +227,19 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);
-      } catch (error) { return finish(reject, error); }
+      } catch (error) {
+        return finish(reject, error);
+      }
     });
   });
 }
 
 async function closeAgentSession(args) {
-  try { await runAgent(args, ['close'], 5_000); }
-  catch (error) { process.stderr.write(`[lc0-search-fixture-parity] warning: failed to close session: ${error.message ?? error}\n`); }
+  try {
+    await runAgent(args, ['close'], 5_000);
+  } catch (error) {
+    process.stderr.write(`[lc0-search-fixture-parity] warning: failed to close session: ${error.message ?? error}\n`);
+  }
 }
 
 async function waitForServer(baseUrl, timeoutMs = 30_000) {
@@ -214,7 +250,9 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
       const response = await fetch(new URL('/single-engine', baseUrl), { cache: 'no-store' });
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) { lastError = error; }
+    } catch (error) {
+      lastError = error;
+    }
     await delay(250);
   }
   throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
@@ -222,7 +260,9 @@ async function waitForServer(baseUrl, timeoutMs = 30_000) {
 
 function startServer(args) {
   if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let output = '';
   let readySettled = false;
   server.ready = new Promise((resolve, reject) => {
@@ -235,11 +275,18 @@ function startServer(args) {
     };
     const onOutput = (chunk) => {
       output += chunk.toString('utf8');
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips ANSI escape sequences from vite output
       const plainOutput = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
       if (/ready in \d+\s*ms/.test(plainOutput) || plainOutput.includes(`:${args.port}/`)) settle(resolve);
     };
-    server.stdout.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
-    server.stderr.on('data', (chunk) => { process.stderr.write(`[vite] ${chunk}`); onOutput(chunk); });
+    server.stdout.on('data', (chunk) => {
+      process.stderr.write(`[vite] ${chunk}`);
+      onOutput(chunk);
+    });
+    server.stderr.on('data', (chunk) => {
+      process.stderr.write(`[vite] ${chunk}`);
+      onOutput(chunk);
+    });
     server.on('exit', (status, signal) => settle(reject, new Error(`Vite dev server exited before ready (${status ?? signal}): ${output.trim()}`)));
   });
   return server;
@@ -287,7 +334,8 @@ async function runBrowserParity(args) {
         if (result.status !== 'HYBRID_SEARCH_FIXTURE_PARITY_DONE') throw new Error(`unexpected status: ${result.status}`);
         const expectedBackend = args.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
         if (result.backend !== expectedBackend) throw new Error(`unexpected backend: ${result.backend}`);
-        if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel) throw new Error(`unexpected encoder kernel: ${result.encoderKernelVariant ?? 'hand'}`);
+        if ((result.encoderKernelVariant ?? 'hand') !== args.encoderKernel)
+          throw new Error(`unexpected encoder kernel: ${result.encoderKernelVariant ?? 'hand'}`);
         return { ...result, scriptPreset: args.preset || null, runtimeConfiguration: lc0RuntimeConfiguration(args) };
       }
       if (Date.now() - lastProgressAt > progressWindow) {
@@ -296,12 +344,17 @@ async function runBrowserParity(args) {
       await delay(250);
     }
     throw new Error(`Timed out waiting for HYBRID_SEARCH_FIXTURE_PARITY_DONE after ${args.timeoutMs}ms (last #benchResult: ${lastBenchText || 'empty'})`);
-  } finally { await closeAgentSession(args); }
+  } finally {
+    await closeAgentSession(args);
+  }
 }
 
 async function loadFixedSuiteFens(args) {
   if (!args.fensFile) return [];
-  const rows = (await readFile(args.fensFile, 'utf8')).split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
+  const rows = (await readFile(args.fensFile, 'utf8'))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
   if (!rows.length) throw new Error(`No FEN rows found in ${args.fensFile}`);
   return rows.slice(0, args.fixtureLimit);
 }
@@ -311,9 +364,14 @@ async function main() {
   if (args.help) return usage();
   args.fixedSuiteFens = await loadFixedSuiteFens(args);
   if (args.batchPipelineDepths.some((depth) => depth > 1)) {
-    process.stderr.write('[lc0-search-fixture-parity] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the fixed-search parity baseline. Use --allow-mismatches for exploratory artifacts.\n');
+    process.stderr.write(
+      '[lc0-search-fixture-parity] warning: batchPipelineDepth > 1 is speculative parallel search; depth=1 is the fixed-search parity baseline. Use --allow-mismatches for exploratory artifacts.\n',
+    );
   }
-  if (args.dryRun) { console.log(parityUrl(args)); return; }
+  if (args.dryRun) {
+    console.log(parityUrl(args));
+    return;
+  }
   const server = startServer(args);
   try {
     if (server) await server.ready;
@@ -323,15 +381,34 @@ async function main() {
       await mkdir(dirname(args.out), { recursive: true });
       await writeFile(args.out, JSON.stringify(result, null, 2));
     }
-    const summary = { status: result.status, out: args.out, cells: result.cells, nativeComparable: result.nativeComparable, nativeMatches: result.nativeMatches, depthBaselineMatches: result.depthBaselineMatches, maxDepthBaselineVisitL1: result.maxDepthBaselineVisitL1, mismatches: result.mismatches?.map(omitVerboseTrace) };
+    const summary = {
+      status: result.status,
+      out: args.out,
+      cells: result.cells,
+      nativeComparable: result.nativeComparable,
+      nativeMatches: result.nativeMatches,
+      depthBaselineMatches: result.depthBaselineMatches,
+      maxDepthBaselineVisitL1: result.maxDepthBaselineVisitL1,
+      mismatches: result.mismatches?.map(omitVerboseTrace),
+    };
     console.log(JSON.stringify(summary, null, 2));
     const visitL1Failed = args.maxDepthVisitL1 !== undefined && Number(result.maxDepthBaselineVisitL1 ?? 0) > args.maxDepthVisitL1;
     const nativeComparable = result.nativeComparable ?? result.cells;
-    if (!args.allowMismatches && (result.mismatches?.length || result.nativeMatches !== nativeComparable || result.depthBaselineMatches !== result.cells || visitL1Failed)) {
+    if (
+      !args.allowMismatches &&
+      (result.mismatches?.length || result.nativeMatches !== nativeComparable || result.depthBaselineMatches !== result.cells || visitL1Failed)
+    ) {
       const visitL1Message = args.maxDepthVisitL1 !== undefined ? `, max depth visit L1 ${result.maxDepthBaselineVisitL1} > ${args.maxDepthVisitL1}` : '';
-      throw new Error(`search fixture parity failed: native ${result.nativeMatches}/${nativeComparable}, depth baseline ${result.depthBaselineMatches}/${result.cells}${visitL1Message}; pass --allow-mismatches for exploratory artifact capture`);
+      throw new Error(
+        `search fixture parity failed: native ${result.nativeMatches}/${nativeComparable}, depth baseline ${result.depthBaselineMatches}/${result.cells}${visitL1Message}; pass --allow-mismatches for exploratory artifact capture`,
+      );
     }
-  } finally { server?.kill('SIGTERM'); }
+  } finally {
+    server?.kill('SIGTERM');
+  }
 }
 
-main().catch((error) => { console.error(error.stack ?? error.message); process.exit(1); });
+main().catch((error) => {
+  console.error(error.stack ?? error.message);
+  process.exit(1);
+});

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { brotliDecompressSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { brotliDecompressSync } from 'node:zlib';
 
 const SCRIPT = new URL('../scripts/publish_content_addressed_release.mjs', import.meta.url);
 const ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
@@ -17,7 +17,19 @@ test('release publisher creates hash-keyed blobs, immutable release, and mutable
     writeFileSync(asset, 'abc');
     const duplicate = join(temp, 'same-bytes-different-name.data');
     writeFileSync(duplicate, 'abc');
-    const publishArgs = [SCRIPT.pathname, '--root', root, '--release-id', 'test.1', '--channel', 'stable', '--asset', `small=${asset}`, '--asset', `duplicate=${duplicate}`];
+    const publishArgs = [
+      SCRIPT.pathname,
+      '--root',
+      root,
+      '--release-id',
+      'test.1',
+      '--channel',
+      'stable',
+      '--asset',
+      `small=${asset}`,
+      '--asset',
+      `duplicate=${duplicate}`,
+    ];
     execFileSync(process.execPath, publishArgs);
 
     const release = JSON.parse(readFileSync(join(root, 'releases', 'test.1.json'), 'utf8'));
@@ -39,7 +51,11 @@ test('release publisher creates hash-keyed blobs, immutable release, and mutable
     // A release ID is write-once: changing its manifest must fail.
     const other = join(temp, 'other.onnx');
     writeFileSync(other, 'abcd');
-    const conflict = spawnSync(process.execPath, [SCRIPT.pathname, '--root', root, '--release-id', 'test.1', '--channel', 'stable', '--asset', `small=${other}`], { encoding: 'utf8' });
+    const conflict = spawnSync(
+      process.execPath,
+      [SCRIPT.pathname, '--root', root, '--release-id', 'test.1', '--channel', 'stable', '--asset', `small=${other}`],
+      { encoding: 'utf8' },
+    );
     assert.notEqual(conflict.status, 0);
     assert.match(conflict.stderr, /Refusing to overwrite immutable release manifest/);
   } finally {

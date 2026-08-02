@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import test from 'node:test';
 
 test('ChessOcean micro-environment invariants', () => {
   const output = execFileSync('node', ['--experimental-strip-types', 'eval/chess_ocean_tests.mjs'], { encoding: 'utf8' });

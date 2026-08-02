@@ -151,7 +151,9 @@ export interface AnnotatedPgnOptions {
  */
 export function annotatedPgn(review: GameReview, options: AnnotatedPgnOptions = {}): string {
   const tags = { Event: 'Game review', ...options.tags };
-  const header = Object.entries(tags).map(([key, value]) => `[${key} "${value}"]`).join('\n');
+  const header = Object.entries(tags)
+    .map(([key, value]) => `[${key} "${value}"]`)
+    .join('\n');
   const startTurn = options.startTurn ?? 'w';
   let fullmove = options.startFullmove ?? 1;
   const tokens: string[] = [];

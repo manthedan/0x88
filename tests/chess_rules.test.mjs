@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import test from 'node:test';
 
 function runSnippet(source) {
   return JSON.parse(execFileSync('node', ['--experimental-strip-types', '--input-type=module', '-e', source], { encoding: 'utf8' }));

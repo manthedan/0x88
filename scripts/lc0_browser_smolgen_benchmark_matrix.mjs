@@ -10,11 +10,16 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const PROJECT_KERNELS = ['hand', 'tiled-project-f16-16', 'tiled-project-f16-32', 'tiled-project-f16', 'tiled-project-f16-128', 'tiled-project-f16-256'];
 
 function usage() {
-  console.log(`Usage: node scripts/lc0_browser_smolgen_benchmark_matrix.mjs [options]\n\nRuns isolated browser smolgen parity/profiling cells and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH              Matrix artifact path (default /tmp/lc0_smolgen_benchmark_matrix.json)\n  --host HOST             Vite host (default ${DEFAULT_HOST})\n  --port N                Vite port (default ${DEFAULT_PORT})\n  --base-url URL          Use an existing server instead of starting Vite\n  --project-kernels LIST  Comma-separated smolgen project kernels: ${PROJECT_KERNELS.join(',')}\n                          (default ${PROJECT_KERNELS.join(',')})\n  --repeats N             Repeat each cell, alternating kernels in repeat order (default 1)\n  --iters N               Smolgen passes per timed cell (default 50)\n  --warmup N              Warmup passes per cell (default 5)\n  --encoder-prefix NAME   Encoder prefix to benchmark (default /encoder0)\n  --timeout MS            Per-cell browser timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN     Browser automation binary\n  --dry-run               Print planned cells and URLs without running\n  -h, --help              Show this help\n`);
+  console.log(
+    `Usage: node scripts/lc0_browser_smolgen_benchmark_matrix.mjs [options]\n\nRuns isolated browser smolgen parity/profiling cells and writes a JSON matrix artifact.\n\nOptions:\n  --out PATH              Matrix artifact path (default /tmp/lc0_smolgen_benchmark_matrix.json)\n  --host HOST             Vite host (default ${DEFAULT_HOST})\n  --port N                Vite port (default ${DEFAULT_PORT})\n  --base-url URL          Use an existing server instead of starting Vite\n  --project-kernels LIST  Comma-separated smolgen project kernels: ${PROJECT_KERNELS.join(',')}\n                          (default ${PROJECT_KERNELS.join(',')})\n  --repeats N             Repeat each cell, alternating kernels in repeat order (default 1)\n  --iters N               Smolgen passes per timed cell (default 50)\n  --warmup N              Warmup passes per cell (default 5)\n  --encoder-prefix NAME   Encoder prefix to benchmark (default /encoder0)\n  --timeout MS            Per-cell browser timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN     Browser automation binary\n  --dry-run               Print planned cells and URLs without running\n  -h, --help              Show this help\n`,
+  );
 }
 
 function parseList(raw, name) {
-  const values = String(raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const values = String(raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (!values.length) throw new Error(`Invalid --${name}: ${raw}`);
   return values;
 }
@@ -59,7 +64,12 @@ function parseArgs(argv) {
   }
   if (!args.baseUrl) args.baseUrl = `http://${args.host}:${args.port}`;
   for (const kernel of args.projectKernels) if (!PROJECT_KERNELS.includes(kernel)) throw new Error(`Invalid project kernel: ${kernel}`);
-  for (const [name, value] of [['port', args.port], ['repeats', args.repeats], ['iters', args.iters], ['timeout', args.timeoutMs]]) {
+  for (const [name, value] of [
+    ['port', args.port],
+    ['repeats', args.repeats],
+    ['iters', args.iters],
+    ['timeout', args.timeoutMs],
+  ]) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}: ${value}`);
   }
   if (!Number.isFinite(args.warmup) || args.warmup < 0) throw new Error(`Invalid --warmup: ${args.warmup}`);
@@ -116,7 +126,8 @@ function runAgent(args, commandArgs, timeoutMs = 30_000) {
       try {
         const parsed = stdout ? JSON.parse(stdout.trim()) : null;
         if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
+          if (parsed.success === false)
+            return finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} failed: ${parsed.error ?? stdout}`));
           return finish(resolve, parsed.data ?? parsed);
         }
         return finish(resolve, parsed);

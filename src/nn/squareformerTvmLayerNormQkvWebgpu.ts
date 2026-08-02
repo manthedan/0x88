@@ -73,8 +73,12 @@ fn layernorm_kernel(@builtin(workgroup_id) blockIdx : vec3<u32>, @builtin(local_
 }
 `;
 
-function ceilDiv(a: number, b: number): number { return Math.floor((a + b - 1) / b); }
-function assertLength(name: string, actual: number, expected: number) { if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`); }
+function ceilDiv(a: number, b: number): number {
+  return Math.floor((a + b - 1) / b);
+}
+function assertLength(name: string, actual: number, expected: number) {
+  if (actual !== expected) throw new Error(`${name} length ${actual} does not match expected ${expected}`);
+}
 function createInitializedBuffer(device: GPUDevice, label: string, data: Float32Array | Uint32Array, usage: number): GPUBuffer {
   const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage, mappedAtCreation: true });
   if (data instanceof Float32Array) new Float32Array(buffer.getMappedRange()).set(data);
@@ -101,9 +105,24 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
   private layerNormPodArgs: GPUBuffer;
   private qkvPodArgs: GPUBuffer;
 
-  private constructor(private device: GPUDevice, shape: SquareformerTvmFfnShape, layerNormPipeline: GPUComputePipeline, qkvPipeline: GPUComputePipeline, buffers: {
-    input: GPUBuffer; normalized: GPUBuffer; output: GPUBuffer; readback: GPUBuffer; layerNormWeight: GPUBuffer; layerNormBias: GPUBuffer; qkvWeight: GPUBuffer; qkvBias: GPUBuffer; layerNormPodArgs: GPUBuffer; qkvPodArgs: GPUBuffer;
-  }) {
+  private constructor(
+    private device: GPUDevice,
+    shape: SquareformerTvmFfnShape,
+    layerNormPipeline: GPUComputePipeline,
+    qkvPipeline: GPUComputePipeline,
+    buffers: {
+      input: GPUBuffer;
+      normalized: GPUBuffer;
+      output: GPUBuffer;
+      readback: GPUBuffer;
+      layerNormWeight: GPUBuffer;
+      layerNormBias: GPUBuffer;
+      qkvWeight: GPUBuffer;
+      qkvBias: GPUBuffer;
+      layerNormPodArgs: GPUBuffer;
+      qkvPodArgs: GPUBuffer;
+    },
+  ) {
     this.shape = shape;
     this.layerNormPipeline = layerNormPipeline;
     this.qkvPipeline = qkvPipeline;
@@ -119,7 +138,13 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
     this.qkvPodArgs = buffers.qkvPodArgs;
   }
 
-  static async create(device: GPUDevice, kernels: SquareformerTvmLayerNormQkvKernels, weights: SquareformerTvmLayerNormQkvWeights, shape: SquareformerTvmFfnShape, epsilon = 1e-5): Promise<SquareformerTvmLayerNormQkvWebgpuBlock> {
+  static async create(
+    device: GPUDevice,
+    kernels: SquareformerTvmLayerNormQkvKernels,
+    weights: SquareformerTvmLayerNormQkvWeights,
+    shape: SquareformerTvmFfnShape,
+    epsilon = 1e-5,
+  ): Promise<SquareformerTvmLayerNormQkvWebgpuBlock> {
     const { rows, dModel } = shape;
     assertLength('layerNormWeight', weights.layerNormWeight.length, dModel);
     assertLength('layerNormBias', weights.layerNormBias.length, dModel);
@@ -128,7 +153,11 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
     const layerNormModule = device.createShaderModule({ label: 'squareformer-tvm-n1-layernorm', code: LAYERNORM_WGSL });
     const qkvModule = device.createShaderModule({ label: 'squareformer-tvm-qkv-bias', code: kernels.qkvBias });
     const [layerNormPipeline, qkvPipeline] = await Promise.all([
-      device.createComputePipelineAsync({ label: 'squareformer-tvm-n1-layernorm', layout: 'auto', compute: { module: layerNormModule, entryPoint: 'layernorm_kernel' } }),
+      device.createComputePipelineAsync({
+        label: 'squareformer-tvm-n1-layernorm',
+        layout: 'auto',
+        compute: { module: layerNormModule, entryPoint: 'layernorm_kernel' },
+      }),
       device.createComputePipelineAsync({ label: 'squareformer-tvm-qkv-bias', layout: 'auto', compute: { module: qkvModule, entryPoint: 'matmul_kernel' } }),
     ]);
     const inputBytes = rows * dModel * 4;
@@ -162,30 +191,36 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
     const { rows, dModel } = this.shape;
     const pass = commandEncoder.beginComputePass({ label: 'squareformer-tvm-n1-qkv' });
     pass.setPipeline(this.layerNormPipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-n1-layernorm-bindings',
-      layout: this.layerNormPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.normalized } },
-        { binding: 1, resource: { buffer: inputBuffer } },
-        { binding: 2, resource: { buffer: this.layerNormWeight } },
-        { binding: 3, resource: { buffer: this.layerNormBias } },
-        { binding: 4, resource: { buffer: this.layerNormPodArgs } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-n1-layernorm-bindings',
+        layout: this.layerNormPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.normalized } },
+          { binding: 1, resource: { buffer: inputBuffer } },
+          { binding: 2, resource: { buffer: this.layerNormWeight } },
+          { binding: 3, resource: { buffer: this.layerNormBias } },
+          { binding: 4, resource: { buffer: this.layerNormPodArgs } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(rows, 1, 1);
     pass.setPipeline(this.qkvPipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      label: 'squareformer-tvm-qkv-bindings',
-      layout: this.qkvPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: outputBuffer } },
-        { binding: 1, resource: { buffer: this.qkvWeight } },
-        { binding: 2, resource: { buffer: this.normalized } },
-        { binding: 3, resource: { buffer: this.qkvPodArgs } },
-        { binding: 4, resource: { buffer: this.qkvBias } },
-      ],
-    }));
+    pass.setBindGroup(
+      0,
+      this.device.createBindGroup({
+        label: 'squareformer-tvm-qkv-bindings',
+        layout: this.qkvPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: outputBuffer } },
+          { binding: 1, resource: { buffer: this.qkvWeight } },
+          { binding: 2, resource: { buffer: this.normalized } },
+          { binding: 3, resource: { buffer: this.qkvPodArgs } },
+          { binding: 4, resource: { buffer: this.qkvBias } },
+        ],
+      }),
+    );
     pass.dispatchWorkgroups(ceilDiv(rows, 32), ceilDiv(3 * dModel, 32), 1);
     pass.end();
     return outputBuffer;
@@ -213,6 +248,18 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
   }
 
   destroy(): void {
-    for (const buffer of [this.input, this.normalized, this.output, this.readback, this.layerNormWeight, this.layerNormBias, this.qkvWeight, this.qkvBias, this.layerNormPodArgs, this.qkvPodArgs]) buffer.destroy();
+    for (const buffer of [
+      this.input,
+      this.normalized,
+      this.output,
+      this.readback,
+      this.layerNormWeight,
+      this.layerNormBias,
+      this.qkvWeight,
+      this.qkvBias,
+      this.layerNormPodArgs,
+      this.qkvPodArgs,
+    ])
+      buffer.destroy();
   }
 }

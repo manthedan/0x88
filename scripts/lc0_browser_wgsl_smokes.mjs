@@ -176,8 +176,13 @@ function parseArgs(argv) {
     else if (arg === '--max-error') {
       args.maxError = Number(next());
       args.maxErrorExplicit = true;
-    }
-    else if (arg === '--only') args.only = new Set(next().split(',').map((s) => s.trim()).filter(Boolean));
+    } else if (arg === '--only')
+      args.only = new Set(
+        next()
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
     else if (arg === '--list') args.list = true;
     else if (arg === '--no-server') args.noServer = true;
     else if (arg === '-h' || arg === '--help') args.help = true;
@@ -190,9 +195,7 @@ function parseArgs(argv) {
 }
 
 function selectedSmokes(args) {
-  const selected = args.only
-    ? SMOKES.filter((smoke) => args.only.has(smoke.name))
-    : args.list ? SMOKES : SMOKES.filter((smoke) => smoke.default !== false);
+  const selected = args.only ? SMOKES.filter((smoke) => args.only.has(smoke.name)) : args.list ? SMOKES : SMOKES.filter((smoke) => smoke.default !== false);
   if (args.only && selected.length !== args.only.size) {
     const known = new Set(SMOKES.map((smoke) => smoke.name));
     const missing = [...args.only].filter((name) => !known.has(name));
@@ -323,9 +326,10 @@ async function runSmoke(args, baseUrl, smoke) {
   if (error > maxError) {
     throw new Error(`${smoke.name}: maxAbsError ${error} exceeded threshold ${maxError}`);
   }
-  const slowestStage = Array.isArray(result.stageTimings) && result.stageTimings.length
-    ? result.stageTimings.reduce((best, timing) => timing.avgMs > best.avgMs ? timing : best, result.stageTimings[0])
-    : undefined;
+  const slowestStage =
+    Array.isArray(result.stageTimings) && result.stageTimings.length
+      ? result.stageTimings.reduce((best, timing) => (timing.avgMs > best.avgMs ? timing : best), result.stageTimings[0])
+      : undefined;
   return {
     smoke: smoke.name,
     status: result.status,
@@ -367,7 +371,9 @@ async function main() {
     }
     console.log(JSON.stringify({ status: 'LC0_BROWSER_WGSL_SMOKES_DONE', baseUrl, maxError: args.maxError, smokes: rows }, null, 2));
   } finally {
-    try { runJsonCommand(args.agentBrowser, ['close'], 5_000, args.session); } catch {}
+    try {
+      runJsonCommand(args.agentBrowser, ['close'], 5_000, args.session);
+    } catch {}
     if (server) server.kill('SIGTERM');
   }
 }

@@ -96,7 +96,6 @@ function sameOriginBerserkAsset(raw: string | null | undefined): string | undefi
   }
 }
 
-
 function assetUrls(variant: BerserkVariant): string[] {
   if (variant.jsUrl) return [variant.jsUrl, variant.wasmUrl, ...(variant.dataUrl ? [variant.dataUrl] : [])];
   return [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
@@ -167,7 +166,9 @@ export const BERSERK_VARIANTS: readonly BerserkVariant[] = [
 ];
 
 export function normalizeBerserkVariant(raw: string | null | undefined): BerserkVariantKey {
-  const value = String(raw ?? '').toLowerCase().replace(/[ _-]+/g, '');
+  const value = String(raw ?? '')
+    .toLowerCase()
+    .replace(/[ _-]+/g, '');
   if (value === 'emscriptenrelaxed' || value === 'relaxedsimd' || value === 'relaxed' || value === 'emscriptenrelaxedsimd128') return 'emscripten-relaxed';
   if (value === 'emscriptensimd' || value === 'emscriptensimd128' || value === 'jssimd') return 'emscripten-simd';
   if (value === 'emscripten' || value === 'js' || value === 'worker' || value === 'browser') return 'emscripten';
@@ -188,18 +189,24 @@ export function defaultBerserkVariantKey(): BerserkVariantKey {
 export function berserkVariantByKey(key: string): BerserkVariant {
   const normalized = normalizeBerserkVariant(key);
   if (normalized === 'emscripten-simd') return BERSERK_EMSCRIPTEN_SIMD_VARIANT;
-  if (normalized === 'emscripten-relaxed') return supportsWasmRelaxedSimd() ? BERSERK_EMSCRIPTEN_RELAXED_VARIANT : supportsBerserkWasmSimd() ? BERSERK_EMSCRIPTEN_SIMD_VARIANT : BERSERK_EMSCRIPTEN_VARIANT;
+  if (normalized === 'emscripten-relaxed')
+    return supportsWasmRelaxedSimd()
+      ? BERSERK_EMSCRIPTEN_RELAXED_VARIANT
+      : supportsBerserkWasmSimd()
+        ? BERSERK_EMSCRIPTEN_SIMD_VARIANT
+        : BERSERK_EMSCRIPTEN_VARIANT;
   if (normalized === 'simd') return BERSERK_SIMD_VARIANT;
   if (normalized === 'default') return BERSERK_DEFAULT_VARIANT;
-  if (normalized === 'custom') return {
-    key: 'custom',
-    label: 'Berserk Custom',
-    wasmUrl: BERSERK_EMSCRIPTEN_WASM_URL,
-    jsUrl: BERSERK_EMSCRIPTEN_JS_URL,
-    dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
-    sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
-    note: 'Custom Berserk Emscripten JS URL.',
-  };
+  if (normalized === 'custom')
+    return {
+      key: 'custom',
+      label: 'Berserk Custom',
+      wasmUrl: BERSERK_EMSCRIPTEN_WASM_URL,
+      jsUrl: BERSERK_EMSCRIPTEN_JS_URL,
+      dataUrl: BERSERK_EMSCRIPTEN_DATA_URL,
+      sourceNetworkUrl: BERSERK_SOURCE_NETWORK_URL,
+      note: 'Custom Berserk Emscripten JS URL.',
+    };
   return BERSERK_EMSCRIPTEN_VARIANT;
 }
 
@@ -278,20 +285,29 @@ export function berserkVariantAssetStatus(variant: BerserkVariant): BerserkAsset
   return assetStatuses.get(assetKey(variant)) ?? 'unknown';
 }
 
-
 export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () => void): Promise<BerserkAssetStatus> {
   const key = assetKey(variant);
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing) return existing.then((status) => { onChange?.(); return status; });
+  if (existing)
+    return existing.then((status) => {
+      onChange?.();
+      return status;
+    });
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
     onChange?.();
     return Promise.resolve('missing');
   }
   assetStatuses.set(key, 'checking');
-  const promise = Promise.all(assetUrls(variant).map((url) => fetch(url, { method: 'HEAD', cache: 'no-store' }).then((response) => response.ok).catch(() => false)))
+  const promise = Promise.all(
+    assetUrls(variant).map((url) =>
+      fetch(url, { method: 'HEAD', cache: 'no-store' })
+        .then((response) => response.ok)
+        .catch(() => false),
+    ),
+  )
     .then((results) => (results.every(Boolean) ? 'present' : 'missing') as BerserkAssetStatus)
     .then((status) => {
       assetStatuses.set(key, status);

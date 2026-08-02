@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
-import { WASI, File, OpenFile, ConsoleStdout, PreopenDirectory } from '@bjorn3/browser_wasi_shim';
+import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from '@bjorn3/browser_wasi_shim';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -20,12 +20,7 @@ const depth = Math.max(1, Math.floor(Number(args.get('depth') ?? 2)));
 const repeat = Math.max(1, Math.floor(Number(args.get('repeat') ?? 1)));
 const hashMb = Math.max(1, Math.floor(Number(args.get('hash') ?? 16)));
 const fen = args.get('fen') ?? 'startpos';
-const commands = [
-  'uci',
-  'isready',
-  `setoption name Hash value ${hashMb}`,
-  'setoption name Threads value 1',
-];
+const commands = ['uci', 'isready', `setoption name Hash value ${hashMb}`, 'setoption name Threads value 1'];
 for (let i = 0; i < repeat; i += 1) {
   commands.push('ucinewgame', fen === 'startpos' ? 'position startpos' : `position fen ${fen}`, `go depth ${depth}`);
 }
@@ -48,12 +43,7 @@ const module = await WebAssembly.compile(await fs.readFile(wasmPath));
 const wasiInstance = new WASI(
   ['viridithas', ...commands],
   [],
-  [
-    new OpenFile(new File([])),
-    lineCollector(stdout),
-    lineCollector(stderr),
-    new PreopenDirectory('.', new Map()),
-  ],
+  [new OpenFile(new File([])), lineCollector(stdout), lineCollector(stderr), new PreopenDirectory('.', new Map())],
   { debug: false },
 );
 const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1: wasiInstance.wasiImport });

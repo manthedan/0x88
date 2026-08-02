@@ -14,7 +14,6 @@ import {
   BERSERK_SIMD_VARIANT,
   BERSERK_SOURCE_NETWORK_URL,
   BERSERK_VARIANTS,
-  supportsBerserkWasmSimd,
   berserkVariantAssetNote,
   berserkVariantAssetStatus,
   berserkVariantByKey,
@@ -24,6 +23,7 @@ import {
   hasExplicitBerserkVariant,
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
+  supportsBerserkWasmSimd,
 } from '../src/lc0/berserkVariants.ts';
 import { supportsWasmRelaxedSimd } from '../src/lc0/recklessVariants.ts';
 
@@ -31,7 +31,10 @@ test('Berserk variants pin Emscripten smoke and planned WASI metadata', () => {
   assert.equal(BERSERK_MAIN_NETWORK, 'berserk-9b84c340af7e.nn');
   assert.equal(BERSERK_DEFAULT_NNUE_URL, '/berserk/berserk-9b84c340af7e.nn');
   assert.equal(BERSERK_SOURCE_NETWORK_URL, 'https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn');
-  assert.deepEqual(BERSERK_VARIANTS.map((variant) => variant.key), ['emscripten', 'emscripten-simd', 'emscripten-relaxed', 'default', 'simd']);
+  assert.deepEqual(
+    BERSERK_VARIANTS.map((variant) => variant.key),
+    ['emscripten', 'emscripten-simd', 'emscripten-relaxed', 'default', 'simd'],
+  );
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.jsUrl, BERSERK_EMSCRIPTEN_JS_URL);
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.wasmUrl, BERSERK_EMSCRIPTEN_WASM_URL);
   assert.equal(BERSERK_EMSCRIPTEN_VARIANT.dataUrl, BERSERK_EMSCRIPTEN_DATA_URL);
@@ -89,7 +92,9 @@ test('Berserk URL params support explicit and custom variants', () => {
   assert.equal(builtInWithCustomNnue.nnueUrl, '/berserk/net.nn');
   const defaultWithCustomNnue = berserkVariantFromParams(new URLSearchParams('berserk=default&berserkNnue=/berserk/default-net.nn'));
   assert.equal(defaultWithCustomNnue.nnueUrl, '/berserk/default-net.nn');
-  const customJs = berserkVariantFromParams(new URLSearchParams('berserkJs=/berserk/custom.js&berserkWasm=/berserk/custom.wasm&berserkData=/berserk/custom.data'));
+  const customJs = berserkVariantFromParams(
+    new URLSearchParams('berserkJs=/berserk/custom.js&berserkWasm=/berserk/custom.wasm&berserkData=/berserk/custom.data'),
+  );
   assert.equal(customJs.key, 'custom');
   assert.equal(customJs.jsUrl, '/berserk/custom.js');
   assert.equal(customJs.wasmUrl, '/berserk/custom.wasm');
@@ -104,7 +109,10 @@ test('production skips known-unshipped Berserk asset probes', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return { ok: false }; };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: false };
+  };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { hostname: '0x88.app' },
@@ -128,9 +136,13 @@ test('production skips known-unshipped Berserk asset probes', async () => {
 // declared set beside this test so a probe can never drift onto an unpublished
 // URL while the shared canonical `.data` remains covered.
 const DEPLOYED = new Set([
-  '/berserk/berserk-emscripten.js', '/berserk/berserk-emscripten.wasm', '/berserk/berserk-emscripten.data',
-  '/berserk/berserk-emscripten-simd128.js', '/berserk/berserk-emscripten-simd128.wasm',
-  '/berserk/berserk-emscripten-relaxed-simd128.js', '/berserk/berserk-emscripten-relaxed-simd128.wasm',
+  '/berserk/berserk-emscripten.js',
+  '/berserk/berserk-emscripten.wasm',
+  '/berserk/berserk-emscripten.data',
+  '/berserk/berserk-emscripten-simd128.js',
+  '/berserk/berserk-emscripten-simd128.wasm',
+  '/berserk/berserk-emscripten-relaxed-simd128.js',
+  '/berserk/berserk-emscripten-relaxed-simd128.wasm',
 ]);
 
 test('production probes the deployed Berserk artifacts', async () => {
@@ -174,11 +186,18 @@ test('Berserk asset checks use Emscripten sidecars or WASI+NNUE assets', async (
     assert.equal(berserkVariantAssetStatus(present), 'unknown');
     assert.equal(await checkBerserkVariantAsset(present), 'present');
     assert.equal(berserkVariantAssetStatus(present), 'present');
-    assert.deepEqual(calls.slice(0, 3), [['/ok/berserk.js', 'HEAD', 'no-store'], ['/ok/berserk.wasm', 'HEAD', 'no-store'], ['/ok/berserk.data', 'HEAD', 'no-store']]);
+    assert.deepEqual(calls.slice(0, 3), [
+      ['/ok/berserk.js', 'HEAD', 'no-store'],
+      ['/ok/berserk.wasm', 'HEAD', 'no-store'],
+      ['/ok/berserk.data', 'HEAD', 'no-store'],
+    ]);
 
     const wasiPresent = { ...BERSERK_DEFAULT_VARIANT, wasmUrl: '/ok/berserk-wasi.wasm', nnueUrl: '/ok/net.nn' };
     assert.equal(await checkBerserkVariantAsset(wasiPresent), 'present');
-    assert.deepEqual(calls.slice(3, 5), [['/ok/berserk-wasi.wasm', 'HEAD', 'no-store'], ['/ok/net.nn', 'HEAD', 'no-store']]);
+    assert.deepEqual(calls.slice(3, 5), [
+      ['/ok/berserk-wasi.wasm', 'HEAD', 'no-store'],
+      ['/ok/net.nn', 'HEAD', 'no-store'],
+    ]);
 
     const missing = { ...BERSERK_SIMD_VARIANT, wasmUrl: '/missing/berserk.wasm' };
     assert.equal(await checkBerserkVariantAsset(missing), 'missing');

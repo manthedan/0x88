@@ -1,6 +1,6 @@
 import type { BoardState } from '../chess/board.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
-import { publishBrowserRuntimeAudit, type BrowserRuntimeAuditDetail } from './runtimeAudit.ts';
+import { type BrowserRuntimeAuditDetail, publishBrowserRuntimeAudit } from './runtimeAudit.ts';
 
 function destroyEvaluator(evaluator: Evaluator | undefined): void {
   if (!evaluator) return;
@@ -26,11 +26,7 @@ export class RuntimeFallbackEvaluator implements Evaluator {
   private readonly createFallback: () => Promise<Evaluator>;
   private readonly auditBase: BrowserRuntimeAuditDetail;
 
-  constructor(
-    primary: Evaluator,
-    createFallback: () => Promise<Evaluator>,
-    auditBase: BrowserRuntimeAuditDetail,
-  ) {
+  constructor(primary: Evaluator, createFallback: () => Promise<Evaluator>, auditBase: BrowserRuntimeAuditDetail) {
     this.primary = primary;
     this.createFallback = createFallback;
     this.auditBase = auditBase;

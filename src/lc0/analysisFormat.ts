@@ -1,5 +1,5 @@
-import { parseFen, type BoardState } from '../chess/board.ts';
-import { moveToUci, type Move } from '../chess/moveCodec.ts';
+import { type BoardState, parseFen } from '../chess/board.ts';
+import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { uciLineToSan } from '../chess/san.ts';
 
 /**
@@ -57,7 +57,7 @@ export function evalBarWhitePercent(scoreCp: number | undefined, mateIn: number 
   let whiteAdvantage: number;
   if (mateIn !== undefined) whiteAdvantage = mateIn >= 0 ? 1 : -1;
   else if (scoreCp === undefined) whiteAdvantage = 0;
-  else whiteAdvantage = (2 / (1 + Math.exp(-0.004 * scoreCp))) - 1; // logistic squash to [-1, 1]
+  else whiteAdvantage = 2 / (1 + Math.exp(-0.004 * scoreCp)) - 1; // logistic squash to [-1, 1]
   return Math.max(0, Math.min(100, 50 + 50 * whiteAdvantage));
 }
 
@@ -222,23 +222,25 @@ export interface CentipawnPuctSearchLike {
 export function centipawnPuctAnalysisLines(result: CentipawnPuctSearchLike, fen: string, engine = 'Centipawn'): AnalysisLine[] {
   const board = parseFen(fen);
   const w = board.turn === 'w' ? 1 : -1;
-  const pvLines = result.multiPvLines?.length ? result.multiPvLines : (result.principalVariation?.length ? [result.principalVariation] : []);
+  const pvLines = result.multiPvLines?.length ? result.multiPvLines : result.principalVariation?.length ? [result.principalVariation] : [];
   const lines = pvLines.length ? pvLines : result.policy.slice(0, 1).map((entry) => [entry]);
-  return lines.filter((line) => line.length).map((line, index) => {
-    const rootUci = moveToUci(line[0].move);
-    const child = result.policy.find((entry) => moveToUci(entry.move) === rootUci);
-    const q = (child?.q ?? line[0].q ?? result.value) * w;
-    const visits = child?.visits ?? line[0].visits ?? result.visits;
-    const scoreCp = qToCentipawns(q);
-    const pvUci = line.map((entry) => moveToUci(entry.move));
-    return {
-      engine,
-      multipv: index + 1,
-      scoreCp,
-      scoreText: formatCentipawns(scoreCp),
-      detail: `${visits} visits`,
-      pvUci,
-      pvSan: uciLineToSan(board, pvUci, 12),
-    };
-  });
+  return lines
+    .filter((line) => line.length)
+    .map((line, index) => {
+      const rootUci = moveToUci(line[0].move);
+      const child = result.policy.find((entry) => moveToUci(entry.move) === rootUci);
+      const q = (child?.q ?? line[0].q ?? result.value) * w;
+      const visits = child?.visits ?? line[0].visits ?? result.visits;
+      const scoreCp = qToCentipawns(q);
+      const pvUci = line.map((entry) => moveToUci(entry.move));
+      return {
+        engine,
+        multipv: index + 1,
+        scoreCp,
+        scoreText: formatCentipawns(scoreCp),
+        detail: `${visits} visits`,
+        pvUci,
+        pvSan: uciLineToSan(board, pvUci, 12),
+      };
+    });
 }

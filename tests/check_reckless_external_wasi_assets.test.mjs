@@ -71,13 +71,20 @@ test('Reckless release manifest command generates complete external artifact met
   await Promise.all(artifacts.map((name, index) => writeFile(join(root, 'public/reckless', name), `artifact-${index}`)));
 
   const manifestPath = join(root, 'public/reckless/reckless-wasip1.manifest.json');
-  const result = spawnSync(process.execPath, [
-    resolve('scripts/write_engine_artifact_manifest.mjs'),
-    'reckless',
-    '--source-archive', 'public/reckless/reckless-scalar-corresponding-source.tar.gz',
-    '--source-url', '/reckless/reckless-scalar-corresponding-source.tar.gz',
-    '--out', manifestPath,
-  ], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve('scripts/write_engine_artifact_manifest.mjs'),
+      'reckless',
+      '--source-archive',
+      'public/reckless/reckless-scalar-corresponding-source.tar.gz',
+      '--source-url',
+      '/reckless/reckless-scalar-corresponding-source.tar.gz',
+      '--out',
+      manifestPath,
+    ],
+    { cwd: root, encoding: 'utf8' },
+  );
   assert.equal(result.status, 0, result.stderr);
 
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -90,7 +97,10 @@ test('Reckless release manifest command generates complete external artifact met
       'public/reckless/reckless-simd128-external-corresponding-source.tar.gz',
     ],
   );
-  assert.equal(manifest.artifacts.some((artifact) => artifact.missing), false);
+  assert.equal(
+    manifest.artifacts.some((artifact) => artifact.missing),
+    false,
+  );
   assert.equal(manifest.sourceArchive.url, '/reckless/reckless-scalar-corresponding-source.tar.gz');
 });
 

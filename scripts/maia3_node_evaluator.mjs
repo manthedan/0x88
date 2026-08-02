@@ -3,10 +3,10 @@
 // browser encoding (boardToMaia3Tokens / maia3MoveIndex) so script results
 // describe exactly what the browser runtime computes.
 import { readFileSync } from 'node:fs';
-import * as ort from '../src/nn/ortRuntime.ts';
-import { legalMoves } from '../src/chess/movegen.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
-import { boardToMaia3Tokens, maia3MoveIndex, MAIA3_POLICY_SIZE } from '../src/lc0/maia3.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
+import { boardToMaia3Tokens, MAIA3_POLICY_SIZE, maia3MoveIndex } from '../src/lc0/maia3.ts';
+import * as ort from '../src/nn/ortRuntime.ts';
 
 const DEFAULT_MODEL = 'public/models/maia3/maia3_simplified.onnx';
 

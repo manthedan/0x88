@@ -27,7 +27,12 @@ test('DisposableVariantPool retains active variants and disposes everything else
   const disposed = [];
   const pool = new DisposableVariantPool(
     (entry) => `${entry.key}:${entry.url}`,
-    (entry) => ({ entry, dispose() { disposed.push(entry.url); } }),
+    (entry) => ({
+      entry,
+      dispose() {
+        disposed.push(entry.url);
+      },
+    }),
   );
   const simd = variant('simd');
   const custom = variant('custom');

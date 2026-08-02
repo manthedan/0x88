@@ -48,17 +48,17 @@ export const SQUAREFORMER_TVM_HYBRID_V1: RuntimeRegistryEntry = {
   promotionGate: 'squareformer-rc-v1',
 };
 
-const PROMOTED_RUNTIMES: RuntimeRegistryEntry[] = [
-  CENTIPAWN_TVMJS_WEBGPU_V2,
-  SQUAREFORMER_TVM_HYBRID_V1,
-].filter((entry) => entry.status === 'promoted');
+const PROMOTED_RUNTIMES: RuntimeRegistryEntry[] = [CENTIPAWN_TVMJS_WEBGPU_V2, SQUAREFORMER_TVM_HYBRID_V1].filter((entry) => entry.status === 'promoted');
 
 export function normalizeRuntimeModelKey(modelKey: string): string {
   return modelKey === BT4_ANNEAL_MUON_BEST_TVM_HYBRID_LEGACY_MODEL_ID ? BT4_ANNEAL_MUON_BEST_MODEL_ID : modelKey;
 }
 
 export function parseBrowserRuntimeSelector(value: string | null | undefined, options: { legacyHybridModelKey?: string | null } = {}): BrowserRuntimeSelector {
-  const normalized = String(value ?? '').trim().toLowerCase().replace(/_/g, '-');
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-');
   if (normalized === '' && options.legacyHybridModelKey === BT4_ANNEAL_MUON_BEST_TVM_HYBRID_LEGACY_MODEL_ID) return 'custom-webgpu';
   if (normalized === '' || normalized === 'auto') return 'auto';
   if (normalized === 'ort' || normalized === 'onnx' || normalized === 'onnxruntime' || normalized === 'baseline') return 'ort';

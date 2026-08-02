@@ -3,14 +3,19 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 function usage() {
-  console.log(`Usage: node scripts/summarize_lc0_tvmjs_webgpu_smoke.mjs --in ARTIFACT.json [--out REPORT.json]\n\nConverts a lc0_tvmjs_webgpu_smoke artifact into a compact fixed-suite-style research report.\nThis does not add Stockfish post-move scoring; it preserves that limitation explicitly.\n`);
+  console.log(
+    `Usage: node scripts/summarize_lc0_tvmjs_webgpu_smoke.mjs --in ARTIFACT.json [--out REPORT.json]\n\nConverts a lc0_tvmjs_webgpu_smoke artifact into a compact fixed-suite-style research report.\nThis does not add Stockfish post-move scoring; it preserves that limitation explicitly.\n`,
+  );
 }
 
 function parseArgs(argv) {
   const args = { in: '', out: '' };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    const next = () => { if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`); return argv[++i]; };
+    const next = () => {
+      if (i + 1 >= argv.length) throw new Error(`${arg} requires a value`);
+      return argv[++i];
+    };
     if (arg === '--in') args.in = next();
     else if (arg === '--out') args.out = next();
     else if (arg === '-h' || arg === '--help') args.help = true;
@@ -50,10 +55,12 @@ function groupedPositions(rows) {
     comparable: entries.length,
     tvmMs: stats(entries.map((row) => row.tvmMs)),
     ortMs: stats(entries.map((row) => row.ortMs)),
-    stockfish: entries.some((row) => row.stockfish) ? {
-      tvmMinusOrtCp: stats(entries.map((row) => row.stockfishCpDeltaTvmMinusOrt)),
-      scoredRows: entries.filter((row) => row.stockfish?.tvm || row.stockfish?.ort).length,
-    } : undefined,
+    stockfish: entries.some((row) => row.stockfish)
+      ? {
+          tvmMinusOrtCp: stats(entries.map((row) => row.stockfishCpDeltaTvmMinusOrt)),
+          scoredRows: entries.filter((row) => row.stockfish?.tvm || row.stockfish?.ort).length,
+        }
+      : undefined,
     rows: entries.map((row) => ({
       repeat: row.repeat ?? 0,
       tvmMove: row.tvmMove,
@@ -85,7 +92,9 @@ function buildReport(artifact, sourcePath) {
     caveats: [
       'Research-only TVMJS/WebGPU path; stable/default ORT WebGPU runtime is unchanged.',
       'This report is derived from the TVMJS smoke harness, not lc0_browser_runtime_fixed_suite.mjs.',
-      hasStockfish ? 'Stockfish post-move scoring is included for the search rows, but this is still smoke-harness scoring rather than lc0_browser_runtime_fixed_suite.mjs output.' : 'No Stockfish post-move scoring is included; quality comparison is TVMJS-vs-ORT f16 evaluator/search move parity only.',
+      hasStockfish
+        ? 'Stockfish post-move scoring is included for the search rows, but this is still smoke-harness scoring rather than lc0_browser_runtime_fixed_suite.mjs output.'
+        : 'No Stockfish post-move scoring is included; quality comparison is TVMJS-vs-ORT f16 evaluator/search move parity only.',
       'Timing is warm-page browser wall time and should not be treated as promotion-grade throughput evidence.',
     ],
     config: {

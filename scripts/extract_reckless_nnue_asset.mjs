@@ -24,7 +24,9 @@ function sourceL1Size() {
 
 const l1Size = sourceL1Size();
 if (l1Size !== 768 && process.env.RECKLESS_BROWSER_API_ALLOW_CUSTOM_NNUE !== '1') {
-  throw new Error(`External Reckless NNUE asset extraction expects the full v60 NNUE shape (L1_SIZE=768), but ${source} has L1_SIZE=${l1Size}. Run npm run reckless:build-wasi first, or set RECKLESS_SOURCE_DIR to a full Reckless source tree.`);
+  throw new Error(
+    `External Reckless NNUE asset extraction expects the full v60 NNUE shape (L1_SIZE=768), but ${source} has L1_SIZE=${l1Size}. Run npm run reckless:build-wasi first, or set RECKLESS_SOURCE_DIR to a full Reckless source tree.`,
+  );
 }
 
 const nnue = explicitEvalfile || defaultNetworkPath();

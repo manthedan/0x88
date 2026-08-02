@@ -28,15 +28,45 @@ export function parseArgs(argv) {
   for (let index = 2; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
-    if (arg === '--model' && next) { args.model = next; index += 1; continue; }
-    if (arg === '--work-dir' && next) { args.workDir = next; index += 1; continue; }
-    if (arg === '--chunk-mib' && next) { args.chunkMib = Number(next); index += 1; continue; }
-    if (arg === '--concurrency' && next) { args.concurrency = Number(next); index += 1; continue; }
-    if (arg === '--max-manifest-bytes' && next) { args.maxManifestBytes = Number(next); index += 1; continue; }
-    if (arg === '--max-decoded-bytes' && next) { args.maxDecodedBytes = Number(next); index += 1; continue; }
-    if (arg === '--max-shard-references' && next) { args.maxShardReferences = Number(next); index += 1; continue; }
+    if (arg === '--model' && next) {
+      args.model = next;
+      index += 1;
+      continue;
+    }
+    if (arg === '--work-dir' && next) {
+      args.workDir = next;
+      index += 1;
+      continue;
+    }
+    if (arg === '--chunk-mib' && next) {
+      args.chunkMib = Number(next);
+      index += 1;
+      continue;
+    }
+    if (arg === '--concurrency' && next) {
+      args.concurrency = Number(next);
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-manifest-bytes' && next) {
+      args.maxManifestBytes = Number(next);
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-decoded-bytes' && next) {
+      args.maxDecodedBytes = Number(next);
+      index += 1;
+      continue;
+    }
+    if (arg === '--max-shard-references' && next) {
+      args.maxShardReferences = Number(next);
+      index += 1;
+      continue;
+    }
     if (arg === '-h' || arg === '--help') {
-      console.log('Usage: node --experimental-strip-types scripts/bench_resumable_model_shards.mjs --model model.onnx --work-dir output [--chunk-mib 16] [--concurrency 3] [--max-manifest-bytes bytes] [--max-decoded-bytes bytes] [--max-shard-references count]');
+      console.log(
+        'Usage: node --experimental-strip-types scripts/bench_resumable_model_shards.mjs --model model.onnx --work-dir output [--chunk-mib 16] [--concurrency 3] [--max-manifest-bytes bytes] [--max-decoded-bytes bytes] [--max-shard-references count]',
+      );
       process.exit(0);
     }
     throw new Error(`Unknown argument: ${arg}`);
@@ -119,11 +149,13 @@ export async function createBenchmarkRunDirectory(workDir) {
 async function main() {
   const args = parseArgs(process.argv);
   const runDir = await createBenchmarkRunDirectory(args.workDir);
-  const generation = await measured(() => generateResumableModelShards({
-    inputPath: args.modelPath,
-    outputDir: join(runDir, 'published'),
-    chunkBytes: args.chunkBytes,
-  }));
+  const generation = await measured(() =>
+    generateResumableModelShards({
+      inputPath: args.modelPath,
+      outputDir: join(runDir, 'published'),
+      chunkBytes: args.chunkBytes,
+    }),
+  );
   const reconstructionOptions = {
     concurrency: args.concurrency,
     maxManifestBytes: args.maxManifestBytes,
@@ -131,11 +163,7 @@ async function main() {
     maxShardReferences: args.maxShardReferences,
   };
 
-  const cold = await measured(() => loadAndCreateSession(
-    generation.value.manifestPath,
-    join(runDir, 'cold-cache'),
-    reconstructionOptions,
-  ));
+  const cold = await measured(() => loadAndCreateSession(generation.value.manifestPath, join(runDir, 'cold-cache'), reconstructionOptions));
 
   const resumeCache = join(runDir, 'resume-cache');
   const controller = new AbortController();
@@ -164,11 +192,7 @@ async function main() {
     return { persistedShardFiles: (await readdir(resumeCache)).length };
   });
 
-  const resumed = await measured(() => loadAndCreateSession(
-    generation.value.manifestPath,
-    resumeCache,
-    reconstructionOptions,
-  ));
+  const resumed = await measured(() => loadAndCreateSession(generation.value.manifestPath, resumeCache, reconstructionOptions));
   const modelStat = await stat(args.modelPath);
   const summarize = (measurement) => ({
     startupMs: Number(measurement.elapsedMs.toFixed(3)),
@@ -184,36 +208,42 @@ async function main() {
     ortInputs: measurement.value.ort.inputs,
     ortOutputs: measurement.value.ort.outputs,
   });
-  console.log(JSON.stringify({
-    schema: 'lc0_browser.resumable_model_shard_benchmark.v1',
-    researchOnly: true,
-    model: { path: args.modelPath, file: basename(args.modelPath), bytes: modelStat.size },
-    chunkBytes: args.chunkBytes,
-    concurrency: args.concurrency,
-    generation: {
-      elapsedMs: Number(generation.elapsedMs.toFixed(3)),
-      manifestPath: generation.value.manifestPath,
-      decodedSha256: generation.value.manifest.decoded.sha256,
-      shardReferences: generation.value.shardReferences,
-      uniqueShardCount: generation.value.uniqueShardCount,
-    },
-    interrupted: {
-      elapsedMs: Number(interrupted.elapsedMs.toFixed(3)),
-      completedBytes: abortProgress?.completedBytes,
-      completedShards: abortProgress?.completedShards,
-      totalBytes: abortProgress?.totalBytes,
-      totalShards: abortProgress?.totalShards,
-      persistedShardFiles: interrupted.value.persistedShardFiles,
-    },
-    cold: summarize(cold),
-    resumed: summarize(resumed),
-    byteIdentical: cold.value.load.sha256 === generation.value.manifest.decoded.sha256
-      && resumed.value.load.sha256 === generation.value.manifest.decoded.sha256,
-    productionRecommendation: {
-      recommended: false,
-      blocker: 'Successful live Artifact v2 rollout and representative startup evidence are required before production consideration.',
-    },
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        schema: 'lc0_browser.resumable_model_shard_benchmark.v1',
+        researchOnly: true,
+        model: { path: args.modelPath, file: basename(args.modelPath), bytes: modelStat.size },
+        chunkBytes: args.chunkBytes,
+        concurrency: args.concurrency,
+        generation: {
+          elapsedMs: Number(generation.elapsedMs.toFixed(3)),
+          manifestPath: generation.value.manifestPath,
+          decodedSha256: generation.value.manifest.decoded.sha256,
+          shardReferences: generation.value.shardReferences,
+          uniqueShardCount: generation.value.uniqueShardCount,
+        },
+        interrupted: {
+          elapsedMs: Number(interrupted.elapsedMs.toFixed(3)),
+          completedBytes: abortProgress?.completedBytes,
+          completedShards: abortProgress?.completedShards,
+          totalBytes: abortProgress?.totalBytes,
+          totalShards: abortProgress?.totalShards,
+          persistedShardFiles: interrupted.value.persistedShardFiles,
+        },
+        cold: summarize(cold),
+        resumed: summarize(resumed),
+        byteIdentical:
+          cold.value.load.sha256 === generation.value.manifest.decoded.sha256 && resumed.value.load.sha256 === generation.value.manifest.decoded.sha256,
+        productionRecommendation: {
+          recommended: false,
+          blocker: 'Successful live Artifact v2 rollout and representative startup evidence are required before production consideration.',
+        },
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

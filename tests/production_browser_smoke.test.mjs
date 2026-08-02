@@ -4,7 +4,14 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { actionableErrorEntries, browserMaxAge, failedRequestEntries, isExpectedAppShellCacheControl, isExpectedOrtCacheControl, parseCacheControl } from '../scripts/production_browser_smoke.mjs';
+import {
+  actionableErrorEntries,
+  browserMaxAge,
+  failedRequestEntries,
+  isExpectedAppShellCacheControl,
+  isExpectedOrtCacheControl,
+  parseCacheControl,
+} from '../scripts/production_browser_smoke.mjs';
 
 const script = 'scripts/production_browser_smoke.mjs';
 

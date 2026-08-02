@@ -101,11 +101,7 @@ function parseAgentJson(output) {
 }
 
 async function runAgent(args, session, commandArgs, stdin) {
-  const output = await spawnCapture(
-    args.agentBrowser,
-    ['--json', '--session', session, ...commandArgs],
-    { timeoutMs: args.timeoutMs, stdin },
-  );
+  const output = await spawnCapture(args.agentBrowser, ['--json', '--session', session, ...commandArgs], { timeoutMs: args.timeoutMs, stdin });
   return parseAgentJson(output);
 }
 
@@ -119,6 +115,7 @@ function startServer(args) {
     const timer = setTimeout(() => reject(new Error(`Vite did not become ready: ${output}`)), 30_000);
     const inspect = (chunk) => {
       output += chunk.toString('utf8');
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips ANSI escape sequences from vite output
       const plain = output.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
       if (/ready in \d+\s*ms/.test(plain) || plain.includes(`:${args.port}/`)) {
         clearTimeout(timer);
@@ -155,9 +152,7 @@ async function waitForResult(args, session) {
         log: document.getElementById('log')?.textContent ?? ''
       }))()`,
     );
-    const value = last?.value ?? (
-      last && 'result' in last && !('error' in last) && !('log' in last) ? last.result : last
-    );
+    const value = last?.value ?? (last && 'result' in last && !('error' in last) && !('log' in last) ? last.result : last);
     if (value?.error) throw new Error(value.error);
     if (value?.result) return value.result;
     await new Promise((resolve) => setTimeout(resolve, 1000));
