@@ -1,9 +1,11 @@
 <script lang="ts">
-  import SiteHeader from '$lib/components/SiteHeader.svelte';
-  import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
-  const title = "0x88 | Browser chess engine workbench";
-  const description = "Play against Maia3, compare browser chess engines on one position, or run engine tournaments. Computation stays on your device.";
-  const github = "https://github.com/manthedan/0x88";
+import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
+import SiteHeader from '$lib/components/SiteHeader.svelte';
+import { footerNav, workspaces } from '$lib/nav';
+
+const title = '0x88 | Browser chess engine workbench';
+const description = 'Play against Maia3, compare browser chess engines on one position, or run engine tournaments. Computation stays on your device.';
+const github = 'https://github.com/manthedan/0x88';
 </script>
 
 <svelte:head>
@@ -22,8 +24,8 @@
         multi-engine tournaments. It needs no account or installation.
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="/app/play/">Play a game <span aria-hidden="true">→</span></a>
-        <a class="btn btn-secondary" href="/app/analysis/">Open analysis</a>
+        <a class="btn btn-primary" href="/app/analysis/">Open analysis <span aria-hidden="true">→</span></a>
+        <a class="btn btn-secondary" href="/app/play/">Play a game</a>
       </div>
     </div>
 
@@ -38,24 +40,14 @@
       <h2 id="modes-h">Chess workspaces</h2>
     </div>
     <div class="mode-index">
-      <a class="mode" href="/app/play/">
-        <span class="mode-number">01 · PLAY</span>
-        <h3>Rated play</h3>
-        <p>Maia3 predicts move probabilities for ratings from 600–2600. You can sample from that policy or choose another available engine.</p>
-        <span class="mode-action">Open play <b aria-hidden="true">→</b></span>
-      </a>
-      <a class="mode" href="/app/analysis/">
-        <span class="mode-number">02 · ANALYSIS</span>
-        <h3>Position analysis</h3>
-        <p>Run Lc0, Stockfish, or another engine on the same position. Their evaluations and principal variations appear together while your PGN stays in the browser.</p>
-        <span class="mode-action">Open analysis <b aria-hidden="true">→</b></span>
-      </a>
-      <a class="mode" href="/app/arena/">
-        <span class="mode-number">03 · ARENA</span>
-        <h3>Engine tournaments</h3>
-        <p>Run matches or larger tournaments under shared time controls. The arena records each game and updates the standings as it plays.</p>
-        <span class="mode-action">Open arena <b aria-hidden="true">→</b></span>
-      </a>
+      {#each workspaces as ws, i (ws.href)}
+        <a class="mode" href={ws.href}>
+          <span class="mode-number">{String(i + 1).padStart(2, '0')}</span>
+          <h3>{ws.title}</h3>
+          <p>{ws.blurb}</p>
+          <span class="mode-action">Open {ws.label.toLowerCase()} <b aria-hidden="true">→</b></span>
+        </a>
+      {/each}
     </div>
   </div>
 </section>
@@ -76,10 +68,9 @@
 <footer class="site-footer">
   <div class="wrap landing-footer-wrap">
     <span class="footer-links">
-      <a href="/app/play/">Play</a>
-      <a href="/app/analysis/">Analysis</a>
-      <a href="/app/arena/">Arena</a>
-      <a href="/docs/">Docs</a>
+      {#each footerNav as item (item.href)}
+        <a href={item.href}>{item.label}</a>
+      {/each}
       <a href={github} rel="noopener">GitHub</a>
       <code>0x88.app · v0</code>
     </span>
@@ -130,7 +121,7 @@
     transition:background .15s,padding .15s;
   }
   .mode:hover{padding-left:12px; padding-right:12px; background:var(--panel); text-decoration:none}
-  .mode-number{padding-top:5px; font-family:var(--mono); font-size:10px; letter-spacing:.08em; color:var(--accent-deep); font-weight:700}
+  .mode-number{padding-top:4px; font-family:var(--mono); font-size:15px; letter-spacing:.02em; color:var(--accent-deep); font-weight:700}
   .mode h3{margin:0; font-size:23px; line-height:1.18}
   .mode p{margin:0; max-width:58ch; font-size:14px; line-height:1.65; color:var(--muted)}
   .mode-action{justify-self:end; padding-top:4px; color:var(--ink); font-size:13px; font-weight:650; white-space:nowrap}

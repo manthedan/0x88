@@ -1,31 +1,39 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import SiteHeader from '$lib/components/SiteHeader.svelte';
-  const title = "0x88 Chess — documentation";
-  const description = "Documentation for the 0x88 browser chess workspaces, engine runtimes, upstream projects, licenses, and corresponding-source archives.";
-  let tocOpen = false;
-  onMount(() => {
-    const headings = document.querySelectorAll('.doc-content section[id], .doc-content h3[id]');
-    const tocLinks = document.querySelectorAll<HTMLAnchorElement>('.toc a[href^="#"]');
-    if (!('IntersectionObserver' in window) || !headings.length) return;
-    const linkMap = new Map<string, HTMLAnchorElement>();
-    tocLinks.forEach((link) => {
-      const href = link.getAttribute('href');
-      if (href) linkMap.set(href.slice(1), link);
-    });
-    const observer = new IntersectionObserver((entries) => {
+import { onMount } from 'svelte';
+import SiteHeader from '$lib/components/SiteHeader.svelte';
+
+const title = '0x88 Chess — documentation';
+const description = 'Documentation for the 0x88 browser chess workspaces, engine runtimes, upstream projects, licenses, and corresponding-source archives.';
+let tocOpen = false;
+onMount(() => {
+  const headings = document.querySelectorAll('.doc-content section[id], .doc-content h3[id]');
+  const tocLinks = document.querySelectorAll<HTMLAnchorElement>('.toc a[href^="#"]');
+  if (!('IntersectionObserver' in window) || !headings.length) return;
+  const linkMap = new Map<string, HTMLAnchorElement>();
+  tocLinks.forEach((link) => {
+    const href = link.getAttribute('href');
+    if (href) linkMap.set(href.slice(1), link);
+  });
+  const observer = new IntersectionObserver(
+    (entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
         const id = entry.target.getAttribute('id');
         const link = id ? linkMap.get(id) : undefined;
         if (!link) return;
-        tocLinks.forEach((item) => item.classList.remove('active'));
+        tocLinks.forEach((item) => {
+          item.classList.remove('active');
+        });
         link.classList.add('active');
       });
-    }, { rootMargin: '-88px 0px -70% 0px', threshold: 0 });
-    headings.forEach((heading) => observer.observe(heading));
-    return () => observer.disconnect();
+    },
+    { rootMargin: '-88px 0px -70% 0px', threshold: 0 },
+  );
+  headings.forEach((heading) => {
+    observer.observe(heading);
   });
+  return () => observer.disconnect();
+});
 </script>
 
 <svelte:head>
@@ -57,9 +65,9 @@
   <ul>
     <li><a href="#pages">The pages</a>
       <ul>
-        <li><a href="#pages-play">Play</a></li>
         <li><a href="#pages-analysis">Analysis</a></li>
         <li><a href="#pages-arena">Arena</a></li>
+        <li><a href="#pages-play">Play</a></li>
       </ul>
     </li>
     <li><a href="#human-vs-computer">Human vs computer play</a></li>
@@ -97,19 +105,7 @@
 <!-- ===== PAGES ===== -->
 <section id="pages">
   <h2>The pages <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
-  <p class="lead">0x88 has dedicated workspaces for play, analysis, and engine tournaments. Each workspace runs client-side and loads its engines when needed.</p>
-
-  <div class="page-block">
-    <h3 id="pages-play"><span class="pn">Play</span> Play a game <a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/app/play</span>
-    <p>The Play page runs a game against Maia3 or one of the available chess engines. Choose a color and strength, then play with takebacks and PGN export available throughout the game.</p>
-    <ul>
-      <li><strong>Maia3 rating slider (600&ndash;2600)</strong> &mdash; conditions Maia3's move probabilities and human-game outcome predictions on the selected rating.</li>
-      <li><strong>Engine opponents at five strength levels</strong> &mdash; adjusts visit, depth, or node limits according to the selected engine.</li>
-      <li><strong>Full game lifecycle</strong> &mdash; takebacks, resign, new game, flip board, move list, and one-click PGN export.</li>
-    </ul>
-    <p>Nothing about your game is sent anywhere. The engine binary and (if needed) the neural network download on first use, then cache locally for next time.</p>
-  </div>
+  <p class="lead">0x88 has dedicated workspaces for analysis, engine tournaments, and play. Each workspace runs client-side and loads its engines when needed.</p>
 
   <div class="page-block">
     <h3 id="pages-analysis"><span class="pn">Analysis</span> Analysis board <a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
@@ -134,6 +130,18 @@
       <li><strong>Per-game eval charts and move replays</strong> &mdash; click any finished game to replay it with the eval bar; click any move to jump the board.</li>
       <li><strong>Configurable engine runtime</strong> &mdash; pick engine, strength, opening book, and time control; the arena handles scheduling and the engines do the rest.</li>
     </ul>
+  </div>
+
+  <div class="page-block">
+    <h3 id="pages-play"><span class="pn">Play</span> Play a game <a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
+    <span class="pg-url">/app/play</span>
+    <p>The Play page runs a game against Maia3 or one of the available chess engines. Choose a color and strength, then play with takebacks and PGN export available throughout the game.</p>
+    <ul>
+      <li><strong>Maia3 rating slider (600&ndash;2600)</strong> &mdash; conditions Maia3's move probabilities and human-game outcome predictions on the selected rating.</li>
+      <li><strong>Engine opponents at five strength levels</strong> &mdash; adjusts visit, depth, or node limits according to the selected engine.</li>
+      <li><strong>Full game lifecycle</strong> &mdash; takebacks, resign, new game, flip board, move list, and one-click PGN export.</li>
+    </ul>
+    <p>Nothing about your game is sent anywhere. The engine binary and (if needed) the neural network download on first use, then cache locally for next time.</p>
   </div>
 </section>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+import { primaryNav } from '$lib/nav';
 </script>
 
 <slot />
@@ -6,11 +7,9 @@
   <div class="wrap">
     <span>Chess engines run locally. Source is public.</span>
     <span class="footer-links">
-      <a href="/">Home</a>
-      <a href="/app/play/">Play</a>
-      <a href="/app/analysis/">Analysis</a>
-      <a href="/app/arena/">Arena</a>
-      <a href="/docs/">Docs</a>
+      {#each primaryNav as item (item.href)}
+        <a href={item.href}>{item.label}</a>
+      {/each}
       <code>0x88.app · v0</code>
     </span>
   </div>

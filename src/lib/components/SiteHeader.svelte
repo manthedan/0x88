@@ -1,33 +1,34 @@
 <script lang="ts">
-  import { page } from '$app/stores';
-  import { theme, boardStyle, toggleTheme, type BoardStyle } from '$lib/stores/theme';
+import { page } from '$app/stores';
+import { primaryNav } from '$lib/nav';
+import { type BoardStyle, boardStyle, theme, toggleTheme } from '$lib/stores/theme';
 
-  export let pageTitle = '';
-  let mobileOpen = false;
-  let mobileNavEl: HTMLElement | null = null;
+export let pageTitle = '';
+let mobileOpen = false;
+let mobileNavEl: HTMLElement | null = null;
 
-  $: path = $page.url.pathname;
-  $: isDark = $theme === 'dark';
+$: path = $page.url.pathname;
+$: isDark = $theme === 'dark';
 
-  function isActive(href: string): boolean {
-    if (href === '/') return path === '/';
-    const base = href.replace(/\/$/, '');
-    return path === base || path.startsWith(`${base}/`);
-  }
+function isActive(href: string): boolean {
+  if (href === '/') return path === '/';
+  const base = href.replace(/\/$/, '');
+  return path === base || path.startsWith(`${base}/`);
+}
 
-  function onBoardChange(event: Event) {
-    boardStyle.set((event.target as HTMLSelectElement).value as BoardStyle);
-  }
+function onBoardChange(event: Event) {
+  boardStyle.set((event.target as HTMLSelectElement).value as BoardStyle);
+}
 
-  function onWindowClick(event: MouseEvent) {
-    if (!mobileOpen) return;
-    if (mobileNavEl && event.target instanceof Node && mobileNavEl.contains(event.target)) return;
-    mobileOpen = false;
-  }
+function onWindowClick(event: MouseEvent) {
+  if (!mobileOpen) return;
+  if (mobileNavEl && event.target instanceof Node && mobileNavEl.contains(event.target)) return;
+  mobileOpen = false;
+}
 
-  function onWindowKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') mobileOpen = false;
-  }
+function onWindowKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') mobileOpen = false;
+}
 </script>
 
 <svelte:window on:click={onWindowClick} on:keydown={onWindowKeydown} />
@@ -43,21 +44,17 @@
       <span class="page-title">{pageTitle}</span>
     {/if}
     <nav class="primary" aria-label="Primary">
-      <a href="/" class:active={isActive('/')} aria-current={isActive('/') ? 'page' : undefined}>Home</a>
-      <a href="/app/play/" class:active={isActive('/app/play/')} aria-current={isActive('/app/play/') ? 'page' : undefined}>Play</a>
-      <a href="/app/analysis/" class:active={isActive('/app/analysis/')} aria-current={isActive('/app/analysis/') ? 'page' : undefined}>Analysis</a>
-      <a href="/app/arena/" class:active={isActive('/app/arena/')} aria-current={isActive('/app/arena/') ? 'page' : undefined}>Arena</a>
-      <a href="/docs/" class:active={isActive('/docs/')} aria-current={isActive('/docs/') ? 'page' : undefined}>Docs</a>
+      {#each primaryNav as item (item.href)}
+        <a href={item.href} class:active={isActive(item.href)} aria-current={isActive(item.href) ? 'page' : undefined}>{item.label}</a>
+      {/each}
     </nav>
     <div class="mobile-nav" class:open={mobileOpen} bind:this={mobileNavEl}>
       <button class="menu-toggle" type="button" aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'} title="Menu" aria-expanded={mobileOpen} on:click={() => mobileOpen = !mobileOpen}><span aria-hidden="true"></span></button>
       {#if mobileOpen}
         <nav class="mobile-nav-menu" aria-label="Mobile navigation">
-          <a href="/" class:active={isActive('/')} aria-current={isActive('/') ? 'page' : undefined}>Home</a>
-          <a href="/app/play/" class:active={isActive('/app/play/')} aria-current={isActive('/app/play/') ? 'page' : undefined}>Play</a>
-          <a href="/app/analysis/" class:active={isActive('/app/analysis/')} aria-current={isActive('/app/analysis/') ? 'page' : undefined}>Analysis</a>
-          <a href="/app/arena/" class:active={isActive('/app/arena/')} aria-current={isActive('/app/arena/') ? 'page' : undefined}>Arena</a>
-          <a href="/docs/" class:active={isActive('/docs/')} aria-current={isActive('/docs/') ? 'page' : undefined}>Docs</a>
+          {#each primaryNav as item (item.href)}
+            <a href={item.href} class:active={isActive(item.href)} aria-current={isActive(item.href) ? 'page' : undefined}>{item.label}</a>
+          {/each}
           <div class="mobile-board-field">
             <label for="mobileBoardSelect">Board style</label>
             <select id="mobileBoardSelect" value={$boardStyle} on:change={onBoardChange}>
