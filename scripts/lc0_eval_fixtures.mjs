@@ -7,7 +7,10 @@ import { requireReadableFile } from './lib/prerequisites.mjs';
 
 const model = process.argv[2] ?? '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const fixturePath = process.argv[3] ?? 'fixtures/lc0/fen_only.json';
-requireReadableFile(model, 'The default path expects a sibling lc0-bestnets checkout; pass the model path explicitly: node scripts/lc0_eval_fixtures.mjs <model.onnx> [fixtures.json]');
+requireReadableFile(
+  model,
+  'The default path expects a sibling lc0-bestnets checkout; pass the model path explicitly: node scripts/lc0_eval_fixtures.mjs <model.onnx> [fixtures.json]',
+);
 requireReadableFile(fixturePath, 'Pass the fixture path explicitly: node scripts/lc0_eval_fixtures.mjs <model.onnx> [fixtures.json]');
 const fixtures = JSON.parse(readFileSync(fixturePath, 'utf8'));
 const evaluator = await Lc0OnnxEvaluator.create(readFileSync(model));

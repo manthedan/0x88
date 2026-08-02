@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import { parseScriptArgs } from './lib/cli.mjs';
 import { spawnCapture } from './lib/process.mjs';
 import { waitForOutput } from './lib/server.mjs';
@@ -16,7 +17,7 @@ const USAGE = `Usage: node scripts/lc0_tvmjs_webgpu_smoke.mjs [options]\n\nRuns 
   --tensor-cache      Fetch manifest tensor-cache sidecar before VM setup (research-only)
   --fens PATH         Newline-separated FEN suite; implies --fixtures and bypasses fixtures/lc0/fen_only.json\n  --ort-compare MODE  Compare TVMJS outputs against ORT: none, f16, f32, both (default none)\n  --ort-ep EP         ORT execution provider for comparison: webgpu, wasm, webgpu,wasm (default webgpu)\n  --ort-model TPL     ORT comparison model path template with {batch}/{dtype} placeholders (default t1 family)\n  --fixture-baseline PATH  Native fixture baseline JSONL served path (default /fixtures/lc0/native_fen_only_blas.jsonl)\n  --tie-epsilon X     Tolerate best-move mismatches whose competing priors are within X (recorded as tieTolerated; default strict)\n  --game-plies N      Run a same-line tree-reuse A/B game sequence of N plies (fresh-tree leg defines the line)\n  --game-visits N     Visits per game-sequence search (default searchVisits or 16)\n  --game-start-fen F  Game-sequence start position (default startpos)\n  --search-visits N   Also run TVMJS-vs-ORT search parity with fixed visits\n  --search-fixtures N Number of fixtures for search parity (default 2)\n  --search-repeats N  Repeat search parity rows for timing stability (default 1)\n  --search-pipeline-depth N  Evaluate this many TVMJS batches concurrently during search parity (default 1)\n  --stockfish-score-depth N  Score TVMJS/ORT post-search moves at fixed Stockfish depth\n  --stockfish-score-ms N     Score TVMJS/ORT post-search moves by Stockfish movetime\n  --base-url URL      Use existing server instead of starting Vite\n  --host HOST         Vite host (default ${DEFAULT_HOST})\n  --port N            Vite port (default ${DEFAULT_PORT})\n  --timeout MS        Overall timeout (default ${DEFAULT_TIMEOUT_MS})\n  --agent-browser BIN Browser automation binary (default AGENT_BROWSER_BIN or agent-browser)\n  --out PATH          JSON artifact path\n  --no-server         Do not auto-start Vite\n  -h, --help          Show help\n`;
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = parseScriptArgs(argv, {
     options: {
       batch: { type: 'string', default: '8' },
@@ -56,8 +57,13 @@ function parseArgs(argv) {
   });
   args.fensFile = args.fens;
   delete args.fens;
-  if (args.fensFile) args.fixtures = true;
-  if (args.noFixtures) args.fixtures = false;
+  const fixturesIndex = argv.lastIndexOf('--fixtures');
+  const noFixturesIndex = argv.lastIndexOf('--no-fixtures');
+  const fensIndex = argv.findLastIndex((arg) => arg === '--fens' || arg.startsWith('--fens='));
+  if (fensIndex > Math.max(fixturesIndex, noFixturesIndex)) args.fixtures = true;
+  else if (noFixturesIndex > fixturesIndex) args.fixtures = false;
+  else if (fixturesIndex >= 0) args.fixtures = true;
+  if (!args.fixtures) args.fensFile = '';
   delete args.noFixtures;
   args.batch = Number(args.batch);
   args.fixtureOffset = Number(args.fixtureOffset);
@@ -349,7 +355,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error?.stack || error?.message || String(error));
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || String(error));
+    process.exit(1);
+  });
+}
