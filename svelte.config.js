@@ -16,7 +16,7 @@ export default {
         'base-uri': ['self'],
         'object-src': ['none'],
         'frame-ancestors': ['self'],
-        'script-src': ['self', 'unsafe-eval', 'wasm-unsafe-eval', 'blob:', 'https://assets.0x88.app'],
+        'script-src': ['self', 'unsafe-eval', 'wasm-unsafe-eval', 'blob:', 'https://assets.0x88.app', 'https://static.cloudflareinsights.com'],
         'style-src': ['self', 'unsafe-inline'],
         'img-src': ['self', 'data:', 'blob:'],
         'font-src': ['self', 'data:'],
