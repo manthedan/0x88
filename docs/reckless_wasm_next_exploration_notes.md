@@ -36,10 +36,10 @@ The avx512 path permutes 64-byte ray tables with `vpermb`. wasm has no
   the subtracted indexes are proven in-range, otherwise keep standard
   swizzle. Do not relax this kernel first; measure the standard version.
 
-Validation: the accumulator add/sub probe pattern
-(`reckless:probe-nnue-accum-simd`) extends naturally — generate a standalone
-probe with the scalar `push_threats_single` shape and the swizzle version,
-require exact parity over randomized boards' threat deltas, then wire into
+Validation: the former accumulator add/sub standalone-probe pattern extends
+naturally — generate a narrow probe with the scalar `push_threats_single`
+shape and the swizzle version, require exact parity over randomized boards'
+threat deltas, then wire it into
 the build-script patch behind `RECKLESS_WASM_SIMD_NNUE=1` and re-run the
 rotated-suite parity protocol.
 

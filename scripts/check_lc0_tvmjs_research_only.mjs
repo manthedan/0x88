@@ -9,8 +9,8 @@
 // policy — accepted for self-hosted use).
 //
 // The policy this script now enforces:
-//   1. ORT stays the DEFAULT runtime: normalizeLc0Runtime must fall back to
-//      'onnx' in both arena and analysis.
+//   1. ORT stays the DEFAULT runtime: the shared normalizeLc0Runtime falls
+//      back to 'onnx', and both arena and analysis consume that normalizer.
 //   2. LC0 whole-model TVMJS stays page-level and non-default. Centipawn has
 //      a separately promoted TVMJS runtime in the shared registry.
 import { readFile } from 'node:fs/promises';
@@ -29,11 +29,20 @@ const FORBIDDEN = [
 ];
 
 const DEFAULT_RUNTIME_ASSERTIONS = [
-  { path: 'src/lc0/arenaBrowser.ts', pattern: /function normalizeLc0Runtime[\s\S]{0,600}?return 'onnx';/, reason: 'Arena LC0 runtime must default to onnx.' },
+  {
+    path: 'src/lc0/browserLc0Runtime.ts',
+    pattern: /export function normalizeLc0Runtime[\s\S]{0,600}?return 'onnx';/,
+    reason: 'The shared LC0 runtime normalizer must default to onnx.',
+  },
+  {
+    path: 'src/lc0/arenaBrowser.ts',
+    pattern: /normalizeLc0Runtime,\s*} from '\.\/browserLc0Runtime\.ts';/,
+    reason: 'Arena must consume the shared LC0 runtime normalizer.',
+  },
   {
     path: 'src/lc0/analysisBrowser.ts',
-    pattern: /function normalizeLc0Runtime[\s\S]{0,600}?return 'onnx';/,
-    reason: 'Analysis LC0 runtime must default to onnx.',
+    pattern: /normalizeLc0Runtime,\s*} from '\.\/browserLc0Runtime\.ts';/,
+    reason: 'Analysis must consume the shared LC0 runtime normalizer.',
   },
 ];
 

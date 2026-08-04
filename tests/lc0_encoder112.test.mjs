@@ -121,3 +121,7 @@ test('LC0 classical 112 explicit history sets repetition planes for repeated pos
   assert.equal(encoded.masks[5 * 13 + 12], 0n, 'older non-repeated position leaves repetition plane empty');
   assert.equal(planeValue(encoded, 12, 'a1'), 1, 'repetition plane is all ones');
 });
+
+test('LC0 classical 112 rejects corrupt history FENs', () => {
+  assert.throws(() => encodeLc0Classical112({ positions: ['not-a-fen', START_FEN] }, { historyFill: 'fen_only' }), /Invalid FEN/);
+});

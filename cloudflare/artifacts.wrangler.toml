@@ -1,7 +1,7 @@
 name = "lc0-artifact-assets"
 main = "artifact-assets-worker.mjs"
 compatibility_date = "2026-06-22"
-workers_dev = true
+workers_dev = false
 
 [[r2_buckets]]
 binding = "ARTIFACTS"

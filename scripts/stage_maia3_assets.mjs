@@ -2,8 +2,8 @@
 import { spawnSync } from 'node:child_process';
 // Stage the Maia3 models for a clean checkout.
 //
-// The repo commits only symlinks (public/models/maia3/*.onnx ->
-// ../../../../models/maia3/...) plus a manifest with expected SHA-256s.
+// The repo commits only the manifest and provenance. Model files are staged in
+// a sibling cache and exposed through ignored local symlinks.
 // Two artifacts:
 //  - maia3_simplified.onnx: downloaded byte-identical from the pinned
 //    upstream commit of CSSLab/maia-platform-frontend.
@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 // Env overrides: MAIA3_MODEL_DIR, MAIA3_SOURCE_URL, MAIA3_PYTHON.
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readlink, rename, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readlink, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -33,10 +33,8 @@ const upstream = entries.find((entry) => !entry.derivedFrom);
 const derived = entries.filter((entry) => entry.derivedFrom);
 if (!upstream) throw new Error(`no upstream (non-derived) model entry in ${MANIFEST}`);
 
-const linkPath = `public/models/maia3/${upstream.file}`;
-const linkTarget = await readlink(linkPath).catch(() => null);
-const defaultDir = linkTarget ? path.dirname(path.resolve(path.dirname(linkPath), linkTarget)) : '../models/maia3';
-const targetDir = process.env.MAIA3_MODEL_DIR ?? defaultDir;
+const publicDir = 'public/models/maia3';
+const targetDir = process.env.MAIA3_MODEL_DIR ?? '../models/maia3';
 const python = process.env.MAIA3_PYTHON ?? '.venv-onnx/bin/python';
 
 async function sha256(filePath) {
@@ -116,5 +114,20 @@ onnx.save(version_converter.convert_version(m, 21), ${JSON.stringify(op21Path)})
   actions.push({ file: entry.file, action: 'derived', sha256: digest });
 }
 
-console.log(JSON.stringify({ ok: true, targetDir, actions }, null, 2));
+const links = [];
+for (const entry of entries) {
+  if (!(await isStaged(entry))) continue;
+  const linkPath = path.join(publicDir, entry.file);
+  const targetPath = path.resolve(targetDir, entry.file);
+  const relativeTarget = path.relative(path.dirname(linkPath), targetPath);
+  const existing = await lstat(linkPath).catch(() => null);
+  const existingTarget = existing?.isSymbolicLink() ? await readlink(linkPath) : null;
+  if (!existing || existingTarget !== relativeTarget) {
+    if (existing) await rm(linkPath, { force: true });
+    await symlink(relativeTarget, linkPath);
+  }
+  links.push({ file: entry.file, target: relativeTarget });
+}
+
+console.log(JSON.stringify({ ok: true, targetDir, actions, links }, null, 2));
 console.log('Now run: npm run maia3:check-assets');

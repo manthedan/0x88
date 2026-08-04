@@ -2,11 +2,9 @@
 
 ## 2026-06-04 accumulator add/sub prototype
 
-This is a narrow, standalone WASM SIMD probe for the NNUE accumulator update shape, not a full Reckless backend rewrite. Run it with:
-
-```sh
-npm run reckless:probe-nnue-accum-simd
-```
+This was a narrow, standalone WASM SIMD probe for the NNUE accumulator update
+shape, not a full Reckless backend rewrite. The script and package command were
+retired after the production SIMD backend was integrated.
 
 What the script does:
 

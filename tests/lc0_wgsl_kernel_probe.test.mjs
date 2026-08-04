@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { Lc0WebHybridEvaluator } from '../src/lc0/hybridEvaluator.ts';
 import {
   createLc0WebGpuPipelineCache,
   createTinyAttentionOutputOnnxForTest,
@@ -9,7 +10,6 @@ import {
   createTinyMatmulAddOnnxForTest,
   createTinyPolicyValueHeadsOnnxForTest,
   f16BitsToF32,
-  Lc0WebHybridEvaluator,
   lc0WebEncoderBlockTensorNames,
   retireLc0WebGpuBufferAfterSubmittedWork,
 } from '../src/lc0/wgslMatmulAddProbe.ts';

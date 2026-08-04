@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseScriptArgs } from './lib/cli.mjs';
-import { spawnCapture } from './lib/process.mjs';
-import { waitForOutput } from './lib/server.mjs';
+import { runAgent } from './lib/process.mjs';
+import { startViteServer, waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5203;
@@ -61,48 +60,6 @@ function parseArgs(argv) {
   }
   if (!['argmax', 'sample'].includes(args.style)) throw new Error(`Invalid --style: ${args.style}`);
   return args;
-}
-
-function startServer(args) {
-  if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.ready = waitForOutput(server, {
-    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
-    timeoutMs: 30_000,
-    label: 'Vite dev server',
-  });
-  return server;
-}
-
-async function waitForServer(baseUrl, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(new URL('/lab/lc0-maia3-smoke.html', baseUrl), { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
-}
-
-async function runAgent(args, commandArgs, timeoutMs, session) {
-  const fullArgs = ['--json', ...(session ? ['--session', session] : []), ...commandArgs];
-  const stdout = await spawnCapture(args.agentBrowser, fullArgs, { echoStderr: true, timeoutMs });
-  const parsed = stdout ? JSON.parse(stdout.trim()) : null;
-  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-    if (parsed.success === false) throw new Error(`${args.agentBrowser} ${commandArgs.join(' ')} failed: ${parsed.error ?? stdout}`);
-    return parsed.data ?? parsed;
-  }
-  return parsed;
 }
 
 async function closeSession(args, session) {
@@ -205,10 +162,10 @@ async function main() {
     console.log(String(smokeUrl(args)));
     return;
   }
-  const server = startServer(args);
+  const server = startViteServer(args);
   try {
     if (server) await server.ready;
-    await waitForServer(args.baseUrl);
+    await waitForHttp(args.baseUrl);
     const result = await runSmoke(args);
     console.log(JSON.stringify({ ok: true, rows: result.rows?.length ?? 0, elapsedMs: result.elapsedMs, out: args.out }, null, 2));
   } finally {

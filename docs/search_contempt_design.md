@@ -229,15 +229,13 @@ the opponent** (validated across ±1000) and has a `Contempt_Analysis`
 mode that reports the *practical* best move against that opponent model
 rather than the objective one.
 
-**The wasm32-wasip1 port is built and gated** (2026-06-11):
+**The now-retired wasm32-wasip1 lab port was built and gated** (2026-06-11):
 
-- `patches/monty-wasip1.patch` (~130 lines on upstream `0950aff1`):
-  inline-execution shims for the four `std::thread::scope` sites
-  (search loop, go/stop stdin poll, tree init/clear), zstd+memmap2 moved
-  to non-wasm target deps, a wasm `read_into_struct_unchecked` that reads
-  nets into a leaked aligned box, and argv-seeded UCI commands for the
-  one-shot worker mode. Build: `scripts/build_monty_wasi.mjs` →
-  `public/monty/monty.wasm` (~560KB).
+- The local patch and build harness added inline-execution shims for the four
+  `std::thread::scope` sites (search loop, go/stop stdin poll, tree init/clear),
+  moved zstd+memmap2 to non-wasm target dependencies, read networks into a
+  leaked aligned box on wasm, and accepted argv-seeded UCI commands for the
+  one-shot worker mode. The resulting artifact was ~560KB before networks.
 - Networks are **not embedded**: the build uses Monty's non-embed path,
   which opens the raw nets by canonical name from the WASI preopened cwd
   (`nn-09da29a4b6ed.network` value ~661MB, `nn-6e49a41bd7c0.network`
@@ -248,8 +246,8 @@ rather than the objective one.
 - Loader: `recklessWasiWorker.ts` gained generic `preopenFiles`
   (fetch + cache + progress); `MontyEngine` (montyEngine.ts) is a
   persistent-preferred `BrowserUciEngine` with a `contempt` option.
-- Gates: `scripts/monty_wasi_smoke.mjs` (browser_wasi_shim + real nets);
-  `lab/monty-smoke.html` click-tested in Chromium (persistent mode).
+- The retired browser-WASI smoke harness and `lab/monty-smoke.html` gated the
+  port in Chromium persistent mode.
   Search parity vs the native release binary is **bit-identical** at
   fixed nodes (same node counts/scores/PVs, contempt WDL rescaling
   identical to the 0.01%), browser ~50-60k nps. Contempt visibly works:

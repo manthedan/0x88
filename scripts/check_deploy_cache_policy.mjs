@@ -30,6 +30,7 @@ const INVARIANTS = [
   'no path declared twice',
   'content-addressed artifacts carry cross-origin CORP under COEP',
   'cross-origin isolation (COOP/COEP) is declared site-wide',
+  'content security policy is declared site-wide',
   'mutable model and engine aliases revalidate',
   'the configured build command runs this gate',
   'no forced .br rewrite in publish-directory _redirects',
@@ -43,6 +44,8 @@ const INVARIANTS = [
 const ONE_YEAR_SECONDS = 31536000;
 
 const immutableAllowed = (path) => path === '/artifacts/sha256/*' || path === '/_app/immutable/*' || path === '/releases/*';
+const CONTENT_SECURITY_POLICY =
+  "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://assets.0x88.app; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self'; manifest-src 'self'";
 
 // Directive order and case are not significant in these token-list headers, so
 // requirements compare the directive set rather than one exact spelling.
@@ -96,6 +99,7 @@ const REQUIRED = [
   // it is the single most valuable thing this gate can hold.
   ['/*', 'cross-origin-opener-policy', 'same-origin', 'cross-origin isolation COOP'],
   ['/*', 'cross-origin-embedder-policy', 'require-corp', 'cross-origin isolation COEP'],
+  ['/*', 'content-security-policy', CONTENT_SECURITY_POLICY, 'site-wide Content-Security-Policy'],
   ['/*.html', 'cache-control', 'public, max-age=0, must-revalidate', 'HTML revalidation Cache-Control'],
   ['/channels/*', 'cache-control', 'public, max-age=0, no-cache', 'channel revalidation Cache-Control'],
   ['/artifacts/sha256/*', 'cache-control', 'public, max-age=31536000, immutable', 'content-addressed immutable Cache-Control'],

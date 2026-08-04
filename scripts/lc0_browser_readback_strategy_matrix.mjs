@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { dirname } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { parseScriptArgs } from './lib/cli.mjs';
 import { spawnCapture } from './lib/process.mjs';
-import { waitForOutput } from './lib/server.mjs';
+import { startViteServer, waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
@@ -99,40 +97,6 @@ async function loadFens(path, maxPositions) {
   return fens;
 }
 
-function startServer(args) {
-  if (args.noServer) return null;
-  const viteBin = process.platform === 'win32' ? 'node_modules/.bin/vite.cmd' : 'node_modules/.bin/vite';
-  const server = spawn(viteBin, ['--host', args.host, '--port', String(args.port), '--strictPort'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, FORCE_COLOR: '0' },
-  });
-  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
-  server.stdout.on('data', echoOutput);
-  server.stderr.on('data', echoOutput);
-  server.ready = waitForOutput(server, {
-    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
-    timeoutMs: 30_000,
-    label: `Vite dev server (port ${args.port})`,
-  });
-  return server;
-}
-
-async function waitForServer(baseUrl, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(new URL('/single-engine', baseUrl), { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
-}
-
 function parseJsonStdout(stdout) {
   const start = stdout.indexOf('{');
   if (start < 0) throw new Error(`No JSON object in command output:\n${stdout}`);
@@ -206,7 +170,7 @@ function commandForCell(args, cell) {
   };
 }
 
-function pick(obj, path) {
+function _pick(obj, path) {
   let cur = obj;
   for (const part of path.split('.')) cur = cur?.[part];
   return cur;
@@ -425,11 +389,11 @@ async function main() {
     );
     return;
   }
-  const server = startServer(args);
+  const server = startViteServer(args);
   const startedAt = new Date().toISOString();
   try {
     if (server) await server.ready;
-    await waitForServer(args.baseUrl);
+    await waitForHttp(args.baseUrl);
     const cells = [];
     for (const cell of plan) {
       try {

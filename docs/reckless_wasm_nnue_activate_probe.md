@@ -2,11 +2,8 @@
 
 This standalone probe targets Reckless' scalar `activate_ft` shape: clipped `i16` PST/threat sums, pairwise product, right shift, and packed `u8` feature output.
 
-Run:
-
-```sh
-npm run reckless:probe-nnue-activate-simd
-```
+The standalone script and package command were retired after the SIMD backend
+was integrated. This document retains the measured result.
 
 Result from 2026-06-04:
 

@@ -13,6 +13,7 @@ import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcher, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
+import { buttonEl, el, maybeEl, selectEl } from './browserDom.ts';
 import {
   BIG_NETS,
   type BigNetConfig,
@@ -138,24 +139,6 @@ function releaseWakeLock(): void {
   if (!wakeLock) return;
   void wakeLock.release().catch(() => {});
   wakeLock = null;
-}
-
-// ---------------------------------------------------------------------------
-// DOM helpers
-// ---------------------------------------------------------------------------
-function el(id: string): HTMLElement {
-  const found = document.getElementById(id);
-  if (!found) throw new Error(`missing element #${id}`);
-  return found;
-}
-function maybeEl(id: string): HTMLElement | null {
-  return document.getElementById(id);
-}
-function selectEl(id: string): HTMLSelectElement {
-  return el(id) as HTMLSelectElement;
-}
-function buttonEl(id: string): HTMLButtonElement {
-  return el(id) as HTMLButtonElement;
 }
 
 /** Start FEN for the current game; odds opponents remove their own queen. */

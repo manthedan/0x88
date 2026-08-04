@@ -52,3 +52,42 @@ export function spawnCapture(command, commandArgs, { timeoutMs = 30_000, cwd, en
     }
   });
 }
+
+/**
+ * Run agent-browser in JSON mode. Supports both historical call shapes while
+ * scripts migrate:
+ * - runAgent(args, commandArgs, timeoutMs?, session?, input?)
+ * - runAgent(args, session, commandArgs, timeoutMsOrInput?)
+ */
+export async function runAgent(args, commandArgsOrSession, timeoutOrCommandArgs = 30_000, sessionOrTimeout, input) {
+  let commandArgs;
+  let timeoutMs;
+  let session;
+  let commandInput = input;
+  if (Array.isArray(commandArgsOrSession)) {
+    commandArgs = commandArgsOrSession;
+    timeoutMs = typeof timeoutOrCommandArgs === 'number' ? timeoutOrCommandArgs : 30_000;
+    session = typeof sessionOrTimeout === 'string' ? sessionOrTimeout : args.session;
+  } else {
+    session = commandArgsOrSession;
+    commandArgs = timeoutOrCommandArgs;
+    if (typeof sessionOrTimeout === 'number') timeoutMs = sessionOrTimeout;
+    else {
+      timeoutMs = args.timeoutMs ?? 30_000;
+      commandInput = sessionOrTimeout;
+    }
+  }
+  const fullArgs = ['--json', ...(session ? ['--session', session] : []), ...commandArgs];
+  const stdout = await spawnCapture(args.agentBrowser, fullArgs, {
+    timeoutMs,
+    input: commandInput,
+    echoStderr: args.agentBrowserEchoStderr === true,
+  });
+  if (!stdout) return null;
+  const parsed = JSON.parse(stdout);
+  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+    if (parsed.success === false) throw new Error(`${args.agentBrowser} ${commandArgs.join(' ')} failed: ${parsed.error ?? stdout}`);
+    return parsed.data ?? parsed;
+  }
+  return parsed;
+}

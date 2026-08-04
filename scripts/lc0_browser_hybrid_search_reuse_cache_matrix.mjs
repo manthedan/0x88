@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
 import { parseScriptArgs } from './lib/cli.mjs';
 import { spawnCapture } from './lib/process.mjs';
-import { waitForOutput } from './lib/server.mjs';
+import { startViteServer, waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
@@ -116,36 +114,6 @@ function parseArgs(argv) {
   return args;
 }
 
-function startServer(args) {
-  if (args.explicitBaseUrl) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
-  server.stdout.on('data', echoOutput);
-  server.stderr.on('data', echoOutput);
-  server.ready = waitForOutput(server, {
-    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
-    timeoutMs: 30_000,
-    label: `Vite dev server (port ${args.port})`,
-  });
-  return server;
-}
-
-async function waitForServer(baseUrl, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(new URL('/single-engine', baseUrl), { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
-}
-
 function compactCell(result, combo) {
   const stats = result.search?.aggregateStats ?? {};
   const lastStats = result.search?.stats ?? {};
@@ -249,11 +217,11 @@ async function main() {
     console.log(JSON.stringify({ baseUrl: args.baseUrl, combos }, null, 2));
     return;
   }
-  const server = startServer(args);
+  const server = startViteServer(args);
   const startedAt = new Date().toISOString();
   try {
     if (server) await server.ready;
-    await waitForServer(args.baseUrl);
+    await waitForHttp(args.baseUrl);
     const cells = [];
     for (let i = 0; i < combos.length; i++) cells.push(await runCell(args, combos[i], i + 1, combos.length));
     const artifact = {

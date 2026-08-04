@@ -1,21 +1,32 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
-import { POLICY_MAP } from '../src/chess/policyMap.ts';
+import { POLICY_MAP, POLICY_MOVES, POLICY_SIZE } from '../src/chess/policyMap.ts';
 import { OnnxEvaluator } from '../src/nn/onnxEvaluator.ts';
 
-const model = '/tmp/residual_smoke.onnx';
-const metaPath = '/tmp/residual_smoke.meta.json';
-
-test('ONNX evaluator masks legal policy and returns WDL', { skip: !existsSync(model) || !existsSync(metaPath) }, async () => {
-  const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
-  const evaluator = await OnnxEvaluator.create(model, meta);
+test('ONNX evaluator masks legal policy and returns normalized WDL', async () => {
+  const meta = {
+    kind: 'student_onnx',
+    architecture: 'residual_tower',
+    policy_map: POLICY_MAP,
+    moves: POLICY_MOVES,
+    channels: 1,
+    blocks: 1,
+    history_plies: 2,
+    input_planes: 46,
+  };
+  const policyLogits = new Float32Array(POLICY_SIZE);
+  policyLogits.fill(-4);
+  const session = {
+    run: async () => ({ policy_logits: { data: policyLogits }, wdl_logits: { data: new Float32Array([2, 1, 0]) } }),
+  };
+  const evaluator = new OnnxEvaluator(session, meta);
   const ev = await evaluator.evaluate(parseFen(START_FEN));
   assert.equal(ev.policy.size, 20);
   const mass = [...ev.policy.values()].reduce((a, b) => a + b, 0);
   assert.ok(Math.abs(mass - 1) < 1e-5, mass);
   assert.equal(ev.wdl.length, 3);
+  assert.ok(ev.wdl[0] > ev.wdl[1] && ev.wdl[1] > ev.wdl[2]);
 });
 
 test('ONNX evaluator requires named policy and WDL outputs', async () => {

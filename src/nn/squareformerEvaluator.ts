@@ -1,4 +1,4 @@
-import { type BoardState, boardToFen, type Color, opposite, type PieceRole } from '../chess/board.ts';
+import { type BoardState, boardToFen, type Color, opposite, type PieceRole, parseFen } from '../chess/board.ts';
 import { isStmWhiteRankflip, normalizedMoveToOriginal, normalizePositionForStmWhite, rankFlipSquare } from '../chess/boardNormalization.ts';
 import { type Move, moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
@@ -84,11 +84,7 @@ export function squareformerFloatInput(board: BoardState, meta: SquareFormerMeta
   addBoardFeatures(data, board, 0, planesPerBoard, inputDim);
   for (let h = 0; h < history; h++) {
     if (!historyFens[h]) continue;
-    try {
-      addBoardFeatures(data, parseFenCached(historyFens[h]), h + 1, planesPerBoard, inputDim);
-    } catch {
-      /* ignore bad history */
-    }
+    addBoardFeatures(data, parseFen(historyFens[h]), h + 1, planesPerBoard, inputDim);
   }
   const base = (history + 1) * planesPerBoard;
   for (let sq = 0; sq < 64; sq++) {
@@ -152,12 +148,9 @@ export function squareformerCompactInput(
   addCompactBoard(data, board, 0, stride);
   for (let h = 0; h < history; h++) {
     if (!historyFens[h]) continue;
-    try {
-      historyBoards[h] = parseFenCached(historyFens[h]);
-      addCompactBoard(data, historyBoards[h]!, h + 1, stride);
-    } catch {
-      /* ignore bad history */
-    }
+    const historyBoard = parseFen(historyFens[h]);
+    historyBoards[h] = historyBoard;
+    addCompactBoard(data, historyBoard, h + 1, stride);
   }
   const base = history + 1;
   const stm = board.turn === 'w' ? 1 : 2;
@@ -182,25 +175,6 @@ export function squareformerCompactInput(
     }
   }
   return data;
-}
-
-function parseFenCached(fen: string): BoardState {
-  // Local import cycle avoidance: parseFen is pure but kept separate from hot import line readability.
-  const [placement, turn = 'w', castling = '-', ep = '-', half = '0', full = '1'] = fen.trim().split(/\s+/);
-  const squares: BoardState['squares'] = Array(64).fill(null);
-  const ranks = placement.split('/');
-  for (let fenRank = 0; fenRank < 8; fenRank++) {
-    let file = 0;
-    for (const ch of ranks[fenRank] ?? '') {
-      if (/\d/.test(ch)) file += Number(ch);
-      else {
-        const color = ch === ch.toUpperCase() ? 'w' : 'b';
-        squares[file++ + (7 - fenRank) * 8] = `${color}${ch.toLowerCase()}` as never;
-      }
-    }
-  }
-  const epSquare = /^[a-h][1-8]$/.test(ep) ? ep.charCodeAt(0) - 97 + (Number(ep[1]) - 1) * 8 : null;
-  return { squares, turn: turn as 'w' | 'b', castling, epSquare, halfmove: Number(half), fullmove: Number(full) };
 }
 
 export function squareformerLegalCandidateInputs(

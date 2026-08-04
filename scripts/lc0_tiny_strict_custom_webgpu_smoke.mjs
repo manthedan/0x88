@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseScriptArgs } from './lib/cli.mjs';
-import { spawnCapture } from './lib/process.mjs';
-import { waitForOutput } from './lib/server.mjs';
+import { runAgent } from './lib/process.mjs';
+import { startViteServer, waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5281;
@@ -41,53 +40,6 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0) throw new Error(`Invalid --timeout: ${args.timeoutMs}`);
   if (args.skipAnalysis && args.skipArena) throw new Error('Nothing to run: both --skip-analysis and --skip-arena were set');
   return args;
-}
-
-function startServer(args) {
-  if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
-  server.stdout.on('data', echoOutput);
-  server.stderr.on('data', echoOutput);
-  server.ready = waitForOutput(server, {
-    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
-    timeoutMs: 30_000,
-    label: `Vite dev server (port ${args.port})`,
-  });
-  return server;
-}
-
-async function waitForServer(baseUrl, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(new URL('/app/analysis', baseUrl), { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
-}
-
-function parseAgentJson(stdout) {
-  const parsed = JSON.parse(stdout.trim());
-  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-    if (parsed.success === false) throw new Error(parsed.error ?? stdout);
-    return parsed.data ?? parsed;
-  }
-  return parsed;
-}
-
-async function runAgent(args, commandArgs, timeoutMs, session, stdin) {
-  const fullArgs = ['--json', ...(session ? ['--session', session] : []), ...commandArgs];
-  const stdout = await spawnCapture(args.agentBrowser, fullArgs, { echoStderr: true, timeoutMs, input: stdin });
-  return parseAgentJson(stdout);
 }
 
 async function evalPage(args, session, expression, timeoutMs = 30_000) {
@@ -256,11 +208,11 @@ async function main() {
     console.log(JSON.stringify({ baseUrl: args.baseUrl, plan }, null, 2));
     return;
   }
-  const server = startServer(args);
+  const server = startViteServer(args);
   const rows = [];
   try {
     await server?.ready;
-    await waitForServer(args.baseUrl);
+    await waitForHttp(args.baseUrl);
     if (!args.skipAnalysis) rows.push(await runAnalysisSmoke(args));
     if (!args.skipArena) rows.push(await runArenaSmoke(args));
     const summary = {

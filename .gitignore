@@ -33,6 +33,14 @@ dist-client/
 .deploy-public/
 .svelte-kit/
 public/models/*.pt
+# Large neural-network assets are staged locally or fetched from the artifact
+# host. Ignore both copied files and local symlinks so clean clones never carry
+# dangling links into a sibling checkout.
+public/models/lc0/*.onnx
+public/models/lc0/*.lc0web/
+public/models/maia3/*.onnx
+/.netlify/
+cloudflare/.wrangler/
 # Reckless binaries and nets are built locally, never committed: the WASI wasm
 # embeds a ~63 MB NNUE. The corresponding-source archives ARE committed, because
 # Reckless is AGPL-3.0 and they are the source-availability obligation for the

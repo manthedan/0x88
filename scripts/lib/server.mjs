@@ -1,3 +1,6 @@
+import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
+
 // Matches ANSI escape sequences (e.g. vite's colored "ready in 123ms" output).
 // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips ANSI escape sequences from child process output
 const ANSI_PATTERN = /\[[0-?]*[ -/]*[@-~]/g;
@@ -40,4 +43,40 @@ export function waitForOutput(child, { match, timeoutMs = 30_000, label = 'proce
     child.stderr?.on('data', onData);
     child.once('exit', onExit);
   });
+}
+
+/** Start the repository Vite server and expose a readiness promise on it. */
+export function startViteServer(args, { env, strictPort = true, timeoutMs = 30_000 } = {}) {
+  if (args.noServer || args.explicitBaseUrl) return null;
+  const commandArgs = ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), ...(strictPort ? ['--strictPort'] : [])];
+  const server = spawn('npm', commandArgs, {
+    env: env ? { ...process.env, ...env } : process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
+  server.stdout.on('data', echoOutput);
+  server.stderr.on('data', echoOutput);
+  server.ready = waitForOutput(server, {
+    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
+    timeoutMs,
+    label: `Vite dev server (port ${args.port})`,
+  });
+  return server;
+}
+
+/** Poll an HTTP route until the server responds successfully. */
+export async function waitForHttp(baseUrl, { path = '/', timeoutMs = 30_000, label = 'Vite dev server' } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(new URL(path, baseUrl), { cache: 'no-store' });
+      if (response.ok) return;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(250);
+  }
+  throw new Error(`${label} did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
 }

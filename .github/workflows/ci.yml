@@ -16,14 +16,21 @@ jobs:
         with:
           lfs: false
       - name: Fetch required release fixture
-        run: git lfs pull --include="public/models/bt4_soap_rem_c19000_final.onnx,public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm" --exclude=""
-      - name: Remove unavailable local-model symlinks
-        run: find public/models -type l -delete
+        run: git lfs pull --include="public/models/bt4_soap_rem_c19000_final.onnx,public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm,public/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/squareformer-ffn/**" --exclude=""
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
+      - name: Cache LC0 parity assets
+        uses: actions/cache@v4
+        with:
+          path: ../models/lc0-bestnets
+          key: lc0-parity-${{ hashFiles('public/models/lc0/manifest.json') }}
       - run: npm ci
+      - name: Stage and verify LC0 parity assets
+        run: npm run test:stage-lc0-assets
+      - name: Biome
+        run: npm run check:biome
       - name: Dependency audit
         run: npm audit
       - name: Typecheck and tests

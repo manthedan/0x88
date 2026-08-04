@@ -639,13 +639,11 @@ function isForcingMove(board: BoardState, move: Move): boolean {
   const target = board.squares[move.to];
   if (target && target[0] !== board.turn) return true;
   if (moving?.[1] === 'p' && move.to === board.epSquare) return true;
-  try {
-    // makeMove flips side-to-move, so the default inCheck(child) asks whether
-    // the opponent is in check after this move.
-    return inCheck(makeMove(board, move));
-  } catch {
-    return false;
-  }
+  // Search edges must contain legal moves. If that invariant breaks, surface
+  // the error instead of silently changing progressive-widening behavior.
+  // makeMove flips side-to-move, so the default inCheck(child) asks whether
+  // the opponent is in check after this move.
+  return inCheck(makeMove(board, move));
 }
 
 export class ProgressiveWideningPUCTPolicy extends ClassicPUCTPolicy {
@@ -1503,11 +1501,15 @@ function selectLeaf(
   transpositionTable?: Map<string, Node>,
   stats?: SearchStats,
 ): SelectedLeaf {
-  if (!node.expanded || node.terminalValue !== null) return { node, path };
-  const best = selectBestEdge(node, searchPolicy, context);
-  best.virtualVisits += 1;
-  if (!best.child) best.child = makeChild(node, best.move, transpositionTable, stats);
-  return selectLeaf(best.child, searchPolicy, context, [...path, best], transpositionTable, stats);
+  let current = node;
+  while (current.expanded && current.terminalValue === null) {
+    const best = selectBestEdge(current, searchPolicy, context);
+    best.virtualVisits += 1;
+    if (!best.child) best.child = makeChild(current, best.move, transpositionTable, stats);
+    path.push(best);
+    current = best.child;
+  }
+  return { node: current, path };
 }
 
 function prepareExpansion(node: Node, stats: SearchStats, context: SearchPolicyContext): Move[] | number {
@@ -1531,7 +1533,52 @@ function prepareExpansion(node: Node, stats: SearchStats, context: SearchPolicyC
   return moves;
 }
 
+function invalidEvaluation(board: BoardState, detail: string): never {
+  throw new Error(`Invalid evaluator output for ${boardToFen(board)}: ${detail}`);
+}
+
+function assertEvaluationMap(name: string, value: unknown, board: BoardState, nonNegative: boolean): asserts value is Map<number, number> {
+  if (!(value instanceof Map)) invalidEvaluation(board, `${name} is not a Map`);
+  for (const [actionId, entry] of value) {
+    if (!Number.isSafeInteger(actionId) || actionId < 0) invalidEvaluation(board, `${name} contains invalid action id ${String(actionId)}`);
+    if (!Number.isFinite(entry)) invalidEvaluation(board, `${name}[${actionId}] is not finite: ${String(entry)}`);
+    if (nonNegative && entry < 0) invalidEvaluation(board, `${name}[${actionId}] is negative: ${entry}`);
+  }
+}
+
+function assertEvaluationWdl(name: string, value: unknown, board: BoardState): asserts value is [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) invalidEvaluation(board, `${name} must contain exactly three values`);
+  let total = 0;
+  for (let i = 0; i < value.length; i++) {
+    const entry = value[i];
+    if (!Number.isFinite(entry)) invalidEvaluation(board, `${name}[${i}] is not finite: ${String(entry)}`);
+    if (entry < 0) invalidEvaluation(board, `${name}[${i}] is negative: ${entry}`);
+    total += entry;
+  }
+  if (!(total > 0) || !Number.isFinite(total)) invalidEvaluation(board, `${name} has invalid total mass: ${total}`);
+}
+
+function assertValidEvaluation(evaln: unknown, board: BoardState): asserts evaln is Evaluation {
+  if (!evaln || typeof evaln !== 'object') invalidEvaluation(board, 'result is not an object');
+  const evaluation = evaln as Partial<Evaluation>;
+  assertEvaluationMap('policy', evaluation.policy, board, true);
+  assertEvaluationWdl('wdl', evaluation.wdl, board);
+  if (evaluation.auxiliaryWdls !== undefined) {
+    if (!evaluation.auxiliaryWdls || typeof evaluation.auxiliaryWdls !== 'object') invalidEvaluation(board, 'auxiliaryWdls is not an object');
+    for (const [name, wdl] of Object.entries(evaluation.auxiliaryWdls)) assertEvaluationWdl(`auxiliaryWdls.${name}`, wdl, board);
+  }
+  if (evaluation.movesLeft !== undefined && !Number.isFinite(evaluation.movesLeft)) {
+    invalidEvaluation(board, `movesLeft is not finite: ${String(evaluation.movesLeft)}`);
+  }
+  if (evaluation.actionValues !== undefined) assertEvaluationMap('actionValues', evaluation.actionValues, board, false);
+  if (evaluation.rankScores !== undefined) assertEvaluationMap('rankScores', evaluation.rankScores, board, false);
+  if (evaluation.regrets !== undefined) assertEvaluationMap('regrets', evaluation.regrets, board, false);
+  if (evaluation.risks !== undefined) assertEvaluationMap('risks', evaluation.risks, board, false);
+  if (evaluation.uncertainties !== undefined) assertEvaluationMap('uncertainties', evaluation.uncertainties, board, false);
+}
+
 function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: SearchPolicyContext): number {
+  assertValidEvaluation(evaln, node.board);
   const raw = moves.map((move) => Math.max(0, evaln.policy.get(moveToActionId(move)) ?? 0));
   const total = raw.reduce((a, b) => a + b, 0);
   const fallback = 1 / moves.length;
@@ -1578,6 +1625,7 @@ function collectPreparedLeafBatch(
   collisionRetryLimit: number,
   inFlightEvalLeaves?: Set<Node>,
   generationId = 0,
+  fillAfterRetryLimit = false,
 ): PreparedLeafBatch {
   const selected: SelectedLeaf[] = [];
   const batchInFlightEvalLeaves = new Set<Node>();
@@ -1605,6 +1653,9 @@ function collectPreparedLeafBatch(
       inFlightEvalLeaves?.add(sel.node);
     }
     selected.push(sel);
+  }
+  if (fillAfterRetryLimit) {
+    while (selected.length < want) selected.push(selectLeaf(root, searchPolicy, context, [], transpositionTable, stats));
   }
   for (const path of retryVirtualPaths) unwindVirtualVisits(path);
 
@@ -1688,6 +1739,7 @@ async function runBatchedVisits(
   searchPolicy: SearchPolicy,
   context: SearchPolicyContext,
   batchSize: number,
+  pipelineDepth: number,
   stats: SearchStats,
   signal?: AbortSignal,
   yieldEveryMs = 0,
@@ -1697,110 +1749,46 @@ async function runBatchedVisits(
   collisionRetryLimit = batchSize * 4,
   onProgress?: () => void,
 ) {
-  let done = 0;
+  let scheduled = 0;
   let lastYield = nowMs();
-  while (done < visits && !deadlineExpired(deadlineMs)) {
+  const inFlightEvalLeaves = new Set<Node>();
+  while (scheduled < visits && !deadlineExpired(deadlineMs)) {
     throwIfAborted(signal);
-    const want = Math.min(batchSize, visits - done);
-    const selected: SelectedLeaf[] = [];
-    const inFlightEvalLeaves = new Set<Node>();
-    const retryVirtualPaths: Edge[][] = [];
-    let attempts = 0;
-    const maxAttempts = collisionMode === 'retry' ? Math.max(want, want + Math.max(0, Math.floor(collisionRetryLimit))) : want;
-    while (selected.length < want && attempts < maxAttempts) {
-      attempts += 1;
-      const sel = selectLeaf(root, searchPolicy, context, [], transpositionTable, stats);
-      if (collisionMode === 'retry' && !sel.node.expanded && sel.node.terminalValue === null) {
-        if (inFlightEvalLeaves.has(sel.node)) {
-          stats.batchLeafCollisions = (stats.batchLeafCollisions ?? 0) + 1;
-          stats.batchLeafRetries = (stats.batchLeafRetries ?? 0) + 1;
-          // Keep this temporary virtual path until batch collection finishes so
-          // subsequent selections see the leaf as in flight and can diversify.
-          retryVirtualPaths.push(sel.path);
-          continue;
-        }
-        inFlightEvalLeaves.add(sel.node);
-      }
-      selected.push(sel);
+    const batches: PreparedLeafBatch[] = [];
+    while (batches.length < pipelineDepth && scheduled < visits && !deadlineExpired(deadlineMs)) {
+      const want = Math.min(batchSize, visits - scheduled);
+      const batch = collectPreparedLeafBatch(
+        root,
+        want,
+        searchPolicy,
+        context,
+        stats,
+        transpositionTable,
+        collisionMode,
+        collisionRetryLimit,
+        inFlightEvalLeaves,
+        nextSearchTraceGenerationId(stats),
+        pipelineDepth === 1,
+      );
+      if (!batch.prepared.length) break;
+      batches.push(batch);
+      scheduled += batch.prepared.length;
     }
-    while (selected.length < want) selected.push(selectLeaf(root, searchPolicy, context, [], transpositionTable, stats));
-    for (const path of retryVirtualPaths) unwindVirtualVisits(path);
-
-    const evalNodes: Node[] = [];
-    const evalMoves: Move[][] = [];
-    const evalIndex = new Map<Node, number>();
-    const prepared: PreparedLeaf[] = [];
-    for (const sel of selected) {
-      if (sel.node.terminalValue !== null) {
-        prepared.push({ kind: 'terminal', sel, value: sel.node.terminalValue });
-        stats.terminalHits += 1;
-        continue;
-      }
-      if (sel.node.expanded) {
-        unwindVirtualVisits(sel.path);
-        throw new Error('selectLeaf returned an expanded non-terminal node');
-      }
-      const prep = prepareExpansion(sel.node, stats, context);
-      if (typeof prep === 'number') prepared.push({ kind: 'terminal', sel, value: prep });
-      else {
-        let slot = evalIndex.get(sel.node);
-        if (slot === undefined) {
-          slot = evalNodes.length;
-          evalIndex.set(sel.node, slot);
-          evalNodes.push(sel.node);
-          evalMoves.push(prep);
-        }
-        prepared.push({ kind: 'eval', sel, slot });
-      }
+    if (!batches.length) break;
+    for (let i = 0; i < batches.length; i++) recordPreparedBatchTrace(stats, root, searchPolicy, context, batches[i], pipelineDepth, i);
+    const evalResults = await evaluatePreparedLeafBatches(evaluator, batches, stats);
+    if (stats.searchTrace) {
+      stats.searchTrace.push({
+        event: 'evals-returned',
+        ...(batches.length === 1 ? { generationId: batches[0].generationId } : {}),
+        pipelineDepth,
+        evalBatchSizes: evalResults.map((evals) => evals.length),
+      });
     }
-
-    const traceBatch: PreparedLeafBatch = { generationId: nextSearchTraceGenerationId(stats), prepared, evalNodes, evalMoves };
-    recordPreparedBatchTrace(stats, root, searchPolicy, context, traceBatch, 1, 0);
-
-    let evals: Evaluation[] = [];
-    if (evalNodes.length) {
-      const contexts = evalNodes.map((node, i) => ({
-        historyFens: node.historyFens,
-        historyBoards: node.historyBoards,
-        explicitHistory: node.explicitHistory,
-        legalMoves: evalMoves[i],
-      }));
-      stats.evalCalls += evalNodes.length;
-      stats.maxEvalBatch = Math.max(stats.maxEvalBatch, evalNodes.length);
-      const batchKey = String(evalNodes.length);
-      stats.evalBatchSizeHistogram = { ...(stats.evalBatchSizeHistogram ?? {}), [batchKey]: (stats.evalBatchSizeHistogram?.[batchKey] ?? 0) + 1 };
-      const beforeMetrics = evaluatorMetrics(evaluator);
-      if (evaluator.evaluateBatch) {
-        stats.batchEvalCalls += 1;
-        evals = await evaluator.evaluateBatch(
-          evalNodes.map((node) => node.board),
-          contexts,
-        );
-      } else {
-        evals = await Promise.all(evalNodes.map((node, i) => evaluator.evaluate(node.board, contexts[i])));
-      }
-      recordEvaluatorMetricsDelta(evaluator, beforeMetrics, evalNodes.length, stats);
-      recordEvaluationTimingBatch(stats, evals);
+    for (let i = 0; i < batches.length; i++) {
+      for (const node of batches[i].evalNodes) inFlightEvalLeaves.delete(node);
+      finishPreparedLeafBatch(batches[i], evalResults[i], searchPolicy, context, stats, root, pipelineDepth, i);
     }
-    if (stats.searchTrace)
-      stats.searchTrace.push({ event: 'evals-returned', generationId: traceBatch.generationId, pipelineDepth: 1, evalBatchSizes: [evals.length] });
-    const values = evalNodes.map((node, i) => {
-      stats.expansions += 1;
-      return finishExpansion(node, evalMoves[i], evals[i], context);
-    });
-    for (let itemIndex = 0; itemIndex < prepared.length; itemIndex++) {
-      const item = prepared[itemIndex];
-      let value: number | undefined;
-      if (item.kind === 'terminal') value = item.value;
-      else {
-        value = values[item.slot];
-        if (value === undefined) throw new Error(`missing batched evaluation value for slot ${item.slot}`);
-      }
-      searchPolicy.backup(item.sel.path, value, context);
-      stats.completedVisits += 1;
-      recordBackupTrace(stats, root, searchPolicy, context, traceBatch, item, itemIndex, value, 1, 0);
-    }
-    done += want;
     onProgress?.();
     throwIfAborted(signal);
     if (deadlineExpired(deadlineMs)) break;
@@ -1865,72 +1853,6 @@ async function evaluatePreparedLeafBatches(evaluator: Evaluator, batches: Prepar
   let evalBatchIndex = 0;
   for (const batch of batches) out.push(batch.evalNodes.length ? evalResults[evalBatchIndex++] : []);
   return out;
-}
-
-async function runPipelinedBatchedVisits(
-  root: Node,
-  evaluator: Evaluator,
-  visits: number,
-  searchPolicy: SearchPolicy,
-  context: SearchPolicyContext,
-  batchSize: number,
-  pipelineDepth: number,
-  stats: SearchStats,
-  signal?: AbortSignal,
-  yieldEveryMs = 0,
-  transpositionTable?: Map<string, Node>,
-  deadlineMs?: number,
-  collisionMode: SearchBatchCollisionMode = 'retry',
-  collisionRetryLimit = batchSize * 4,
-  onProgress?: () => void,
-) {
-  let scheduled = 0;
-  let lastYield = nowMs();
-  const inFlightEvalLeaves = new Set<Node>();
-  while (scheduled < visits && !deadlineExpired(deadlineMs)) {
-    throwIfAborted(signal);
-    const batches: PreparedLeafBatch[] = [];
-    while (batches.length < pipelineDepth && scheduled < visits && !deadlineExpired(deadlineMs)) {
-      const want = Math.min(batchSize, visits - scheduled);
-      const batch = collectPreparedLeafBatch(
-        root,
-        want,
-        searchPolicy,
-        context,
-        stats,
-        transpositionTable,
-        collisionMode,
-        collisionRetryLimit,
-        inFlightEvalLeaves,
-        nextSearchTraceGenerationId(stats),
-      );
-      if (!batch.prepared.length) break;
-      batches.push(batch);
-      scheduled += batch.prepared.length;
-    }
-    if (!batches.length) break;
-    for (let i = 0; i < batches.length; i++) recordPreparedBatchTrace(stats, root, searchPolicy, context, batches[i], pipelineDepth, i);
-    const evalResults = await evaluatePreparedLeafBatches(evaluator, batches, stats);
-    if (stats.searchTrace) {
-      stats.searchTrace.push({
-        event: 'evals-returned',
-        pipelineDepth,
-        evalBatchSizes: evalResults.map((evals) => evals.length),
-      });
-    }
-    for (let i = 0; i < batches.length; i++) {
-      for (const node of batches[i].evalNodes) inFlightEvalLeaves.delete(node);
-      finishPreparedLeafBatch(batches[i], evalResults[i], searchPolicy, context, stats, root, pipelineDepth, i);
-    }
-    onProgress?.();
-    throwIfAborted(signal);
-    if (deadlineExpired(deadlineMs)) break;
-    if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
-      await yieldToUi();
-      lastYield = nowMs();
-      throwIfAborted(signal);
-    }
-  }
 }
 
 export async function searchRoot(board: BoardState, evaluator: Evaluator, options: SearchOptions = {}): Promise<SearchResult> {
@@ -2065,6 +1987,42 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     lastProgressMs = now;
     options.onProgress(buildSearchProgress(root, searchPolicy, context, stats, options, visits, tSearch0));
   };
+  const hasBatchedScheduler = batchSize > 1 || batchPipelineDepth > 1;
+  const runVisits = async (count: number): Promise<void> => {
+    if (hasBatchedScheduler) {
+      await runBatchedVisits(
+        root,
+        evaluator,
+        count,
+        searchPolicy,
+        context,
+        batchSize,
+        batchPipelineDepth,
+        stats,
+        signal,
+        yieldEveryMs,
+        options.transpositionTable,
+        deadlineMs,
+        options.batchCollisionMode,
+        options.batchCollisionRetryLimit,
+        emitProgress,
+      );
+      return;
+    }
+    let lastYield = nowMs();
+    for (let i = 0; i < count && !deadlineExpired(deadlineMs); i++) {
+      throwIfAborted(signal);
+      await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
+      stats.completedVisits += 1;
+      if (deadlineExpired(deadlineMs)) break;
+      if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
+        emitProgress();
+        await yieldToUi();
+        lastYield = nowMs();
+        throwIfAborted(signal);
+      }
+    }
+  };
   throwIfAborted(signal);
   if (budgetMode === 'neural') {
     stats.requestedNeuralEvals = visits;
@@ -2073,57 +2031,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     stats.maxRootVisits = maxRootVisits;
     if (!cacheAware) {
       stats.stopReason = 'no-cache-metrics-fixed-visits';
-      if (batchSize > 1 || batchPipelineDepth > 1) {
-        if (batchPipelineDepth > 1)
-          await runPipelinedBatchedVisits(
-            root,
-            evaluator,
-            visitsToRun,
-            searchPolicy,
-            context,
-            batchSize,
-            batchPipelineDepth,
-            stats,
-            signal,
-            yieldEveryMs,
-            options.transpositionTable,
-            deadlineMs,
-            options.batchCollisionMode,
-            options.batchCollisionRetryLimit,
-            emitProgress,
-          );
-        else
-          await runBatchedVisits(
-            root,
-            evaluator,
-            visitsToRun,
-            searchPolicy,
-            context,
-            batchSize,
-            stats,
-            signal,
-            yieldEveryMs,
-            options.transpositionTable,
-            deadlineMs,
-            options.batchCollisionMode,
-            options.batchCollisionRetryLimit,
-            emitProgress,
-          );
-      } else {
-        let lastYield = nowMs();
-        for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
-          throwIfAborted(signal);
-          await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
-          stats.completedVisits += 1;
-          if (deadlineExpired(deadlineMs)) break;
-          if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
-            emitProgress();
-            await yieldToUi();
-            lastYield = nowMs();
-            throwIfAborted(signal);
-          }
-        }
-      }
+      await runVisits(visitsToRun);
       if (deadlineExpired(deadlineMs) && stats.completedVisits < visitsToRun) stats.stopReason = 'movetime';
     } else {
       const startMisses = stats.neuralEvalMisses ?? 0;
@@ -2137,46 +2045,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
         // extra batches before the miss counter is checked again.
         const chunk = Math.max(1, Math.min(batchSize * batchPipelineDepth, room, Math.max(batchSize, remainingMissBudget)));
         const beforeCompleted = stats.completedVisits;
-        if (batchSize > 1 || batchPipelineDepth > 1) {
-          if (batchPipelineDepth > 1)
-            await runPipelinedBatchedVisits(
-              root,
-              evaluator,
-              chunk,
-              searchPolicy,
-              context,
-              batchSize,
-              batchPipelineDepth,
-              stats,
-              signal,
-              yieldEveryMs,
-              options.transpositionTable,
-              deadlineMs,
-              options.batchCollisionMode,
-              options.batchCollisionRetryLimit,
-              emitProgress,
-            );
-          else
-            await runBatchedVisits(
-              root,
-              evaluator,
-              chunk,
-              searchPolicy,
-              context,
-              batchSize,
-              stats,
-              signal,
-              yieldEveryMs,
-              options.transpositionTable,
-              deadlineMs,
-              options.batchCollisionMode,
-              options.batchCollisionRetryLimit,
-              emitProgress,
-            );
-        } else {
-          await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
-          stats.completedVisits += 1;
-        }
+        await runVisits(chunk);
         if (deadlineExpired(deadlineMs)) {
           stats.stopReason = 'movetime';
           break;
@@ -2197,76 +2066,28 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       if (!stats.stopReason)
         stats.stopReason = deadlineExpired(deadlineMs) ? 'movetime' : (stats.neuralEvalMisses ?? 0) - startMisses >= visits ? 'neural-budget' : 'max-visits';
     }
-  } else if (batchSize > 1 || batchPipelineDepth > 1) {
-    let done = 0;
-    while (done < visitsToRun && !deadlineExpired(deadlineMs)) {
-      const chunk = Math.min(batchSize * batchPipelineDepth, visitsToRun - done);
-      const beforeCompleted = stats.completedVisits;
-      if (batchPipelineDepth > 1)
-        await runPipelinedBatchedVisits(
-          root,
-          evaluator,
-          chunk,
-          searchPolicy,
-          context,
-          batchSize,
-          batchPipelineDepth,
-          stats,
-          signal,
-          yieldEveryMs,
-          options.transpositionTable,
-          deadlineMs,
-          options.batchCollisionMode,
-          options.batchCollisionRetryLimit,
-          emitProgress,
-        );
-      else
-        await runBatchedVisits(
-          root,
-          evaluator,
-          chunk,
-          searchPolicy,
-          context,
-          batchSize,
-          stats,
-          signal,
-          yieldEveryMs,
-          options.transpositionTable,
-          deadlineMs,
-          options.batchCollisionMode,
-          options.batchCollisionRetryLimit,
-          emitProgress,
-        );
-      done += Math.max(0, stats.completedVisits - beforeCompleted);
-      if (stats.completedVisits === beforeCompleted) break;
-      if (deadlineExpired(deadlineMs)) break;
-      const earlyStop = rootEarlyStopReason(root, context, options, fixedVisitTarget, kldState, bestStableState);
-      if (earlyStop) {
-        stats.stopReason = earlyStop;
-        break;
-      }
-    }
-    if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && done < visitsToRun ? 'movetime' : 'visit-budget';
   } else {
+    let done = 0;
     let lastYield = nowMs();
-    for (let i = 0; i < visitsToRun && !deadlineExpired(deadlineMs); i++) {
-      throwIfAborted(signal);
-      await simulate(root, evaluator, searchPolicy, context, stats, options.transpositionTable);
-      stats.completedVisits += 1;
-      if (deadlineExpired(deadlineMs)) break;
+    while (done < visitsToRun && !deadlineExpired(deadlineMs)) {
+      const chunk = Math.min(hasBatchedScheduler ? batchSize * batchPipelineDepth : 1, visitsToRun - done);
+      const beforeCompleted = stats.completedVisits;
+      await runVisits(chunk);
+      done += Math.max(0, stats.completedVisits - beforeCompleted);
+      if (stats.completedVisits === beforeCompleted || deadlineExpired(deadlineMs)) break;
       const earlyStop = rootEarlyStopReason(root, context, options, fixedVisitTarget, kldState, bestStableState);
       if (earlyStop) {
         stats.stopReason = earlyStop;
         break;
       }
-      if (yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
+      if (!hasBatchedScheduler && yieldEveryMs > 0 && nowMs() - lastYield >= yieldEveryMs) {
         emitProgress();
         await yieldToUi();
         lastYield = nowMs();
         throwIfAborted(signal);
       }
     }
-    if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && stats.completedVisits < visitsToRun ? 'movetime' : 'visit-budget';
+    if (!stats.stopReason) stats.stopReason = deadlineExpired(deadlineMs) && done < visitsToRun ? 'movetime' : 'visit-budget';
   }
   root.visits = priorRootVisits + stats.completedVisits;
   if (context.scCounters) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 
 const mode = process.argv.includes('--copy') ? 'copy' : 'symlink';
 const repoRoot = resolve(new URL('..', import.meta.url).pathname);
@@ -147,6 +147,7 @@ for (const packDir of packDirs) {
     sourceSha256: packManifest.model.sourceSha256,
     packSha256: packManifest.packSha256,
     metadataBytes,
+    metadataSha256: sha256(packManifestPath),
     shardBytes,
     tensorCount: packManifest.weights.tensorCount,
     shards: packManifest.weights.shards,
@@ -157,7 +158,7 @@ for (const packDir of packDirs) {
 
 const manifest = {
   generatedBy: 'scripts/lc0_prepare_model_assets.mjs',
-  note: 'Local LC0 browser model assets. The large ONNX/model-pack files are exposed as symlinks by default so they are not committed as blobs.',
+  note: 'LC0 browser model assets are not committed. Run npm run lc0:prepare-model-assets to create ignored local symlinks, or fetch the published URLs from the artifact host.',
   models,
   packs,
 };

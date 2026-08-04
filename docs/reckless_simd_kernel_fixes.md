@@ -64,7 +64,7 @@ existing `nnz_table` (32 bytes → 8-bit mask → precomputed `SparseEntry`).
 
 ## Evidence
 
-### Standalone kernel probe (`npm run reckless:probe-nnue-dot-simd`)
+### Retired standalone kernel probe (historical evidence)
 
 Apple Silicon Node, 96 groups × 200k iterations, exact parity for all
 kernels (activations in `[0, 127]`, full-range i8 weights):

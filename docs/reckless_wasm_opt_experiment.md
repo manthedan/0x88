@@ -1,12 +1,9 @@
 # Reckless wasm-opt experiment
 
-Generated with:
+The one-off experiment script and package command were retired after the result
+showed no material product benefit. This document retains the measurements.
 
-```sh
-npm run reckless:wasm-opt-experiment
-```
-
-The script uses the npm `binaryen` package's `wasm-opt`, validates outputs by compiling them with Node `WebAssembly.compile()`, writes optimized artifacts under ignored `.local_engines/reckless-wasm-opt/`, and records byte/gzip size plus compile timings in local-dev artifact: `.local-dev-artifacts/docs/reckless_wasm_opt_experiment_2026-06-04.json`.
+The script used the npm `binaryen` package's `wasm-opt`, validated outputs by compiling them with Node `WebAssembly.compile()`, wrote optimized artifacts under ignored `.local_engines/reckless-wasm-opt/`, and recorded byte/gzip size plus compile timings in local-dev artifact: `.local-dev-artifacts/docs/reckless_wasm_opt_experiment_2026-06-04.json`.
 
 ## 2026-06-04 results
 

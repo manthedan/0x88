@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { parseScriptArgs } from './lib/cli.mjs';
-import { spawnCapture } from './lib/process.mjs';
-import { waitForOutput } from './lib/server.mjs';
+import { runAgent } from './lib/process.mjs';
+import { startViteServer, waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5291;
@@ -104,21 +103,6 @@ export function parseArgs(argv) {
   return args;
 }
 
-function parseAgentJson(stdout) {
-  const parsed = JSON.parse(stdout.trim());
-  if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-    if (parsed.success === false) throw new Error(parsed.error ?? stdout);
-    return parsed.data ?? parsed;
-  }
-  return parsed;
-}
-
-async function runAgent(args, commandArgs, timeoutMs, session, stdin) {
-  const fullArgs = ['--json', ...(session ? ['--session', session] : []), ...commandArgs];
-  const stdout = await spawnCapture(args.agentBrowser, fullArgs, { echoStderr: true, timeoutMs, input: stdin });
-  return parseAgentJson(stdout);
-}
-
 async function evalPage(args, session, expression, timeoutMs = 30_000) {
   const payload = await runAgent(args, ['eval', '--stdin'], timeoutMs, session, expression);
   if (payload && typeof payload === 'object') {
@@ -126,39 +110,6 @@ async function evalPage(args, session, expression, timeoutMs = 30_000) {
     if ('result' in payload) return payload.result;
   }
   return payload;
-}
-
-function startServer(args) {
-  if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
-    env: { ...process.env, LC0_TVMJS_LAB: '1' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
-  server.stdout.on('data', echoOutput);
-  server.stderr.on('data', echoOutput);
-  server.ready = waitForOutput(server, {
-    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
-    timeoutMs: 30_000,
-    label: `Vite dev server (port ${args.port})`,
-  });
-  return server;
-}
-
-async function waitForServer(baseUrl, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(new URL('/lab/lc0-tvmjs-webgpu-smoke.html', baseUrl), { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
 }
 
 async function closeSession(args, session) {
@@ -198,10 +149,10 @@ async function loadFenSuite(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const server = startServer(args);
+  const server = startViteServer(args, { env: { LC0_TVMJS_LAB: '1' } });
   try {
     if (server) await server.ready;
-    await waitForServer(args.baseUrl);
+    await waitForHttp(args.baseUrl);
     const fixedSuiteFens = await loadFenSuite(args);
     const session = `lc0-tvmjs-${process.pid}`;
     const url = new URL('/lab/lc0-tvmjs-webgpu-smoke.html', args.baseUrl);

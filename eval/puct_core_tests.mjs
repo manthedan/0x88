@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseFen } from '../src/chess/board.ts';
 import { moveFromUci, moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
-import { actionValuePuctPolicy, classicPuctPolicy, GumbelRootPolicy, searchRoot } from '../src/search/puct.ts';
+import { actionValuePuctPolicy, classicPuctPolicy, GumbelRootPolicy, ProgressiveWideningPUCTPolicy, searchRoot } from '../src/search/puct.ts';
 
 function moveEq(a, b) {
   return a.from === b.from && a.to === b.to && (a.promotion ?? '') === (b.promotion ?? '');
@@ -116,6 +116,48 @@ async function testAllZeroPolicyUniformFallback() {
     'missing/all-zero policy should fallback to uniform legal priors',
   );
 }
+async function testInvalidNeuralOutputsFailClosed() {
+  const cases = [
+    {
+      name: 'policy NaN',
+      evaluation: (board) => ({ policy: policyFor(board, { e2e4: Number.NaN }), wdl: [0.5, 0, 0.5] }),
+      expected: /policy\[\d+\] is not finite: NaN/,
+    },
+    {
+      name: 'WDL infinity',
+      evaluation: (board) => ({ policy: policyFor(board, { e2e4: 1 }), wdl: [Number.POSITIVE_INFINITY, 0, 0] }),
+      expected: /wdl\[0\] is not finite: Infinity/,
+    },
+    {
+      name: 'moves-left NaN',
+      evaluation: (board) => ({ policy: policyFor(board, { e2e4: 1 }), wdl: [0.5, 0, 0.5], movesLeft: Number.NaN }),
+      expected: /movesLeft is not finite: NaN/,
+    },
+  ];
+  for (const sample of cases) {
+    await assert.rejects(
+      () => searchRoot(parseFen(START), evaluator(sample.evaluation), { visits: 1, temperature: 0 }),
+      sample.expected,
+      `${sample.name} must stop search instead of degrading to a legal-looking result`,
+    );
+  }
+}
+async function testProgressiveWideningRejectsInvalidEdges() {
+  const edge = { move: moveFromUci('a3a4'), prior: 1, child: null, visits: 0, valueSum: 0, virtualVisits: 0, side: 'w' };
+  const node = {
+    board: parseFen(START),
+    historyFens: [],
+    historyBoards: [],
+    explicitHistory: false,
+    expanded: true,
+    terminalValue: null,
+    edges: [edge],
+    visits: 0,
+    isRoot: true,
+  };
+  const policy = new ProgressiveWideningPUCTPolicy({ includeForcing: true });
+  assert.throws(() => policy.scoreEdge(node, edge, searchContext()), /No piece on source square/);
+}
 
 async function testValuePerspectiveFlip() {
   const ev = evaluator((board) => ({ policy: policyFor(board, { e2e4: 1, d2d4: 0.01 }), wdl: [0.9, 0, 0.1] }));
@@ -218,6 +260,8 @@ async function testPipelinedBackupCollisionModeDoesNotCrash() {
 const tests = [
   testPolicyIdentity,
   testAllZeroPolicyUniformFallback,
+  testInvalidNeuralOutputsFailClosed,
+  testProgressiveWideningRejectsInvalidEdges,
   testValuePerspectiveFlip,
   testTerminalNoLegalMoves,
   testTieBreakByQThenPrior,

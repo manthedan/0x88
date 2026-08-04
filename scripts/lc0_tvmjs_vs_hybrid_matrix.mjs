@@ -2,9 +2,8 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { parseScriptArgs } from './lib/cli.mjs';
-import { waitForOutput } from './lib/server.mjs';
+import { startViteServer, waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5297;
@@ -87,38 +86,6 @@ function parseArgs(argv) {
   args.tvmjsOut ??= join(dirname(args.out), `${stem}.tvmjs.json`);
   args.hybridOut ??= join(dirname(args.out), `${stem}.hybrid.json`);
   return args;
-}
-
-function startServer(args) {
-  if (args.noServer) return null;
-  const child = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
-  child.stdout.on('data', echoOutput);
-  child.stderr.on('data', echoOutput);
-  child.ready = waitForOutput(child, {
-    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
-    timeoutMs: 30_000,
-    label: `Vite dev server (port ${args.port})`,
-  });
-  return child;
-}
-
-async function waitForServer(baseUrl, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(new URL('/lab/lc0-tvmjs-webgpu-smoke.html', baseUrl), { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
 }
 
 function runCommand(command, args, options = {}) {
@@ -329,10 +296,10 @@ async function main() {
     return;
   }
 
-  const server = startServer(args);
+  const server = startViteServer(args);
   try {
     if (server) await server.ready;
-    await waitForServer(args.baseUrl);
+    await waitForHttp(args.baseUrl);
     await mkdir(dirname(args.out), { recursive: true });
 
     process.stderr.write(`[lc0-tvmjs-vs-hybrid] TVMJS child -> ${args.tvmjsOut}\n`);

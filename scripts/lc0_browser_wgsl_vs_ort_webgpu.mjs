@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { setTimeout as delay } from 'node:timers/promises';
 import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_PORT = 5179;
 const DEFAULT_HOST = '127.0.0.1';
@@ -81,22 +81,6 @@ function startVite(args) {
     else if (signal) process.stderr.write(`[vite] exited via signal ${signal}\n`);
   });
   return child;
-}
-
-async function waitForServer(baseUrl, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/single-engine`, { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
 }
 
 function runJsonCommand(bin, args, timeoutMs, session) {
@@ -276,7 +260,7 @@ async function main() {
   let server;
   if (!args.noServer && !args.baseUrl) server = startVite(args);
   try {
-    await waitForServer(baseUrl, args.timeoutMs);
+    await waitForHttp(baseUrl, { timeoutMs: args.timeoutMs });
     const rows = [];
     for (let i = 0; i < plan.length; i++) rows.push(await runOne(args, baseUrl, i, plan[i]));
     const summary = summarize(rows);

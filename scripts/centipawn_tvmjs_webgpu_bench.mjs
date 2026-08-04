@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { parseScriptArgs } from './lib/cli.mjs';
-import { spawnCapture } from './lib/process.mjs';
-import { waitForOutput } from './lib/server.mjs';
+import { runAgent } from './lib/process.mjs';
+import { startViteServer } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5292;
@@ -54,32 +53,6 @@ function parseArgs(argv) {
   return args;
 }
 
-function parseAgentJson(output) {
-  const parsed = JSON.parse(output.trim());
-  if (parsed?.success === false) throw new Error(parsed.error ?? output);
-  return parsed?.data ?? parsed;
-}
-
-async function runAgent(args, session, commandArgs, stdin) {
-  const output = await spawnCapture(args.agentBrowser, ['--json', '--session', session, ...commandArgs], { timeoutMs: args.timeoutMs, input: stdin });
-  return parseAgentJson(output);
-}
-
-function startServer(args) {
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
-    env: { ...process.env, LC0_TVMJS_LAB: '1' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  server.stdout.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.stderr.on('data', (chunk) => process.stderr.write(`[vite] ${chunk}`));
-  server.ready = waitForOutput(server, {
-    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
-    timeoutMs: 30_000,
-    label: 'Vite',
-  });
-  return server;
-}
-
 async function waitForResult(args, session) {
   const deadline = Date.now() + args.timeoutMs;
   let last;
@@ -104,7 +77,7 @@ async function waitForResult(args, session) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const server = startServer(args);
+  const server = startViteServer(args, { env: { LC0_TVMJS_LAB: '1' } });
   const session = `centipawn-tvmjs-${process.pid}`;
   try {
     await server.ready;

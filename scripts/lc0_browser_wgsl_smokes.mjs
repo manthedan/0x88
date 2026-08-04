@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { setTimeout as delay } from 'node:timers/promises';
 import { parseScriptArgs } from './lib/cli.mjs';
+import { waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_PORT = 5179;
 const DEFAULT_HOST = '127.0.0.1';
@@ -196,22 +196,6 @@ function smokeUrl(baseUrl, smoke) {
   return `${baseUrl.replace(/\/$/, '')}/single-engine?${smoke.query}`;
 }
 
-async function waitForServer(baseUrl, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/single-engine`, { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
-}
-
 function startVite(args) {
   const viteBin = process.platform === 'win32' ? 'node_modules/.bin/vite.cmd' : 'node_modules/.bin/vite';
   const child = spawn(viteBin, ['--host', args.host, '--port', String(args.port), '--strictPort'], {
@@ -294,7 +278,7 @@ function parseBenchResult(rawText, smoke) {
   let result;
   try {
     result = JSON.parse(rawText);
-  } catch (error) {
+  } catch (_error) {
     throw new Error(`${smoke.name}: #benchResult was not JSON after ${smoke.doneText}: ${rawText}`);
   }
   if (result.status !== smoke.doneText) {
@@ -347,7 +331,7 @@ async function main() {
   let server;
   if (!args.noServer && !args.baseUrl) server = startVite(args);
   try {
-    await waitForServer(baseUrl, args.timeoutMs);
+    await waitForHttp(baseUrl, { timeoutMs: args.timeoutMs });
     const rows = [];
     for (const smoke of smokes) {
       process.stderr.write(`[lc0-browser-smoke] ${smoke.name}: ${smokeUrl(baseUrl, smoke)}\n`);

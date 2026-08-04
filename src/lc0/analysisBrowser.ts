@@ -8,7 +8,7 @@ import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
-import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { BROWSER_RUNTIME_AUDIT_EVENT, type BrowserRuntimeAuditDetail, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import {
@@ -72,7 +72,19 @@ import {
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
 import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
-import { browserVariantOption } from './browserVariantOption.ts';
+import { el, htmlEscape, inputEl, maybeEl, selectEl } from './browserDom.ts';
+import {
+  type BrowserLc0Runtime,
+  lc0EncoderLayers as browserLc0EncoderLayers,
+  lc0RuntimeLabel as browserLc0RuntimeLabel,
+  lc0WholeModelPhysicalBatch as browserLc0WholeModelPhysicalBatch,
+  lc0WholeModelTensorCache as browserLc0WholeModelTensorCache,
+  initialLc0Runtime as initialBrowserLc0Runtime,
+  installExperimentalLc0RuntimeOption as installBrowserLc0RuntimeOption,
+  LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
+  normalizeLc0Runtime,
+} from './browserLc0Runtime.ts';
+import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
   type BigNetConfig,
@@ -192,8 +204,7 @@ const LEGACY_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL = '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json';
 const LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
-const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
-type Lc0AnalysisRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
+type Lc0AnalysisRuntime = BrowserLc0Runtime;
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
 const REQUESTED_VIRIDITHAS_EXPLICIT = hasExplicitViridithasVariant(params);
@@ -204,6 +215,37 @@ const REQUESTED_PLENTYCHESS_EXPLICIT = hasExplicitPlentyChessVariant(params);
 let REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
 const REQUESTED_STORMPHRAX_EXPLICIT = hasExplicitStormphraxVariant(params);
 let REQUESTED_STORMPHRAX_VARIANT = stormphraxVariantFromParams(params);
+const recklessBrowserVariants = createBrowserVariantSelector({
+  builtIns: RECKLESS_VARIANTS,
+  requested: () => REQUESTED_RECKLESS_VARIANT,
+  normalize: normalizeRecklessVariant,
+  byKey: recklessVariantByKey,
+});
+const viridithasBrowserVariants = createBrowserVariantSelector({
+  builtIns: VIRIDITHAS_VARIANTS,
+  requested: () => REQUESTED_VIRIDITHAS_VARIANT,
+  normalize: normalizeViridithasVariant,
+  byKey: viridithasVariantByKey,
+});
+const berserkBrowserVariants = createBrowserVariantSelector({
+  builtIns: BERSERK_VARIANTS,
+  requested: () => REQUESTED_BERSERK_VARIANT,
+  normalize: normalizeBerserkVariant,
+  byKey: berserkVariantByKey,
+  usable: (variant) => Boolean(variant.jsUrl),
+});
+const plentyChessBrowserVariants = createBrowserVariantSelector({
+  builtIns: PLENTYCHESS_VARIANTS,
+  requested: () => REQUESTED_PLENTYCHESS_VARIANT,
+  normalize: normalizePlentyChessVariant,
+  byKey: plentyChessVariantByKey,
+});
+const stormphraxBrowserVariants = createBrowserVariantSelector({
+  builtIns: STORMPHRAX_VARIANTS,
+  requested: () => REQUESTED_STORMPHRAX_VARIANT,
+  normalize: normalizeStormphraxVariant,
+  byKey: stormphraxVariantByKey,
+});
 
 function sameOriginPathParam(names: string[], fallback: string, allowedPrefixes: string[]): string {
   for (const name of names) {
@@ -466,43 +508,16 @@ function requestedEp(): string {
   return 'auto';
 }
 
-function normalizeLc0Runtime(value: string | null): Lc0AnalysisRuntime {
-  if (isV0DeployProfile()) return 'onnx';
-  const raw = (value ?? '').toLowerCase();
-  if (raw === LC0_WHOLE_MODEL_WEBGPU_RUNTIME || raw === 'tvm' + 'js-webgpu' || raw === 'lc0-' + 'tvm' + 'js-webgpu') return LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
-  if (raw === 'hybrid' || raw === 'lc0web' || raw === 'hybrid-ort-heads' || raw === 'wgsl-encoder') return 'hybrid-ort-heads';
-  if (raw === 'hybrid-wgsl-heads' || raw === 'wgsl-heads' || raw === 'wgsl') return 'hybrid-wgsl-heads';
-  return 'onnx';
-}
-
 function initialLc0Runtime(): Lc0AnalysisRuntime {
-  if (isV0DeployProfile()) return 'onnx';
-  if (params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl') return 'hybrid-wgsl-heads';
-  return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
+  return initialBrowserLc0Runtime(params);
 }
 
 function selectedLc0Runtime(): Lc0AnalysisRuntime {
   return normalizeLc0Runtime(selectEl('lc0RuntimeSelect').value);
 }
 
-function lc0WholeModelRuntimeRequested(): boolean {
-  if (isV0DeployProfile()) return false;
-  return (
-    normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ||
-    params.get('enableWholeModelWebgpu') === '1' ||
-    params.get('enableTvm' + 'js') === '1'
-  );
-}
-
 function installExperimentalLc0RuntimeOption(): void {
-  // Promoted 2026-06-10 (release-owner decision): the whole-model WebGPU
-  // runtime is always listed. ORT remains the default and the fallback.
-  const select = selectEl('lc0RuntimeSelect');
-  if ([...select.options].some((option) => option.value === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)) return;
-  const option = document.createElement('option');
-  option.value = LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
-  option.textContent = 'TVM whole-model WebGPU (fast, small net)';
-  select.appendChild(option);
+  installBrowserLc0RuntimeOption(selectEl('lc0RuntimeSelect'));
 }
 
 function lc0ResolvedRuntime(runtime: Lc0AnalysisRuntime): string {
@@ -524,23 +539,19 @@ function installRuntimeAuditPanel(): void {
 }
 
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
-  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return 'TVM whole-model WebGPU (research)';
-  if (runtime === 'hybrid-wgsl-heads') return 'WGSL encoder + WGSL heads';
-  if (runtime === 'hybrid-ort-heads') return 'WGSL encoder + ORT heads';
-  return 'ORT ONNX';
+  return browserLc0RuntimeLabel(runtime);
 }
 
 function lc0EncoderLayers(): number {
-  return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
+  return browserLc0EncoderLayers(params);
 }
 
 function lc0WholeModelPhysicalBatch(): number {
-  const parsed = Math.floor(Number(params.get('wholeModelBatch') ?? params.get('tvmBatch') ?? params.get('compiledBatch') ?? '8'));
-  return Number.isFinite(parsed) ? Math.max(1, Math.min(64, parsed)) : 8;
+  return browserLc0WholeModelPhysicalBatch(params);
 }
 
 function lc0WholeModelTensorCache(): boolean {
-  return params.get('wholeModelTensorCache') === '1' || params.get('tensorCache') === '1';
+  return browserLc0WholeModelTensorCache(params);
 }
 
 function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
@@ -580,7 +591,10 @@ function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => 
 
 async function initWorker(): Promise<string> {
   if (searchWorker && workerReady) return workerBackend;
-  if (!searchWorker) searchWorker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
+  if (!searchWorker)
+    searchWorker = selectedLc0Runtime().startsWith('hybrid-')
+      ? new Worker(new URL('./hybridSearchWorker.ts', import.meta.url), { type: 'module' })
+      : new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
   searchWorker.addEventListener('message', (event: MessageEvent) => {
     const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
     if (message.type === 'downloadProgress') {
@@ -601,7 +615,7 @@ async function initWorker(): Promise<string> {
     for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 worker error'));
     workerPending.clear();
   });
-  const ready = await postWorker<{ backend: string }>(lc0InitMessage());
+  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback'] }>(lc0InitMessage());
   workerReady = true;
   workerBackend = ready.backend;
   const runtime = selectedLc0Runtime();
@@ -619,7 +633,7 @@ async function initWorker(): Promise<string> {
     searchBudget: `multipv=${multiPv()}`,
     notes:
       runtime === 'onnx'
-        ? [ready.backend]
+        ? [ready.backend, ...(ready.ortFallback ? [`WebGPU fallback: ${ready.ortFallback.reason}`] : [])]
         : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME
           ? [ready.backend, 'whole-model runtime is research-only and opt-in']
           : [ready.backend, 'hybrid runtime is pack-lazy until first evaluation succeeds'],
@@ -753,24 +767,6 @@ async function workerLc0Lines(
     (progress) => showAnalysisProgress(runId, fen, label, progress),
   );
   return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
-}
-
-function el(id: string): HTMLElement {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`Missing #${id}`);
-  return node;
-}
-function maybeEl(id: string): HTMLElement | null {
-  return document.getElementById(id);
-}
-function inputEl(id: string): HTMLInputElement {
-  return el(id) as HTMLInputElement;
-}
-function selectEl(id: string): HTMLSelectElement {
-  return el(id) as HTMLSelectElement;
-}
-function htmlEscape(value: unknown): string {
-  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
 function modelProgressEl(): HTMLElement {
@@ -1188,60 +1184,43 @@ function defaultStrength(family: EngineFamily): number {
 }
 
 function availableRecklessVariants(): RecklessVariant[] {
-  const variants = [...RECKLESS_VARIANTS];
-  if (!variants.some((variant) => variant.key === REQUESTED_RECKLESS_VARIANT.key)) variants.push(REQUESTED_RECKLESS_VARIANT);
-  return variants;
+  return recklessBrowserVariants.available();
 }
 
 function recklessVariantForKey(variantKey: string): RecklessVariant {
-  const key = normalizeRecklessVariant(variantKey);
-  if (key === 'custom' && REQUESTED_RECKLESS_VARIANT.key === 'custom') return REQUESTED_RECKLESS_VARIANT;
-  return recklessVariantByKey(key);
+  return recklessBrowserVariants.resolve(variantKey);
 }
 
 function availableViridithasVariants(): ViridithasVariant[] {
-  return REQUESTED_VIRIDITHAS_VARIANT.key === 'custom' ? [...VIRIDITHAS_VARIANTS, REQUESTED_VIRIDITHAS_VARIANT] : [...VIRIDITHAS_VARIANTS];
+  return viridithasBrowserVariants.available();
 }
 
 function viridithasVariantForKey(variantKey: string): ViridithasVariant {
-  const key = normalizeViridithasVariant(variantKey);
-  if (key === 'custom' && REQUESTED_VIRIDITHAS_VARIANT.key === 'custom') return REQUESTED_VIRIDITHAS_VARIANT;
-  return viridithasVariantByKey(key);
+  return viridithasBrowserVariants.resolve(variantKey);
 }
 
 function availableBerserkVariants(): BerserkVariant[] {
-  const builtIns = BERSERK_VARIANTS.filter((variant) => !!variant.jsUrl);
-  if (REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return [...builtIns, REQUESTED_BERSERK_VARIANT];
-  return builtIns;
+  return berserkBrowserVariants.available();
 }
 
 function berserkVariantForKey(variantKey: string): BerserkVariant {
-  const key = normalizeBerserkVariant(variantKey);
-  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return REQUESTED_BERSERK_VARIANT;
-  const variant = berserkVariantByKey(key);
-  return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
+  return berserkBrowserVariants.resolve(variantKey);
 }
 
 function availablePlentyChessVariants(): PlentyChessVariant[] {
-  if (REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return [...PLENTYCHESS_VARIANTS, REQUESTED_PLENTYCHESS_VARIANT];
-  return [...PLENTYCHESS_VARIANTS];
+  return plentyChessBrowserVariants.available();
 }
 
 function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
-  const key = normalizePlentyChessVariant(variantKey);
-  if (key === 'custom' && REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return REQUESTED_PLENTYCHESS_VARIANT;
-  return plentyChessVariantByKey(key);
+  return plentyChessBrowserVariants.resolve(variantKey);
 }
 
 function availableStormphraxVariants(): StormphraxVariant[] {
-  if (REQUESTED_STORMPHRAX_VARIANT.key === 'custom') return [...STORMPHRAX_VARIANTS, REQUESTED_STORMPHRAX_VARIANT];
-  return [...STORMPHRAX_VARIANTS];
+  return stormphraxBrowserVariants.available();
 }
 
 function stormphraxVariantForKey(variantKey: string): StormphraxVariant {
-  const key = normalizeStormphraxVariant(variantKey);
-  if (key === 'custom' && REQUESTED_STORMPHRAX_VARIANT.key === 'custom') return REQUESTED_STORMPHRAX_VARIANT;
-  return stormphraxVariantByKey(key);
+  return stormphraxBrowserVariants.resolve(variantKey);
 }
 
 // "Add engine" fills the next missing family by priority

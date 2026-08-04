@@ -65,6 +65,13 @@ export type OrtSessionAttempt = {
   error?: string;
 };
 
+export type OrtRuntimeFallback = {
+  at: string;
+  from: 'webgpu';
+  to: 'wasm';
+  reason: string;
+};
+
 export type OrtWebGpuAdapterDiagnostics = {
   ok: boolean;
   summary?: string;
@@ -129,6 +136,7 @@ export type OrtRuntimeDiagnostics = {
   adapter?: OrtWebGpuAdapterDiagnostics;
   sessions: { created: number; released: number; active: number };
   sessionAttempts: OrtSessionAttempt[];
+  fallback?: OrtRuntimeFallback;
   webgpuDiagnostics?: OrtWebGpuDiagnosticsSnapshot;
 };
 
@@ -401,6 +409,7 @@ function lockOrtRuntimeArtifactKind(providers: string[]): OrtRuntimeArtifactKind
 
 let lastOrtExecutionProviders: string[] | null = null;
 const sessionAttempts: OrtSessionAttempt[] = [];
+let lastOrtRuntimeFallback: OrtRuntimeFallback | undefined;
 let createdOrtSessions = 0;
 let releasedOrtSessions = 0;
 
@@ -1003,6 +1012,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
       : {}),
     sessions: { created: createdOrtSessions, released: releasedOrtSessions, active: Math.max(0, createdOrtSessions - releasedOrtSessions) },
     sessionAttempts: sessionAttempts.map((x) => ({ ...x, providers: [...x.providers] })),
+    ...(lastOrtRuntimeFallback ? { fallback: { ...lastOrtRuntimeFallback } } : {}),
     webgpuDiagnostics: getOrtWebGpuDiagnosticsSnapshot(),
   };
   if (options.probeAdapter && webgpuAvailable()) {
@@ -1082,6 +1092,7 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
     createdOrtSessions += 1;
     recordSessionAttempt(providers, true, t1 - t0);
     lastOrtExecutionProviders = providers;
+    lastOrtRuntimeFallback = undefined;
     logOrtSessionReady(providers, t1 - t0);
     return session;
   } catch (err) {
@@ -1096,6 +1107,7 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
     createdOrtSessions += 1;
     recordSessionAttempt(['wasm'], true, fallbackT1 - fallbackT0);
     lastOrtExecutionProviders = ['wasm'];
+    lastOrtRuntimeFallback = { at: new Date().toISOString(), from: 'webgpu', to: 'wasm', reason: message };
     logOrtSessionReady(['wasm'], fallbackT1 - fallbackT0, `fallback after WebGPU failure: ${message}`);
     return session;
   }

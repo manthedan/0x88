@@ -43,7 +43,7 @@ threads rather than by neural rating conditioning.
 | PlentyChess | C++ via Emscripten | scalar-ish single-thread JS/WASM/data | SSE4.1-shaped wasm SIMD, relaxed SIMD | `npm run plentychess:build-emscripten`, `plentychess:build-sse41-emscripten`, `plentychess:build-relaxed-simd-emscripten` |
 | Reckless | Rust `wasm32-wasip1` | scalar WASI/UCI | `+simd128`, `+simd128,+relaxed-simd`; browser API variants | `npm run reckless:build-wasi`, `reckless:build-simd-wasi`, `reckless:build-relaxed-simd-wasi`, `reckless:build-browser-api*` |
 | Viridithas | Rust `wasm32-wasip1` | scalar WASI/UCI | `simd128`, relaxed SIMD | `npm run viridithas:build-wasi`, `viridithas:build-simd-wasi`, `viridithas:build-relaxed-simd-wasi` |
-| Monty | Rust `wasm32-wasip1` | lab-only WASI/UCI | not productized | `npm run monty:*` where locally staged; networks are too large for product use |
+| Monty | Rust `wasm32-wasip1` | retired lab-only WASI/UCI port | not productized | No maintained build target; the ~950MB network pair made browser delivery impractical |
 
 ## Emscripten target policy
 

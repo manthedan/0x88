@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Lc0WebHybridEvaluator } from '../src/lc0/wgslMatmulAddProbe.ts';
+import { Lc0WebHybridEvaluator } from '../src/lc0/hybridEvaluator.ts';
 
 test('lc0web hybrid evaluator keeps stable ORT-head defaults protected', () => {
   const evaluator = new Lc0WebHybridEvaluator({

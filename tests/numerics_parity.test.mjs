@@ -37,7 +37,7 @@ function rng(seed) {
 
 test('shared softmax matches legacy evaluator implementations bit-for-bit', () => {
   const rand = rng(0x51f7_1ee1);
-  const cases = [[-1000, -1000, -1000], [0], [-20, 0, 20]];
+  const cases = [[], [-1000, -1000, -1000], [0], [-20, 0, 20]];
   for (let i = 0; i < 100; i++) {
     const n = 1 + Math.floor(rand() * 80);
     cases.push(Array.from({ length: n }, () => (rand() - 0.5) * 80));

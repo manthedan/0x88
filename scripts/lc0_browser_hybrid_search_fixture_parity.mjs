@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { applyLc0RuntimePreset, LC0_WEBGPU_RESEARCH_B4_PRESET, lc0RuntimeConfiguration } from './lc0_runtime_presets.mjs';
 import { parseScriptArgs } from './lib/cli.mjs';
-import { waitForOutput } from './lib/server.mjs';
+import { runAgent } from './lib/process.mjs';
+import { startViteServer, waitForHttp } from './lib/server.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
@@ -186,82 +186,12 @@ function parityUrl(args) {
   return String(url);
 }
 
-function runAgent(args, commandArgs, timeoutMs = 30_000) {
-  const fullArgs = ['--json', '--session', args.session, ...commandArgs];
-  return new Promise((resolve, reject) => {
-    const child = spawn(args.agentBrowser, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const chunks = { stdout: [], stderr: [] };
-    let settled = false;
-    const finish = (fn, value) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        fn(value);
-      }
-    };
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(reject, new Error(`${args.agentBrowser} ${fullArgs.slice(1).join(' ')} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    child.stdout.on('data', (chunk) => chunks.stdout.push(chunk));
-    child.stderr.on('data', (chunk) => chunks.stderr.push(chunk));
-    child.on('error', (error) => finish(reject, error));
-    child.on('close', (status) => {
-      const stdout = Buffer.concat(chunks.stdout).toString('utf8');
-      const stderr = Buffer.concat(chunks.stderr).toString('utf8');
-      if (status !== 0) return finish(reject, new Error(`${args.agentBrowser} failed: ${stderr || stdout}`));
-      try {
-        const parsed = stdout ? JSON.parse(stdout.trim()) : null;
-        if (parsed && typeof parsed === 'object' && 'success' in parsed) {
-          if (parsed.success === false) return finish(reject, new Error(`${args.agentBrowser} failed: ${parsed.error ?? stdout}`));
-          return finish(resolve, parsed.data ?? parsed);
-        }
-        return finish(resolve, parsed);
-      } catch (error) {
-        return finish(reject, error);
-      }
-    });
-  });
-}
-
 async function closeAgentSession(args) {
   try {
     await runAgent(args, ['close'], 5_000);
   } catch (error) {
     process.stderr.write(`[lc0-search-fixture-parity] warning: failed to close session: ${error.message ?? error}\n`);
   }
-}
-
-async function waitForServer(baseUrl, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(new URL('/single-engine', baseUrl), { cache: 'no-store' });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(250);
-  }
-  throw new Error(`Vite dev server did not become ready at ${baseUrl}: ${lastError?.message ?? 'timeout'}`);
-}
-
-function startServer(args) {
-  if (args.noServer) return null;
-  const server = spawn('npm', ['run', 'web:client', '--', '--host', args.host, '--port', String(args.port), '--strictPort'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const echoOutput = (chunk) => process.stderr.write(`[vite] ${chunk}`);
-  server.stdout.on('data', echoOutput);
-  server.stderr.on('data', echoOutput);
-  server.ready = waitForOutput(server, {
-    match: (text) => /ready in \d+\s*ms/.test(text) || text.includes(`:${args.port}/`),
-    timeoutMs: 30_000,
-    label: `Vite dev server (port ${args.port})`,
-  });
-  return server;
 }
 
 function textFromGetResult(result) {
@@ -343,10 +273,10 @@ async function main() {
     console.log(parityUrl(args));
     return;
   }
-  const server = startServer(args);
+  const server = startViteServer(args);
   try {
     if (server) await server.ready;
-    await waitForServer(args.baseUrl);
+    await waitForHttp(args.baseUrl);
     const result = await runBrowserParity(args);
     if (args.out) {
       await mkdir(dirname(args.out), { recursive: true });

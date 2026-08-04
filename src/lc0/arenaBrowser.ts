@@ -11,6 +11,7 @@ import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { BROWSER_RUNTIME_AUDIT_EVENT, type BrowserRuntimeAuditDetail, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
+import { evalBarWhitePercent } from './analysisFormat.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -27,7 +28,21 @@ import {
 } from './berserkVariants.ts';
 import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
 import { boardCheck } from './boardUx.ts';
-import { browserVariantOption } from './browserVariantOption.ts';
+import { el, htmlEscape, inputEl, maybeEl, selectEl } from './browserDom.ts';
+import {
+  type BrowserLc0Runtime,
+  boundedIntValue,
+  lc0EncoderLayers as browserLc0EncoderLayers,
+  lc0RuntimeLabel as browserLc0RuntimeLabel,
+  lc0WholeModelPhysicalBatch as browserLc0WholeModelPhysicalBatch,
+  lc0WholeModelRuntimeRequested as browserLc0WholeModelRuntimeRequested,
+  lc0WholeModelTensorCache as browserLc0WholeModelTensorCache,
+  initialLc0Runtime as initialBrowserLc0Runtime,
+  installExperimentalLc0RuntimeOption as installBrowserLc0RuntimeOption,
+  LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
+  normalizeLc0Runtime,
+} from './browserLc0Runtime.ts';
+import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
   type BigNetConfig,
@@ -76,6 +91,7 @@ import {
 } from './engineProvision.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { GameTree } from './gameTree.ts';
+import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
@@ -135,7 +151,6 @@ import {
   viridithasVariantByKey,
   viridithasVariantFromParams,
 } from './viridithasVariants.ts';
-import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './wgslMatmulAddProbe.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
 type Ground = ReturnType<typeof Chessground>;
@@ -251,7 +266,6 @@ const LEGACY_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL = '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json';
 const LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL = '/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/manifest.json';
 const DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json';
-const LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole-onnx-webgpu' as const;
 const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl(
   isV0DeployProfile() ? DEFAULT_CENTIPAWN_MODEL_URL : (params.get('centipawnModel') ?? params.get('centipawnOnnx') ?? DEFAULT_CENTIPAWN_MODEL_URL),
 );
@@ -270,7 +284,7 @@ const CENTIPAWN_HYBRID_MANIFEST_URL =
   (LEGACY_CENTIPAWN_OVERRIDE ? LEGACY_CENTIPAWN_HYBRID_MANIFEST_URL : DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL);
 const LC0_WHOLE_MODEL_MANIFEST_URL =
   params.get('wholeModelManifest') ?? params.get('wholeModelManifestUrl') ?? params.get('tvm' + 'jsManifest') ?? DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL;
-type Lc0ArenaRuntime = 'onnx' | 'hybrid-ort-heads' | 'hybrid-wgsl-heads' | typeof LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
+type Lc0ArenaRuntime = BrowserLc0Runtime;
 type Lc0ArenaPreset = 'stable' | 'benchmarked-small' | 'custom';
 const REQUESTED_RECKLESS_EXPLICIT = hasExplicitRecklessVariant(params);
 let REQUESTED_RECKLESS_VARIANT = recklessVariantFromParams(params);
@@ -282,6 +296,37 @@ const REQUESTED_PLENTYCHESS_EXPLICIT = hasExplicitPlentyChessVariant(params);
 let REQUESTED_PLENTYCHESS_VARIANT = plentyChessVariantFromParams(params);
 const REQUESTED_STORMPHRAX_EXPLICIT = hasExplicitStormphraxVariant(params);
 let REQUESTED_STORMPHRAX_VARIANT = stormphraxVariantFromParams(params);
+const recklessBrowserVariants = createBrowserVariantSelector({
+  builtIns: RECKLESS_VARIANTS,
+  requested: () => REQUESTED_RECKLESS_VARIANT,
+  normalize: normalizeRecklessVariant,
+  byKey: recklessVariantByKey,
+});
+const viridithasBrowserVariants = createBrowserVariantSelector({
+  builtIns: VIRIDITHAS_VARIANTS,
+  requested: () => REQUESTED_VIRIDITHAS_VARIANT,
+  normalize: normalizeViridithasVariant,
+  byKey: viridithasVariantByKey,
+});
+const berserkBrowserVariants = createBrowserVariantSelector({
+  builtIns: BERSERK_VARIANTS,
+  requested: () => REQUESTED_BERSERK_VARIANT,
+  normalize: normalizeBerserkVariant,
+  byKey: berserkVariantByKey,
+  usable: (variant) => Boolean(variant.jsUrl),
+});
+const plentyChessBrowserVariants = createBrowserVariantSelector({
+  builtIns: PLENTYCHESS_VARIANTS,
+  requested: () => REQUESTED_PLENTYCHESS_VARIANT,
+  normalize: normalizePlentyChessVariant,
+  byKey: plentyChessVariantByKey,
+});
+const stormphraxBrowserVariants = createBrowserVariantSelector({
+  builtIns: STORMPHRAX_VARIANTS,
+  requested: () => REQUESTED_STORMPHRAX_VARIANT,
+  normalize: normalizeStormphraxVariant,
+  byKey: stormphraxVariantByKey,
+});
 
 let ground: Ground | null = null;
 let mountAbort = new AbortController();
@@ -469,24 +514,6 @@ function persistArenaSeatRows(): void {
   } catch {
     /* optional preference */
   }
-}
-
-function el(id: string): HTMLElement {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`Missing #${id}`);
-  return node;
-}
-function maybeEl(id: string): HTMLElement | null {
-  return document.getElementById(id);
-}
-function inputEl(id: string): HTMLInputElement {
-  return el(id) as HTMLInputElement;
-}
-function selectEl(id: string): HTMLSelectElement {
-  return el(id) as HTMLSelectElement;
-}
-function htmlEscape(value: unknown): string {
-  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
 function formatNps(nps: number): string {
@@ -683,19 +710,8 @@ function centipawnHistoryFens(positions: BoardState[]): string[] {
   return positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16);
 }
 
-function normalizeLc0Runtime(value: string | null): Lc0ArenaRuntime {
-  if (isV0DeployProfile()) return 'onnx';
-  const raw = (value ?? '').toLowerCase();
-  if (raw === LC0_WHOLE_MODEL_WEBGPU_RUNTIME || raw === 'tvm' + 'js-webgpu' || raw === 'lc0-' + 'tvm' + 'js-webgpu') return LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
-  if (raw === 'hybrid' || raw === 'lc0web' || raw === 'hybrid-ort-heads' || raw === 'wgsl-encoder') return 'hybrid-ort-heads';
-  if (raw === 'hybrid-wgsl-heads' || raw === 'wgsl-heads' || raw === 'wgsl') return 'hybrid-wgsl-heads';
-  return 'onnx';
-}
-
 function initialLc0Runtime(): Lc0ArenaRuntime {
-  if (isV0DeployProfile()) return 'onnx';
-  if (params.get('headBackend') === 'wgsl' || params.get('hybridHeads') === 'wgsl') return 'hybrid-wgsl-heads';
-  return normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime'));
+  return initialBrowserLc0Runtime(params);
 }
 
 function selectedLc0Runtime(): Lc0ArenaRuntime {
@@ -703,23 +719,11 @@ function selectedLc0Runtime(): Lc0ArenaRuntime {
 }
 
 function lc0WholeModelRuntimeRequested(): boolean {
-  if (isV0DeployProfile()) return false;
-  return (
-    normalizeLc0Runtime(params.get('lc0Runtime') ?? params.get('runtime')) === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ||
-    params.get('enableWholeModelWebgpu') === '1' ||
-    params.get('enableTvm' + 'js') === '1'
-  );
+  return browserLc0WholeModelRuntimeRequested(params);
 }
 
 function installExperimentalLc0RuntimeOption(_force = false): void {
-  // Promoted 2026-06-10 (release-owner decision): the whole-model WebGPU
-  // runtime is always listed. ORT remains the default and the fallback.
-  const select = selectEl('lc0RuntimeSelect');
-  if ([...select.options].some((option) => option.value === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)) return;
-  const option = document.createElement('option');
-  option.value = LC0_WHOLE_MODEL_WEBGPU_RUNTIME;
-  option.textContent = 'TVM whole-model WebGPU (fast, small net)';
-  select.appendChild(option);
+  installBrowserLc0RuntimeOption(selectEl('lc0RuntimeSelect'));
 }
 
 function normalizeLc0Preset(value: string | null): Lc0ArenaPreset {
@@ -823,10 +827,7 @@ function installRuntimeAuditPanel(): void {
 }
 
 function lc0RuntimeLabel(runtime = selectedLc0Runtime()): string {
-  if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) return 'TVM whole-model WebGPU (research)';
-  if (runtime === 'hybrid-wgsl-heads') return 'WGSL encoder + WGSL heads';
-  if (runtime === 'hybrid-ort-heads') return 'WGSL encoder + ORT heads';
-  return 'ORT ONNX';
+  return browserLc0RuntimeLabel(runtime);
 }
 
 function normalizeLc0InputBackend(value: string | null): 'js' | 'wgsl' | 'wasm' {
@@ -850,7 +851,7 @@ function lc0HybridLegalPriorsBackend(): 'js' | 'wasm' | 'gpu' {
 }
 
 function lc0EncoderLayers(): number {
-  return Math.min(32, Math.max(1, Math.floor(Number(params.get('encoderLayers') ?? params.get('layers') ?? '10') || 10)));
+  return browserLc0EncoderLayers(params);
 }
 
 function normalizeLc0EncoderKernelVariant(value: string | null): Lc0WebEncoderKernelVariant {
@@ -873,11 +874,6 @@ function lc0HybridConfigLabel(runtime = selectedLc0Runtime()): string {
   return `input ${lc0HybridInputBackend()} · encoder ${lc0EncoderKernelVariant()} · legal ${effectiveLegal}`;
 }
 
-function boundedIntValue(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Math.floor(Number(value ?? fallback));
-  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
-}
-
 function lc0BatchSize(): number {
   const node = document.getElementById('lc0BatchSizeInput') as HTMLInputElement | null;
   return boundedIntValue(node?.value ?? params.get('lc0BatchSize') ?? params.get('batchSize') ?? params.get('batch'), 1, 1, 64);
@@ -889,11 +885,11 @@ function lc0BatchPipelineDepth(): number {
 }
 
 function lc0WholeModelPhysicalBatch(): number {
-  return boundedIntValue(params.get('wholeModelBatch') ?? params.get('tvmBatch') ?? params.get('compiledBatch'), 8, 1, 64);
+  return browserLc0WholeModelPhysicalBatch(params);
 }
 
 function lc0WholeModelTensorCache(): boolean {
-  return params.get('wholeModelTensorCache') === '1' || params.get('tensorCache') === '1';
+  return browserLc0WholeModelTensorCache(params);
 }
 
 function intParam(name: string, fallback: number, min: number, max: number): number {
@@ -1069,7 +1065,7 @@ function stockfishEvalBar(fen: string, info: StockfishInfoLine | undefined): Eng
   }
   if (info.scoreCp === undefined) return undefined;
   const whiteCp = turn === 'w' ? info.scoreCp : -info.scoreCp;
-  const whiteScore = 1 / (1 + Math.exp(-whiteCp / 320));
+  const whiteScore = evalBarWhitePercent(whiteCp, undefined) / 100;
   return { whiteScore: clamp01(whiteScore), label: signed(whiteCp / 100, 1) };
 }
 
@@ -2154,15 +2150,11 @@ function disposeStockfish(): void {
 }
 
 function availableRecklessVariants(): RecklessVariant[] {
-  const variants = [...RECKLESS_VARIANTS];
-  if (!variants.some((variant) => variant.key === REQUESTED_RECKLESS_VARIANT.key)) variants.push(REQUESTED_RECKLESS_VARIANT);
-  return variants;
+  return recklessBrowserVariants.available();
 }
 
 function recklessVariantForKey(variantKey: string): RecklessVariant {
-  const key = normalizeRecklessVariant(variantKey);
-  if (key === 'custom' && REQUESTED_RECKLESS_VARIANT.key === 'custom') return REQUESTED_RECKLESS_VARIANT;
-  return recklessVariantByKey(key);
+  return recklessBrowserVariants.resolve(variantKey);
 }
 
 function getRecklessFor(variantKey: string): RecklessEngine {
@@ -2217,13 +2209,11 @@ function refreshRecklessVariantUi(): void {
 }
 
 function availableViridithasVariants(): ViridithasVariant[] {
-  return REQUESTED_VIRIDITHAS_VARIANT.key === 'custom' ? [...VIRIDITHAS_VARIANTS, REQUESTED_VIRIDITHAS_VARIANT] : [...VIRIDITHAS_VARIANTS];
+  return viridithasBrowserVariants.available();
 }
 
 function viridithasVariantForKey(variantKey: string): ViridithasVariant {
-  const key = normalizeViridithasVariant(variantKey);
-  if (key === 'custom' && REQUESTED_VIRIDITHAS_VARIANT.key === 'custom') return REQUESTED_VIRIDITHAS_VARIANT;
-  return viridithasVariantByKey(key);
+  return viridithasBrowserVariants.resolve(variantKey);
 }
 
 function getViridithasFor(variantKey: string) {
@@ -2262,16 +2252,11 @@ function refreshViridithasVariantUi(): void {
 }
 
 function availableBerserkVariants(): BerserkVariant[] {
-  const builtIns = BERSERK_VARIANTS.filter((variant) => !!variant.jsUrl);
-  if (REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return [...builtIns, REQUESTED_BERSERK_VARIANT];
-  return builtIns;
+  return berserkBrowserVariants.available();
 }
 
 function berserkVariantForKey(variantKey: string): BerserkVariant {
-  const key = normalizeBerserkVariant(variantKey);
-  if (key === 'custom' && REQUESTED_BERSERK_VARIANT.key === 'custom' && REQUESTED_BERSERK_VARIANT.jsUrl) return REQUESTED_BERSERK_VARIANT;
-  const variant = berserkVariantByKey(key);
-  return variant.jsUrl ? variant : BERSERK_VARIANTS.find((entry) => entry.jsUrl)!;
+  return berserkBrowserVariants.resolve(variantKey);
 }
 
 function getBerserkFor(variantKey: string) {
@@ -2308,14 +2293,11 @@ function refreshBerserkVariantUi(): void {
 }
 
 function availablePlentyChessVariants(): PlentyChessVariant[] {
-  if (REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return [...PLENTYCHESS_VARIANTS, REQUESTED_PLENTYCHESS_VARIANT];
-  return [...PLENTYCHESS_VARIANTS];
+  return plentyChessBrowserVariants.available();
 }
 
 function plentyChessVariantForKey(variantKey: string): PlentyChessVariant {
-  const key = normalizePlentyChessVariant(variantKey);
-  if (key === 'custom' && REQUESTED_PLENTYCHESS_VARIANT.key === 'custom') return REQUESTED_PLENTYCHESS_VARIANT;
-  return plentyChessVariantByKey(key);
+  return plentyChessBrowserVariants.resolve(variantKey);
 }
 
 function getPlentyChessFor(variantKey: string) {
@@ -2361,14 +2343,11 @@ function refreshPlentyChessVariantUi(): void {
 }
 
 function availableStormphraxVariants(): StormphraxVariant[] {
-  if (REQUESTED_STORMPHRAX_VARIANT.key === 'custom') return [...STORMPHRAX_VARIANTS, REQUESTED_STORMPHRAX_VARIANT];
-  return [...STORMPHRAX_VARIANTS];
+  return stormphraxBrowserVariants.available();
 }
 
 function stormphraxVariantForKey(variantKey: string): StormphraxVariant {
-  const key = normalizeStormphraxVariant(variantKey);
-  if (key === 'custom' && REQUESTED_STORMPHRAX_VARIANT.key === 'custom') return REQUESTED_STORMPHRAX_VARIANT;
-  return stormphraxVariantByKey(key);
+  return stormphraxBrowserVariants.resolve(variantKey);
 }
 
 function getStormphraxFor(variantKey: string) {

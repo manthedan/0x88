@@ -1,6 +1,6 @@
 {
   "generatedBy": "scripts/lc0_prepare_model_assets.mjs",
-  "note": "Local LC0 browser model assets. The large ONNX/model-pack files are exposed as symlinks by default so they are not committed as blobs.",
+  "note": "LC0 browser model assets are not committed. Run npm run lc0:prepare-model-assets to create ignored local symlinks, or fetch the published URLs from the artifact host.",
   "models": [
     {
       "file": "t1-256x10-distilled-swa-2432500.batch1.f32.onnx",
@@ -167,6 +167,7 @@
       "sourceSha256": "4a3d0b0ee3080c36d1f18c4a1acbdb0ef9751bb32fc33f28db032f4c230418eb",
       "packSha256": "39e77b84729a0ba950de10747e56f19e39a147b25239341bc8d90f25edbdcb1b",
       "metadataBytes": 296585,
+      "metadataSha256": "3001f3bb692ebc02abfd575670d87a9db693c2e81a9ce23f73638265314c7c65",
       "shardBytes": 40418450,
       "tensorCount": 375,
       "shards": [

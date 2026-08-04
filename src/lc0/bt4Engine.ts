@@ -11,7 +11,7 @@
 import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
-import { collectOrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
@@ -313,6 +313,7 @@ export class Bt4WorkerSearcher {
   private activeSearchId: number | null = null;
   private configuredEvalCacheEntries = -1;
   backend = '';
+  fallback: OrtRuntimeDiagnostics['fallback'];
   /** Model download progress during the first init (not called on reloads). */
   onDownloadProgress: ((loadedBytes: number, totalBytes?: number) => void) | null = null;
 
@@ -374,7 +375,7 @@ export class Bt4WorkerSearcher {
       // Big nets opt into app-owned Cache Storage so immutable model bytes
       // survive route changes even when the browser HTTP cache skips large
       // entries. Quota-limited browsers fall back to URL-loading in the worker.
-      const ready = await this.post<{ backend: string }>({
+      const ready = await this.post<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback'] }>({
         type: 'init',
         modelUrl: this.config.modelUrl,
         ep,
@@ -387,6 +388,7 @@ export class Bt4WorkerSearcher {
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;
+      this.fallback = ready.ortFallback;
       return this.backend;
     })();
     try {
@@ -471,6 +473,7 @@ export class Bt4WorkerSearcher {
     this.ready = false;
     this.initPromise = null;
     this.configuredEvalCacheEntries = -1;
+    this.fallback = undefined;
     for (const pending of this.pending.values()) pending.reject(new Error('Lc0 BT4 worker disposed'));
     this.pending.clear();
     this.activeSearchId = null;
