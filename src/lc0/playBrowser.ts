@@ -9,6 +9,13 @@ import { gameTreeToPgn } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import {
+  BROWSER_RUNTIME_AUDIT_EVENT,
+  type BrowserRuntimeAuditDetail,
+  browserRuntimeAuditIdentity,
+  clearRuntimeFallbackWarning,
+  updateRuntimeFallbackWarning,
+} from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcher, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
@@ -110,6 +117,7 @@ let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
 let centipawnEvaluator: CachedEvaluator | null = null;
 let centipawnLoadPromise: Promise<Evaluator> | null = null;
 let centipawnEvaluatorGeneration = 0;
+const playRuntimeFallbackAudits = new Map<string, BrowserRuntimeAuditDetail>();
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
 /** One-line model/cache status shown in the caption once Maia3 has loaded. */
@@ -176,6 +184,9 @@ interface PlayContext {
   resignArmed: boolean;
   resignArmTimer: ReturnType<typeof setTimeout> | null;
   lastProgressAnnouncement: number;
+  engineReady: boolean;
+  preparingEngine: boolean;
+  enginePreparationGeneration: number;
   // Bound listeners for cleanup
   listeners: Array<{ type: string; target: EventTarget; fn: EventListenerOrEventListenerObject }>;
 }
@@ -204,6 +215,9 @@ function createPlayContext(): PlayContext {
     resignArmed: false,
     resignArmTimer: null,
     lastProgressAnnouncement: -1,
+    engineReady: false,
+    preparingEngine: false,
+    enginePreparationGeneration: 0,
     listeners: [],
   };
 }
@@ -215,6 +229,10 @@ function trackListener(ctx: PlayContext, target: EventTarget, type: string, fn: 
 
 function ctxIsDisposed(ctx: PlayContext): boolean {
   return ctx.disposed;
+}
+
+function ctxAsyncUiIsCurrent(ctx: PlayContext, generation: number): boolean {
+  return !ctxIsDisposed(ctx) && generation === ctx.enginePreparationGeneration;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +363,33 @@ function ctxSetEngineNote(text: string, warn = false): void {
   if (!text) buttonEl('retryEngine').hidden = true;
 }
 
+function ctxSetRuntimeWarning(text: string): void {
+  const warning = el('runtimeWarning');
+  clearRuntimeFallbackWarning(warning);
+  if (!text) return;
+  warning.textContent = text;
+  warning.hidden = false;
+}
+
+function playOptionMatchesRuntimeAudit(option: PlayEngineOption, detail: BrowserRuntimeAuditDetail): boolean {
+  return (
+    option.id === 'centipawn' &&
+    detail.family === 'centipawn' &&
+    detail.engineLabel === 'Centipawn' &&
+    detail.modelId === 'bt4-soap-rem-c19000-final' &&
+    detail.requestedRuntime === 'auto'
+  );
+}
+
+function ctxRestoreSelectedRuntimeWarning(ctx: PlayContext): void {
+  const warning = el('runtimeWarning');
+  clearRuntimeFallbackWarning(warning);
+  const option = ctxSelectedEngine(ctx);
+  for (const detail of playRuntimeFallbackAudits.values()) {
+    if (playOptionMatchesRuntimeAudit(option, detail)) updateRuntimeFallbackWarning(warning, detail);
+  }
+}
+
 function ctxActionableEngineError(ctx: PlayContext, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
   const option = ctxSelectedEngine(ctx);
@@ -420,22 +465,27 @@ function ctxHideDownloadProgress(): void {
 function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
   if (lc0Searcher) return Promise.resolve(lc0Searcher);
   if (!lc0LoadPromise) {
-    ctxSetEngineNote('Loading Lc0 small net…');
+    const uiGeneration = ctx.enginePreparationGeneration;
+    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Lc0 small net…');
     lc0LoadPromise = (async () => {
       const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
         cache: true,
         requestPersistentStorage: true,
-        onProgress: (loaded, total) => ctxShowDownloadProgress('Lc0 small net', loaded, total),
+        onProgress: (loaded, total) => {
+          if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Lc0 small net', loaded, total);
+        },
       });
-      ctxHideDownloadProgress();
+      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxHideDownloadProgress();
       const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
       lc0Searcher = new Lc0PuctSearcher(new CachedLc0Evaluator(evaluator, { maxEntries: 2048 }));
-      ctxSetEngineNote('');
+      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
       return lc0Searcher;
     })().catch((error: Error) => {
       lc0LoadPromise = null;
-      ctxHideDownloadProgress();
-      ctxSetEngineNote(`Lc0 load failed: ${error.message}`, true);
+      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
+        ctxHideDownloadProgress();
+        ctxSetEngineNote(`Lc0 load failed: ${error.message}`, true);
+      }
       throw error;
     });
   }
@@ -445,8 +495,9 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
 function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
   if (centipawnEvaluator) return Promise.resolve(centipawnEvaluator);
   if (!centipawnLoadPromise) {
-    const generation = centipawnEvaluatorGeneration;
-    ctxSetEngineNote('Loading Centipawn…');
+    const evaluatorGeneration = centipawnEvaluatorGeneration;
+    const uiGeneration = ctx.enginePreparationGeneration;
+    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Centipawn…');
     centipawnLoadPromise = createBrowserSquareformerRuntimeEvaluator(
       {
         id: 'bt4-soap-rem-c19000-final',
@@ -465,7 +516,7 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
       },
     )
       .then((loaded) => {
-        if (ctxIsDisposed(ctx) || generation !== centipawnEvaluatorGeneration) {
+        if (ctxIsDisposed(ctx) || evaluatorGeneration !== centipawnEvaluatorGeneration) {
           (loaded.evaluator as Evaluator & { destroy?: () => void }).destroy?.();
           const error = new Error('Centipawn load discarded after Play teardown');
           error.name = 'AbortError';
@@ -477,12 +528,12 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
           includeLegalMoves: true,
           label: `centipawn-play:${loaded.resolvedRuntime}`,
         });
-        if (!ctxIsDisposed(ctx)) ctxSetEngineNote('');
+        if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
         return centipawnEvaluator;
       })
       .catch((error: Error) => {
-        if (generation === centipawnEvaluatorGeneration) centipawnLoadPromise = null;
-        if (!ctxIsDisposed(ctx)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
+        if (evaluatorGeneration === centipawnEvaluatorGeneration) centipawnLoadPromise = null;
+        if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
         throw error;
       });
   }
@@ -491,24 +542,29 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
 
 function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
   if (maia3Promise) return maia3Promise;
+  const uiGeneration = ctx.enginePreparationGeneration;
   maia3Promise = (async () => {
-    ctxSetEngineNote('Loading Maia3 human model…');
+    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Maia3 human model…');
     const evaluator = await Maia3BrowserEvaluator.create({
       selfElo: ctxSelectedMaia3Elo(),
       oppoElo: ctxSelectedMaia3Elo(),
-      onProgress: (loaded, total) => ctxShowDownloadProgress('Maia3', loaded, total),
+      onProgress: (loaded, total) => {
+        if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Maia3', loaded, total);
+      },
     });
-    ctxHideDownloadProgress();
+    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxHideDownloadProgress();
     const load = evaluator.modelLoad;
     const origin = load.cacheStatus === 'hit' ? 'from cache' : load.cacheStatus === 'miss' ? 'downloaded' : 'loaded';
     const integrity = load.sha256Valid === true ? ', sha256 ✓' : load.sha256Valid === false ? ', sha256 MISMATCH' : '';
     maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
-    ctxSetEngineNote('');
+    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
     return evaluator;
   })().catch((error: Error) => {
     maia3Promise = null;
-    ctxHideDownloadProgress();
-    ctxSetEngineNote(`Maia3 load failed: ${error.message}`, true);
+    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
+      ctxHideDownloadProgress();
+      ctxSetEngineNote(`Maia3 load failed: ${error.message}`, true);
+    }
     throw error;
   });
   return maia3Promise;
@@ -518,8 +574,9 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
   const existing = cpuEnginePromises.get(option.id);
   if (existing) return existing;
   const label = option.label;
+  const uiGeneration = ctx.enginePreparationGeneration;
   const created = (async (): Promise<CpuEngine> => {
-    ctxSetEngineNote(`Loading ${label} (first use downloads the engine)…`);
+    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Loading ${label} (first use downloads the engine)…`);
     try {
       switch (option.family) {
         case 'sf':
@@ -532,11 +589,11 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
           throw new Error(`unsupported engine family ${option.family}`);
       }
     } finally {
-      ctxSetEngineNote('');
+      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
     }
   })().catch((error: Error) => {
     cpuEnginePromises.delete(option.id);
-    ctxSetEngineNote(`${label} load failed: ${error.message}`, true);
+    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`${label} load failed: ${error.message}`, true);
     throw error;
   });
   cpuEnginePromises.set(option.id, created);
@@ -655,8 +712,10 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       });
       return result.move ? moveToUci(result.move) : null;
     } finally {
-      ctxHideDownloadProgress();
-      if (!ctxIsDisposed(ctx)) ctxSetEngineNote('');
+      if (!signal.aborted && !ctxIsDisposed(ctx)) {
+        ctxHideDownloadProgress();
+        ctxSetEngineNote('');
+      }
     }
   }
   if (option.family === 'lc0' && option.variant === 'small') {
@@ -678,15 +737,17 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       );
       return result.move ?? null;
     } finally {
-      ctxHideDownloadProgress();
+      if (!signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress();
     }
   }
   if (option.family === 'lc0') {
     const searcher = acquireBigNetSearcher(option.variant as BigNetKey);
-    if (!searcher.loaded) {
+    if (!searcher.loaded && !signal.aborted && !ctxIsDisposed(ctx)) {
       ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
       ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
-      searcher.onDownloadProgress = (loaded, total) => ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
+      searcher.onDownloadProgress = (loaded, total) => {
+        if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
+      };
     }
     try {
       const lqoOptions = option.variant === 'lqo' ? ctxLqoSearchOptions(ctx) : null;
@@ -707,11 +768,13 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
           ...(lqoOptions ?? {}),
         },
       );
-      ctxHideDownloadProgress();
-      ctxSetEngineNote('');
+      if (!signal.aborted && !ctxIsDisposed(ctx)) {
+        ctxHideDownloadProgress();
+        ctxSetEngineNote('');
+      }
       return result.cancelled ? null : (result.move ?? null);
     } finally {
-      ctxHideDownloadProgress();
+      if (!signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress();
     }
   }
   const engine = await ctxCpuEngineFor(ctx, option);
@@ -722,6 +785,80 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
   }
   return engine.bestMove(boardToFen(ctx.board), signal);
 }
+async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
+  if (ctx.disposed || ctx.board.turn !== ctx.humanColor) return;
+  const resumingGame = ctx.moves.length > 0;
+  const option = ctxSelectedEngine(ctx);
+  releaseUnusedBigNetSearchers(option.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
+  const signal = ctx.abort.signal;
+  const generation = ++ctx.enginePreparationGeneration;
+  ctx.engineReady = false;
+  ctx.preparingEngine = true;
+  buttonEl('retryEngine').hidden = true;
+  ctxSetEngineNote(resumingGame ? `Checking ${option.label} before play resumes…` : `Preparing ${option.label} before the first move…`);
+  ctxRender(ctx);
+  try {
+    if (option.family === 'maia3') {
+      const player = await ctxEnsureMaia3(ctx);
+      await player.chooseMove(
+        { positions: ctx.positions },
+        {
+          selfElo: ctxSelectedMaia3Elo(),
+          oppoElo: ctxSelectedMaia3Elo(),
+          style: 'argmax',
+        },
+      );
+    } else if (option.family === 'centipawn') {
+      const evaluator = await ctxEnsureCentipawn(ctx);
+      await evaluator.evaluate(ctx.board, {
+        historyFens: ctx.positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16),
+        legalMoves: legalMoves(ctx.board),
+      });
+    } else if (option.family === 'lc0' && option.variant === 'small') {
+      const searcher = await ctxEnsureLc0Small(ctx);
+      await searcher.search(
+        { positions: ctx.positions },
+        { visits: 1, signal, reuseTree: false, drawScore: PLAY_DRAW_SCORE, searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT },
+      );
+      if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
+      searcher.resetTree();
+    } else if (option.family === 'lc0') {
+      const searcher = acquireBigNetSearcher(option.variant as BigNetKey);
+      const lqoOptions = option.variant === 'lqo' ? ctxLqoSearchOptions(ctx) : null;
+      await searcher.search(
+        { positions: ctx.positions },
+        {
+          visits: 1,
+          signal,
+          reuseTree: false,
+          batchSize: 1,
+          batchPipelineDepth: 1,
+          evalCacheEntries: 2048,
+          drawScore: lqoOptions?.drawScore ?? PLAY_DRAW_SCORE,
+          searchContemptLimit: lqoOptions?.searchContemptLimit ?? PLAY_SEARCH_CONTEMPT_LIMIT,
+          ...(lqoOptions ?? {}),
+        },
+      );
+      if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
+      await searcher.resetTree();
+    } else {
+      const engine = await ctxCpuEngineFor(ctx, option);
+      engine.setOptions({ depth: 1, movetimeMs: undefined });
+      await engine.bestMove(boardToFen(ctx.board), signal);
+    }
+    if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
+    ctx.engineReady = true;
+    ctxSetEngineNote(resumingGame ? `${option.label} is ready. You can continue the game.` : `${option.label} is ready. Moving a piece starts the game.`);
+  } catch (error) {
+    if (!signal.aborted && !ctx.disposed && generation === ctx.enginePreparationGeneration) ctxSetEngineFailure(ctx, error);
+  } finally {
+    if (!ctx.disposed && generation === ctx.enginePreparationGeneration) {
+      ctx.preparingEngine = false;
+      ctxHideDownloadProgress();
+      ctxRender(ctx);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Game flow (context-scoped)
@@ -731,6 +868,8 @@ function ctxCancelEngineTurn(ctx: PlayContext): void {
   ctx.abort.abort();
   ctx.abort = new AbortController();
   ctx.engineThinking = false;
+  ctx.preparingEngine = false;
+  ctx.enginePreparationGeneration += 1;
   ctxHideDownloadProgress();
   releaseWakeLock();
 }
@@ -748,6 +887,7 @@ function ctxApplyMove(ctx: PlayContext, move: Move): void {
   if (!ctx.moves.length) {
     ctx.activeEngineId = selectEl('engineSelect').value;
     ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
+    ctxSetEngineNote('');
   }
   ctx.sans.push(moveToSan(ctx.board, move));
   ctx.moves.push(move);
@@ -769,6 +909,7 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   } catch (error) {
     if (signal.aborted) return;
     ctx.engineThinking = false;
+    ctx.engineReady = false;
     releaseWakeLock();
     ctxSetEngineFailure(ctx, error);
     ctxRender(ctx);
@@ -776,7 +917,8 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   } finally {
     releaseWakeLock();
   }
-  if (signal.aborted) return;
+  if (signal.aborted || ctx.disposed) return;
+  ctx.engineReady = true;
   ctx.engineThinking = false;
   const move = uci ? legalMoves(ctx.board).find((m) => moveToUci(m) === uci) : undefined;
   if (!move) {
@@ -790,7 +932,8 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
 }
 
 function ctxOnUserMove(ctx: PlayContext, from: Key, to: Key): void {
-  if (ctx.engineThinking || ctx.gameOver || ctx.board.turn !== ctx.humanColor) {
+  if (!ctx.engineReady && !ctx.preparingEngine && !ctx.gameOver && ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
+  if (ctx.preparingEngine || !ctx.engineReady || ctx.engineThinking || ctx.gameOver || ctx.board.turn !== ctx.humanColor) {
     ctxRender(ctx);
     return;
   }
@@ -817,6 +960,7 @@ function ctxApplyHumanMove(ctx: PlayContext, move: Move): void {
 
 function ctxNewGame(ctx: PlayContext): void {
   ctxCancelEngineTurn(ctx);
+  ctx.engineReady = false;
   const colorChoice = selectEl('colorSelect').value;
   ctx.humanColor = colorChoice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : colorChoice === 'black' ? 'b' : 'w';
   ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';
@@ -835,10 +979,14 @@ function ctxNewGame(ctx: PlayContext): void {
   }
   ctxSetEngineNote('');
   ctxDisarmResign(ctx);
-  ctx.activeEngineId = selectEl('engineSelect').value;
+  const selectedEngineId = selectEl('engineSelect').value;
+  const engineChanged = ctx.activeEngineId !== selectedEngineId;
+  ctx.activeEngineId = selectedEngineId;
+  if (engineChanged) ctxRestoreSelectedRuntimeWarning(ctx);
   ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
   ctxRender(ctx);
   if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
+  else void ctxVerifySelectedEngineReady(ctx);
 }
 
 function ctxTakeback(ctx: PlayContext): void {
@@ -855,6 +1003,7 @@ function ctxTakeback(ctx: PlayContext): void {
   ctx.pendingPromotion = null;
   ctxRender(ctx);
   if (ctx.board.turn !== ctx.humanColor) void ctxEngineTurn(ctx);
+  else if (!ctx.engineReady) void ctxVerifySelectedEngineReady(ctx);
 }
 
 function ctxResign(ctx: PlayContext): void {
@@ -925,7 +1074,9 @@ function ctxVerdictText(ctx: PlayContext): string {
 function ctxStatusText(ctx: PlayContext): string {
   if (ctx.gameOver) return ctxVerdictText(ctx);
   if (ctx.pendingPromotion) return 'Choose a promotion piece';
+  if (ctx.preparingEngine) return `Preparing ${ctxSelectedEngine(ctx).label} before the first move…`;
   if (ctx.engineThinking) return `${ctxSelectedEngine(ctx).label} is thinking…`;
+  if (!ctx.engineReady) return `${ctxSelectedEngine(ctx).label} is not ready. Retry the engine or choose another opponent.`;
   if (!ctx.moves.length && ctx.board.turn === ctx.humanColor)
     return `Your move — you play ${ctx.humanColor === 'w' ? 'White' : 'Black'}. Moving a piece starts the game.`;
   return ctx.board.turn === ctx.humanColor ? 'Your move' : `${ctxSelectedEngine(ctx).label} to move`;
@@ -1028,12 +1179,14 @@ function ctxResolvePendingPreferredEngine(ctx: PlayContext): void {
   const restored = status === 'present';
   if (restored) selectEl('engineSelect').value = option.id;
   ctxRenderLevelOptions(ctx);
+  ctx.engineReady = false;
   ctxResetGameStateForMount(ctx);
   ctxPersistPlayPreferences(ctx);
   ctxRenderEngineCaution(ctx);
-  if (!restored) ctxSetEngineNote('Your saved engine asset is unavailable, so Play is using Maia instead.', true);
+  if (!restored) ctxSetRuntimeWarning('Your saved engine asset is unavailable, so Play is using Maia instead.');
   ctxRender(ctx);
   if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
+  else void ctxVerifySelectedEngineReady(ctx);
 }
 
 function ctxRenderEngineCaution(ctx: PlayContext): void {
@@ -1068,7 +1221,14 @@ function ctxRender(ctx: PlayContext): void {
   ctxRenderPromotionPicker(ctx);
   ctxRenderRestartBanner(ctx);
   el('pgnOut').textContent = '';
-  const humanCanMove = !ctx.pendingPreferredEngineId && !ctx.engineThinking && !ctx.gameOver && !ctx.pendingPromotion && ctx.board.turn === ctx.humanColor;
+  const humanCanMove =
+    !ctx.pendingPreferredEngineId &&
+    !ctx.preparingEngine &&
+    ctx.engineReady &&
+    !ctx.engineThinking &&
+    !ctx.gameOver &&
+    !ctx.pendingPromotion &&
+    ctx.board.turn === ctx.humanColor;
   const lastUci = ctx.moves.length ? moveToUci(ctx.moves[ctx.moves.length - 1]) : undefined;
   const config = {
     orientation: ctx.orientation,
@@ -1180,13 +1340,19 @@ function ctxInit(ctx: PlayContext): void {
     ctxNewGame(ctx);
   });
   trackListener(ctx, el('retryEngine'), 'click', () => {
-    if (ctx.engineThinking || ctx.gameOver || ctx.board.turn === ctx.humanColor) {
-      ctxSetEngineNote('Nothing to retry right now. Make your move or start a new game.');
-      return;
-    }
+    if (ctx.engineThinking || ctx.preparingEngine || ctx.gameOver) return;
     buttonEl('retryEngine').hidden = true;
     ctxSetEngineNote('Retrying engine…');
-    void ctxEngineTurn(ctx);
+    if (ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
+    else void ctxEngineTurn(ctx);
+  });
+  trackListener(ctx, window, BROWSER_RUNTIME_AUDIT_EVENT, (event: Event) => {
+    const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
+    if (detail.surface && detail.surface !== 'play') return;
+    const identity = browserRuntimeAuditIdentity(detail);
+    if (detail.fallbackReason) playRuntimeFallbackAudits.set(identity, detail);
+    else playRuntimeFallbackAudits.delete(identity);
+    if (playOptionMatchesRuntimeAudit(ctxSelectedEngine(ctx), detail)) ctxRestoreSelectedRuntimeWarning(ctx);
   });
   trackListener(ctx, el('takeback'), 'click', () => ctxTakeback(ctx));
   trackListener(ctx, el('resign'), 'click', () => ctxResign(ctx));
@@ -1216,6 +1382,7 @@ function ctxInit(ctx: PlayContext): void {
     ctxSetEngineNote('');
     if (!ctx.moves.length) {
       ctxCancelEngineTurn(ctx);
+      ctx.engineReady = false;
       const choice = selectEl('colorSelect').value;
       ctx.humanColor = choice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : choice === 'black' ? 'b' : 'w';
       ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';
@@ -1227,6 +1394,7 @@ function ctxInit(ctx: PlayContext): void {
       ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
       ctxRender(ctx);
       if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
+      else void ctxVerifySelectedEngineReady(ctx);
     } else {
       ctxMaybeQueueRestart(ctx);
     }
@@ -1259,15 +1427,18 @@ function ctxInit(ctx: PlayContext): void {
     ctxRenderEngineCaution(ctx);
     if (!ctx.moves.length) {
       ctxCancelEngineTurn(ctx);
+      ctx.engineReady = false;
       ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';
       ctx.startFen = startFenFor(ctxSelectedEngine(ctx), ctx.humanColor);
       ctx.board = parseFen(ctx.startFen);
       ctx.positions = [ctx.board];
       ctx.gameOver = null;
       ctx.activeEngineId = selectEl('engineSelect').value;
+      ctxRestoreSelectedRuntimeWarning(ctx);
       ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
       ctxRender(ctx);
       if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
+      else void ctxVerifySelectedEngineReady(ctx);
     } else if (!ctx.gameOver && !ctx.engineThinking) {
       ctxMaybeQueueRestart(ctx);
       ctxRender(ctx);
@@ -1318,11 +1489,14 @@ function ctxInit(ctx: PlayContext): void {
       ctx.pendingPreferredEngineId = null;
       ctx.pendingPreferredEngineTimer = null;
       ctxPersistPlayPreferences(ctx);
-      ctxSetEngineNote('The saved-engine check timed out, so Play is using Maia. You can retry the engine from the selector.', true);
+      ctx.engineReady = false;
+      ctxSetRuntimeWarning('The saved-engine check timed out, so Play is using Maia. You can retry the engine from the selector.');
       ctxRender(ctx);
       if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
+      else void ctxVerifySelectedEngineReady(ctx);
     }, 10_000);
   } else if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
+  else void ctxVerifySelectedEngineReady(ctx);
 }
 
 function hasPlayBrowserDom(): boolean {
@@ -1347,6 +1521,7 @@ function hasPlayBrowserDom(): boolean {
     'levelCaption',
     'engineCaution',
     'engineNote',
+    'runtimeWarning',
     'retryEngine',
     'dlProgress',
     'progressAnnouncement',
@@ -1388,13 +1563,14 @@ export function mountPlayBrowser(): () => void {
     ctx.disposed = true;
     ctxCancelEngineTurn(ctx);
     ctx.abort.abort();
-    releaseUnusedBigNetSearchers([]);
+    releaseUnusedBigNetSearchers([], 0);
     centipawnEvaluatorGeneration += 1;
     centipawnEvaluator?.clear();
     const destroyCentipawn = (centipawnEvaluator?.inner as (Evaluator & { destroy?: () => void }) | undefined)?.destroy;
     if (typeof destroyCentipawn === 'function') destroyCentipawn.call(centipawnEvaluator?.inner);
     centipawnEvaluator = null;
     centipawnLoadPromise = null;
+    playRuntimeFallbackAudits.clear();
     // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
     // engines it must not remain cached after this Play route is gone.
     disposeCachedCpuEngine('stormphrax');

@@ -11,6 +11,8 @@ jobs:
   test-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      NETLIFY_R2_PUBLIC_ASSETS: .local-dev-artifacts/ci-public
     steps:
       - uses: actions/checkout@v5
         with:
@@ -26,6 +28,8 @@ jobs:
         with:
           path: ../models/lc0-bestnets
           key: lc0-parity-${{ hashFiles('public/models/lc0/manifest.json') }}
+      - name: Prepare portable CI public assets
+        run: node scripts/prepare_netlify_r2_public_assets.mjs public "$NETLIFY_R2_PUBLIC_ASSETS"
       - run: npm ci
       - name: Stage and verify LC0 parity assets
         run: npm run test:stage-lc0-assets

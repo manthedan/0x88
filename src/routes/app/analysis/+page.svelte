@@ -100,6 +100,7 @@ onMount(() => {
       </div>
     </header>
     <div id="message" aria-live="polite">Loading model…</div>
+    <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
     <details class="section-block" open>
       <summary>Engines</summary>
@@ -283,6 +284,10 @@ onMount(() => {
   .engine-list{margin-top:0}
   .engine-list-loading{
     padding:8px 0; color:var(--muted); font-family:var(--mono); font-size:11px;
+  }
+  :global(.runtime-warning){
+    margin-top:7px; padding:7px 9px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule));
+    border-radius:6px; background:var(--warn-soft); color:var(--warn); font-family:var(--mono); font-size:10px; line-height:1.4;
   }
   .field{margin-top:10px}
   .position-tools{

@@ -63,6 +63,13 @@ onMount(() => {
     <div id="gameMoves" class="movestrip" hidden></div>
     <div id="pairing">Select engines and start a tournament.</div>
     <div id="message" aria-live="polite">Loading model…</div>
+    <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
+    <div id="engineWarmupStatus" class="engine-warmup-status" role="status" aria-live="polite" aria-atomic="true" hidden>
+      <progress aria-label="Engine preparation in progress"></progress>
+      <div id="engineWarmupTitle" class="engine-warmup-title"></div>
+      <div id="engineWarmupPhase" class="engine-warmup-phase"></div>
+      <div id="engineWarmupDetail" class="engine-warmup-detail"></div>
+    </div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
     <section id="chartsPanel" aria-label="Game charts" hidden>
       <div class="chart-grid">
@@ -355,6 +362,20 @@ onMount(() => {
     border-radius:6px; background:var(--panel-inset); color:var(--text-soft);
     font-family:var(--mono); font-size:10px; line-height:1.4;
   }
+  :global(.runtime-warning){
+    margin-top:7px; padding:7px 9px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule));
+    border-radius:6px; background:var(--warn-soft); color:var(--warn); font-family:var(--mono); font-size:10px; line-height:1.4;
+  }
+  :global(.engine-warmup-status){
+    margin-top:7px; padding:10px 11px; display:grid; gap:5px;
+    border:1px solid color-mix(in srgb, var(--accent) 38%, var(--rule));
+    border-radius:var(--radius-sm); background:var(--accent-soft);
+  }
+  :global(.engine-warmup-status[hidden]){display:none}
+  :global(.engine-warmup-status progress){width:100%; height:7px; accent-color:var(--accent)}
+  :global(.engine-warmup-title){font-size:12px; font-weight:700; color:var(--ink)}
+  :global(.engine-warmup-phase){font-size:11px; font-weight:600; color:var(--text-soft)}
+  :global(.engine-warmup-detail){font-size:11px; line-height:1.45; color:var(--muted)}
   :global(.model-load-progress){
     margin-top:6px; padding:8px; border:1px solid var(--rule);
     border-radius:var(--radius-sm); background:var(--panel);

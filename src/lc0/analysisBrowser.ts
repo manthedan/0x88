@@ -9,7 +9,15 @@ import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { BROWSER_RUNTIME_AUDIT_EVENT, type BrowserRuntimeAuditDetail, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
+import {
+  BROWSER_RUNTIME_AUDIT_EVENT,
+  type BrowserRuntimeAuditDetail,
+  browserRuntimeAuditIdentity,
+  formatBrowserRuntimeAudit,
+  publishBrowserRuntimeAudit,
+  reconcileRuntimeFallbackWarning,
+  updateRuntimeFallbackWarning,
+} from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
@@ -530,6 +538,9 @@ function installRuntimeAuditPanel(): void {
   if (analysisAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
   analysisAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
+    if (detail.surface && detail.surface !== 'analysis') return;
+    const warningTarget = document.getElementById('runtimeWarning');
+    if (warningTarget && activeRuntimeAuditIdentities().has(browserRuntimeAuditIdentity(detail))) updateRuntimeFallbackWarning(warningTarget, detail);
     if (detail.family !== 'lc0') return;
     const target = document.getElementById('runtimeAudit');
     if (!target) return;
@@ -627,7 +638,8 @@ async function initWorker(): Promise<string> {
     modelId: 'lc0-default',
     modelUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : MODEL_URL,
     requestedRuntime: runtime,
-    resolvedRuntime: lc0ResolvedRuntime(runtime),
+    resolvedRuntime: ready.ortFallback ? 'ort-worker-wasm-fallback' : lc0ResolvedRuntime(runtime),
+    fallbackReason: ready.ortFallback?.reason,
     runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
     manifestUrl: runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
     searchBudget: `multipv=${multiPv()}`,
@@ -1388,6 +1400,45 @@ function activeEngineRows(): EngineRow[] {
     });
 }
 
+function runtimeAuditIdentityForRow(row: EngineRow): string | null {
+  if (row.family === 'centipawn') {
+    const model = centipawnModelForVariant(row.variant);
+    return browserRuntimeAuditIdentity({
+      source: 'active-analysis-engine',
+      surface: 'analysis',
+      family: 'centipawn',
+      engineLabel: centipawnEngineLabel(row.variant),
+      modelId: model.modelId,
+      requestedRuntime: centipawnRuntimeForVariant(row.variant),
+    });
+  }
+  if (row.family === 'lc0' && !isLc0BigNetVariant(row.variant)) {
+    return browserRuntimeAuditIdentity({
+      source: 'active-analysis-engine',
+      surface: 'analysis',
+      family: 'lc0',
+      engineLabel: 'LC0',
+      modelId: 'lc0-default',
+      requestedRuntime: selectedLc0Runtime(),
+    });
+  }
+  return null;
+}
+
+function activeRuntimeAuditIdentities(): Set<string> {
+  const identities = new Set<string>();
+  for (const row of activeEngineRows()) {
+    const identity = runtimeAuditIdentityForRow(row);
+    if (identity) identities.add(identity);
+  }
+  return identities;
+}
+
+function reconcileActiveRuntimeFallbackWarning(): void {
+  const warningTarget = document.getElementById('runtimeWarning');
+  if (warningTarget) reconcileRuntimeFallbackWarning(warningTarget, activeRuntimeAuditIdentities());
+}
+
 function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
   return engineRows.some((r) => r.family === 'lc0' && r.variant === variant);
 }
@@ -1415,6 +1466,7 @@ function renderEngineList(): void {
     })
     .join('');
   el('comparisonSection').hidden = activeEngineRows().length < 2;
+  reconcileActiveRuntimeFallbackWarning();
 }
 
 async function workerBigNetLines(
@@ -3288,6 +3340,7 @@ function wireEvents() {
       engineRows[i].strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(target.value) || meta.def)));
     }
     engineRows[i] = normalizeDeployEngineRow(engineRows[i], 'analysis', i);
+    reconcileActiveRuntimeFallbackWarning();
     persistManualEngineRows();
     disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
@@ -3644,6 +3697,7 @@ async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
   lineCache.clear();
   completeAnalysisKeys.clear();
   disposeRuntimeResources();
+  reconcileActiveRuntimeFallbackWarning();
   renderRecklessRuntimeInfo();
   const loaded = await loadLc0Backend(!forceAnalyzeAfterLoad);
   if (loaded && forceAnalyzeAfterLoad) void analyzeCurrent();

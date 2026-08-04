@@ -206,19 +206,48 @@ async function playFirstMove(session, engine, fullNavigation = false) {
     (value) => value === true,
     session.args.timeoutMs,
   );
-  const started = await evaluate(
+  const configured = await evaluate(
     session,
     `(() => {
     const engine = document.querySelector('#engineSelect');
     const level = document.querySelector('#levelSelect');
     const color = document.querySelector('#colorSelect');
-    engine.value = '${engine}';
-    engine.dispatchEvent(new Event('change', { bubbles: true }));
+    if (color.value !== 'white') {
+      color.value = 'white';
+      color.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (engine.value !== '${engine}') {
+      engine.value = '${engine}';
+      engine.dispatchEvent(new Event('change', { bubbles: true }));
+    }
     level.value = '0';
     level.dispatchEvent(new Event('change', { bubbles: true }));
+    const restartBanner = document.querySelector('#restartBanner');
+    if (restartBanner && !restartBanner.hidden) document.querySelector('#confirmRestart')?.click();
+    else if ((document.querySelector('#moveList')?.textContent?.trim() ?? '') !== 'No moves yet') document.querySelector('#newGame')?.click();
+    return { engine: engine.value, level: level.value, color: color.value };
+  })()`,
+  );
+  if (configured?.engine !== engine || configured?.level !== '0' || configured?.color !== 'white')
+    throw new Error(`Could not prepare ${engine} at fastest strength: ${JSON.stringify(configured)}`);
+  await waitForEval(
+    session,
+    `(() => ({
+    engine: document.querySelector('#engineSelect')?.value,
+    color: document.querySelector('#colorSelect')?.value,
+    note: document.querySelector('#engineNote')?.textContent?.trim() ?? '',
+    moves: document.querySelector('#moveList')?.textContent?.trim() ?? ''
+  }))()`,
+    (value) => value?.engine === engine && value?.color === 'white' && value?.note.includes('is ready') && value?.moves === 'No moves yet',
+    session.args.timeoutMs,
+  );
+  const started = await evaluate(
+    session,
+    `(() => {
+    const color = document.querySelector('#colorSelect');
     color.value = 'black';
     color.dispatchEvent(new Event('change', { bubbles: true }));
-    return { engine: engine.value, level: level.value, color: color.value };
+    return { engine: document.querySelector('#engineSelect')?.value, level: document.querySelector('#levelSelect')?.value, color: color.value };
   })()`,
   );
   if (started?.engine !== engine || started?.level !== '0' || started?.color !== 'black')

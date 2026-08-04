@@ -8,7 +8,15 @@ import { gameTreeToPgn } from '../chess/pgn.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { BROWSER_RUNTIME_AUDIT_EVENT, type BrowserRuntimeAuditDetail, formatBrowserRuntimeAudit, publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
+import {
+  BROWSER_RUNTIME_AUDIT_EVENT,
+  type BrowserRuntimeAuditDetail,
+  browserRuntimeAuditIdentity,
+  formatBrowserRuntimeAudit,
+  publishBrowserRuntimeAudit,
+  reconcileRuntimeFallbackWarning,
+  updateRuntimeFallbackWarning,
+} from '../nn/runtimeAudit.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { evalBarWhitePercent } from './analysisFormat.ts';
@@ -155,11 +163,17 @@ import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 // Seats are array indices into seatRows; tournament pids are String(index).
+interface ArenaWarmupStatus {
+  phase: string;
+  detail: string;
+}
+
 interface ArenaEngine {
   id: string;
   name: string;
   move(positions: BoardState[], signal: AbortSignal): Promise<string | null>;
   warmup?(signal: AbortSignal): Promise<void>;
+  warmupStatus?: ArenaWarmupStatus;
 }
 interface GameRecord {
   pgn: string;
@@ -404,7 +418,9 @@ const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant
   createStormphraxEngine(variant, ARENA_CPU_ENGINE_OPTIONS),
 );
 const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
+const centipawnEvaluatorLoadTokens = new Map<string, symbol>();
 const centipawnEvaluators = new Set<CachedEvaluator>();
+const centipawnEvaluatorsByKey = new Map<string, CachedEvaluator>();
 let centipawnEvaluatorGeneration = 0;
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
@@ -647,13 +663,29 @@ function centipawnModelForVariant(variant: string): { modelId: string; onnx: str
     : { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
 }
 
+function centipawnEvaluatorCacheKey(variant: string): string {
+  const runtime = centipawnRuntimeForVariant(variant);
+  const fallback = centipawnRuntimeFallbackForVariant(variant);
+  const model = centipawnModelForVariant(variant);
+  return `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
+}
+
+function activeCentipawnEvaluatorKeys(): Set<string> {
+  return new Set(
+    activeSeatRows()
+      .filter((row) => row.family === 'centipawn')
+      .map((row) => centipawnEvaluatorCacheKey(row.variant)),
+  );
+}
+
 async function centipawnEvaluator(variant: string): Promise<Evaluator> {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
   const model = centipawnModelForVariant(variant);
-  const key = `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
+  const key = centipawnEvaluatorCacheKey(variant);
   const existing = centipawnEvaluatorPromises.get(key);
   if (existing) return existing;
+  const loadToken = Symbol(key);
   const generation = centipawnEvaluatorGeneration;
   const created = (async () => {
     const loaded = await createBrowserSquareformerRuntimeEvaluator(
@@ -687,22 +719,49 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
       includeLegalMoves: true,
       label: `centipawn-arena:${runtime}`,
     });
-    if (centipawnEvaluatorGeneration !== generation) {
-      const destroy = (cached.inner as Evaluator & { destroy?: () => void }).destroy;
-      if (typeof destroy === 'function') destroy.call(cached.inner);
+    if (centipawnEvaluatorGeneration !== generation || centipawnEvaluatorLoadTokens.get(key) !== loadToken) {
+      destroyCentipawnEvaluator(cached);
       const error = new Error('Centipawn evaluator was disposed before it finished loading');
       error.name = 'AbortError';
       throw error;
     }
     centipawnEvaluators.add(cached);
+    centipawnEvaluatorsByKey.set(key, cached);
     return cached;
   })();
   centipawnEvaluatorPromises.set(key, created);
+  centipawnEvaluatorLoadTokens.set(key, loadToken);
   try {
     return await created;
   } catch (error) {
-    if (centipawnEvaluatorPromises.get(key) === created) centipawnEvaluatorPromises.delete(key);
+    if (centipawnEvaluatorPromises.get(key) === created) {
+      centipawnEvaluatorPromises.delete(key);
+      if (centipawnEvaluatorLoadTokens.get(key) === loadToken) centipawnEvaluatorLoadTokens.delete(key);
+    }
     throw error;
+  }
+}
+
+function destroyCentipawnEvaluator(evaluator: CachedEvaluator): void {
+  evaluator.clear();
+  const destroy = (evaluator.inner as Evaluator & { destroy?: () => void }).destroy;
+  if (typeof destroy === 'function') destroy.call(evaluator.inner);
+}
+
+function disposeUnusedCentipawnEvaluators(): void {
+  const activeKeys = activeCentipawnEvaluatorKeys();
+  for (const key of [...centipawnEvaluatorPromises.keys()]) {
+    if (activeKeys.has(key)) continue;
+    centipawnEvaluatorPromises.delete(key);
+    centipawnEvaluatorLoadTokens.delete(key);
+  }
+  for (const [key, evaluator] of [...centipawnEvaluatorsByKey]) {
+    if (activeKeys.has(key)) continue;
+    destroyCentipawnEvaluator(evaluator);
+    centipawnEvaluators.delete(evaluator);
+    centipawnEvaluatorsByKey.delete(key);
+    centipawnEvaluatorPromises.delete(key);
+    centipawnEvaluatorLoadTokens.delete(key);
   }
 }
 
@@ -818,6 +877,9 @@ function installRuntimeAuditPanel(): void {
   if (arenaAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
   arenaAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
+    if (detail.surface && detail.surface !== 'arena') return;
+    const warningTarget = document.getElementById('runtimeWarning');
+    if (warningTarget && activeRuntimeAuditIdentities().has(browserRuntimeAuditIdentity(detail))) updateRuntimeFallbackWarning(warningTarget, detail);
     if (detail.family !== 'lc0') return;
     const target = document.getElementById('runtimeAuditInfo');
     if (!target) return;
@@ -1516,6 +1578,45 @@ function activeSeatRows(): EngineRow[] {
   return arenaTournamentMode() === 'match' ? seatRows.slice(0, 2) : [...seatRows];
 }
 
+function runtimeAuditIdentityForRow(row: EngineRow): string | null {
+  if (row.family === 'centipawn') {
+    const model = centipawnModelForVariant(row.variant);
+    return browserRuntimeAuditIdentity({
+      source: 'active-arena-engine',
+      surface: 'arena',
+      family: 'centipawn',
+      engineLabel: centipawnEngineLabel(row.variant),
+      modelId: model.modelId,
+      requestedRuntime: centipawnRuntimeForVariant(row.variant),
+    });
+  }
+  if (row.family === 'lc0' && !isLc0BigNetVariant(row.variant)) {
+    return browserRuntimeAuditIdentity({
+      source: 'active-arena-engine',
+      surface: 'arena',
+      family: 'lc0',
+      engineLabel: 'LC0',
+      modelId: 'lc0-default',
+      requestedRuntime: selectedLc0Runtime(),
+    });
+  }
+  return null;
+}
+
+function activeRuntimeAuditIdentities(): Set<string> {
+  const identities = new Set<string>();
+  for (const row of activeSeatRows()) {
+    const identity = runtimeAuditIdentityForRow(row);
+    if (identity) identities.add(identity);
+  }
+  return identities;
+}
+
+function reconcileActiveRuntimeFallbackWarning(): void {
+  const warningTarget = document.getElementById('runtimeWarning');
+  if (warningTarget) reconcileRuntimeFallbackWarning(warningTarget, activeRuntimeAuditIdentities());
+}
+
 function seatEngineId(index: number): string {
   return engineIdForRow(seatRows[index]);
 }
@@ -1550,6 +1651,7 @@ function renderSeatSelectors(): void {
       return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${label}</span>${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="seat-fam" data-seat="${index}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${index}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
     })
     .join('');
+  reconcileActiveRuntimeFallbackWarning();
 }
 
 function syncSeatRowsFromDom(): void {
@@ -2161,16 +2263,6 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   return recklessEngines.getOrCreate(recklessVariantForKey(variantKey));
 }
 
-function prewarmReckless(engine: RecklessEngine): void {
-  void engine
-    .prewarm()
-    .then(renderRecklessRuntimeInfo)
-    .catch((error) => {
-      if ((error as Error).name !== 'AbortError') console.warn('Reckless prewarm failed', error);
-      renderRecklessRuntimeInfo();
-    });
-}
-
 function recklessMissingAssetMessage(variants: RecklessVariant[]): string {
   const urls = variants.flatMap((variant) => [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])]);
   return `Reckless asset missing: ${urls.join(', ')}. Build/publish Reckless artifacts with npm run reckless:build-production, or choose Stockfish/Centipawn/LC0 instead.`;
@@ -2481,6 +2573,7 @@ function buildEngines() {
   pruneUnusedLc0Searchers(activeIds);
   engines.clear();
   disposeUnusedUciEngines();
+  disposeUnusedCentipawnEvaluators();
   const warmupPositions = [parseFen(START_FEN)];
   const lc0Search =
     (engineId: string, row: EngineRow): ArenaEngine['move'] =>
@@ -2692,6 +2785,15 @@ function buildEngines() {
       searchPolicy: montyLitePuctPolicy,
     });
   };
+  const stockfishWarmupStatus = (): ArenaWarmupStatus => {
+    const threads = stockfishThreadsPlanned();
+    const threadText = threads === 1 ? 'its engine worker' : `${threads} engine threads`;
+    const hashMb = cpuEngineHashMbForSurface('arena');
+    return {
+      phase: 'Loading and configuring the local WebAssembly engine',
+      detail: `Stockfish runs entirely in this browser. On first use, this loads its engine files, starts ${threadText}, allocates a ${hashMb} MB search cache, and completes its UCI readiness check. The match clock has not started; game 1 begins automatically.`,
+    };
+  };
   const stockfishWarmup = (kind: 'lite' | 'full') => async (signal: AbortSignal) => {
     const engine = stockfishEngineFor(kind);
     // Planned (lease-free) threads so the pthread pool spawns before move one.
@@ -2741,7 +2843,7 @@ function buildEngines() {
       engines.set(id, { id, name, move: centipawnMove(id, row), warmup: centipawnWarmup(row) });
     } else if (row.family === 'sf') {
       const kind = row.variant === 'full' ? 'full' : 'lite';
-      engines.set(id, { id, name, move: sf(id, row, kind), warmup: stockfishWarmup(kind) });
+      engines.set(id, { id, name, move: sf(id, row, kind), warmup: stockfishWarmup(kind), warmupStatus: stockfishWarmupStatus() });
     } else if (row.family === 'reckless') {
       const variant = recklessVariantForKey(row.variant);
       if (variant.key !== 'custom' && recklessVariantAssetStatus(variant) === 'missing') {
@@ -2755,7 +2857,6 @@ function buildEngines() {
         continue;
       }
       const engine = getRecklessFor(row.variant);
-      prewarmReckless(engine);
       engines.set(id, { id, name, move: recklessMove(id, row, engine), warmup: recklessWarmup(engine) });
     } else if (row.family === 'viridithas') {
       const engine = getViridithasFor(row.variant);
@@ -2928,16 +3029,51 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-async function warmUpSelectedEngines(ids: string[], signal: AbortSignal): Promise<void> {
-  const warmed = new Set<string>();
+function showEngineWarmupStatus(engine: ArenaEngine, index: number, total: number): void {
+  const status = el('engineWarmupStatus');
+  status.hidden = false;
+  el('engineWarmupTitle').textContent = `Preparing ${engine.name} · engine ${index} of ${total}`;
+  const fallback: ArenaWarmupStatus = {
+    phase: 'Loading the engine and checking that it is ready',
+    detail: 'The arena performs a tiny untimed readiness check before game 1 so startup work is not charged to the first move. The match begins automatically.',
+  };
+  const copy = engine.warmupStatus ?? fallback;
+  el('engineWarmupPhase').textContent = copy.phase;
+  el('engineWarmupDetail').textContent = copy.detail;
+}
+
+function hideEngineWarmupStatus(): void {
+  const status = el('engineWarmupStatus');
+  status.hidden = true;
+  el('engineWarmupTitle').textContent = '';
+  el('engineWarmupPhase').textContent = '';
+  el('engineWarmupDetail').textContent = '';
+}
+
+async function warmUpSelectedEngines(ids: string[], signal: AbortSignal, minimumVisibleMs = 400): Promise<void> {
+  const pending: ArenaEngine[] = [];
+  const seen = new Set<string>();
   for (const id of ids) {
-    if (signal.aborted) return;
     const engine = engines.get(id);
-    if (!engine?.warmup || warmed.has(id)) continue;
-    el('message').textContent = `Warming up ${engine.name}…`;
-    await engine.warmup(signal);
-    warmed.add(id);
-    renderCacheInfo();
+    if (!engine?.warmup || seen.has(id)) continue;
+    seen.add(id);
+    pending.push(engine);
+  }
+  if (!pending.length) return;
+  el('message').textContent = 'Preparing engines before game 1…';
+  const visibleSince = performance.now();
+  try {
+    for (let index = 0; index < pending.length; index++) {
+      if (signal.aborted) return;
+      const engine = pending[index];
+      showEngineWarmupStatus(engine, index + 1, pending.length);
+      await engine.warmup!(signal);
+      renderCacheInfo();
+    }
+  } finally {
+    const remainingVisibleMs = minimumVisibleMs - (performance.now() - visibleSince);
+    if (!signal.aborted && remainingVisibleMs > 0) await sleep(remainingVisibleMs, signal);
+    hideEngineWarmupStatus();
   }
 }
 
@@ -3122,7 +3258,7 @@ function clearStartPending(): void {
   if (!running) el('start').toggleAttribute('disabled', false);
 }
 
-async function startMatch() {
+async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> {
   if (running || startPending) return;
   const mountSignal = mountAbort.signal;
   startPending = true;
@@ -3248,9 +3384,11 @@ async function startMatch() {
   const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
   if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
   else renderStandings(standings, schedule.length);
+  let enginesReady = false;
   try {
     resetLc0SearchTrees(seatIds);
-    await warmUpSelectedEngines(seatIds, matchAbort.signal);
+    await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
+    enginesReady = true;
     if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
     for (let i = 0; i < schedule.length; i++) {
       if (matchAbort.signal.aborted) break;
@@ -3318,8 +3456,11 @@ async function startMatch() {
       if (isAbortError(error) || matchAbort.signal.aborted) {
         el('message').textContent = `Stopped after ${score.games} game(s).`;
         el('pairing').textContent = 'Match stopped.';
+      } else if (enginesReady) {
+        el('message').textContent = `Match failed: ${error instanceof Error ? error.message : String(error)}`;
       } else {
-        el('message').textContent = `Match failed: ${(error as Error).message}`;
+        el('message').textContent = `Engine preparation failed: ${error instanceof Error ? error.message : String(error)}`;
+        el('pairing').textContent = 'Match did not start.';
       }
     }
   } finally {
@@ -3345,6 +3486,19 @@ async function startMatch() {
       refreshSeatControls();
       renderEngineOutputs();
     }
+  }
+}
+async function startMatch(minimumWarmupVisibleMs = 400): Promise<void> {
+  const mountSignal = mountAbort.signal;
+  try {
+    await startMatchUnchecked(minimumWarmupVisibleMs);
+  } catch (error) {
+    if (isStaleMount(mountSignal)) return;
+    hideEngineWarmupStatus();
+    clearStartPending();
+    const detail = error instanceof Error ? error.message : String(error);
+    el('message').textContent = `Match preparation failed: ${detail}`;
+    el('pairing').textContent = 'Match did not start.';
   }
 }
 
@@ -3380,13 +3534,11 @@ function disposeRuntimeResources(): void {
   hideDownloadProgress();
   disposeLc0Resources();
   centipawnEvaluatorGeneration++;
-  for (const evaluator of centipawnEvaluators) {
-    evaluator.clear();
-    const destroy = (evaluator.inner as Evaluator & { destroy?: () => void }).destroy;
-    if (typeof destroy === 'function') destroy.call(evaluator.inner);
-  }
+  for (const evaluator of centipawnEvaluators) destroyCentipawnEvaluator(evaluator);
   centipawnEvaluators.clear();
+  centipawnEvaluatorsByKey.clear();
   centipawnEvaluatorPromises.clear();
+  centipawnEvaluatorLoadTokens.clear();
   disposeStockfish();
   recklessEngines.disposeAll();
   viridithasEngines.disposeAll();
@@ -3447,6 +3599,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
   showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
     const evaluator = await createSelectedLc0Evaluator();
+    const ortDiagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics({ probeAdapter: false }) : undefined;
     if (isStaleMount(mountSignal)) {
       void evaluator.dispose?.();
       return;
@@ -3459,7 +3612,8 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
       modelId: 'lc0-default',
       modelUrl: runtime === 'onnx' ? MODEL_URL : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
       requestedRuntime: runtime,
-      resolvedRuntime: lc0ResolvedRuntime(runtime),
+      resolvedRuntime: ortDiagnostics?.fallback ? 'ort-main-thread-wasm-fallback' : lc0ResolvedRuntime(runtime),
+      fallbackReason: ortDiagnostics?.fallback?.reason,
       runtimeConfigId: runtime === 'onnx' ? undefined : runtime,
       manifestUrl: runtime === 'onnx' ? undefined : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
       searchBudget: activeSeatRows()
@@ -3504,6 +3658,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
 async function reloadLc0Evaluator(): Promise<void> {
   abort?.abort();
   disposeLc0Resources();
+  reconcileActiveRuntimeFallbackWarning();
   renderCacheInfo();
   await loadLc0Evaluator();
 }
@@ -3569,7 +3724,7 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
     const sfKind = seatRows[1].family === 'sf' && seatRows[1].variant === 'full' ? 'full' : 'lite';
     const sfId = seatRows[1].family === 'sf' ? seatEngineId(1) : 'sf:lite:8';
     const sfName = seatRows[1].family === 'sf' ? (engines.get(sfId)?.name ?? rowLabel(seatRows[1])) : 'Stockfish Lite d8';
-    await warmUpSelectedEngines([lc0Id, sfId], controller.signal);
+    await warmUpSelectedEngines([lc0Id, sfId], controller.signal, 0);
     const sfEngine = stockfishEngineFor(sfKind);
     const timed = arenaBudgetMode() === 'movetime';
     const scoreMs = stockfishScoreMs();
@@ -3705,7 +3860,7 @@ async function runArenaBenchAutorun(): Promise<void> {
   const started = performance.now();
   try {
     if ((el('start') as HTMLButtonElement).disabled) throw new Error(el('message').textContent || 'arena start is disabled');
-    await startMatch();
+    await startMatch(0);
     const matchMessage = el('message').textContent ?? '';
     if (!games.length || /^(Match failed|Opening setup error|No games|Select two|Stopped|Lc0 BT4 needs)/.test(matchMessage)) {
       throw new Error(matchMessage || 'arena benchmark did not complete any games');
@@ -3840,6 +3995,7 @@ function wireEvents() {
       clampStrength(row);
     }
     normalizeSeatRowForDeploy(seat);
+    reconcileActiveRuntimeFallbackWarning();
     persistArenaSeatRows();
     for (const key of ARENA_BIG_NET_KEYS) {
       if (activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) continue;
@@ -3875,6 +4031,7 @@ function wireEvents() {
     syncSeatRowsFromDom();
     seatRows.splice(index, 1);
     persistArenaSeatRows();
+    reconcileActiveRuntimeFallbackWarning();
     buildEngines();
     populateSeats();
   });
@@ -4070,7 +4227,13 @@ export function mountArenaBrowser(): () => void {
   const controller = new AbortController();
   mountAbort = controller;
   arenaMountedCallbackCache = new WeakMap();
-  void init(controller.signal);
+  void init(controller.signal).catch((error) => {
+    if (controller.signal.aborted || mountAbort !== controller) return;
+    hideEngineWarmupStatus();
+    const detail = error instanceof Error ? error.message : String(error);
+    el('message').textContent = `Arena failed to initialize: ${detail}`;
+    el('pairing').textContent = 'Arena initialization failed.';
+  });
   return () => {
     controller.abort();
     if (mountAbort !== controller) return;

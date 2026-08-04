@@ -88,6 +88,7 @@ onMount(() => {
       <div id="levelCaption" class="small setup-note"></div>
       <div id="engineCaution" class="small" hidden></div>
       <div id="engineNote" role="status" aria-live="polite" hidden></div>
+      <div id="runtimeWarning" class="runtime-warning small" role="status" aria-live="polite" hidden></div>
       <button id="retryEngine" type="button" hidden>Retry engine</button>
     </details>
 
@@ -167,6 +168,10 @@ onMount(() => {
     background:var(--panel-inset); font-family:var(--mono); font-size:10px; line-height:1.4;
   }
   :global(#engineNote.warn){color:var(--warn); border-color:var(--warn)}
+  :global(.runtime-warning){
+    margin-top:7px; padding:7px 8px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule));
+    border-radius:6px; background:var(--warn-soft); color:var(--warn); line-height:1.4;
+  }
   :global(#retryEngine){min-height:34px; margin-top:6px; padding:6px 9px}
   :global(#dlProgress){margin-top:8px; padding:7px 8px; border:1px solid var(--rule); border-radius:6px; background:var(--panel-inset)}
   :global(#dlProgress progress){width:100%; height:8px; accent-color:var(--accent)}
