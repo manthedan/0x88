@@ -5,6 +5,7 @@ import {
   type OrtRuntimeDiagnosticOptions,
   type OrtRuntimeDiagnostics,
   type OrtWasmArtifactSelection,
+  setOrtDequantFoldForCurrentThread,
   setOrtRuntimeDiagnosticOptionsForCurrentThread,
   setRequestedOrtWasmArtifactForCurrentThread,
   setRequestedOrtWasmThreadsForCurrentThread,
@@ -44,6 +45,8 @@ type InitMessage = {
   encoderKernelVariant?: Lc0WebEncoderKernelVariant;
   evalCacheEntries?: number;
   ortDiagnostics?: OrtRuntimeDiagnosticOptions;
+  /** Fold weight-only DequantizeLinear at load; omitted = runtime default (on unless ?ortDequantFold=0). */
+  dequantFold?: boolean;
   ortWasmArtifact?: OrtWasmArtifactSelection;
   ortWasmThreads?: number;
   /** Stream model download progress back as 'downloadProgress' messages. */
@@ -303,6 +306,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   const cacheLabel = evalCacheEntries > 0 ? ` · eval-cache ${evalCacheEntries}` : '';
   applyOrtExecutionProvider(message.ep);
   setOrtRuntimeDiagnosticOptionsForCurrentThread(message.ortDiagnostics ?? null);
+  setOrtDequantFoldForCurrentThread(message.dequantFold ?? null);
   setRequestedOrtWasmArtifactForCurrentThread(message.ortWasmArtifact ?? null);
   setRequestedOrtWasmThreadsForCurrentThread(message.ortWasmThreads ?? null);
   if (message.runtime === 'whole-onnx-webgpu') {

@@ -980,6 +980,7 @@ const ORT_PREFERRED_OUTPUT_LOCATION =
     : !paramFalsey('ortGpuOutputs') && (ORT_READBACK_PROFILE_REQUESTED || paramTruthy('ortGpuOutputs'))
       ? 'gpu-buffer'
       : undefined;
+const ORT_DEQUANT_FOLD: boolean | undefined = paramFalsey('ortDequantFold') ? false : paramTruthy('ortDequantFold') ? true : undefined;
 const BENCH_WARMUP = Math.min(100, Math.max(0, Math.floor(Number(params.get('benchWarmup') ?? '5') || 0)));
 const BENCH_ITERS = Math.min(1000, Math.max(1, Math.floor(Number(params.get('benchIters') ?? params.get('iters') ?? '25') || 25)));
 function requestedKernelVariant(): KernelVariant {
@@ -1477,6 +1478,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
     ortDiagnostics: requestedOrtDiagnosticsPayload(),
+    ...(ORT_DEQUANT_FOLD === undefined ? {} : { dequantFold: ORT_DEQUANT_FOLD }),
     ortWasmArtifact: requestedWasmArtifact,
     ortWasmThreads: requestedOrtWasmThreadsPayload(),
     ...(HYBRID_EVALUATOR_REQUESTED
@@ -1561,6 +1563,7 @@ async function initHybridWorkerWithOptions(
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
     ortDiagnostics: requestedOrtDiagnosticsPayload(),
+    ...(ORT_DEQUANT_FOLD === undefined ? {} : { dequantFold: ORT_DEQUANT_FOLD }),
     ortWasmArtifact: requestedWasmArtifact,
     ortWasmThreads: requestedOrtWasmThreadsPayload(),
     runtime: 'hybrid',

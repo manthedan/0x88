@@ -3,6 +3,7 @@ import './ortConsoleFilter.ts';
 export * from 'onnxruntime-web/webgpu';
 
 import * as ort from 'onnxruntime-web/webgpu';
+import { foldOnnxDequantizeLinear } from './onnxDequantFold.ts';
 import { supportsWasmRelaxedSimdIntegerDot } from '../lc0/wasmFeatures.ts';
 
 (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
@@ -138,6 +139,19 @@ export type OrtRuntimeDiagnostics = {
   sessionAttempts: OrtSessionAttempt[];
   fallback?: OrtRuntimeFallback;
   webgpuDiagnostics?: OrtWebGpuDiagnosticsSnapshot;
+  dequantFold?: OrtDequantFoldSummary;
+};
+
+export type OrtDequantFoldSummary = {
+  enabled: boolean;
+  foldedNodes: number;
+  skippedNodes: number;
+  removedInitializers: number;
+  bytesBefore: number;
+  bytesAfter: number;
+  elapsedMs: number;
+  /** Set when ORT rejected the folded model and the session was created from the original bytes. */
+  discardedAfter?: string;
 };
 
 function browserParam(name: string): string | null {
@@ -277,6 +291,93 @@ function lockRequestedOrtWasmArtifact(): void {
 
 export function setOrtRuntimeDiagnosticOptionsForCurrentThread(options: OrtRuntimeDiagnosticOptions | null): void {
   forcedOrtDiagnosticsOptions = options;
+}
+
+let forcedOrtDequantFold: boolean | null = null;
+let lastOrtDequantFold: OrtDequantFoldSummary | null = null;
+
+/** Worker threads cannot see the page URL, so the page forwards its choice explicitly. */
+export function setOrtDequantFoldForCurrentThread(value: boolean | null): void {
+  forcedOrtDequantFold = value;
+}
+
+/**
+ * Weight-only DequantizeLinear nodes are folded into plain initializers at load time unless
+ * `?ortDequantFold=0` (or ORT_DEQUANT_FOLD=0) asks for the graph as shipped.
+ */
+export function ortDequantFoldEnabled(): boolean {
+  if (forcedOrtDequantFold !== null) return forcedOrtDequantFold;
+  const raw = String(browserParam('ortDequantFold') ?? envValue('ORT_DEQUANT_FOLD') ?? '')
+    .trim()
+    .toLowerCase();
+  return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
+}
+
+export function lastOrtDequantFoldSummary(): OrtDequantFoldSummary | null {
+  return lastOrtDequantFold;
+}
+
+function runningUnderNode(): boolean {
+  return typeof globalThis.process?.versions?.node === 'string';
+}
+
+type OrtModelInput = string | Uint8Array | ArrayBuffer;
+
+type PreparedOrtModelInput = {
+  input: OrtModelInput;
+  /** The unfolded model, present only when `input` is a folded rewrite of it. */
+  original?: OrtModelInput;
+};
+
+async function prepareOrtModelInput(modelPath: OrtModelInput): Promise<PreparedOrtModelInput> {
+  if (!ortDequantFoldEnabled()) {
+    lastOrtDequantFold = { enabled: false, foldedNodes: 0, skippedNodes: 0, removedInitializers: 0, bytesBefore: 0, bytesAfter: 0, elapsedMs: 0 };
+    return { input: modelPath };
+  }
+  let bytes: Uint8Array;
+  if (typeof modelPath === 'string') {
+    // ORT reads file paths itself under Node; in a browser the string is a URL and fetching it
+    // here is what ORT would have done anyway.
+    if (runningUnderNode() || typeof fetch !== 'function') return { input: modelPath };
+    try {
+      const response = await fetch(modelPath);
+      if (!response.ok) return { input: modelPath };
+      bytes = new Uint8Array(await response.arrayBuffer());
+    } catch {
+      return { input: modelPath };
+    }
+  } else {
+    bytes = modelPath instanceof Uint8Array ? modelPath : new Uint8Array(modelPath);
+  }
+  try {
+    const result = foldOnnxDequantizeLinear(bytes);
+    lastOrtDequantFold = {
+      enabled: true,
+      foldedNodes: result.foldedNodes,
+      skippedNodes: result.skippedNodes,
+      removedInitializers: result.removedInitializers,
+      bytesBefore: result.bytesBefore,
+      bytesAfter: result.bytesAfter,
+      elapsedMs: result.elapsedMs,
+    };
+    return result.foldedNodes > 0 ? { input: result.bytes, original: bytes } : { input: bytes };
+  } catch (err) {
+    console.warn(`Centipawn: ORT dequantize fold skipped: ${err instanceof Error ? err.message : String(err)}`);
+    lastOrtDequantFold = { enabled: true, foldedNodes: 0, skippedNodes: 0, removedInitializers: 0, bytesBefore: bytes.byteLength, bytesAfter: bytes.byteLength, elapsedMs: 0 };
+    return { input: bytes };
+  }
+}
+
+function discardDequantFold(reason: string): void {
+  const fold = lastOrtDequantFold;
+  if (!fold) return;
+  lastOrtDequantFold = { ...fold, foldedNodes: 0, removedInitializers: 0, bytesAfter: fold.bytesBefore, discardedAfter: reason };
+}
+
+function describeDequantFold(): string | undefined {
+  const fold = lastOrtDequantFold;
+  if (!fold || !fold.enabled || fold.foldedNodes === 0) return undefined;
+  return `dequant fold: ${fold.foldedNodes} DequantizeLinear folded (${(fold.bytesBefore / 1e6).toFixed(1)} -> ${(fold.bytesAfter / 1e6).toFixed(1)} MB, ${fold.elapsedMs.toFixed(0)} ms)`;
 }
 
 function normalizeEp(value: string | null | undefined): OrtExecutionProviderPreference {
@@ -1014,6 +1115,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
     sessionAttempts: sessionAttempts.map((x) => ({ ...x, providers: [...x.providers] })),
     ...(lastOrtRuntimeFallback ? { fallback: { ...lastOrtRuntimeFallback } } : {}),
     webgpuDiagnostics: getOrtWebGpuDiagnosticsSnapshot(),
+    ...(lastOrtDequantFold ? { dequantFold: { ...lastOrtDequantFold } } : {}),
   };
   if (options.probeAdapter && webgpuAvailable()) {
     try {
@@ -1075,7 +1177,7 @@ async function ensureWebGpuAdapterProbed(): Promise<void> {
   }
 }
 
-export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuffer): Promise<ort.InferenceSession> {
+export async function createOrtSession(modelPath: OrtModelInput): Promise<ort.InferenceSession> {
   // Must precede resolvedOrtExecutionProviders(): both it and the artifact
   // selector read the probe result, and the locks below freeze that choice.
   await ensureWebGpuAdapterProbed();
@@ -1085,32 +1187,49 @@ export async function createOrtSession(modelPath: string | Uint8Array | ArrayBuf
   // the WebGPU->WASM fallback below then reuses the same binary.
   lockRequestedOrtWasmArtifact();
   lockOrtRuntimeArtifactKind(providers);
-  const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
-  try {
-    const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(providers));
-    const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
-    createdOrtSessions += 1;
-    recordSessionAttempt(providers, true, t1 - t0);
-    lastOrtExecutionProviders = providers;
-    lastOrtRuntimeFallback = undefined;
-    logOrtSessionReady(providers, t1 - t0);
-    return session;
-  } catch (err) {
-    const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
-    const message = err instanceof Error ? err.message : String(err);
-    recordSessionAttempt(providers, false, t1 - t0, message);
-    if (!shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers)) throw err;
-    console.warn(`Centipawn: ORT WebGPU session failed; falling back to WASM. ${message}`);
-    const fallbackT0 = typeof performance === 'undefined' ? Date.now() : performance.now();
-    const session = await ort.InferenceSession.create(modelPath as never, sessionOptions(['wasm']));
-    const fallbackT1 = typeof performance === 'undefined' ? Date.now() : performance.now();
-    createdOrtSessions += 1;
-    recordSessionAttempt(['wasm'], true, fallbackT1 - fallbackT0);
-    lastOrtExecutionProviders = ['wasm'];
-    lastOrtRuntimeFallback = { at: new Date().toISOString(), from: 'webgpu', to: 'wasm', reason: message };
-    logOrtSessionReady(['wasm'], fallbackT1 - fallbackT0, `fallback after WebGPU failure: ${message}`);
-    return session;
+  const prepared = await prepareOrtModelInput(modelPath);
+  const wasmFallback = shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
+  // Attempt order: folded model on the requested providers; the unfolded model on the same
+  // providers if ORT rejected the folded rewrite; then WASM on the unfolded model when the
+  // requested provider preference allows a fallback.
+  const attempts: { input: OrtModelInput; providers: string[]; note: (message: string | null) => string | undefined }[] = [
+    { input: prepared.input, providers, note: () => describeDequantFold() },
+  ];
+  if (prepared.original !== undefined) {
+    attempts.push({ input: prepared.original, providers, note: (message) => `unfolded model after the folded one failed to load: ${message}` });
   }
+  if (wasmFallback) {
+    attempts.push({ input: prepared.original ?? prepared.input, providers: ['wasm'], note: (message) => `fallback after WebGPU failure: ${message}` });
+  }
+  let lastMessage: string | null = null;
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
+    try {
+      const session = await ort.InferenceSession.create(attempt.input as never, sessionOptions(attempt.providers));
+      const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
+      createdOrtSessions += 1;
+      recordSessionAttempt(attempt.providers, true, t1 - t0);
+      lastOrtExecutionProviders = attempt.providers;
+      lastOrtRuntimeFallback =
+        attempt.providers === providers ? undefined : { at: new Date().toISOString(), from: 'webgpu', to: 'wasm', reason: lastMessage ?? '' };
+      logOrtSessionReady(attempt.providers, t1 - t0, attempt.note(lastMessage));
+      return session;
+    } catch (err) {
+      const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
+      lastMessage = err instanceof Error ? err.message : String(err);
+      recordSessionAttempt(attempt.providers, false, t1 - t0, lastMessage);
+      const next = attempts[i + 1];
+      if (!next) throw err;
+      if (next.input !== attempt.input) {
+        discardDequantFold(lastMessage);
+        console.warn(`Centipawn: ORT session failed on the dequantize-folded model; retrying with the original bytes. ${lastMessage}`);
+      } else {
+        console.warn(`Centipawn: ORT WebGPU session failed; falling back to WASM. ${lastMessage}`);
+      }
+    }
+  }
+  throw new Error('Centipawn: ORT session creation exhausted all attempts');
 }
 
 export async function releaseOrtSession(session: ort.InferenceSession): Promise<void> {

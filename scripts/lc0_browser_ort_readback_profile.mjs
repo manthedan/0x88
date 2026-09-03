@@ -7,7 +7,7 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5179;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
-const USAGE = `Usage: node scripts/lc0_browser_ort_readback_profile.mjs [options]\n\nRuns the LC0 ONNX evaluator in browser ORT with diagnostic output enabled.\n\nOptions:\n  --base-url URL        Use an existing dev server\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --model URL          LC0 ONNX model URL\n  --fen FEN            Position to benchmark (default page start position)\n  --iters N            Timed eval iterations (default 10)\n  --warmup N           Warmup eval iterations (default 2)\n  --ep EP              ORT EP: wasm, webgpu, webgpu,wasm, auto (default webgpu)\n  --ort-wasm-variant V ORT WASM artifact: fixed or relaxed\n  --ort-threads N      Pin ORT WASM threads\n  --no-monkey-patch    Disable WebGPU API monkey-patch counts\n  --no-kernel-profile  Disable ORT WebGPU kernel timestamp profiling\n  --no-gpu-outputs     Do not set preferredOutputLocation=gpu-buffer\n  --pack-verify        Kept for symmetry; ignored by ONNX bench\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`;
+const USAGE = `Usage: node scripts/lc0_browser_ort_readback_profile.mjs [options]\n\nRuns the LC0 ONNX evaluator in browser ORT with diagnostic output enabled.\n\nOptions:\n  --base-url URL        Use an existing dev server\n  --port N             Vite port when auto-starting (default ${DEFAULT_PORT})\n  --host HOST          Vite host when auto-starting (default ${DEFAULT_HOST})\n  --agent-browser BIN  Browser automation binary (default: AGENT_BROWSER_BIN or agent-browser)\n  --session NAME       agent-browser session name\n  --timeout MS         Total browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --model URL          LC0 ONNX model URL\n  --fen FEN            Position to benchmark (default page start position)\n  --iters N            Timed eval iterations (default 10)\n  --warmup N           Warmup eval iterations (default 2)\n  --ep EP              ORT EP: wasm, webgpu, webgpu,wasm, auto (default webgpu)\n  --ort-wasm-variant V ORT WASM artifact: fixed or relaxed\n  --ort-threads N      Pin ORT WASM threads\n  --no-monkey-patch    Disable WebGPU API monkey-patch counts\n  --no-kernel-profile  Disable ORT WebGPU kernel timestamp profiling\n  --no-gpu-outputs     Do not set preferredOutputLocation=gpu-buffer\n  --dequant-fold 0|1   Force the load-time DequantizeLinear fold off/on (default: runtime default, on)\n  --pack-verify        Kept for symmetry; ignored by ONNX bench\n  --no-server          Do not auto-start Vite\n  --dry-run            Print URL and exit\n  -h, --help           Show this help\n`;
 
 function parseArgs(argv) {
   const args = parseScriptArgs(argv, {
@@ -23,6 +23,7 @@ function parseArgs(argv) {
       'no-monkey-patch': { type: 'boolean', default: false },
       'no-kernel-profile': { type: 'boolean', default: false },
       'no-gpu-outputs': { type: 'boolean', default: false },
+      'dequant-fold': { type: 'string' },
       'pack-verify': { type: 'boolean', default: false },
       'base-url': { type: 'string' },
       model: { type: 'string' },
@@ -77,6 +78,7 @@ function benchmarkUrl(args) {
   url.searchParams.set('ortMonkeyPatchWebGpu', args.monkeyPatch ? '1' : '0');
   if (args.gpuOutputs) url.searchParams.set('ortPreferredOutputLocation', 'gpu-buffer');
   else url.searchParams.set('ortGpuOutputs', '0');
+  if (args.dequantFold !== undefined) url.searchParams.set('ortDequantFold', args.dequantFold);
   if (args.model) url.searchParams.set('model', args.model);
   if (args.fen) url.searchParams.set('fen', args.fen);
   return String(url);
