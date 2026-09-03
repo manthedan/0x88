@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { test } from 'node:test';
-import * as ort from '../src/nn/ortRuntime.ts';
-import {
-  ONNX_FLOAT, ONNX_FLOAT16, ONNX_INT4, ONNX_INT8, ProtoWriter, countOnnxDequantizeLinear, encodeTensorProto,
-  f16BitsToF32, f32ToF16Bits, foldOnnxDequantizeLinear, parseProtoFields,
-} from '../src/nn/onnxDequantFold.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
+import {
+  countOnnxDequantizeLinear,
+  encodeTensorProto,
+  f16BitsToF32,
+  f32ToF16Bits,
+  foldOnnxDequantizeLinear,
+  ONNX_FLOAT,
+  ONNX_FLOAT16,
+  ONNX_INT4,
+  ONNX_INT8,
+  ProtoWriter,
+  parseProtoFields,
+} from '../src/nn/onnxDequantFold.ts';
+import * as ort from '../src/nn/ortRuntime.ts';
 
 // ---- tiny ONNX builder (ModelProto/GraphProto/NodeProto/ValueInfoProto field numbers)
 function valueInfo(name, elemType, dims) {
@@ -41,12 +50,19 @@ const f16Bytes = (values) => new Uint8Array(Uint16Array.from(values.map(f32ToF16
 const int8Bytes = (values) => new Uint8Array(Int8Array.from(values).buffer);
 function int4Bytes(values) {
   const out = new Uint8Array(Math.ceil(values.length / 2));
-  values.forEach((v, i) => { out[i >> 1] |= (v & 0xf) << ((i & 1) * 4); });
+  values.forEach((v, i) => {
+    out[i >> 1] |= (v & 0xf) << ((i & 1) * 4);
+  });
   return out;
 }
 function matmul(x, rows, cols, w, n) {
   const y = new Float32Array(rows * n);
-  for (let r = 0; r < rows; r++) for (let j = 0; j < n; j++) { let acc = 0; for (let k = 0; k < cols; k++) acc += x[r * cols + k] * w[k * n + j]; y[r * n + j] = acc; }
+  for (let r = 0; r < rows; r++)
+    for (let j = 0; j < n; j++) {
+      let acc = 0;
+      for (let k = 0; k < cols; k++) acc += x[r * cols + k] * w[k * n + j];
+      y[r * n + j] = acc;
+    }
   return y;
 }
 const wasmSession = (bytes) => ort.InferenceSession.create(bytes, ort.sessionOptions(['wasm']));
@@ -68,7 +84,8 @@ test('per-column int8 DequantizeLinear folds into an f32 initializer with identi
   const bytes = model({
     nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'], [attrInt('axis', 1)]), node('MatMul', ['X', 'W'], ['Y'])],
     initializers: [encodeTensorProto('Wq', ONNX_INT8, [4, 3], int8Bytes(q)), encodeTensorProto('Ws', ONNX_FLOAT, [3], f32Bytes(scale))],
-    inputs: [valueInfo('X', ONNX_FLOAT, [2, 4])], outputs: [valueInfo('Y', ONNX_FLOAT, [2, 3])],
+    inputs: [valueInfo('X', ONNX_FLOAT, [2, 4])],
+    outputs: [valueInfo('Y', ONNX_FLOAT, [2, 3])],
   });
   assert.equal(countOnnxDequantizeLinear(bytes), 1);
   const folded = foldOnnxDequantizeLinear(bytes);
@@ -77,8 +94,17 @@ test('per-column int8 DequantizeLinear folds into an f32 initializer with identi
   assert.equal(countOnnxDequantizeLinear(folded.bytes), 0);
   assert.equal(parseProtoFields(folded.bytes).length, parseProtoFields(bytes).length, 'top-level fields preserved');
   const x = Float32Array.from([1, 2, 3, 4, -1, 0.5, 2, -3]);
-  const expected = matmul(x, 2, 4, q.map((v, i) => v * scale[i % 3]), 3);
-  for (const [label, session] of [['original', await wasmSession(bytes)], ['folded', await wasmSession(folded.bytes)]]) {
+  const expected = matmul(
+    x,
+    2,
+    4,
+    q.map((v, i) => v * scale[i % 3]),
+    3,
+  );
+  for (const [label, session] of [
+    ['original', await wasmSession(bytes)],
+    ['folded', await wasmSession(folded.bytes)],
+  ]) {
     const out = await session.run({ X: new ort.Tensor('float32', x, [2, 4]) });
     assert.deepEqual(Array.from(out.Y.data), Array.from(expected), label);
     await session.release();
@@ -91,7 +117,8 @@ test('blocked int4 DequantizeLinear (axis 0, block 2) folds to the reference deq
   const bytes = model({
     nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'], [attrInt('axis', 0), attrInt('block_size', 2)]), node('MatMul', ['X', 'W'], ['Y'])],
     initializers: [encodeTensorProto('Wq', ONNX_INT4, [4, 3], int4Bytes(q)), encodeTensorProto('Ws', ONNX_FLOAT, [2, 3], f32Bytes(scale))],
-    inputs: [valueInfo('X', ONNX_FLOAT, [1, 4])], outputs: [valueInfo('Y', ONNX_FLOAT, [1, 3])],
+    inputs: [valueInfo('X', ONNX_FLOAT, [1, 4])],
+    outputs: [valueInfo('Y', ONNX_FLOAT, [1, 3])],
   });
   const folded = foldOnnxDequantizeLinear(bytes);
   assert.equal(folded.foldedNodes, 1);
@@ -118,7 +145,8 @@ test('f16 scales produce an f16 initializer that ORT reads back correctly', asyn
   const bytes = model({
     nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'], [attrInt('axis', 1)]), node('MatMul', ['X', 'W'], ['Y'])],
     initializers: [encodeTensorProto('Wq', ONNX_INT8, [4, 3], int8Bytes(q)), encodeTensorProto('Ws', ONNX_FLOAT16, [3], f16Bytes(scale))],
-    inputs: [valueInfo('X', ONNX_FLOAT16, [1, 4])], outputs: [valueInfo('Y', ONNX_FLOAT16, [1, 3])],
+    inputs: [valueInfo('X', ONNX_FLOAT16, [1, 4])],
+    outputs: [valueInfo('Y', ONNX_FLOAT16, [1, 3])],
   });
   ort.setOrtDequantFoldForCurrentThread(true);
   const session = await ort.createOrtSession(bytes);
@@ -130,8 +158,160 @@ test('f16 scales produce an f16 initializer that ORT reads back correctly', asyn
   const got = out.Y.data instanceof Uint16Array ? Array.from(out.Y.data).map(f16BitsToF32) : Array.from(out.Y.data); // ORT hands back Float16Array where the runtime has one
   const w = q.map((v, i) => f16BitsToF32(f32ToF16Bits(v * f16BitsToF32(f32ToF16Bits(scale[i % 3])))));
   const expected = matmul(Float32Array.from(x), 1, 4, w, 3);
-  got.forEach((v, i) => assert.ok(Math.abs(v - expected[i]) <= Math.abs(expected[i]) * 4e-3 + 1e-3, `Y[${i}] ${v} vs ${expected[i]}`));
+  for (const [i, v] of got.entries()) assert.ok(Math.abs(v - expected[i]) <= Math.abs(expected[i]) * 4e-3 + 1e-3, `Y[${i}] ${v} vs ${expected[i]}`);
   await ort.releaseOrtSession(session);
+});
+
+// Two's-complement int64 varint (10 bytes for negatives), which ProtoWriter.varint refuses.
+function signedVarint(value) {
+  let v = BigInt.asUintN(64, BigInt(value));
+  const out = [];
+  while (v >= 128n) {
+    out.push(Number(v % 128n) | 0x80);
+    v /= 128n;
+  }
+  out.push(Number(v));
+  return Uint8Array.from(out);
+}
+function attrSignedInt(name, value) {
+  return new ProtoWriter().stringField(1, name).tag(3, 0).raw(signedVarint(value)).varintField(20, 2).finish();
+}
+function attrGraph(name, graphBytes) {
+  return new ProtoWriter().stringField(1, name).bytesField(6, graphBytes).varintField(20, 5).finish();
+}
+function attrGraphs(name, graphs) {
+  const w = new ProtoWriter().stringField(1, name);
+  for (const g of graphs) w.bytesField(11, g);
+  return w.varintField(20, 10).finish();
+}
+function int8TensorAsInt32Data(name, dims, values) {
+  const packed = new ProtoWriter();
+  for (const v of values) packed.raw(signedVarint(v));
+  const w = new ProtoWriter();
+  for (const d of dims) w.varintField(1, d);
+  w.varintField(2, ONNX_INT8).bytesField(5, packed.finish()).stringField(8, name);
+  return w.finish();
+}
+
+test('negative axis and negative int32_data values decode as signed integers', async () => {
+  const q = [1, -2, 3, 4, -5, 6, 7, -8, 9, 10, -11, 12]; // [4, 3]
+  const scale = [0.5, 0.25, 0.125];
+  const bytes = model({
+    nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'], [attrSignedInt('axis', -1)]), node('MatMul', ['X', 'W'], ['Y'])],
+    initializers: [int8TensorAsInt32Data('Wq', [4, 3], q), encodeTensorProto('Ws', ONNX_FLOAT, [3], f32Bytes(scale))],
+    inputs: [valueInfo('X', ONNX_FLOAT, [2, 4])],
+    outputs: [valueInfo('Y', ONNX_FLOAT, [2, 3])],
+  });
+  const folded = foldOnnxDequantizeLinear(bytes);
+  assert.equal(folded.foldedNodes, 1);
+  const x = Float32Array.from([1, 2, 3, 4, -1, 0.5, 2, -3]);
+  const expected = matmul(
+    x,
+    2,
+    4,
+    q.map((v, i) => v * scale[i % 3]),
+    3,
+  );
+  for (const [label, session] of [
+    ['original', await wasmSession(bytes)],
+    ['folded', await wasmSession(folded.bytes)],
+  ]) {
+    const out = await session.run({ X: new ort.Tensor('float32', x, [2, 4]) });
+    assert.deepEqual(Array.from(out.Y.data), Array.from(expected), label);
+    await session.release();
+  }
+});
+
+test('initializers captured by a subgraph survive the fold', () => {
+  const thenBranch = new ProtoWriter()
+    .bytesField(1, node('Identity', ['Ws'], ['Z']))
+    .stringField(2, 'then')
+    .bytesField(12, valueInfo('Z', ONNX_FLOAT, [3]))
+    .finish();
+  const elseBranch = new ProtoWriter()
+    .bytesField(1, node('Identity', ['Zero'], ['Z']))
+    .stringField(2, 'else')
+    .bytesField(12, valueInfo('Z', ONNX_FLOAT, [3]))
+    .finish();
+  const bytes = model({
+    nodes: [
+      node('DequantizeLinear', ['Wq', 'Ws', 'Zp'], ['W'], [attrInt('axis', 1)]),
+      node('MatMul', ['X', 'W'], ['Y']),
+      node('If', ['cond'], ['Z'], [attrGraph('then_branch', thenBranch), attrGraph('else_branch', elseBranch)]),
+      // A repeated-graph (GRAPHS, field 11) attribute capturing 'Zp' the same way.
+      node(
+        'CustomBodies',
+        [],
+        ['Z2'],
+        [
+          attrGraphs('bodies', [
+            new ProtoWriter()
+              .bytesField(1, node('Identity', ['Zp'], ['Z2']))
+              .stringField(2, 'body')
+              .finish(),
+          ]),
+        ],
+      ),
+    ],
+    initializers: [
+      encodeTensorProto('Wq', ONNX_INT8, [4, 3], int8Bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])),
+      encodeTensorProto('Ws', ONNX_FLOAT, [3], f32Bytes([0.5, 0.25, 0.125])),
+      encodeTensorProto('Zp', ONNX_INT8, [3], int8Bytes([0, 0, 0])),
+      encodeTensorProto('Zero', ONNX_FLOAT, [3], f32Bytes([0, 0, 0])),
+    ],
+    inputs: [valueInfo('X', ONNX_FLOAT, [2, 4]), valueInfo('cond', 9, [])],
+    outputs: [valueInfo('Y', ONNX_FLOAT, [2, 3]), valueInfo('Z', ONNX_FLOAT, [3])],
+  });
+  const folded = foldOnnxDequantizeLinear(bytes);
+  assert.equal(folded.foldedNodes, 1);
+  assert.equal(folded.removedInitializers, 1, 'only Wq is dropped; Ws and Zp are read by subgraph bodies');
+  const graph = parseProtoFields(folded.bytes).find((f) => f.field === 7);
+  const names = parseProtoFields(folded.bytes, graph.valueStart, graph.valueEnd)
+    .filter((f) => f.field === 5)
+    .map((f) => parseProtoFields(folded.bytes, f.valueStart, f.valueEnd).find((t) => t.field === 8))
+    .map((t) => new TextDecoder().decode(folded.bytes.subarray(t.valueStart, t.valueEnd)));
+  assert.deepEqual(names.sort(), ['W', 'Ws', 'Zero', 'Zp']);
+});
+
+test('output_dtype selects the folded tensor type; unsupported output types are skipped', () => {
+  const build = (outputDtype) =>
+    model({
+      nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'], [attrInt('axis', 1), attrInt('output_dtype', outputDtype)]), node('MatMul', ['X', 'W'], ['Y'])],
+      initializers: [encodeTensorProto('Wq', ONNX_INT8, [2, 2], int8Bytes([1, -2, 3, 4])), encodeTensorProto('Ws', ONNX_FLOAT16, [2], f16Bytes([0.5, 0.25]))],
+      inputs: [valueInfo('X', ONNX_FLOAT, [1, 2])],
+      outputs: [valueInfo('Y', ONNX_FLOAT, [1, 2])],
+    });
+  const foldedType = (bytes) => {
+    const graph = parseProtoFields(bytes).find((f) => f.field === 7);
+    for (const f of parseProtoFields(bytes, graph.valueStart, graph.valueEnd).filter((t) => t.field === 5)) {
+      const fields = parseProtoFields(bytes, f.valueStart, f.valueEnd);
+      const name = fields.find((t) => t.field === 8);
+      if (new TextDecoder().decode(bytes.subarray(name.valueStart, name.valueEnd)) === 'W') return fields.find((t) => t.field === 2).varint;
+    }
+    return null;
+  };
+  const asFloat = foldOnnxDequantizeLinear(build(ONNX_FLOAT));
+  assert.equal(asFloat.foldedNodes, 1);
+  assert.equal(foldedType(asFloat.bytes), ONNX_FLOAT, 'output_dtype=FLOAT overrides the f16 scale type');
+  const asBf16 = foldOnnxDequantizeLinear(build(16 /* BFLOAT16 */));
+  assert.equal(asBf16.foldedNodes, 0);
+  assert.equal(asBf16.skippedNodes, 1);
+});
+
+test('a DequantizeLinear fed by an overridable graph input is not folded', () => {
+  const bytes = model({
+    nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'], [attrInt('axis', 1)]), node('MatMul', ['X', 'W'], ['Y'])],
+    initializers: [
+      encodeTensorProto('Wq', ONNX_INT8, [4, 3], int8Bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])),
+      encodeTensorProto('Ws', ONNX_FLOAT, [3], f32Bytes([0.5, 0.25, 0.125])),
+    ],
+    inputs: [valueInfo('X', ONNX_FLOAT, [2, 4]), valueInfo('Ws', ONNX_FLOAT, [3])],
+    outputs: [valueInfo('Y', ONNX_FLOAT, [2, 3])],
+  });
+  const folded = foldOnnxDequantizeLinear(bytes);
+  assert.equal(folded.foldedNodes, 0);
+  assert.equal(folded.skippedNodes, 1);
+  assert.equal(folded.bytes, bytes, 'model bytes returned unchanged');
 });
 
 const QDQ8 = process.env.LC0_QDQ8_MODEL ?? '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';

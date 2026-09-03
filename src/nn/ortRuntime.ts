@@ -3,8 +3,8 @@ import './ortConsoleFilter.ts';
 export * from 'onnxruntime-web/webgpu';
 
 import * as ort from 'onnxruntime-web/webgpu';
-import { foldOnnxDequantizeLinear } from './onnxDequantFold.ts';
 import { supportsWasmRelaxedSimdIntegerDot } from '../lc0/wasmFeatures.ts';
+import { foldOnnxDequantizeLinear } from './onnxDequantFold.ts';
 
 (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
 
@@ -363,7 +363,15 @@ async function prepareOrtModelInput(modelPath: OrtModelInput): Promise<PreparedO
     return result.foldedNodes > 0 ? { input: result.bytes, original: bytes } : { input: bytes };
   } catch (err) {
     console.warn(`Centipawn: ORT dequantize fold skipped: ${err instanceof Error ? err.message : String(err)}`);
-    lastOrtDequantFold = { enabled: true, foldedNodes: 0, skippedNodes: 0, removedInitializers: 0, bytesBefore: bytes.byteLength, bytesAfter: bytes.byteLength, elapsedMs: 0 };
+    lastOrtDequantFold = {
+      enabled: true,
+      foldedNodes: 0,
+      skippedNodes: 0,
+      removedInitializers: 0,
+      bytesBefore: bytes.byteLength,
+      bytesAfter: bytes.byteLength,
+      elapsedMs: 0,
+    };
     return { input: bytes };
   }
 }

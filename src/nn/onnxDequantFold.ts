@@ -42,19 +42,34 @@ type Field = {
   varint?: number;
 };
 
+/**
+ * Decodes a protobuf varint as a two's-complement int64. The low and high 32-bit halves are
+ * accumulated exactly, so negative int32/int64 values (10-byte varints near 2^64, e.g. axis=-1
+ * or negative int32_data entries) come back as the intended negative number instead of being
+ * rounded to 2^64 by float arithmetic. Magnitudes above 2^53 lose precision; nothing in the
+ * ONNX metadata we read gets there.
+ */
 function readVarint(buf: Uint8Array, pos: number): [number, number] {
-  let result = 0;
+  let lo = 0;
+  let hi = 0;
   let shift = 0;
   let p = pos;
   for (;;) {
     if (p >= buf.length) throw new Error('onnx: truncated varint');
     const b = buf[p++];
-    result += shift < 28 ? (b & 0x7f) << shift : (b & 0x7f) * 2 ** shift;
+    const bits = b & 0x7f;
+    if (shift < 32) {
+      lo = (lo | (bits << shift)) >>> 0;
+      if (shift > 25) hi = (hi | (bits >>> (32 - shift))) >>> 0;
+    } else {
+      hi = (hi | (bits << (shift - 32))) >>> 0;
+    }
     if ((b & 0x80) === 0) break;
     shift += 7;
     if (shift > 63) throw new Error('onnx: varint too long');
   }
-  return [result, p];
+  const signedHi = hi >= 0x8000_0000 ? hi - 0x1_0000_0000 : hi;
+  return [signedHi * 0x1_0000_0000 + lo, p];
 }
 
 export function parseProtoFields(buf: Uint8Array, start = 0, end = buf.length): Field[] {
@@ -194,12 +209,12 @@ export function f32ToF16Bits(x: number): number {
     let h = mant >>> shift;
     const rem = mant & ((1 << shift) - 1);
     const half = 1 << (shift - 1);
-    if (rem > half || (rem === half && (h & 1))) h += 1;
+    if (rem > half || (rem === half && h & 1)) h += 1;
     return sign | h;
   }
   let h = (e << 10) | (mant >>> 13);
   const rem = mant & 0x1fff;
-  if (rem > 0x1000 || (rem === 0x1000 && (h & 1))) h += 1; // carry into the exponent is the correct rounding
+  if (rem > 0x1000 || (rem === 0x1000 && h & 1)) h += 1; // carry into the exponent is the correct rounding
   return sign | h;
 }
 
@@ -222,22 +237,44 @@ function parseTensor(buf: Uint8Array, f: Field): TensorInfo {
     switch (t.field) {
       case 1: // dims
         if (t.wire === WIRE_VARINT) info.dims.push(t.varint!);
-        else for (let p = t.valueStart; p < t.valueEnd; ) { const [v, n] = readVarint(buf, p); info.dims.push(v); p = n; }
+        else
+          for (let p = t.valueStart; p < t.valueEnd; ) {
+            const [v, n] = readVarint(buf, p);
+            info.dims.push(v);
+            p = n;
+          }
         break;
-      case 2: info.dataType = t.varint ?? 0; break;
+      case 2:
+        info.dataType = t.varint ?? 0;
+        break;
       case 4: // float_data
         if (t.wire === WIRE_FIXED32) floats.push(new DataView(buf.buffer, buf.byteOffset + t.valueStart, 4).getFloat32(0, true));
-        else { const dv = new DataView(buf.buffer, buf.byteOffset + t.valueStart, t.valueEnd - t.valueStart); for (let p = 0; p + 4 <= dv.byteLength; p += 4) floats.push(dv.getFloat32(p, true)); }
+        else {
+          const dv = new DataView(buf.buffer, buf.byteOffset + t.valueStart, t.valueEnd - t.valueStart);
+          for (let p = 0; p + 4 <= dv.byteLength; p += 4) floats.push(dv.getFloat32(p, true));
+        }
         break;
       case 5: // int32_data
         if (t.wire === WIRE_VARINT) int32.push(t.varint! | 0);
-        else for (let p = t.valueStart; p < t.valueEnd; ) { const [v, n] = readVarint(buf, p); int32.push(v | 0); p = n; }
+        else
+          for (let p = t.valueStart; p < t.valueEnd; ) {
+            const [v, n] = readVarint(buf, p);
+            int32.push(v | 0);
+            p = n;
+          }
         break;
-      case 8: info.name = fieldString(buf, t); break;
-      case 9: info.raw = buf.subarray(t.valueStart, t.valueEnd); break;
+      case 8:
+        info.name = fieldString(buf, t);
+        break;
+      case 9:
+        info.raw = buf.subarray(t.valueStart, t.valueEnd);
+        break;
       case 13: // external_data: not supported for folding
-        info.raw = null; info.dataType = -1; break;
-      default: break;
+        info.raw = null;
+        info.dataType = -1;
+        break;
+      default:
+        break;
     }
   }
   if (int32.length) info.int32Data = Int32Array.from(int32);
@@ -377,16 +414,51 @@ type NodeInfo = {
   outputs: string[];
   axis: number;
   blockSize: number;
+  /** DequantizeLinear output_dtype (opset 25+); 0 means "same as the scale". */
+  outputDtype: number;
 };
 
+/**
+ * Counts every tensor name a node reads, including reads from subgraphs nested in its
+ * attributes (If/Loop/Scan bodies capture outer-scope initializers by name). Names that a
+ * subgraph shadows with its own input/initializer are over-counted, which only keeps an
+ * initializer alive that could have been dropped.
+ */
+function countNodeConsumers(buf: Uint8Array, node: Field, consumers: Map<string, number>): void {
+  for (const t of parseProtoFields(buf, node.valueStart, node.valueEnd)) {
+    if (t.field === 1 && t.wire === WIRE_LEN) {
+      const name = fieldString(buf, t);
+      consumers.set(name, (consumers.get(name) ?? 0) + 1);
+    } else if (t.field === 5 && t.wire === WIRE_LEN) {
+      for (const a of parseProtoFields(buf, t.valueStart, t.valueEnd)) {
+        if ((a.field === 6 || a.field === 11) && a.wire === WIRE_LEN) countGraphConsumers(buf, a, consumers); // AttributeProto.g (6) / .graphs (11)
+      }
+    }
+  }
+}
+
+function countGraphConsumers(buf: Uint8Array, graph: Field, consumers: Map<string, number>): void {
+  for (const f of parseProtoFields(buf, graph.valueStart, graph.valueEnd)) {
+    if (f.field === 1 && f.wire === WIRE_LEN) countNodeConsumers(buf, f, consumers);
+  }
+}
+
 function parseNode(buf: Uint8Array, f: Field): NodeInfo {
-  const node: NodeInfo = { field: f, opType: '', domain: '', inputs: [], outputs: [], axis: 1, blockSize: 0 };
+  const node: NodeInfo = { field: f, opType: '', domain: '', inputs: [], outputs: [], axis: 1, blockSize: 0, outputDtype: 0 };
   for (const t of parseProtoFields(buf, f.valueStart, f.valueEnd)) {
     switch (t.field) {
-      case 1: node.inputs.push(fieldString(buf, t)); break;
-      case 2: node.outputs.push(fieldString(buf, t)); break;
-      case 4: node.opType = fieldString(buf, t); break;
-      case 7: node.domain = fieldString(buf, t); break;
+      case 1:
+        node.inputs.push(fieldString(buf, t));
+        break;
+      case 2:
+        node.outputs.push(fieldString(buf, t));
+        break;
+      case 4:
+        node.opType = fieldString(buf, t);
+        break;
+      case 7:
+        node.domain = fieldString(buf, t);
+        break;
       case 5: {
         let name = '';
         let ival: number | undefined;
@@ -395,13 +467,14 @@ function parseNode(buf: Uint8Array, f: Field): NodeInfo {
           else if (a.field === 3) ival = a.varint;
         }
         if (ival === undefined) break;
-        // AttributeProto.i is int64 two's complement; negative axes arrive as huge varints.
-        const signed = ival >= 2 ** 63 ? ival - 2 ** 64 : ival;
-        if (name === 'axis') node.axis = signed;
-        else if (name === 'block_size') node.blockSize = signed;
+        // AttributeProto.i is int64 two's complement; readVarint already returns it signed.
+        if (name === 'axis') node.axis = ival;
+        else if (name === 'block_size') node.blockSize = ival;
+        else if (name === 'output_dtype') node.outputDtype = ival;
         break;
       }
-      default: break;
+      default:
+        break;
     }
   }
   return node;
@@ -439,8 +512,13 @@ export function countOnnxDequantizeLinear(model: Uint8Array): number {
 export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResult {
   const t0 = now();
   const unchanged = (skipped: number): OnnxDequantFoldResult => ({
-    bytes: model, foldedNodes: 0, skippedNodes: skipped, removedInitializers: 0,
-    bytesBefore: model.byteLength, bytesAfter: model.byteLength, elapsedMs: now() - t0,
+    bytes: model,
+    foldedNodes: 0,
+    skippedNodes: skipped,
+    removedInitializers: 0,
+    bytesBefore: model.byteLength,
+    bytesAfter: model.byteLength,
+    elapsedMs: now() - t0,
   });
   const modelFields = parseProtoFields(model);
   const graphField = modelFields.find((f) => f.field === 7 && f.wire === WIRE_LEN);
@@ -455,16 +533,20 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   for (const f of graphFields) {
     if (f.wire !== WIRE_LEN) continue;
     if (f.field === 1) {
-      const node = parseNode(model, f);
-      nodes.push(node);
-      for (const name of node.inputs) consumers.set(name, (consumers.get(name) ?? 0) + 1);
+      nodes.push(parseNode(model, f));
+      countNodeConsumers(model, f, consumers);
     } else if (f.field === 5) {
       // Only the name is needed up front; the payload is parsed for the tensors we fold.
       let name = '';
-      for (const t of parseProtoFields(model, f.valueStart, f.valueEnd)) if (t.field === 8) { name = fieldString(model, t); break; }
+      for (const t of parseProtoFields(model, f.valueStart, f.valueEnd))
+        if (t.field === 8) {
+          name = fieldString(model, t);
+          break;
+        }
       initializers.set(name, { field: f, info: null });
     } else if (f.field === 11 || f.field === 12) {
-      for (const t of parseProtoFields(model, f.valueStart, f.valueEnd)) if (t.field === 1) (f.field === 11 ? graphInputs : graphOutputs).add(fieldString(model, t));
+      for (const t of parseProtoFields(model, f.valueStart, f.valueEnd))
+        if (t.field === 1) (f.field === 11 ? graphInputs : graphOutputs).add(fieldString(model, t));
     }
   }
   const dql = nodes.filter((n) => n.opType === 'DequantizeLinear' && (n.domain === '' || n.domain === 'ai.onnx'));
@@ -482,18 +564,44 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   const droppedInitializers = new Set<Field>();
   let skipped = 0;
   for (const node of dql) {
-    if (node.inputs.length < 2 || node.outputs.length !== 1) { skipped += 1; continue; }
+    if (node.inputs.length < 2 || node.outputs.length !== 1) {
+      skipped += 1;
+      continue;
+    }
     const x = tensor(node.inputs[0]);
     const scale = tensor(node.inputs[1]);
     const zpName = node.inputs.length > 2 && node.inputs[2] ? node.inputs[2] : null;
+    // An initializer that is also a graph input is a default the caller may override at run
+    // time, so it is not a constant we can bake in.
+    if (graphInputs.has(node.inputs[0]) || graphInputs.has(node.inputs[1]) || (zpName && graphInputs.has(zpName))) {
+      skipped += 1;
+      continue;
+    }
     const zp = zpName ? tensor(zpName) : null;
-    if (!x || !scale || (zpName && !zp) || (scale.dataType !== ONNX_FLOAT && scale.dataType !== ONNX_FLOAT16)) { skipped += 1; continue; }
-    if (initializers.has(node.outputs[0])) { skipped += 1; continue; }
+    if (!x || !scale || (zpName && !zp) || (scale.dataType !== ONNX_FLOAT && scale.dataType !== ONNX_FLOAT16)) {
+      skipped += 1;
+      continue;
+    }
+    if (initializers.has(node.outputs[0])) {
+      skipped += 1;
+      continue;
+    }
+    const outType = node.outputDtype || scale.dataType;
+    if (outType !== ONNX_FLOAT && outType !== ONNX_FLOAT16) {
+      skipped += 1;
+      continue;
+    }
     const values = dequantize(x, scale, zp, node.axis, node.blockSize);
-    if (!values) { skipped += 1; continue; }
+    if (!values) {
+      skipped += 1;
+      continue;
+    }
     const xEntry = initializers.get(node.inputs[0])!;
-    if (replacement.has(xEntry.field)) { skipped += 1; continue; } // shared quantized input: fold only once
-    const folded = encodeFloatTensor(node.outputs[0], scale.dataType, x.dims, values);
+    if (replacement.has(xEntry.field)) {
+      skipped += 1;
+      continue;
+    } // shared quantized input: fold only once
+    const folded = encodeFloatTensor(node.outputs[0], outType, x.dims, values);
     removedNodes.add(node.field);
     replacement.set(xEntry.field, folded);
     for (const name of [node.inputs[0], node.inputs[1], zpName]) {
