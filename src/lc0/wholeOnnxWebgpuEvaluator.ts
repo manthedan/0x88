@@ -72,7 +72,7 @@ interface WholeModelRuntime {
   systemLib(): WholeModelModule;
   asyncLoadWebGPUPipelines(module: WholeModelModule): Promise<void>;
   createVirtualMachine(device: unknown): WholeModelVm;
-  fetchTensorCache?(baseUrl: string, device: unknown): Promise<void>;
+  fetchTensorCache?(baseUrl: string, device: unknown, cacheScope?: string, cacheType?: string, signal?: AbortSignal): Promise<void>;
   tensorCacheGet?(name: string): WholeModelTensor | undefined;
   cacheMetadata?: unknown;
 }
@@ -298,7 +298,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
         if (options.fetchTensorCache || needsDetachedParams) {
           if (!cacheUrl) throw new Error('tensor cache requested but manifest.tensorCache is missing');
           if (!runtime.fetchTensorCache) throw new Error('runtime tensor-cache fetch API is missing');
-          await timed('tensorCacheFetchMs', () => runtime.fetchTensorCache!(cacheUrl, runtime.webgpu()));
+          await timed('tensorCacheFetchMs', () => runtime.fetchTensorCache!(cacheUrl, runtime.webgpu(), 'tvmjs', 'cache', options.signal));
           options.signal?.throwIfAborted();
           tensorCacheInfo = { url: cacheUrl, metadata: runtime.cacheMetadata ?? null };
         }

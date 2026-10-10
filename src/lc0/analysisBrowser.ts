@@ -953,12 +953,16 @@ function centipawnEvaluatorCacheKey(variant: string): string {
   return `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
 }
 
+function centipawnEvaluatorKeysForRows(rows: EngineRow[]): Set<string> {
+  return new Set(rows.filter((row) => row.family === 'centipawn').map((row) => centipawnEvaluatorCacheKey(row.variant)));
+}
+
+// Row edits are deferred while a run is active, so the run's own row snapshot
+// must keep its Centipawn evaluators alive even if the visible rows changed.
+let analysisRunCentipawnKeys = new Set<string>();
+
 function activeCentipawnEvaluatorKeys(): Set<string> {
-  return new Set(
-    activeEngineRows()
-      .filter((row) => row.family === 'centipawn')
-      .map((row) => centipawnEvaluatorCacheKey(row.variant)),
-  );
+  return new Set([...centipawnEvaluatorKeysForRows(activeEngineRows()), ...analysisRunCentipawnKeys]);
 }
 
 async function centipawnEvaluator(variant: string): Promise<Evaluator> {
@@ -3050,6 +3054,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   const runId = ++activeAnalysisRunId;
   const controller = new AbortController();
   analysisAbort = controller;
+  analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
   analyzing = true;
   el('stop').toggleAttribute('disabled', false);
   el('analyze').toggleAttribute('disabled', true);
@@ -3331,6 +3336,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     if (analysisAbort === controller && runId === activeAnalysisRunId && !mountAbort.signal.aborted) {
       analyzing = false;
       analysisAbort = null;
+      analysisRunCentipawnKeys = new Set();
       runDeferredAnalysis = analyzeAfterActiveRun;
       reloadDeferredLc0 = reloadLc0AfterActiveRun;
       disposeDeferredEngines = disposeUnusedEnginesAfterActiveRun;
@@ -3849,6 +3855,7 @@ function wireEvents() {
 function disposeRuntimeResources(): void {
   analysisAbort?.abort();
   analysisAbort = null;
+  analysisRunCentipawnKeys = new Set();
   analyzeAfterActiveRun = false;
   reloadLc0AfterActiveRun = false;
   disposeUnusedEnginesAfterActiveRun = false;
