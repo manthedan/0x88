@@ -128,17 +128,17 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - Threaded flavors exist (`lite-threaded`, `threaded`) and require same-origin cross-origin isolation. Relaxed full/threaded variants remain reproducible local candidates, but are not public selector artifacts yet.
 - **Strength knob:** depth by default; `movetimeMs`, `skillLevel`, and `threads` are supported in `StockfishOptions`. Staged UI uses depth.
 - **Artifact footprint:**
-  - Lite single WASM: ~7.0 MB plus ~20 KB JS wrapper.
-  - Lite threaded WASM: ~6.8 MB plus ~31 KB JS wrapper.
-  - Full single/threaded WASM: ~108 MB plus wrapper.
+  - Lite single WASM: ~1.76 MiB; npm JS ~28 KB, unminified relaxed JS ~159 KB.
+  - Lite threaded WASM: ~1.62 MiB plus ~33 KB JS wrapper.
+  - Full single/threaded WASM: ~94.5 MiB plus wrapper.
 - **Feature parity:**
   - Move search: yes.
   - Analysis/MultiPV: yes through parsed UCI `info ... multipv` lines.
   - Stop/abort: worker can be terminated/recreated on error; UCI stop handling is mature enough for UI use.
   - New game/hash reset: standard UCI path.
   - Threads: supported by Stockfish, browser availability depends on SAB/cross-origin isolation and flavor.
-- **Speed snapshot:** Lite single relaxed SIMD measured 2.34M aggregate NPS vs 2.01M baseline (1.16×) on the Chromium public-asset validation set. Full and pthread relaxed candidate builds have smoke/parity evidence but need deeper full-net speed claims before promotion.
-- **Validation:** existing arena/analysis smokes, `StockfishEngine` parsing/selection tests, and `.local-dev-artifacts/stockfish-relaxed/browser_promotion_validation_report.json` for Chromium relaxed-vs-baseline parity.
+- **Speed snapshot:** SF19 Chromium149 depth12 lite relaxed: 790k median aggregate wall NPS vs 654k baseline (1.168× paired median). Across-release NPS decreases; native strength and lite footprint improve. See `stockfish_19_upgrade.md` for spreads, startup, all tiers and full/lite strength. The older 2.34M/2.01M snapshot is historical SF18 evidence only.
+- **Validation:** exact native bench signatures full453169/lite632754; all flag cells pass. Chromium passes 600/600 browser-vs-native depth12 comparisons; npm and custom lite/full pthread variants pass Threads2 smoke. Focused adapter tests include SF19 silent-startup failure rejection/retry.
 - **Open work:** finish Safari fallback checks and decide whether full/threaded relaxed variants belong in staged selectors or remain local/config-only.
 
 ### Reckless family

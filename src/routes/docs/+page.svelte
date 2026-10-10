@@ -83,7 +83,7 @@ onMount(() => {
         <li><a href="#engines-lqo">Leela Queen Odds (LQO)</a></li>
         <li><a href="#engines-maia3">Maia3</a></li>
         <li><a href="#engines-centipawn">Centipawn</a></li>
-        <li><a href="#engines-stockfish">Stockfish 18</a></li>
+        <li><a href="#engines-stockfish">Stockfish 19</a></li>
         <li><a href="#engines-berserk">Berserk</a></li>
         <li><a href="#engines-viridithas">Viridithas</a></li>
         <li><a href="#engines-plentychess">PlentyChess</a></li>
@@ -263,7 +263,7 @@ onMount(() => {
     <tbody>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish.js package</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Stockfish 18</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Stockfish 19</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)">Lite/full, single-thread/threaded flavors; threaded builds require cross-origin isolation.</td>
       </tr>
       <tr>
@@ -330,8 +330,8 @@ onMount(() => {
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">Stockfish</td>
-        <td style="padding:10px">Not measured; current package is upstream Stockfish.js rather than a local relaxed-SIMD build.</td>
-        <td style="padding:10px">N/A</td>
+        <td style="padding:10px">SF19 Lite: <code>790k</code> median wall NPS vs <code>654k</code> baseline (<code>1.17&times;</code> paired median, Chromium depth 12; shared-host spread is wide).</td>
+        <td style="padding:10px"><code>600/600</code> exact browser/native comparisons; full and pthread relaxed builds remain unpromoted.</td>
       </tr>
     </tbody>
   </table>
@@ -529,7 +529,7 @@ onMount(() => {
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">Provenance doc</a> + <a href="https://github.com/CSSLab/maia-platform-frontend" rel="noopener">upstream frontend</a></td>
       </tr>
       <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish 18</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish 19</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/stockfish/stockfish-19.0.1-corresponding-source.tar.gz">stockfish-19.0.1-corresponding-source.tar.gz</a></td>
