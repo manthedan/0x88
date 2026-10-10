@@ -3004,6 +3004,12 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
   const loaded = await reloadLc0Backend('none', controller.signal);
   if (analysisReloadAbort !== controller) return;
   analysisReloadAbort = null;
+  if (!loaded && !controller.signal.aborted && (reloadLc0AfterActiveRun || disposeUnusedEnginesAfterActiveRun)) {
+    // Settings changed while this load was running; a failed superseded load
+    // must not strand them. analyzeCurrent consumes the flags, so this cannot loop.
+    void analyzeCurrent({ force: true });
+    return;
+  }
   if (!loaded || controller.signal.aborted) {
     el('stop').toggleAttribute('disabled', true);
     el('analyze').toggleAttribute('disabled', false);
@@ -3032,6 +3038,9 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   // A replacement search must apply settings maintenance before it snapshots
   // rows/cache keys, otherwise a newly selected runtime can run on the old worker.
   cancelActiveAnalysisRun();
+  // The cancelled run's finally no longer owns cleanup (its controller is not
+  // current), so retire its Centipawn snapshot before disposing unused engines.
+  analysisRunCentipawnKeys = new Set();
   if (disposeBeforeRun) disposeUnusedEngines();
   if (reloadBeforeRun) {
     analysisAbort = null;
