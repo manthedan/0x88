@@ -11,6 +11,8 @@ export interface ViridithasVariant {
   wasmUrl: string;
   note: string;
   assetStatus?: ViridithasAssetStatus;
+  /** Lab URL overrides are same-origin but not in the deployed path set. */
+  allowUnshippedProbe?: boolean;
 }
 
 export const VIRIDITHAS_DEFAULT_VARIANT: ViridithasVariant = {
@@ -57,7 +59,7 @@ function assetPathname(raw: string): string {
 }
 
 function shouldSkipKnownUnshippedProbe(variant: ViridithasVariant): boolean {
-  if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
+  if (variant.key === 'custom' || variant.allowUnshippedProbe || isLocalDevelopmentOrigin()) return false;
   const pathname = assetPathname(variant.wasmUrl);
   return pathname.startsWith('/viridithas/') && !DEPLOYED_VIRIDITHAS_PATHS.has(pathname);
 }

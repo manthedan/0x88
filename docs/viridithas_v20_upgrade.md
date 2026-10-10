@@ -130,4 +130,12 @@ Not yet applied to this family: the C-engine `-O3`/LTO matrix is the wrong tool.
 
 ## Republish
 
-Do not publish from this branch. After merge, rebuild is not required again if these artifacts ship: the three `public/viridithas/*.wasm` files, `viridithas-wasip1-corresponding-source.tar.gz`, and `viridithas-wasip1.manifest.json`. `scripts/r2_brotli_publish_assets.mjs` is what uploads them. Historical files in `public/releases/` stay as the records of earlier publishes.
+Do not publish from this branch. The three wasm files, the corresponding-source archive, and `public/viridithas/viridithas-wasip1.manifest.json` are the inputs. Production resolves `/viridithas/...` through `channels/stable.json` and that channel's release manifest (`cloudflare/artifact-assets-worker.mjs`). Uploading the legacy keys with `scripts/r2_brotli_publish_assets.mjs` does not change what that worker serves.
+
+After merge, write a new release that includes the updated Viridithas manifest:
+
+```sh
+npm run deploy:write-release-manifests
+```
+
+That is `scripts/write_artifact_release_manifests.mjs`. It reads `public/viridithas/viridithas-wasip1.manifest.json` by default and stages a release plus a channel pointer under `.local-dev-artifacts/artifact-releases/`. Publish the hashed artifacts, the release manifest, and the channel pointer with `scripts/publish_hashed_artifacts_to_r2.mjs` (`npm run deploy:publish-r2-artifacts -- --release <release.json> --channel-manifest <channel.json> --execute`). Leave historical files in `public/releases/` as the records of earlier publishes.

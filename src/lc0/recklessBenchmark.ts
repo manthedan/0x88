@@ -195,7 +195,12 @@ function sameOriginViridithasBenchUrl(param: string): string | null {
 
 function viridithasBenchVariant(variant: ViridithasVariant, overrideParam: string): BenchVariant {
   const override = sameOriginViridithasBenchUrl(overrideParam);
-  return { ...(override ? { ...variant, wasmUrl: override } : variant), engine: 'viridithas' };
+  if (!override) return { ...variant, engine: 'viridithas' };
+  // A startup probe stores assetStatus on the shared default variant. Copying
+  // that status onto another URL makes checkViridithasVariantAsset skip the HEAD.
+  const rest: ViridithasVariant = { ...variant, wasmUrl: override, allowUnshippedProbe: true };
+  delete rest.assetStatus;
+  return { ...rest, engine: 'viridithas' };
 }
 
 function selectedVariants(): BenchVariant[] {
