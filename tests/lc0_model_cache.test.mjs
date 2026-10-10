@@ -585,6 +585,32 @@ test('loadLc0ModelForOrt aborts caller-owned streamed downloads', async () => {
   );
 });
 
+test('loadLc0ModelForOrt aborts while manifest metadata is pending without cancelling the shared request', async () => {
+  await withMockedEnv(
+    async () => {
+      const mockedFetch = globalThis.fetch;
+      let releaseManifest;
+      const manifestGate = new Promise((resolve) => {
+        releaseManifest = resolve;
+      });
+      globalThis.fetch = async (input) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url === MANIFEST_URL) await manifestGate;
+        return mockedFetch(input);
+      };
+      const controller = new AbortController();
+      const cancelled = loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, signal: controller.signal });
+      const unsignalled = loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL });
+      controller.abort();
+      await assert.rejects(cancelled, (error) => error?.name === 'AbortError');
+      releaseManifest();
+      const loaded = await unsignalled;
+      assert.equal(loaded.url, MODEL_URL);
+    },
+    { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 },
+  );
+});
+
 test('loadLc0ModelForOrt rechecks cancellation after asynchronous verification', async () => {
   const controller = new AbortController();
   const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');

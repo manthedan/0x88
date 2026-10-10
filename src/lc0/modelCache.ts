@@ -728,14 +728,27 @@ export function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoadOption
   return entry.promise;
 }
 
+/**
+ * Waits for `promise` but rejects as soon as `signal` aborts. The underlying
+ * work is left running because metadata requests are shared through
+ * single-flight maps, and one caller's abort must not cancel another's wait.
+ */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoadOptions): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
   const started = nowMs();
   const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  const manifest = await fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl));
-  options.signal?.throwIfAborted();
-  const resolved = await resolveArtifactUrl(modelUrl, manifest, channelUrl);
-  options.signal?.throwIfAborted();
+  const manifest = await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
   const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
 
   if (!options.cache) {
