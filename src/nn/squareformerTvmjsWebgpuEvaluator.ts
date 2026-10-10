@@ -286,8 +286,6 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       if (this.destroyed) throw new Error('TVMJS evaluator is destroyed');
       if (this.failureReason) throw new Error(`TVMJS WebGPU runtime is unavailable: ${this.failureReason}`);
       const rows = prepareRows(boards, contexts, this.meta);
-      const padded = [...rows];
-      while (padded.length < this.physicalBatchSize) padded.push(rows[rows.length - 1]!);
       const stride = this.meta.token_features ?? this.meta.history_plies + 9;
       const attackFeatures = Number(this.meta.attack_summary_feature_count ?? 0);
       if (attackFeatures !== THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES || this.meta.attack_summary_schema !== 'threatgraph_square_summary_v1') {
@@ -295,8 +293,8 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       }
       const tokens = new Int32Array(this.physicalBatchSize * 64 * stride);
       const attack = new Float32Array(this.physicalBatchSize * 64 * attackFeatures);
-      for (let index = 0; index < padded.length; index++) {
-        const row = padded[index]!;
+      for (let index = 0; index < rows.length; index++) {
+        const row = rows[index]!;
         tokens.set(squareformerCompactInput(row.board, this.meta, row.historyFens, 'int32') as Int32Array, index * 64 * stride);
         const attackRow = threatgraphSquareSummaryV1(row.board);
         if (row.attackSummaryChannelMask) {
@@ -311,6 +309,17 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
           }
         }
         attack.set(attackRow, index * 64 * attackFeatures);
+      }
+      // Padding repeats the last real row, including its history and applied mask.
+      // Copy encoded bytes rather than re-running both encoders for each slot.
+      if (rows.length < this.physicalBatchSize) {
+        const last = rows.length - 1;
+        const tokenRow = tokens.subarray(last * 64 * stride, (last + 1) * 64 * stride);
+        const attackRow = attack.subarray(last * 64 * attackFeatures, (last + 1) * 64 * attackFeatures);
+        for (let index = rows.length; index < this.physicalBatchSize; index++) {
+          tokens.set(tokenRow, index * 64 * stride);
+          attack.set(attackRow, index * 64 * attackFeatures);
+        }
       }
 
       const setInput = this.vmModule.getFunction('set_input');
