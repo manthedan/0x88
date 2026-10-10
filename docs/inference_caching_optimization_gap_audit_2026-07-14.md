@@ -3,6 +3,18 @@
 Date: 2026-07-14
 Updated: 2026-07-15
 
+> **Status correction — 2026-10-10:** This is a historical opportunity audit,
+> not a current deployment checklist. Artifact v2 and the production Worker
+> rollout are complete; see
+> [`runtime_efficiency_and_release_readiness_audit_2026-07-25.md`](runtime_efficiency_and_release_readiness_audit_2026-07-25.md)
+> §1.7, which records stable release `2026-07-27.stored-brotli.1`. A read-only
+> check today found the later stable release `2026-07-27.runtime-residuals.1`,
+> also v2, with stored Brotli and identity Range responses. The original ranking
+> below must be read alongside the completed-work and residual lists, not as a
+> recommendation to redo shipped delivery work. Detailed findings #6/#7/#8
+> (GPU overlap, compact output, tuning) are evidence-gated/parked, not immediate
+> priorities. These finding numbers differ from the historical ranking table.
+
 ## Executive conclusion
 
 The project has already explored most obvious low-level neural inference levers:
@@ -119,6 +131,12 @@ manual micro-tuning sweep.
 
 ## Ranked remaining opportunities
 
+**2026-10-10 annotation:** Historical ranking, retained for context. Rank 1's
+v2 rollout and rank 6's resource sharing/retirement have shipped. The remaining
+publisher verification-metadata work is narrower than another v2 rollout.
+Rank 7 is not promoted; rank 10 is parked on the measured Apple Silicon paths.
+See detailed findings #6/#7/#8 and the corrected residual list below.
+
 | Rank | Opportunity | Expected impact | Effort | Risk |
 | ---: | --- | --- | --- | --- |
 | 1 | SHA-only identity/Brotli representations plus canonical Artifact Worker caching | Very high | Medium | Low to medium |
@@ -135,6 +153,19 @@ manual micro-tuning sweep.
 ## Detailed findings
 
 ### 1. Content-addressed artifact delivery
+
+**2026-10-10 verdict: shipped, not a remaining startup blocker.** The v2
+Worker, publisher, generator, and browser resolver are integrated. The live
+stable pointer is v2. The production identity/Brotli/Range canary and full-body
+integrity result are recorded in the 07-25 audit §1.7. Today's bounded check
+confirmed the channel/release schemas and a Berserk preload HEAD with
+`Content-Encoding: br`, encoded/decoded length and SHA headers, a repeated
+Worker cache hit, and `206` identity bytes `0-15/25201924`. This is a header
+and small-Range check, not a new full-release integrity audit. Persisted trusted
+R2 verification metadata remains open; the publisher still performs decoded
+full-body integrity checks for carried-forward objects.
+
+The following description records the original pre-rollout gaps.
 
 The repository already documents a sound release structure:
 
@@ -271,6 +302,23 @@ avoid reconstruction, but that has greater runtime compatibility risk.
 
 ### 6. Parity-preserving GPU/readback overlap
 
+**2026-10-10 verdict: do not prioritize a new readback ring on this evidence.**
+Resource sharing, buffer retirement, eager mapping, and separated timing are
+already implemented. The controlled profile below measured about 37.16 ms GPU
+execution, 1.3 ms queue-drain/readback synchronization, and 0.05 ms mapped-range
+copying. The earlier 59.9 ms `mapAsync` interval included outstanding GPU work;
+it is not evidence of a 59.9 ms mapping bottleneck. On this sample, even hiding
+all measured fence/copy cost buys only about 1.35 ms, not the GPU execution time.
+This is one profile, not a universal 1–3 ms upper bound across backends.
+
+Within one parity-preserving search, the next leaf selection depends on backup
+of the current results. Speculative depth above one failed search parity.
+Independent-search overlap would require the production broker, whose unstable
+prototype was not integrated. Reopen only if separated measurements on a
+specific backend show sync/readback is a material fraction of evaluation wall
+time, or alongside a production broker with repeated throughput, cancellation,
+and per-search parity evidence. The original design sketch follows.
+
 GPU queue synchronization and `mapAsync` waiting remain important custom-runtime
 bottlenecks. Existing speculative search pipelining is not parity-safe because
 it selects future leaves before earlier values are backed up.
@@ -288,6 +336,16 @@ This is a scheduler and evaluator-lifecycle problem, not only a shader problem.
 
 ### 7. Fused legal candidate readback
 
+**2026-10-10 verdict: not promoted; byte reduction alone lost the gate.** The
+compact GPU legal-prior control cut readback from 7,444 to 3,084 bytes per
+evaluation, but median search throughput fell from 110.574 to 106.953 visits/s
+(about 3.3%) and only three of four PVs matched. This control is not the fully
+fused proposed path, so it does not prove fusion can never win; it does refute
+promotion on readback size alone. Reopen only with a genuinely fused path that
+beats both JS and GPU-legal controls in repeated full evaluation/search runs
+and passes the complete legal-probability, WDL, visits, best-move, and PV parity
+gates. The unimplemented fused design follows.
+
 The scoped but unimplemented GPU postprocessing path would:
 
 - consume mapped policy logits already resident on the GPU;
@@ -301,6 +359,19 @@ readback work to beat the JS legal-prior control. Byte reduction by itself is
 not a sufficient gate.
 
 ### 8. Per-shape WGSL schedule tuning
+
+**2026-10-10 verdict: parked as low-ROI on the measured Apple Silicon paths.**
+The dlight Matmul sweep in `docs/lc0_tvmjs_research_runbook.md` measured
+13.78 ms/invoke at the default versus 13.10 ms with k16 (about −5%, within the
+reported noise margin); other single-knob changes were neutral, slower, or
+failed TIR legality. The BT4 sweep in
+`docs/lc0_tvmjs_bt4it332_onboarding_2026-06-09.md` likewise found the default a
+local optimum (84.80 ms versus 89.76 ms with k16). These are TVMJS schedule
+controls, not proof that every custom WGSL shape is optimal. Reopen with
+material kernel attribution on a different GPU/backend, or a bounded
+per-function/metaschedule experiment with repeatable full evaluation/search
+wins and the existing numerical/native parity gates. Do not build an autotuner
+merely because the historical ranking mentions one.
 
 TVM default scheduling improved kernel time but not end-to-end performance.
 There was no single dominant kernel, although fused MatMul families represented
@@ -499,6 +570,9 @@ is published.
 
 ### Phase 1: artifact system v2
 
+**2026-10-10 status:** rollout complete. The sequence is retained as the
+historical plan; item 9's trusted persisted verification metadata remains open.
+
 1. Run a live identity/Brotli/Range canary before changing publication.
 2. Publish identity bodies by decoded SHA only.
 3. Publish Brotli bodies by decoded SHA, encoding, and encoded SHA.
@@ -659,7 +733,8 @@ Confirmed local evidence:
   byte-identically, persisted five of eleven shards before an intentional
   interruption, reused 83,886,080 bytes on resume, downloaded the remaining
   87,130,243 bytes, and successfully created an ORT session. This remains
-  research-only pending live Artifact v2 rollout and browser startup evidence;
+  research-only pending browser startup evidence and production integration
+  (the live Artifact v2 dependency is now satisfied);
 - the compact GPU legal-prior control reduced per-evaluation readback from
   7,444 to 3,084 bytes and search readback from 25,309.6 to 10,485.6 bytes, but
   median search throughput regressed from 110.574 to 106.953 visits/s and only
@@ -671,25 +746,28 @@ Confirmed local evidence:
   unresolved cache-aware per-consumer accounting semantics. The prototype was
   not integrated.
 
-Still remaining:
+Completed in production since the original status (2026-10-10 correction):
 
-- live identity/Brotli/Range canary validation through Cloudflare;
-- deployment of a generated v2 release and migration of the live channel from
-  the currently published v1 manifests;
-- deployment of the updated Artifact Worker and publication of the prepared v2
-  release to the canary channel. A read-only live check confirmed that Range
-  currently returns `206`, but the deployed Worker still lacks the v2 encoded
-  length header and repeated HEAD requests remained cache misses;
+- Artifact Worker deployment, v2 release publication, and live stable-channel
+  migration; the 07-25 audit §1.7 records `2026-07-27.stored-brotli.1`, and
+  today's stable pointer names the later `2026-07-27.runtime-residuals.1`;
+- live identity/Brotli/Range validation, including the earlier full decoded-hash
+  canary. Today's read-only HEAD/16-byte Range check also found the v2 encoded
+  length header and a repeated HEAD Worker cache hit. The old pre-deployment
+  header/cache-miss observation is no longer current.
+
+Still remaining (as of the 2026-10-10 recheck):
 - persisted R2 verification metadata that can safely replace ordinary
   carried-forward full-body integrity downloads with HEAD-only checks;
 - production cross-worker/session evaluation brokering, after stable repeated
   performance evidence and cache-aware per-consumer neural-budget accounting;
-- fused compact GPU output, still gated on repeatable full evaluation/search
-  improvement after the completed lifecycle and timing work;
+- fused compact GPU output, not promoted and not an immediate priority: reopen
+  only on the end-to-end improvement and full parity gates in finding #7;
+- GPU/readback overlap and per-shape tuning only if the reopening conditions in
+  findings #6/#8 are met; neither is a currently justified implementation task;
 - supported external-network work for Viridithas and Stockfish;
 - production integration and representative browser startup measurement for
-  resumable model shards, which remain dependent on the live Artifact v2
-  rollout.
+  resumable model shards; live Artifact v2 is no longer a pending dependency.
 
 ## Work that should remain parked
 

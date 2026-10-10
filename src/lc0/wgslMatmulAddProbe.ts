@@ -2149,9 +2149,11 @@ async function readF32OutputOnce(
   encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, elements * 4);
   device.queue.submit([encoder.finish()]);
   await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
-  const output = new Float32Array(readbackBuffer.getMappedRange().slice(0));
-  readbackBuffer.unmap();
-  return output;
+  try {
+    return new Float32Array(readbackBuffer.getMappedRange().slice(0));
+  } finally {
+    readbackBuffer.unmap();
+  }
 }
 
 async function measureGpuTimestampMs(device: DeviceLike, commandBuffers: unknown[]): Promise<number | undefined> {
@@ -5724,7 +5726,9 @@ fn main() {
   }
   for (var i = 0u; i < count; i = i + 1u) {
     for (var j = i + 1u; j < count; j = j + 1u) {
-      if (output[j * 3u + 2u] > output[i * 3u + 2u]) {
+      // Match the JS stable sort: equal priors retain original legal-move order.
+      if (output[j * 3u + 2u] > output[i * 3u + 2u] ||
+          (output[j * 3u + 2u] == output[i * 3u + 2u] && output[j * 3u] < output[i * 3u])) {
         let slot = output[i * 3u];
         let logit = output[i * 3u + 1u];
         let prior = output[i * 3u + 2u];
@@ -7068,13 +7072,16 @@ async function mapWgslPolicyValueHeadOutputs(runtime: WgslPolicyValueHeadRuntime
   const globals = gpuGlobals();
   const started = nowMs();
   await runtime.headsReadbackBuffer.mapAsync(globals.GPUMapMode!.READ);
-  const range = runtime.headsReadbackBuffer.getMappedRange();
-  const mappedPolicy = new Float32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
-  mappedPolicy.set(new Float32Array(range, 0, DEFAULT_POLICY_MAPPED_OUTPUTS));
-  const wdl = new Float32Array(3);
-  wdl.set(new Float32Array(range, DEFAULT_POLICY_MAPPED_OUTPUTS * 4, 3));
-  runtime.headsReadbackBuffer.unmap();
-  return { mappedPolicy, wdl, readbackSyncedMs: nowMs() - started };
+  try {
+    const range = runtime.headsReadbackBuffer.getMappedRange();
+    const mappedPolicy = new Float32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
+    mappedPolicy.set(new Float32Array(range, 0, DEFAULT_POLICY_MAPPED_OUTPUTS));
+    const wdl = new Float32Array(3);
+    wdl.set(new Float32Array(range, DEFAULT_POLICY_MAPPED_OUTPUTS * 4, 3));
+    return { mappedPolicy, wdl, readbackSyncedMs: nowMs() - started };
+  } finally {
+    runtime.headsReadbackBuffer.unmap();
+  }
 }
 
 function legalPriorsFromGpuOutput(legalCandidates: LegalPolicyCandidate[], output: Float32Array<ArrayBufferLike>): Lc0Evaluation['legalPriors'] {
@@ -7100,13 +7107,16 @@ async function mapWgslLegalPriorsOutputs(
   const globals = gpuGlobals();
   const started = nowMs();
   await runtime.headsReadbackBuffer.mapAsync(globals.GPUMapMode!.READ);
-  const range = runtime.headsReadbackBuffer.getMappedRange();
-  const legalOutput = new Float32Array(WGSL_GPU_LEGAL_OUTPUT_FLOATS);
-  legalOutput.set(new Float32Array(range, 0, WGSL_GPU_LEGAL_OUTPUT_FLOATS));
-  const wdl = new Float32Array(3);
-  wdl.set(new Float32Array(range, WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3));
-  runtime.headsReadbackBuffer.unmap();
-  return { legalPriors: legalPriorsFromGpuOutput(legalCandidates, legalOutput), wdl, readbackSyncedMs: nowMs() - started };
+  try {
+    const range = runtime.headsReadbackBuffer.getMappedRange();
+    const legalOutput = new Float32Array(WGSL_GPU_LEGAL_OUTPUT_FLOATS);
+    legalOutput.set(new Float32Array(range, 0, WGSL_GPU_LEGAL_OUTPUT_FLOATS));
+    const wdl = new Float32Array(3);
+    wdl.set(new Float32Array(range, WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3));
+    return { legalPriors: legalPriorsFromGpuOutput(legalCandidates, legalOutput), wdl, readbackSyncedMs: nowMs() - started };
+  } finally {
+    runtime.headsReadbackBuffer.unmap();
+  }
 }
 
 async function runCachedWgslPolicyValueHeads(
@@ -9233,12 +9243,13 @@ class Lc0WebHybridRuntime {
     readbackMapState: SubmittedWgslHybridBatchReadbackMapState,
     queueState?: SubmittedWgslHybridBatchQueueState,
   ): Promise<void> {
+    // A rejected queue fence does not imply that the independent map failed.
+    // Settle both before releasing the buffer/slot, including on device loss.
+    await Promise.allSettled([readbackMapState.promise, queueState?.promise ?? Promise.resolve()]);
     try {
-      await Promise.all([readbackMapState.promise, queueState?.promise ?? Promise.resolve()]);
       readbackBuffer.unmap();
     } catch {
-      // The caller is already propagating the primary error. If mapAsync also
-      // fails, there is no mapped range to release.
+      // Preserve the primary error if the buffer was already destroyed.
     }
   }
 
@@ -9247,14 +9258,12 @@ class Lc0WebHybridRuntime {
     options: { policyTemperature: number },
     readbackMode: 'immediate' | 'deferred-double-buffered',
   ): Promise<Lc0WebHybridEvaluationResult[]> {
-    let readbackMapped = false;
     try {
       const headStarted = nowMs();
       const readbackStarted = nowMs();
       const deferredReadbackDelayMs = Math.max(0, submitted.readbackMapState.startedAt - submitted.submittedAt);
       const mapAsyncAwaitStarted = nowMs();
       await Promise.all([submitted.readbackMapState.promise, submitted.queueState.promise]);
-      readbackMapped = true;
       const readbackMapAsyncWaitMs = nowMs() - mapAsyncAwaitStarted;
       const readbackMapAsyncMs = Math.max(0, (submitted.readbackMapState.settledAt ?? nowMs()) - submitted.readbackMapState.startedAt);
       const queueDrainFenceLatencyMs = Math.max(0, (submitted.queueState.settledAt ?? nowMs()) - submitted.queueState.startedAt);
@@ -9370,13 +9379,7 @@ class Lc0WebHybridRuntime {
       }
       return out;
     } finally {
-      if (readbackMapped) {
-        try {
-          submitted.readbackBuffer.unmap();
-        } catch {
-          /* best-effort cleanup after a failed mapped-range read */
-        }
-      }
+      await this.cleanupStartedReadbackMap(submitted.readbackBuffer, submitted.readbackMapState, submitted.queueState);
       if (submitted.deferredReadbackSlot !== undefined) this.wgslDeferredReadbackInUse.delete(submitted.deferredReadbackSlot);
     }
   }
@@ -9437,6 +9440,10 @@ class Lc0WebHybridRuntime {
         submitted = await this.submitWgslBatch(batch, options, readbackBuffer, { batchSequenceIndex: i, deferredReadbackSlot });
       } catch (error) {
         this.wgslDeferredReadbackInUse.delete(deferredReadbackSlot);
+        if (pending) {
+          await this.cleanupStartedReadbackMap(pending.submitted.readbackBuffer, pending.submitted.readbackMapState, pending.submitted.queueState);
+          if (pending.submitted.deferredReadbackSlot !== undefined) this.wgslDeferredReadbackInUse.delete(pending.submitted.deferredReadbackSlot);
+        }
         throw error;
       }
       if (pending) {

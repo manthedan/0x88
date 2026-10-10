@@ -58,6 +58,8 @@ function canonicalCacheRequest(request, key, kind = 'body') {
 
 function parseRange(raw, size) {
   if (!raw) return undefined;
+  // No byte position exists in an empty object, including suffix ranges.
+  if (!Number.isSafeInteger(size) || size <= 0) return 'invalid';
   const match = raw.match(/^bytes=(\d*)-(\d*)$/);
   if (!match || (!match[1] && !match[2])) return 'invalid';
   if (!match[1]) {
