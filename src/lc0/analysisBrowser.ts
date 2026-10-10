@@ -2691,6 +2691,9 @@ function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnu
 
 function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
   analyzeAfterActiveRun = false;
+  // Any caller that wants analysis after an in-flight backend load re-queues it
+  // after cancelling (analyzeCurrent, forced reloads), so Stop must drop it.
+  analyzeAfterLc0BackendLoad = false;
   if (!options.preserveDeferredMaintenance) {
     reloadLc0AfterActiveRun = false;
     disposeUnusedEnginesAfterActiveRun = false;
