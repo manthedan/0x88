@@ -321,7 +321,7 @@ let analyzeAfterActiveRun = false;
 // Set while loadLc0Backend owns the LC0 worker/evaluator lifecycle. analyzeCurrent
 // must queue behind it rather than start a reload, because a reload disposes the
 // worker that this load is still waiting on.
-let activeLc0BackendLoad: object | null = null;
+let activeLc0BackendLoad: { cancelled: () => boolean } | null = null;
 let analyzeAfterLc0BackendLoad = false;
 let reloadLc0AfterActiveRun = false;
 let disposeUnusedEnginesAfterActiveRun = false;
@@ -3043,7 +3043,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   }
   const needsSmallLc0Backend = rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
   if (needsSmallLc0Backend && !workerReady && !searcher) {
-    if (activeLc0BackendLoad) analyzeAfterLc0BackendLoad = true;
+    if (activeLc0BackendLoad && !activeLc0BackendLoad.cancelled()) analyzeAfterLc0BackendLoad = true;
     else void reloadLc0ForAnalysis(true);
     return;
   }
@@ -3341,10 +3341,12 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       document.getElementById('stop')?.toggleAttribute('disabled', true);
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
+    // In finally: a cancelled run returns early from the try, and Stop must still
+    // apply queued runtime/engine maintenance even though it drops the re-run.
+    if (disposeDeferredEngines) disposeUnusedEngines();
+    if (reloadDeferredLc0) void reloadLc0ForAnalysis(runDeferredAnalysis);
+    else if (runDeferredAnalysis) void analyzeCurrent();
   }
-  if (disposeDeferredEngines) disposeUnusedEngines();
-  if (reloadDeferredLc0) void reloadLc0ForAnalysis(runDeferredAnalysis);
-  else if (runDeferredAnalysis) void analyzeCurrent();
 }
 
 function afterNavigation() {
@@ -3908,7 +3910,7 @@ function disposePageResources(): void {
 async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = mountAbort.signal, operationSignal?: AbortSignal): Promise<boolean> {
   const loadCancelled = () => isStaleMount(mountSignal) || operationSignal?.aborted === true;
   if (loadCancelled()) return false;
-  const load = {};
+  const load = { cancelled: loadCancelled };
   activeLc0BackendLoad = load;
   try {
     return await loadLc0BackendOwned(runAutoAnalyze, loadCancelled, operationSignal);
@@ -4025,8 +4027,10 @@ async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'a
   if (operationSignal?.aborted) return false;
   reconcileActiveRuntimeFallbackWarning();
   renderRecklessRuntimeInfo();
+  // A forced re-run goes through the load's queued-analysis dispatch so a move
+  // made during loading cannot start a second, cancelling analyzeCurrent.
+  if (analyzeAfterLoad === 'force') analyzeAfterLc0BackendLoad = true;
   const loaded = await loadLc0Backend(analyzeAfterLoad === 'auto', mountAbort.signal, operationSignal);
-  if (loaded && !operationSignal?.aborted && analyzeAfterLoad === 'force') void analyzeCurrent();
   return loaded;
 }
 

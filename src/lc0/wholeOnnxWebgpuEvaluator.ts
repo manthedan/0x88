@@ -194,11 +194,14 @@ async function loadRuntimeBundle(bundleUrl: string, baseUrl: URL, expectedSha256
     throw new Error(`TVMJS runtime bundle mismatch: loaded ${String(loadedSha256 ?? 'unknown')} != expected ${expectedSha256}`);
   }
   await import(/* @vite-ignore */ url);
-  signal?.throwIfAborted();
+  // Record the integrity stamp before honouring cancellation: the import has
+  // already installed the runtime global, and an unstamped global would make
+  // every later create in this realm fail the mismatch check.
   globals.lc0WholeModelRuntimeBundleUrl = url;
   globals.__LC0_TVMJS_BUNDLE_SHA256__ = expectedSha256;
   const api = globals[RUNTIME_GLOBAL] as WholeModelRuntimeApi | undefined;
   if (!api) throw new Error(`runtime global missing after loading ${url}`);
+  signal?.throwIfAborted();
   return api;
 }
 
@@ -276,41 +279,48 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const requiredFeatures = ['shader-f16'];
     for (const feature of requiredFeatures) if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
     const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
-    options.signal?.throwIfAborted();
-    const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model, options.signal));
-    const runtime = await timed('runtimeInstantiateMs', () => api.instantiate(wasmBytes, api.createPolyfillWASI(), options.logger));
-    options.signal?.throwIfAborted();
-    timedSync('runtimeInitWebGpuMs', () => runtime.initWebGPU(device));
-    runtime.beginScope();
     try {
-      const sys = timedSync('systemLibMs', () => runtime.systemLib());
-      await timed('webgpuPipelinePrebuildMs', () => runtime.asyncLoadWebGPUPipelines(sys));
       options.signal?.throwIfAborted();
-      const vm = timedSync('createVirtualMachineMs', () => runtime.createVirtualMachine(runtime.webgpu()));
-      const vmMod = vm.getInternalModule();
-      const cacheUrl = tensorCacheUrl(manifest, base);
-      const needsDetachedParams = manifest.parameterStrategy?.current === 'detached-tensor-cache';
-      let tensorCacheInfo: { url: string; metadata: unknown } | undefined;
-      if (options.fetchTensorCache || needsDetachedParams) {
-        if (!cacheUrl) throw new Error('tensor cache requested but manifest.tensorCache is missing');
-        if (!runtime.fetchTensorCache) throw new Error('runtime tensor-cache fetch API is missing');
-        await timed('tensorCacheFetchMs', () => runtime.fetchTensorCache!(cacheUrl, runtime.webgpu()));
+      const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model, options.signal));
+      const runtime = await timed('runtimeInstantiateMs', () => api.instantiate(wasmBytes, api.createPolyfillWASI(), options.logger));
+      options.signal?.throwIfAborted();
+      timedSync('runtimeInitWebGpuMs', () => runtime.initWebGPU(device));
+      runtime.beginScope();
+      try {
+        const sys = timedSync('systemLibMs', () => runtime.systemLib());
+        await timed('webgpuPipelinePrebuildMs', () => runtime.asyncLoadWebGPUPipelines(sys));
         options.signal?.throwIfAborted();
-        tensorCacheInfo = { url: cacheUrl, metadata: runtime.cacheMetadata ?? null };
-      }
-      const detachedParams: WholeModelTensor[] = [];
-      if (needsDetachedParams) {
-        if (!runtime.tensorCacheGet) throw new Error('detached params require tensor-cache lookup API');
-        for (let i = 0; ; i++) {
-          const tensor = runtime.tensorCacheGet(`param_${i}`);
-          if (!tensor) break;
-          detachedParams.push(tensor);
+        const vm = timedSync('createVirtualMachineMs', () => runtime.createVirtualMachine(runtime.webgpu()));
+        const vmMod = vm.getInternalModule();
+        const cacheUrl = tensorCacheUrl(manifest, base);
+        const needsDetachedParams = manifest.parameterStrategy?.current === 'detached-tensor-cache';
+        let tensorCacheInfo: { url: string; metadata: unknown } | undefined;
+        if (options.fetchTensorCache || needsDetachedParams) {
+          if (!cacheUrl) throw new Error('tensor cache requested but manifest.tensorCache is missing');
+          if (!runtime.fetchTensorCache) throw new Error('runtime tensor-cache fetch API is missing');
+          await timed('tensorCacheFetchMs', () => runtime.fetchTensorCache!(cacheUrl, runtime.webgpu()));
+          options.signal?.throwIfAborted();
+          tensorCacheInfo = { url: cacheUrl, metadata: runtime.cacheMetadata ?? null };
         }
-        if (!detachedParams.length) throw new Error('detached tensor-cache manifest but no param_N tensors loaded');
+        const detachedParams: WholeModelTensor[] = [];
+        if (needsDetachedParams) {
+          if (!runtime.tensorCacheGet) throw new Error('detached params require tensor-cache lookup API');
+          for (let i = 0; ; i++) {
+            const tensor = runtime.tensorCacheGet(`param_${i}`);
+            if (!tensor) break;
+            detachedParams.push(tensor);
+          }
+          if (!detachedParams.length) throw new Error('detached tensor-cache manifest but no param_N tensors loaded');
+        }
+        return new Lc0WholeOnnxWebgpuEvaluator(runtime, vmMod, model.batch, detachedParams, startupTimings, tensorCacheInfo);
+      } catch (error) {
+        runtime.endScope();
+        throw error;
       }
-      return new Lc0WholeOnnxWebgpuEvaluator(runtime, vmMod, model.batch, detachedParams, startupTimings, tensorCacheInfo);
     } catch (error) {
-      runtime.endScope();
+      // Nothing else owns this device until create() returns; release it on
+      // any failure, including cancellation, so a superseded load frees GPU memory.
+      (device as { destroy?: () => void } | null)?.destroy?.();
       throw error;
     }
   }
