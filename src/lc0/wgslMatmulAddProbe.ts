@@ -9233,12 +9233,13 @@ class Lc0WebHybridRuntime {
     readbackMapState: SubmittedWgslHybridBatchReadbackMapState,
     queueState?: SubmittedWgslHybridBatchQueueState,
   ): Promise<void> {
+    // A rejected queue fence does not imply that the independent map failed.
+    // Settle both before releasing the buffer/slot, including on device loss.
+    await Promise.allSettled([readbackMapState.promise, queueState?.promise ?? Promise.resolve()]);
     try {
-      await Promise.all([readbackMapState.promise, queueState?.promise ?? Promise.resolve()]);
       readbackBuffer.unmap();
     } catch {
-      // The caller is already propagating the primary error. If mapAsync also
-      // fails, there is no mapped range to release.
+      // Preserve the primary error if the buffer was already destroyed.
     }
   }
 
@@ -9247,14 +9248,12 @@ class Lc0WebHybridRuntime {
     options: { policyTemperature: number },
     readbackMode: 'immediate' | 'deferred-double-buffered',
   ): Promise<Lc0WebHybridEvaluationResult[]> {
-    let readbackMapped = false;
     try {
       const headStarted = nowMs();
       const readbackStarted = nowMs();
       const deferredReadbackDelayMs = Math.max(0, submitted.readbackMapState.startedAt - submitted.submittedAt);
       const mapAsyncAwaitStarted = nowMs();
       await Promise.all([submitted.readbackMapState.promise, submitted.queueState.promise]);
-      readbackMapped = true;
       const readbackMapAsyncWaitMs = nowMs() - mapAsyncAwaitStarted;
       const readbackMapAsyncMs = Math.max(0, (submitted.readbackMapState.settledAt ?? nowMs()) - submitted.readbackMapState.startedAt);
       const queueDrainFenceLatencyMs = Math.max(0, (submitted.queueState.settledAt ?? nowMs()) - submitted.queueState.startedAt);
@@ -9370,13 +9369,7 @@ class Lc0WebHybridRuntime {
       }
       return out;
     } finally {
-      if (readbackMapped) {
-        try {
-          submitted.readbackBuffer.unmap();
-        } catch {
-          /* best-effort cleanup after a failed mapped-range read */
-        }
-      }
+      await this.cleanupStartedReadbackMap(submitted.readbackBuffer, submitted.readbackMapState, submitted.queueState);
       if (submitted.deferredReadbackSlot !== undefined) this.wgslDeferredReadbackInUse.delete(submitted.deferredReadbackSlot);
     }
   }
@@ -9437,6 +9430,10 @@ class Lc0WebHybridRuntime {
         submitted = await this.submitWgslBatch(batch, options, readbackBuffer, { batchSequenceIndex: i, deferredReadbackSlot });
       } catch (error) {
         this.wgslDeferredReadbackInUse.delete(deferredReadbackSlot);
+        if (pending) {
+          await this.cleanupStartedReadbackMap(pending.submitted.readbackBuffer, pending.submitted.readbackMapState, pending.submitted.queueState);
+          if (pending.submitted.deferredReadbackSlot !== undefined) this.wgslDeferredReadbackInUse.delete(pending.submitted.deferredReadbackSlot);
+        }
         throw error;
       }
       if (pending) {
