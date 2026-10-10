@@ -132,7 +132,13 @@ async function createTvmRunner(manifest, manifestUrl, inputs) {
   ]) {
     if (adapter.limits[key] !== undefined) requiredLimits[key] = adapter.limits[key];
   }
-  const device = await adapter.requestDevice({ requiredLimits });
+  const requiredFeatures = (manifest.requiredFeatures ?? []).filter(feature => feature !== 'webgpu');
+  if (requiredFeatures.includes('subgroups') &&
+      (manifest.version !== 'v3-subgroups' || manifest.subgroupSize !== 32 ||
+       adapter.info?.subgroupMinSize !== 32 || adapter.info?.subgroupMaxSize !== 32)) {
+    throw new Error('Subgroup parity requires the v3 artifact and a fixed size-32 adapter');
+  }
+  const device = await adapter.requestDevice({ requiredFeatures, requiredLimits });
   const gpuErrors = [];
   device.addEventListener('uncapturederror', (event) => {
     gpuErrors.push(event.error?.message ?? String(event.error));

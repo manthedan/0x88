@@ -7,6 +7,7 @@ import { legalMoves } from '../chess/movegen.ts';
 import { isTrustedExecutableAssetUrl } from '../lc0/assetUrls.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
+import { CENTIPAWN_TVMJS_WEBGPU_V2 } from './runtimeRegistry.ts';
 import {
   type SquareFormerMeta,
   squareformerCompactInput,
@@ -48,6 +49,7 @@ type TvmjsApi = {
 type GpuAdapter = {
   features: { has(feature: string): boolean };
   limits: Record<string, number>;
+  info?: { subgroupMinSize?: number; subgroupMaxSize?: number };
   requestDevice(descriptor?: unknown): Promise<GpuDevice>;
 };
 
@@ -63,6 +65,8 @@ type TvmjsManifest = {
   dtype: string;
   target: string;
   requiredFeatures?: string[];
+  version?: string;
+  subgroupSize?: number;
   runtime?: { tvmjsBundle?: string; tvmjsRuntimeWasm?: string };
   models?: Array<{ batch: number; wasm: string; bytes?: number; sha256?: string }>;
   files?: Array<{ path: string; bytes?: number; sha256?: string }>;
@@ -159,6 +163,11 @@ function validateManifest(manifest: TvmjsManifest): void {
   if (manifest.modelFamily !== EXPECTED_MODEL_FAMILY) throw new Error(`Unexpected TVMJS model family: ${manifest.modelFamily}`);
   if (manifest.dtype !== 'f32') throw new Error(`Unexpected TVMJS dtype: ${manifest.dtype}`);
   if (manifest.target !== 'webgpu') throw new Error(`Unexpected TVMJS target: ${manifest.target}`);
+  const subgroupVariant = manifest.version === 'v3-subgroups';
+  const requestsSubgroups = manifest.requiredFeatures?.includes('subgroups') === true;
+  if (subgroupVariant !== requestsSubgroups || (subgroupVariant && manifest.subgroupSize !== 32)) {
+    throw new Error('Only the v3-subgroups artifact may request subgroups, with subgroupSize 32');
+  }
 }
 
 function prepareRows(boards: BoardState[], contexts: EvaluationContext[], meta: SquareFormerMeta): PreparedRow[] {
@@ -185,6 +194,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
   private readonly vmModule: { getFunction(name: string): TvmPackedFunction };
   private readonly meta: SquareFormerMeta;
   readonly physicalBatchSize: number;
+  readonly manifestUrl?: string;
 
   private constructor(
     runtime: TvmRuntime,
@@ -192,12 +202,14 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     vmModule: { getFunction(name: string): TvmPackedFunction },
     meta: SquareFormerMeta,
     physicalBatchSize: number,
+    manifestUrl?: string,
   ) {
     this.runtime = runtime;
     this.device = device;
     this.vmModule = vmModule;
     this.meta = meta;
     this.physicalBatchSize = physicalBatchSize;
+    this.manifestUrl = manifestUrl;
     this.device.addEventListener?.('uncapturederror', (event) => {
       this.failureReason = event.error?.message ?? 'Uncaptured WebGPU error';
     });
@@ -220,11 +232,20 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     const bundleFile = manifest.files?.find((entry) => entry.path === bundlePath);
     if (!bundleFile?.sha256) throw new Error(`TVMJS manifest missing bundle integrity metadata: ${bundlePath}`);
     const bundleUrl = new URL(bundlePath, baseUrl);
-    const api = await loadTvmjsBundle(bundleUrl, { sha256: bundleFile.sha256 });
     const gpu = (navigator as Navigator & { gpu?: { requestAdapter(options?: unknown): Promise<GpuAdapter | null> } }).gpu;
     if (!gpu) throw new Error('WebGPU is unavailable');
     const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('WebGPU adapter unavailable');
+    if (
+      manifest.version === 'v3-subgroups' &&
+      (!adapter.features.has('subgroups') || adapter.info?.subgroupMinSize !== 32 || adapter.info?.subgroupMaxSize !== 32)
+    ) {
+      // TVM canonicalizes thread_warp_size to 32, not the adapter's arbitrary
+      // supported size. Missing/variable size metadata is unsafe: keep v2.
+      const fallbackUrl = new URL(CENTIPAWN_TVMJS_WEBGPU_V2.artifact.manifestUrl, manifestResolved);
+      return SquareformerTvmjsWebgpuEvaluator.create(fallbackUrl.toString(), meta);
+    }
+    const api = await loadTvmjsBundle(bundleUrl, { sha256: bundleFile.sha256 });
     const requiredFeatures = (manifest.requiredFeatures ?? []).filter((feature) => feature !== 'webgpu');
     for (const feature of requiredFeatures) {
       if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
@@ -252,7 +273,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       const systemLib = runtime.systemLib();
       await runtime.asyncLoadWebGPUPipelines(systemLib);
       const vm = runtime.createVirtualMachine(runtime.webgpu());
-      return new SquareformerTvmjsWebgpuEvaluator(runtime, device, vm.getInternalModule(), meta, model.batch);
+      return new SquareformerTvmjsWebgpuEvaluator(runtime, device, vm.getInternalModule(), meta, model.batch, manifestResolved.toString());
     } catch (error) {
       runtime?.dispose();
       device.destroy();

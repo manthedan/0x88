@@ -1,0 +1,97 @@
+{
+  "schema": "lc0_browser.lc0_tvmjs_webgpu_bundle.v1",
+  "modelFamily": "bt4-soap-rem-c19000-final",
+  "dtype": "f32",
+  "version": "v3-subgroups",
+  "target": "webgpu",
+  "hostTarget": {
+    "kind": "llvm",
+    "mtriple": "wasm32-unknown-unknown-wasm"
+  },
+  "generatedAt": "2026-10-10T20:38:25.540Z",
+  "requiredFeatures": [
+    "webgpu",
+    "subgroups"
+  ],
+  "runtime": {
+    "tvmjsBundle": "tvmjs.bundle.js",
+    "tvmjsRuntimeWasm": "tvmjs_runtime.wasm",
+    "note": "TVMJS/WebGPU whole-model export bundle. Runtime/parity/perf still require browser validation."
+  },
+  "parameterStrategy": {
+    "current": "embedded-in-per-batch-wasm",
+    "note": "Current research staging embeds model weights in each batch-specific TVMJS wasm. Future release candidates should evaluate TVM tensor-cache weight separation before publication.",
+    "tensorCacheApis": {
+      "pythonDumpTensorCache": "tvm.contrib.tvmjs.dump_tensor_cache",
+      "browserFetchTensorCache": "tvm.fetchTensorCache"
+    }
+  },
+  "compilerProvenance": {
+    "gitCommit": "94398e51fbb8bf9022da85d83e25f914ef033110",
+    "gitDescribe": "v0.26.dev0-6-g94398e51f-dirty",
+    "gitDirty": true,
+    "tvmBuildDir": "build-tvmjs",
+    "note": "The exact compiler source patch is included below; the unrelated dirty web/package-lock.json did not affect the compiler build.",
+    "patches": [
+      {
+        "path": "tvm-vector-size-storage-rewrite.patch",
+        "bytes": 2521,
+        "sha256": "33b73d6cfa2a198a792e8642332c51ba236a8547c1e8c854a6d8301c7b31098f"
+      }
+    ],
+    "emscripten": {
+      "emcc": "emcc",
+      "version": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 5.0.7-git"
+    },
+    "webgpu": {
+      "requiredFeatures": [
+        "webgpu",
+        "subgroups"
+      ],
+      "fetchTensorCacheApiPresent": true,
+      "dumpTensorCacheApiPresent": true
+    }
+  },
+  "models": [
+    {
+      "batch": 16,
+      "wasm": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+      "probe": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.json",
+      "bytes": 20194291,
+      "sha256": "8bd117093f1914d60a5e7b89dbcb768c5a91130c346246fa7e9ebd763213b6c9"
+    }
+  ],
+  "files": [
+    {
+      "path": "tvmjs.bundle.js",
+      "bytes": 310860,
+      "sha256": "e5225b46a98cc6c5ab133233a67f830e856ac0a23b01022768e7f94ed58a8111"
+    },
+    {
+      "path": "tvmjs_runtime.wasm",
+      "bytes": 5354374,
+      "sha256": "f5d0b00f63ee878a2144f576ab41825a7c3d13a79621782dcc98b14f4d1c58e5"
+    },
+    {
+      "path": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+      "bytes": 20194291,
+      "sha256": "8bd117093f1914d60a5e7b89dbcb768c5a91130c346246fa7e9ebd763213b6c9"
+    },
+    {
+      "path": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.json",
+      "bytes": 48539,
+      "sha256": "863136f333994f4eaccb14c36ab68cb5bbb22fd922ef5b5efb0c9e2f95ba6afb"
+    },
+    {
+      "path": "tvm-vector-size-storage-rewrite.patch",
+      "bytes": 2521,
+      "sha256": "33b73d6cfa2a198a792e8642332c51ba236a8547c1e8c854a6d8301c7b31098f"
+    }
+  ],
+  "status": "experimental",
+  "subgroupSize": 32,
+  "fallbackManifest": "../v2-shape-k16/manifest.json",
+  "buildRecipe": "scripts/build_centipawn_tvmjs_subgroups.sh",
+  "sourceModelSha256": "de2dd68518f6e2ed162da5ee27c67a5a4795567d6e39972e3705824572b7660e",
+  "fixedModelSha256": "c4adcf876904baf3381727720391ffba2fa2981e0395334e81af9424815b0506"
+}

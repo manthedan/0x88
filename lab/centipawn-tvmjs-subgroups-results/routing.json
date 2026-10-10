@@ -1,0 +1,52 @@
+{
+  "lifecycle": {
+    "effectiveLaunch": {
+      "browserLaunched": true,
+      "engine": "chrome",
+      "launchHash": 7445744387455038000
+    },
+    "launched": false,
+    "relaunchedBrowser": false,
+    "restartedBackground": false,
+    "restoreStatus": "not_configured",
+    "reused": true,
+    "saveStatus": "not_attempted"
+  },
+  "origin": "http://localhost:5195/lab/centipawn-tvmjs-subgroups.html?repeats=1&searchRepeats=1&visits=16&searchFixtureCount=1",
+  "result": {
+    "ok": true,
+    "parity": {
+      "maxPolicyAbs": 4.535237019542837e-7,
+      "maxWdlAbs": 1.895726520206864e-8,
+      "tolerance": 0.001
+    },
+    "rows": [
+      {
+        "manifestUrl": "http://localhost:5195/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v3-subgroups/manifest.json",
+        "mode": "candidate",
+        "requestedFeatures": [
+          [
+            "subgroups"
+          ]
+        ],
+        "runtimeConfigId": "centipawn-tvmjs-webgpu-f32-v3-subgroups"
+      },
+      {
+        "manifestUrl": "http://localhost:5195/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json",
+        "mode": "variable-size-fallback",
+        "requestedFeatures": [
+          []
+        ],
+        "runtimeConfigId": "centipawn-tvmjs-webgpu-f32-v2-shape-k16"
+      },
+      {
+        "manifestUrl": "http://localhost:5195/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json",
+        "mode": "default",
+        "requestedFeatures": [
+          []
+        ],
+        "runtimeConfigId": "centipawn-tvmjs-webgpu-f32-v2-shape-k16"
+      }
+    ]
+  }
+}

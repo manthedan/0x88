@@ -1,0 +1,2878 @@
+{
+  "run1": {
+    "date": "2026-10-10T20:45:35.768Z",
+    "visits": 128,
+    "orderOffset": 0,
+    "batch": 16,
+    "variants": [
+      {
+        "variant": "v2-shape-k16",
+        "modelSha256": "fd3d8635c8368338c3a0d1b57a725a70b4f8a74f8d130ee831848c641cba75b5",
+        "gpuBusyMs": {
+          "count": 31,
+          "median": 13.303808,
+          "p10": 6.291456,
+          "p90": 14.41792,
+          "min": 5.636096,
+          "max": 15.335424
+        },
+        "gpuEnvelopeMs": {
+          "count": 31,
+          "median": 14.09024,
+          "p10": 7.471104,
+          "p90": 15.335424,
+          "min": 6.684672,
+          "max": 16.05632
+        },
+        "invokeWallMs": {
+          "count": 31,
+          "median": 17.9650000333786,
+          "p10": 11.245000004768372,
+          "p90": 19.575000047683716,
+          "min": 10.444999933242798,
+          "max": 20.50499999523163
+        },
+        "zeroPasses": {
+          "count": 31,
+          "median": 65,
+          "p10": 63,
+          "p90": 90,
+          "min": 62,
+          "max": 97
+        },
+        "searchWallMs": {
+          "count": 28,
+          "median": 117.23249995708466,
+          "p10": 81.87999999523163,
+          "p90": 148.11500000953674,
+          "min": 77.03999996185303,
+          "max": 155.5
+        }
+      },
+      {
+        "variant": "v3-subgroups",
+        "modelSha256": "8bd117093f1914d60a5e7b89dbcb768c5a91130c346246fa7e9ebd763213b6c9",
+        "gpuBusyMs": {
+          "count": 31,
+          "median": 12.517376,
+          "p10": 6.88128,
+          "p90": 13.631488,
+          "min": 5.767168,
+          "max": 13.76256
+        },
+        "gpuEnvelopeMs": {
+          "count": 31,
+          "median": 13.43488,
+          "p10": 7.667712,
+          "p90": 14.614528,
+          "min": 6.750208,
+          "max": 15.663104
+        },
+        "invokeWallMs": {
+          "count": 31,
+          "median": 17.2150000333786,
+          "p10": 11.47000002861023,
+          "p90": 18.600000023841854,
+          "min": 11.025000095367432,
+          "max": 19.325000047683716
+        },
+        "zeroPasses": {
+          "count": 31,
+          "median": 70,
+          "p10": 67,
+          "p90": 90,
+          "min": 62,
+          "max": 94
+        },
+        "searchWallMs": {
+          "count": 28,
+          "median": 103.54750007390976,
+          "p10": 78.34500002861023,
+          "p90": 148.70000004768372,
+          "min": 72.6599999666214,
+          "max": 156.62000000476837
+        }
+      }
+    ],
+    "pairedSearchSavingPercent": {
+      "count": 28,
+      "median": 2.323273255112462,
+      "p10": -15.498964234393299,
+      "p90": 21.837181653383574,
+      "min": -81.60723016163097,
+      "max": 40.357790246607465
+    },
+    "fixtures": [
+      {
+        "fixture": "startpos",
+        "wallMs": [
+          {
+            "count": 7,
+            "median": 140.95499992370603,
+            "p10": 83.41500008106232,
+            "p90": 150.59500002861023,
+            "min": 83.41500008106232,
+            "max": 155.5
+          },
+          {
+            "count": 7,
+            "median": 125.37000000476836,
+            "p10": 84.5900000333786,
+            "p90": 151.83000004291534,
+            "min": 84.5900000333786,
+            "max": 156.62000000476837
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 7,
+          "median": -1.4086194943048858,
+          "p10": -9.19123795973551,
+          "p90": 11.056720178335834,
+          "min": -9.19123795973551,
+          "max": 22.524773375487296
+        }
+      },
+      {
+        "fixture": "black-to-move-after-e4",
+        "wallMs": [
+          {
+            "count": 7,
+            "median": 100.47500002384186,
+            "p10": 87.81499993801117,
+            "p90": 121.54999995231628,
+            "min": 87.81499993801117,
+            "max": 139.23499989509585
+          },
+          {
+            "count": 7,
+            "median": 96.31000006198884,
+            "p10": 81.14999997615814,
+            "p90": 108.83000004291534,
+            "min": 81.14999997615814,
+            "max": 125.12999999523164
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 7,
+          "median": 8.17538899444623,
+          "p10": -24.53844236430889,
+          "p90": 21.837181653383574,
+          "min": -24.53844236430889,
+          "max": 30.921431455106685
+        }
+      },
+      {
+        "fixture": "castling-rights",
+        "wallMs": [
+          {
+            "count": 7,
+            "median": 101.75,
+            "p10": 77.03999996185303,
+            "p90": 126.88999998569489,
+            "min": 77.03999996185303,
+            "max": 147.25
+          },
+          {
+            "count": 7,
+            "median": 86.36000001430511,
+            "p10": 72.6599999666214,
+            "p90": 104.65500009059906,
+            "min": 72.6599999666214,
+            "max": 145.95500004291534
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 7,
+          "median": 5.685358252077388,
+          "p10": -5.637210237515822,
+          "p90": 15.125307111248043,
+          "min": -5.637210237515822,
+          "max": 40.357790246607465
+        }
+      },
+      {
+        "fixture": "black-castling-rights",
+        "wallMs": [
+          {
+            "count": 7,
+            "median": 123.10500001907349,
+            "p10": 81.87999999523163,
+            "p90": 126.62999999523164,
+            "min": 81.87999999523163,
+            "max": 148.11500000953674
+          },
+          {
+            "count": 7,
+            "median": 125.98500001430511,
+            "p10": 89.90499997138977,
+            "p90": 142.18499994277954,
+            "min": 89.90499997138977,
+            "max": 148.70000004768372
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 7,
+          "median": 0.5093579570013551,
+          "p10": -81.60723016163097,
+          "p90": 4.273706270470767,
+          "min": -81.60723016163097,
+          "max": 18.021766944663685
+        }
+      }
+    ]
+  },
+  "run2": {
+    "date": "2026-10-10T20:47:12.484Z",
+    "visits": 128,
+    "orderOffset": 1,
+    "batch": 16,
+    "variants": [
+      {
+        "variant": "v2-shape-k16",
+        "modelSha256": "fd3d8635c8368338c3a0d1b57a725a70b4f8a74f8d130ee831848c641cba75b5",
+        "gpuBusyMs": {
+          "count": 31,
+          "median": 13.303808,
+          "p10": 6.094848,
+          "p90": 14.024704,
+          "min": 5.505024,
+          "max": 14.942208
+        },
+        "gpuEnvelopeMs": {
+          "count": 31,
+          "median": 14.680064,
+          "p10": 7.143424,
+          "p90": 15.532032,
+          "min": 6.5536,
+          "max": 16.187392
+        },
+        "invokeWallMs": {
+          "count": 31,
+          "median": 17.920000076293945,
+          "p10": 10.78000009059906,
+          "p90": 19.210000038146973,
+          "min": 9.90499997138977,
+          "max": 19.664999961853027
+        },
+        "zeroPasses": {
+          "count": 31,
+          "median": 68,
+          "p10": 61,
+          "p90": 93,
+          "min": 55,
+          "max": 96
+        },
+        "searchWallMs": {
+          "count": 28,
+          "median": 146.74749994277954,
+          "p10": 85.28000009059906,
+          "p90": 151.11500000953674,
+          "min": 78.54500007629395,
+          "max": 155.22000002861023
+        }
+      },
+      {
+        "variant": "v3-subgroups",
+        "modelSha256": "8bd117093f1914d60a5e7b89dbcb768c5a91130c346246fa7e9ebd763213b6c9",
+        "gpuBusyMs": {
+          "count": 31,
+          "median": 12.648448,
+          "p10": 5.767168,
+          "p90": 13.238272,
+          "min": 5.046272,
+          "max": 13.303808
+        },
+        "gpuEnvelopeMs": {
+          "count": 31,
+          "median": 13.893632,
+          "p10": 6.88128,
+          "p90": 14.548992,
+          "min": 6.160384,
+          "max": 14.942208
+        },
+        "invokeWallMs": {
+          "count": 31,
+          "median": 17.12000000476837,
+          "p10": 10.09500002861023,
+          "p90": 18.16000008583069,
+          "min": 9.375,
+          "max": 18.769999980926514
+        },
+        "zeroPasses": {
+          "count": 31,
+          "median": 70,
+          "p10": 65,
+          "p90": 96,
+          "min": 64,
+          "max": 100
+        },
+        "searchWallMs": {
+          "count": 28,
+          "median": 142.53750002384186,
+          "p10": 77.53999996185303,
+          "p90": 147.10000002384186,
+          "min": 74.12000000476837,
+          "max": 148.65499997138977
+        }
+      }
+    ],
+    "pairedSearchSavingPercent": {
+      "count": 28,
+      "median": 3.4108719448852796,
+      "p10": -14.891143039053944,
+      "p90": 9.075985131945675,
+      "min": -19.006622492023762,
+      "max": 46.6455513765724
+    },
+    "fixtures": [
+      {
+        "fixture": "startpos",
+        "wallMs": [
+          {
+            "count": 7,
+            "median": 146.00499999523163,
+            "p10": 78.7150000333786,
+            "p90": 150.78000009059906,
+            "min": 78.7150000333786,
+            "max": 151.33500003814697
+          },
+          {
+            "count": 7,
+            "median": 142.74000000953674,
+            "p10": 83.20999991893768,
+            "p90": 145.78999996185303,
+            "min": 83.20999991893768,
+            "max": 148.65499997138977
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 7,
+          "median": 3.23858349608539,
+          "p10": -17.08074536367743,
+          "p90": 5.679452886935399,
+          "min": -17.08074536367743,
+          "max": 11.69478944911939
+        }
+      },
+      {
+        "fixture": "black-to-move-after-e4",
+        "wallMs": [
+          {
+            "count": 7,
+            "median": 150.8399999141693,
+            "p10": 149.75999999046326,
+            "p90": 151.11500000953674,
+            "min": 149.75999999046326,
+            "max": 151.8050000667572
+          },
+          {
+            "count": 7,
+            "median": 144.92000007629397,
+            "p10": 141.73500001430511,
+            "p90": 147.82999992370603,
+            "min": 141.73500001430511,
+            "max": 148.03999996185303
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 7,
+          "median": 3.512286318641966,
+          "p10": 1.2045781083203089,
+          "p90": 6.050525383188743,
+          "min": 1.2045781083203089,
+          "max": 6.2071931936867
+        }
+      },
+      {
+        "fixture": "castling-rights",
+        "wallMs": [
+          {
+            "count": 7,
+            "median": 98.14999997615814,
+            "p10": 78.54500007629395,
+            "p90": 143.1449999809265,
+            "min": 78.54500007629395,
+            "max": 144.5
+          },
+          {
+            "count": 7,
+            "median": 103.19500005245207,
+            "p10": 74.12000000476837,
+            "p90": 136.9100000858307,
+            "min": 74.12000000476837,
+            "max": 138.02999997138977
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 7,
+          "median": 4.477508670318498,
+          "p10": -19.006622492023762,
+          "p90": 9.075985131945675,
+          "min": -19.006622492023762,
+          "max": 46.6455513765724
+        }
+      },
+      {
+        "fixture": "black-castling-rights",
+        "wallMs": [
+          {
+            "count": 7,
+            "median": 147.0349999666214,
+            "p10": 97.49500000476836,
+            "p90": 148.88499999046326,
+            "min": 97.49500000476836,
+            "max": 155.22000002861023
+          },
+          {
+            "count": 7,
+            "median": 143.08000004291534,
+            "p10": 82.64999997615814,
+            "p90": 143.93500006198883,
+            "min": 82.64999997615814,
+            "max": 144.47000002861023
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 7,
+          "median": 2.9653759358805987,
+          "p10": -14.891143039053944,
+          "p90": 8.73920890009029,
+          "min": -14.891143039053944,
+          "max": 15.226421896388697
+        }
+      }
+    ]
+  },
+  "run3": {
+    "date": "2026-10-10T20:48:45.537Z",
+    "visits": 256,
+    "orderOffset": 0,
+    "batch": 16,
+    "variants": [
+      {
+        "variant": "v2-shape-k16",
+        "modelSha256": "fd3d8635c8368338c3a0d1b57a725a70b4f8a74f8d130ee831848c641cba75b5",
+        "gpuBusyMs": {
+          "count": 31,
+          "median": 13.238272,
+          "p10": 5.57056,
+          "p90": 15.138816,
+          "min": 3.670016,
+          "max": 16.318464
+        },
+        "gpuEnvelopeMs": {
+          "count": 31,
+          "median": 14.41792,
+          "p10": 7.077888,
+          "p90": 17.36704,
+          "min": 4.784128,
+          "max": 19.267584
+        },
+        "invokeWallMs": {
+          "count": 31,
+          "median": 18.860000014305115,
+          "p10": 10.6599999666214,
+          "p90": 21.460000038146973,
+          "min": 8.504999995231628,
+          "max": 23.31000006198883
+        },
+        "zeroPasses": {
+          "count": 31,
+          "median": 66,
+          "p10": 57,
+          "p90": 99,
+          "min": 54,
+          "max": 109
+        },
+        "searchWallMs": {
+          "count": 44,
+          "median": 140.7399999499321,
+          "p10": 113.69500005245207,
+          "p90": 202.51499998569489,
+          "min": 112.65499997138976,
+          "max": 284.72000002861023
+        },
+        "kernels": {
+          "divide4_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_add1_add1_matmul2_add1_add3_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_bitwise_and_cast_cast_expand_dims_expand_dims_concatenate_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_cast_divide3_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide1_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide2_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul10_divide6_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "fused_matmul11_add10_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "fused_matmul12_add9_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul1_add2_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul3_add4_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.703936,
+              "p10": 0.7864319999999999,
+              "p90": 2.228224,
+              "min": 0.589824,
+              "max": 2.4248320000000003
+            }
+          },
+          "fused_matmul4_add5_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.917504,
+              "p10": 0.3932159999999999,
+              "p90": 1.31072,
+              "min": 0.196608,
+              "max": 1.572864
+            }
+          },
+          "fused_matmul6_add6_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.6553599999999999,
+              "p10": 0.32767999999999997,
+              "p90": 0.851968,
+              "min": 0.196608,
+              "max": 0.917504
+            }
+          },
+          "fused_matmul7_add7_divide5_erf_add8_multiply2_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.31072,
+              "p10": 0.524288,
+              "p90": 1.5728639999999998,
+              "min": 0.3932159999999999,
+              "max": 1.6384
+            }
+          },
+          "fused_matmul7_add7_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0.065536,
+              "max": 0.262144
+            }
+          },
+          "fused_matmul8_add2_add1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.2451839999999998,
+              "p10": 0.5898239999999999,
+              "p90": 1.5728639999999998,
+              "min": 0.3932159999999999,
+              "max": 1.703936
+            }
+          },
+          "fused_matmul9_add2_kernel": {
+            "dispatchesPerInvoke": 2,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.131072,
+              "p90": 0.32767999999999997,
+              "min": 0.065536,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_matmul_add1_add1_add1_add1_add1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_maximum1_minimum1_kernel": {
+            "dispatchesPerInvoke": 5,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_multiply_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_transpose3_multiply1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.524288
+            }
+          },
+          "fused_reshape4_transpose6_add1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.196608,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.3932159999999999
+            }
+          },
+          "fused_reshape5_reshape6_concatenate1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_reshape_expand_dims1_transpose1_squeeze_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.32767999999999997,
+              "p10": 0.065536,
+              "p90": 0.5898240000000001,
+              "min": 0,
+              "max": 1.4417920000000002
+            }
+          },
+          "fused_strided_slice1_cast1_maximum2_minimum2_tir_isnan1_where1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_strided_slice_maximum_minimum_add_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_transpose4_reshape3_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "layer_norm1_kernel": {
+            "dispatchesPerInvoke": 12,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.589824,
+              "p10": 0.131072,
+              "p90": 0.7208960000000001,
+              "min": 0.065536,
+              "max": 0.8519680000000002
+            }
+          },
+          "layer_norm_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "matmul5_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.786432,
+              "p10": 0.32767999999999997,
+              "p90": 0.917504,
+              "min": 0.262144,
+              "max": 1.048576
+            }
+          },
+          "mean_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "multiply3_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.196608,
+              "p10": 0.065536,
+              "p90": 0.32767999999999997,
+              "min": 0,
+              "max": 1.245184
+            }
+          },
+          "softmax_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.5073280000000002,
+              "p10": 0.7208959999999999,
+              "p90": 2.097152,
+              "min": 0.45875199999999994,
+              "max": 2.686976
+            }
+          },
+          "sum_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "take1_kernel": {
+            "dispatchesPerInvoke": 8,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "take2_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take3_kernel": {
+            "dispatchesPerInvoke": 2,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take4_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take5_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take6_kernel": {
+            "dispatchesPerInvoke": 18,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.45875199999999994,
+              "p10": 0.196608,
+              "p90": 0.589824,
+              "min": 0.065536,
+              "max": 0.7208960000000001
+            }
+          },
+          "take_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "transpose7_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "transpose_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.262144
+            }
+          }
+        }
+      },
+      {
+        "variant": "v3-subgroups",
+        "modelSha256": "8bd117093f1914d60a5e7b89dbcb768c5a91130c346246fa7e9ebd763213b6c9",
+        "gpuBusyMs": {
+          "count": 31,
+          "median": 12.713984,
+          "p10": 5.57056,
+          "p90": 14.483456,
+          "min": 3.670016,
+          "max": 15.204352
+        },
+        "gpuEnvelopeMs": {
+          "count": 31,
+          "median": 14.221312,
+          "p10": 6.946816,
+          "p90": 16.187392,
+          "min": 5.373952,
+          "max": 18.415616
+        },
+        "invokeWallMs": {
+          "count": 31,
+          "median": 18.34500002861023,
+          "p10": 10.44000005722046,
+          "p90": 20.550000071525577,
+          "min": 8.465000033378601,
+          "max": 24.00499999523163
+        },
+        "zeroPasses": {
+          "count": 31,
+          "median": 65,
+          "p10": 60,
+          "p90": 94,
+          "min": 57,
+          "max": 109
+        },
+        "searchWallMs": {
+          "count": 44,
+          "median": 143.04750001430511,
+          "p10": 111.65499997138976,
+          "p90": 224.41999995708463,
+          "min": 107.6599999666214,
+          "max": 296.72000002861023
+        },
+        "kernels": {
+          "divide4_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_add1_add1_matmul2_add1_add3_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "fused_bitwise_and_cast_cast_expand_dims_expand_dims_concatenate_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_cast_divide3_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide1_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide2_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul10_divide6_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul11_add10_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "fused_matmul12_add9_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul1_add2_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul3_add4_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.900544,
+              "p10": 0.7864319999999999,
+              "p90": 2.29376,
+              "min": 0.524288,
+              "max": 2.359296
+            }
+          },
+          "fused_matmul4_add5_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.98304,
+              "p10": 0.3932159999999999,
+              "p90": 1.179648,
+              "min": 0.262144,
+              "max": 1.5728639999999998
+            }
+          },
+          "fused_matmul6_add6_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.6553599999999999,
+              "p10": 0.262144,
+              "p90": 0.917504,
+              "min": 0.196608,
+              "max": 1.0485760000000002
+            }
+          },
+          "fused_matmul7_add7_divide5_erf_add8_multiply2_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.31072,
+              "p10": 0.524288,
+              "p90": 1.5728639999999998,
+              "min": 0.3932159999999999,
+              "max": 1.6384
+            }
+          },
+          "fused_matmul7_add7_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0.065536,
+              "max": 0.393216
+            }
+          },
+          "fused_matmul8_add2_add1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.4417919999999995,
+              "p10": 0.524288,
+              "p90": 1.5728639999999998,
+              "min": 0.3932159999999999,
+              "max": 1.6384
+            }
+          },
+          "fused_matmul9_add2_kernel": {
+            "dispatchesPerInvoke": 2,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.131072,
+              "p90": 0.32767999999999997,
+              "min": 0.065536,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_matmul_add1_add1_add1_add1_add1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_maximum1_minimum1_kernel": {
+            "dispatchesPerInvoke": 5,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_multiply_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_transpose3_multiply1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_reshape4_transpose6_add1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.196608,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0.065536,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_reshape5_reshape6_concatenate1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "fused_reshape_expand_dims1_transpose1_squeeze_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.32767999999999997,
+              "p10": 0.196608,
+              "p90": 0.524288,
+              "min": 0.065536,
+              "max": 1.376256
+            }
+          },
+          "fused_strided_slice1_cast1_maximum2_minimum2_tir_isnan1_where1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_strided_slice_maximum_minimum_add_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_transpose4_reshape3_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "layer_norm1_kernel": {
+            "dispatchesPerInvoke": 12,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.3932159999999999,
+              "p10": 0.196608,
+              "p90": 0.589824,
+              "min": 0,
+              "max": 0.7208960000000001
+            }
+          },
+          "layer_norm_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "matmul5_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.7864319999999999,
+              "p10": 0.32767999999999997,
+              "p90": 0.98304,
+              "min": 0.131072,
+              "max": 1.048576
+            }
+          },
+          "mean_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "multiply3_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.196608,
+              "p10": 0.131072,
+              "p90": 0.32767999999999997,
+              "min": 0,
+              "max": 0.3932159999999999
+            }
+          },
+          "softmax_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.179648,
+              "p10": 0.458752,
+              "p90": 1.376256,
+              "min": 0.3932159999999999,
+              "max": 2.097152
+            }
+          },
+          "sum_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "take1_kernel": {
+            "dispatchesPerInvoke": 8,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.3932159999999999
+            }
+          },
+          "take2_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take3_kernel": {
+            "dispatchesPerInvoke": 2,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "take4_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take5_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take6_kernel": {
+            "dispatchesPerInvoke": 18,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.3932159999999999,
+              "p10": 0.131072,
+              "p90": 0.524288,
+              "min": 0,
+              "max": 0.7208960000000001
+            }
+          },
+          "take_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.196608,
+              "min": 0.065536,
+              "max": 0.196608
+            }
+          },
+          "transpose7_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 1.245184
+            }
+          },
+          "transpose_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          }
+        }
+      }
+    ],
+    "pairedSearchSavingPercent": {
+      "count": 44,
+      "median": 0.6366151571203793,
+      "p10": -23.776956609073086,
+      "p90": 15.715963572382986,
+      "min": -57.46797333775966,
+      "max": 31.42730167415857
+    },
+    "fixtures": [
+      {
+        "fixture": "startpos",
+        "wallMs": [
+          {
+            "count": 11,
+            "median": 190.86500000953671,
+            "p10": 162.29999995231628,
+            "p90": 208.0899999141693,
+            "min": 156.42499995231628,
+            "max": 222.61000001430511
+          },
+          {
+            "count": 11,
+            "median": 193.9650000333786,
+            "p10": 156.09500002861023,
+            "p90": 228.0199999809265,
+            "min": 131.9799998998642,
+            "max": 266.7350000143051
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 11,
+          "median": -7.095487525486566,
+          "p10": -34.18071609600697,
+          "p90": 15.715963572382986,
+          "min": -57.46797333775966,
+          "max": 21.49323542980498
+        }
+      },
+      {
+        "fixture": "black-to-move-after-e4",
+        "wallMs": [
+          {
+            "count": 11,
+            "median": 130.77499997615814,
+            "p10": 117.73500001430511,
+            "p90": 202.51499998569489,
+            "min": 116.73000001907349,
+            "max": 213.27999997138977
+          },
+          {
+            "count": 11,
+            "median": 142.99000000953674,
+            "p10": 115.98000001907349,
+            "p90": 177.67500007152557,
+            "min": 115.8050000667572,
+            "max": 185.1849999427795
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 11,
+          "median": 7.411388479211478,
+          "p10": -16.38450268019518,
+          "p90": 17.385544320194324,
+          "min": -57.28967589950231,
+          "max": 31.42730167415857
+        }
+      },
+      {
+        "fixture": "castling-rights",
+        "wallMs": [
+          {
+            "count": 11,
+            "median": 120.95000004768372,
+            "p10": 113.28000009059906,
+            "p90": 164.10999989509585,
+            "min": 112.65499997138976,
+            "max": 203.57500004768372
+          },
+          {
+            "count": 11,
+            "median": 113.1049998998642,
+            "p10": 111.15499997138976,
+            "p90": 180.18500006198883,
+            "min": 107.6599999666214,
+            "max": 244.8949999809265
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 11,
+          "median": 0.15448463152798464,
+          "p10": -19.561394879537495,
+          "p90": 14.37887708091623,
+          "min": -20.29718773108895,
+          "max": 16.491986981964935
+        }
+      },
+      {
+        "fixture": "black-castling-rights",
+        "wallMs": [
+          {
+            "count": 11,
+            "median": 120.15499997138976,
+            "p10": 113.92499995231628,
+            "p90": 190.86000001430511,
+            "min": 113.5200001001358,
+            "max": 284.72000002861023
+          },
+          {
+            "count": 11,
+            "median": 120.47000002861024,
+            "p10": 111.65499997138976,
+            "p90": 192.44999992847443,
+            "min": 109.88499999046326,
+            "max": 296.72000002861023
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 11,
+          "median": -0.2621614225754243,
+          "p10": -13.815960482923085,
+          "p90": 3.820568936137192,
+          "min": -55.85498754091054,
+          "max": 11.223933982615208
+        }
+      }
+    ]
+  },
+  "run4": {
+    "date": "2026-10-10T20:49:48.015Z",
+    "visits": 256,
+    "orderOffset": 1,
+    "batch": 16,
+    "variants": [
+      {
+        "variant": "v2-shape-k16",
+        "modelSha256": "fd3d8635c8368338c3a0d1b57a725a70b4f8a74f8d130ee831848c641cba75b5",
+        "gpuBusyMs": {
+          "count": 31,
+          "median": 13.303808,
+          "p10": 5.439488,
+          "p90": 14.221312,
+          "min": 5.046272,
+          "max": 14.680064
+        },
+        "gpuEnvelopeMs": {
+          "count": 31,
+          "median": 14.155776,
+          "p10": 6.22592,
+          "p90": 15.138816,
+          "min": 6.160384,
+          "max": 15.40096
+        },
+        "invokeWallMs": {
+          "count": 31,
+          "median": 17.50499999523163,
+          "p10": 9.504999995231628,
+          "p90": 18.69000005722046,
+          "min": 9.105000019073486,
+          "max": 19.975000023841854
+        },
+        "zeroPasses": {
+          "count": 31,
+          "median": 66,
+          "p10": 62,
+          "p90": 96,
+          "min": 59,
+          "max": 99
+        },
+        "searchWallMs": {
+          "count": 44,
+          "median": 219.11750000715256,
+          "p10": 175.62999999523163,
+          "p90": 287.5900000333786,
+          "min": 168.7849999666214,
+          "max": 303.79500007629395
+        },
+        "kernels": {
+          "divide4_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_add1_add1_matmul2_add1_add3_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_bitwise_and_cast_cast_expand_dims_expand_dims_concatenate_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_cast_divide3_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide1_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide2_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0
+            }
+          },
+          "fused_matmul10_divide6_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "fused_matmul11_add10_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "fused_matmul12_add9_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul1_add2_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul3_add4_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 2.031616,
+              "p10": 0.851968,
+              "p90": 2.228224,
+              "min": 0.7864319999999999,
+              "max": 2.228224
+            }
+          },
+          "fused_matmul4_add5_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.65536,
+              "p10": 0.3932159999999999,
+              "p90": 0.7864319999999999,
+              "min": 0.32767999999999997,
+              "max": 0.851968
+            }
+          },
+          "fused_matmul6_add6_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.7864319999999999,
+              "p10": 0.32767999999999997,
+              "p90": 0.851968,
+              "min": 0,
+              "max": 0.917504
+            }
+          },
+          "fused_matmul7_add7_divide5_erf_add8_multiply2_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.5073279999999998,
+              "p10": 0.524288,
+              "p90": 1.5728639999999998,
+              "min": 0.45875199999999994,
+              "max": 1.6384
+            }
+          },
+          "fused_matmul7_add7_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0.065536,
+              "max": 0.262144
+            }
+          },
+          "fused_matmul8_add2_add1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.5073279999999998,
+              "p10": 0.589824,
+              "p90": 1.5728639999999998,
+              "min": 0.3932159999999999,
+              "max": 1.900544
+            }
+          },
+          "fused_matmul9_add2_kernel": {
+            "dispatchesPerInvoke": 2,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.131072,
+              "p90": 0.32767999999999997,
+              "min": 0.065536,
+              "max": 0.524288
+            }
+          },
+          "fused_matmul_add1_add1_add1_add1_add1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_maximum1_minimum1_kernel": {
+            "dispatchesPerInvoke": 5,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_multiply_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_transpose3_multiply1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_reshape4_transpose6_add1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_reshape5_reshape6_concatenate1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_reshape_expand_dims1_transpose1_squeeze_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.131072,
+              "p90": 0.3932159999999999,
+              "min": 0,
+              "max": 0.3932159999999999
+            }
+          },
+          "fused_strided_slice1_cast1_maximum2_minimum2_tir_isnan1_where1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_strided_slice_maximum_minimum_add_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_transpose4_reshape3_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "layer_norm1_kernel": {
+            "dispatchesPerInvoke": 12,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.589824,
+              "p10": 0.131072,
+              "p90": 0.7208960000000001,
+              "min": 0.065536,
+              "max": 0.7864320000000002
+            }
+          },
+          "layer_norm_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "matmul5_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.851968,
+              "p10": 0.32767999999999997,
+              "p90": 0.98304,
+              "min": 0.131072,
+              "max": 0.98304
+            }
+          },
+          "mean_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "multiply3_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.196608,
+              "p10": 0.065536,
+              "p90": 0.32767999999999997,
+              "min": 0.065536,
+              "max": 0.786432
+            }
+          },
+          "softmax_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.703936,
+              "p10": 0.65536,
+              "p90": 1.900544,
+              "min": 0.524288,
+              "max": 2.097152
+            }
+          },
+          "sum_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take1_kernel": {
+            "dispatchesPerInvoke": 8,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "take2_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take3_kernel": {
+            "dispatchesPerInvoke": 2,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take4_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take5_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take6_kernel": {
+            "dispatchesPerInvoke": 18,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.3932159999999999,
+              "p10": 0.131072,
+              "p90": 0.524288,
+              "min": 0.065536,
+              "max": 0.65536
+            }
+          },
+          "take_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.196608
+            }
+          },
+          "transpose7_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.524288
+            }
+          },
+          "transpose_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.262144
+            }
+          }
+        }
+      },
+      {
+        "variant": "v3-subgroups",
+        "modelSha256": "8bd117093f1914d60a5e7b89dbcb768c5a91130c346246fa7e9ebd763213b6c9",
+        "gpuBusyMs": {
+          "count": 31,
+          "median": 12.517376,
+          "p10": 5.111808,
+          "p90": 13.369344,
+          "min": 4.718592,
+          "max": 13.959168
+        },
+        "gpuEnvelopeMs": {
+          "count": 31,
+          "median": 13.369344,
+          "p10": 6.291456,
+          "p90": 14.09024,
+          "min": 5.832704,
+          "max": 14.942208
+        },
+        "invokeWallMs": {
+          "count": 31,
+          "median": 16.769999980926514,
+          "p10": 9.8400000333786,
+          "p90": 17.84500002861023,
+          "min": 9.039999961853027,
+          "max": 18.43500006198883
+        },
+        "zeroPasses": {
+          "count": 31,
+          "median": 70,
+          "p10": 65,
+          "p90": 99,
+          "min": 60,
+          "max": 102
+        },
+        "searchWallMs": {
+          "count": 44,
+          "median": 210.99500000476837,
+          "p10": 165.7300000190735,
+          "p90": 279.1299999952316,
+          "min": 159.02499997615814,
+          "max": 300.31499993801117
+        },
+        "kernels": {
+          "divide4_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_add1_add1_matmul2_add1_add3_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_bitwise_and_cast_cast_expand_dims_expand_dims_concatenate_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_cast_divide3_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide1_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_divide2_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0,
+              "min": 0,
+              "max": 0
+            }
+          },
+          "fused_divide_bitwise_and_cast_expand_dims_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul10_divide6_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul11_add10_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "fused_matmul12_add9_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul1_add2_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_matmul3_add4_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 2.097152,
+              "p10": 0.7864319999999999,
+              "p90": 2.228224,
+              "min": 0.720896,
+              "max": 2.29376
+            }
+          },
+          "fused_matmul4_add5_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.6553599999999999,
+              "p10": 0.32767999999999997,
+              "p90": 0.7864319999999999,
+              "min": 0.262144,
+              "max": 0.7864319999999999
+            }
+          },
+          "fused_matmul6_add6_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.7864319999999999,
+              "p10": 0.32767999999999997,
+              "p90": 0.7864319999999999,
+              "min": 0.196608,
+              "max": 0.851968
+            }
+          },
+          "fused_matmul7_add7_divide5_erf_add8_multiply2_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.5073279999999998,
+              "p10": 0.589824,
+              "p90": 1.5728639999999998,
+              "min": 0.45875199999999994,
+              "max": 1.5728639999999998
+            }
+          },
+          "fused_matmul7_add7_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0.065536,
+              "max": 0.262144
+            }
+          },
+          "fused_matmul8_add2_add1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.5728639999999998,
+              "p10": 0.589824,
+              "p90": 1.5728639999999998,
+              "min": 0.524288,
+              "max": 1.5728639999999998
+            }
+          },
+          "fused_matmul9_add2_kernel": {
+            "dispatchesPerInvoke": 2,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.262144,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0.065536,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_matmul_add1_add1_add1_add1_add1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_maximum1_minimum1_kernel": {
+            "dispatchesPerInvoke": 5,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_multiply_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_reshape1_transpose2_reshape2_transpose3_multiply1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.5242880000000001
+            }
+          },
+          "fused_reshape4_transpose6_add1_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          },
+          "fused_reshape5_reshape6_concatenate1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_reshape_expand_dims1_transpose1_squeeze_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.32767999999999997,
+              "p10": 0.065536,
+              "p90": 0.65536,
+              "min": 0,
+              "max": 1.245184
+            }
+          },
+          "fused_strided_slice1_cast1_maximum2_minimum2_tir_isnan1_where1_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_strided_slice_maximum_minimum_add_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "fused_transpose4_reshape3_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.262144
+            }
+          },
+          "layer_norm1_kernel": {
+            "dispatchesPerInvoke": 12,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.3932159999999999,
+              "p10": 0.065536,
+              "p90": 0.589824,
+              "min": 0,
+              "max": 0.917504
+            }
+          },
+          "layer_norm_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "matmul5_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.8519679999999998,
+              "p10": 0.3932159999999999,
+              "p90": 0.917504,
+              "min": 0.196608,
+              "max": 0.98304
+            }
+          },
+          "mean_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "multiply3_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.196608,
+              "p10": 0.065536,
+              "p90": 0.262144,
+              "min": 0,
+              "max": 0.32767999999999997
+            }
+          },
+          "softmax_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 1.245184,
+              "p10": 0.45875199999999994,
+              "p90": 1.376256,
+              "min": 0.3932159999999999,
+              "max": 1.376256
+            }
+          },
+          "sum_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take1_kernel": {
+            "dispatchesPerInvoke": 8,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "take2_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take3_kernel": {
+            "dispatchesPerInvoke": 2,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.065536,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take4_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take5_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "take6_kernel": {
+            "dispatchesPerInvoke": 18,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.32767999999999997,
+              "p10": 0.131072,
+              "p90": 0.524288,
+              "min": 0,
+              "max": 0.65536
+            }
+          },
+          "take_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0.065536,
+              "p90": 0.131072,
+              "min": 0,
+              "max": 0.131072
+            }
+          },
+          "transpose7_kernel": {
+            "dispatchesPerInvoke": 1,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0,
+              "p10": 0,
+              "p90": 0.065536,
+              "min": 0,
+              "max": 0.065536
+            }
+          },
+          "transpose_kernel": {
+            "dispatchesPerInvoke": 6,
+            "perInvokeGpuMs": {
+              "count": 31,
+              "median": 0.131072,
+              "p10": 0,
+              "p90": 0.196608,
+              "min": 0,
+              "max": 0.393216
+            }
+          }
+        }
+      }
+    ],
+    "pairedSearchSavingPercent": {
+      "count": 44,
+      "median": 3.1190412068517803,
+      "p10": -41.76257547318416,
+      "p90": 30.708939523732106,
+      "min": -64.2411812408275,
+      "max": 47.57014277681003
+    },
+    "fixtures": [
+      {
+        "fixture": "startpos",
+        "wallMs": [
+          {
+            "count": 11,
+            "median": 267.8200000524521,
+            "p10": 182.85000002384183,
+            "p90": 287.5900000333786,
+            "min": 173.43499994277954,
+            "max": 291.5549999475479
+          },
+          {
+            "count": 11,
+            "median": 238.34499990940097,
+            "p10": 181.16499996185303,
+            "p90": 286.8899999856949,
+            "min": 173.4450000524521,
+            "max": 300.31499993801117
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 11,
+          "median": 3.23137944886841,
+          "p10": -26.8429094946907,
+          "p90": 24.160472227245744,
+          "min": -64.2411812408275,
+          "max": 31.648121907651582
+        }
+      },
+      {
+        "fixture": "black-to-move-after-e4",
+        "wallMs": [
+          {
+            "count": 11,
+            "median": 230.2300000190735,
+            "p10": 181.82999992370603,
+            "p90": 264.54499995708466,
+            "min": 169.49000000953674,
+            "max": 303.79500007629395
+          },
+          {
+            "count": 11,
+            "median": 204.01000010967255,
+            "p10": 177.375,
+            "p90": 272.9950000047684,
+            "min": 165.625,
+            "max": 279.1299999952316
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 11,
+          "median": 10.138415728958861,
+          "p10": -19.361491534778107,
+          "p90": 28.061069371377002,
+          "min": -36.480028343522534,
+          "max": 28.76252266630828
+        }
+      },
+      {
+        "fixture": "castling-rights",
+        "wallMs": [
+          {
+            "count": 11,
+            "median": 207.31000006198883,
+            "p10": 175.62999999523163,
+            "p90": 280.3550000190735,
+            "min": 168.7849999666214,
+            "max": 303.31000006198883
+          },
+          {
+            "count": 11,
+            "median": 180.42499995231628,
+            "p10": 162.61000001430511,
+            "p90": 230.30000007152557,
+            "min": 159.02499997615814,
+            "max": 249.97500002384183
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 11,
+          "median": 15.859278134740418,
+          "p10": -36.44577427915352,
+          "p90": 36.34818880944584,
+          "min": -42.33046747744045,
+          "max": 47.57014277681003
+        }
+      },
+      {
+        "fixture": "black-castling-rights",
+        "wallMs": [
+          {
+            "count": 11,
+            "median": 194.73999989032745,
+            "p10": 180.28999996185303,
+            "p90": 291.5700000524521,
+            "min": 175.00999999046326,
+            "max": 297.27499997615814
+          },
+          {
+            "count": 11,
+            "median": 210.86000001430511,
+            "p10": 166.95000004768372,
+            "p90": 284.55999994277954,
+            "min": 165.7300000190735,
+            "max": 294.72000002861023
+          }
+        ],
+        "pairedSavingPercent": {
+          "count": 11,
+          "median": -16.956015341350206,
+          "p10": -41.898884836533256,
+          "p90": 30.708939523732106,
+          "min": -45.76375366308585,
+          "max": 38.34478171751111
+        }
+      }
+    ]
+  }
+}

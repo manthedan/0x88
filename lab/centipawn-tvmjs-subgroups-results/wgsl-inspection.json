@@ -1,0 +1,428 @@
+{
+  "schema": "centipawn-subgroups-wgsl.v1",
+  "normalization": "Drop enable subgroups and unused CSE let declarations only; reject any live CSE reference.",
+  "kernels": [
+    {
+      "kernel": "divide4_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "3f08c651a31d2e0a92f74d0d7c56e2a2b7967f1b5d7b212cd13ba66cfe961cba",
+      "v3Sha256": "0a472e2a2810df21ed3099c251dad8ab3780b878d5e0cc1eed12854588472b53",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_add1_add1_matmul2_add1_add3_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "b3ffdbc2c035cc7bc33a43ffbecd73f92ff341c1a0eaa8894d7f2cab7f2b59c0",
+      "v3Sha256": "7a20b2d333d5a3a3c414b64f025a078a6f95762d805146f0abe34859ea068823",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_bitwise_and_cast_cast_expand_dims_expand_dims_concatenate_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "3e47ce5d3b3a25797e87799ca974a2278d9e2037fcc31080acf3c01add4b53f7",
+      "v3Sha256": "c72e7432603189755e8620663877d7f66e7cf30bdab9e1c8738a9ad032a026a7",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_cast_divide3_expand_dims_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "3450ac72d256db27a52f9482a618c95d36895ae649214094fb739e21ff5334e3",
+      "v3Sha256": "937d8f00be32953296c3e06bab13be31895bd186718e451f6f65f2b955f5639e",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_divide1_bitwise_and_cast_expand_dims_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "072dc0db1e2ba1d094552672625ef1ad9ce61f7b05c08d85fe0741a92fa7d770",
+      "v3Sha256": "569b464c1da8841e35b577c7ee59f6e859ab475cc6bde32f86bebe731c52241b",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_divide2_bitwise_and_cast_expand_dims_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "c62f4c6ce97195b9c5556f1737c564ec9587b23403ab6868992166952c9520f5",
+      "v3Sha256": "48448ad3ccfe061e5a8589b361c3a5fbaff905bfc80b6c71c999dcbb0ee7f3ae",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_divide_bitwise_and_cast_expand_dims_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "c45b304e6051c08aebe17c2d9f01b2627c679e70dc6f9f2a3ed10d3669870677",
+      "v3Sha256": "5ede1f707d379faccf6631f7ba6c0ebcd56f726ee44ca7ca9da7e6538cd5dfc4",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul10_divide6_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "be8038fb5dd99aac9b9a07c6c6af8df72040f4ac4e7e8d4e39660ecc292defc4",
+      "v3Sha256": "301fa1e924f24fd0291415138a5c588c8009cbe51799f16e86cd8c3f4e853e29",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul11_add10_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "0884ec4442e95ac1b16c57dd908fa188b307207f76069b59790afeff5fcb4730",
+      "v3Sha256": "34669d4503279ac0700ce0b400979f3d34c49519e6ad4e524b02f5e6193e5a13",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul12_add9_kernel",
+      "workgroup": "64, 1, 1",
+      "subgroupOps": {
+        "subgroupShuffleDown": 6
+      },
+      "v2Sha256": "5f0f5901a62e956e5bcdff4c627af5c59602614d02ea5b8b9e226e4216c1f061",
+      "v3Sha256": "734c55958ddc487babaff8bfc5a165e53fb5b5be79c4a16aa39cbfa8a3e884b6",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": false
+    },
+    {
+      "kernel": "fused_matmul1_add2_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "3d894a0529ce5070779cb9589fc41b2e309fa8942faeb3b3dc699a123e03047e",
+      "v3Sha256": "6e6d1e2101dd63f0b4465372ae8f9d6fceffe73f2e8d385b1f34c860693c1a1c",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul3_add4_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "b6c367dd0362f02671ae6e1e2626c881c5d69db66a66b35ca3bb54b58bbeb55d",
+      "v3Sha256": "336bcfac7a4a0aaf4235d05f38cb601e244c1d8974885beff2b22ce6ccced3ad",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul4_add5_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "3d0cb146315b78d088f327e836bfbb8930faa9cb95df0e7d64c371e1533dd1db",
+      "v3Sha256": "37f1daf671c9629abde4ee5a9dabe1e1b30f493a55b583dbe5180a4a27cd41fe",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul6_add6_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "753418c10ea9bbe94fac898c99e8a734481aeb8ee6b874ed1820d37e962f13a0",
+      "v3Sha256": "2f81220544a685bfb063ca84a1871c5b0a0a0bb71f45f2c045ce9111d6f61133",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul7_add7_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "855b46486e81f1532b7d5ba72af7d3509705e30c0fa603f08a8bb63e8c3752fe",
+      "v3Sha256": "18e894a0238b53680d8703ec53f930f7d69e79202dbc5c080102bdf34e5f922c",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul7_add7_divide5_erf_add8_multiply2_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "07b1326f834dd9c2432c9e7f77cd6a4550bca1c8720f32db52717596dee8baff",
+      "v3Sha256": "66bf27f4549346828f92c675140bcb4d435da753b0a4552e44d2159b75d22655",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul8_add2_add1_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "30076da3c9024b3271645cca4d5468463bbb4e827f269afc79162c2e909e39b8",
+      "v3Sha256": "37fce9ed29e4536cfbb4b4783dce55bf5708cb5d4d766e025102fd3abf7ca0b8",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul9_add2_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "1fc2a4cc2a03b443668f3f44f9053b50308f14503d57de8a45e67254d6a21c73",
+      "v3Sha256": "5a1ff707fd7140bd579c9e53f5407b6cd1e7e0c8a2c1ca5649a8d3fe0e44d39b",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_matmul_add1_add1_add1_add1_add1_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "f33b837a19da1ba895e5c67ccb31c190dc43045036350bdbfce3ef6d975e4f04",
+      "v3Sha256": "a22d163b031c99e40882c4827170daed8ab85e3a268932b40d68c4c461c56c57",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_maximum1_minimum1_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "c21bf9f70d3ebcb49e5c6dbfaba3211579d73c5767424a26606fc5d364a08882",
+      "v3Sha256": "fe654102b17f6f5a80d423870c1a7959bee64e9bab15646cca73d8fea5df4f16",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_reshape1_transpose2_reshape2_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "a5fc39412938b3dcfb8ef5d355fa8d795aeb53049b46af01d55111c1681d5126",
+      "v3Sha256": "3d4876188643cb1b835e2aaf1bd8028c7057f6057e12f3f617642b4f3e279225",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_reshape1_transpose2_reshape2_multiply_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "17c71c29d6b0383c7e9b6b01b748eee1aceb099a022fd8615450849f315516a5",
+      "v3Sha256": "2fd90e19d81205e2034d608b1b06f20e3a6915b8349b2f6f32be556cc9e92f57",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_reshape1_transpose2_reshape2_transpose3_multiply1_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "51fc1624115bb2bbed2b7eafbcee566231eb49f92b988ad87a96b34adadf7a84",
+      "v3Sha256": "79f0b2f34bd09509480069089bcd026ff1b9310b7fb4146de3f344390b4da05c",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_reshape4_transpose6_add1_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "078c247b74d440fdc24931ffc60e7e40d86b271efa7bc6b2976322d064ae1055",
+      "v3Sha256": "efedf0c66e7c8bb9db0b9f0e77b29c9222136575df4ee9baecd47d6a8e6fdd87",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_reshape5_reshape6_concatenate1_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "6442607a8ac047ccc2d25121b20e7f81a6fc053f7c3f1789ae99adab95e9840d",
+      "v3Sha256": "ee8e9a325972c06a7c358fea90d6b5c8c223daafb8f09c9c9fc311fd20d89ac2",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_reshape_expand_dims1_transpose1_squeeze_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "713642fe8aa5a68cc1975f2bebef9b14019626e13ed18f1eddd9ef2ef3941f5c",
+      "v3Sha256": "66d238acf3dba27f51fbd50437ffab2046669c84d7b6075ae2260619b30ab75f",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_strided_slice1_cast1_maximum2_minimum2_tir_isnan1_where1_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "50c5defde8aec48289cf5d6b9ccfc11de9fac8a59be2048c6f1679b81789d7b2",
+      "v3Sha256": "e476a6a3ff87af16574f6736a165da35df111b2def3a652c70bd07fe64d805aa",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_strided_slice_maximum_minimum_add_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "e38a9efac58c0fb7dd7c53202ec59e62feb863b63ccbf56aa633c7ff10d611e8",
+      "v3Sha256": "5d64dcc47e5e53a0d92c0ddd4e45472ead933a26538534b1a016034767d50790",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "fused_transpose4_reshape3_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "3159ea95459d03e463b2829c03b675f07baeefb1a083f67246d7d965544c5c13",
+      "v3Sha256": "5eeec641771b92314bdd7ea0889af441151de84b5075ef0e12fa66084cfb78cb",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "layer_norm_kernel",
+      "workgroup": "64, 1, 1",
+      "subgroupOps": {
+        "subgroupShuffleDown": 12
+      },
+      "v2Sha256": "63a47c558574314929bdbb619574e744bc7d8d7f721a382dcd725c782b296576",
+      "v3Sha256": "aebbe1d618a93ea56ee838a822b5919ca35316ffe6d5d0e4b5d38d0e3e3ac514",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": false
+    },
+    {
+      "kernel": "layer_norm1_kernel",
+      "workgroup": "64, 1, 1",
+      "subgroupOps": {
+        "subgroupShuffleDown": 12
+      },
+      "v2Sha256": "70ae4605ff98188462192304ac0b0c9d78cb69dafd1b35d20b5c6ee0be1d0266",
+      "v3Sha256": "04676cf5f7532d0b5483b48f4666c4394802edb90885fc66e1737a1db47d6360",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": false
+    },
+    {
+      "kernel": "matmul5_kernel",
+      "workgroup": "8, 8, 1",
+      "subgroupOps": {},
+      "v2Sha256": "770b3983bd8f4390030eba77172b9ebce40ee82c531d5c0e9e879544745b3a6c",
+      "v3Sha256": "f395d41b36596fb3d018303000a5dc94703b94447016897e7ff0af902b4d7f05",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "mean_kernel",
+      "workgroup": "16, 16, 1",
+      "subgroupOps": {},
+      "v2Sha256": "a30633e38744b5fa9ffbae5981f1763b1abf0255831e9078f5846d7fc0768675",
+      "v3Sha256": "d3d0214704323e4a3c2a6555c9337e6e085883511dd3f2934beb61b8e53a2b83",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "multiply3_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "89bbba2a2bbc07ceaa2e6c954677412d01581d6111982925928df19b24582243",
+      "v3Sha256": "b4b978d036b8f19d9553f3c03cc257cb43393654ed7aacb76a99c10e374c692e",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "softmax_kernel",
+      "workgroup": "64, 1, 1",
+      "subgroupOps": {
+        "subgroupShuffleDown": 12
+      },
+      "v2Sha256": "729cf8aab767d5c723bb9df92d789a161fa2e293cbed557c7a7cecfbeb0d5b0a",
+      "v3Sha256": "341d3647ce6f689e48aed85044c98fafaea06aaf44556daba275bdfb2aaaf68e",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": false
+    },
+    {
+      "kernel": "squeeze1_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "e65c53de981b422d44ca1f30398bdebdf115a9fec71b3d5c0fc147f3d264651e",
+      "v3Sha256": "a3900b548e0cd2a111ffebffc3d963bc2775e141b47b3949ce641fbae3e074e9",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "sum_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "baf9aa74da4d876b57f082e6e9033092a9d60fcc85844d3ce16ac3cd91ab73a5",
+      "v3Sha256": "fc1398b6abcdc4e75a8057397a37ab7c2135f3fe1b6e30f5a08a1d8eacb2c0de",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "take_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "bea47794a930e46fec08695a36e31736395c04d757126dee20791ca41be3c519",
+      "v3Sha256": "b32cc70c72ec25b5c50436323410152ee48a3ca9cfa9074350093e52745e8552",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "take1_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "b26a3df776f98df2bb150514385afaa1badf72228add927819b9423f2ef3e907",
+      "v3Sha256": "5caf5aa3ddbe91b0a8020b03c5831eead72dedaafd0690902e3593b3ffb256f7",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "take2_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "83e2bf3447041e6b51a4a7864caf1b1558d819465405af2baadf70bc1be7a1cf",
+      "v3Sha256": "2f07e15c28c5459cfb63938a38228d6cebcdd650489235c0570228187834e535",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "take3_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "15225a23213abe191c17fe44646b1375906a59efa9cd3270f1a576c10b61d161",
+      "v3Sha256": "80699741a13d9923126c8e6b592f3c4c7301d107f4d8f81323d9d023cd4567f8",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "take4_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "7c4d6a27fb2abc5c43f9bd39226d4848132c2f44ce74558092f596ecec76fc2c",
+      "v3Sha256": "85aa5d88be07e2511e07ea06109ea8dab53773d3cd5bd72318209ec0c95f6518",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "take5_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "a47ed066b2c3d3cc9757f9e71a54904bc4bf24e08a9d56b965f01e69fe61aaf0",
+      "v3Sha256": "90f29fc441ace8daba8dd3fa678331a617b7a9656a8d263bbb9c223730dde96f",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "take6_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "d1ad41a5082ffbbe177d1ea29f80cb14216bbd6f4c8ab46e3b23f9bb4a8b01cd",
+      "v3Sha256": "62678fc8fa923a0640247f3b9a8805bb16a58137f13ebe17759bfcf6aae0432d",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "transpose_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "a71ddefba73c4d59fb28b6c49387f8529412dce106147b10718a6c66dbbcd2dd",
+      "v3Sha256": "6c1e78c215aaada1bfd3bb53f6e3df5df70ed4282d7e36e098bf440fdd121c7c",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    },
+    {
+      "kernel": "transpose7_kernel",
+      "workgroup": "256, 1, 1",
+      "subgroupOps": {},
+      "v2Sha256": "78117ea01aa8b4fdf5d02c45cd9afaf66d704abf5222542cc3d57b8d997e42c9",
+      "v3Sha256": "0f27807f7b29e21455c6037a728db17b55ea941887d858a0d1c797283538e903",
+      "controlMatchesV2Normalized": true,
+      "bodyMatchesV2Normalized": true
+    }
+  ]
+}
