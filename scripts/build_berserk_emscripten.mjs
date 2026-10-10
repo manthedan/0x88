@@ -163,6 +163,10 @@ const sources = [
 // SIMD builds compile Berserk's own SSE4.1 NNUE path through Emscripten's SSE
 // intrinsic emulation headers; the relaxed build additionally swaps the
 // patched m128 dpbusd helpers to the relaxed integer dot.
+// Only the promoted tier was measured: +29% browser NPS at depths 11/12,
+// exact search parity, +3 KB Brotli. Keep unmeasured fallback tiers unchanged.
+// See docs/cpu_engine_build_flags_matrix_2026-10.md. An explicit 0 opts out.
+const ltoEnabled = (process.env.BERSERK_EMSCRIPTEN_LTO ?? (process.env.BERSERK_WASM_RELAXED_SIMD === '1' ? '1' : '0')) === '1';
 const simdFlags =
   process.env.BERSERK_WASM_RELAXED_SIMD === '1'
     ? ['-msse4.1', '-msimd128', '-mrelaxed-simd']
@@ -176,6 +180,7 @@ const emccArgs = [
   '-Wextra',
   '-Wshadow',
   process.env.BERSERK_EMSCRIPTEN_OPT ?? '-O2',
+  ...(ltoEnabled ? ['-flto'] : []),
   ...simdFlags,
   '-DNDEBUG',
   '-DVERSION="14"',

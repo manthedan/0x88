@@ -159,6 +159,7 @@ const simdFlags =
 const emccArgs = [
   '-std=c++17',
   process.env.PLENTYCHESS_EMSCRIPTEN_OPT ?? '-O2',
+  ...(process.env.PLENTYCHESS_EMSCRIPTEN_LTO === '1' ? ['-flto'] : []),
   '-DNDEBUG',
   '-DARCH_X86',
   '-DPLENTY_SYNC_SEARCH',
