@@ -153,8 +153,9 @@ pass. Native full is 793,609 [779,195–797,074], native lite
 1,339,033 [1,331,973–1,340,952].
 
 **Retain O3/LTO.** Mac Node's lite O2/LTO median is 1.043× O3/LTO, but browser
-paired O2/O3 ratios are 0.821/0.997/1.049/0.895/0.782 (median0.895): O2 loses
-four of five paired rounds despite a misleading higher unpaired median.
+paired O2/O3 ratios are 0.989/1.011/0.958/0.967/1.005 (median0.989): O2 loses
+three of five paired rounds and shows no browser win. The earlier build-confounded
+run was worse for O2 (paired median0.895), despite its higher unpaired median.
 Full O2/LTO and O3/LTO ranges overlap and their ranking flipped between runs.
 No robust cross-runtime win justifies changing upstream's flag default.
 
@@ -184,32 +185,35 @@ caches. This is cold Worker startup, **not five cold network downloads**.
 
 | Release/flavor | Wall NPS | Worker-to-ready ms |
 | --- | ---: | ---: |
-| 18.0.7 lite single | 947,416 [644,692–1,478,522] | 197 [112–218] |
-| 19.0.1 lite single | 654,150 [615,111–1,078,164] | 109 [65–186] |
-| 18.0.7 lite relaxed | 1,007,898 [959,807–1,795,110] | 171 [105–193] |
-| 19.0.1 lite relaxed O3/LTO | 790,095 [668,669–1,342,466] | 110 [71–132] |
-| 19.0.1 lite relaxed O2/LTO | 828,754 [591,819–1,049,643] | 109 [78–135] |
-| 18.0.8 full single | 413,064 [267,840–569,821] | 541 [457–815] |
-| 19.0.1 full single | 296,084 [240,755–399,157] | 499 [426–698] |
-| 18.0.8 lite pthread | 699,064 [651,900–945,468] | 213 [192–251] |
-| 19.0.1 lite pthread | 537,611 [393,151–610,304] | 180 [147–512] |
-| 18.0.8 full pthread | 381,950 [246,727–527,181] | 702 [585–894] |
-| 19.0.1 full pthread | 368,301 [223,921–658,081] | 489 [437–804] |
+| 18.0.7 lite single | 1,260,055 [1,255,451–1,866,667] | 125 [112–128] |
+| 19.0.1 lite single | 862,896 [821,178–1,296,646] | 76 [63–78] |
+| 18.0.7 lite relaxed | 1,471,786 [1,466,797–2,171,687] | 125 [96–128] |
+| 19.0.1 lite relaxed O3/LTO | 1,086,131 [1,080,161–1,609,029] | 78 [59–80] |
+| 19.0.1 lite relaxed O2/LTO | 1,091,920 [1,039,302–1,591,536] | 81 [63–88] |
+| 18.0.8 full single | 601,625 [581,731–842,265] | 425 [418–484] |
+| 19.0.1 full single | 535,651 [532,071–757,189] | 380 [348–385] |
+| 18.0.8 lite pthread | 1,341,950 [1,330,612–1,741,671] | 135 [115–136] |
+| 19.0.1 lite pthread | 919,559 [908,332–1,053,795] | 112 [86–114] |
+| 18.0.8 full pthread | 629,250 [497,574–644,758] | 406 [380–738] |
+| 19.0.1 full pthread | 560,883 [555,158–575,563] | 399 [299–560] |
 
-Paired median new/old NPS ratios: lite baseline0.729, lite relaxed0.748,
-lite pthread0.617, full single0.846, full pthread0.962. **SF19 is not a
+Paired median new/old NPS ratios: lite baseline0.677, lite relaxed0.740,
+lite pthread0.679, full single0.890, full pthread0.893. **SF19 is not a
 per-node speed win.** The new searches visit fewer nodes: 723,146 vs917,364
 for lite; 620,123 vs734,653 for full. Paired same-depth suite time ratios are
-1.081/1.054/1.277/0.998/0.877 respectively; equal depth does not imply equal
-strength. Within SF19, relaxed lite is **1.168× baseline** paired median NPS
-(1.208× ratio of unpaired medians). Lite startup/transfer size and native
+1.164/1.065/1.162/0.948/0.946 respectively; equal depth does not imply equal
+strength. Within SF19, relaxed lite is **1.273× baseline** paired median NPS
+(1.259× ratio of unpaired medians). Lite startup/transfer size and native
 strength improve; full compressed bytes increase. Accept the upgrade on that
 combined evidence, not an invented across-version throughput gain.
 
-Ranges are wide on this shared Mac; a concurrent source-rebuild job is a known
-confounder during this browser run. Medians/ranges are observations, not precise
-speed confidence intervals. Mac Node timing and every browser timing/smoke
-were serialized using the shared benchlock. No thread-scaling claim: T=2
+These are the final repeat **after all our build/test jobs finished**. The
+first run overlapped our source rebuild and is retained separately as
+`mac-browser.json`; the table uses `mac-browser-final.json`. Both have identical
+parity outcomes. Ranges remain wide on the shared Mac, but paired old/new ratios
+are much more stable (e.g. lite relaxed0.733–0.748). Medians/ranges are observations,
+not precise speed confidence intervals. All reported Mac Node/browser timings used the shared benchlock; the final
+pthread smoke also held it. No thread-scaling claim: T=2
 smoke passes both npm and custom lite/full pthread variants (eight bestmoves);
 T=1 is used for deterministic parity and the comparison above.
 
@@ -223,18 +227,25 @@ WASM `744ae23293592254667b4b4fe2d5eae17319945ee06c51e364792b524880e6e7`.
 Baseline rebuilds are functionally reproducible; npm's minified JS additionally
 uses upstream's pinned Terser tooling, unlike our `--no-minify` audit builds.
 
-Codex `gpt-6.1-sol`, xhigh, branch mode/base main accepted one P2: SF19's async
+Codex `gpt-6.1-sol`, xhigh, branch mode/base main accepted two P2s across
+review iterations. First: SF19's async
 `instantiateWasm` failure may be discarded by generated glue and never emit a
 worker error. Fixed at the adapter boundary with a 120s initialization deadline,
 cleared on readiness/failure/disposal; rejected initialization can retry. Fake
 clock tests cover timeout, cleanup, disposal and constructor-failure retry.
 Real browser missing-WASM smoke reproduces zero worker-error events but now
-rejects/terminates; normal startup/search still succeeds. Final review result
-is recorded in the closeout below.
+rejects/terminates; normal startup/search still succeeds. Second: the shared
+manifest helper's new release-config import was absent from non-Stockfish
+archives. Moved that dependency into the common archive list; an isolated
+archive-shaped manifest CLI test proves imports resolve for every family.
+Final review result is recorded in the closeout below.
 
-`npm run typecheck`: 0 errors/warnings. Focused tests: **40/40**. Full `npm test`:
-**810 total, 807 pass, 3 pre-existing skips, 0 fail**. Stockfish-only browser asset
-check and `git diff --check` pass. No publish/deploy/push occurred.
+`npm run typecheck`: 0 errors/warnings. Focused tests: **41/41**. Final frozen-HEAD
+`npm test`: **811 total, 808 pass, 3 pre-existing skips, 0 fail**. A concurrent
+commit/archive refresh invalidated the release-stamp test during an intermediate
+full run; its retained frozen-input rerun passes. This was an audit workflow
+mistake, not a production fix. Stockfish-only asset check and diff checks pass.
+No publish/deploy/push occurred.
 
 ## Reproducibility and release policy
 
@@ -296,6 +307,17 @@ Concrete automation proposals:
 5. Script fastchess fixed-TC/seed/book/core settings plus a documented decisive
    early-stop policy, save raw penta counts and CI convention, and run isolated
    x86 WASM timing only AFTER the match/build workers leave the slot.
+6. Validate relative-import closure for shared archive helpers in isolated
+   fixtures across every family; cross-family import regressions should fail
+   before source packaging. Fault-inject missing WASM and both silent startup
+   handshakes, not just successful worker smoke.
+7. Cache/install matching browser tooling (the local Playwright headless binary
+   was absent); provide a benchlock-held browser-native asynchronous runner with
+   durable verified JSON download. Avoid long awaited evaluations exceeding the
+   browser daemon's 30s IPC deadline. Record own-job isolation and paired ratios,
+   not only ratios of aggregate medians, before selecting build flags. Freeze
+   HEAD and build-input files during full tests: release-stamp tests correctly
+   rebuild when a concurrent commit or archive refresh changes their identity.
 
 Unapplied family optimizations worth testing, not assumed wins: external NNUE
 (shared cache instead of re-embedding/downloading per flavor), binary embedding
@@ -303,3 +325,31 @@ for build memory, cold-start streaming/precompiled module reuse, lower-frequency
 Asyncify yielding, relaxed-dot sparse affine specialization/nnz discovery, and
 browser-specific flags/toolchain/PGO. Do not claim Lazy SMP raw-NPS increases buy
 extra depth: the runtime audit already rejected that inference for this family.
+
+## Closeout
+
+All eight checks completed; performance tradeoffs are explicitly recorded, not
+misrepresented as universal speed wins. Full and lite native strength improve,
+all parity gates pass, and the promoted lite candidate retains O3/LTO.
+
+Implementation commits: `0fb0167` (pinned builds/audit harnesses), `ecc8fcf`
+(exact19.0.1 runtime/assets), `a6d7bfc` (bounded startup/retry), `b94d7d2`
+(initial evidence), `bd0c9c9` (shared archive dependency). The final measurement,
+source/manifest and closeout refresh is the tip commit shown by `git log`.
+
+Final structured review command (shared scratchpad supplied as `$SCRATCH`):
+
+```sh
+~/.pi/agent/skills/autoreview/scripts/autoreview --mode branch --base main \
+  --engine codex --model gpt-6.1-sol --thinking xhigh \
+  --prompt-file "$SCRATCH/stockfish19-review-notes.md" \
+  --output "$SCRATCH/stockfish19-review-final3.txt" \
+  --json-output "$SCRATCH/stockfish19-review-final3.json" --stream-engine-output
+```
+
+**Clean:** helper exits0, `findings: []`, no accepted/actionable findings; overall
+`patch is correct`. Both prior P2 findings were accepted, fixed and regression
+tested; none were dismissed. No redundant review was run after this clean result.
+Final artifacts' SHA256 values and both archived network hashes were independently
+verified. Only documentation/source-manifest metadata changes follow that review;
+production code remains frozen. Nothing was published, deployed or pushed.

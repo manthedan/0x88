@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-10-10T23:09:12.120Z",
+  "generatedAt": "2026-10-10T23:31:48.852Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "stockfish",
   "flavor": "stockfish-js-19.0.1",
@@ -214,8 +214,8 @@
   "sourceArchive": {
     "required": true,
     "path": "public/stockfish/stockfish-19.0.1-corresponding-source.tar.gz",
-    "bytes": 80613640,
-    "sha256": "13894433f72540d5b977d0888de863f9bd3a92e7acf78de166f9d2bf3aee56e9",
+    "bytes": 80615034,
+    "sha256": "f571eec194a4a61c39e4ef981e70aa3faf3606346e55adea2d9bb9dfed63716d",
     "url": "/stockfish/stockfish-19.0.1-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

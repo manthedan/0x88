@@ -137,7 +137,7 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - Stop/abort: worker can be terminated/recreated on error; UCI stop handling is mature enough for UI use.
   - New game/hash reset: standard UCI path.
   - Threads: supported by Stockfish, browser availability depends on SAB/cross-origin isolation and flavor.
-- **Speed snapshot:** SF19 Chromium149 depth12 lite relaxed: 790k median aggregate wall NPS vs 654k baseline (1.168× paired median). Across-release NPS decreases; native strength and lite footprint improve. See `stockfish_19_upgrade.md` for spreads, startup, all tiers and full/lite strength. The older 2.34M/2.01M snapshot is historical SF18 evidence only.
+- **Speed snapshot:** SF19 Chromium149 depth12 lite relaxed: 1.086M median aggregate wall NPS vs 0.863M baseline (1.273× paired median). Across-release NPS decreases; native strength and lite footprint improve. See `stockfish_19_upgrade.md` for spreads, startup, all tiers and full/lite strength. The older 2.34M/2.01M snapshot is historical SF18 evidence only.
 - **Validation:** exact native bench signatures full453169/lite632754; all flag cells pass. Chromium passes 600/600 browser-vs-native depth12 comparisons; npm and custom lite/full pthread variants pass Threads2 smoke. Focused adapter tests include SF19 silent-startup failure rejection/retry.
 - **Open work:** finish Safari fallback checks and decide whether full/threaded relaxed variants belong in staged selectors or remain local/config-only.
 

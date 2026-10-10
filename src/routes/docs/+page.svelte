@@ -330,7 +330,7 @@ onMount(() => {
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">Stockfish</td>
-        <td style="padding:10px">SF19 Lite: <code>790k</code> median wall NPS vs <code>654k</code> baseline (<code>1.17&times;</code> paired median, Chromium depth 12; shared-host spread is wide).</td>
+        <td style="padding:10px">SF19 Lite: <code>1.086M</code> median wall NPS vs <code>0.863M</code> baseline (<code>1.27&times;</code> paired median, Chromium depth 12; shared-host spread is wide).</td>
         <td style="padding:10px"><code>600/600</code> exact browser/native comparisons; full and pthread relaxed builds remain unpromoted.</td>
       </tr>
     </tbody>
