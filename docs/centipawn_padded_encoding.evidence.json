@@ -1,0 +1,585 @@
+{
+  "schema": "centipawn-padded-encoding-evidence.v1",
+  "artifacts": {
+    "modelId": "bt4-soap-rem-c19000-final",
+    "dtype": "f32",
+    "physicalBatch": 16,
+    "onnxSha256": "de2dd68518f6e2ed162da5ee27c67a5a4795567d6e39972e3705824572b7660e",
+    "tvmjsModelWasmSha256": "fd3d8635c8368338c3a0d1b57a725a70b4f8a74f8d130ee831848c641cba75b5",
+    "metadataSha256": "5b78093585ea34d3bcda599ed62d2c01fa4c1839114d9e81ee5b1f6dac4b1b22",
+    "manifestPath": "public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json"
+  },
+  "preprocessing": {
+    "schema": "centipawn-padded-encoding-benchmark.v1",
+    "generatedAt": "2026-10-10T21:00:22.985Z",
+    "baselineCommit": "5761490ef5533d82870bbaf0b0d3529a3298ddd3",
+    "baselineSourceSha256": "1fa7705eb24219eb73097792f395f6cfa9480ce20e0fdea5d4d443f625ab5170",
+    "afterSourceSha256": "841d6992e2960f343e3b41a29d885772435a32ab19c7dc57d388362816b0b338",
+    "metadataSha256": "5b78093585ea34d3bcda599ed62d2c01fa4c1839114d9e81ee5b1f6dac4b1b22",
+    "model": "bt4-soap-rem-c19000-final",
+    "node": "v24.16.0",
+    "platform": "darwin 25.4.0 arm64",
+    "cpu": "Apple M4",
+    "rounds": 12,
+    "iterations": 200,
+    "warmup": 500,
+    "timingBoundary": "evaluatePhysicalBatch exclusive callback entry through first vmModule.getFunction; includes normalization, allocation, encoding, masks and padding; excludes GPU and queue wait",
+    "results": [
+      {
+        "workload": "start-white-no-history",
+        "logicalBatch": 1,
+        "physicalBatch": 16,
+        "orders": [
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before"
+        ],
+        "before": {
+          "medianMs": 0.3202933175000007,
+          "minMs": 0.30902141500000285,
+          "maxMs": 0.33311022000000007,
+          "samplesMs": [
+            0.33311022000000007,
+            0.30902141500000285,
+            0.3112375300000014,
+            0.3273358850000008,
+            0.319759545,
+            0.31909892999999667,
+            0.32687706499999647,
+            0.32082709000000137,
+            0.31072310500000244,
+            0.3239141549999999,
+            0.3208533349999959,
+            0.319717749999993
+          ]
+        },
+        "after": {
+          "medianMs": 0.028620172500001505,
+          "minMs": 0.025055220000003545,
+          "maxMs": 0.033072244999998474,
+          "samplesMs": [
+            0.03127019500000074,
+            0.025055220000003545,
+            0.02997670500000055,
+            0.026236479999999462,
+            0.029167099999996254,
+            0.027859174999998685,
+            0.027141239999997423,
+            0.02807324500000675,
+            0.02731288500000119,
+            0.030358944999999835,
+            0.033072244999998474,
+            0.029435190000011744
+          ]
+        },
+        "speedup": 11.191173550752842
+      },
+      {
+        "workload": "start-white-no-history",
+        "logicalBatch": 4,
+        "physicalBatch": 16,
+        "orders": [
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before"
+        ],
+        "before": {
+          "medianMs": 0.3249437824999921,
+          "minMs": 0.3148877250000032,
+          "maxMs": 0.3481604200000038,
+          "samplesMs": [
+            0.318073545000002,
+            0.327978344999982,
+            0.3249608649999993,
+            0.3268008400000019,
+            0.33224231499998835,
+            0.32191812000000597,
+            0.3201398049999966,
+            0.3156549799999982,
+            0.32492669999998497,
+            0.3481604200000038,
+            0.3148877250000032,
+            0.34683380000000624
+          ]
+        },
+        "after": {
+          "medianMs": 0.09326122749999968,
+          "minMs": 0.08631245500000545,
+          "maxMs": 0.09631729499999665,
+          "samplesMs": [
+            0.0926247799999976,
+            0.0954735549999964,
+            0.08675334499999508,
+            0.08631245500000545,
+            0.09085329999999658,
+            0.09389767500000175,
+            0.09089601000000243,
+            0.09182916000001114,
+            0.09431144000001723,
+            0.09587647000000288,
+            0.09631729499999665,
+            0.09441349500001707
+          ]
+        },
+        "speedup": 3.4842323140127363
+      },
+      {
+        "workload": "start-white-no-history",
+        "logicalBatch": 8,
+        "physicalBatch": 16,
+        "orders": [
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before"
+        ],
+        "before": {
+          "medianMs": 0.17648760750000633,
+          "minMs": 0.1686595599999896,
+          "maxMs": 0.18224232499999743,
+          "samplesMs": [
+            0.1686595599999896,
+            0.17405876500003387,
+            0.17432481999997662,
+            0.1768402250000031,
+            0.17901038499998323,
+            0.17613499000000957,
+            0.178722709999995,
+            0.1774354300000141,
+            0.17817604999999276,
+            0.17078374500002155,
+            0.17058691000001772,
+            0.18224232499999743
+          ]
+        },
+        "after": {
+          "medianMs": 0.12407322249999993,
+          "minMs": 0.11773753499999884,
+          "maxMs": 0.1332587300000091,
+          "samplesMs": [
+            0.12238063999998758,
+            0.12070147000000815,
+            0.1192243699999949,
+            0.11773753499999884,
+            0.12409104000000525,
+            0.12414145499999676,
+            0.12887563500000396,
+            0.1228754099999901,
+            0.12803669499997794,
+            0.1332587300000091,
+            0.12405540499999461,
+            0.12691375499999594
+          ]
+        },
+        "speedup": 1.4224471964529368
+      },
+      {
+        "workload": "start-white-no-history",
+        "logicalBatch": 16,
+        "physicalBatch": 16,
+        "orders": [
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before"
+        ],
+        "before": {
+          "medianMs": 0.24255458249998468,
+          "minMs": 0.2289035549999926,
+          "maxMs": 0.2576377400000092,
+          "samplesMs": [
+            0.2375689799999941,
+            0.24495584500000406,
+            0.24888647500000388,
+            0.229767504999993,
+            0.24879752000000963,
+            0.24239061499998799,
+            0.2349093800000196,
+            0.2289035549999926,
+            0.2428254349999952,
+            0.2427185499999814,
+            0.2576377400000092,
+            0.2355066750000151
+          ]
+        },
+        "after": {
+          "medianMs": 0.24029843749999827,
+          "minMs": 0.22559539999999742,
+          "maxMs": 0.2521560299999965,
+          "samplesMs": [
+            0.24105725999999322,
+            0.2521560299999965,
+            0.24884351000003108,
+            0.23430399000000535,
+            0.25021022500000756,
+            0.22559539999999742,
+            0.22738122500003555,
+            0.2342249749999928,
+            0.23953961500000331,
+            0.24512354999994387,
+            0.24224026999999296,
+            0.23469126999999845
+          ]
+        },
+        "speedup": 1.009388929131037
+      },
+      {
+        "workload": "black-seven-history-masked",
+        "logicalBatch": 1,
+        "physicalBatch": 16,
+        "orders": [
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before"
+        ],
+        "before": {
+          "medianMs": 0.8082171599999857,
+          "minMs": 0.7905480950000038,
+          "maxMs": 0.8286433500000385,
+          "samplesMs": [
+            0.8120903549999458,
+            0.8038831150000442,
+            0.794455804999975,
+            0.8176374799999576,
+            0.8176466350000328,
+            0.8043439650000255,
+            0.8028210549999767,
+            0.8286433500000385,
+            0.8024939900000027,
+            0.8201516800000309,
+            0.7905480950000038,
+            0.8146729549999918
+          ]
+        },
+        "after": {
+          "medianMs": 0.08072748750000755,
+          "minMs": 0.07628124000001207,
+          "maxMs": 0.08637978999997359,
+          "samplesMs": [
+            0.07912164000000303,
+            0.08148059999999986,
+            0.08417687000000569,
+            0.08637978999997359,
+            0.08027876500000275,
+            0.08545899000000645,
+            0.08062082000001283,
+            0.07756022999996731,
+            0.08139767500003928,
+            0.08054124999999658,
+            0.08083415500000228,
+            0.07628124000001207
+          ]
+        },
+        "speedup": 10.011672418269058
+      },
+      {
+        "workload": "black-seven-history-masked",
+        "logicalBatch": 4,
+        "physicalBatch": 16,
+        "orders": [
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before"
+        ],
+        "before": {
+          "medianMs": 0.6763219425000897,
+          "minMs": 0.6553366500000084,
+          "maxMs": 0.7185906350000186,
+          "samplesMs": [
+            0.6729794900000161,
+            0.6553366500000084,
+            0.6622912150000321,
+            0.7157468699999754,
+            0.6578691800000889,
+            0.6998229650000121,
+            0.6752678550000928,
+            0.689858770000119,
+            0.7185906350000186,
+            0.6773760300000867,
+            0.6844133350000265,
+            0.6641556049998962
+          ]
+        },
+        "after": {
+          "medianMs": 0.23900506249997305,
+          "minMs": 0.2281044149999616,
+          "maxMs": 0.2656444150000334,
+          "samplesMs": [
+            0.23362628000000768,
+            0.23593958499998735,
+            0.23717081500000858,
+            0.23881121999998867,
+            0.2441815200000019,
+            0.2551112649999686,
+            0.2500454600000467,
+            0.23919890499995744,
+            0.2290501900000072,
+            0.2281044149999616,
+            0.26356504500002303,
+            0.2656444150000334
+          ]
+        },
+        "speedup": 2.829738983040018
+      },
+      {
+        "workload": "black-seven-history-masked",
+        "logicalBatch": 8,
+        "physicalBatch": 16,
+        "orders": [
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before"
+        ],
+        "before": {
+          "medianMs": 0.8212104200000476,
+          "minMs": 0.7984758000000511,
+          "maxMs": 0.8601020800000151,
+          "samplesMs": [
+            0.8065822849999676,
+            0.8168025099999977,
+            0.8601020800000151,
+            0.8294331250000414,
+            0.806699555000032,
+            0.825458755000027,
+            0.8384383499999513,
+            0.8169620850000683,
+            0.7984758000000511,
+            0.834565169999978,
+            0.8138241100000323,
+            0.8424893600000359
+          ]
+        },
+        "after": {
+          "medianMs": 0.440791365000041,
+          "minMs": 0.42562724999999774,
+          "maxMs": 0.47765558999997665,
+          "samplesMs": [
+            0.4391295750000063,
+            0.4683818350000729,
+            0.44878021999994416,
+            0.4367081049999888,
+            0.43281147000001513,
+            0.434339209999971,
+            0.4478385150000031,
+            0.44245315500007565,
+            0.42562724999999774,
+            0.4380277200000364,
+            0.47765558999997665,
+            0.4566270899999381
+          ]
+        },
+        "speedup": 1.8630365411082208
+      },
+      {
+        "workload": "black-seven-history-masked",
+        "logicalBatch": 16,
+        "physicalBatch": 16,
+        "orders": [
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before",
+          "before/after",
+          "after/before"
+        ],
+        "before": {
+          "medianMs": 0.8813146875000257,
+          "minMs": 0.8525505750001139,
+          "maxMs": 0.9093524899999921,
+          "samplesMs": [
+            0.8958172450000348,
+            0.9073424799999884,
+            0.8784304050000082,
+            0.8841989700000431,
+            0.9093524899999921,
+            0.86365059499989,
+            0.8773645549999673,
+            0.8629983300000095,
+            0.9031112450001092,
+            0.8722368549999555,
+            0.895097515000125,
+            0.8525505750001139
+          ]
+        },
+        "after": {
+          "medianMs": 0.8756668925000076,
+          "minMs": 0.8517250449998938,
+          "maxMs": 0.9123549950001143,
+          "samplesMs": [
+            0.8569270600000618,
+            0.8912449999999899,
+            0.8723937699999078,
+            0.8604785249999805,
+            0.9123549950001143,
+            0.8787866649999978,
+            0.9101249750001807,
+            0.8517250449998938,
+            0.8894260149999172,
+            0.8911643949999416,
+            0.8560833000001002,
+            0.8725471200000174
+          ]
+        },
+        "speedup": 1.0064497071299496
+      }
+    ]
+  },
+  "browser": {
+    "environment": {
+      "adapter": {
+        "architecture": "metal-3",
+        "description": "",
+        "device": "",
+        "vendor": "apple"
+      },
+      "isolated": true,
+      "measurementSource": "async function(variant,sample) { const deadline=performance.now()+120000; const waitIdle=async()=>{ while (!window.__analysisSchedulingState || window.__analysisSchedulingState().analyzing || document.querySelector('#analyze').disabled || !document.querySelector('#message').textContent.includes('Analysis complete')) { if(performance.now()>deadline) throw Error('warmup failed'); await new Promise(r=>setTimeout(r,25)); } }; await waitIdle(); document.querySelector('#autoAnalyze').checked=false; const pv=document.querySelector('#multiPvInput'); pv.value='1'; pv.dispatchEvent(new Event('change',{bubbles:true})); await new Promise(r=>setTimeout(r,350)); await waitIdle(); document.querySelector('#fenInput').value='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'; document.querySelector('#loadFen').click(); await new Promise(r=>setTimeout(r,50)); if(window.__analysisSchedulingState().analyzing) throw Error('unexpected auto search'); const start=performance.now(); document.querySelector('#analyze').click(); if(!window.__analysisSchedulingState().analyzing) throw Error('search did not start'); while(window.__analysisSchedulingState().analyzing) { if(performance.now()>deadline) throw Error('search timeout'); await new Promise(r=>setTimeout(r,5)); } const wallMs=performance.now()-start; return {variant,sample,wallMs,userAgent:navigator.userAgent,logicalBatch:4,physicalBatch:16,visits:document.querySelector('.row-strength').value,multipv:pv.value,message:document.querySelector('#message').textContent,lines:document.querySelector('#lines').innerText,modelResources:performance.getEntriesByType('resource').filter(x=>/shape-k16/.test(x.name)).map(x=>x.name)}; }",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36"
+    },
+    "logicalBatch": 4,
+    "physicalBatch": 16,
+    "visits": 256,
+    "multiPv": 1,
+    "runtime": "tvmjs-webgpu strict",
+    "surface": "production Analysis",
+    "order": [
+      "before",
+      "after",
+      "after",
+      "before",
+      "before",
+      "after",
+      "after",
+      "before"
+    ],
+    "samples": [
+      {
+        "lines": "+0.71\ne4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4 b5",
+        "sample": 1,
+        "variant": "before",
+        "wallMs": 920.5449999570848
+      },
+      {
+        "lines": "+0.71\ne4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4 b5",
+        "sample": 2,
+        "variant": "after",
+        "wallMs": 1082.3199999332428
+      },
+      {
+        "lines": "+0.71\ne4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4 b5",
+        "sample": 3,
+        "variant": "after",
+        "wallMs": 890.7699999809265
+      },
+      {
+        "lines": "+0.71\ne4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4 b5",
+        "sample": 4,
+        "variant": "before",
+        "wallMs": 912.0299999713898
+      },
+      {
+        "lines": "+0.71\ne4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4 b5",
+        "sample": 5,
+        "variant": "before",
+        "wallMs": 815.2350000143051
+      },
+      {
+        "lines": "+0.71\ne4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4 b5",
+        "sample": 6,
+        "variant": "after",
+        "wallMs": 837.8999999761581
+      },
+      {
+        "lines": "+0.71\ne4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4 b5",
+        "sample": 7,
+        "variant": "after",
+        "wallMs": 779.8949999809265
+      },
+      {
+        "lines": "+0.71\ne4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Nxe4 d4 b5",
+        "sample": 8,
+        "variant": "before",
+        "wallMs": 1123.3899999856949
+      }
+    ],
+    "summary": {
+      "before": {
+        "medianMs": 916.2874999642372,
+        "minMs": 815.2350000143051,
+        "maxMs": 1123.3899999856949
+      },
+      "after": {
+        "medianMs": 864.3349999785423,
+        "minMs": 779.8949999809265,
+        "maxMs": 1082.3199999332428
+      }
+    }
+  }
+}

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { SquareformerTvmjsWebgpuEvaluator } from '../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
+import { encodingBatch, encodingFens, legacyPaddedInputs } from './fixtures/centipawn_encoding.mjs';
 
 class FakeTensor {
   constructor(shape, dtype, bytes = new Uint8Array(shape.reduce((product, value) => product * value, 1) * 4), sync = async () => {}) {
@@ -26,12 +27,13 @@ function bytesOf(values) {
 }
 
 function fakeRuntime(sync = async () => {}) {
-  const state = { invokes: 0, destroyed: false, ended: 0, inputShapes: [] };
+  const state = { invokes: 0, destroyed: false, ended: 0, inputShapes: [], inputBytes: [] };
   const policy = new FakeTensor([16, 20480], 'float32', bytesOf(new Float32Array(16 * 20480)));
   const wdl = new FakeTensor([16, 3], 'float32', bytesOf(new Float32Array(16 * 3)), sync);
   const functions = {
     set_input(_name, tokens, attack) {
       state.inputShapes.push([tokens.shape, tokens.dtype, attack.shape, attack.dtype]);
+      state.inputBytes.push({ tokens: tokens.bytes.slice(), attack: attack.bytes.slice() });
     },
     invoke_stateful() {
       state.invokes += 1;
@@ -104,6 +106,62 @@ test('Centipawn TVMJS evaluator pads and chunks fixed batch 16 requests', async 
   await Promise.resolve();
   assert.equal(state.destroyed, true);
   assert.equal(state.deviceDestroyed, true);
+});
+
+for (const size of [1, 4, 8, 16]) {
+  test(`Centipawn TVMJS b${size} uploaded bytes match the original padded encoding`, async () => {
+    for (const normalization of ['stm_white_rankflip_v1', undefined]) {
+      for (const masked of [false, true]) {
+        // Rotate all positions through the last real row, which supplies padding.
+        for (let offset = 0; offset < encodingFens.length; offset++) {
+          const { boards, contexts } = encodingBatch(size, offset, masked);
+          const currentMeta = { ...meta, board_normalization: normalization };
+          const expected = legacyPaddedInputs(boards, contexts, currentMeta);
+          const { runtime, vmModule, state } = fakeRuntime();
+          const evaluator = new SquareformerTvmjsWebgpuEvaluator(runtime, { destroy() {} }, vmModule, currentMeta, 16);
+          assert.equal((await evaluator.evaluateBatch(boards, contexts)).length, size);
+          assert.equal(state.inputBytes.length, 1);
+          assert.deepEqual(state.inputBytes[0].tokens, expected.tokens, `tokens: ${normalization}/${masked}/${offset}`);
+          assert.deepEqual(state.inputBytes[0].attack, expected.attack, `attack: ${normalization}/${masked}/${offset}`);
+          evaluator.destroy();
+        }
+      }
+    }
+  });
+}
+
+test('Centipawn TVMJS padding copies already-masked rows without reading masks again', async () => {
+  const { boards, contexts } = encodingBatch(4, 1);
+  const reads = Array(boards.length).fill(0);
+  contexts.forEach((context, index) => {
+    context.attackSummaryChannelMask = new Proxy(Array(28).fill(0.3), {
+      get(target, key) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads[index] += 1;
+        return Reflect.get(target, key);
+      },
+    });
+  });
+  const { runtime, vmModule } = fakeRuntime();
+  const evaluator = new SquareformerTvmjsWebgpuEvaluator(runtime, { destroy() {} }, vmModule, meta, 16);
+  await evaluator.evaluateBatch(boards, contexts);
+  assert.deepEqual(reads, Array(4).fill(64 * 28));
+  evaluator.destroy();
+});
+
+test("Centipawn TVMJS padding uses each chunk's final context and rejects invalid masks before invoking", async () => {
+  const { boards, contexts } = encodingBatch(17, 1, true);
+  const { runtime, vmModule, state } = fakeRuntime();
+  const evaluator = new SquareformerTvmjsWebgpuEvaluator(runtime, { destroy() {} }, vmModule, meta, 16);
+  await evaluator.evaluateBatch(boards, contexts);
+  assert.deepEqual(state.inputBytes, [
+    legacyPaddedInputs(boards.slice(0, 16), contexts.slice(0, 16), meta),
+    legacyPaddedInputs(boards.slice(16), contexts.slice(16), meta),
+  ]);
+  await assert.rejects(evaluator.evaluate(boards[0], { attackSummaryChannelMask: [1] }), /attackSummaryChannelMask length 1 does not match 28/);
+  assert.equal(state.invokes, 2);
+  assert.deepEqual(await evaluator.evaluateBatch([]), []);
+  assert.equal(state.invokes, 2);
+  evaluator.destroy();
 });
 
 test('Centipawn TVMJS evaluator defers disposal until an in-flight batch finishes', async () => {
