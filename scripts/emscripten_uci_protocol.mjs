@@ -87,10 +87,11 @@ export function runSuite(module, stdout, { depth, hash = 16, positions = 20, war
   return ROTATED_FEN_SUITE.slice(0, positions).map((p) => search(p, depth));
 }
 
-// Rotate then reverse alternating rounds. Every artifact gets every slot over
-// ten rounds for the five-cell matrix (current + four builds).
+// Rotate once per forward/reverse pair. Over 2*N rounds every artifact gets
+// every slot twice, including even-sized matrices: rotating on every round
+// cancels reversal for two-item A/B tests and traps even-N cells in slot parity.
 export function roundOrder(items, round) {
-  const shift = round % items.length;
+  const shift = Math.floor(round / 2) % items.length;
   const rotated = [...items.slice(shift), ...items.slice(0, shift)];
   return round % 2 ? rotated.reverse() : rotated;
 }
