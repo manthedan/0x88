@@ -172,6 +172,9 @@ function hashCommand(hashMb: number): string {
 export interface StockfishInfoLine extends BrowserUciInfoLine {}
 
 const STOCKFISH_ABORT_DRAIN_TIMEOUT_MS = 1500;
+// SF19's async instantiateWasm hook can reject without a worker error event.
+// Bound both UCI handshakes, allowing time to download the large full network.
+export const STOCKFISH_INIT_TIMEOUT_MS = 120_000;
 
 /** Parse a UCI `info ... multipv K ... score ... pv ...` line, or null if it lacks a PV. */
 export function parseStockfishInfo(line: string): StockfishInfoLine | null {
@@ -222,6 +225,7 @@ export class StockfishEngine implements BrowserUciEngine {
   private options: StockfishOptions;
   private readonly url: string;
   private workerObjectUrl: string | null = null;
+  private initTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: StockfishOptions = {}, url: string = defaultStockfishUrl()) {
     this.options = options;
@@ -268,7 +272,13 @@ export class StockfishEngine implements BrowserUciEngine {
     this.workerObjectUrl = null;
   }
 
+  private clearInitTimer(): void {
+    if (this.initTimer !== null) clearTimeout(this.initTimer);
+    this.initTimer = null;
+  }
+
   private failActive(error: Error): void {
+    this.clearInitTimer();
     const rejectMove = this.rejectMove;
     const rejectAnalyze = this.rejectAnalyze;
     const rejectReady = this.rejectReady;
@@ -297,6 +307,9 @@ export class StockfishEngine implements BrowserUciEngine {
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise<void>((resolve, reject) => {
       this.rejectInit = reject;
+      this.initTimer = setTimeout(() => {
+        this.failActive(new Error('Stockfish initialization timed out'));
+      }, STOCKFISH_INIT_TIMEOUT_MS);
       try {
         const workerUrl = stockfishWorkerUrl(this.url);
         this.workerObjectUrl = workerUrl.objectUrl ?? null;
@@ -324,6 +337,7 @@ export class StockfishEngine implements BrowserUciEngine {
               resolveReady();
               return;
             }
+            this.clearInitTimer();
             this.rejectInit = null;
             resolve();
             return;
@@ -366,10 +380,14 @@ export class StockfishEngine implements BrowserUciEngine {
         };
         worker.postMessage('uci');
       } catch (error) {
-        this.rejectInit = null;
-        this.revokeWorkerObjectUrl();
+        this.failActive(error as Error);
         reject(error as Error);
       }
+    }).catch((error) => {
+      // A synchronous constructor failure occurs before readyPromise is assigned.
+      // Clear its rejected cache here as well, so the next request can retry.
+      this.readyPromise = null;
+      throw error;
     });
     return this.readyPromise;
   }

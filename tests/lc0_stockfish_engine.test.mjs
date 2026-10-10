@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { CPU_ENGINE_HASH_MB_BY_SURFACE, cpuEngineHashMbForSurface, DEFAULT_CPU_ENGINE_HASH_MB } from '../src/lc0/cpuEngineMemory.ts';
 import {
   DEFAULT_STOCKFISH_HASH_MB,
+  STOCKFISH_INIT_TIMEOUT_MS,
   defaultStockfishUrl,
   normalizeStockfishFlavor,
   parseBestMove,
@@ -22,6 +23,7 @@ class MockStockfishWorker {
     this.url = String(url);
     this.options = options;
     this.messages = [];
+    this.terminated = false;
     this.onmessage = null;
     this.onerror = null;
     MockStockfishWorker.instances.push(this);
@@ -33,7 +35,7 @@ class MockStockfishWorker {
     else if (message === 'isready') queueMicrotask(() => this.onmessage?.({ data: 'readyok' }));
   }
 
-  terminate() {}
+  terminate() { this.terminated = true; }
 }
 
 test('parseBestMove extracts the UCI move and handles (none)', () => {
@@ -345,6 +347,59 @@ test('StockfishEngine disposal rejects queued searches without restarting a work
   } finally {
     if (previousWorker === undefined) delete globalThis.Worker;
     else globalThis.Worker = previousWorker;
+  }
+});
+
+test('StockfishEngine bounds silent initialization failures and can retry', async (t) => {
+  const previousWorker = globalThis.Worker;
+  class SilentWorker extends MockStockfishWorker {
+    postMessage(cmd) { this.messages.push(cmd); }
+  }
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  globalThis.Worker = SilentWorker;
+  const engine = new StockfishEngine({}, '/stockfish/stockfish-19-lite-single.js');
+  try {
+    const failed = assert.rejects(engine.prewarm(), /Stockfish initialization timed out/);
+    await new Promise((resolve) => setImmediate(resolve));
+    const worker = MockStockfishWorker.instances.at(-1);
+    t.mock.timers.tick(STOCKFISH_INIT_TIMEOUT_MS);
+    await failed;
+    assert.equal(worker.terminated, true);
+    globalThis.Worker = MockStockfishWorker;
+    await engine.prewarm();
+    t.mock.timers.tick(STOCKFISH_INIT_TIMEOUT_MS);
+    assert.equal(MockStockfishWorker.instances.at(-1).terminated, false);
+  } finally {
+    engine.dispose();
+    globalThis.Worker = previousWorker;
+    t.mock.timers.reset();
+  }
+});
+
+test('StockfishEngine clears initialization deadlines on disposal and constructor failure', async (t) => {
+  const previousWorker = globalThis.Worker;
+  class SilentWorker extends MockStockfishWorker {
+    postMessage(cmd) { this.messages.push(cmd); }
+  }
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  globalThis.Worker = SilentWorker;
+  const engine = new StockfishEngine({}, '/stockfish/stockfish-19-lite-single.js');
+  try {
+    const disposed = assert.rejects(engine.prewarm(), /Abort|abort/);
+    await new Promise((resolve) => setImmediate(resolve));
+    engine.dispose();
+    await disposed;
+    t.mock.timers.tick(STOCKFISH_INIT_TIMEOUT_MS);
+    globalThis.Worker = class { constructor() { throw Error('constructor failed'); } };
+    const retry = new StockfishEngine({}, '/stockfish/stockfish-19-lite-single.js');
+    await assert.rejects(retry.prewarm(), /constructor failed/);
+    globalThis.Worker = MockStockfishWorker;
+    await retry.prewarm();
+    retry.dispose();
+  } finally {
+    engine.dispose();
+    globalThis.Worker = previousWorker;
+    t.mock.timers.reset();
   }
 });
 
