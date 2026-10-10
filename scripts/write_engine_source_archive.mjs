@@ -139,9 +139,9 @@ const CONFIGS = {
     engine: 'viridithas',
     flavor: 'wasip1-scalar-simd128',
     upstreamRepo: 'https://github.com/cosmobobak/viridithas.git',
-    upstreamCommit: '20d7402065cae084715183e019fdd18089e2dfac',
+    upstreamCommit: '0631113e2215714c54d397cce9a8caebc5e6f8ee',
     buildDir: '.local_engines/viridithas-wasi-src',
-    sourcePrefix: 'upstream/viridithas-20d7402065cae084715183e019fdd18089e2dfac/',
+    sourcePrefix: 'upstream/viridithas-0631113e2215714c54d397cce9a8caebc5e6f8ee/',
     output: 'public/viridithas/viridithas-wasip1-corresponding-source.tar.gz',
     patch: 'patches/viridithas-wasip1.patch',
     buildScript: 'scripts/build_viridithas_wasi.mjs',
@@ -157,10 +157,10 @@ const CONFIGS = {
     assetDir: '.local_engines/viridithas-nets',
     assets: [
       {
-        name: 'atlantis-b800.nnue.zst',
-        sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst',
-        rawSha256: '2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a',
-        licenseNote: 'Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.',
+        name: 'sandhi-s2-b200.nnue.zst',
+        sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v109/sandhi-s2-b200.nnue.zst',
+        rawSha256: '066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585',
+        licenseNote: 'sandhi-s2-b200.nnue.zst is CC0-1.0 (cosmobobak/viridithas-networks LICENSE at 1040c3ee, 2026-06-08, before the v109 release). The engine source is MIT.',
       },
     ],
     envPrefix: 'VIRIDITHAS',
@@ -294,7 +294,7 @@ BERSERK_SKIP_GIT=1 BERSERK_BUILD_DIR="$PWD/.build/berserk-relaxed" BERSERK_NET_D
     return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="${outDir}" npm run ${config.engine}:build-emscripten`;
   }
   if (config.engine === 'viridithas') {
-    return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas.wasm" npm run viridithas:build-wasi && ${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_SIMD=1 ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas-simd128.wasm" npm run viridithas:build-wasi`;
+    return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas.wasm" npm run viridithas:build-wasi && ${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_SIMD=1 ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas-simd128.wasm" npm run viridithas:build-wasi && ${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_RELAXED_SIMD=1 ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas-relaxed-simd128.wasm" npm run viridithas:build-wasi`;
   }
   if (config.engine === 'stockfish') {
     return '(cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f)\n# Promoted relaxed SIMD artifact from the same upstream source plus the documented patch/build script:\nSTOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd:lite-single\n# Optional unpromoted candidates remain buildable with:\n# STOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd:single\n# STOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd:lite-threaded\n# STOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd:threaded';

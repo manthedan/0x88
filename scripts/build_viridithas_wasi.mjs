@@ -9,9 +9,9 @@ const engineDir = process.env.VIRIDITHAS_BUILD_DIR ?? path.join(root, '.local_en
 const netDir = process.env.VIRIDITHAS_NET_DIR ?? path.join(root, '.local_engines', 'viridithas-nets');
 const out = process.env.VIRIDITHAS_WASM_OUT ?? path.join(root, 'public', 'viridithas', 'viridithas.wasm');
 const repo = process.env.VIRIDITHAS_REPO ?? 'https://github.com/cosmobobak/viridithas.git';
-const ref = process.env.VIRIDITHAS_REF ?? '20d7402065cae084715183e019fdd18089e2dfac';
-const netUrl = process.env.VIRIDITHAS_NET_URL ?? 'https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst';
-const netSha256 = process.env.VIRIDITHAS_NET_SHA256 ?? '2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a';
+const ref = process.env.VIRIDITHAS_REF ?? '0631113e2215714c54d397cce9a8caebc5e6f8ee';
+const netUrl = process.env.VIRIDITHAS_NET_URL ?? 'https://github.com/cosmobobak/viridithas-networks/releases/download/v109/sandhi-s2-b200.nnue.zst';
+const netSha256 = process.env.VIRIDITHAS_NET_SHA256 ?? '066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585';
 const netPath = path.join(netDir, path.basename(new URL(netUrl).pathname));
 const patchPath = path.join(root, 'patches', 'viridithas-wasip1.patch');
 

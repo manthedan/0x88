@@ -21,6 +21,7 @@ import { canUsePersistentViridithasWasi, ViridithasEngine } from './viridithasEn
 import {
   checkViridithasVariantAsset,
   VIRIDITHAS_DEFAULT_VARIANT,
+  VIRIDITHAS_RELAXED_SIMD_VARIANT,
   VIRIDITHAS_SIMD_VARIANT,
   type ViridithasVariant,
   viridithasVariantAssetStatus,
@@ -180,6 +181,23 @@ function selectedPositions(): BenchPosition[] {
   return positions.length ? positions : [{ label: 'startpos', fen: START_FEN }];
 }
 
+function sameOriginViridithasBenchUrl(param: string): string | null {
+  const raw = new URLSearchParams(location.search).get(param);
+  if (!raw || raw.includes('..')) return null;
+  try {
+    const url = new URL(raw, location.origin);
+    if (url.origin !== location.origin || !url.pathname.startsWith('/viridithas/')) return null;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function viridithasBenchVariant(variant: ViridithasVariant, overrideParam: string): BenchVariant {
+  const override = sameOriginViridithasBenchUrl(overrideParam);
+  return { ...(override ? { ...variant, wasmUrl: override } : variant), engine: 'viridithas' };
+}
+
 function selectedVariants(): BenchVariant[] {
   const variants: BenchVariant[] = [];
   if (inputEl('benchFull').checked) variants.push({ ...RECKLESS_FULL_VARIANT, engine: 'reckless' });
@@ -189,8 +207,9 @@ function selectedVariants(): BenchVariant[] {
   if (inputEl('benchBrowserApiSimd').checked) variants.push({ ...RECKLESS_BROWSER_API_SIMD_VARIANT, engine: 'reckless' });
   if (inputEl('benchBrowserApiSimdExternal').checked) variants.push({ ...RECKLESS_BROWSER_API_SIMD_EXTERNAL_VARIANT, engine: 'reckless' });
   if (inputEl('benchLite').checked) variants.push({ ...RECKLESS_LITE_VARIANT, engine: 'reckless' });
-  if (inputEl('benchViridithas').checked) variants.push({ ...VIRIDITHAS_DEFAULT_VARIANT, engine: 'viridithas' });
-  if (inputEl('benchViridithasSimd').checked) variants.push({ ...VIRIDITHAS_SIMD_VARIANT, engine: 'viridithas' });
+  if (inputEl('benchViridithas').checked) variants.push(viridithasBenchVariant(VIRIDITHAS_DEFAULT_VARIANT, 'viridithasScalar'));
+  if (inputEl('benchViridithasSimd').checked) variants.push(viridithasBenchVariant(VIRIDITHAS_SIMD_VARIANT, 'viridithasSimd'));
+  if (inputEl('benchViridithasRelaxed').checked) variants.push(viridithasBenchVariant(VIRIDITHAS_RELAXED_SIMD_VARIANT, 'viridithasRelaxed'));
   if (inputEl('benchBerserk').checked) variants.push({ ...BERSERK_EMSCRIPTEN_VARIANT, engine: 'berserk' });
   if (inputEl('benchPlentyChess').checked) variants.push({ ...PLENTYCHESS_EMSCRIPTEN_VARIANT, engine: 'plentychess' });
   return variants;
@@ -519,7 +538,7 @@ async function runBench(): Promise<void> {
       }
       for (const mode of config.modes) {
         if (abort.signal.aborted) return;
-        if (variant.engine === 'reckless' && variant.key === 'relaxed-simd' && !supportsWasmRelaxedSimd()) {
+        if ((variant.engine === 'reckless' || variant.engine === 'viridithas') && variant.key === 'relaxed-simd' && !supportsWasmRelaxedSimd()) {
           rows.push({
             variant: variant.label,
             mode,

@@ -18,7 +18,7 @@ driven over the UCI text protocol. 0x88 does not statically link any engine.
 | --- | --- | --- | --- |
 | [Stockfish](https://github.com/nmrugg/stockfish.js) (stockfish.js) | 18.0.7, commit `32d4b5ae` | GPL-3.0 | Yes — binaries, manifest, and corresponding source |
 | [Reckless](https://github.com/codedeliveryservice/Reckless) | v60, commit `00106174` | **AGPL-3.0** | Binaries are built locally / hosted; corresponding source archives are published |
-| [Viridithas](https://github.com/cosmobobak/viridithas) | v20.0.0, commit `20d74020` | MIT | Yes — binaries, manifest, and corresponding source |
+| [Viridithas](https://github.com/cosmobobak/viridithas) | v20.0.0 tag, commit `0631113e` | MIT | Yes — binaries, manifest, and corresponding source |
 | [PlentyChess](https://github.com/Yoshie2000/PlentyChess) | 7.0.66, commit `58d8ba25` | GPL-3.0 | Yes — binaries, manifest, and corresponding source |
 | [Stormphrax](https://github.com/Ciekce/Stormphrax) | v8.0.0, commit `58296551` | GPL-3.0-or-later | Yes — binaries, manifest, and corresponding source |
 | [Berserk](https://github.com/jhonnold/berserk) | tag 14, commit `8ae895a6` | GPL-3.0 | Yes — binaries, manifest, and corresponding source |
@@ -60,7 +60,7 @@ the author himself distributes. The reasoning is set out in full in
 | Asset | Source | Licence |
 | --- | --- | --- |
 | PlentyChess `0134-2r24-s0.bin` | [Yoshie2000/PlentyNetworks](https://github.com/Yoshie2000/PlentyNetworks) | GPL-3.0 |
-| Viridithas `atlantis-b800.nnue` | [cosmobobak/viridithas-networks](https://github.com/cosmobobak/viridithas-networks) | MIT (with the engine) |
+| Viridithas `sandhi-s2-b200.nnue` | [cosmobobak/viridithas-networks](https://github.com/cosmobobak/viridithas-networks) v109 | CC0-1.0 (repo `LICENSE`, commit `1040c3ee`, 2026-06-08) |
 | Berserk `berserk-9b84c340af7e.nn` | [jhonnold/berserk-networks](https://github.com/jhonnold/berserk-networks) | GPL-3.0 with the engine (see note) |
 | Maia 3 | [CSSLab/maia3](https://github.com/CSSLab/maia3) | AGPL-3.0 |
 | Lc0 networks (t1, t3, BT4) | Leela Chess Zero project | See `docs/model_provenance/` |

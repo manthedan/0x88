@@ -108,7 +108,7 @@
       "family": "viridithas",
       "uiLabel": "Viridithas",
       "status": "experimental",
-      "versionOrSource": "cosmobobak/viridithas commit 20d7402065cae084715183e019fdd18089e2dfac; atlantis-b800.nnue.zst v106",
+      "versionOrSource": "cosmobobak/viridithas tag v20.0.0 commit 0631113e2215714c54d397cce9a8caebc5e6f8ee; sandhi-s2-b200.nnue.zst v109",
       "deploymentStatus": "tracked-deployable",
       "manifestUrl": "/viridithas/viridithas-wasip1.manifest.json",
       "sourceArchiveUrl": "/viridithas/viridithas-wasip1-corresponding-source.tar.gz",

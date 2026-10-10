@@ -41,7 +41,7 @@ Every engine family should have one card with these fields:
 | Centipawn | `bt4-ort` (production), legacy `bt4-auto`/`bt4-custom` in research builds | Production ORT baseline; legacy custom WebGPU explicit | Centipawn SquareFormer evaluator/search path | BT4 SOAP REM c19000 | Small public model relative to LC0 BT4 | Legacy `tiny` deep-links and URL overrides are accepted for compatibility. |
 | Stockfish | `lite`, `full` | Lite single-thread default opponent | NPM `stockfish` JS/WASM UCI worker | `stockfish@18.0.7` | Lite WASM ~7 MB; full WASM ~108 MB | Mature UCI baseline; strongest/large full variant is optional. |
 | Reckless | `simd`, `relaxed-simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `lite` | Relaxed SIMD if available; fixed SIMD fallback; scalar final fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; the default speed ladder is relaxed SIMD > fixed SIMD > scalar WASI/UCI. |
-| Viridithas | `default`, `simd` | Experimental opt-in | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` commit `20d7402065ca` + v106 `atlantis-b800.nnue.zst` + local patches | WASM ~55 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
+| Viridithas | `relaxed-simd`, `simd`, `default` | Relaxed SIMD when the browser validates it; SIMD, then scalar | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` tag `v20.0.0` commit `0631113e` + v109 `sandhi-s2-b200.nnue.zst` + local patches | WASM ~53 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
 | Berserk | `emscripten` (WASI `default`/`simd` planned only) | Experimental opt-in | Patched single-thread Emscripten UCI worker; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | JS glue + ~128 KB WASM per tier + one shared ~24 MB preload; tracked/deployable with manifest and corresponding source | Strong GPL C UCI candidate; staged UI integration is experimental while lifecycle/benchmark data accumulates. |
 | PlentyChess | `emscripten` | Experimental opt-in | Patched single-thread Emscripten UCI worker | `Yoshie2000/PlentyChess` commit `58d8ba2505ae2b49f48dd410d214a457d15c12c6` + network `0134-2r24-s0.bin` | JS ~71 KB + WASM ~390 KB + data/processed NNUE ~63 MB raw; ~32-34 MB compressed transfer if `.data` is served with brotli/gzip; generated/local only | Node/browser lifecycle smoke and arena/analysis selector smoke pass; depth-7 rotated-FEN benchmark is ~718k NPS; large sidecar and source-archive release gate keep it experimental. |
 | Stormphrax | `emscripten` | Experimental opt-in | Patched single-thread Emscripten UCI worker with wasm SIMD | `Ciekce/Stormphrax` tag `v8.0.0`, commit `582965517ed2032d41a6b4cd6c2e66b1b934e2ad` + `undertown.nnue` | JS ~71 KB + WASM ~697 KB + data 55.9 MB raw | Node UCI smoke passes; available in Play, Arena, and Analysis with depth/movetime and MultiPV. |
@@ -242,18 +242,19 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 
 - **Family id / UI label:** `viridithas` / `Viridithas`.
 - **Integration status:** experimental. Arena and analysis can use it, but it should not be presented as production-ready.
-- **Source/version anchor:** upstream `cosmobobak/viridithas` pinned to commit `20d7402065cae084715183e019fdd18089e2dfac`; build script downloads v106 `atlantis-b800.nnue.zst`; local patch is `patches/viridithas-wasip1.patch`.
-- **License/distribution:** treat generated WASM and downloaded NNUE as third-party engine assets; generated `public/viridithas/*.wasm` is ignored.
+- **Source/version anchor:** upstream `cosmobobak/viridithas` tag `v20.0.0`, commit `0631113e2215714c54d397cce9a8caebc5e6f8ee`; build script downloads v109 `sandhi-s2-b200.nnue.zst`; local patch is `patches/viridithas-wasip1.patch`. The previous pin `20d74020` was a 2026-06-03 pre-release that already called itself v20.0.0 and embedded `atlantis`.
+- **License/distribution:** engine source is MIT; the embedded `sandhi-s2-b200` network is CC0-1.0. The WASM binaries, manifest, and corresponding-source archive are tracked with Git LFS.
 - **Runtime adapter:** patched Rust `wasm32-wasip1` UCI.
   - One-shot argv mode.
   - Benchmark-only batch one-process mode.
   - Persistent shared-stdin WASI worker in isolated browsers.
 - **UI variants:**
-  - `simd`: `Viridithas SIMD experimental`, `/viridithas/viridithas-simd128.wasm` (default when no variant is requested).
+  - `relaxed-simd`: `Viridithas Relaxed SIMD`, `/viridithas/viridithas-relaxed-simd128.wasm` (feature-detected default when Relaxed SIMD validates).
+  - `simd`: `Viridithas SIMD experimental`, `/viridithas/viridithas-simd128.wasm` (default when SIMD validates and Relaxed SIMD does not).
   - `default`: `Viridithas scalar experimental`, `/viridithas/viridithas.wasm` (explicit compatibility fallback via `?viridithas=default`).
   - `custom`: URL param escape hatch via `?viridithasWasm=`.
 - **Strength knob:** depth in UI and benchmarks; movetime benchmark plumbing exists.
-- **Artifact footprint:** scalar and SIMD WASM artifacts are ~55 MB each with compressed network embedded.
+- **Artifact footprint:** scalar, SIMD, and relaxed WASM artifacts are about 53.2 MiB each with the compressed network embedded.
 - **Feature parity:**
   - Move search: yes for sequential searches and shallow arena games.
   - Analysis: yes through Stockfish/Reckless-style UCI info formatting.
