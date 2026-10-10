@@ -224,6 +224,28 @@ test('artifact assets worker serves valid byte ranges', async () => {
   assert.equal(await text(response), 'cdef');
 });
 
+test('artifact assets worker rejects every byte range on an empty artifact without an R2 ranged GET', async () => {
+  for (const method of ['GET', 'HEAD']) {
+    for (const Range of ['bytes=-1', 'bytes=0-', 'bytes=0-0']) {
+      const env = fakeEnv();
+      let rangedGets = 0;
+      env.ARTIFACTS.head = async () => ({ size: 0 });
+      const originalGet = env.ARTIFACTS.get;
+      env.ARTIFACTS.get = async (key, options) => {
+        if (options?.range) {
+          rangedGets += 1;
+          throw new Error('R2 rejects a zero-length range');
+        }
+        return originalGet(key, options);
+      };
+      const response = await handleArtifactRequest(new Request(`https://assets.example/${KEY}`, { method, headers: { Range } }), env);
+      assert.equal(response.status, 416, `${method} ${Range}`);
+      assert.equal(response.headers.get('Content-Range'), 'bytes */0');
+      assert.equal(rangedGets, 0);
+    }
+  }
+});
+
 test('artifact assets worker serves suffix byte ranges', async () => {
   const response = await handleArtifactRequest(
     new Request(`https://assets.example/${KEY}`, {
