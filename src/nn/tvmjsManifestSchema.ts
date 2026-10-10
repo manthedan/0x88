@@ -28,6 +28,8 @@ export const TvmjsManifestSchema = v.looseObject({
   dtype: v.string(),
   target: v.string(),
   requiredFeatures: v.optional(v.array(v.string())),
+  version: v.optional(v.string()),
+  subgroupSize: v.optional(v.number()),
   runtime: v.optional(
     v.looseObject({
       tvmjsBundle: v.optional(v.string()),

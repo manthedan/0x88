@@ -1,0 +1,52 @@
+{
+  "lifecycle": {
+    "effectiveLaunch": {
+      "browserLaunched": true,
+      "engine": "chrome",
+      "launchHash": 7445744387455038000
+    },
+    "launched": false,
+    "relaunchedBrowser": false,
+    "restartedBackground": false,
+    "restoreStatus": "not_configured",
+    "reused": true,
+    "saveStatus": "not_attempted"
+  },
+  "origin": "http://localhost:5195/lab/centipawn-tvmjs-subgroups.html?repeats=1&searchRepeats=1&visits=16&searchFixtureCount=1",
+  "result": {
+    "executedBundle": {
+      "sha256": "53ceb7bd7d9ba0290e76c701ad160a3ec4d172c9df32efc690111010c51b49f2",
+      "url": "http://localhost:5195/assets/centipawn-tvmjs-subgroups-yZSftvmt.js"
+    },
+    "gpuErrors": [],
+    "lifecycle": "PASS",
+    "ok": true,
+    "ortSearch": [
+      {
+        "fixture": "startpos",
+        "move": "d2d4",
+        "pv": [
+          "d2d4"
+        ],
+        "visits": 16
+      }
+    ],
+    "parity": {
+      "v2VsOrt": {
+        "maxPolicyAbs": 7.04677236118556e-7,
+        "maxWdlAbs": 0.0000011228717250733045,
+        "tolerance": 0.001
+      },
+      "v3VsOrt": {
+        "maxPolicyAbs": 0.0000010827480966812963,
+        "maxWdlAbs": 0.0000013643449941758146,
+        "tolerance": 0.001
+      },
+      "v3VsV2": {
+        "maxPolicyAbs": 5.807526202439295e-7,
+        "maxWdlAbs": 2.414732691025101e-7,
+        "tolerance": 0.001
+      }
+    }
+  }
+}

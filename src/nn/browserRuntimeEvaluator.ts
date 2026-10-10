@@ -127,17 +127,22 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     try {
       if (!manifestUrl) throw new Error(`No TVMJS manifest is registered for ${modelId}`);
       const primary = await SquareformerTvmjsWebgpuEvaluator.create(manifestUrl, meta);
-      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), auditBase) : primary;
+      const selectedManifestUrl = primary.manifestUrl ?? manifestUrl;
+      const runtimeConfigId = new URL(selectedManifestUrl, location.href).pathname.endsWith('/f32/v3-subgroups/manifest.json')
+        ? 'centipawn-tvmjs-webgpu-f32-v3-subgroups'
+        : entry?.runtimeConfigId;
+      const selectedAudit = { ...auditBase, manifestUrl: selectedManifestUrl, runtimeConfigId };
+      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), selectedAudit) : primary;
       const result = {
         evaluator,
         meta,
         modelId,
         requestedRuntime,
         resolvedRuntime: 'tvmjs-webgpu' as const,
-        runtimeConfigId: entry?.runtimeConfigId,
-        manifestUrl,
+        runtimeConfigId,
+        manifestUrl: selectedManifestUrl,
       };
-      publishBrowserRuntimeAudit({ ...auditBase, resolvedRuntime: result.resolvedRuntime });
+      publishBrowserRuntimeAudit({ ...selectedAudit, resolvedRuntime: result.resolvedRuntime });
       return result;
     } catch (err) {
       if (!fallback) throw err;

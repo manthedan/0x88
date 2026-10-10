@@ -1,0 +1,75 @@
+{
+  "result": {
+    "batch": 16,
+    "gpuErrors": [],
+    "manifest": "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json",
+    "ok": true,
+    "ortModel": "/models/bt4_soap_rem_c19000_final.onnx",
+    "parity": {
+      "hidden": {
+        "allFinite": true,
+        "expectedLength": 131072,
+        "length": 131072,
+        "maxAbsDiff": 1.931190490722656e-05,
+        "meanAbsDiff": 2.5812655075618807e-06
+      },
+      "policy": {
+        "allFinite": true,
+        "expectedLength": 327680,
+        "length": 327680,
+        "maxAbsDiff": 5.14984130859375e-05,
+        "meanAbsDiff": 8.674618584336713e-06
+      },
+      "q": {
+        "allFinite": true,
+        "expectedLength": 16,
+        "length": 16,
+        "maxAbsDiff": 1.430511474609375e-06,
+        "meanAbsDiff": 5.364418029785156e-07
+      },
+      "wdl": {
+        "allFinite": true,
+        "expectedLength": 48,
+        "length": 48,
+        "maxAbsDiff": 2.6702880859375e-05,
+        "meanAbsDiff": 5.622704823811849e-06
+      }
+    },
+    "parityOutputs": [
+      "policy",
+      "wdl",
+      "q",
+      "hidden"
+    ],
+    "repeats": 1,
+    "schema": "lc0_browser.centipawn_tvmjs_webgpu_bench.v1",
+    "timedOutputs": [
+      "policy",
+      "wdl"
+    ],
+    "timing": {
+      "ort": {
+        "count": 1,
+        "maxMs": 26,
+        "meanMs": 26,
+        "medianMs": 26,
+        "minMs": 26
+      },
+      "tvm": {
+        "count": 1,
+        "maxMs": 14.979999899864197,
+        "meanMs": 14.979999899864197,
+        "medianMs": 14.979999899864197,
+        "minMs": 14.979999899864197
+      }
+    },
+    "timingIncludes": [
+      "gpu-input-upload",
+      "model-execution",
+      "policy-wdl-readback"
+    ],
+    "tvmPipelineMs": 106.67999994754793,
+    "tvmToOrtMeanRatio": 0.5761538423024691,
+    "warmup": 2
+  }
+}
