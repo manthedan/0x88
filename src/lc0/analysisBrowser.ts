@@ -318,6 +318,11 @@ const resourceBroker = new EngineResourceBroker({ policy: 'bounded', maxConcurre
 const registeredBrokerEngines = new Set<string>();
 let scheduledAnalysisTimer: ReturnType<typeof setTimeout> | null = null;
 let analyzeAfterActiveRun = false;
+// Set while loadLc0Backend owns the LC0 worker/evaluator lifecycle. analyzeCurrent
+// must queue behind it rather than start a reload, because a reload disposes the
+// worker that this load is still waiting on.
+let activeLc0BackendLoad: object | null = null;
+let analyzeAfterLc0BackendLoad = false;
 let reloadLc0AfterActiveRun = false;
 let disposeUnusedEnginesAfterActiveRun = false;
 
@@ -3038,7 +3043,8 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   }
   const needsSmallLc0Backend = rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
   if (needsSmallLc0Backend && !workerReady && !searcher) {
-    void reloadLc0ForAnalysis(true);
+    if (activeLc0BackendLoad) analyzeAfterLc0BackendLoad = true;
+    else void reloadLc0ForAnalysis(true);
     return;
   }
   const runId = ++activeAnalysisRunId;
@@ -3902,6 +3908,25 @@ function disposePageResources(): void {
 async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = mountAbort.signal, operationSignal?: AbortSignal): Promise<boolean> {
   const loadCancelled = () => isStaleMount(mountSignal) || operationSignal?.aborted === true;
   if (loadCancelled()) return false;
+  const load = {};
+  activeLc0BackendLoad = load;
+  try {
+    return await loadLc0BackendOwned(runAutoAnalyze, loadCancelled, operationSignal);
+  } finally {
+    if (activeLc0BackendLoad === load) {
+      activeLc0BackendLoad = null;
+      analyzeAfterLc0BackendLoad = false;
+    }
+  }
+}
+
+function analyzeAfterLc0BackendReady(runAutoAnalyze: boolean, loadCancelled: () => boolean): void {
+  const queued = analyzeAfterLc0BackendLoad;
+  analyzeAfterLc0BackendLoad = false;
+  if (!loadCancelled() && (queued || (runAutoAnalyze && inputEl('autoAnalyze').checked))) void analyzeCurrent();
+}
+
+async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
@@ -3916,10 +3941,12 @@ async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = 
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
-    if (!loadCancelled() && runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
+    analyzeAfterLc0BackendReady(runAutoAnalyze, loadCancelled);
     return true;
   } catch (workerError) {
-    if (loadCancelled()) return false;
+    // resetSearchWorker rejects pending init with AbortError when a newer load
+    // disposed this worker; that load owns the backend now, so do not fall back.
+    if (loadCancelled() || (workerError as Error).name === 'AbortError') return false;
     if (runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
@@ -3979,7 +4006,7 @@ async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = 
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
       hideModelProgress();
-      if (!loadCancelled() && runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
+      analyzeAfterLc0BackendReady(runAutoAnalyze, loadCancelled);
       return true;
     } catch (error) {
       if (loadCancelled()) return false;
