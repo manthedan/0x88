@@ -118,6 +118,7 @@ const sources = [
 const emxxArgs = [
   '-std=c++20',
   process.env.STORMPHRAX_EMSCRIPTEN_OPT ?? '-O2',
+  ...(process.env.STORMPHRAX_EMSCRIPTEN_LTO === '1' ? ['-flto'] : []),
   '-DNDEBUG',
   `-DSP_VERSION=${version}`,
   '-DSP_WASM_SIMD',

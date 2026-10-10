@@ -22,6 +22,7 @@ const CONFIGS = {
       script: 'scripts/build_berserk_emscripten.mjs',
       command: 'npm run berserk:build-emscripten && npm run berserk:build-simd-emscripten && npm run berserk:build-relaxed-simd-emscripten',
       patches: ['patches/berserk-emscripten.patch'],
+      defaultCompilerFlags: { scalar: '-O2', simd128: '-O2', relaxedSimd128: '-O2 -flto' },
     },
     artifacts: [
       'public/berserk/berserk-emscripten.js',

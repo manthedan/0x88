@@ -34,6 +34,18 @@ It verifies the full SHA-256
 `9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084` and the
 hash prefix embedded in the filename.
 
+The October 2026 compiler matrix changes the **next build** of the promoted
+relaxed tier to `-O2 -flto`; scalar and regular SIMD stay `-O2` without LTO.
+`BERSERK_EMSCRIPTEN_LTO=0` restores the old relaxed build; explicit `=1` also
+allows experiments on other tiers. `BERSERK_EMSCRIPTEN_OPT` remains independent.
+See [`docs/cpu_engine_build_flags_matrix_2026-10.md`](../../docs/cpu_engine_build_flags_matrix_2026-10.md).
+
+**Release pending:** the committed binaries, manifest, and source archive here
+still describe the previous no-LTO release. Before publication, rebuild the
+artifact pairs, regenerate the corresponding-source archive and manifest, and
+publish them together through the normal release process. This experiment does
+not replace or publish those files.
+
 Smoke the result with `npm run berserk:smoke-emscripten` (Node) or
 `lab/berserk-smoke.html` (browser worker/adapter).
 
