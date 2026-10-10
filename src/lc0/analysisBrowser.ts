@@ -505,7 +505,10 @@ const workerPending = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: WorkerSearchProgress) => void }
 >();
 let activeWorkerSearchId: number | null = null;
-let activeWorkerSearchProgressSeen = false;
+// Hybrid workers initialize lazily inside their first search and cannot act on
+// a cancel until then. Track warmth per worker lifetime, not per search, so a
+// cancel on an initialized worker uses the normal cancel message.
+let workerSearchWarm = false;
 
 interface WorkerSearchResult {
   move?: string | null;
@@ -617,7 +620,7 @@ function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => 
 
 function resetSearchWorker(reason: string): void {
   activeWorkerSearchId = null;
-  activeWorkerSearchProgressSeen = false;
+  workerSearchWarm = false;
   searchWorker?.terminate();
   searchWorker = null;
   workerReady = false;
@@ -810,19 +813,16 @@ async function workerLc0Lines(
       (id) => {
         searchId = id;
         activeWorkerSearchId = id;
-        activeWorkerSearchProgressSeen = false;
       },
       (progress) => {
-        if (activeWorkerSearchId === searchId) activeWorkerSearchProgressSeen = true;
+        workerSearchWarm = true;
         showAnalysisProgress(runId, fen, label, progress);
       },
     );
+    workerSearchWarm = true;
     return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
   } finally {
-    if (activeWorkerSearchId === searchId) {
-      activeWorkerSearchId = null;
-      activeWorkerSearchProgressSeen = false;
-    }
+    if (activeWorkerSearchId === searchId) activeWorkerSearchId = null;
   }
 }
 
@@ -960,6 +960,13 @@ function centipawnEvaluatorKeysForRows(rows: EngineRow[]): Set<string> {
 // Row edits are deferred while a run is active, so the run's own row snapshot
 // must keep its Centipawn evaluators alive even if the visible rows changed.
 let analysisRunCentipawnKeys = new Set<string>();
+
+function retireAnalysisRunCentipawnKeys(): void {
+  if (!analysisRunCentipawnKeys.size) return;
+  analysisRunCentipawnKeys = new Set();
+  // Removals made while the snapshot was held could not dispose these evaluators.
+  disposeUnusedCentipawnEvaluators();
+}
 
 function activeCentipawnEvaluatorKeys(): Set<string> {
   return new Set([...centipawnEvaluatorKeysForRows(activeEngineRows()), ...analysisRunCentipawnKeys]);
@@ -2718,7 +2725,7 @@ function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolea
   }
   analysisAbort?.abort();
   if (activeWorkerSearchId !== null && searchWorker) {
-    if (workerRuntime.startsWith('hybrid-') && !activeWorkerSearchProgressSeen) {
+    if (workerRuntime.startsWith('hybrid-') && !workerSearchWarm) {
       resetSearchWorker('LC0 hybrid worker initialization cancelled');
       analyzing = false;
       clearAnalysisSearchProgress();
@@ -3042,8 +3049,8 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   // rows/cache keys, otherwise a newly selected runtime can run on the old worker.
   cancelActiveAnalysisRun();
   // The cancelled run's finally no longer owns cleanup (its controller is not
-  // current), so retire its Centipawn snapshot before disposing unused engines.
-  analysisRunCentipawnKeys = new Set();
+  // current), so retire its Centipawn snapshot here.
+  retireAnalysisRunCentipawnKeys();
   if (disposeBeforeRun) disposeUnusedEngines();
   if (reloadBeforeRun) {
     analysisAbort = null;
@@ -3349,7 +3356,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     if (analysisAbort === controller && runId === activeAnalysisRunId && !mountAbort.signal.aborted) {
       analyzing = false;
       analysisAbort = null;
-      analysisRunCentipawnKeys = new Set();
+      retireAnalysisRunCentipawnKeys();
       runDeferredAnalysis = analyzeAfterActiveRun;
       reloadDeferredLc0 = reloadLc0AfterActiveRun;
       disposeDeferredEngines = disposeUnusedEnginesAfterActiveRun;
