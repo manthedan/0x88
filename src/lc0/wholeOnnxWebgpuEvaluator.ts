@@ -105,6 +105,7 @@ export interface Lc0WholeOnnxWebgpuEvaluatorOptions {
   batch?: number;
   fetchTensorCache?: boolean;
   logger?: (message: string) => void;
+  signal?: AbortSignal;
 }
 
 function sumFinite(values: Array<number | undefined>): number {
@@ -167,20 +168,24 @@ function checkedStagedRuntimeUrl(value: string, baseUrl: string | URL, label: st
   return url;
 }
 
-async function fetchChecked(baseUrl: URL, rel: string, expected?: { bytes?: number; sha256?: string }): Promise<ArrayBuffer> {
+async function fetchChecked(baseUrl: URL, rel: string, expected?: { bytes?: number; sha256?: string }, signal?: AbortSignal): Promise<ArrayBuffer> {
+  signal?.throwIfAborted();
   const url = checkedStagedRuntimeUrl(rel, baseUrl, `artifact ${rel}`).toString();
-  const response = await fetch(url);
+  const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`Fetch failed ${response.status}: ${url}`);
   const bytes = await response.arrayBuffer();
+  signal?.throwIfAborted();
   if (expected?.bytes != null && bytes.byteLength !== expected.bytes) throw new Error(`Size mismatch for ${rel}: ${bytes.byteLength} != ${expected.bytes}`);
   if (expected?.sha256) {
     const actual = await sha256Hex(bytes);
+    signal?.throwIfAborted();
     if (actual !== expected.sha256) throw new Error(`SHA-256 mismatch for ${rel}: ${actual} != ${expected.sha256}`);
   }
   return bytes;
 }
 
-async function loadRuntimeBundle(bundleUrl: string, baseUrl: URL, expectedSha256: string): Promise<WholeModelRuntimeApi> {
+async function loadRuntimeBundle(bundleUrl: string, baseUrl: URL, expectedSha256: string, signal?: AbortSignal): Promise<WholeModelRuntimeApi> {
+  signal?.throwIfAborted();
   const url = checkedStagedRuntimeUrl(bundleUrl, baseUrl, 'runtime bundle').toString();
   const globals = globalThis as Record<string, unknown>;
   const loadedSha256 = globals.__LC0_TVMJS_BUNDLE_SHA256__;
@@ -189,6 +194,7 @@ async function loadRuntimeBundle(bundleUrl: string, baseUrl: URL, expectedSha256
     throw new Error(`TVMJS runtime bundle mismatch: loaded ${String(loadedSha256 ?? 'unknown')} != expected ${expectedSha256}`);
   }
   await import(/* @vite-ignore */ url);
+  signal?.throwIfAborted();
   globals.lc0WholeModelRuntimeBundleUrl = url;
   globals.__LC0_TVMJS_BUNDLE_SHA256__ = expectedSha256;
   const api = globals[RUNTIME_GLOBAL] as WholeModelRuntimeApi | undefined;
@@ -231,6 +237,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
   }
 
   static async create(options: Lc0WholeOnnxWebgpuEvaluatorOptions): Promise<Lc0WholeOnnxWebgpuEvaluator> {
+    options.signal?.throwIfAborted();
     const startupTimings: Record<string, number> = {};
     const timed = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
       const started = performance.now();
@@ -250,30 +257,35 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     };
 
     const base = checkedStagedRuntimeUrl(options.manifestUrl, location.href, 'manifest');
-    const manifestResponse = await timed('manifestFetchMs', () => fetch(base));
+    const manifestResponse = await timed('manifestFetchMs', () => fetch(base, { signal: options.signal }));
     if (!manifestResponse.ok) throw new Error(`Manifest fetch failed: ${manifestResponse.status}`);
     const manifest = await timed('manifestJsonMs', async () => v.parse(WholeOnnxRuntimeManifestSchema, await manifestResponse.json()));
+    options.signal?.throwIfAborted();
     const requestedBatch = Math.max(1, Math.floor(options.batch ?? 8));
     const model = manifest.models.find((item) => item.batch === requestedBatch);
     if (!model) throw new Error(`Batch ${requestedBatch} not in manifest`);
     const bundle = manifest.runtime?.['tvm' + 'jsBundle'] ?? DEFAULT_BUNDLE;
     const bundleFile = manifest.files?.find((entry) => entry.path === bundle);
     if (!bundleFile?.sha256) throw new Error(`Runtime bundle integrity metadata missing for ${bundle}`);
-    const api = await timed('runtimeBundleLoadMs', () => loadRuntimeBundle(bundle, base, bundleFile.sha256!));
+    const api = await timed('runtimeBundleLoadMs', () => loadRuntimeBundle(bundle, base, bundleFile.sha256!, options.signal));
     const nav = navigator as NavigatorWithGpu;
     if (!nav.gpu) throw new Error('navigator.gpu missing');
     const adapter = await timed('requestAdapterMs', () => nav.gpu!.requestAdapter());
+    options.signal?.throwIfAborted();
     if (!adapter) throw new Error('WebGPU adapter unavailable');
     const requiredFeatures = ['shader-f16'];
     for (const feature of requiredFeatures) if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
     const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
-    const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model));
+    options.signal?.throwIfAborted();
+    const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model, options.signal));
     const runtime = await timed('runtimeInstantiateMs', () => api.instantiate(wasmBytes, api.createPolyfillWASI(), options.logger));
+    options.signal?.throwIfAborted();
     timedSync('runtimeInitWebGpuMs', () => runtime.initWebGPU(device));
     runtime.beginScope();
     try {
       const sys = timedSync('systemLibMs', () => runtime.systemLib());
       await timed('webgpuPipelinePrebuildMs', () => runtime.asyncLoadWebGPUPipelines(sys));
+      options.signal?.throwIfAborted();
       const vm = timedSync('createVirtualMachineMs', () => runtime.createVirtualMachine(runtime.webgpu()));
       const vmMod = vm.getInternalModule();
       const cacheUrl = tensorCacheUrl(manifest, base);
@@ -283,6 +295,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
         if (!cacheUrl) throw new Error('tensor cache requested but manifest.tensorCache is missing');
         if (!runtime.fetchTensorCache) throw new Error('runtime tensor-cache fetch API is missing');
         await timed('tensorCacheFetchMs', () => runtime.fetchTensorCache!(cacheUrl, runtime.webgpu()));
+        options.signal?.throwIfAborted();
         tensorCacheInfo = { url: cacheUrl, metadata: runtime.cacheMetadata ?? null };
       }
       const detachedParams: WholeModelTensor[] = [];

@@ -549,6 +549,80 @@ test('loadLc0ModelForOrt streams progress downloads into a preallocated buffer',
   );
 });
 
+test('loadLc0ModelForOrt aborts caller-owned streamed downloads', async () => {
+  const controller = new AbortController();
+  const progress = [];
+  await withMockedEnv(
+    async () => {
+      await assert.rejects(
+        () =>
+          loadLc0ModelForOrt(MODEL_URL, {
+            cache: false,
+            manifestUrl: MANIFEST_URL,
+            signal: controller.signal,
+            onProgress: (loadedBytes, totalBytes) => {
+              progress.push([loadedBytes, totalBytes]);
+              if (loadedBytes === 0) controller.abort();
+            },
+          }),
+        (error) => error?.name === 'AbortError',
+      );
+      assert.deepEqual(progress, [[0, 3]]);
+    },
+    {
+      serveBytes: (input) =>
+        new Response(
+          new ReadableStream({
+            start(streamController) {
+              input.signal.addEventListener('abort', () => streamController.error(input.signal.reason), { once: true });
+            },
+          }),
+          { headers: { 'content-length': '3' } },
+        ),
+      manifestSha256: ABC_SHA256,
+      manifestBytes: 3,
+    },
+  );
+});
+
+test('loadLc0ModelForOrt rechecks cancellation after asynchronous verification', async () => {
+  const controller = new AbortController();
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  const nativeCrypto = globalThis.crypto;
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: {
+      subtle: {
+        async digest(algorithm, data) {
+          const digest = await nativeCrypto.subtle.digest(algorithm, data);
+          controller.abort();
+          return digest;
+        },
+      },
+    },
+  });
+  try {
+    await withMockedEnv(
+      async () => {
+        await assert.rejects(
+          () =>
+            loadLc0ModelForOrt(MODEL_URL, {
+              cache: false,
+              manifestUrl: MANIFEST_URL,
+              signal: controller.signal,
+              onProgress: () => undefined,
+            }),
+          (error) => error?.name === 'AbortError',
+        );
+      },
+      { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 },
+    );
+  } finally {
+    if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor);
+    else delete globalThis.crypto;
+  }
+});
+
 test('clearLc0ModelCacheEntry removes only the selected model and its metadata', async () => {
   await withMockedEnv(
     async () => {
