@@ -12,9 +12,58 @@ const Runtime = runInNewContext(`${stripTypeScriptTypes(classSource)}; Lc0WebHyb
   nowMs: () => performance.now(),
 });
 
+const headHelpers = source.slice(
+  source.indexOf('async function mapWgslPolicyValueHeadOutputs('),
+  source.indexOf('\nasync function runCachedWgslPolicyValueHeads('),
+);
+const f32Helper = source.slice(source.indexOf('async function readF32OutputOnce('), source.indexOf('\nasync function measureGpuTimestampMs('));
+const readers = runInNewContext(
+  `${stripTypeScriptTypes(headHelpers + '\n' + f32Helper)}; ({ mapWgslPolicyValueHeadOutputs, mapWgslLegalPriorsOutputs, readF32OutputOnce })`,
+  {
+    nowMs: () => performance.now(),
+    gpuGlobals: () => ({ GPUMapMode: { READ: 1 } }),
+    DEFAULT_POLICY_MAPPED_OUTPUTS: 1858,
+    WGSL_GPU_LEGAL_OUTPUT_FLOATS: 768,
+  },
+);
+
+for (const name of Object.keys(readers)) {
+  test(`${name} unmaps after a failed range read and permits reuse`, async () => {
+    let mapped = false;
+    let firstRead = true;
+    let unmaps = 0;
+    const buffer = {
+      async mapAsync() {
+        if (mapped) throw new Error('double map');
+        mapped = true;
+      },
+      getMappedRange() {
+        if (firstRead) {
+          firstRead = false;
+          throw new Error('range read failed');
+        }
+        return new ArrayBuffer(7444);
+      },
+      unmap() {
+        mapped = false;
+        unmaps += 1;
+      },
+    };
+    const device = { createCommandEncoder: () => ({ copyBufferToBuffer() {}, finish() {} }), queue: { submit() {} } };
+    const read = () => (name === 'readF32OutputOnce' ? readers[name](device, {}, buffer, 3) : readers[name]({ headsReadbackBuffer: buffer }, []));
+    await assert.rejects(read(), /range read failed/);
+    assert.equal(mapped, false, 'persistent readback must not remain mapped after an error');
+    await read();
+    assert.equal(mapped, false);
+    assert.equal(unmaps, 2);
+  });
+}
+
 function gate() {
   let resolve;
-  const promise = new Promise((done) => { resolve = done; });
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
@@ -22,16 +71,30 @@ function submitted(slot, mapPromise = Promise.resolve(), queuePromise = Promise.
   let mapped = false;
   let unmapped = 0;
   const buffer = {
-    getMappedRange() { throw new Error('range read failed'); },
-    unmap() { mapped = false; unmapped += 1; },
+    getMappedRange() {
+      throw new Error('range read failed');
+    },
+    unmap() {
+      mapped = false;
+      unmapped += 1;
+    },
   };
   return {
     deferredReadbackSlot: slot,
     readbackBuffer: buffer,
-    readbackMapState: { startedAt: 0, promise: mapPromise.then(() => { mapped = true; }) },
+    readbackMapState: {
+      startedAt: 0,
+      promise: mapPromise.then(() => {
+        mapped = true;
+      }),
+    },
     queueState: { startedAt: 0, promise: queuePromise },
-    get mapped() { return mapped; },
-    get unmapped() { return unmapped; },
+    get mapped() {
+      return mapped;
+    },
+    get unmapped() {
+      return unmapped;
+    },
   };
 }
 
@@ -53,7 +116,9 @@ test('failed second deferred submission drains and releases the first pending ma
     throw new Error('invalid second input');
   };
   let settled = false;
-  const work = r.evaluateWgslBatchesDeferredReadback([['valid'], ['invalid']], {}).finally(() => { settled = true; });
+  const work = r.evaluateWgslBatchesDeferredReadback([['valid'], ['invalid']], {}).finally(() => {
+    settled = true;
+  });
   const rejected = assert.rejects(work, /invalid second input/);
   await new Promise((resolve) => setImmediate(resolve));
   const returnedBeforeMap = settled;
@@ -71,7 +136,9 @@ test('batch finalization waits for mapping and unmaps even when the queue fence 
   const batch = submitted(0, mapping.promise, Promise.reject(new Error('device lost')));
   r.wgslDeferredReadbackInUse.add(0);
   let settled = false;
-  const work = r.finishWgslBatch(batch, {}, 'deferred-double-buffered').finally(() => { settled = true; });
+  const work = r.finishWgslBatch(batch, {}, 'deferred-double-buffered').finally(() => {
+    settled = true;
+  });
   const rejected = assert.rejects(work, /device lost/);
   await new Promise((resolve) => setImmediate(resolve));
   const returnedBeforeMap = settled;

@@ -2149,9 +2149,11 @@ async function readF32OutputOnce(
   encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, elements * 4);
   device.queue.submit([encoder.finish()]);
   await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
-  const output = new Float32Array(readbackBuffer.getMappedRange().slice(0));
-  readbackBuffer.unmap();
-  return output;
+  try {
+    return new Float32Array(readbackBuffer.getMappedRange().slice(0));
+  } finally {
+    readbackBuffer.unmap();
+  }
 }
 
 async function measureGpuTimestampMs(device: DeviceLike, commandBuffers: unknown[]): Promise<number | undefined> {
@@ -7068,13 +7070,16 @@ async function mapWgslPolicyValueHeadOutputs(runtime: WgslPolicyValueHeadRuntime
   const globals = gpuGlobals();
   const started = nowMs();
   await runtime.headsReadbackBuffer.mapAsync(globals.GPUMapMode!.READ);
-  const range = runtime.headsReadbackBuffer.getMappedRange();
-  const mappedPolicy = new Float32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
-  mappedPolicy.set(new Float32Array(range, 0, DEFAULT_POLICY_MAPPED_OUTPUTS));
-  const wdl = new Float32Array(3);
-  wdl.set(new Float32Array(range, DEFAULT_POLICY_MAPPED_OUTPUTS * 4, 3));
-  runtime.headsReadbackBuffer.unmap();
-  return { mappedPolicy, wdl, readbackSyncedMs: nowMs() - started };
+  try {
+    const range = runtime.headsReadbackBuffer.getMappedRange();
+    const mappedPolicy = new Float32Array(DEFAULT_POLICY_MAPPED_OUTPUTS);
+    mappedPolicy.set(new Float32Array(range, 0, DEFAULT_POLICY_MAPPED_OUTPUTS));
+    const wdl = new Float32Array(3);
+    wdl.set(new Float32Array(range, DEFAULT_POLICY_MAPPED_OUTPUTS * 4, 3));
+    return { mappedPolicy, wdl, readbackSyncedMs: nowMs() - started };
+  } finally {
+    runtime.headsReadbackBuffer.unmap();
+  }
 }
 
 function legalPriorsFromGpuOutput(legalCandidates: LegalPolicyCandidate[], output: Float32Array<ArrayBufferLike>): Lc0Evaluation['legalPriors'] {
@@ -7100,13 +7105,16 @@ async function mapWgslLegalPriorsOutputs(
   const globals = gpuGlobals();
   const started = nowMs();
   await runtime.headsReadbackBuffer.mapAsync(globals.GPUMapMode!.READ);
-  const range = runtime.headsReadbackBuffer.getMappedRange();
-  const legalOutput = new Float32Array(WGSL_GPU_LEGAL_OUTPUT_FLOATS);
-  legalOutput.set(new Float32Array(range, 0, WGSL_GPU_LEGAL_OUTPUT_FLOATS));
-  const wdl = new Float32Array(3);
-  wdl.set(new Float32Array(range, WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3));
-  runtime.headsReadbackBuffer.unmap();
-  return { legalPriors: legalPriorsFromGpuOutput(legalCandidates, legalOutput), wdl, readbackSyncedMs: nowMs() - started };
+  try {
+    const range = runtime.headsReadbackBuffer.getMappedRange();
+    const legalOutput = new Float32Array(WGSL_GPU_LEGAL_OUTPUT_FLOATS);
+    legalOutput.set(new Float32Array(range, 0, WGSL_GPU_LEGAL_OUTPUT_FLOATS));
+    const wdl = new Float32Array(3);
+    wdl.set(new Float32Array(range, WGSL_GPU_LEGAL_OUTPUT_FLOATS * 4, 3));
+    return { legalPriors: legalPriorsFromGpuOutput(legalCandidates, legalOutput), wdl, readbackSyncedMs: nowMs() - started };
+  } finally {
+    runtime.headsReadbackBuffer.unmap();
+  }
 }
 
 async function runCachedWgslPolicyValueHeads(
