@@ -22,6 +22,7 @@ async function withGpu(
     min = 32,
     max = 32,
     info,
+    assetBase,
     manifest = { ...base, version: 'v3-subgroups', requiredFeatures: ['webgpu', 'subgroups'], subgroupSize: 32 },
     failPipelines = false,
   },
@@ -35,6 +36,7 @@ async function withGpu(
   }
   const calls = { fetches: [], devices: [], destroyed: 0, disposed: 0 };
   replace('location', new URL('https://app.example/analysis'));
+  if (assetBase) replace('LC0_BROWSER_ASSET_BASE_URL', assetBase);
   replace('fetch', async (url) => {
     calls.fetches.push(String(url));
     if (String(url).endsWith('/manifest.json'))
@@ -108,6 +110,21 @@ for (const adapter of [{ features: false }, { min: 16, max: 32 }, { min: 32, max
     });
   });
 }
+
+test('v2 fallback preserves same-origin and configured CDN asset-base path prefixes', async () => {
+  for (const baseUrl of ['https://app.example/preview', 'https://assets.example/preview']) {
+    await withGpu({ features: false, assetBase: baseUrl }, async (calls) => {
+      const evaluator = await SquareformerTvmjsWebgpuEvaluator.create(`${baseUrl}${prefix}v3-subgroups/manifest.json`, {});
+      const selected = `${baseUrl}${prefix}v2-shape-k16/manifest.json`;
+      assert.equal(evaluator.manifestUrl, selected);
+      assert.ok(calls.fetches.includes(selected));
+      assert.ok(calls.fetches.every((url) => url.startsWith(`${baseUrl}/`)));
+      assert.deepEqual(calls.devices[0].requiredFeatures, []);
+      evaluator.destroy();
+      await Promise.resolve();
+    });
+  }
+});
 
 test('reject mismatched subgroup manifest contracts', async () => {
   for (const manifest of [

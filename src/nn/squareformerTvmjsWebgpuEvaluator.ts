@@ -7,7 +7,6 @@ import { legalMoves } from '../chess/movegen.ts';
 import { isTrustedExecutableAssetUrl } from '../lc0/assetUrls.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
-import { CENTIPAWN_TVMJS_WEBGPU_V2 } from './runtimeRegistry.ts';
 import {
   type SquareFormerMeta,
   squareformerCompactInput,
@@ -242,7 +241,9 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     ) {
       // TVM canonicalizes thread_warp_size to 32, not the adapter's arbitrary
       // supported size. Missing/variable size metadata is unsafe: keep v2.
-      const fallbackUrl = new URL(CENTIPAWN_TVMJS_WEBGPU_V2.artifact.manifestUrl, manifestResolved);
+      // These versioned artifacts are siblings. Keep any configured asset-base
+      // path prefix (e.g. /preview) instead of resolving a root-relative URL.
+      const fallbackUrl = new URL('../v2-shape-k16/manifest.json', manifestResolved);
       return SquareformerTvmjsWebgpuEvaluator.create(fallbackUrl.toString(), meta);
     }
     const api = await loadTvmjsBundle(bundleUrl, { sha256: bundleFile.sha256 });

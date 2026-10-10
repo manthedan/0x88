@@ -51,7 +51,7 @@ All 46 shaders acquire `enable subgroups;`; **only these four execute subgroup o
 
 ## Runtime safety and fallback
 
-`SquareformerTvmjsWebgpuEvaluator.create` permits the `subgroups` request only for a manifest declaring **version v3-subgroups, requiredFeatures containing subgroups, subgroupSize 32**. Mismatched contracts reject. Before requesting a device or fetching the v3 model, it requires feature availability and **adapter.info.subgroupMinSize == subgroupMaxSize == 32**; absent or variable metadata selects the existing v2 manifest. V2 never requests `subgroups`. The selected manifest URL is exposed, and the browser factory's result/audit uses the **selected** artifact/config identity, not an incorrectly labelled v3 request after a v2 fallback.
+`SquareformerTvmjsWebgpuEvaluator.create` permits the `subgroups` request only for a manifest declaring **version v3-subgroups, requiredFeatures containing subgroups, subgroupSize 32**. Mismatched contracts reject. Before requesting a device or fetching the v3 model, it requires feature availability and **adapter.info.subgroupMinSize == subgroupMaxSize == 32**; absent or variable metadata selects the existing v2 manifest. V2 never requests `subgroups`. Fallback resolves the known sibling v2 manifest relative to v3, preserving configured CDN/same-origin path prefixes; the first structured review identified and corrected the original root-relative URL bug, with regression coverage. The selected manifest URL is exposed, and the browser factory's result/audit uses the **selected** artifact/config identity, not an incorrectly labelled v3 request after a v2 fallback.
 
 The final production-browser [routing probe](../lab/centipawn-tvmjs-subgroups-results/routing.json) verifies candidate→v3 with `['subgroups']`, simulated variable size32–64→v2 with no features, and default auto→v2 with no features, including correct selected config IDs and a real evaluation/destruction in each case. This simulates adapter metadata, not a second physical adapter.
 
@@ -164,6 +164,6 @@ npm test
 git diff --check
 ```
 
-Closeout gates: typecheck **446 files, 0 errors/0 warnings**; focused tests **31/31**; full `npm test` **789 tests, 786 passed, 3 existing skips, 0 failures**; production builds, shell/Python inspection checks and `git diff --check` pass. Browser sessions and port5195 servers are closed. Structured branch review is reported in the final task closeout, not treated as a performance gate.
+Closeout gates: typecheck **446 files, 0 errors/0 warnings**; focused tests **32/32**; full `npm test` **790 tests, 787 passed, 3 existing skips, 0 failures**; production builds, shell/Python inspection checks and `git diff --check` pass. Browser sessions and port5195 servers are closed. Structured branch review is reported in the final task closeout, not treated as a performance gate.
 
 Before reconsidering promotion: longer/stable matched search distributions (including near ties/history/reuse), actual shader lane-topology evidence, and at least one non-Apple size32 adapter. No subgroup size32 routing claim is made for untested hardware. **The default stays unchanged.**
