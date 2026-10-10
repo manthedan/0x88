@@ -176,7 +176,7 @@ function _pick(obj, path) {
   return cur;
 }
 
-function compactResult(strategy, result) {
+export function compactResult(strategy, result) {
   if (strategy.startsWith('ort-')) {
     const last = result.lastBackendTiming ?? {};
     const stats = result.phaseTimingStats ?? {};
@@ -197,6 +197,9 @@ function compactResult(strategy, result) {
       webgpuMapReadBufferBytesMean: mean('webgpuMapReadBufferBytes'),
       webgpuCreateBufferCountMean: mean('webgpuCreateBufferCount'),
       ortKernelCountLast: last.ortKernelCount,
+      ortKernelProfileStatus: last.ortKernelProfileStatus,
+      ortKernelProfileReason: last.ortKernelProfileReason,
+      ortKernelGpuMsLast: last.ortKernelGpuMs,
       readbackBytesLast: last.readbackBytes,
     };
   }
@@ -276,7 +279,7 @@ export function numericStats(values) {
   };
 }
 
-function summarize(cells) {
+export function summarize(cells) {
   const groups = new Map();
   for (const cell of cells) {
     if (!cell.summary) continue;
@@ -292,6 +295,12 @@ function summarize(cells) {
         strategy,
         {
           samples: items.length,
+          ...(strategy.startsWith('ort-')
+            ? {
+                ortKernelProfileStatuses: [...new Set(items.map((item) => item.ortKernelProfileStatus).filter(Boolean))],
+                ortKernelProfileReasons: [...new Set(items.map((item) => item.ortKernelProfileReason).filter(Boolean))],
+              }
+            : {}),
           avgMsMedian: get('avgMs'),
           evalMeanMsMedian: get('evalMeanMs'),
           searchMeanMsMedian: get('searchMeanMs'),

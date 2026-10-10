@@ -84,9 +84,13 @@ export type OrtWebGpuAdapterDiagnostics = {
 
 export type OrtWebGpuProfilingSummary = {
   enabled: boolean;
+  status: 'disabled' | 'unavailable' | 'available';
+  reason?: string;
+  /** Callback events received, not a count of all GPU kernels executed. */
   eventCount: number;
-  kernelGpuMsTotal: number;
-  topPrograms: Array<{ programName: string; count: number; gpuMs: number }>;
+  /** Null when no callback events were received; never interpret missing data as zero GPU cost. */
+  kernelGpuMsTotal: number | null;
+  topPrograms: Array<{ programName: string; count: number; gpuMs: number }> | null;
 };
 
 export type OrtWebGpuApiInstrumentationSummary = {
@@ -234,7 +238,7 @@ let forcedOrtRuntimeArtifactKind: OrtRuntimeArtifactKind | null = null;
 let lockedOrtRuntimeArtifactKind: OrtRuntimeArtifactKind | null = null;
 
 export type OrtRuntimeDiagnosticOptions = {
-  /** Enable ORT WebGPU timestamp profiling and collect per-kernel program totals. */
+  /** Request JSEP kernel timestamp callbacks (unavailable on the native WebGPU EP in ORT 1.27). */
   webgpuProfiling?: boolean;
   /** Wrap browser WebGPU APIs before ORT initializes to count submits/maps/copies. */
   webgpuApiInstrumentation?: boolean;
@@ -762,6 +766,34 @@ function recordOrtWebGpuProfileData(data: unknown): void {
   while (ortWebGpuProfileRecords.length > 4096) ortWebGpuProfileRecords.shift();
 }
 
+function webGpuProfilingSummary(
+  enabled: boolean,
+  eventCount: number,
+  totalMs: number,
+  topPrograms: NonNullable<OrtWebGpuProfilingSummary['topPrograms']>,
+): OrtWebGpuProfilingSummary {
+  // ORT 1.27's only ondata invocation is in lib/wasm/jsep/backend-webgpu.ts.
+  // Native initEp (wasm-core-impl.ts) does not wire it. No events is missing
+  // attribution, not zero GPU work or evidence of a WASM fallback. Real events
+  // remain authoritative, including previously collected events after disabling.
+  const status = eventCount > 0 ? 'available' : enabled ? 'unavailable' : 'disabled';
+  return {
+    enabled,
+    status,
+    ...(status === 'available'
+      ? {}
+      : {
+          reason:
+            status === 'disabled'
+              ? 'ORT WebGPU kernel profiling is disabled'
+              : 'unavailable on native WebGPU EP: ORT 1.27 profiling.ondata is JSEP-only; no kernel events received',
+        }),
+    eventCount,
+    kernelGpuMsTotal: eventCount > 0 ? Number(totalMs.toFixed(6)) : null,
+    topPrograms: eventCount > 0 ? topPrograms : null,
+  };
+}
+
 function ortProfilingSummary(): OrtWebGpuProfilingSummary {
   const byProgram = new Map<string, { count: number; gpuMs: number }>();
   for (const record of ortWebGpuProfileRecords) {
@@ -770,15 +802,15 @@ function ortProfilingSummary(): OrtWebGpuProfilingSummary {
     value.gpuMs += record.gpuMs;
     byProgram.set(record.programName, value);
   }
-  return {
-    enabled: requestedOrtWebGpuProfiling(),
-    eventCount: ortWebGpuProfileEventCount,
-    kernelGpuMsTotal: Number(ortWebGpuProfileTotalMs.toFixed(6)),
-    topPrograms: Array.from(byProgram.entries())
+  return webGpuProfilingSummary(
+    requestedOrtWebGpuProfiling(),
+    ortWebGpuProfileEventCount,
+    ortWebGpuProfileTotalMs,
+    Array.from(byProgram.entries())
       .map(([programName, value]) => ({ programName, count: value.count, gpuMs: Number(value.gpuMs.toFixed(6)) }))
       .sort((a, b) => b.gpuMs - a.gpuMs)
       .slice(0, 12),
-  };
+  );
 }
 
 const webGpuApiStats: OrtWebGpuApiInstrumentationSummary = {
@@ -924,13 +956,14 @@ export async function waitForOrtWebGpuDiagnostics(): Promise<void> {
 }
 
 export function subtractOrtWebGpuDiagnosticsSnapshot(after: OrtWebGpuDiagnosticsSnapshot, before: OrtWebGpuDiagnosticsSnapshot): OrtWebGpuDiagnosticsSnapshot {
-  const beforePrograms = new Map(before.profiling.topPrograms.map((entry) => [entry.programName, entry]));
+  const beforePrograms = new Map(before.profiling.topPrograms?.map((entry) => [entry.programName, entry]));
   return {
-    profiling: {
-      enabled: after.profiling.enabled,
-      eventCount: after.profiling.eventCount - before.profiling.eventCount,
-      kernelGpuMsTotal: Number((after.profiling.kernelGpuMsTotal - before.profiling.kernelGpuMsTotal).toFixed(6)),
-      topPrograms: after.profiling.topPrograms
+    profiling: webGpuProfilingSummary(
+      after.profiling.enabled,
+      after.profiling.eventCount - before.profiling.eventCount,
+      // Null cumulative totals have no events, so contribute nothing to a real-event delta.
+      (after.profiling.kernelGpuMsTotal ?? 0) - (before.profiling.kernelGpuMsTotal ?? 0),
+      (after.profiling.topPrograms ?? [])
         .map((entry) => {
           const prev = beforePrograms.get(entry.programName);
           return { programName: entry.programName, count: entry.count - (prev?.count ?? 0), gpuMs: Number((entry.gpuMs - (prev?.gpuMs ?? 0)).toFixed(6)) };
@@ -938,7 +971,7 @@ export function subtractOrtWebGpuDiagnosticsSnapshot(after: OrtWebGpuDiagnostics
         .filter((entry) => entry.count > 0 || entry.gpuMs > 0)
         .sort((a, b) => b.gpuMs - a.gpuMs)
         .slice(0, 12),
-    },
+    ),
     api: {
       ...after.api,
       submitCount: after.api.submitCount - before.api.submitCount,

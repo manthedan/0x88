@@ -607,7 +607,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     await ort.waitForOrtWebGpuDiagnostics();
     const postprocessStarted = ort.tinyLeelaNowMs();
     const webgpuDelta = ort.subtractOrtWebGpuDiagnosticsSnapshot(ort.getOrtWebGpuDiagnosticsSnapshot(), webgpuBefore);
-    const baseTiming: Record<string, number | string | undefined> = {
+    const baseTiming: Record<string, number | string | null | undefined> = {
       backend: 'ort-onnx',
       inputBuildMs: encodeMs,
       ortRunMs,
@@ -617,6 +617,8 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       readbackBytes: physicalBatchSize * (LC0_POLICY_SIZE + LC0_WDL_SIZE + LC0_MLH_SIZE) * 4,
       readbackMapCount: webgpuDelta.api.mapAsyncCount,
       ortKernelCount: webgpuDelta.profiling.eventCount,
+      ortKernelProfileStatus: webgpuDelta.profiling.status,
+      ortKernelProfileReason: webgpuDelta.profiling.reason,
       ortKernelGpuMs: webgpuDelta.profiling.kernelGpuMsTotal,
       webgpuSubmitCount: webgpuDelta.api.submitCount,
       webgpuSubmittedCommandBufferCount: webgpuDelta.api.submittedCommandBufferCount,
