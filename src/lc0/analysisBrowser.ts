@@ -3063,7 +3063,6 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   const runId = ++activeAnalysisRunId;
   const controller = new AbortController();
   analysisAbort = controller;
-  analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
   analyzing = true;
   el('stop').toggleAttribute('disabled', false);
   el('analyze').toggleAttribute('disabled', true);
@@ -3077,6 +3076,8 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     el('analyze').toggleAttribute('disabled', false);
     return;
   }
+  // Snapshot after the terminal-position return, which skips the finally that clears it.
+  analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
   const selectedLabels = rows.map((row) => rowLabel(row)).join(' + ');
   const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
   el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
