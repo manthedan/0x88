@@ -5726,7 +5726,9 @@ fn main() {
   }
   for (var i = 0u; i < count; i = i + 1u) {
     for (var j = i + 1u; j < count; j = j + 1u) {
-      if (output[j * 3u + 2u] > output[i * 3u + 2u]) {
+      // Match the JS stable sort: equal priors retain original legal-move order.
+      if (output[j * 3u + 2u] > output[i * 3u + 2u] ||
+          (output[j * 3u + 2u] == output[i * 3u + 2u] && output[j * 3u] < output[i * 3u])) {
         let slot = output[i * 3u];
         let logit = output[i * 3u + 1u];
         let prior = output[i * 3u + 2u];
