@@ -317,6 +317,9 @@ function initialPerformanceDial(): PerformanceDial {
 const resourceBroker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: 2, dial: initialPerformanceDial() });
 const registeredBrokerEngines = new Set<string>();
 let scheduledAnalysisTimer: ReturnType<typeof setTimeout> | null = null;
+let analyzeAfterActiveRun = false;
+let reloadLc0AfterActiveRun = false;
+let disposeUnusedEnginesAfterActiveRun = false;
 
 function syncBrokerParticipants(rows: EngineRow[]): void {
   const desired = new Map<string, EngineFamily>();
@@ -366,6 +369,7 @@ let analysisPagehideHandler: ((event: PageTransitionEvent) => void) | null = nul
 let analysisAuditHandler: ((event: Event) => void) | null = null;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
+let analysisReloadAbort: AbortController | null = null;
 let reviewAbort: AbortController | null = null;
 let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
@@ -450,6 +454,10 @@ const BUILT_IN_ENGINE_PROFILES: BuiltInEngineAnalysisProfile[] = [
     lc0Runtime: 'onnx',
   },
 ];
+function builtInEngineProfiles(): BuiltInEngineAnalysisProfile[] {
+  if (!isV0DeployProfile()) return BUILT_IN_ENGINE_PROFILES;
+  return BUILT_IN_ENGINE_PROFILES.filter((profile) => profile.lc0Runtime === 'onnx' && !profileHasBt4(profile.rows));
+}
 let engineProfiles: EngineAnalysisProfile[] = [];
 let importedGames: ImportedGame[] = [];
 let importedPositionIndex: OpeningPositionIndex | null = null;
@@ -485,12 +493,14 @@ function currentBookStats(): OpeningMoveStat[] {
 let searchWorker: Worker | null = null;
 let workerReady = false;
 let workerBackend = '';
+let workerRuntime: Lc0AnalysisRuntime | '' = '';
 let workerSeq = 0;
 const workerPending = new Map<
   number,
   { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: WorkerSearchProgress) => void }
 >();
 let activeWorkerSearchId: number | null = null;
+let activeWorkerSearchProgressSeen = false;
 
 interface WorkerSearchResult {
   move?: string | null;
@@ -600,7 +610,22 @@ function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => 
   });
 }
 
-async function initWorker(): Promise<string> {
+function resetSearchWorker(reason: string): void {
+  activeWorkerSearchId = null;
+  activeWorkerSearchProgressSeen = false;
+  searchWorker?.terminate();
+  searchWorker = null;
+  workerReady = false;
+  workerBackend = '';
+  workerRuntime = '';
+  const error = new Error(reason);
+  error.name = 'AbortError';
+  for (const pending of workerPending.values()) pending.reject(error);
+  workerPending.clear();
+}
+
+async function initWorker(operationSignal?: AbortSignal): Promise<string> {
+  if (operationSignal?.aborted) throw new DOMException('LC0 backend load cancelled', 'AbortError');
   if (searchWorker && workerReady) return workerBackend;
   if (!searchWorker)
     searchWorker = selectedLc0Runtime().startsWith('hybrid-')
@@ -626,10 +651,12 @@ async function initWorker(): Promise<string> {
     for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 worker error'));
     workerPending.clear();
   });
-  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback'] }>(lc0InitMessage());
+  const runtime = selectedLc0Runtime();
+  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback'] }>(lc0InitMessage(runtime));
+  if (operationSignal?.aborted) throw new DOMException('LC0 backend load cancelled', 'AbortError');
   workerReady = true;
   workerBackend = ready.backend;
-  const runtime = selectedLc0Runtime();
+  workerRuntime = runtime;
   publishBrowserRuntimeAudit({
     source: 'lc0-analysis-worker',
     surface: 'analysis',
@@ -771,14 +798,27 @@ async function workerLc0Lines(
   requestedMultiPv: number,
   label = 'Lc0',
 ): Promise<AnalysisLine[]> {
-  const response = await postWorker<{ result: WorkerSearchResult }>(
-    { type: 'search', input: { positions }, visits, batchSize: 1, multiPv: requestedMultiPv, reportProgress: true },
-    (id) => {
-      activeWorkerSearchId = id;
-    },
-    (progress) => showAnalysisProgress(runId, fen, label, progress),
-  );
-  return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
+  let searchId: number | null = null;
+  try {
+    const response = await postWorker<{ result: WorkerSearchResult }>(
+      { type: 'search', input: { positions }, visits, batchSize: 1, multiPv: requestedMultiPv, reportProgress: true },
+      (id) => {
+        searchId = id;
+        activeWorkerSearchId = id;
+        activeWorkerSearchProgressSeen = false;
+      },
+      (progress) => {
+        if (activeWorkerSearchId === searchId) activeWorkerSearchProgressSeen = true;
+        showAnalysisProgress(runId, fen, label, progress);
+      },
+    );
+    return response.result.cancelled ? [] : lc0AnalysisLines(response.result, fen, 'Lc0');
+  } finally {
+    if (activeWorkerSearchId === searchId) {
+      activeWorkerSearchId = null;
+      activeWorkerSearchProgressSeen = false;
+    }
+  }
 }
 
 function modelProgressEl(): HTMLElement {
@@ -797,6 +837,14 @@ function modelProgressEl(): HTMLElement {
 
 const loadingProgressItems = new Map<string, LoadingProgressItem>();
 const preloadedAnalysisAssetUrls = new Set<string>();
+interface AnalysisAssetPreload {
+  controller: AbortController;
+  consumers: Map<AbortSignal, number>;
+  promise: Promise<void>;
+}
+const preloadingAnalysisAssetPromises = new Map<string, AnalysisAssetPreload>();
+const analysisAssetPrefetchControllers = new Map<EngineRow, AbortController>();
+let analysisAssetPreloadSequence = 0;
 const preparedCpuEngineKeys = new Set<string>();
 
 function renderLoadingProgressItems(): void {
@@ -1083,7 +1131,7 @@ function builtInProfileValue(id: string): string {
   return `${BUILT_IN_PROFILE_VALUE_PREFIX}${id}`;
 }
 function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_KEY) ?? ''): void {
-  const builtInOptions = BUILT_IN_ENGINE_PROFILES.map(
+  const builtInOptions = builtInEngineProfiles().map(
     (profile) =>
       `<option value="${htmlEscape(builtInProfileValue(profile.id))}"${builtInProfileValue(profile.id) === selected ? ' selected' : ''}>${htmlEscape(profile.name)}</option>`,
   );
@@ -1099,7 +1147,7 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
     ...savedOptions,
     '</optgroup>',
   ].join('');
-  const builtIn = BUILT_IN_ENGINE_PROFILES.find((profile) => builtInProfileValue(profile.id) === selected);
+  const builtIn = builtInEngineProfiles().find((profile) => builtInProfileValue(profile.id) === selected);
   const saved = engineProfiles.find((profile) => profile.name === selected);
   const profile = builtIn ?? saved;
   inputEl('engineProfileName').value = saved?.name ?? '';
@@ -1108,18 +1156,24 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
     : 'Manual engine setup. Choose a built-in profile or save the current engine rows.';
 }
 function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): void {
-  const runtimeChanged = selectedLc0Runtime() !== profile.lc0Runtime;
+  const runtime = normalizeLc0Runtime(profile.lc0Runtime);
+  const runtimeChanged = selectedLc0Runtime() !== runtime;
+  cancelAllAnalysisAssetPrefetches();
   engineRows = profileRowsForUse(profile.rows, true);
   inputEl('multiPvInput').value = String(profile.multiPv);
-  selectEl('lc0RuntimeSelect').value = profile.lc0Runtime;
+  selectEl('lc0RuntimeSelect').value = runtime;
   if (options.persistLast !== false) storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, profile.name);
   renderEngineList();
   renderEngineProfiles(options.selected ?? profile.name);
   el('engineProfileSummary').textContent = profileSummary(profile, options.note);
-  disposeUnusedEngines();
   lineCache.clear();
   completeAnalysisKeys.clear();
-  if (runtimeChanged) void reloadLc0Backend(true);
+  if (deferAnalysisSettingsRefresh({ reloadLc0: runtimeChanged, disposeUnusedEngines: true })) {
+    for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
+    return;
+  }
+  disposeUnusedEngines();
+  if (runtimeChanged) void reloadLc0Backend('force');
   else void analyzeCurrent();
 }
 function saveCurrentEngineProfile(): void {
@@ -1445,13 +1499,13 @@ function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
 
 function renderEngineList(): void {
   engineRows = engineRows.map((row, index) => {
-    const normalized = normalizeDeployEngineRow(row, 'analysis', index);
-    const options = variantOptions(normalized.family);
-    const selected = options.find((option) => option.value === normalized.variant);
+    Object.assign(row, normalizeDeployEngineRow(row, 'analysis', index));
+    const options = variantOptions(row.family);
+    const selected = options.find((option) => option.value === row.variant);
     if (!selected || (selected.disabled && !/\(checking\b/.test(selected.label))) {
-      normalized.variant = options.find((option) => !option.disabled)?.value ?? defaultVariant(normalized.family);
+      row.variant = options.find((option) => !option.disabled)?.value ?? defaultVariant(row.family);
     }
-    return normalized;
+    return row;
   });
   const families = analysisEngineFamilyOptions();
   el('engineList').innerHTML = engineRows
@@ -2614,19 +2668,68 @@ async function copyReviewPgn(): Promise<void> {
   }
 }
 
-function cancelActiveAnalysisRun(): void {
+function hasActiveAnalysisRun(): boolean {
+  return (analyzing && analysisAbort !== null && !analysisAbort.signal.aborted) || (analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted);
+}
+
+function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): boolean {
+  if (!hasActiveAnalysisRun()) return false;
+  analyzeAfterActiveRun = true;
+  reloadLc0AfterActiveRun ||= options.reloadLc0 === true;
+  disposeUnusedEnginesAfterActiveRun ||= options.disposeUnusedEngines === true;
+  return true;
+}
+
+function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
+  analyzeAfterActiveRun = false;
+  if (!options.preserveDeferredMaintenance) {
+    reloadLc0AfterActiveRun = false;
+    disposeUnusedEnginesAfterActiveRun = false;
+  }
   if (scheduledAnalysisTimer) {
     clearTimeout(scheduledAnalysisTimer);
     scheduledAnalysisTimer = null;
   }
+  const reloadController = analysisReloadAbort;
+  analysisReloadAbort = null;
+  reloadController?.abort();
+  if (reloadController) {
+    disposeRuntimeResources();
+    analyzing = false;
+    clearAnalysisSearchProgress();
+    hideModelProgress();
+    el('stop').toggleAttribute('disabled', true);
+    el('analyze').toggleAttribute('disabled', false);
+    selectEl('lc0RuntimeSelect').disabled = false;
+    el('backend').textContent = 'not loaded';
+    el('message').textContent = 'Analysis stopped during LC0 backend reload.';
+  }
   analysisAbort?.abort();
-  if (activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  if (activeWorkerSearchId !== null && searchWorker) {
+    if (workerRuntime.startsWith('hybrid-') && !activeWorkerSearchProgressSeen) {
+      resetSearchWorker('LC0 hybrid worker initialization cancelled');
+      analyzing = false;
+      clearAnalysisSearchProgress();
+      hideModelProgress();
+      el('stop').toggleAttribute('disabled', true);
+      el('analyze').toggleAttribute('disabled', false);
+      selectEl('lc0RuntimeSelect').disabled = false;
+      el('backend').textContent = 'not loaded';
+      el('message').textContent = 'Analysis stopped during LC0 hybrid backend initialization.';
+    } else {
+      searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+    }
+  }
   for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
 }
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
   if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
-  cancelActiveAnalysisRun();
+  if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
+    analyzeAfterActiveRun = true;
+    return;
+  }
+  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
   scheduledAnalysisTimer = setTimeout(() => {
     scheduledAnalysisTimer = null;
     void analyzeCurrent(options);
@@ -2702,45 +2805,148 @@ function jsSidecarWasmUrl(jsUrl: string): string | undefined {
   }
 }
 
+function analysisCpuEngineAssetUrls(row: EngineRow): (string | undefined)[] {
+  if (row.family === 'sf') {
+    const kind = row.variant === 'full' ? 'full' : 'lite';
+    const url = stockfishFlavorUrl(
+      threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : kind === 'lite' ? 'lite-single' : 'single',
+    );
+    return [url, jsSidecarWasmUrl(url)];
+  }
+  if (row.family === 'viridithas') return [viridithasVariantForKey(row.variant).wasmUrl];
+  if (row.family === 'berserk') {
+    const variant = berserkVariantForKey(row.variant);
+    return [variant.jsUrl, variant.wasmUrl, variant.dataUrl, variant.nnueUrl];
+  }
+  if (row.family === 'plentychess') {
+    const variant = plentyChessVariantForKey(row.variant);
+    return [variant.jsUrl, variant.wasmUrl, variant.dataUrl];
+  }
+  if (row.family === 'stormphrax') {
+    const variant = stormphraxVariantForKey(row.variant);
+    return [variant.jsUrl, variant.wasmUrl, variant.dataUrl];
+  }
+  if (row.family === 'reckless') {
+    const variant = recklessVariantForKey(row.variant);
+    return [variant.wasmUrl, variant.nnueUrl];
+  }
+  return [];
+}
+
+function analysisAssetAbortError(): DOMException {
+  return new DOMException('Analysis asset download cancelled', 'AbortError');
+}
+
+function createAnalysisAssetPreload(engineLabel: string, rawUrl: string): AnalysisAssetPreload {
+  const controller = new AbortController();
+  const id = `asset:${++analysisAssetPreloadSequence}:${engineLabel}:${rawUrl}`;
+  const label = `${engineLabel} · ${assetFileLabel(rawUrl)}`;
+  const entry: AnalysisAssetPreload = { controller, consumers: new Map(), promise: Promise.resolve() };
+  entry.promise = (async () => {
+    showLoadingProgressItem(id, { label, phase: 'Downloading' });
+    try {
+      const response = await fetch(rawUrl, { cache: 'force-cache', signal: controller.signal });
+      if (!response.ok) throw new Error(`failed to fetch ${assetFileLabel(rawUrl)}: HTTP ${response.status}`);
+      const totalBytes = Number(response.headers.get('x-artifact-content-length') ?? response.headers.get('content-length') ?? 0) || undefined;
+      if (!response.body) {
+        const bytes = await response.arrayBuffer();
+        showLoadingProgressItem(id, { label, phase: 'Downloading', loadedBytes: bytes.byteLength, totalBytes: totalBytes ?? bytes.byteLength });
+        preloadedAnalysisAssetUrls.add(rawUrl);
+        return;
+      }
+      const reader = response.body.getReader();
+      let loadedBytes = 0;
+      let lastReport = 0;
+      for (;;) {
+        if (controller.signal.aborted) throw analysisAssetAbortError();
+        const { done, value } = await reader.read();
+        if (done) break;
+        loadedBytes += value.byteLength;
+        const now = performance.now();
+        if (now - lastReport > 250) {
+          lastReport = now;
+          showLoadingProgressItem(id, { label, phase: 'Downloading', loadedBytes, totalBytes });
+        }
+      }
+      showLoadingProgressItem(id, { label, phase: 'Downloaded', loadedBytes, totalBytes: totalBytes ?? loadedBytes });
+      preloadedAnalysisAssetUrls.add(rawUrl);
+    } finally {
+      if (preloadingAnalysisAssetPromises.get(rawUrl) === entry) preloadingAnalysisAssetPromises.delete(rawUrl);
+      hideLoadingProgressItem(id);
+    }
+  })();
+  preloadingAnalysisAssetPromises.set(rawUrl, entry);
+  return entry;
+}
+async function waitForAnalysisAssetPreload(entry: AnalysisAssetPreload, rawUrl: string, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw analysisAssetAbortError();
+  entry.consumers.set(signal, (entry.consumers.get(signal) ?? 0) + 1);
+  let rejectAbort: (reason: DOMException) => void = () => undefined;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(analysisAssetAbortError());
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    await Promise.race([entry.promise, abortPromise]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+    const remaining = (entry.consumers.get(signal) ?? 1) - 1;
+    if (remaining > 0) entry.consumers.set(signal, remaining);
+    else entry.consumers.delete(signal);
+    if (!entry.consumers.size && !preloadedAnalysisAssetUrls.has(rawUrl) && !entry.controller.signal.aborted) entry.controller.abort();
+  }
+}
+
 async function preloadAnalysisAsset(engineLabel: string, rawUrl: string | undefined, signal: AbortSignal): Promise<void> {
   if (!rawUrl || preloadedAnalysisAssetUrls.has(rawUrl)) return;
-  const id = `asset:${engineLabel}:${rawUrl}`;
-  const label = `${engineLabel} · ${assetFileLabel(rawUrl)}`;
-  showLoadingProgressItem(id, { label, phase: 'Downloading' });
-  try {
-    const response = await fetch(rawUrl, { cache: 'force-cache', signal });
-    if (!response.ok) throw new Error(`failed to fetch ${assetFileLabel(rawUrl)}: HTTP ${response.status}`);
-    const totalBytes = Number(response.headers.get('x-artifact-content-length') ?? response.headers.get('content-length') ?? 0) || undefined;
-    if (!response.body) {
-      const bytes = await response.arrayBuffer();
-      showLoadingProgressItem(id, { label, phase: 'Downloading', loadedBytes: bytes.byteLength, totalBytes: totalBytes ?? bytes.byteLength });
-      preloadedAnalysisAssetUrls.add(rawUrl);
+  for (;;) {
+    if (signal.aborted) throw analysisAssetAbortError();
+    let entry = preloadingAnalysisAssetPromises.get(rawUrl);
+    if (!entry || entry.controller.signal.aborted) entry = createAnalysisAssetPreload(engineLabel, rawUrl);
+    try {
+      await waitForAnalysisAssetPreload(entry, rawUrl, signal);
       return;
+    } catch (error) {
+      if (signal.aborted || (error as Error).name !== 'AbortError' || !entry.controller.signal.aborted) throw error;
     }
-    const reader = response.body.getReader();
-    let loadedBytes = 0;
-    let lastReport = 0;
-    for (;;) {
-      if (signal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
-      const { done, value } = await reader.read();
-      if (done) break;
-      loadedBytes += value.byteLength;
-      const now = performance.now();
-      if (now - lastReport > 250) {
-        lastReport = now;
-        showLoadingProgressItem(id, { label, phase: 'Downloading', loadedBytes, totalBytes });
-      }
-    }
-    showLoadingProgressItem(id, { label, phase: 'Downloaded', loadedBytes, totalBytes: totalBytes ?? loadedBytes });
-    preloadedAnalysisAssetUrls.add(rawUrl);
-  } finally {
-    hideLoadingProgressItem(id);
   }
 }
 
 async function preloadAnalysisAssets(engineLabel: string, urls: (string | undefined)[], signal: AbortSignal): Promise<void> {
   const uniqueUrls = [...new Set(urls.filter((url): url is string => Boolean(url)))];
   for (const url of uniqueUrls) await preloadAnalysisAsset(engineLabel, url, signal);
+}
+
+function cancelAnalysisAssetPrefetch(row: EngineRow): void {
+  const controller = analysisAssetPrefetchControllers.get(row);
+  if (!controller) return;
+  analysisAssetPrefetchControllers.delete(row);
+  controller.abort();
+}
+
+function cancelAllAnalysisAssetPrefetches(): void {
+  for (const controller of analysisAssetPrefetchControllers.values()) controller.abort();
+  analysisAssetPrefetchControllers.clear();
+}
+
+function prefetchAnalysisAssetsForAddedRow(row: EngineRow): void {
+  const urls = analysisCpuEngineAssetUrls(row);
+  if (!urls.some(Boolean) || mountAbort.signal.aborted) return;
+  cancelAnalysisAssetPrefetch(row);
+  const controller = new AbortController();
+  const abortOnUnmount = () => controller.abort();
+  analysisAssetPrefetchControllers.set(row, controller);
+  mountAbort.signal.addEventListener('abort', abortOnUnmount, { once: true });
+  const label = rowLabel(row);
+  void preloadAnalysisAssets(label, urls, controller.signal)
+    .catch((error) => {
+      if ((error as Error).name !== 'AbortError' && !controller.signal.aborted) console.warn(`${label} asset prefetch failed`, error);
+    })
+    .finally(() => {
+      mountAbort.signal.removeEventListener('abort', abortOnUnmount);
+      if (analysisAssetPrefetchControllers.get(row) === controller) analysisAssetPrefetchControllers.delete(row);
+    });
 }
 
 async function prepareCpuEngine(
@@ -2763,6 +2969,7 @@ async function prepareCpuEngine(
       return;
     }
     await preloadAnalysisAssets(label, urls, signal);
+    if (signal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
     showLoadingProgressItem(`startup:${label}`, { label, phase: 'Starting engine' });
     try {
       await start(signal);
@@ -2774,17 +2981,67 @@ async function prepareCpuEngine(
   if (!prepared) beginSearch();
 }
 
+async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
+  if (mountAbort.signal.aborted) return;
+  if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
+    analyzeAfterActiveRun ||= analyzeAfterLoad;
+    return;
+  }
+  const controller = new AbortController();
+  analysisReloadAbort = controller;
+  analyzing = false;
+  clearAnalysisSearchProgress();
+  el('stop').toggleAttribute('disabled', false);
+  const loaded = await reloadLc0Backend('none', controller.signal);
+  if (analysisReloadAbort !== controller) return;
+  analysisReloadAbort = null;
+  if (!loaded || controller.signal.aborted) {
+    el('stop').toggleAttribute('disabled', true);
+    el('analyze').toggleAttribute('disabled', false);
+    selectEl('lc0RuntimeSelect').disabled = false;
+    return;
+  }
+  if (reloadLc0AfterActiveRun || disposeUnusedEnginesAfterActiveRun) {
+    analyzeAfterActiveRun ||= analyzeAfterLoad;
+    void analyzeCurrent({ force: true });
+    return;
+  }
+  const shouldAnalyze = analyzeAfterLoad || analyzeAfterActiveRun;
+  analyzeAfterActiveRun = false;
+  el('stop').toggleAttribute('disabled', true);
+  if (shouldAnalyze) void analyzeCurrent({ force: true });
+}
+
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
+  if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
+    analyzeAfterActiveRun = true;
+    return;
+  }
+  const reloadBeforeRun = reloadLc0AfterActiveRun;
+  const disposeBeforeRun = disposeUnusedEnginesAfterActiveRun;
+  // A replacement search must apply settings maintenance before it snapshots
+  // rows/cache keys, otherwise a newly selected runtime can run on the old worker.
+  cancelActiveAnalysisRun();
+  if (disposeBeforeRun) disposeUnusedEngines();
+  if (reloadBeforeRun) {
+    analysisAbort = null;
+    analyzing = false;
+    clearAnalysisSearchProgress();
+    void reloadLc0ForAnalysis(true);
+    return;
+  }
   const rows = activeEngineRows();
   if (!rows.length) {
     el('message').textContent = 'Add an engine to analyze.';
     return;
   }
+  const needsSmallLc0Backend = rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
+  if (needsSmallLc0Backend && !workerReady && !searcher) {
+    void reloadLc0ForAnalysis(true);
+    return;
+  }
   const runId = ++activeAnalysisRunId;
-  // Interrupt any in-flight analysis: abort the Stockfish signal and cancel the
-  // worker LC0 / big-net searches, so a new position takes over immediately.
-  cancelActiveAnalysisRun();
   const controller = new AbortController();
   analysisAbort = controller;
   analyzing = true;
@@ -2805,6 +3062,9 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
   clearAnalysisSearchProgress();
   syncBrokerParticipants(rows);
+  let runDeferredAnalysis = false;
+  let reloadDeferredLc0 = false;
+  let disposeDeferredEngines = false;
   try {
     const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
     const publishLines = () => {
@@ -3065,11 +3325,20 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     if (analysisAbort === controller && runId === activeAnalysisRunId && !mountAbort.signal.aborted) {
       analyzing = false;
       analysisAbort = null;
+      runDeferredAnalysis = analyzeAfterActiveRun;
+      reloadDeferredLc0 = reloadLc0AfterActiveRun;
+      disposeDeferredEngines = disposeUnusedEnginesAfterActiveRun;
+      analyzeAfterActiveRun = false;
+      reloadLc0AfterActiveRun = false;
+      disposeUnusedEnginesAfterActiveRun = false;
       clearAnalysisSearchProgress();
       document.getElementById('stop')?.toggleAttribute('disabled', true);
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
   }
+  if (disposeDeferredEngines) disposeUnusedEngines();
+  if (reloadDeferredLc0) void reloadLc0ForAnalysis(runDeferredAnalysis);
+  else if (runDeferredAnalysis) void analyzeCurrent();
 }
 
 function afterNavigation() {
@@ -3308,12 +3577,14 @@ function wireEvents() {
     void analyzeCurrent({ force: true });
   });
   el('stop').addEventListener('click', () => {
-    cancelActiveAnalysisRun();
+    cancelAllAnalysisAssetPrefetches();
+    cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
   });
   el('engineList').addEventListener('change', (event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     const i = Number(target.dataset.i);
     if (Number.isNaN(i) || !engineRows[i]) return;
+    const previousRow = engineRows[i];
     if (target.classList.contains('row-fam')) {
       const family = target.value as EngineFamily;
       engineRows[i].family = family;
@@ -3340,15 +3611,20 @@ function wireEvents() {
       engineRows[i].strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(target.value) || meta.def)));
     }
     engineRows[i] = normalizeDeployEngineRow(engineRows[i], 'analysis', i);
+    cancelAnalysisAssetPrefetch(previousRow);
     reconcileActiveRuntimeFallbackWarning();
     persistManualEngineRows();
-    disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
+    if (deferAnalysisSettingsRefresh({ disposeUnusedEngines: true })) {
+      prefetchAnalysisAssetsForAddedRow(engineRows[i]);
+      return;
+    }
+    disposeUnusedEngines();
     scheduleAnalyzeCurrent();
   });
   el('engineProfileSelect').addEventListener('change', () => {
     const value = selectEl('engineProfileSelect').value;
-    const builtIn = BUILT_IN_ENGINE_PROFILES.find((entry) => builtInProfileValue(entry.id) === value);
+    const builtIn = builtInEngineProfiles().find((entry) => builtInProfileValue(entry.id) === value);
     if (builtIn) {
       applyEngineProfile(builtIn, { selected: value, persistLast: false, note: builtIn.note });
       return;
@@ -3357,13 +3633,18 @@ function wireEvents() {
     if (profile) applyEngineProfile(profile);
     else {
       storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY);
+      cancelAllAnalysisAssetPrefetches();
       engineRows = loadManualEngineRows() ?? [{ family: 'lc0', variant: 'small', strength: 400 }];
       inputEl('engineProfileName').value = '';
       renderEngineProfiles('');
       renderEngineList();
-      disposeUnusedEngines();
       lineCache.clear();
       completeAnalysisKeys.clear();
+      if (deferAnalysisSettingsRefresh({ disposeUnusedEngines: true })) {
+        for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
+        return;
+      }
+      disposeUnusedEngines();
       scheduleAnalyzeCurrent();
     }
   });
@@ -3382,27 +3663,34 @@ function wireEvents() {
     if (!button) return;
     const i = Number(button.dataset.i);
     if (Number.isNaN(i) || engineRows.length <= 1) return;
-    engineRows.splice(i, 1);
+    const [removedRow] = engineRows.splice(i, 1);
+    cancelAnalysisAssetPrefetch(removedRow);
     persistManualEngineRows();
     renderEngineList();
-    disposeUnusedEngines();
     lineCache.delete(tree.current.fen);
+    if (deferAnalysisSettingsRefresh({ disposeUnusedEngines: true })) return;
+    disposeUnusedEngines();
     scheduleAnalyzeCurrent();
   });
   el('addEngine').addEventListener('click', () => {
     const family = nextEngineFamily();
-    engineRows.push({ family, variant: defaultVariant(family), strength: defaultStrength(family) });
+    const row = normalizeDeployEngineRow({ family, variant: defaultVariant(family), strength: defaultStrength(family) }, 'analysis', engineRows.length);
+    engineRows.push(row);
     persistManualEngineRows();
     renderEngineList();
     lineCache.delete(tree.current.fen);
+    if (deferAnalysisSettingsRefresh()) {
+      prefetchAnalysisAssetsForAddedRow(engineRows[engineRows.length - 1]);
+      return;
+    }
     scheduleAnalyzeCurrent();
   });
   el('lc0RuntimeSelect').addEventListener('change', () => {
-    void reloadLc0Backend();
+    if (!deferAnalysisSettingsRefresh({ reloadLc0: true })) void reloadLc0Backend();
   });
   el('multiPvInput').addEventListener('change', () => {
     lineCache.delete(tree.current.fen);
-    scheduleAnalyzeCurrent();
+    if (!deferAnalysisSettingsRefresh()) scheduleAnalyzeCurrent();
   });
   el('reviewGame').addEventListener('click', () => {
     void runGameReview();
@@ -3553,6 +3841,10 @@ function wireEvents() {
 function disposeRuntimeResources(): void {
   analysisAbort?.abort();
   analysisAbort = null;
+  analyzeAfterActiveRun = false;
+  reloadLc0AfterActiveRun = false;
+  disposeUnusedEnginesAfterActiveRun = false;
+  cancelAllAnalysisAssetPrefetches();
   preparedCpuEngineKeys.clear();
   const reviewWasRunning = reviewAbort !== null;
   reviewAbort?.abort();
@@ -3566,13 +3858,7 @@ function disposeRuntimeResources(): void {
     if (status) status.textContent = 'Review stopped after runtime changed.';
   }
   if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
-  activeWorkerSearchId = null;
-  searchWorker?.terminate();
-  searchWorker = null;
-  workerReady = false;
-  workerBackend = '';
-  for (const pending of workerPending.values()) pending.reject(new Error('LC0 worker disposed'));
-  workerPending.clear();
+  resetSearchWorker('LC0 worker disposed');
   for (const key of ANALYSIS_BIG_NET_KEYS) {
     peekBigNetSearcher(key)?.cancel();
     releaseBigNetSearcher(key);
@@ -3593,6 +3879,8 @@ function disposeRuntimeResources(): void {
 }
 
 function disposePageResources(): void {
+  analysisReloadAbort?.abort();
+  analysisReloadAbort = null;
   disposeRuntimeResources();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   void maia3PanelEvaluator?.dispose();
@@ -3611,8 +3899,9 @@ function disposePageResources(): void {
   ground = null;
 }
 
-async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = mountAbort.signal): Promise<boolean> {
-  if (isStaleMount(mountSignal)) return false;
+async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = mountAbort.signal, operationSignal?: AbortSignal): Promise<boolean> {
+  const loadCancelled = () => isStaleMount(mountSignal) || operationSignal?.aborted === true;
+  if (loadCancelled()) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
@@ -3620,16 +3909,17 @@ async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = 
   el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)} in a worker…`;
   showModelProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
-    el('backend').textContent = await initWorker();
-    if (isStaleMount(mountSignal)) return false;
+    const backend = await initWorker(operationSignal);
+    if (loadCancelled()) return false;
+    el('backend').textContent = backend;
     hideModelProgress();
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
-    if (runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
+    if (!loadCancelled() && runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
     return true;
   } catch (workerError) {
-    if (isStaleMount(mountSignal)) return false;
+    if (loadCancelled()) return false;
     if (runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
@@ -3646,17 +3936,25 @@ async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = 
           batch: lc0WholeModelPhysicalBatch(),
           fetchTensorCache: lc0WholeModelTensorCache(),
           logger: (line) => console.info('[lc0 whole-model analysis]', line),
+          signal: operationSignal,
         });
       } else {
         const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
           cache: false,
-          onProgress: (loaded, total) => showModelProgress('Lc0 small net', loaded, total, 'Downloading'),
+          signal: operationSignal,
+          onProgress: (loaded, total) => {
+            if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
+          },
         });
         nextEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
       }
+      if (loadCancelled()) {
+        void nextEvaluator?.dispose?.();
+        return false;
+      }
       const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
       const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
-      if (isStaleMount(mountSignal)) {
+      if (loadCancelled()) {
         void nextEvaluator.dispose?.();
         return false;
       }
@@ -3681,10 +3979,10 @@ async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = 
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
       hideModelProgress();
-      if (!isStaleMount(mountSignal) && runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
+      if (!loadCancelled() && runAutoAnalyze && inputEl('autoAnalyze').checked) void analyzeCurrent();
       return true;
     } catch (error) {
-      if (isStaleMount(mountSignal)) return false;
+      if (loadCancelled()) return false;
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `Model load failed: ${(error as Error).message}`;
       hideModelProgress();
@@ -3693,14 +3991,16 @@ async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = 
   }
 }
 
-async function reloadLc0Backend(forceAnalyzeAfterLoad = false): Promise<void> {
+async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'auto', operationSignal?: AbortSignal): Promise<boolean> {
   lineCache.clear();
   completeAnalysisKeys.clear();
   disposeRuntimeResources();
+  if (operationSignal?.aborted) return false;
   reconcileActiveRuntimeFallbackWarning();
   renderRecklessRuntimeInfo();
-  const loaded = await loadLc0Backend(!forceAnalyzeAfterLoad);
-  if (loaded && forceAnalyzeAfterLoad) void analyzeCurrent();
+  const loaded = await loadLc0Backend(analyzeAfterLoad === 'auto', mountAbort.signal, operationSignal);
+  if (loaded && !operationSignal?.aborted && analyzeAfterLoad === 'force') void analyzeCurrent();
+  return loaded;
 }
 
 async function init(mountSignal: AbortSignal) {
@@ -3778,6 +4078,10 @@ function resetAnalysisPageState(): void {
   tree = new GameTree(params.get('fen') ?? START_FEN);
   orientation = 'white';
   analysisAbort = null;
+  analysisReloadAbort = null;
+  analyzeAfterActiveRun = false;
+  reloadLc0AfterActiveRun = false;
+  disposeUnusedEnginesAfterActiveRun = false;
   reviewAbort?.abort();
   reviewAbort = null;
   lastReview = null;
@@ -3814,14 +4118,25 @@ export function mountAnalysisBrowser(): () => void {
   const hook = (from: string, to: string) => {
     void onUserMove(from as Key, to as Key);
   };
-  (globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void }).__analysisUserMove = hook;
+  const schedulingStateHook = () => ({
+    analyzing,
+    searchActive: analysisAbort !== null && !analysisAbort.signal.aborted,
+    reloadActive: analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
+  });
+  type AnalysisSmokeGlobal = typeof globalThis & {
+    __analysisUserMove?: typeof hook;
+    __analysisSchedulingState?: typeof schedulingStateHook;
+  };
+  const smokeGlobal = globalThis as AnalysisSmokeGlobal;
+  smokeGlobal.__analysisUserMove = hook;
+  smokeGlobal.__analysisSchedulingState = schedulingStateHook;
   void init(controller.signal);
   return () => {
     controller.abort();
     if (mountAbort === controller) disposePageResources();
     // Only clear the test hook if it is still ours (a newer mount may have
     // installed its own).
-    const g = globalThis as unknown as { __analysisUserMove?: (from: string, to: string) => void };
-    if (g.__analysisUserMove === hook) delete g.__analysisUserMove;
+    if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
+    if (smokeGlobal.__analysisSchedulingState === schedulingStateHook) delete smokeGlobal.__analysisSchedulingState;
   };
 }
