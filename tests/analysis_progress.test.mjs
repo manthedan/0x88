@@ -6,7 +6,7 @@ const analysisSourceUrl = new URL('../src/lc0/analysisBrowser.ts', import.meta.u
 
 async function preparationSource() {
   const source = await readFile(analysisSourceUrl, 'utf8');
-  return source.slice(source.indexOf('async function preloadAnalysisAsset'), source.indexOf('async function analyzeCurrent'));
+  return source.slice(source.indexOf('function createAnalysisAssetPreload'), source.indexOf('async function analyzeCurrent'));
 }
 
 test('analysis model assets are only preloaded once per mounted page', async () => {

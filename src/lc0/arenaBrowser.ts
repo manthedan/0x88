@@ -786,7 +786,13 @@ function installExperimentalLc0RuntimeOption(_force = false): void {
 }
 
 function normalizeLc0Preset(value: string | null): Lc0ArenaPreset {
+  if (isV0DeployProfile() && value === 'benchmarked-small') return 'stable';
   return value === 'benchmarked-small' || value === 'custom' ? value : 'stable';
+}
+
+function installLc0PresetOptions(): void {
+  if (!isV0DeployProfile()) return;
+  selectEl('lc0PresetSelect').querySelector('option[value="benchmarked-small"]')?.remove();
 }
 
 function inferredLc0Preset(): Lc0ArenaPreset {
@@ -818,12 +824,14 @@ function setLc0PresetNote(preset = selectedLc0Preset()): void {
   } else if (preset === 'custom') {
     note.textContent = 'Custom mode: advanced runtime knobs are open. Only use these for experiments or reproducing old benchmark cells.';
   } else {
-    note.textContent =
-      'Stable default: LC0 Small via ORT with WebGPU/WASM fallback. Use the fast preset to test benchmarked eval speed in fixed-time arena games.';
+    note.textContent = isV0DeployProfile()
+      ? 'Stable deployment: LC0 Small via ORT with WebGPU/WASM fallback.'
+      : 'Stable default: LC0 Small via ORT with WebGPU/WASM fallback. Use the fast preset to test benchmarked eval speed in fixed-time arena games.';
   }
 }
 
 function applyLc0Preset(preset: Lc0ArenaPreset, options: { reload?: boolean } = {}): void {
+  preset = normalizeLc0Preset(preset);
   selectEl('lc0PresetSelect').value = preset;
   const advanced = el('lc0AdvancedRuntime') as HTMLDetailsElement;
   if (preset === 'benchmarked-small') {
@@ -4143,6 +4151,7 @@ async function init(mountSignal: AbortSignal) {
   if (isStaleMount(mountSignal)) return;
   renderBoard();
   installRuntimeAuditPanel();
+  installLc0PresetOptions();
   installExperimentalLc0RuntimeOption();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
   if (!isV0DeployProfile()) refreshRecklessVariantUi();

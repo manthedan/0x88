@@ -28,6 +28,13 @@ export function lc0WholeModelRuntimeRequested(params: URLSearchParams): boolean 
 }
 
 export function installExperimentalLc0RuntimeOption(select: HTMLSelectElement): void {
+  if (isV0DeployProfile()) {
+    for (const option of [...select.options]) {
+      if (option.value !== 'onnx') option.remove();
+    }
+    select.value = 'onnx';
+    return;
+  }
   if ([...select.options].some((option) => option.value === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)) return;
   const option = document.createElement('option');
   option.value = LC0_WHOLE_MODEL_WEBGPU_RUNTIME;

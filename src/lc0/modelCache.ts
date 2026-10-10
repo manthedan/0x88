@@ -96,6 +96,8 @@ export interface Lc0ModelLoadOptions {
    * manifest byte count and may be undefined.
    */
   onProgress?: (loadedBytes: number, totalBytes?: number) => void;
+  /** Cancels caller-owned fetches; signaled loads do not share in-flight work. */
+  signal?: AbortSignal;
   /** Request persistent browser storage after an explicit user cache opt-in. */
   requestPersistentStorage?: boolean;
   /** Minimum free quota retained after caching. Defaults to 64 MiB. */
@@ -678,7 +680,7 @@ const modelLoadFlights = new Map<string, ModelLoadFlight>();
 function modelLoadFlightKey(modelUrl: string, options: Lc0ModelLoadOptions): string | undefined {
   // Injectable stores intentionally opt out so tests and isolated callers do not
   // accidentally share a load across different persistence domains.
-  if (!options.cache || options.metadataStore) return undefined;
+  if (!options.cache || options.metadataStore || options.signal) return undefined;
   return JSON.stringify([
     absoluteUrl(modelUrl),
     options.cacheName ?? DEFAULT_CACHE_NAME,
@@ -726,11 +728,27 @@ export function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoadOption
   return entry.promise;
 }
 
+/**
+ * Waits for `promise` but rejects as soon as `signal` aborts. The underlying
+ * work is left running because metadata requests are shared through
+ * single-flight maps, and one caller's abort must not cancel another's wait.
+ */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoadOptions): Promise<Lc0ModelLoadResult> {
+  options.signal?.throwIfAborted();
   const started = nowMs();
   const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  const manifest = await fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl));
-  const resolved = await resolveArtifactUrl(modelUrl, manifest, channelUrl);
+  const manifest = await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
   const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
 
   if (!options.cache) {
@@ -746,8 +764,10 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
         telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs }),
       };
     }
-    const download = await fetchModelBytes(new Request(resolved.url), resolved.url, expectation.expectedBytes, options.onProgress);
+    const download = await fetchModelBytes(new Request(resolved.url, { signal: options.signal }), resolved.url, expectation.expectedBytes, options.onProgress);
+    options.signal?.throwIfAborted();
     const check = await verifyLc0ModelBytes(download.bytes, expectation);
+    options.signal?.throwIfAborted();
     if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
     return {
       model: download.bytes,
@@ -790,18 +810,22 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   const store = options.metadataStore ?? browserMetadataStore();
   const key = metadataKey(cacheName, resolved.url);
   const cacheKey = new Request(resolved.url);
-  const fetchRequest = new Request(resolved.url, { cache: 'force-cache' });
+  const fetchRequest = new Request(resolved.url, { cache: 'force-cache', signal: options.signal });
   const cache = await caches.open(cacheName);
   const storagePersistent = await requestPersistentStorage(options.requestPersistentStorage);
+  options.signal?.throwIfAborted();
   const cached = await cache.match(cacheKey);
 
   if (cached) {
     const cacheReadStarted = nowMs();
     const bytes = await cached.arrayBuffer();
+    options.signal?.throwIfAborted();
     const cacheReadMs = nowMs() - cacheReadStarted;
     const metadata = await ignoreMetadataFailure(store ? () => store.get(key) : undefined);
+    options.signal?.throwIfAborted();
     if (metadataMatches(metadata, bytes, expectation, options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS)) {
       await ignoreMetadataFailure(store ? () => store.put({ ...metadata, lastUsedAt: epochMs() }) : undefined);
+      options.signal?.throwIfAborted();
       return {
         model: bytes,
         url: resolved.url,
@@ -823,8 +847,10 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     }
 
     const check = await verifyLc0ModelBytes(bytes, expectation);
+    options.signal?.throwIfAborted();
     if (check.ok) {
       await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, resolved.url, expectation, check)) : undefined);
+      options.signal?.throwIfAborted();
       return {
         model: bytes,
         url: resolved.url,
@@ -846,8 +872,11 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     }
 
     await cache.delete(cacheKey);
+    options.signal?.throwIfAborted();
     await ignoreMetadataFailure(store ? () => store.delete(key) : undefined);
+    options.signal?.throwIfAborted();
     if (!(await cacheQuotaAllows(expectation.expectedBytes, options))) {
+      options.signal?.throwIfAborted();
       return {
         model: resolved.url,
         url: resolved.url,
@@ -861,7 +890,7 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
         telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs, cacheReadMs, hashMs: check.hashMs }),
       };
     }
-    const reloadRequest = new Request(resolved.url, { cache: 'reload' });
+    const reloadRequest = new Request(resolved.url, { cache: 'reload', signal: options.signal });
     const result = await fetchAndCacheModel(
       cache,
       cacheKey,
@@ -885,6 +914,7 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   }
 
   if (!(await cacheQuotaAllows(expectation.expectedBytes, options))) {
+    options.signal?.throwIfAborted();
     return {
       model: resolved.url,
       url: resolved.url,
@@ -919,14 +949,19 @@ async function fetchAndCacheModel(
   inheritedTelemetry: Pick<Lc0ModelLoadTelemetry, 'manifestMs' | 'cacheReadMs' | 'hashMs'> = {},
 ): Promise<Lc0ModelLoadResult> {
   const download = await fetchModelBytes(fetchRequest, fetchModelUrl, expectation.expectedBytes, options.onProgress);
+  options.signal?.throwIfAborted();
   const check = await verifyLc0ModelBytes(download.bytes, expectation);
+  options.signal?.throwIfAborted();
   if (!check.ok) throw new Error(`LC0 model validation failed for ${fetchModelUrl}: ${check.reason}`);
 
   const cacheWriteStarted = nowMs();
   await cache.put(cacheKey, new Response(download.bytes));
+  options.signal?.throwIfAborted();
   const cacheWriteMs = nowMs() - cacheWriteStarted;
   await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, fetchModelUrl, expectation, check)) : undefined);
+  options.signal?.throwIfAborted();
   await enforceModelCacheBounds(cache, cacheName, fetchModelUrl, store, options);
+  options.signal?.throwIfAborted();
   const hashMs = check.hashMs ?? 0;
   return {
     model: download.bytes,
