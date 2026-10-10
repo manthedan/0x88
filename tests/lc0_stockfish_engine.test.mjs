@@ -49,10 +49,13 @@ test('stockfish flavor helpers map browser Stockfish builds', () => {
   assert.equal(normalizeStockfishFlavor('full-threaded'), 'threaded');
   assert.equal(stockfishFlavorRequiresIsolation('single'), false);
   assert.equal(stockfishFlavorRequiresIsolation('threaded'), true);
-  assert.equal(stockfishFlavorUrl('lite-single').startsWith('/stockfish/stockfish-18-lite-single'), true);
-  assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-18-single.js');
-  assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-18-lite.js');
-  assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
+  assert.equal(stockfishFlavorUrl('lite-single').startsWith('/stockfish/stockfish-19-lite-single'), true);
+  assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-19-single.js');
+  assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-19-lite.js');
+  assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-19.js');
+  assert.equal(new StockfishEngine({}, stockfishFlavorUrl('threaded')).maxThreads(), 32);
+  assert.equal(new StockfishEngine({}, stockfishFlavorUrl('lite-threaded')).maxThreads(), 32);
+  assert.equal(new StockfishEngine({}, stockfishFlavorUrl('single')).maxThreads(), 1);
 });
 
 test('CPU engine hash budgets reflect each browser surface', () => {
@@ -72,10 +75,10 @@ test('production asset base hosts the full single-threaded Stockfish pair', asyn
   });
   try {
     const productionModule = await import(`../src/lc0/stockfishEngine.ts?r2-full=${Date.now()}`);
-    assert.equal(productionModule.stockfishFlavorUrl('single'), 'https://assets.0x88.app/stockfish/stockfish-18-single.js');
+    assert.equal(productionModule.stockfishFlavorUrl('single'), 'https://assets.0x88.app/stockfish/stockfish-19-single.js');
     const worker = productionModule.stockfishWorkerUrl(productionModule.stockfishFlavorUrl('single'));
     assert.match(worker.url, /^blob:/);
-    assert.match(worker.url, /stockfish-18-single\.wasm$/);
+    assert.match(worker.url, /stockfish-19-single\.wasm$/);
     URL.revokeObjectURL(worker.objectUrl);
   } finally {
     if (previousBase === undefined) delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
@@ -89,18 +92,18 @@ test('Stockfish lite-single uses relaxed SIMD when validated and falls back othe
   const originalValidate = WebAssembly.validate;
   try {
     WebAssembly.validate = () => true;
-    assert.equal(defaultStockfishUrl(), '/stockfish/stockfish-18-lite-single-relaxed.js');
-    assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-18-lite-single-relaxed.js');
-    assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-18-single.js');
-    assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-18-lite.js');
-    assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
+    assert.equal(defaultStockfishUrl(), '/stockfish/stockfish-19-lite-single-relaxed.js');
+    assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-19-lite-single-relaxed.js');
+    assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-19-single.js');
+    assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-19-lite.js');
+    assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-19.js');
 
     WebAssembly.validate = () => false;
-    assert.equal(defaultStockfishUrl(), '/stockfish/stockfish-18-lite-single.js');
-    assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-18-lite-single.js');
-    assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-18-single.js');
-    assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-18-lite.js');
-    assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-18.js');
+    assert.equal(defaultStockfishUrl(), '/stockfish/stockfish-19-lite-single.js');
+    assert.equal(stockfishFlavorUrl('lite-single'), '/stockfish/stockfish-19-lite-single.js');
+    assert.equal(stockfishFlavorUrl('single'), '/stockfish/stockfish-19-single.js');
+    assert.equal(stockfishFlavorUrl('lite-threaded'), '/stockfish/stockfish-19-lite.js');
+    assert.equal(stockfishFlavorUrl('threaded'), '/stockfish/stockfish-19.js');
   } finally {
     WebAssembly.validate = originalValidate;
   }
@@ -113,8 +116,8 @@ test('same-origin threaded Stockfish uses its native worker URL', () => {
     configurable: true,
   });
   try {
-    assert.deepEqual(stockfishWorkerUrl('/stockfish/stockfish-18-lite.js'), {
-      url: '/stockfish/stockfish-18-lite.js',
+    assert.deepEqual(stockfishWorkerUrl('/stockfish/stockfish-19-lite.js'), {
+      url: '/stockfish/stockfish-19-lite.js',
     });
   } finally {
     if (previousLocation === undefined) delete globalThis.location;

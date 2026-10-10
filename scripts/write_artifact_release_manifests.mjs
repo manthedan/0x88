@@ -21,7 +21,7 @@ const DEFAULT_SOURCE_MANIFESTS = [
   'public/models/maia3/manifest.json',
   'public/models/centipawn.manifest.json',
   'public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json',
-  'public/stockfish/stockfish-18.0.7.manifest.json',
+  'public/stockfish/stockfish-19.0.1.manifest.json',
   'public/reckless/reckless-wasip1.manifest.json',
   'public/viridithas/viridithas-wasip1.manifest.json',
   'public/berserk/berserk-emscripten-single-thread.manifest.json',

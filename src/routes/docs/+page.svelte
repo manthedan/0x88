@@ -405,17 +405,17 @@ onMount(() => {
   </div>
 
   <div class="engine-entry">
-    <h3 id="engines-stockfish">Stockfish 18 <a class="anchor-link" href="#engines-stockfish" aria-label="Link to this section">#</a></h3>
+    <h3 id="engines-stockfish">Stockfish 19 <a class="anchor-link" href="#engines-stockfish" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
       <dt>Project</dt><dd><a href="https://github.com/official-stockfish/Stockfish" rel="noopener">official-stockfish/Stockfish</a> &middot; browser package via <a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></dd>
       <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
       <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
-      <dt>Source</dt><dd><a href="https://assets.0x88.app/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/stockfish/stockfish-19.0.1-corresponding-source.tar.gz">stockfish-19.0.1-corresponding-source.tar.gz</a></dd>
     </dl>
-    <p>Stockfish is a community-developed UCI engine derived from Glaurung 2.1. It combines alpha-beta search with NNUE evaluation, and proposed changes are tested through the distributed Fishtest system. Stockfish 18 led the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and Stockfish finished first in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 ships the Stockfish.js 18.0.7 package in Lite and full-network forms.</p>
+    <p>Stockfish is a community-developed UCI engine derived from Glaurung 2.1. It combines alpha-beta search with NNUE evaluation, and proposed changes are tested through the distributed Fishtest system. Stockfish 18 led the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and Stockfish finished first in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 ships the Stockfish.js 19.0.1 package in Lite and full-network forms; SF19 uses new networks for both variants.</p>
     <div class="callout info">
       <h4>Relaxed SIMD candidate</h4>
-      <p>The Lite single-thread build has a feature-detected relaxed-SIMD candidate. On our Chromium public-asset validation set &mdash; opening, tactical, quiet middlegame, castling-rights, en-passant, promotion, and endgame FENs; fixed depths 7/9 plus 120 ms movetime &mdash; it measured <strong>2.34M aggregate NPS vs 2.01M</strong> for the baseline Lite single build, a <strong>1.16&times;</strong> overall speedup. Fixed-depth parity was exact: 14/14 same best move, score, and PV. Full single-threaded, Lite pthread, and full pthread relaxed builds remain reproducible local candidates while we gather deeper full-net/threaded evidence. Browsers without the relaxed-SIMD dot-product opcode automatically keep using the baseline Lite single artifact.</p>
+      <p>The Lite single-thread build has a feature-detected relaxed-SIMD candidate, with the baseline kept as a fallback. SF19 validation compares each WASM variant against its same-network native build using exact node-count bench signatures and fixed-depth best move, score, nodes, and PV. The Lite network has a different feature architecture from full Stockfish. Full single-threaded, Lite pthread, and full pthread relaxed builds remain local candidates, not default release artifacts. Historical SF18 relaxed-SIMD speedups do not describe the new SF19 networks.</p>
     </div>
     <details>
       <summary>Architecture &amp; packaging details</summary>
@@ -532,7 +532,7 @@ onMount(() => {
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish 18</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:12px">GPL-3.0</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/stockfish/stockfish-18.0.7-corresponding-source.tar.gz">stockfish-18.0.7-corresponding-source.tar.gz</a></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><a href="https://assets.0x88.app/stockfish/stockfish-19.0.1-corresponding-source.tar.gz">stockfish-19.0.1-corresponding-source.tar.gz</a></td>
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Berserk</td>

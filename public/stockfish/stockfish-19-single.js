@@ -1,0 +1,1 @@
+../../node_modules/stockfish/bin/stockfish-19-single.js
