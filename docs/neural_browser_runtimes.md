@@ -12,7 +12,7 @@ different artifact formats.
 | ORT ONNX WebGPU | Stable browser neural baseline for LC0-family models | Default where WebGPU is available; ORT WASM remains fallback/control | `.onnx` model plus optional external data/meta |
 | ONNX QDQ | Download-size reduction for the ORT lane | Promoted per model only after fixture/search drift gates | `.qdq8.onnx` with int8 weights and in-graph `DequantizeLinear` |
 | Custom WGSL / hybrid | Hand-written WebGPU kernels for hot LC0 subgraphs | Explicit runtime lane, benchmark/parity gated | lc0web tensor pack + WGSL kernels, sometimes ORT heads |
-| TVMJS WebGPU | Whole-model compiler lane: ONNX → TVM Relax → browser WebGPU runtime | Research/opt-in; not a default | TVMJS wasm module, runtime JS, params/tensor cache, manifest |
+| TVMJS WebGPU | Whole-model compiler lane: ONNX → TVM Relax → browser WebGPU runtime | Promoted primary runtime for Centipawn (automatic ORT fallback); research/opt-in elsewhere | TVMJS wasm module, runtime JS, params/tensor cache, manifest |
 | ORT WebNN EP | Future non-WebGPU hardware lane through WebNN/CoreML/ANE/NPU | Flag-only probe; not shippable until WebNN is unflagged and model gates pass | ONNX model, often fixed-shape and QDQ/block-DQL adjusted |
 
 ## ORT ONNX WebGPU: the stable baseline
@@ -95,9 +95,11 @@ Why it is not the default:
 - cross-device evidence, especially non-Apple GPUs, still matters before any
   default promotion.
 
-TVMJS may be exposed as an explicit research/runtime selector, but ORT ONNX
-WebGPU remains the rollback/default lane unless a release owner accepts the
-promotion evidence.
+TVMJS has been promoted as the primary runtime for the experimental Centipawn
+engine, with automatic ORT fallback (see `src/nn/runtimeRegistry.ts` and the
+stable channel manifest). For other models it remains an explicit
+research/runtime selector, and ORT ONNX WebGPU stays the rollback/default lane
+unless a release owner accepts further promotion evidence.
 
 ## ORT WebNN EP: promising, but still flag-gated
 

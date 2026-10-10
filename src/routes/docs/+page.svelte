@@ -82,6 +82,7 @@ onMount(() => {
         <li><a href="#engines-lc0">Leela Chess Zero</a></li>
         <li><a href="#engines-lqo">Leela Queen Odds (LQO)</a></li>
         <li><a href="#engines-maia3">Maia3</a></li>
+        <li><a href="#engines-centipawn">Centipawn</a></li>
         <li><a href="#engines-stockfish">Stockfish 18</a></li>
         <li><a href="#engines-berserk">Berserk</a></li>
         <li><a href="#engines-viridithas">Viridithas</a></li>
@@ -197,7 +198,7 @@ onMount(() => {
 
   <div class="callout info">
     <h4>Stable baseline</h4>
-    <p><strong>ONNX Runtime WebGPU</strong> is the stable neural baseline and rollback path. TVMJS, custom WGSL, WebNN, and QDQ artifacts all need to prove themselves against ORT WebGPU with fixture drift and search-move gates before they can become product defaults.</p>
+    <p><strong>ONNX Runtime WebGPU</strong> is the stable neural baseline and rollback path. TVMJS, custom WGSL, WebNN, and QDQ artifacts all need to prove themselves against ORT WebGPU with fixture drift and search-move gates before they can become product defaults. The TVMJS lane has cleared those gates for Centipawn, where it is the promoted primary runtime with automatic ORT fallback; everywhere else the rule still applies.</p>
   </div>
 
   <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
@@ -227,7 +228,7 @@ onMount(() => {
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">TVMJS WebGPU</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)">Compiler path from ONNX to TVM Relax to browser-loadable TVMJS wasm plus WebGPU pipelines.</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Research/opt-in; generated artifacts need separate hosting, provenance, and cross-device gates.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Promoted primary runtime for Centipawn with automatic ORT fallback; other models remain research/opt-in pending separate hosting, provenance, and cross-device gates.</td>
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">ORT WebNN EP</td>
@@ -267,7 +268,7 @@ onMount(() => {
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Emscripten UCI worker</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Berserk, PlentyChess</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Berserk, PlentyChess, Stormphrax</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)">Single-thread baseline first, then explicit <code>simd128</code>, SSE4.1-shaped wasm SIMD, or relaxed-SIMD variants after smoke/benchmark evidence.</td>
       </tr>
       <tr>
@@ -285,7 +286,7 @@ onMount(() => {
 
   <h3 id="cpu-wasm-relaxed-simd">Relaxed SIMD <a class="anchor-link" href="#cpu-wasm-relaxed-simd" aria-label="Link to this section">#</a></h3>
   <p>Relaxed SIMD is a separate WebAssembly feature from ordinary <code>simd128</code>. A relaxed build can fail to validate on a browser that supports baseline SIMD, so every relaxed artifact needs feature detection, asset fallback, and a non-relaxed path.</p>
-  <p>The main win for these chess engines is the relaxed integer dot product used in NNUE layers. When the activation operand is proven to stay in <code>[0, 127]</code>, <code>i32x4_relaxed_dot_i8x16_i7x16_add</code> is value-exact and can replace slower <code>maddubs</code>/<code>dpbusd</code> emulation. Reckless, Viridithas, Berserk, and PlentyChess all have this proof in their current SIMD audit lanes.</p>
+  <p>The main win for these chess engines is the relaxed integer dot product used in NNUE layers. When the activation operand is proven to stay in <code>[0, 127]</code>, <code>i32x4_relaxed_dot_i8x16_i7x16_add</code> is value-exact and can replace slower <code>maddubs</code>/<code>dpbusd</code> emulation. Reckless, Viridithas, Berserk, PlentyChess, and Stormphrax all have this proof in their current SIMD audit lanes.</p>
   <p>The rule is still parity-first: inspect the artifact to confirm relaxed opcodes are present, then require fixed-depth equality for best move, score, node count, and PV before promoting a runtime ladder such as <code>relaxed-simd &gt; simd128 &gt; scalar</code>. Without that evidence, relaxed SIMD remains a lab or benchmark variant.</p>
 
   <div class="callout info">
@@ -321,6 +322,11 @@ onMount(() => {
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">PlentyChess</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>992k</code> NPS vs <code>603k</code> default (<code>+64%</code>)</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stormphrax</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>540k</code> NPS vs <code>477k</code> SIMD (<code>1.13&times;</code>, Chromium depth 11)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>60/60</code> exact fixed-depth parity; <code>20/20</code> browser parity</td>
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">Stockfish</td>
@@ -391,6 +397,14 @@ onMount(() => {
   </div>
 
   <div class="engine-entry">
+    <h3 id="engines-centipawn">Centipawn <a class="anchor-link" href="#engines-centipawn" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (in-house)</dd>
+    </dl>
+    <p>Centipawn is 0x88's own edge-deployed neural chess engine, and it is experimental. It evaluates the SquareFormer/BT4 network family in the browser with TVMJS WebGPU as the primary runtime and automatic ONNX Runtime WebGPU fallback, and appears on the Play, Analysis, and Arena pages at five strength levels.</p>
+  </div>
+
+  <div class="engine-entry">
     <h3 id="engines-stockfish">Stockfish 18 <a class="anchor-link" href="#engines-stockfish" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
       <dt>Project</dt><dd><a href="https://github.com/official-stockfish/Stockfish" rel="noopener">official-stockfish/Stockfish</a> &middot; browser package via <a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></dd>
@@ -426,7 +440,7 @@ onMount(() => {
     <h3 id="engines-viridithas">Viridithas <a class="anchor-link" href="#engines-viridithas" aria-label="Link to this section">#</a></h3>
     <dl class="engine-meta">
       <dt>Author</dt><dd>Cosmo Bobak &middot; <a href="https://github.com/cosmobobak/viridithas" rel="noopener">github.com/cosmobobak/viridithas</a></dd>
-      <dt>License</dt><dd><span class="lic mit">MIT</span> at pinned commit <a href="https://github.com/cosmobobak/viridithas/commit/20d7402065cae084715183e019fdd18089e2dfac" rel="noopener"><code>20d7402</code></a>; upstream changed to AGPL-3.0-only in version 20.0.0</dd>
+      <dt>License</dt><dd><span class="lic mit">MIT</span> at pinned commit <a href="https://github.com/cosmobobak/viridithas/commit/20d7402065cae084715183e019fdd18089e2dfac" rel="noopener"><code>20d7402</code></a>; upstream relicensed to AGPL-3.0-only as of v21; v20.0.0 and earlier remain MIT</dd>
       <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
       <dt>Source</dt><dd><a href="https://assets.0x88.app/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a></dd>
     </dl>
