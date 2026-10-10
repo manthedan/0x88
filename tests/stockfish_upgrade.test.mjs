@@ -1,11 +1,31 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { patchSource, requiredNet, VARIANTS } from '../scripts/build_stockfish_relaxed_simd.mjs';
 import { STOCKFISH_RELEASE, stockfishArtifactBases } from '../scripts/stockfish_release_config.mjs';
 import { benchDefaults, benchSignature, parityReport } from '../scripts/stockfish_upgrade_bench.mjs';
+
+test('every source archive bundles the shared manifest helper dependencies', () => {
+  const source = readFileSync('scripts/write_engine_source_archive.mjs', 'utf8');
+  const common = source.split('await copyFiles(')[1].split('].filter(Boolean)')[0];
+  const manifest = readFileSync('scripts/write_engine_artifact_manifest.mjs', 'utf8');
+  const imports = [...manifest.matchAll(/from '(\.\/[^']+)'/g)].map((m) => join('scripts', m[1]));
+  const root = mkdtempSync(join(tmpdir(), 'sf19-common-source-'));
+  try {
+    mkdirSync(join(root, 'scripts'));
+    for (const file of ['scripts/write_engine_artifact_manifest.mjs', ...imports]) {
+      assert.ok(common.includes(`'${file}'`), `${file} must be common to every engine archive`);
+      copyFileSync(file, join(root, file));
+    }
+    const result = spawnSync(process.execPath, ['scripts/write_engine_artifact_manifest.mjs'], { cwd: root, encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Usage:/);
+    assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 function sourceFixture() {
   const root = mkdtempSync(join(tmpdir(), 'sf19-patch-'));

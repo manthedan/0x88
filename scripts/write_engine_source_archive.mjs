@@ -188,7 +188,6 @@ const CONFIGS = {
       'docs/netlify_engine_artifacts.md',
       'docs/stockfish_relaxed_simd_experiment.md',
       'docs/stockfish_19_upgrade.md',
-      'scripts/stockfish_release_config.mjs',
       'scripts/stockfish_upgrade_bench.mjs',
       'scripts/emscripten_uci_protocol.mjs',
       'patches/stockfish-js-native-audit.patch',
@@ -374,6 +373,8 @@ async function writeArchive(config, outPath, allowMissingAssets) {
         config.buildScript,
         config.smokeScript,
         'scripts/write_engine_artifact_manifest.mjs',
+        // The shared manifest helper imports this even for non-Stockfish engines.
+        'scripts/stockfish_release_config.mjs',
         'scripts/precompress_engine_artifacts.mjs',
         config.smokeHtml,
         ...config.adapterFiles,
