@@ -543,6 +543,7 @@ for (const engine of ['berserk', 'reckless']) {
     ['valid', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4', 'PASS'],
     ['garbled nodes', 'info depth 9 nodes 100garbage score cp 0 pv e2e4', 'bestmove e2e4', 'FAIL'],
     ['garbled bestmove', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove bogus', 'FAIL'],
+    ['unterminated trailing bestmove', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4\nbestmove bogus', 'FAIL'],
   ]) test(`${engine} parity raw-output validation: ${label}`, () => temporary(async (dir) => {
     writeFileSync(join(dir, 'candidate.manifest.json'), JSON.stringify({ engine, upstream: {
       repo: 'https://example.invalid', commit: ref, license: 'GPL-3.0' } }));
@@ -550,7 +551,7 @@ for (const engine of ['berserk', 'reckless']) {
       wasm: join(dir, `${engine}-emscripten-${name}.wasm`), js: join(dir, `${engine}-emscripten-${name}.js`) }));
     if (engine === 'berserk') writeFileSync(join(dir, 'berserk-emscripten.data'), 'fixture net');
     for (const tier of tiers) {
-      writeFileSync(tier.wasm, engine === 'reckless' ? wasiTranscript(`${info}\n${best}\n`) : wasm([]));
+      writeFileSync(tier.wasm, engine === 'reckless' ? wasiTranscript(`${info}\n${best}${label === 'unterminated trailing bestmove' ? '' : '\n'}`) : wasm([]));
       if (engine === 'berserk') writeFileSync(tier.js, `module.exports = async (options) => ({ ccall: (_, __, ___, [line]) => {
         if (line === 'uci') options.print('uciok');
         if (line === 'isready') options.print('readyok');

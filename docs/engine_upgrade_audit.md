@@ -118,7 +118,11 @@ same suite through native UCI and WASM UCI. Threads=1, Hash=16; replay has **one
 `ucinewgame` before the suite, not one reset per position. Final node totals and ordered per-position nodes/bestmoves must match when the
 native reference provides position rows; omitted candidate rows cannot disable
 that comparison. Recognized position records are validated completely, with
-contiguous coverage and a sum matching the summary; Berserk requires all 50 rows.
+contiguous coverage and a sum matching the summary; Berserk and Reckless require
+all 50 rows. Stockfish's built-in and replay completion records are counted
+separately. Replay output is drained through shutdown, including surplus or
+unterminated final records, and every nonzero WASI exit status fails regardless
+of the host's narrower process exit-code representation.
 `EXACT` is `PASS`; `DIFF(+/-n)` is **FAIL**, even when another narrower suite passes.
 A zero total delta with different position signatures still fails.
 
@@ -172,7 +176,8 @@ Compare bestmove/score/nodes/PV. The wrapper independently validates row coverag
 requested depth, complete fields and Reckless exit codes; matching failed searches
 cannot pass via the harness's aggregate totals. Producing harnesses validate raw
 UCI numeric tokens, bestmove/ponder records and PV moves before forming rows, so
-matching malformed records cannot become exact parity. Canonical and tier-specific
+matching malformed records cannot become exact parity. WASI output collectors
+flush decoder state and unterminated records before parsing. Canonical and tier-specific
 Emscripten preload aliases are preserved by both bench and parity loaders.
 Unsupported Reckless API/external variants are
 listed as excluded; Viridithas has no existing rotated harness and explicitly

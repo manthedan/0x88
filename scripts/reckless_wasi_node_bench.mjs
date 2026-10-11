@@ -66,12 +66,19 @@ const nnueBytes = nnuePath ? await fs.readFile(nnuePath) : null;
 function lineCollector(lines) {
   const decoder = new TextDecoder('utf-8', { fatal: false });
   let pending = '';
-  return new ConsoleStdout((chunk) => {
-    pending += decoder.decode(chunk, { stream: true });
-    const split = pending.split(/\r?\n/);
-    pending = split.pop() ?? '';
-    for (const line of split) lines.push(line);
-  });
+  return {
+    fd: new ConsoleStdout((chunk) => {
+      pending += decoder.decode(chunk, { stream: true });
+      const split = pending.split(/\r?\n/);
+      pending = split.pop() ?? '';
+      for (const line of split) lines.push(line);
+    }),
+    finish: () => {
+      pending += decoder.decode();
+      if (pending) lines.push(pending);
+      pending = '';
+    },
+  };
 }
 
 async function runOneShot(module, fen, depth) {
@@ -89,13 +96,15 @@ async function runOneShot(module, fen, depth) {
   ].join('\n');
   const stdout = [];
   const stderr = [];
+  const stdoutCollector = lineCollector(stdout);
+  const stderrCollector = lineCollector(stderr);
   const wasi = new WASI(
     ['reckless'],
     [],
     [
       new OpenFile(new File(new TextEncoder().encode(commands))),
-      lineCollector(stdout),
-      lineCollector(stderr),
+      stdoutCollector.fd,
+      stderrCollector.fd,
       new PreopenDirectory('.', nnueBytes ? new Map([[nnueName, new File(nnueBytes)]]) : new Map()),
     ],
     { debug: false },
@@ -109,6 +118,9 @@ async function runOneShot(module, fen, depth) {
   } catch (error) {
     if (typeof error?.code === 'number') exitCode = error.code;
     else throw error;
+  } finally {
+    stdoutCollector.finish();
+    stderrCollector.finish();
   }
   const wallMs = performance.now() - started;
   const rssAfter = process.memoryUsage().rss;
