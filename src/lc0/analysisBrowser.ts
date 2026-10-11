@@ -1468,10 +1468,13 @@ function rowLabel(row: EngineRow): string {
 function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tree.current, requestedMultiPv = multiPv()): string {
   const runtime = row.family === 'lc0' && !isLc0BigNetVariant(row.variant) ? selectedLc0Runtime() : '';
   const { dial, cpuBudget } = resourceBroker.snapshot();
-  const participants = activeEngineRows()
-    .filter((entry) => engineResourceProfile(entry.family).resourceClass === 'cpu')
-    .map((entry) => `${entry.family}:${entry.variant}`)
-    .sort();
+  const participants = [
+    ...new Set(
+      [...activeEngineRows(), row]
+        .filter((entry) => engineResourceProfile(entry.family).resourceClass === 'cpu')
+        .map((entry) => `${entry.family}:${entry.variant}`),
+    ),
+  ].sort();
   const cpu = engineResourceProfile(row.family).resourceClass === 'cpu' ? JSON.stringify([dial, cpuBudget, participants]) : '';
   return analysisResultCacheKey(fen, tree.historyBoards(node).map(boardToFen), row, { multiPv: requestedMultiPv, runtime, cpu });
 }
@@ -1633,7 +1636,7 @@ function renderRecklessRuntimeInfo(): void {
   const recklessParts = recklessVariants.map((variant) => {
     const engine = recklessEngines.peek(variant);
     const status = engine?.runtimeStatus();
-    const mode = engine?.runtimeLabel() ?? fallbackMode;
+    const mode = `${engine?.runtimeLabel() ?? fallbackMode}${variant.backend === 'browser-api' ? ' · FEN-only (no repetition history)' : ''}`;
     const asset = recklessVariantAssetStatus(variant);
     if (assetProbePending(asset))
       void checkRecklessVariantAsset(
