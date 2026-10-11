@@ -3,7 +3,7 @@ export function parseCommitBench(message) {
   return match ? Number(match[1]) : null;
 }
 
-export function parseBenchOutput(text) {
+export function parseBenchOutput(text, { expectedRows } = {}) {
   // Identify the final summary record BEFORE validating its fields. Filtering
   // for valid matches would silently fall back past a malformed final record.
   // Unlabelled formats retain their nodes/table markers; UCI info and table
@@ -23,13 +23,30 @@ export function parseBenchOutput(text) {
   if (!match || match.slice(1).some((token) => token !== undefined && !Number.isFinite(Number(token)))) {
     throw new Error(`Missing/invalid full bench node summary${summary ? `: ${summary}` : ''}`);
   }
-  const rows = [...text.matchAll(/Bench \[#\s*(\d+)\]: bestmove\s+(\S+)\s+score\s+-?\d+\s+(\d+) nodes/g)]
-    .map((m) => ({ position: Number(m[1]), bestmove: m[2], nodes: Number(m[3]) }));
-  if (!rows.length) {
-    rows.push(...[...text.matchAll(/^\s*(\d+)\s+(\d+)\s+[\d.]+s\s+[\d.]+ N\/s\s*$/gm)]
-      .map((m) => ({ position: Number(m[1]), nodes: Number(m[2]) })));
-  }
   if (nodes === null || !Number.isSafeInteger(nodes) || nodes <= 0) throw new Error(`Missing/invalid full bench node summary: ${summary}`);
+  const rows = [];
+  for (const line of text.split(/\r?\n/).map((record) => record.trim())) {
+    if (/^Bench\s*\[/.test(line)) {
+      const row = line.match(/^Bench \[#\s*(\d+)\]: bestmove\s+([a-h][1-8][a-h][1-8][qrbn]?|0000|\(none\))\s+score\s+(-?\d+)\s+(\d+) nodes\s+(\d+) nps\s+\|\s+.+$/);
+      if (!row || [row[1], row[3], row[4], row[5]].some((token) => !Number.isSafeInteger(Number(token)))) {
+        throw new Error(`Malformed bench position record: ${line}`);
+      }
+      rows.push({ position: Number(row[1]), bestmove: row[2], nodes: Number(row[4]) });
+    } else if (/^\S+\s+\S+\s+\S+\s+\S+\s+N\/s\b|^\d+\s+\S+\s+[\d.+-]\S*s(?:\s|$)/.test(line)) {
+      const row = line.match(/^(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)s\s+(\d+) N\/s$/);
+      if (!row || [row[1], row[2], row[4]].some((token) => !Number.isSafeInteger(Number(token))) || !Number.isFinite(Number(row[3]))) {
+        throw new Error(`Malformed bench position record: ${line}`);
+      }
+      rows.push({ position: Number(row[1]), nodes: Number(row[2]) });
+    }
+  }
+  if ((expectedRows !== undefined && rows.length !== expectedRows) || (patterns[2].test(summary) && !rows.length)) {
+    throw new Error(`Missing bench position coverage: expected ${expectedRows ?? 'table rows'}, got ${rows.length}`);
+  }
+  if (rows.length && (rows.some((row, i) => row.position !== rows[0].position + i)
+    || ![0, 1].includes(rows[0].position) || rows.reduce((sum, row) => sum + row.nodes, 0) !== nodes)) {
+    throw new Error('Invalid bench position coverage/node total');
+  }
   return { nodes, rows };
 }
 
@@ -56,18 +73,18 @@ export function compareBench(candidate, reference, baselineDiverged = false) {
   if (!reference) return { status: 'SKIP', detail: `nodes=${candidate.nodes}; native unavailable`, data: { candidate, reference: null } };
   const delta = candidate.nodes - reference.nodes;
   const mismatches = [];
-  if (reference.rows?.length && candidate.rows?.length) {
-    for (let i = 0; i < Math.max(reference.rows.length, candidate.rows.length); i += 1) {
+  if (reference.rows?.length) {
+    for (let i = 0; i < Math.max(reference.rows.length, candidate.rows?.length ?? 0); i += 1) {
       const a = reference.rows[i];
-      const b = candidate.rows[i];
-      if (!a || !b || a.nodes !== b.nodes || a.bestmove !== b.bestmove) mismatches.push({ index: i, native: a ?? null, wasm: b ?? null });
+      const b = candidate.rows?.[i];
+      if (!a || !b || a.position !== b.position || a.nodes !== b.nodes || a.bestmove !== b.bestmove) mismatches.push({ index: i, native: a ?? null, wasm: b ?? null });
     }
   }
   const differs = delta !== 0 || mismatches.length > 0;
   return {
     status: differs ? (baselineDiverged ? 'WARN' : 'FAIL') : 'PASS',
     detail: `${differs ? `DIFF(${delta >= 0 ? '+' : ''}${delta})` : 'EXACT'} nodes=${candidate.nodes} native=${reference.nodes}${mismatches.length ? `; ${mismatches.length} position mismatch(es)` : ''}${differs && baselineDiverged ? '; baseline divergence explicitly waived' : ''}`,
-    data: { candidate, reference, delta, perPositionCompared: Boolean(reference.rows?.length && candidate.rows?.length), mismatches, baselineDiverged },
+    data: { candidate, reference, delta, perPositionCompared: Boolean(reference.rows?.length), mismatches, baselineDiverged },
   };
 }
 

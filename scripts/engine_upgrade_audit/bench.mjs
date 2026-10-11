@@ -53,7 +53,7 @@ export async function runNativeBuiltin(context) {
   // Send the same UCI bench command through stdin. Appending argv to a quoted
   // ssh ... bash -lc command would set bash's $0, not the engine's bench arg.
   const output = await runProcess('bash', ['-lc', command], { input: 'bench\nquit\n', timeout: context.options.timeout });
-  return { ...parseBenchOutput(`${output.stdout}\n${output.stderr}`), source: '--native-cmd', command };
+  return { ...parseBenchOutput(`${output.stdout}\n${output.stderr}`, { expectedRows: context.engine === 'berserk' ? 50 : undefined }), source: '--native-cmd', command };
 }
 
 export function externalNetworkPath(context) {
@@ -82,5 +82,5 @@ export async function runEmscriptenBuiltin(context, tier) {
   if (output.code !== 0) throw new Error(`bench process exit ${output.code}: ${output.stderr.slice(-1000)}`);
   const text = `${output.stdout}\n${output.stderr}`;
   if (/unknown command[^\n]*bench/i.test(text)) return { skip: 'facade explicitly rejects command("bench"); replay not validated in v1', diagnostic: text.slice(-500) };
-  return { ...parseBenchOutput(text), method: 'command("bench")' };
+  return { ...parseBenchOutput(text, { expectedRows: context.engine === 'berserk' ? 50 : undefined }), method: 'command("bench")' };
 }

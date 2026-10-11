@@ -44,7 +44,7 @@ test('bench parser rejects truncated output, UCI counts and zero', () => {
 for (const [label, valid, invalids] of [
   ['Viridithas', '100 nodes in 1.000s (100 nps)', ['100garbage nodes in 1.000s (100 nps)', '100 nodes in 1..0s (100 nps)', '100 nodes in 1.0s (100garbage nps)', '100 nodes in invalid', '100 nodes in 1.0s garbage']],
   ['Reckless OpenBench', 'Bench: 100 nodes 1 nps', ['Bench: invalid', 'Bench: 100garbage nodes 1 nps', 'Bench: 100 nodes 1garbage nps', 'Bench: 100 nodes 1 nps garbage']],
-  ['Reckless table', '100 1.000s 100 N/s', ['invalid 1.000s 100 N/s', '100garbage 1.000s 100 N/s', '100 1..0s 100 N/s', '100 invalid 100 N/s', '100 1.000s invalid N/s', '100 1.000s 100 N/s garbage']],
+  ['Reckless table', '0 100 1.000s 100 N/s\n100 1.000s 100 N/s', ['invalid 1.000s 100 N/s', '100garbage 1.000s 100 N/s', '100 1..0s 100 N/s', '100 invalid 100 N/s', '100 1.000s invalid N/s', '100 1.000s 100 N/s garbage']],
   ['Stockfish', 'Nodes searched: 100', ['Nodes searched: invalid', 'Nodes searched: 100garbage', 'Nodes searched: 100 trailing', 'Nodes searched:']],
   ['Berserk', 'Results: 100 nodes 1 nps', ['Results: invalid', 'Results: 100garbage nodes 1 nps', 'Results: 100 nodes 1garbage nps', 'Results: 100 nodes garbage']],
   ['Stormphrax', '100 nodes 100 nps', ['invalid nodes 100 nps', '100garbage nodes 100 nps', '100 nodes invalid nps', '100 nodes 100garbage nps', '100 nodes 100 nps garbage']],
@@ -74,6 +74,31 @@ test('per-position bench nodes and bestmove when available', () => {
   const result = parseBenchOutput('Bench [# 1]: bestmove e2e4 score 25 1234 nodes 2468 nps | fen\nResults: 1234 nodes 1 nps');
   assert.deepEqual(result.rows, [{ position: 1, bestmove: 'e2e4', nodes: 1234 }]);
   assert.equal(parseBenchOutput('  1 1234 0.5s 2468 N/s\n1234 0.5s 2468 N/s').rows.length, 1);
+});
+
+test('malformed position records cannot disappear behind an exact bench total', () => {
+  for (const row of [
+    'Bench [# 1]: bestmove e2e4 score 25 100 nodesgarbage 1 nps | fen',
+    'Bench [# 1]: bestmove e2e4 score 25 100garbage nodes 1 nps | fen',
+    'Bench [# 1]: bestmove bogus score 25 100 nodes 1 nps | fen',
+    'Bench [# 1]: bestmove e2e4 score 25garbage 100 nodes 1 nps | fen',
+    'Bench [# 1]: bestmove e2e4 score 25 100 nodes 1garbage nps | fen',
+    '1 100garbage 0.5s 200 N/s',
+    '1 100 0..5s 200 N/s',
+    '1 100 0.5s 200garbage N/s',
+  ]) assert.throws(() => parseBenchOutput(`${row}\nResults: 100 nodes 1 nps`), /Malformed bench position/);
+  assert.throws(() => parseBenchOutput('Results: 100 nodes 1 nps', { expectedRows: 50 }), /Missing bench position coverage/);
+  assert.throws(() => parseBenchOutput('100 0.5s 200 N/s'), /Missing bench position coverage/);
+  assert.throws(() => parseBenchOutput('1 50 0.5s 100 N/s\n100 0.5s 200 N/s'), /Invalid bench position coverage/);
+  assert.throws(() => parseBenchOutput('1 50 0.5s 100 N/s\n1 50 0.5s 100 N/s\n100 0.5s 200 N/s'), /Invalid bench position coverage/);
+  const reference = { nodes: 100, rows: [{ position: 1, nodes: 100, bestmove: 'e2e4' }] };
+  for (const rows of [[], undefined]) {
+    const comparison = compareBench({ nodes: 100, rows }, reference);
+    assert.equal(comparison.status, 'FAIL');
+    assert.equal(comparison.data.delta, 0);
+    assert.equal(comparison.data.mismatches.length, 1);
+  }
+  assert.equal(compareBench(reference, { nodes: 100, source: '--native-bench' }).status, 'PASS');
 });
 
 test('commit Bench line is anchored, case-insensitive and optional', () => {
