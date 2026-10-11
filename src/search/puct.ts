@@ -368,7 +368,9 @@ export interface SearchPolicyContext {
 }
 
 export interface SearchPolicy {
-  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number;
+  /** `stats` lets a caller scoring every edge of one node compute the
+   * node-wide terms once; omitted, they are derived from `node`. */
+  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext, stats?: NodeScoreStats): number;
   backup(path: Edge[], leafValue: number, context: SearchPolicyContext): void;
   rootPolicy(edges: Edge[], context: SearchPolicyContext, node?: Node): SearchPolicyEntry[];
   chooseFinalMove(entries: SearchPolicyEntry[], context: SearchPolicyContext): SearchPolicyEntry | null;
@@ -470,39 +472,35 @@ export function computeCpuct(context: SearchPolicyContext, parentVisits: number)
   return context.cpuct + context.cpuctFactor * Math.log((Math.max(0, parentVisits) + base) / base);
 }
 
-function edgeQVariance(edges: Edge[], context: SearchPolicyContext): number {
+function edgeQVariance(edges: Edge[], unvisitedQ: number, context: SearchPolicyContext): number {
   if (context.cpuctVarianceWeight <= 0 || edges.length < 2) return 0;
   const weights = edges.map((edge) => Math.max(edge.prior, 1e-9));
   const total = weights.reduce((a, b) => a + b, 0) || 1;
-  const qForVariance = (edge: Edge) =>
-    edge.visits > 0
-      ? edgeQForParent(edge, context.fpu)
-      : context.fpuStrategy === 'lc0-reduction'
-        ? parentQForNode(
-            { board: null as unknown as BoardState, historyFens: [], historyBoards: [], explicitHistory: false, expanded: true, terminalValue: null, edges },
-            context.fpu,
-          ) -
-          context.fpuReduction *
-            Math.sqrt(
-              visitedPolicyMass({
-                board: null as unknown as BoardState,
-                historyFens: [],
-                historyBoards: [],
-                explicitHistory: false,
-                expanded: true,
-                terminalValue: null,
-                edges,
-              }),
-            )
-        : context.fpu;
-  const qs = edges.map(qForVariance);
+  const qs = edges.map((edge) => (edge.visits > 0 ? edgeQForParent(edge, context.fpu) : unvisitedQ));
   const mean = qs.reduce((sum, q, i) => sum + q * weights[i], 0) / total;
   return qs.reduce((sum, q, i) => sum + weights[i] * (q - mean) * (q - mean), 0) / total;
 }
 
-function cpuctVarianceScale(edge: Edge, edges: Edge[], context: SearchPolicyContext): number {
+/** Node-wide terms shared by every edge score at one node. Selection scores
+ * all edges of a node at once; deriving these per edge made it O(edges²),
+ * and O(edges³) with the cpuct variance term. */
+export interface NodeScoreStats {
+  parentVisits: number;
+  /** Q given to unvisited edges (constant or lc0-reduction FPU). */
+  unvisitedQ: number;
+  /** sqrt of the prior-weighted edge-Q variance; 0 when the variance term is off. */
+  qSigma: number;
+}
+
+export function nodeScoreStats(node: Node, context: SearchPolicyContext): NodeScoreStats {
+  const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
+  const unvisitedQ = unvisitedEdgeQ(node, context);
+  const qSigma = context.cpuctVarianceWeight > 0 ? Math.sqrt(Math.max(0, edgeQVariance(node.edges, unvisitedQ, context))) : 0;
+  return { parentVisits, unvisitedQ, qSigma };
+}
+
+function cpuctVarianceScale(edge: Edge, sigma: number, context: SearchPolicyContext): number {
   if (context.cpuctVarianceWeight <= 0) return 1;
-  const sigma = Math.sqrt(Math.max(0, edgeQVariance(edges, context)));
   const uncertainty = 1 / Math.sqrt(1 + edgeSelectVisits(edge));
   return clamp(1 + context.cpuctVarianceWeight * sigma * uncertainty, 1, Math.max(1, context.cpuctVarianceMaxScale));
 }
@@ -539,10 +537,18 @@ function parentQForNode(node: Node, fpu: number): number {
   return visits > 0 ? weighted / visits : fpu;
 }
 
-export function edgeQForParentInNode(edge: Edge, node: Node | undefined, context: SearchPolicyContext): number {
-  if (edge.visits > 0) return edgeQForParent(edge, context.fpu);
+function unvisitedEdgeQ(node: Node | undefined, context: SearchPolicyContext): number {
   if (!node || context.fpuStrategy !== 'lc0-reduction') return context.fpu;
   return parentQForNode(node, context.fpu) - context.fpuReduction * Math.sqrt(visitedPolicyMass(node));
+}
+
+export function edgeQForParentInNode(edge: Edge, node: Node | undefined, context: SearchPolicyContext): number {
+  if (edge.visits > 0) return edgeQForParent(edge, context.fpu);
+  return unvisitedEdgeQ(node, context);
+}
+
+function edgeQWithStats(edge: Edge, stats: NodeScoreStats, context: SearchPolicyContext): number {
+  return edge.visits > 0 ? edgeQForParent(edge, context.fpu) : stats.unvisitedQ;
 }
 
 /** lc0-style moves-left utility: prefer shorter wins and longer losses in
@@ -563,12 +569,12 @@ function movesLeftUtility(node: Node, edge: Edge, context: SearchPolicyContext):
 }
 
 export class ClassicPUCTPolicy implements SearchPolicy {
-  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
-    const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
+  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext, stats = nodeScoreStats(node, context)): number {
+    const parentVisits = stats.parentVisits;
     const sqrtParent = Math.sqrt(parentVisits + 1);
-    const q = edgeQForParentInNode(edge, node, context);
+    const q = edgeQWithStats(edge, stats, context);
     const sv = edgeSelectVisits(edge);
-    const u = (computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, node.edges, context) * edge.prior * sqrtParent) / (1 + sv);
+    const u = (computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, stats.qSigma, context) * edge.prior * sqrtParent) / (1 + sv);
     return q + u + butterflyScore(edge, context) + movesLeftUtility(node, edge, context);
   }
 
@@ -668,8 +674,7 @@ export class ProgressiveWideningPUCTPolicy extends ClassicPUCTPolicy {
     };
   }
 
-  private state(node: Node): ProgressiveWideningState {
-    const parentVisits = node.edges.reduce((sum, edge) => sum + edgeSelectVisits(edge), 0);
+  private state(node: Node, parentVisits: number): ProgressiveWideningState {
     const cached = this.states.get(node);
     if (cached && cached.parentVisits === parentVisits) return cached;
 
@@ -713,12 +718,12 @@ export class ProgressiveWideningPUCTPolicy extends ClassicPUCTPolicy {
     return state;
   }
 
-  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
-    const state = this.state(node);
+  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext, stats = nodeScoreStats(node, context)): number {
+    const parentVisits = stats.parentVisits;
+    const state = this.state(node, parentVisits);
     if (!state.active.has(edge)) return -Infinity;
-    const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
     const sqrtParent = Math.sqrt(parentVisits + 1);
-    const q = edgeQForParentInNode(edge, node, context);
+    const q = edgeQWithStats(edge, stats, context);
     const sv = edgeSelectVisits(edge);
     const exploreScale =
       this.options.giniExploreScale === 0
@@ -732,14 +737,14 @@ export class ProgressiveWideningPUCTPolicy extends ClassicPUCTPolicy {
               this.options.maxExploreScale,
             )
           : clamp(1 + this.options.giniExploreScale * (state.policyGini - 0.5), this.options.minExploreScale, this.options.maxExploreScale);
-    const u = (computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, node.edges, context) * exploreScale * edge.prior * sqrtParent) / (1 + sv);
+    const u = (computeCpuct(context, parentVisits) * cpuctVarianceScale(edge, stats.qSigma, context) * exploreScale * edge.prior * sqrtParent) / (1 + sv);
     return q + u + butterflyScore(edge, context);
   }
 }
 
 export class ActionValuePUCTPolicy extends ClassicPUCTPolicy {
-  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
-    const base = super.scoreEdge(node, edge, context);
+  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext, stats?: NodeScoreStats): number {
+    const base = super.scoreEdge(node, edge, context, stats);
     const av = edge.actionValuePrior ?? 0;
     // AV is a parent-perspective prior. It guides unvisited/low-visit moves and
     // decays as backed-up search evidence accumulates.
@@ -748,8 +753,8 @@ export class ActionValuePUCTPolicy extends ClassicPUCTPolicy {
 }
 
 export class AuxPUCTPolicy extends ClassicPUCTPolicy {
-  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
-    const base = super.scoreEdge(node, edge, context);
+  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext, stats?: NodeScoreStats): number {
+    const base = super.scoreEdge(node, edge, context, stats);
     const sv = 1 + edgeSelectVisits(edge);
     return (
       base +
@@ -818,12 +823,13 @@ export class GumbelRootPolicy extends ClassicPUCTPolicy {
     return state;
   }
 
-  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext): number {
-    if (!node.isRoot) return super.scoreEdge(node, edge, context);
+  scoreEdge(node: Node, edge: Edge, context: SearchPolicyContext, stats?: NodeScoreStats): number {
+    if (!node.isRoot) return super.scoreEdge(node, edge, context, stats);
     const state = this.rootState(node);
     if (!state.candidates.has(edge)) return -Infinity;
-    const parentVisits = node.edges.reduce((sum, e) => sum + edgeSelectVisits(e), 0);
-    const q = edgeQForParentInNode(edge, node, context);
+    const nodeStats = stats ?? nodeScoreStats(node, context);
+    const parentVisits = nodeStats.parentVisits;
+    const q = edgeQWithStats(edge, nodeStats, context);
     const sv = edgeSelectVisits(edge);
     const puct = (computeCpuct(context, parentVisits) * edge.prior * Math.sqrt(parentVisits + 1)) / (1 + sv);
     const g = state.noise.get(edge) ?? 0;
@@ -1221,8 +1227,9 @@ function selectBestEdge(node: Node, searchPolicy: SearchPolicy, context: SearchP
   if (frozen) return frozen;
   let best = node.edges[0];
   let bestScore = -Infinity;
+  const stats = nodeScoreStats(node, context);
   for (const edge of node.edges) {
-    const score = searchPolicy.scoreEdge(node, edge, context);
+    const score = searchPolicy.scoreEdge(node, edge, context, stats);
     if (score > bestScore) {
       best = edge;
       bestScore = score;
