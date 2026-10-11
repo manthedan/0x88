@@ -404,6 +404,23 @@ for (const [label, final, best] of [
     { label: 'fixture', command: process.execPath, args: [engine] }, ['startpos'], 1), /Malformed (?:bestmove|replay nodes) record/);
 }));
 
+for (const [label, trailing] of [
+  ['malformed duplicate', 'bestmove bogus\n'],
+  ['valid duplicate', 'bestmove e2e4\n'],
+  ['partial final record', 'bestmove bogus'],
+]) test(`replay rejects ${label} after the final search bestmove`, () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-trailing-replay.mjs');
+  writeFileSync(engine, `import { createInterface } from 'node:readline';
+    for await (const line of createInterface({ input: process.stdin })) {
+      if (line === 'uci') console.log('uciok');
+      if (line === 'isready') console.log('readyok');
+      if (line.startsWith('go ')) console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+      if (line === 'quit') { process.stdout.write(${JSON.stringify(trailing)}); break; }
+    }`);
+  await assert.rejects(runReplay({ tmp: dir, options: { timeout: 5000 } },
+    { label: 'fixture', command: process.execPath, args: [engine] }, ['startpos'], 1), /Malformed bestmove|Unexpected replay bestmove coverage/);
+}));
+
 test('replay accepts complete moves, promotions, ponder and terminal records with the last count', () => temporary(async (dir) => {
   const engine = join(dir, 'fake-valid-replay.mjs');
   const outputs = [

@@ -57,6 +57,8 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
   let exited = false;
   let completed = false;
   let exitStatus;
+  let expectedSearches = 0;
+  const closed = new Promise((done) => child.once('close', done));
   const fail = (err) => {
     failure = err;
     for (const notify of pending) notify();
@@ -76,6 +78,10 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       const parts = buffer.split(/\r?\n/);
       buffer = parts.pop();
       lines.push(...parts);
+      for (const notify of pending) notify();
+    });
+    stream.on('end', () => {
+      if (buffer) { lines.push(buffer); buffer = ''; }
       for (const notify of pending) notify();
     });
   }
@@ -127,6 +133,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       if (entry.startsWith('setoption ')) { command(entry); continue; }
       const from = lines.length;
       command(`position fen ${entry}`);
+      expectedSearches += 1;
       command(`go depth ${benchDepth}`);
       const best = await wait((l) => /^bestmove(?:\s|$)/.test(l));
       const search = replaySearch(lines.slice(from, cursor - 1), best);
@@ -148,6 +155,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       const infoStart = lines.length;
       command(`position fen ${fen}`);
       const t = performance.now();
+      expectedSearches += 1;
       command(`go depth ${depth}`);
       const best = await wait((l) => /^bestmove(?:\s|$)/.test(l));
       const wallMs = performance.now() - t;
@@ -161,11 +169,21 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     if (!exited) {
       child.stdin.end('quit\n');
       const timer = setTimeout(() => child.kill('SIGKILL'), 2000);
-      await new Promise((done) => child.once('exit', done));
+      await closed;
       clearTimeout(timer);
-    }
-    if (completed && (exitStatus?.code !== 0 || exitStatus?.signal)) {
-      throw new Error(`${cell.label} replay engine exited abnormally (${exitStatus?.code}, ${exitStatus?.signal})`);
+    } else await closed;
+    if (completed) {
+      if (exitStatus?.code !== 0 || exitStatus?.signal) {
+        throw new Error(`${cell.label} replay engine exited abnormally (${exitStatus?.code}, ${exitStatus?.signal})`);
+      }
+      // Drain the complete transcript, including output after the final search
+      // and partial final lines. A first bestmove is not a license to ignore
+      // malformed or surplus completion records before a clean shutdown.
+      const bestLines = lines.filter((line) => /^bestmove(?:\s|$)/.test(line));
+      for (const line of bestLines) parseBestmove(line);
+      if (bestLines.length !== expectedSearches) {
+        throw new Error(`Unexpected replay bestmove coverage: expected ${expectedSearches}, got ${bestLines.length}`);
+      }
     }
   }
 }
