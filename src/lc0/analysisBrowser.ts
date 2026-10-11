@@ -3573,6 +3573,7 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
   if (!isCurrent()) return;
   const board = parseFen(fen);
   if (!legalMoves(board).length) {
+    maia3PanelStatus('');
     el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>';
     return;
   }

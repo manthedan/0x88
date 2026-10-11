@@ -511,6 +511,7 @@ export class StockfishEngine implements BrowserUciEngine {
     return this.runExclusive(async () => {
       await this.init();
       if (!this.worker || opts.signal?.aborted) return [];
+      const position = uciPositionCommand(fen, opts.moves);
       const multipv = Math.max(1, Math.floor(opts.multipv ?? 1));
       this.lastInfoLines = [];
       this.worker.postMessage(`setoption name MultiPV value ${multipv}`);
@@ -537,7 +538,7 @@ export class StockfishEngine implements BrowserUciEngine {
           reject(error);
         };
         opts.signal?.addEventListener('abort', onAbort);
-        this.worker!.postMessage(uciPositionCommand(fen, opts.moves));
+        this.worker!.postMessage(position);
         this.worker!.postMessage(stockfishGoCommand({ depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }));
       });
     });

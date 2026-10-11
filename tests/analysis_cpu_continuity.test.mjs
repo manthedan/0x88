@@ -44,6 +44,10 @@ test('Stockfish analysis API sends root FEN plus moves, without an implicit new 
     assert.ok(commands.includes(`position fen ${game.root.fen} moves e2e4`));
     assert.equal(commands.includes('ucinewgame'), false);
     assert.equal(lines[0].pvUci[0], 'e7e5');
+    const invalid = new AbortController();
+    await assert.rejects(engine.analyze(game.root.fen, { moves: ['invalid'], signal: invalid.signal }), /Invalid UCI/);
+    invalid.abort();
+    assert.equal(commands.includes('stop'), false, 'invalid history must not install a dangling abort listener');
   } finally {
     engine.dispose();
     globalThis.Worker = previous;
