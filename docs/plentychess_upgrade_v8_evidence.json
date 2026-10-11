@@ -1076,5 +1076,17 @@
     "assetQuarantine": "Six dangling legacy Stockfish aliases were temporarily moved only in this worktree for final build/typecheck/tests, then restored unchanged; no Stockfish edits are committed.",
     "productBuild": "BUILD_SCOPE=product npm run build:client -- --configLoader runner"
   },
-  "rawEvidenceRoot": ".local-dev-artifacts/plentychess-upgrade/"
+  "rawEvidenceRoot": ".local-dev-artifacts/plentychess-upgrade/",
+  "review": {
+    "engine": "codex",
+    "model": "gpt-6.1-sol",
+    "thinking": "xhigh",
+    "mode": "branch",
+    "base": "main",
+    "reviewedCommit": "fbb0315",
+    "exitCode": 0,
+    "actionableFindings": 0,
+    "report": "perf-upgrade-plentychess-8-review-1.md",
+    "postReviewChanges": "Documentation and corresponding-source bundle/manifest only; reviewed code and seven JS/WASM/data artifacts unchanged."
+  }
 }

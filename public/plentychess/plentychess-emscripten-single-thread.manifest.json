@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-10-11T00:12:25.110Z",
+  "generatedAt": "2026-10-11T00:20:56.450Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "plentychess",
   "flavor": "emscripten-single-thread",
@@ -161,8 +161,8 @@
   "sourceArchive": {
     "required": true,
     "path": "public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz",
-    "bytes": 30767628,
-    "sha256": "adf2c7824c9e543766e2e34ba7c21ed2f65c3b04196f58ba0ef2e9a363bd70a6",
+    "bytes": 30768044,
+    "sha256": "b53391706151a91e6b492d88e261d883de5d5db41a2a2a42c6a673d846fe9a0d",
     "url": "/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

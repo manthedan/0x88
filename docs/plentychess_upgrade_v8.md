@@ -259,11 +259,15 @@ batch is retained separately, not silently mixed with the quiet batch.
 ### Commits and review closeout
 
 - `e89b363`: fix even-sized benchmark counterbalancing, with N=2/4/5 tests.
-- The focused upgrade commit contains the pin/network/patch, metadata, all
+- `fbb0315`: focused upgrade commit with pin/network/patch, metadata, all
   release artifacts, source bundle, native comparator, tests and evidence.
-- Required Codex review runs on the committed branch against `main`, using
-  `gpt-6.1-sol` / `xhigh`; final status and the reviewed commit are recorded
-  after the helper completes. No push is needed or allowed.
+- **Codex review 1: CLEAN**, branch against `main` at `fbb0315`, using
+  `gpt-6.1-sol` / `xhigh`. Helper exit **0**, **no accepted/actionable findings**;
+  no findings required acceptance, rejection or fixes. Overall: “patch is
+  correct” (0.93). Report: `$SCRATCH/perf-upgrade-plentychess-8-review-1.md`.
+- Stop after this clean run. The subsequent closeout is documentation plus
+  regenerated source bundle/manifest only; reviewed code and the seven
+  JS/WASM/data files are unchanged. No push is needed or allowed.
 
 ```sh
 ~/.pi/agent/skills/autoreview/scripts/autoreview --mode branch --base main \
