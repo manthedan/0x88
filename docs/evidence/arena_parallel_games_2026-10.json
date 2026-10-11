@@ -1,0 +1,239 @@
+{
+  "base": "5c161a9",
+  "hardware": {
+    "model": "Mac16,13",
+    "cores": 10,
+    "physicalBytes": 25769803776,
+    "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36",
+    "deviceMemory": 16
+  },
+  "throughputProtocol": {
+    "limit": "movetime",
+    "movetimeMs": 500,
+    "plies": 8,
+    "games": 6,
+    "openings": ["startpos", "rnbqkbnr/ppp2ppp/8/3pp3/4P3/2N5/PPPP1PPP/R1BQKBNR w KQkq - 0 3"],
+    "order": "1,2,1,3 repeated three times",
+    "metric": "sum(nodes) / sum(requested movetime), averaged over all six games per trial"
+  },
+  "throughput": [
+    {
+      "engine": "Stockfish",
+      "k": 1,
+      "nps": [1381647.5, 1386116.25, 1368728.8333333333, 1359997.8333333333, 1378392.8333333333, 1342518.8333333333],
+      "median": 1373560.8333333333,
+      "min": 1342518.8333333333,
+      "max": 1386116.25,
+      "soloRatio": 1.0
+    },
+    {
+      "engine": "Stockfish",
+      "k": 2,
+      "nps": [1334446.5, 1274537.75, 1305694.75],
+      "median": 1305694.75,
+      "min": 1274537.75,
+      "max": 1334446.5,
+      "soloRatio": 0.9505911338716342
+    },
+    {
+      "engine": "Stockfish",
+      "k": 3,
+      "nps": [1187974.8333333333, 1180684.0833333333, 1162154.8333333333],
+      "median": 1180684.0833333333,
+      "min": 1162154.8333333333,
+      "max": 1187974.8333333333,
+      "soloRatio": 0.8595790260472628
+    },
+    {
+      "engine": "Berserk",
+      "k": 1,
+      "nps": [1145539.4166666667, 1184216.1666666667, 1173475.25, 1140212.6666666667, 1128362.25, 1135408.0833333333],
+      "median": 1142876.0416666667,
+      "min": 1128362.25,
+      "max": 1184216.1666666667,
+      "soloRatio": 1.0
+    },
+    {
+      "engine": "Berserk",
+      "k": 2,
+      "nps": [1059577.5833333333, 1024332.0, 1050166.1666666667],
+      "median": 1050166.1666666667,
+      "min": 1024332.0,
+      "max": 1059577.5833333333,
+      "soloRatio": 0.9188802008091793
+    },
+    {
+      "engine": "Berserk",
+      "k": 3,
+      "nps": [1035112.4166666666, 887993.3333333334, 951316.4166666666],
+      "median": 951316.4166666666,
+      "min": 887993.3333333334,
+      "max": 1035112.4166666666,
+      "soloRatio": 0.8323880998322032
+    }
+  ],
+  "labParity": [
+    {
+      "limit": "depth",
+      "k": 1,
+      "games": 6,
+      "identicalTraces": 6,
+      "identicalOutcomes": 6
+    },
+    {
+      "limit": "depth",
+      "k": 2,
+      "games": 6,
+      "identicalTraces": 6,
+      "identicalOutcomes": 6
+    },
+    {
+      "limit": "depth",
+      "k": 1,
+      "games": 6,
+      "identicalTraces": 6,
+      "identicalOutcomes": 6
+    },
+    {
+      "limit": "depth",
+      "k": 3,
+      "games": 6,
+      "identicalTraces": 6,
+      "identicalOutcomes": 6
+    },
+    {
+      "limit": "nodes",
+      "k": 1,
+      "games": 6,
+      "identicalTraces": 6,
+      "identicalOutcomes": 6
+    },
+    {
+      "limit": "nodes",
+      "k": 2,
+      "games": 6,
+      "identicalTraces": 6,
+      "identicalOutcomes": 6
+    },
+    {
+      "limit": "nodes",
+      "k": 1,
+      "games": 6,
+      "identicalTraces": 6,
+      "identicalOutcomes": 6
+    },
+    {
+      "limit": "nodes",
+      "k": 3,
+      "games": 6,
+      "identicalTraces": 6,
+      "identicalOutcomes": 6
+    }
+  ],
+  "memory": [
+    {
+      "k": 1,
+      "workers": 2,
+      "bytes": 432209381
+    },
+    {
+      "k": 2,
+      "workers": 4,
+      "bytes": 861457180
+    },
+    {
+      "k": 3,
+      "workers": 6,
+      "bytes": 1290693661
+    }
+  ],
+  "builtDepth": {
+    "protocol": "SF Lite/Berserk relaxed/PlentyChess SSE4.1, depth 10, Threads 1, Hash 64 MiB; 3-engine RR, two openings, six games, delay 0; ABABAB; wall includes worker startup, disposal and rendering",
+    "pgnSha256": "9cdf94d55864bc6c290854063deb36eb470b3131951c3122b2e2fa6dfb55474b",
+    "allPgnEqual": true,
+    "allStandingsEqual": true,
+    "standings": "6/6 games \u00b7 Elo vs pool, \u00b195% approx#EngineEloWDLPtsG1PlentyChess SSE4.1 10depth+191 \u00b1393220342Berserk Relaxed SIMD 10depth+0 \u00b1340121243Stockfish Lite 10depth-191 \u00b139302214",
+    "runs": [
+      {
+        "repeat": 1,
+        "k": 1,
+        "elapsedMs": 13135.899999976158,
+        "workers": 0,
+        "peak": 2
+      },
+      {
+        "repeat": 1,
+        "k": 2,
+        "elapsedMs": 6593.235000014305,
+        "workers": 0,
+        "peak": 4
+      },
+      {
+        "repeat": 2,
+        "k": 1,
+        "elapsedMs": 13065.894999980928,
+        "workers": 0,
+        "peak": 2
+      },
+      {
+        "repeat": 2,
+        "k": 2,
+        "elapsedMs": 6611.84500002861,
+        "workers": 0,
+        "peak": 4
+      },
+      {
+        "repeat": 3,
+        "k": 1,
+        "elapsedMs": 13166.75,
+        "workers": 0,
+        "peak": 2
+      },
+      {
+        "repeat": 3,
+        "k": 2,
+        "elapsedMs": 6649.185000061989,
+        "workers": 0,
+        "peak": 4
+      }
+    ]
+  },
+  "builtNodes": {
+    "nodes": 10000,
+    "transport": "research-only Worker.postMessage substitution, not a product nodes budget",
+    "pgnSha256": "4490ea0f748e874d4970fe8825e1b9e5279fcb9887fc32557d258aab50a590d5",
+    "allPgnEqual": true,
+    "allStandingsEqual": true,
+    "runs": [
+      {
+        "k": 2,
+        "elapsedMs": 5203.445000052452,
+        "workers": 0,
+        "peak": 4
+      },
+      {
+        "k": 1,
+        "elapsedMs": 9257.164999961851,
+        "workers": 0,
+        "peak": 2
+      },
+      {
+        "k": 2,
+        "elapsedMs": 4602.789999961853,
+        "workers": 0,
+        "peak": 4
+      }
+    ]
+  },
+  "stop": {
+    "before": {
+      "pairing": "Game 1/60: Stockfish Lite (W) vs Berserk Relaxed SIMD (B) \u00b7 2 active (K=2)",
+      "peak": 4,
+      "workers": 4
+    },
+    "message": "Stopped after 0 game(s).",
+    "standings": "0/60 games \u00b7 Elo vs pool, \u00b195% approx#EngineEloWDLPtsG1Berserk Relaxed SIMD\u2014000002PlentyChess SSE4.1\u2014000003Stockfish Lite\u201400000",
+    "stopMs": 11.524999976158142,
+    "workers": 0
+  }
+}

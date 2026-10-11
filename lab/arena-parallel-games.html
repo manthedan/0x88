@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Arena CPU concurrency gate</title>
+  <style>body { font: 16px system-ui; margin: 2rem; background: #111827; color: #e5e7eb; } pre { white-space: pre-wrap; } </style>
+</head>
+<body>
+  <h1>Arena CPU concurrency gate (research only)</h1>
+  <p>Independent Stockfish Lite / Berserk workers, Threads=1, Hash=64 MiB. No product scheduler changes.</p>
+  <p id="status">Ready</p>
+  <pre id="output"></pre>
+  <script type="module" src="./arena-parallel-games.mjs"></script>
+</body>
+</html>
