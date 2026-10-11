@@ -31,6 +31,9 @@ jobs:
       - name: Prepare portable CI public assets
         run: node scripts/prepare_netlify_r2_public_assets.mjs public "$NETLIFY_R2_PUBLIC_ASSETS"
       - run: npm ci
+      # Hash-checks the committed LC0 manifest locally. A warm cache makes no
+      # network calls. Missing bytes come from the commit-pinned release
+      # (public/channels/stable.json → public/releases/*.json), not the live channel.
       - name: Stage and verify LC0 parity assets
         run: npm run test:stage-lc0-assets
       - name: Biome
