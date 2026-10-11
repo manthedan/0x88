@@ -86,6 +86,8 @@ export interface Lc0ModelLoadOptions {
   cache?: boolean;
   cacheName?: string;
   manifestUrl?: string;
+  /** Already-validated entry from another model family's manifest (e.g. TVMJS). */
+  manifestEntry?: Lc0ModelManifestEntry;
   /** Optional channel manifest whose release manifest maps stable URLs to immutable artifact URLs. */
   channelUrl?: string | null;
   /**
@@ -685,6 +687,7 @@ function modelLoadFlightKey(modelUrl: string, options: Lc0ModelLoadOptions): str
     absoluteUrl(modelUrl),
     options.cacheName ?? DEFAULT_CACHE_NAME,
     absoluteUrl(options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)),
+    options.manifestEntry ?? null,
     options.channelUrl ?? configuredChannelUrl() ?? null,
     options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS,
     options.requestPersistentStorage ?? false,
@@ -747,7 +750,9 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   options.signal?.throwIfAborted();
   const started = nowMs();
   const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  const manifest = await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  const manifest = options.manifestEntry
+    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl, elapsedMs: 0 }
+    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
   const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
   const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
 

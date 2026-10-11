@@ -664,6 +664,35 @@ test('clearLc0ModelCacheEntry removes only the selected model and its metadata',
   );
 });
 
+test('external manifest entries use the shared metadata fast path and rehash on mismatch', async () => {
+  await withMockedEnv(
+    async (fetchLog) => {
+      const metadataStore = new MemoryMetadataStore();
+      const options = {
+        cache: true,
+        channelUrl: null,
+        manifestEntry: { file: 'test.onnx', url: MODEL_URL, bytes: 3, sha256: ABC_SHA256 },
+        metadataStore,
+      };
+      assert.equal((await loadLc0ModelForOrt(MODEL_URL, options)).verification, 'hashed');
+      const cache = await globalThis.caches.open('lc0-browser-models-v1');
+      const original = cache.store.get(MODEL_URL);
+      // Real Cache Storage clones every response read.
+      cache.match = async () => original.clone();
+      const warm = await loadLc0ModelForOrt(MODEL_URL, options);
+      assert.equal(warm.verification, 'metadata');
+      assert.equal(warm.hashMs, 0);
+      const entry = [...metadataStore.entries.values()][0];
+      entry.sha256 = EMPTY_SHA256;
+      assert.equal((await loadLc0ModelForOrt(MODEL_URL, options)).verification, 'hashed');
+      assert.equal(fetchLog.manifest, 0);
+      assert.equal(fetchLog.model, 1);
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, { ...options, manifestEntry: { ...options.manifestEntry, sha256: EMPTY_SHA256 } }), /sha256 mismatch/);
+    },
+    { serveBytes: () => bytesOf('abc') },
+  );
+});
+
 test('clearLc0ModelCache reports removed entries and is safe when empty', async () => {
   await withMockedEnv(
     async () => {
