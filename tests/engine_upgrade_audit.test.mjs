@@ -65,7 +65,8 @@ test('native Stockfish signature rejects malformed final summaries and numeric p
   for (const summary of ['Nodes searched: invalid', 'Nodes searched: 100garbage', 'Nodes searched:', 'Nodes searched: 0', 'Nodes searched: 9007199254740992']) {
     assert.throws(() => benchSignature(['Nodes searched: 100', summary]), /Invalid native bench node summary/);
   }
-  assert.equal(benchSignature(['Nodes searched: 100', 'Nodes searched: 200']), '200');
+  assert.throws(() => benchSignature(['Nodes searched: 100', 'Nodes searched: 200']), /Conflicting native bench summaries/);
+  assert.equal(benchSignature(['Nodes searched: 00100', 'Nodes searched: 100']), '100');
 });
 
 test('native built-in bench cannot compare EXACT after a malformed final summary', () => temporary(async (dir) => {
@@ -445,6 +446,26 @@ test('native Stockfish built-in bestmoves are separate from replay completion co
   }
 }));
 
+test('verified terminal native bench info may have an empty PV before its completion', () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-terminal-native.mjs');
+  const terminals = ['8/8/8/8/8/6k1/6p1/6K1 w - -', '7k/7P/6K1/8/3B4/8/8/8 b - -'];
+  const nativeOutput = 'bestmove e2e4\n'.repeat(49) + 'info depth 0 nodes 0 score mate 0 pv\nbestmove 0000\n'.repeat(2) + 'Nodes searched: 4900';
+  writeFileSync(engine, `import { createInterface } from 'node:readline';
+    const terminals = ${JSON.stringify(terminals)}; let terminal = false;
+    for await (const line of createInterface({ input: process.stdin })) {
+      if (line === 'uci') console.log('uciok');
+      if (line === 'isready') console.log('readyok');
+      if (line.startsWith('bench ')) console.log(${JSON.stringify(nativeOutput)});
+      if (line.startsWith('position fen ')) terminal = terminals.includes(line.slice(13));
+      if (line.startsWith('go ')) console.log(terminal ? 'info depth 0 nodes 0 score mate 0 pv\\nbestmove 0000' : 'info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+      if (line === 'quit') break;
+    }`);
+  const result = await runCell({ label: 'fixture', command: process.execPath, args: [engine], nativeBench: true },
+    { defaults: [...Array(49).fill('startpos'), ...terminals], benchDepth: 1, positions: 0, timeout: 5000 });
+  assert.equal(result.nativeSignature, '4900');
+  assert.equal(result.benchSignature, '4900');
+}));
+
 test('native built-in Stockfish bench completions are validated separately', () => temporary(async (dir) => {
   const engine = join(dir, 'fake-invalid-native-stockfish.mjs');
   for (const bestmoves of [Array(50).fill('bestmove e2e4'), Array(52).fill('bestmove e2e4'),
@@ -474,7 +495,7 @@ test('native Stockfish summaries are revalidated after draining shutdown output'
         if (line === 'quit') { process.stderr.write(${JSON.stringify(trailing)}); break; }
       }`);
     await assert.rejects(runCell({ label: 'fixture', command: process.execPath, args: [engine], nativeBench: true },
-      { defaults: Array(51).fill('startpos'), benchDepth: 1, positions: 0, timeout: 5000 }), /Invalid native bench node summary|Bench replay mismatch after shutdown/);
+      { defaults: Array(51).fill('startpos'), benchDepth: 1, positions: 0, timeout: 5000 }), /Invalid native bench node summary|Conflicting native bench summaries|Bench replay mismatch after shutdown/);
   }
 }));
 
@@ -539,13 +560,45 @@ test('replay validates info emitted after bestmove and on quit across both strea
   }
 }));
 
+test('conflicting native Stockfish totals fail even when the last equals replay', () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-conflicting-native-summary.mjs');
+  writeFileSync(engine, `import { createInterface } from 'node:readline';
+    for await (const line of createInterface({ input: process.stdin })) {
+      if (line === 'uci') console.log('uciok');
+      if (line === 'isready') console.log('readyok');
+      if (line.startsWith('bench ')) console.log('bestmove e2e4\\n'.repeat(51) + 'Nodes searched: 5101\\nNodes searched: 5100');
+      if (line.startsWith('go ')) console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+      if (line === 'quit') break;
+    }`);
+  await assert.rejects(runCell({ label: 'fixture', command: process.execPath, args: [engine], nativeBench: true },
+    { defaults: Array(51).fill('startpos'), benchDepth: 1, positions: 0, timeout: 5000 }), /Conflicting native bench summaries/);
+}));
+
+test('empty-PV terminal exceptions cannot sanitize nonterminal or shutdown records', () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-empty-pv.mjs');
+  for (const phase of ['search', 'quit']) {
+    writeFileSync(engine, `import { createInterface } from 'node:readline';
+      for await (const line of createInterface({ input: process.stdin })) {
+        if (line === 'uci') console.log('uciok');
+        if (line === 'isready') console.log('readyok');
+        if (line.startsWith('go ')) {
+          console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+          if (${JSON.stringify(phase)} === 'search') console.log('info depth 1 nodes 100 score cp 0 pv');
+        }
+        if (line === 'quit') { if (${JSON.stringify(phase)} === 'quit') console.log('info depth 1 nodes 100 score cp 0 pv'); break; }
+      }`);
+    await assert.rejects(runReplay({ tmp: dir, options: { timeout: 5000 } },
+      { label: 'fixture', command: process.execPath, args: [engine] }, ['startpos'], 1), /Malformed UCI PV record/);
+  }
+}));
+
 test('replay accepts complete moves, promotions, ponder and terminal records with the last count', () => temporary(async (dir) => {
   const engine = join(dir, 'fake-valid-replay.mjs');
   const outputs = [
     'info nodes 5\ninfo nodes 10\nbestmove e2e4 ponder e7e5\ninfo nodes 999',
     'info nodes 20\nbestmove a7a8q',
-    'bestmove 0000',
-    'bestmove (none)',
+    'info depth 0 nodes 0 score mate 0 pv\nbestmove 0000',
+    'info depth 0 nodes 0 score cp 0 pv\nbestmove (none)',
   ];
   writeFileSync(engine, `import { createInterface } from 'node:readline';
     const outputs = ${JSON.stringify(outputs)}; let index = 0;

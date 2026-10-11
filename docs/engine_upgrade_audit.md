@@ -125,7 +125,10 @@ that comparison. Recognized position records are validated completely, with
 contiguous coverage and a sum matching the summary; Berserk and Reckless require
 all 50 rows. Stockfish's built-in and replay completion records are counted
 separately, with complete native built-in coverage and a final native-summary
-recheck after both output streams close. Missing/zero replay nodes are allowed
+recheck after both output streams close, requiring all native totals to agree.
+Empty PVs are allowed only in info captured before completion of a verified
+terminal search, never in nonterminal or late/shutdown records.
+Missing/zero replay nodes are allowed
 only for the two verified terminal boards in the pinned Stockfish corpus;
 nonterminal incomplete searches fail even with `--baseline-diverged`.
 Replay output is drained through shutdown, including surplus or
