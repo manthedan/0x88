@@ -18,6 +18,8 @@ import { runProcess } from '../scripts/engine_upgrade_audit/process.mjs';
 import { emscriptenTiers, wasiTiers } from '../scripts/engine_upgrade_audit/tiers.mjs';
 import { parseBestmove, parseInfo, parseUciSearch } from '../scripts/emscripten_uci_protocol.mjs';
 import { wasiBenchProtocol } from '../scripts/engine_upgrade_audit/wasi_protocol.mjs';
+import { parseFen } from '../src/chess/board.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
 
 const ref = 'a'.repeat(40);
 function temporary(fn) {
@@ -482,12 +484,30 @@ test('replay accepts complete moves, promotions, ponder and terminal records wit
       if (line === 'quit') process.exit(0);
     }`);
   const result = await runCell({ label: 'fixture', command: process.execPath, args: [engine] },
-    { defaults: ['one', 'two', 'three', 'four'], benchDepth: 1, positions: 0, timeout: 5000 });
+    { defaults: ['one', 'two', '8/8/8/8/8/6k1/6p1/6K1 w - -', '7k/7P/6K1/8/3B4/8/8/8 b - -'], benchDepth: 1, positions: 0, timeout: 5000 });
   assert.equal(result.benchSignature, '30');
   assert.deepEqual(result.benchRows.map(({ nodes, bestmove }) => ({ nodes, bestmove })), [
     { nodes: 10, bestmove: 'e2e4' }, { nodes: 20, bestmove: 'a7a8q' },
     { nodes: 0, bestmove: '0000' }, { nodes: 0, bestmove: '(none)' },
   ]);
+}));
+
+test('only independently verified terminal corpus boards may omit replay nodes', () => temporary(async (dir) => {
+  for (const fen of ['8/8/8/8/8/6k1/6p1/6K1 w - -', '7k/7P/6K1/8/3B4/8/8/8 b - -']) {
+    assert.equal(legalMoves(parseFen(fen)).length, 0);
+  }
+  const engine = join(dir, 'fake-incomplete-replay.mjs');
+  for (const output of ['bestmove 0000', 'bestmove (none)', 'info nodes 0\\nbestmove e2e4', 'bestmove e2e4', 'info nodes 100\\nbestmove 0000']) {
+    writeFileSync(engine, `import { createInterface } from 'node:readline';
+      for await (const line of createInterface({ input: process.stdin })) {
+        if (line === 'uci') console.log('uciok');
+        if (line === 'isready') console.log('readyok');
+        if (line.startsWith('go ')) console.log(${JSON.stringify(output.replaceAll('\\n', '\n'))});
+        if (line === 'quit') break;
+      }`);
+    await assert.rejects(runReplay({ tmp: dir, options: { timeout: 5000 } },
+      { label: 'fixture', command: process.execPath, args: [engine] }, ['startpos'], 1), /Invalid terminal bestmove|Missing.*bench nodes/);
+  }
 }));
 
 test('PlentyChess malformed replay cannot PASS an explicit native total', () => temporary(async (dir) => {

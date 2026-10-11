@@ -29,13 +29,28 @@ export function benchDefaults(source) {
   return entries;
 }
 
-function replaySearch(lines, best) {
+// Reviewed terminal boards in pinned Stockfish Defaults. New terminal corpus
+// entries need adapter review; a null bestmove alone is never terminal proof.
+const terminalBenchPositions = new Set([
+  '8/8/8/8/8/6k1/6p1/6K1 w - -',
+  '7k/7P/6K1/8/3B4/8/8/8 b - -',
+]);
+function isTerminalBenchPosition(entry) {
+  const fields = entry.trim().split(/\s+/);
+  return (fields.length === 4 || (fields.length === 6 && /^\d+$/.test(fields[4]) && /^\d+$/.test(fields[5])))
+    && terminalBenchPositions.has(fields.slice(0, 4).join(' '));
+}
+
+function replaySearch(lines, best, entry) {
   const bestmove = parseBestmove(best);
   // Select node-bearing records, not just records whose numeric prefix parses.
   // A corrupt final count must never cause fallback to an earlier info line.
   const infos = lines.filter((line) => /^info\s/.test(line) && !/^info\s+string\b/.test(line)
     && line.trim().split(/\s+/).includes('nodes'));
-  if (!infos.length && !['0000', '(none)'].includes(bestmove)) throw new Error('Missing bench nodes');
+  const terminal = isTerminalBenchPosition(entry);
+  const noMove = ['0000', '(none)'].includes(bestmove);
+  if (noMove !== terminal) throw new Error(`Invalid terminal bestmove for bench position: ${entry}`);
+  if (!infos.length && !terminal) throw new Error(`Missing bench nodes: ${entry}`);
   let nodes = 0;
   for (const info of infos) {
     const tokens = info.trim().split(/\s+/);
@@ -44,6 +59,7 @@ function replaySearch(lines, best) {
       || !Number.isSafeInteger(Number(token))) throw new Error(`Malformed replay nodes record: ${info}`);
     nodes = Number(token);
   }
+  if (nodes === 0 && !terminal) throw new Error(`Missing/zero bench nodes for nonterminal position: ${entry}`);
   return { nodes, bestmove };
 }
 
@@ -140,7 +156,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       expectedSearches += 1;
       command(`go depth ${benchDepth}`);
       const best = await wait((l) => /^bestmove(?:\s|$)/.test(l));
-      const search = replaySearch(lines.slice(from, cursor - 1), best);
+      const search = replaySearch(lines.slice(from, cursor - 1), best, entry);
       benchNodes += search.nodes;
       if (!Number.isSafeInteger(benchNodes)) throw new Error('Invalid replay bench node total');
       benchRows.push({ fen: entry, ...search });
