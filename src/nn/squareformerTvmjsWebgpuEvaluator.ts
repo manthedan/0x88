@@ -5,6 +5,7 @@ import { moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { isTrustedExecutableAssetUrl } from '../lc0/assetUrls.ts';
+import { loadLc0ModelForOrt } from '../lc0/modelCache.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import {
@@ -106,6 +107,24 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 }
 
 async function fetchVerified(url: URL, expected?: { bytes?: number; sha256?: string }): Promise<ArrayBuffer> {
+  if (expected?.sha256) {
+    // Content identity lives in the existing modelCache bucket/metadata store,
+    // not an independent TVMJS cache. A changed manifest gets a distinct key.
+    const cacheUrl = new URL(url);
+    cacheUrl.searchParams.set('sha256', expected.sha256);
+    try {
+      const result = await loadLc0ModelForOrt(cacheUrl.href, {
+        cache: true,
+        channelUrl: null,
+        manifestEntry: { file: url.pathname.split('/').pop()!, url: cacheUrl.href, ...expected },
+      });
+      if (result.model instanceof ArrayBuffer && result.sha256Valid) return result.model;
+    } catch {
+      // Storage failures are optional; the uncached path below still hashes.
+    }
+    // Quota/Cache Storage/WebCrypto unavailable: preserve executable integrity
+    // rather than allowing the loader's URL/length-only fallback to bypass it.
+  }
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Fetch failed ${response.status}: ${url}`);
   const bytes = await response.arrayBuffer();

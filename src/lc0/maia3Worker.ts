@@ -42,6 +42,7 @@ type DisposeMessage = {
 type Maia3WorkerMessage = InitMessage | EvaluateMessage | EvaluateConditionsMessage | DisposeMessage;
 
 let session: ort.InferenceSession | null = null;
+let operationTail: Promise<void> = Promise.resolve();
 
 function post(message: unknown, transfers: Transferable[] = []): void {
   (globalThis as unknown as { postMessage: (message: unknown, transfers?: Transferable[]) => void }).postMessage(message, transfers);
@@ -57,7 +58,9 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
 }
 
 (globalThis as unknown as { onmessage: ((event: MessageEvent<Maia3WorkerMessage>) => void) | null }).onmessage = (event) => {
-  void (async () => {
+  // ORT runs and session release must not overlap. The live panel coalesces
+  // obsolete requests before posting; this also protects other worker callers.
+  const operation = operationTail.then(async () => {
     const message = event.data;
     try {
       if (message.type === 'init') {
@@ -130,5 +133,6 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
     } catch (error) {
       post({ type: 'error', id: message.id, message: error instanceof Error ? error.message : String(error) });
     }
-  })();
+  });
+  operationTail = operation.catch(() => undefined);
 };

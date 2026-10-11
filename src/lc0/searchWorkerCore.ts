@@ -84,6 +84,7 @@ type SearchMessage = {
 type ResetSearchMessage = {
   type: 'resetSearch';
   id: number;
+  clearEvalCache?: boolean;
 };
 
 type EvaluateMessage = {
@@ -517,6 +518,7 @@ export function startSearchWorker(options: { createHybridEvaluator?: HybridEvalu
           await handleEvaluateBatch(message);
         } else if (message.type === 'resetSearch') {
           searcher?.resetTree();
+          if (message.clearEvalCache) (evaluator as CachedLc0Evaluator | null)?.clearCache?.();
           post({ type: 'searchReset', id: message.id });
         } else if (message.type === 'search') {
           if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');

@@ -215,6 +215,78 @@ test('Centipawn TVMJS evaluator rejects untrusted manifests before fetching', as
   }
 });
 
+test('Centipawn TVMJS model creates share hash-keyed modelCache bytes without IDB', async () => {
+  const bytes = new TextEncoder().encode('abc');
+  const sha256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+  const restoreLocation = replaceGlobal('location', new URL('https://app.example/analysis'));
+  const responses = new Map();
+  const cache = {
+    match: async (request) => responses.get(request.url)?.clone(),
+    put: async (request, response) => responses.set(request.url, response),
+    keys: async () => [...responses.keys()].map((url) => new Request(url)),
+  };
+  const restoreCaches = replaceGlobal('caches', { open: async () => cache });
+  // Without IDB the shared loader still uses Cache Storage, but rehashes.
+  const restoreIdb = replaceGlobal('indexedDB', undefined);
+  let bodyFetches = 0;
+  const restoreFetch = replaceGlobal('fetch', async (input) => {
+    const url = typeof input === 'string' ? input : (input.url ?? String(input));
+    if (url.endsWith('manifest.json')) {
+      return new Response(
+        JSON.stringify({
+          schema: 'lc0_browser.lc0_tvmjs_webgpu_bundle.v1',
+          modelFamily: 'bt4-soap-rem-c19000-final',
+          dtype: 'f32',
+          target: 'webgpu',
+          runtime: { tvmjsBundle: 'tvmjs.bundle.js' },
+          models: [{ batch: 16, wasm: 'model.wasm', bytes: 3, sha256 }],
+          files: [{ path: 'tvmjs.bundle.js', bytes: 1, sha256: '0'.repeat(64) }],
+        }),
+      );
+    }
+    bodyFetches += 1;
+    return new Response(bytes);
+  });
+  const restoreNavigator = replaceGlobal('navigator', {
+    gpu: {
+      requestAdapter: async () => ({
+        features: { has: () => false },
+        limits: {},
+        requestDevice: async () => ({ destroy() {} }),
+      }),
+    },
+  });
+  const restoreTvmjs = replaceGlobal('tvmjs', {
+    createPolyfillWASI: () => ({}),
+    instantiate: async () => ({
+      initWebGPU() {},
+      beginScope() {},
+      systemLib() {},
+      asyncLoadWebGPUPipelines: async () => {},
+      webgpu() {},
+      createVirtualMachine: () => ({ getInternalModule: () => ({ getFunction() {} }) }),
+      dispose() {},
+    }),
+  });
+  const restoreBundleSha = replaceGlobal('__LC0_TVMJS_BUNDLE_SHA256__', '0'.repeat(64));
+  try {
+    const first = await SquareformerTvmjsWebgpuEvaluator.create('/runtimes/centipawn/manifest.json', meta);
+    const second = await SquareformerTvmjsWebgpuEvaluator.create('/runtimes/centipawn/manifest.json', meta);
+    first.destroy();
+    second.destroy();
+    assert.equal(bodyFetches, 1);
+    assert.match([...responses.keys()][0], new RegExp(`sha256=${sha256}`));
+  } finally {
+    restoreBundleSha();
+    restoreTvmjs();
+    restoreNavigator();
+    restoreFetch();
+    restoreIdb();
+    restoreCaches();
+    restoreLocation();
+  }
+});
+
 test('Centipawn TVMJS evaluator destroys its device when model fetch fails', async () => {
   const restoreLocation = replaceGlobal('location', new URL('https://app.example/analysis'));
   let fetchCount = 0;

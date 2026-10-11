@@ -198,21 +198,29 @@ export class Lc0PuctSearcher {
         elapsedMs: progress.elapsedMs,
       };
     };
-    const result = await searchRoot(board, this.evaluator, {
-      ...searchOptions,
-      visits: options.visits ?? (options.movetimeMs && options.movetimeMs > 0 ? Number.MAX_SAFE_INTEGER : 32),
-      temperature: options.temperature ?? 0,
-      cpuctSchedule: options.cpuctSchedule ?? 'lc0-log',
-      fpuStrategy: options.fpuStrategy ?? 'lc0-reduction',
-      includePv: options.includePv ?? true,
-      root,
-      // History belongs to the LC0 input. Do not let generic SearchOptions
-      // accidentally replace it and desynchronize the 112-plane encoder.
-      historyFens,
-      historyBoards,
-      explicitHistory,
-      onProgress: onProgress ? (progress) => onProgress(convertProgress(progress)) : undefined,
-    });
+    let result: SearchResult;
+    try {
+      result = await searchRoot(board, this.evaluator, {
+        ...searchOptions,
+        visits: options.visits ?? (options.movetimeMs && options.movetimeMs > 0 ? Number.MAX_SAFE_INTEGER : 32),
+        temperature: options.temperature ?? 0,
+        cpuctSchedule: options.cpuctSchedule ?? 'lc0-log',
+        fpuStrategy: options.fpuStrategy ?? 'lc0-reduction',
+        includePv: options.includePv ?? true,
+        root,
+        // History belongs to the LC0 input. Do not let generic SearchOptions
+        // accidentally replace it and desynchronize the 112-plane encoder.
+        historyFens,
+        historyBoards,
+        explicitHistory,
+        onProgress: onProgress ? (progress) => onProgress(convertProgress(progress)) : undefined,
+      });
+    } catch (error) {
+      // Backups can mutate inherited edges before root visit accounting commits.
+      // Never retain that partially updated tree after cancellation/failure.
+      if (useInternalTree) this.resetTree();
+      throw error;
+    }
     if (useInternalTree) this.cachedRoot = result.root ?? null;
     const children = result.policy
       .map((entry) => ({ uci: moveToUci(entry.move), visits: entry.visits, prior: entry.prior, q: entry.q, probability: entry.probability }))

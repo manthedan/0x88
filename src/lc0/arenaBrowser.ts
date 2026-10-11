@@ -3570,7 +3570,7 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
   const runtime = selectedLc0Runtime();
   if (runtime === 'onnx') {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
-      cache: false,
+      cache: true,
       onProgress: (loaded, total) => showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'),
     });
     return Lc0OnnxEvaluator.create(modelLoad.model);

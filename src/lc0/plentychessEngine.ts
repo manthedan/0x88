@@ -1,5 +1,11 @@
 import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
-import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
+import {
+  type BrowserUciAnalysisOptions,
+  type BrowserUciEngine,
+  type BrowserUciInfoLine,
+  type BrowserUciRuntimeStatus,
+  uciPositionCommand,
+} from './browserUciEngine.ts';
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 
@@ -414,7 +420,7 @@ export class PlentyChessEngine implements BrowserUciEngine {
       this.lastInfoLines = [];
       await this.applyOptions(opts.signal);
       await this.sendCommand(`setoption name MultiPV value ${multipv}`, opts.signal);
-      await this.sendCommand(`position fen ${fen}`, opts.signal);
+      await this.sendCommand(uciPositionCommand(fen, opts.moves), opts.signal);
       const searchStart = this.stdout.length;
       const commandPromise = this.sendCommand(
         plentyChessGoCommand({ ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }),

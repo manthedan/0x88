@@ -13,6 +13,13 @@ export interface BrowserUciAnalysisOptions {
   depth?: number;
   movetimeMs?: number;
   signal?: AbortSignal;
+  /** UCI moves from the supplied root FEN, preserving repetition history. */
+  moves?: readonly string[];
+}
+
+export function uciPositionCommand(fen: string, moves: readonly string[] = []): string {
+  if (moves.some((move) => !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move))) throw new Error('Invalid UCI move history');
+  return `position fen ${fen}${moves.length ? ` moves ${moves.join(' ')}` : ''}`;
 }
 
 export interface BrowserUciEngineOptions {

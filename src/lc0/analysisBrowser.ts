@@ -19,6 +19,8 @@ import {
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
+import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
+import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
   type AnalysisLine,
@@ -34,7 +36,8 @@ import { lineChartSvg } from './charts.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { annotatedPgn, type GameReview, type ReviewedMove, type ReviewPosition, reviewGame } from './gameReview.ts';
 import { type GameNode, GameTree } from './gameTree.ts';
-import { Maia3BrowserEvaluator, type Maia3Evaluation, maia3WinProbability } from './maia3.ts';
+import { LatestOnlyTask } from './latestOnlyTask.ts';
+import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import {
   buildOpeningPositionIndex,
   type ImportedGame,
@@ -92,6 +95,7 @@ import {
   LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
   normalizeLc0Runtime,
 } from './browserLc0Runtime.ts';
+import type { BrowserUciAnalysisOptions, BrowserUciEngine } from './browserUciEngine.ts';
 import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
@@ -143,7 +147,7 @@ import {
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
-import { type Lc0EvaluationProvider, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, type Lc0EvaluationProvider, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import {
   checkPlentyChessVariantAsset,
   hasExplicitPlentyChessVariant,
@@ -380,8 +384,14 @@ let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
 let lastReviewSignature = '';
 let analyzing = false;
+let activeAnalysisSelectionKey = '';
 const lineCache = new Map<string, AnalysisLine[]>();
 const engineLineCache = new Map<string, AnalysisLine[]>();
+function cacheEngineLines(key: string, lines: AnalysisLine[]): void {
+  engineLineCache.delete(key);
+  engineLineCache.set(key, lines);
+  if (engineLineCache.size > 512) engineLineCache.delete(engineLineCache.keys().next().value!);
+}
 const completeAnalysisKeys = new Set<string>();
 interface SearchProgressSnapshot {
   label: string;
@@ -584,7 +594,15 @@ function lc0WholeModelTensorCache(): boolean {
 }
 
 function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
-  const common = { type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false, reportDownloadProgress: MODEL_URL === DEFAULT_MODEL_URL };
+  const common = {
+    type: 'init',
+    modelUrl: MODEL_URL,
+    ep: requestedEp(),
+    cacheModel: true,
+    requestPersistentModelStorage: true,
+    evalCacheEntries: 2048,
+    reportDownloadProgress: MODEL_URL === DEFAULT_MODEL_URL,
+  };
   if (runtime === 'onnx') return common;
   if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)
     return {
@@ -593,7 +611,6 @@ function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown>
       wholeModelManifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
       wholeModelBatch: lc0WholeModelPhysicalBatch(),
       wholeModelTensorCache: lc0WholeModelTensorCache(),
-      evalCacheEntries: 0,
     };
   return {
     ...common,
@@ -809,7 +826,7 @@ async function workerLc0Lines(
   let searchId: number | null = null;
   try {
     const response = await postWorker<{ result: WorkerSearchResult }>(
-      { type: 'search', input: { positions }, visits, batchSize: 1, multiPv: requestedMultiPv, reportProgress: true },
+      { type: 'search', input: { positions }, visits, batchSize: 1, multiPv: requestedMultiPv, reuseTree: visits <= 16_000, reportProgress: true },
       (id) => {
         searchId = id;
         activeWorkerSearchId = id;
@@ -851,6 +868,7 @@ const preloadingAnalysisAssetPromises = new Map<string, AnalysisAssetPreload>();
 const analysisAssetPrefetchControllers = new Map<EngineRow, AbortController>();
 let analysisAssetPreloadSequence = 0;
 const preparedCpuEngineKeys = new Set<string>();
+const cpuSessions = new AnalysisCpuSessions();
 
 function renderLoadingProgressItems(): void {
   const node = modelProgressEl();
@@ -1448,10 +1466,18 @@ function rowLabel(row: EngineRow): string {
   return recklessVariantForKey(row.variant).label;
 }
 
-function engineAnalysisCacheKey(fen: string, row: EngineRow): string {
+function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tree.current, requestedMultiPv = multiPv()): string {
   const runtime = row.family === 'lc0' && !isLc0BigNetVariant(row.variant) ? selectedLc0Runtime() : '';
-  const history = tree.historyBoards().map(boardToFen).join('|');
-  return [fen, history, row.family, row.variant, row.strength, `multipv=${multiPv()}`, runtime].join('\u0000');
+  const { dial, cpuBudget } = resourceBroker.snapshot();
+  const participants = [
+    ...new Set(
+      [...activeEngineRows(), row]
+        .filter((entry) => engineResourceProfile(entry.family).resourceClass === 'cpu')
+        .map((entry) => `${entry.family}:${entry.variant}`),
+    ),
+  ].sort();
+  const cpu = engineResourceProfile(row.family).resourceClass === 'cpu' ? JSON.stringify([dial, cpuBudget, participants]) : '';
+  return analysisResultCacheKey(fen, tree.historyBoards(node).map(boardToFen), row, { multiPv: requestedMultiPv, runtime, cpu });
 }
 
 function analysisSelectionCacheKey(fen: string, rows = activeEngineRows()): string {
@@ -1611,7 +1637,7 @@ function renderRecklessRuntimeInfo(): void {
   const recklessParts = recklessVariants.map((variant) => {
     const engine = recklessEngines.peek(variant);
     const status = engine?.runtimeStatus();
-    const mode = engine?.runtimeLabel() ?? fallbackMode;
+    const mode = `${engine?.runtimeLabel() ?? fallbackMode}${variant.backend === 'browser-api' ? ' · FEN-only (no repetition history)' : ''}`;
     const asset = recklessVariantAssetStatus(variant);
     if (assetProbePending(asset))
       void checkRecklessVariantAsset(
@@ -2528,9 +2554,8 @@ function clearReviewIfMainlineChanged(): void {
 }
 
 interface ReviewEngineChoice {
-  engine: {
-    analyze(fen: string, opts?: { multipv?: number; depth?: number; signal?: AbortSignal }): Promise<{ scoreCp?: number; mateIn?: number; pvUci: string[] }[]>;
-  };
+  engine: BrowserUciEngine;
+  row: EngineRow;
   label: string;
   depth: number;
 }
@@ -2539,15 +2564,17 @@ interface ReviewEngineChoice {
 function reviewEngineChoice(): ReviewEngineChoice {
   for (const row of activeEngineRows()) {
     if (row.family === 'sf')
-      return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
-    if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), label: recklessVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'viridithas') return { engine: getViridithasFor(row.variant), label: viridithasVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), label: berserkVariantForKey(row.variant).label, depth: row.strength };
+      return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), row, label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
+    if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), row, label: recklessVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'viridithas')
+      return { engine: getViridithasFor(row.variant), row, label: viridithasVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), row, label: berserkVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'plentychess')
-      return { engine: getPlentyChessFor(row.variant), label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'stormphrax') return { engine: getStormphraxFor(row.variant), label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
+      return { engine: getPlentyChessFor(row.variant), row, label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'stormphrax')
+      return { engine: getStormphraxFor(row.variant), row, label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
   }
-  return { engine: getStockfish('lite'), label: 'SF Lite', depth: 12 };
+  return { engine: getStockfish('lite'), row: { family: 'sf', variant: 'lite', strength: 12 }, label: 'SF Lite', depth: 12 };
 }
 
 function winWhiteFromInfo(fen: string, info: { scoreCp?: number; mateIn?: number } | undefined): number {
@@ -2610,7 +2637,15 @@ async function runGameReview(): Promise<void> {
     el('reviewStatus').textContent = 'Load a PGN or play some moves first.';
     return;
   }
-  const { engine, label, depth } = reviewEngineChoice();
+  cancelActiveAnalysisRun();
+  const { engine, row, label, depth } = reviewEngineChoice();
+  const reviewTree = tree;
+  // Review remains a single-PV search. A MultiPV=3 interactive line is not
+  // equivalent to MultiPV=1 at fixed depth, so it deliberately cannot hit.
+  const reviewMultiPv = 1;
+  const cacheKeys = nodes.map((node) => engineAnalysisCacheKey(node.fen, row, node, reviewMultiPv));
+  syncBrokerParticipants([...activeEngineRows(), row]);
+  let cacheHits = 0;
   const controller = new AbortController();
   reviewAbort = controller;
   el('reviewGame').toggleAttribute('disabled', true);
@@ -2630,8 +2665,27 @@ async function runGameReview(): Promise<void> {
         positions.push({ winWhite: inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5, bestUci: null, legalMoves: 0 });
         continue;
       }
-      const lines = await engine.analyze(fen, { multipv: 1, depth, signal: controller.signal });
+      const cached = cachedReviewPosition(engineLineCache.get(cacheKeys[i]), legal);
+      if (cached) {
+        cacheHits += 1;
+        positions.push(cached);
+        continue;
+      }
+      const engineId = row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`;
+      const lines = await withCpuLease(engineId, controller.signal, async (lease) => {
+        cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
+        if (cpuSessions.needsReset(engine, reviewTree)) {
+          await engine.newGame(controller.signal);
+          cpuSessions.prepared(engine, reviewTree);
+        }
+        return withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
+          analyzeCpuPosition(engine, row, fen, analysisGamePosition(reviewTree, nodes[i]), { multipv: reviewMultiPv, depth, signal }),
+        );
+      });
       if (reviewAbort !== controller) return;
+      if (controller.signal.aborted) break;
+      const formatted = stockfishAnalysisLines(lines, fen, label);
+      if (formatted.length) cacheEngineLines(cacheKeys[i], formatted);
       positions.push({
         winWhite: winWhiteFromInfo(fen, lines[0]),
         bestUci: lines[0]?.pvUci?.[0] ?? null,
@@ -2649,7 +2703,7 @@ async function runGameReview(): Promise<void> {
     lastReviewSignature = reviewSignature(nodes);
     renderReview(lastReview, nodes);
     el('reviewCopyPgn').hidden = false;
-    el('reviewStatus').textContent = `Reviewed ${moves.length} moves with ${label}.`;
+    el('reviewStatus').textContent = `Reviewed ${moves.length} moves with ${label} · ${cacheHits}/${nodes.length} cached positions.`;
   } catch (error) {
     if (reviewAbort === controller) {
       el('reviewStatus').textContent = (error as Error).name === 'AbortError' ? 'Review stopped.' : `Review failed: ${(error as Error).message}`;
@@ -2970,6 +3024,7 @@ function prefetchAnalysisAssetsForAddedRow(row: EngineRow): void {
 
 async function prepareCpuEngine(
   row: EngineRow,
+  engine: object,
   preparationKey: string,
   label: string,
   parentSignal: AbortSignal,
@@ -2977,6 +3032,7 @@ async function prepareCpuEngine(
   start: (signal: AbortSignal) => Promise<void>,
   beginSearch: () => void,
 ): Promise<void> {
+  const game = tree;
   const prepared = preparedCpuEngineKeys.has(preparationKey);
   // A warm engine reset is part of the next search, not another model load.
   // Show one search activity state immediately instead of briefly flashing the
@@ -2984,7 +3040,8 @@ async function prepareCpuEngine(
   if (prepared) beginSearch();
   await withEngineTimeout(`${label} loading`, parentSignal, cpuColdStartTimeoutMs(row), async (signal) => {
     if (prepared) {
-      await start(signal);
+      if (cpuSessions.needsReset(engine, game)) await start(signal);
+      if (!signal.aborted) cpuSessions.prepared(engine, game);
       return;
     }
     await preloadAnalysisAssets(label, urls, signal);
@@ -2992,12 +3049,34 @@ async function prepareCpuEngine(
     showLoadingProgressItem(`startup:${label}`, { label, phase: 'Starting engine' });
     try {
       await start(signal);
+      if (!signal.aborted) cpuSessions.prepared(engine, game);
       preparedCpuEngineKeys.add(preparationKey);
     } finally {
       hideLoadingProgressItem(`startup:${label}`);
     }
   });
   if (!prepared) beginSearch();
+}
+
+async function analyzeCpuPosition(
+  engine: Pick<BrowserUciEngine, 'analyze'>,
+  row: EngineRow,
+  fen: string,
+  position: ReturnType<typeof analysisGamePosition>,
+  options: BrowserUciAnalysisOptions,
+) {
+  // The experimental Reckless direct ABI only exposes set_fen, not UCI moves.
+  // Keep that explicitly FEN-only rather than feeding it a malformed FEN or
+  // silently switching the user's runtime. All UCI transports receive history.
+  const fenOnly = row.family === 'reckless' && recklessVariantForKey(row.variant).backend === 'browser-api';
+  try {
+    return await engine.analyze(fenOnly ? fen : position.fen, { ...options, moves: fenOnly ? undefined : position.moves });
+  } catch (error) {
+    cpuSessions.invalidate(engine);
+    throw error;
+  } finally {
+    if (options.signal?.aborted) cpuSessions.invalidate(engine);
+  }
 }
 
 async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
@@ -3039,6 +3118,7 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
+  reviewAbort?.abort();
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
     return;
@@ -3078,6 +3158,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   el('analyze').toggleAttribute('disabled', true);
   const fen = tree.current.fen;
   const analysisPositions = tree.historyBoards();
+  const cpuPosition = analysisGamePosition(tree);
   const analysisMultiPv = multiPv();
   const board = parseFen(fen);
   if (legalMoves(board).length === 0) {
@@ -3090,6 +3171,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
   const selectedLabels = rows.map((row) => rowLabel(row)).join(' + ');
   const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
+  activeAnalysisSelectionKey = selectionCacheKey;
   el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
   clearAnalysisSearchProgress();
   syncBrokerParticipants(rows);
@@ -3099,6 +3181,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   try {
     const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
     const publishLines = () => {
+      if (controller.signal.aborted || analysisSelectionCacheKey(tree.current.fen) !== selectionCacheKey) return;
       lineCache.set(fen, lineGroups.flat());
       if (tree.current.fen === fen) {
         renderLines();
@@ -3117,7 +3200,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           try {
             const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
             if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
-            if (lines.length) engineLineCache.set(cacheKey, lines);
+            if (lines.length) cacheEngineLines(cacheKey, lines);
             else engineLineCache.delete(cacheKey);
             lineGroups[index] = lines;
             publishLines();
@@ -3156,6 +3239,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
                 { positions: analysisPositions },
                 {
                   visits: row.strength,
+                  reuseTree: row.strength <= 16_000,
                   multiPv: analysisMultiPv,
                   signal: controller.signal,
                   yieldEveryMs: 16,
@@ -3204,9 +3288,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         pushTask(index, cacheKey, label, (beginSearch) =>
           withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
             const engine = getStockfish(kind);
-            engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
+            cpuSessions.setThreads(engine, Math.min(lease.threads, engine.maxThreads()));
             await prepareCpuEngine(
               row,
+              engine,
               `sf:${kind}`,
               label,
               controller.signal,
@@ -3215,7 +3300,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             return stockfishAnalysisLines(infos, fen, label);
           }),
@@ -3228,6 +3313,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
             await prepareCpuEngine(
               row,
+              engine,
               `viridithas:${row.variant}`,
               label,
               controller.signal,
@@ -3239,7 +3325,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3251,9 +3337,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getBerserkFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
           withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
-            engine.setOptions({ threads: lease.threads });
+            cpuSessions.setThreads(engine, lease.threads);
             await prepareCpuEngine(
               row,
+              engine,
               `berserk:${row.variant}`,
               label,
               controller.signal,
@@ -3262,7 +3349,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3274,9 +3361,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getPlentyChessFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
           withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
-            engine.setOptions({ threads: lease.threads });
+            cpuSessions.setThreads(engine, lease.threads);
             await prepareCpuEngine(
               row,
+              engine,
               `plentychess:${row.variant}`,
               label,
               controller.signal,
@@ -3285,7 +3373,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3297,9 +3385,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getStormphraxFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
           withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
-            engine.setOptions({ threads: lease.threads });
+            cpuSessions.setThreads(engine, lease.threads);
             await prepareCpuEngine(
               row,
+              engine,
               `stormphrax:${row.variant}`,
               label,
               controller.signal,
@@ -3308,7 +3397,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3322,6 +3411,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
             await prepareCpuEngine(
               row,
+              engine,
               `reckless:${row.variant}`,
               label,
               controller.signal,
@@ -3330,7 +3420,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3341,7 +3431,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     await Promise.all(tasks);
     if (controller.signal.aborted || mountAbort.signal.aborted) return;
     publishLines();
-    if (!hadTaskFailure) completeAnalysisKeys.add(selectionCacheKey);
+    if (!hadTaskFailure) {
+      completeAnalysisKeys.add(selectionCacheKey);
+      if (completeAnalysisKeys.size > 512) completeAnalysisKeys.delete(completeAnalysisKeys.values().next().value!);
+    }
     const message = document.getElementById('message');
     if (message)
       message.textContent = hadTaskFailure
@@ -3375,12 +3468,41 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   }
 }
 
+let analysisGameTree = tree;
+
 function afterNavigation() {
+  if (analysisGameTree !== tree) {
+    analysisGameTree = tree;
+    reviewAbort?.abort();
+    clearReviewState('Review cleared for the new game.');
+    cancelActiveAnalysisRun();
+    searcher?.resetTree();
+    (mainEvaluator as CachedLc0Evaluator | null)?.clearCache?.();
+    // Queued behind any cancelled search, so that search cannot repopulate the
+    // old tree/cache after the reset. Model/runtime changes dispose the worker.
+    if (searchWorker) void postWorker({ type: 'resetSearch', clearEvalCache: true }).catch(() => undefined);
+    engineLineCache.clear();
+    completeAnalysisKeys.clear();
+  }
+  const fen = tree.current.fen;
+  const rows = activeEngineRows();
+  const selectionKey = analysisSelectionCacheKey(fen, rows);
+  if (analyzing && analysisAbort && !analysisAbort.signal.aborted && activeAnalysisSelectionKey !== selectionKey) cancelActiveAnalysisRun();
+  // A transposition can have the same FEN but a different neural/repetition
+  // history. A completed-key marker is not provenance for the FEN-only view.
+  const cached = completeAnalysisKeys.has(selectionKey)
+    ? cachedAnalysisSelection(
+        engineLineCache,
+        rows.map((row) => engineAnalysisCacheKey(fen, row)),
+      )
+    : undefined;
+  if (cached) lineCache.set(fen, cached);
+  else lineCache.delete(fen);
   clearStalePgnDatabaseSearchResults();
   clearReviewIfMainlineChanged();
   renderAll();
   scheduleMaia3Panel();
-  if (inputEl('autoAnalyze').checked && !completeAnalysisKeys.has(analysisSelectionCacheKey(tree.current.fen))) void analyzeCurrent();
+  if (inputEl('autoAnalyze').checked && !cached) void analyzeCurrent();
   else {
     renderEvalBar();
     setShapes(bestShapes());
@@ -3396,7 +3518,7 @@ const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
 let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
 let maia3PanelLoadGeneration = 0;
-let maia3PanelSeq = 0;
+let maia3PanelTask: LatestOnlyTask<string> | null = null;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
 
 function maia3PanelStatus(text: string): void {
@@ -3425,6 +3547,10 @@ async function enableMaia3Panel(): Promise<void> {
       return;
     }
     maia3PanelEvaluator = evaluator;
+    maia3PanelTask = new LatestOnlyTask(
+      (fen, isCurrent) => renderMaia3Panel(fen, evaluator, () => isCurrent() && !isStaleMount(mountSignal) && maia3PanelEvaluator === evaluator),
+      (error) => maia3PanelStatus(`Maia3 evaluation failed: ${(error as Error).message}`),
+    );
     hideModelProgress();
     el('maia3Enable').hidden = true;
     el('maia3Grid').hidden = false;
@@ -3445,10 +3571,15 @@ async function enableMaia3Panel(): Promise<void> {
 }
 
 function scheduleMaia3Panel(): void {
-  if (!maia3PanelEvaluator) return;
+  const task = maia3PanelTask;
+  // Invalidate on navigation, not only when the debounce eventually dispatches.
+  task?.invalidate();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  maia3PanelTimer = null;
+  if (!task) return;
   maia3PanelTimer = setTimeout(() => {
-    void renderMaia3Panel();
+    maia3PanelTimer = null;
+    task.request(tree.current.fen || START_FEN);
   }, 120);
 }
 
@@ -3459,27 +3590,20 @@ function bestEngineUci(fen: string): string | null {
   return first?.pvUci[0] ?? null;
 }
 
-async function renderMaia3Panel(): Promise<void> {
-  const evaluator = maia3PanelEvaluator;
-  if (!evaluator) return;
-  const seq = ++maia3PanelSeq;
-  const fen = tree.current.fen || START_FEN;
+async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, isCurrent: () => boolean): Promise<void> {
+  if (!isCurrent()) return;
   const board = parseFen(fen);
   if (!legalMoves(board).length) {
+    maia3PanelStatus('');
     el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>';
     return;
   }
-  let evaluations: Maia3Evaluation[];
-  try {
-    evaluations = await evaluator.evaluateConditions(
-      board,
-      MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })),
-    );
-  } catch (error) {
-    maia3PanelStatus(`Maia3 evaluation failed: ${(error as Error).message}`);
-    return;
-  }
-  if (seq !== maia3PanelSeq) return;
+  const evaluations = await evaluator.evaluateConditions(
+    board,
+    MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })),
+  );
+  if (!isCurrent()) return;
+  maia3PanelStatus('');
   const engineUci = bestEngineUci(fen);
   const sanByUci = new Map(legalMoves(board).map((move) => [moveToUci(move), moveToSan(board, move)]));
   const rows = evaluations.map((evaluation, i) => {
@@ -3922,7 +4046,8 @@ function disposePageResources(): void {
   maia3PanelEvaluator = null;
   maia3PanelLoading = false;
   maia3PanelLoadGeneration += 1;
-  maia3PanelSeq += 1;
+  maia3PanelTask?.dispose();
+  maia3PanelTask = null;
   maia3PanelTimer = null;
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = null;
@@ -3996,7 +4121,8 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
         });
       } else {
         const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
-          cache: false,
+          cache: true,
+          requestPersistentStorage: true,
           signal: operationSignal,
           onProgress: (loaded, total) => {
             if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
@@ -4008,6 +4134,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
         void nextEvaluator?.dispose?.();
         return false;
       }
+      nextEvaluator = new CachedLc0Evaluator(nextEvaluator, { maxEntries: 2048 });
       const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
       const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
       if (loadCancelled()) {
@@ -4134,6 +4261,9 @@ let lastAnalysisMountHref: string | null = null;
 
 function resetAnalysisPageState(): void {
   tree = new GameTree(params.get('fen') ?? START_FEN);
+  analysisGameTree = tree;
+  engineLineCache.clear();
+  completeAnalysisKeys.clear();
   orientation = 'white';
   analysisAbort = null;
   analysisReloadAbort = null;
