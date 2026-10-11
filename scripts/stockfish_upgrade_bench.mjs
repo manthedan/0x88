@@ -84,6 +84,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
   let expectedSearches = 0;
   let replayStart = 0;
   let nativeBenchStart;
+  let replaySignature;
   const closed = new Promise((done) => child.once('close', done));
   const fail = (err) => {
     failure = err;
@@ -172,6 +173,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       benchRows.push({ fen: entry, ...search });
     }
     const signature = String(benchNodes);
+    replaySignature = signature;
     if (!benchNodes || (cell.nativeBench && nativeSignature !== signature)) throw Error(`Bench replay mismatch: native=${nativeSignature}, replay=${signature}`);
     command(`setoption name Threads value ${threads}`);
     const rows = [];
@@ -211,6 +213,10 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       // malformed or surplus completion records before a clean shutdown.
       if (cell.nativeBench) {
         validateCompletions(lines.slice(nativeBenchStart, replayStart), defaults.filter((entry) => !entry.startsWith('setoption ')).length, 'native built-in bench');
+        const finalNativeSignature = benchSignature(lines.slice(nativeBenchStart));
+        if (finalNativeSignature !== replaySignature) {
+          throw new Error(`Bench replay mismatch after shutdown: native=${finalNativeSignature}, replay=${replaySignature}`);
+        }
       }
       validateCompletions(lines.slice(replayStart), expectedSearches, 'replay');
     }

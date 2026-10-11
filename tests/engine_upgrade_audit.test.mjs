@@ -441,6 +441,22 @@ test('native built-in Stockfish bench completions are validated separately', () 
   }
 }));
 
+test('native Stockfish summaries are revalidated after draining shutdown output', () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-late-native-summary.mjs');
+  for (const trailing of ['Nodes searched: invalid\n', 'Nodes searched: invalid', 'Nodes searched: 5101']) {
+    writeFileSync(engine, `import { createInterface } from 'node:readline';
+      for await (const line of createInterface({ input: process.stdin })) {
+        if (line === 'uci') console.log('uciok');
+        if (line === 'isready') console.log('readyok');
+        if (line.startsWith('bench ')) console.log('bestmove e2e4\\n'.repeat(51) + 'Nodes searched: 5100');
+        if (line.startsWith('go ')) console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+        if (line === 'quit') { process.stderr.write(${JSON.stringify(trailing)}); break; }
+      }`);
+    await assert.rejects(runCell({ label: 'fixture', command: process.execPath, args: [engine], nativeBench: true },
+      { defaults: Array(51).fill('startpos'), benchDepth: 1, positions: 0, timeout: 5000 }), /Invalid native bench node summary|Bench replay mismatch after shutdown/);
+  }
+}));
+
 for (const [label, final, best] of [
   ['empty bestmove', 'info nodes 100', 'bestmove '],
   ['bare bestmove', 'info nodes 100', 'bestmove'],
