@@ -1,0 +1,593 @@
+{
+  "schema": "centipawn_mixed_f16_rejected_evidence_v1",
+  "decision": "reject-numerical-gate",
+  "branchBase": "5c161a9",
+  "compilerCommit": "94398e51fbb8bf9022da85d83e25f914ef033110",
+  "tvmFfiFixCommit": "afea100",
+  "constantPoolRepro": "PASS",
+  "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": ""
+  },
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.0.0 Safari/537.36",
+  "requiredFeatures": ["webgpu", "shader-f16"],
+  "physicalBatch": 16,
+  "tolerance": 0.001,
+  "reference": {
+    "path": "public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json",
+    "batch": 16,
+    "wasm": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+    "probe": "bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.json",
+    "bytes": 20192787,
+    "sha256": "fd3d8635c8368338c3a0d1b57a725a70b4f8a74f8d130ee831848c641cba75b5"
+  },
+  "candidate": {
+    "batch": 16,
+    "wasm": "bt4-soap-rem-c19000-final.batch16.f16.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+    "probe": "bt4-soap-rem-c19000-final.batch16.f16.webgpu.tvmjs-wasm.probe.json",
+    "bytes": 12095744,
+    "sha256": "f7054858eec28f6b3131fbbcea53c265c814426a64344a48156959a63e899bb7"
+  },
+  "synthetic": {
+    "raw": {
+      "policy": {
+        "count": 327680,
+        "maxAbs": 0.05432701110839844,
+        "meanAbs": 0.010789115286252126
+      },
+      "wdl": {
+        "count": 48,
+        "maxAbs": 0.011913299560546875,
+        "meanAbs": 0.004017055034637451
+      },
+      "q": {
+        "count": 16,
+        "maxAbs": 0.002429485321044922,
+        "meanAbs": 0.0007415711879730225
+      },
+      "hidden": {
+        "count": 131072,
+        "maxAbs": 0.021570920944213867,
+        "meanAbs": 0.0031475632304540646
+      }
+    },
+    "rawTop1Matches": 16,
+    "rawTop1Count": 16
+  },
+  "fixtures": {
+    "raw": {
+      "policy": {
+        "count": 327680,
+        "maxAbs": 0.08095932006835938,
+        "meanAbs": 0.010181609905807586
+      },
+      "wdl": {
+        "count": 48,
+        "maxAbs": 0.017322540283203125,
+        "meanAbs": 0.00733109835224847
+      },
+      "q": {
+        "count": 16,
+        "maxAbs": 0.004000365734100342,
+        "meanAbs": 0.0009285216219723225
+      },
+      "hidden": {
+        "count": 131072,
+        "maxAbs": 0.03291165828704834,
+        "meanAbs": 0.0033912937331019855
+      }
+    },
+    "rawTop1Matches": 16,
+    "rawTop1Count": 16,
+    "legalPolicy": {
+      "count": 174,
+      "maxAbs": 0.0009575033066274996,
+      "meanAbs": 7.72428184441982e-5
+    },
+    "wdlProbabilities": {
+      "count": 30,
+      "maxAbs": 0.002876814956689122,
+      "meanAbs": 0.00024059665840423498
+    },
+    "top1Matches": 10,
+    "top1Count": 10,
+    "perFixture": [
+      {
+        "id": "startpos",
+        "legalPolicy": {
+          "count": 20,
+          "maxAbs": 0.000664955027204317,
+          "meanAbs": 7.194763379258571e-5
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 3.20053004641066e-5,
+          "meanAbs": 2.133686697610475e-5
+        },
+        "top1F32": "d2d4",
+        "top1F16": "d2d4",
+        "top1Agreement": true
+      },
+      {
+        "id": "black-to-move-after-e4",
+        "legalPolicy": {
+          "count": 20,
+          "maxAbs": 0.00035821504321773,
+          "meanAbs": 8.757864872157386e-5
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 0.00037783228308008177,
+          "meanAbs": 0.0002518881887201112
+        },
+        "top1F32": "c2c4",
+        "top1F16": "c2c4",
+        "top1Agreement": true
+      },
+      {
+        "id": "castling-rights",
+        "legalPolicy": {
+          "count": 26,
+          "maxAbs": 0.0007626738995904492,
+          "meanAbs": 5.991863282211032e-5
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 2.211948349060966e-5,
+          "meanAbs": 1.4746322327159842e-5
+        },
+        "top1F32": "h1h8",
+        "top1F16": "h1h8",
+        "top1Agreement": true
+      },
+      {
+        "id": "black-castling-rights",
+        "legalPolicy": {
+          "count": 26,
+          "maxAbs": 0.0007626738995904492,
+          "meanAbs": 5.991863282211032e-5
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 2.211948349060966e-5,
+          "meanAbs": 1.4746322327159842e-5
+        },
+        "top1F32": "h1h8",
+        "top1F16": "h1h8",
+        "top1Agreement": true
+      },
+      {
+        "id": "en-passant-available",
+        "legalPolicy": {
+          "count": 31,
+          "maxAbs": 0.0009575033066274996,
+          "meanAbs": 7.330084281509809e-5
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 0.002876814956689122,
+          "meanAbs": 0.0019178766377927873
+        },
+        "top1F32": "d2d4",
+        "top1F16": "d2d4",
+        "top1Agreement": true
+      },
+      {
+        "id": "black-en-passant-available",
+        "legalPolicy": {
+          "count": 7,
+          "maxAbs": 0.00013974694428436907,
+          "meanAbs": 7.087614143346561e-5
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 3.258387562142225e-5,
+          "meanAbs": 2.1722583747704386e-5
+        },
+        "top1F32": "d5e6",
+        "top1F16": "d5e6",
+        "top1Agreement": true
+      },
+      {
+        "id": "promotion-near",
+        "legalPolicy": {
+          "count": 11,
+          "maxAbs": 0.0008633455008872359,
+          "meanAbs": 0.00016773055658076753
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 1.2662559858434008e-6,
+          "meanAbs": 8.441706572244747e-7
+        },
+        "top1F32": "a7a8q",
+        "top1F16": "a7a8q",
+        "top1Agreement": true
+      },
+      {
+        "id": "black-promotion-near",
+        "legalPolicy": {
+          "count": 13,
+          "maxAbs": 0.0004565321898150343,
+          "meanAbs": 0.00010732059329227934
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 7.898255049987313e-9,
+          "meanAbs": 5.265503361043641e-9
+        },
+        "top1F32": "e1d1",
+        "top1F16": "e1d1",
+        "top1Agreement": true
+      },
+      {
+        "id": "in-check-king-evasion",
+        "legalPolicy": {
+          "count": 6,
+          "maxAbs": 0.0002013558572105112,
+          "meanAbs": 0.00010033291170817582
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 9.680053227667518e-5,
+          "meanAbs": 6.453368818447384e-5
+        },
+        "top1F32": "e2d3",
+        "top1F16": "e2d3",
+        "top1Agreement": true
+      },
+      {
+        "id": "rule50-nonzero",
+        "legalPolicy": {
+          "count": 14,
+          "maxAbs": 0.00016024514319912253,
+          "meanAbs": 3.737824496558067e-5
+        },
+        "wdl": {
+          "count": 3,
+          "maxAbs": 0.0001473998067094539,
+          "meanAbs": 9.826653780626333e-5
+        },
+        "top1F32": "h1h7",
+        "top1F16": "h1h7",
+        "top1Agreement": true
+      }
+    ]
+  },
+  "gpuErrors": [],
+  "ok": false,
+  "timingMeasured": false,
+  "shaderInspection": {
+    "kernelCount": 51,
+    "f16KernelCount": 32,
+    "subgroups": false,
+    "sameMatmulConfig": true,
+    "matmulConfig": {
+      "block_size_x": 8,
+      "block_size_y": 8,
+      "vthread_x": 1,
+      "vthread_y": 1,
+      "micro_size_x": 4,
+      "micro_size_y": 4,
+      "micro_size_k": 16,
+      "vector_size": 1,
+      "unroll": 256,
+      "use_shared": true,
+      "storage_align": false,
+      "inner_x": false
+    },
+    "f32ReductionInspection": [
+      {
+        "kernel": "fused_layer_norm1_cast3_kernel",
+        "accumulators": [
+          {
+            "name": "in_thread_lv74_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "in_thread_lv74_var_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0",
+            "dtype": "f32"
+          },
+          {
+            "name": "lv74_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0_1",
+            "dtype": "f32"
+          },
+          {
+            "name": "lv74_var_sum_shared",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_layer_norm_cast6_kernel",
+        "accumulators": [
+          {
+            "name": "in_thread_lv69_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "in_thread_lv69_var_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0",
+            "dtype": "f32"
+          },
+          {
+            "name": "lv69_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0_1",
+            "dtype": "f32"
+          },
+          {
+            "name": "lv69_var_sum_shared",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul10_cast16_divide6_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul11_cast18_add10_cast21_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_intermediate_reindex_pad_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul12_cast19_add9_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_rf_local",
+            "dtype": "f32"
+          },
+          {
+            "name": "matmul_rf_local_1",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul1_cast3_add2_cast4_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul2_cast3_cast4_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul3_cast8_add4_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul4_cast12_add5_cast13_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul5_cast10_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_intermediate_reindex_pad_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul6_cast14_add6_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul7_cast15_add7_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul8_cast3_add2_cast4_add1_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul9_cast3_add2_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_matmul_cast3_cast4_add1_add1_add1_kernel",
+        "accumulators": [
+          {
+            "name": "matmul_reindex_local",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "fused_softmax_cast12_kernel",
+        "accumulators": [
+          {
+            "name": "in_thread_T_softmax_maxelem_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "in_thread_T_softmax_expsum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0",
+            "dtype": "f32"
+          },
+          {
+            "name": "T_softmax_maxelem_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0_1",
+            "dtype": "f32"
+          },
+          {
+            "name": "T_softmax_expsum_shared",
+            "dtype": "f32"
+          }
+        ]
+      },
+      {
+        "kernel": "layer_norm1_kernel",
+        "accumulators": [
+          {
+            "name": "in_thread_lv74_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "in_thread_lv74_var_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0",
+            "dtype": "f32"
+          },
+          {
+            "name": "lv74_sum_shared",
+            "dtype": "f32"
+          },
+          {
+            "name": "red_buf0_1",
+            "dtype": "f32"
+          },
+          {
+            "name": "lv74_var_sum_shared",
+            "dtype": "f32"
+          }
+        ]
+      }
+    ]
+  },
+  "localArtifacts": [
+    {
+      "path": "artifacts/centipawn-f16/build.sh",
+      "bytes": 2607,
+      "sha256": "0954da48321c654a8af67e4cfdf71b547823f233ba494fbb8ff8bbd57bf0c63b"
+    },
+    {
+      "path": "artifacts/centipawn-f16/build_mixed.py",
+      "bytes": 1176,
+      "sha256": "55be9bf6b57891736bb2ae1f662ee7707b5df94a4be041d640ad4551ae059826"
+    },
+    {
+      "path": "artifacts/centipawn-f16/parity.mjs",
+      "bytes": 7982,
+      "sha256": "95cece4701183868fc5d29e386ff3d17240414f35b27e22b4faf4ce9b1f0e6ff"
+    },
+    {
+      "path": "artifacts/centipawn-f16/parity.html",
+      "bytes": 460,
+      "sha256": "92ef148a61cba9d1f792681e2aabcc3820851ddc11d9af4a361f0e044518df36"
+    },
+    {
+      "path": "artifacts/centipawn-f16/parity.json",
+      "bytes": 13236,
+      "sha256": "76ec627b719480f6ae7cc06579dc977a422e85e185fdb27e6f5125d90af91b07"
+    },
+    {
+      "path": "artifacts/centipawn-f16/wgsl-inspection.json",
+      "bytes": 5494,
+      "sha256": "c0c47bdff6e507abe3c5c1869cc5ee951d31fa0716ecbaf57acb32f22a3cbf5b"
+    },
+    {
+      "path": "artifacts/centipawn-f16/mixed.relax.py",
+      "bytes": 59844,
+      "sha256": "b099b16237c8b5243aba023be48a13f276485faab4a8734646532979a758ce2d"
+    },
+    {
+      "path": "artifacts/centipawn-f16/bt4-soap-rem-c19000-final.batch16.f32.onnx",
+      "bytes": 16246184,
+      "sha256": "c4adcf876904baf3381727720391ffba2fa2981e0395334e81af9424815b0506"
+    },
+    {
+      "path": "artifacts/centipawn-f16/bt4-soap-rem-c19000-final.batch16.f16.webgpu.tvmjs-wasm.probe.json",
+      "bytes": 51068,
+      "sha256": "ae328cd651764f75e12caf17f924fc22247cd55aa1dfe68dd960a69ba0975c49"
+    },
+    {
+      "path": "artifacts/centipawn-f16/bt4-soap-rem-c19000-final.batch16.f16.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+      "bytes": 12095744,
+      "sha256": "f7054858eec28f6b3131fbbcea53c265c814426a64344a48156959a63e899bb7"
+    },
+    {
+      "path": "artifacts/centipawn-f16/bt4-soap-rem-c19000-final.batch16.f16.webgpu.tvmjs-wasm.probe.sources/module02.depth2.webgpu.wgsl",
+      "bytes": 747380,
+      "sha256": "8b20a49af46538d62e5c6fe8da20d942ea7036a59e31311367de20abd2a7642e"
+    },
+    {
+      "path": "artifacts/centipawn-f16/parity-failed.png",
+      "bytes": 142060,
+      "sha256": "b940d1335fa75cc8a886a174a81770ab333c7f5cb07e3df8e2838b0cf1e9d457"
+    },
+    {
+      "path": "artifacts/centipawn-f16/lab-dist/assets/parity-DDWmqxlJ.js",
+      "bytes": 88166,
+      "sha256": "a5959e1289f6e893ad6ee857e3e6ca56dcb31178e18228cd1bc0d909fd0cd706"
+    }
+  ],
+  "fixtureMoveNotation": "stm-white normalized UCI; agreement unaffected by inverse rank flip"
+}
