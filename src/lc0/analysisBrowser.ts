@@ -19,6 +19,7 @@ import {
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
+import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
   type AnalysisLine,
@@ -92,6 +93,7 @@ import {
   LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
   normalizeLc0Runtime,
 } from './browserLc0Runtime.ts';
+import type { BrowserUciAnalysisOptions, BrowserUciEngine } from './browserUciEngine.ts';
 import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
@@ -858,6 +860,7 @@ const preloadingAnalysisAssetPromises = new Map<string, AnalysisAssetPreload>();
 const analysisAssetPrefetchControllers = new Map<EngineRow, AbortController>();
 let analysisAssetPreloadSequence = 0;
 const preparedCpuEngineKeys = new Set<string>();
+const cpuSessions = new AnalysisCpuSessions();
 
 function renderLoadingProgressItems(): void {
   const node = modelProgressEl();
@@ -2977,6 +2980,7 @@ function prefetchAnalysisAssetsForAddedRow(row: EngineRow): void {
 
 async function prepareCpuEngine(
   row: EngineRow,
+  engine: object,
   preparationKey: string,
   label: string,
   parentSignal: AbortSignal,
@@ -2984,6 +2988,7 @@ async function prepareCpuEngine(
   start: (signal: AbortSignal) => Promise<void>,
   beginSearch: () => void,
 ): Promise<void> {
+  const game = tree;
   const prepared = preparedCpuEngineKeys.has(preparationKey);
   // A warm engine reset is part of the next search, not another model load.
   // Show one search activity state immediately instead of briefly flashing the
@@ -2991,7 +2996,8 @@ async function prepareCpuEngine(
   if (prepared) beginSearch();
   await withEngineTimeout(`${label} loading`, parentSignal, cpuColdStartTimeoutMs(row), async (signal) => {
     if (prepared) {
-      await start(signal);
+      if (cpuSessions.needsReset(engine, game)) await start(signal);
+      if (!signal.aborted) cpuSessions.prepared(engine, game);
       return;
     }
     await preloadAnalysisAssets(label, urls, signal);
@@ -2999,12 +3005,34 @@ async function prepareCpuEngine(
     showLoadingProgressItem(`startup:${label}`, { label, phase: 'Starting engine' });
     try {
       await start(signal);
+      if (!signal.aborted) cpuSessions.prepared(engine, game);
       preparedCpuEngineKeys.add(preparationKey);
     } finally {
       hideLoadingProgressItem(`startup:${label}`);
     }
   });
   if (!prepared) beginSearch();
+}
+
+async function analyzeCpuPosition(
+  engine: Pick<BrowserUciEngine, 'analyze'>,
+  row: EngineRow,
+  fen: string,
+  position: ReturnType<typeof analysisGamePosition>,
+  options: BrowserUciAnalysisOptions,
+) {
+  // The experimental Reckless direct ABI only exposes set_fen, not UCI moves.
+  // Keep that explicitly FEN-only rather than feeding it a malformed FEN or
+  // silently switching the user's runtime. All UCI transports receive history.
+  const fenOnly = row.family === 'reckless' && recklessVariantForKey(row.variant).backend === 'browser-api';
+  try {
+    return await engine.analyze(fenOnly ? fen : position.fen, { ...options, moves: fenOnly ? undefined : position.moves });
+  } catch (error) {
+    cpuSessions.invalidate(engine);
+    throw error;
+  } finally {
+    if (options.signal?.aborted) cpuSessions.invalidate(engine);
+  }
 }
 
 async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
@@ -3085,6 +3113,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   el('analyze').toggleAttribute('disabled', true);
   const fen = tree.current.fen;
   const analysisPositions = tree.historyBoards();
+  const cpuPosition = analysisGamePosition(tree);
   const analysisMultiPv = multiPv();
   const board = parseFen(fen);
   if (legalMoves(board).length === 0) {
@@ -3212,9 +3241,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         pushTask(index, cacheKey, label, (beginSearch) =>
           withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
             const engine = getStockfish(kind);
-            engine.setOptions({ threads: Math.min(lease.threads, engine.maxThreads()) });
+            cpuSessions.setThreads(engine, Math.min(lease.threads, engine.maxThreads()));
             await prepareCpuEngine(
               row,
+              engine,
               `sf:${kind}`,
               label,
               controller.signal,
@@ -3223,7 +3253,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             return stockfishAnalysisLines(infos, fen, label);
           }),
@@ -3236,6 +3266,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
             await prepareCpuEngine(
               row,
+              engine,
               `viridithas:${row.variant}`,
               label,
               controller.signal,
@@ -3247,7 +3278,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3259,9 +3290,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getBerserkFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
           withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
-            engine.setOptions({ threads: lease.threads });
+            cpuSessions.setThreads(engine, lease.threads);
             await prepareCpuEngine(
               row,
+              engine,
               `berserk:${row.variant}`,
               label,
               controller.signal,
@@ -3270,7 +3302,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3282,9 +3314,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getPlentyChessFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
           withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
-            engine.setOptions({ threads: lease.threads });
+            cpuSessions.setThreads(engine, lease.threads);
             await prepareCpuEngine(
               row,
+              engine,
               `plentychess:${row.variant}`,
               label,
               controller.signal,
@@ -3293,7 +3326,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3305,9 +3338,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         const engine = getStormphraxFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
           withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
-            engine.setOptions({ threads: lease.threads });
+            cpuSessions.setThreads(engine, lease.threads);
             await prepareCpuEngine(
               row,
+              engine,
               `stormphrax:${row.variant}`,
               label,
               controller.signal,
@@ -3316,7 +3350,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -3330,6 +3364,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
             await prepareCpuEngine(
               row,
+              engine,
               `reckless:${row.variant}`,
               label,
               controller.signal,
@@ -3338,7 +3373,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              engine.analyze(fen, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);

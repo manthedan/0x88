@@ -1,5 +1,5 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import type { BrowserUciEngine } from './browserUciEngine.ts';
+import { type BrowserUciAnalysisOptions, type BrowserUciEngine, uciPositionCommand } from './browserUciEngine.ts';
 import type { RecklessOptions } from './recklessEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 
@@ -348,8 +348,8 @@ export class ViridithasEngine implements BrowserUciEngine {
     ];
   }
 
-  private searchCommands(fen: string, options: RecklessOptions, multipv = 1): string[] {
-    return [...this.setupCommands(options, multipv), `position fen ${fen}`, goCommand(options)];
+  private searchCommands(fen: string, options: RecklessOptions, multipv = 1, moves?: readonly string[]): string[] {
+    return [...this.setupCommands(options, multipv), uciPositionCommand(fen, moves), goCommand(options)];
   }
 
   private batchSearchCommands(fens: string[], options: RecklessOptions, multipv = 1, clearHashBetweenSearches = true): string[] {
@@ -477,13 +477,14 @@ export class ViridithasEngine implements BrowserUciEngine {
     });
   }
 
-  async analyze(fen: string, opts: { multipv?: number; depth?: number; movetimeMs?: number; signal?: AbortSignal } = {}): Promise<StockfishInfoLine[]> {
+  async analyze(fen: string, opts: BrowserUciAnalysisOptions = {}): Promise<StockfishInfoLine[]> {
     return this.runExclusive(async () => {
       const result = await this.runCommands(
         this.searchCommands(
           fen,
           { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs },
           opts.multipv ?? 1,
+          opts.moves,
         ),
         opts.signal,
       );

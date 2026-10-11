@@ -1,5 +1,11 @@
 import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from './assetUrls.ts';
-import type { BrowserUciAnalysisOptions, BrowserUciEngine, BrowserUciInfoLine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
+import {
+  type BrowserUciAnalysisOptions,
+  type BrowserUciEngine,
+  type BrowserUciInfoLine,
+  type BrowserUciRuntimeStatus,
+  uciPositionCommand,
+} from './browserUciEngine.ts';
 import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
 
 /**
@@ -531,7 +537,7 @@ export class StockfishEngine implements BrowserUciEngine {
           reject(error);
         };
         opts.signal?.addEventListener('abort', onAbort);
-        this.worker!.postMessage(`position fen ${fen}`);
+        this.worker!.postMessage(uciPositionCommand(fen, opts.moves));
         this.worker!.postMessage(stockfishGoCommand({ depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }));
       });
     });

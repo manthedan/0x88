@@ -1,5 +1,5 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import type { BrowserUciEngine } from './browserUciEngine.ts';
+import { type BrowserUciAnalysisOptions, type BrowserUciEngine, uciPositionCommand } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 
 export interface RecklessOptions {
@@ -585,13 +585,13 @@ export class RecklessEngine implements BrowserUciEngine {
     return this.runCommandsUntil(commands, signal);
   }
 
-  private searchCommands(fen: string, options: RecklessOptions, multipv = 1): string[] {
+  private searchCommands(fen: string, options: RecklessOptions, multipv = 1, moves?: readonly string[]): string[] {
     return [
       hashCommand(options.hashMb ?? this.options.hashMb ?? 16),
       'setoption name Threads value 1',
       `setoption name MultiPV value ${Math.max(1, Math.floor(multipv))}`,
       'setoption name Minimal value true',
-      `position fen ${fen}`,
+      uciPositionCommand(fen, moves),
       goCommand(options),
     ];
   }
@@ -694,9 +694,10 @@ export class RecklessEngine implements BrowserUciEngine {
     });
   }
 
-  async analyze(fen: string, opts: { multipv?: number; depth?: number; movetimeMs?: number; signal?: AbortSignal } = {}): Promise<StockfishInfoLine[]> {
+  async analyze(fen: string, opts: BrowserUciAnalysisOptions = {}): Promise<StockfishInfoLine[]> {
     return this.runExclusive(async () => {
       if (this.runtimeOptions.backend === 'browser-api') {
+        if (opts.moves?.length) throw new Error('Reckless browser-api does not support move history');
         const result = await this.runBrowserApiMessage(
           { type: 'search', fen, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs, multipv: opts.multipv ?? 1 },
           opts.signal,
@@ -709,6 +710,7 @@ export class RecklessEngine implements BrowserUciEngine {
           fen,
           { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs ?? this.options.movetimeMs },
           opts.multipv ?? 1,
+          opts.moves,
         ),
         opts.signal,
       );

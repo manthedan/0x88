@@ -18,7 +18,7 @@ test('analysis model assets are only preloaded once per mounted page', async () 
 test('warm CPU engine preparation uses search progress without reopening startup progress', async () => {
   const source = await preparationSource();
   assert.match(source, /if \(prepared\) beginSearch\(\);/);
-  assert.match(source, /if \(prepared\) \{\s*await start\(signal\);\s*return;\s*\}/);
+  assert.match(source, /if \(prepared\) \{\s*if \(cpuSessions\.needsReset\(engine, game\)\) await start\(signal\);/);
   assert.match(source, /preparedCpuEngineKeys\.add\(preparationKey\)/);
 });
 
