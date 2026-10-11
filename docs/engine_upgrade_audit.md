@@ -22,7 +22,9 @@ security sandbox. `--native-cmd` is intentionally a trusted shell command.
 
 Artifacts default to `public/<engine>/`. Select a candidate with `--artifacts`;
 the tool reads that public directory's sibling `engines/<engine>/upstream.lock.json`,
-not this checkout's old lock. Stockfish and Stormphrax use the artifact manifest's
+not this checkout's old lock. The tier inventory merges required tiers, on-disk
+WASM files and manifest-declared WASM files; a missing declared tier is a FAIL,
+including nonstandard external/API variants. Stockfish and Stormphrax use the artifact manifest's
 upstream pin. `--lock` and `--manifest` override this discovery. An arbitrary
 artifact directory without a pin fails closed: provide explicit metadata. Multiple
 manifests require `--manifest`. Existing files are checked against manifest hashes;
@@ -96,7 +98,12 @@ produces `SKIP(native unavailable)` with a build suggestion; nothing is built
 automatically. An OS-attested spawn/ENOENT lookup failure also skips. Failures
 inside supplied shell/SSH commands remain FAIL: diagnostic text such as "network
 not found" is not proof that an executable is unavailable.
-Runtime failures, incomplete native output and invalid summaries fail. Supported
+Runtime failures, incomplete native output and invalid summaries fail. The final
+summary record is selected before validating its complete format and numeric
+tokens; malformed final output never falls back to an earlier valid summary.
+Replay likewise validates complete UCI bestmove records and safe-integer node
+tokens before accumulating each search, including the final node-bearing line.
+Supported
 Emscripten benches that time out or omit a valid total also fail; only an explicit
 unsupported-command response skips. Replay must exit cleanly, not crash on quit
 or require forced termination.

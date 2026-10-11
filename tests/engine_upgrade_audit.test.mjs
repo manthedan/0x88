@@ -8,7 +8,7 @@ import { adapters, audit, nativeUnavailable, parseArgs, saveReport, selectRefere
 import { externalNetworkPath, nativeCell, runEmscriptenBuiltin, runNativeBuiltin, runReplay, stageEmscripten } from '../scripts/engine_upgrade_audit/bench.mjs';
 import { validateParityRows } from '../scripts/engine_upgrade_audit/parity.mjs';
 import { benchSource } from '../scripts/engine_upgrade_audit/source.mjs';
-import { runCell } from '../scripts/stockfish_upgrade_bench.mjs';
+import { benchSignature, runCell } from '../scripts/stockfish_upgrade_bench.mjs';
 import { execFileSync } from 'node:child_process';
 import { compareBench, hasFailures, parseBenchOutput, parseCommitBench, parseTags, simdStatus } from '../scripts/engine_upgrade_audit/parsers.mjs';
 import { parsePlentyChessFens, plentyChessDefaults, plentyChessScript } from '../scripts/engine_upgrade_audit/plentychess.mjs';
@@ -30,12 +30,45 @@ for (const [label, text, nodes] of [
   ['Stockfish stderr', 'Nodes searched  :  453169\nNodes/second: 12345', 453169],
   ['Stormphrax', '10.123 seconds\n1234567 nodes 123456 nps', 1234567],
   ['Berserk', 'Results:          777777 nodes 30000 nps', 777777],
+  ['Viridithas without NPS', '100 nodes in 1.000s', 100],
+  ['Berserk without NPS', 'Results: 100 nodes', 100],
+  ['Total searched', 'Total nodes searched: 100', 100],
+  ['TOTAL', 'TOTAL 100', 100],
 ]) test(`full bench summary: ${label}`, () => assert.equal(parseBenchOutput(text).nodes, nodes));
 
 test('bench parser rejects truncated output, UCI counts and zero', () => {
   for (const text of ['info depth 13 nodes 123456 nps 30000', 'bestmove e2e4', 'Bench: 0 nodes 0 nps']) assert.throws(() => parseBenchOutput(text));
   assert.equal(parseBenchOutput('Bench: 123 nodes 1 nps\nBench: 456 nodes 2 nps').nodes, 456);
 });
+
+for (const [label, valid, invalids] of [
+  ['Viridithas', '100 nodes in 1.000s (100 nps)', ['100garbage nodes in 1.000s (100 nps)', '100 nodes in 1..0s (100 nps)', '100 nodes in 1.0s (100garbage nps)', '100 nodes in invalid', '100 nodes in 1.0s garbage']],
+  ['Reckless OpenBench', 'Bench: 100 nodes 1 nps', ['Bench: invalid', 'Bench: 100garbage nodes 1 nps', 'Bench: 100 nodes 1garbage nps', 'Bench: 100 nodes 1 nps garbage']],
+  ['Reckless table', '100 1.000s 100 N/s', ['invalid 1.000s 100 N/s', '100garbage 1.000s 100 N/s', '100 1..0s 100 N/s', '100 invalid 100 N/s', '100 1.000s invalid N/s', '100 1.000s 100 N/s garbage']],
+  ['Stockfish', 'Nodes searched: 100', ['Nodes searched: invalid', 'Nodes searched: 100garbage', 'Nodes searched: 100 trailing', 'Nodes searched:']],
+  ['Berserk', 'Results: 100 nodes 1 nps', ['Results: invalid', 'Results: 100garbage nodes 1 nps', 'Results: 100 nodes 1garbage nps', 'Results: 100 nodes garbage']],
+  ['Stormphrax', '100 nodes 100 nps', ['invalid nodes 100 nps', '100garbage nodes 100 nps', '100 nodes invalid nps', '100 nodes 100garbage nps', '100 nodes 100 nps garbage']],
+  ['Total nodes', 'Total nodes searched: 100', ['Total nodes searched: invalid', 'Total nodes searched: 100garbage', 'TOTAL invalid', 'TOTAL 100 trailing']],
+]) test(`bench parser validates the final ${label} record, not the last valid substring`, () => {
+  for (const invalid of invalids) {
+    assert.throws(() => parseBenchOutput(invalid), /Missing\/invalid/, invalid);
+    assert.throws(() => parseBenchOutput(`${valid}\n${invalid}`), /Missing\/invalid/, invalid);
+  }
+  assert.equal(parseBenchOutput(`${valid}\ninfo depth 1 nodes 999\n`).nodes, 100);
+});
+
+test('native Stockfish signature rejects malformed final summaries and numeric prefixes', () => {
+  for (const summary of ['Nodes searched: invalid', 'Nodes searched: 100garbage', 'Nodes searched:', 'Nodes searched: 0', 'Nodes searched: 9007199254740992']) {
+    assert.throws(() => benchSignature(['Nodes searched: 100', summary]), /Invalid native bench node summary/);
+  }
+  assert.equal(benchSignature(['Nodes searched: 100', 'Nodes searched: 200']), '200');
+});
+
+test('native built-in bench cannot compare EXACT after a malformed final summary', () => temporary(async (dir) => {
+  const script = join(dir, 'fake-native.mjs');
+  writeFileSync(script, `for await (const chunk of process.stdin) {} console.log('Bench: 100 nodes 1 nps\\nBench: invalid');`);
+  await assert.rejects(runNativeBuiltin({ options: { nativeCmd: `"${process.execPath}" "${script}"`, timeout: 5000 } }), /Missing\/invalid/);
+}));
 
 test('per-position bench nodes and bestmove when available', () => {
   const result = parseBenchOutput('Bench [# 1]: bestmove e2e4 score 25 1234 nodes 2468 nps | fen\nResults: 1234 nodes 1 nps');
@@ -227,7 +260,7 @@ test('supported Emscripten bench failures cannot become SKIP', () => temporary(a
   writeFileSync(join(dir, 'berserk-emscripten.data'), 'fake net');
   const context = { tmp: dir, artifacts: dir, engine: 'berserk', options: { timeout: 5000 } };
   const tier = { name: 'base', js, wasm: binary };
-  for (const output of ['', 'info nodes 100', 'Bench: 0 nodes 1 nps']) {
+  for (const output of ['', 'info nodes 100', 'Bench: 0 nodes 1 nps', 'Bench: 100 nodes 1 nps\nBench: invalid', 'Results: 100garbage nodes 1 nps']) {
     writeFileSync(js, `module.exports = async (options) => ({ ccall: () => options.print(${JSON.stringify(output)}) });`);
     await assert.rejects(runEmscriptenBuiltin(context, tier), /Missing\/invalid/);
   }

@@ -4,24 +4,32 @@ export function parseCommitBench(message) {
 }
 
 export function parseBenchOutput(text) {
-  // Summaries only: never accidentally accept an intermediate UCI nodes line.
+  // Identify the final summary record BEFORE validating its fields. Filtering
+  // for valid matches would silently fall back past a malformed final record.
+  // Unlabelled formats retain their nodes/table markers; UCI info and table
+  // position rows are not summaries.
+  const summaryRecord = /^(?:(?:Bench|Results)\s*:|Nodes\s+searched\b|Total\s+nodes\b|TOTAL\b|\S+\s+nodes\b|\S+\s+[\d.+-]\S*s(?:\s|$)|\S+\s+\S+\s+\S+\s+N\/s\b)/i;
+  const summary = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => summaryRecord.test(line)).at(-1);
   const patterns = [
-    /^\s*(\d+) nodes in [\d.]+s\b/gm, // Viridithas
-    /^\s*(?:Bench:\s*)?(\d+) nodes\s+[\d.]+ nps\b/gm, // Reckless, Stormphrax
-    /^\s*(\d+)\s+[\d.]+s\s+[\d.]+ N\/s\s*$/gm, // Reckless table footer
-    /^\s*Nodes searched\s*:\s*(\d+)/gm, // Stockfish
-    /^\s*Results:\s*(\d+) nodes\b/gm, // Berserk
-    /^\s*(?:Total nodes(?: searched)?\s*[:=]?|TOTAL)\s+(\d+)\s*$/gim,
+    /^(\d+)\s+nodes in (\d+(?:\.\d+)?)s(?:\s+\((\d+) nps\))?$/, // Viridithas
+    /^(?:Bench:\s*)?(\d+)\s+nodes\s+(\d+) nps$/, // Reckless, Stormphrax
+    /^(\d+)\s+(\d+(?:\.\d+)?)s\s+(\d+) N\/s$/, // Reckless table footer
+    /^Nodes searched\s*:\s*(\d+)$/, // Stockfish
+    /^Results:\s*(\d+)\s+nodes(?:\s+(\d+) nps)?$/, // Berserk
+    /^(?:Total nodes(?: searched)?\s*[:=]?|TOTAL)\s+(\d+)$/i,
   ];
-  const matches = patterns.flatMap((pattern) => [...text.matchAll(pattern)]).sort((a, b) => a.index - b.index);
-  const nodes = matches.length ? Number(matches.at(-1)[1]) : null;
+  const match = summary && patterns.map((pattern) => summary.match(pattern)).find(Boolean);
+  const nodes = match ? Number(match[1]) : null;
+  if (!match || match.slice(1).some((token) => token !== undefined && !Number.isFinite(Number(token)))) {
+    throw new Error(`Missing/invalid full bench node summary${summary ? `: ${summary}` : ''}`);
+  }
   const rows = [...text.matchAll(/Bench \[#\s*(\d+)\]: bestmove\s+(\S+)\s+score\s+-?\d+\s+(\d+) nodes/g)]
     .map((m) => ({ position: Number(m[1]), bestmove: m[2], nodes: Number(m[3]) }));
   if (!rows.length) {
     rows.push(...[...text.matchAll(/^\s*(\d+)\s+(\d+)\s+[\d.]+s\s+[\d.]+ N\/s\s*$/gm)]
       .map((m) => ({ position: Number(m[1]), nodes: Number(m[2]) })));
   }
-  if (nodes === null || !Number.isSafeInteger(nodes) || nodes <= 0) throw new Error('Missing/invalid full bench node summary');
+  if (nodes === null || !Number.isSafeInteger(nodes) || nodes <= 0) throw new Error(`Missing/invalid full bench node summary: ${summary}`);
   return { nodes, rows };
 }
 

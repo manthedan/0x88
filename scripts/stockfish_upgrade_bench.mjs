@@ -10,8 +10,13 @@ import { fileURLToPath } from 'node:url';
 import { ROTATED_FEN_SUITE, exactSearch, parseInfo, roundOrder } from './emscripten_uci_protocol.mjs';
 
 export function benchSignature(lines) {
-  const matches = lines.join('\n').matchAll(/Nodes searched\s*:\s*(\d+)/g);
-  return [...matches].at(-1)?.[1] ?? null;
+  const summary = lines.filter((line) => /^\s*Nodes\s+searched\b/.test(line)).at(-1);
+  if (summary === undefined) return null;
+  const match = summary.match(/^\s*Nodes searched\s*:\s*(\d+)\s*$/);
+  if (!match || !Number.isSafeInteger(Number(match[1])) || Number(match[1]) <= 0) {
+    throw new Error(`Invalid native bench node summary: ${summary}`);
+  }
+  return match[1];
 }
 
 export function benchDefaults(source) {
