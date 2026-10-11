@@ -424,6 +424,23 @@ test('native Stockfish built-in bestmoves are separate from replay completion co
   }
 }));
 
+test('native built-in Stockfish bench completions are validated separately', () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-invalid-native-stockfish.mjs');
+  for (const bestmoves of [Array(50).fill('bestmove e2e4'), Array(52).fill('bestmove e2e4'),
+    [...Array(50).fill('bestmove e2e4'), 'bestmove bogus']]) {
+    writeFileSync(engine, `import { createInterface } from 'node:readline';
+      for await (const line of createInterface({ input: process.stdin })) {
+        if (line === 'uci') console.log('uciok');
+        if (line === 'isready') console.log('readyok');
+        if (line.startsWith('bench ')) console.log(${JSON.stringify(bestmoves.join('\n') + '\nNodes searched: 5100')});
+        if (line.startsWith('go ')) console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+        if (line === 'quit') break;
+      }`);
+    await assert.rejects(runCell({ label: 'fixture', command: process.execPath, args: [engine], nativeBench: true },
+      { defaults: Array(51).fill('startpos'), benchDepth: 1, positions: 0, timeout: 5000 }), /Malformed bestmove|Unexpected native built-in bench bestmove coverage/);
+  }
+}));
+
 for (const [label, final, best] of [
   ['empty bestmove', 'info nodes 100', 'bestmove '],
   ['bare bestmove', 'info nodes 100', 'bestmove'],

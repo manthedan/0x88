@@ -63,6 +63,14 @@ function replaySearch(lines, best, entry) {
   return { nodes, bestmove };
 }
 
+function validateCompletions(lines, expected, phase) {
+  const bestLines = lines.filter((line) => /^bestmove(?:\s|$)/.test(line));
+  for (const line of bestLines) parseBestmove(line);
+  if (bestLines.length !== expected) {
+    throw new Error(`Unexpected ${phase} bestmove coverage: expected ${expected}, got ${bestLines.length}`);
+  }
+}
+
 export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults } = {}) {
   const started = performance.now();
   const child = spawn(cell.command, cell.args || [], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -75,6 +83,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
   let exitStatus;
   let expectedSearches = 0;
   let replayStart = 0;
+  let nativeBenchStart;
   const closed = new Promise((done) => child.once('close', done));
   const fail = (err) => {
     failure = err;
@@ -130,12 +139,13 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     const startupMs = performance.now() - started;
     let nativeSignature;
     if (cell.nativeBench) {
-      const benchStart = lines.length;
+      nativeBenchStart = lines.length;
       command(`bench 16 1 ${benchDepth} default depth`);
       await wait((l) => /Nodes searched\s*:/.test(l));
       command('isready');
       await wait((l) => l === 'readyok');
-      nativeSignature = benchSignature(lines.slice(benchStart));
+      nativeSignature = benchSignature(lines.slice(nativeBenchStart));
+      validateCompletions(lines.slice(nativeBenchStart), defaults.filter((entry) => !entry.startsWith('setoption ')).length, 'native built-in bench');
     }
     // Stockfish.js compiles bench out. Replay setup_bench's exact command
     // sequence, with ONE reset before the suite (not one reset per position).
@@ -199,11 +209,10 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       // Drain the complete transcript, including output after the final search
       // and partial final lines. A first bestmove is not a license to ignore
       // malformed or surplus completion records before a clean shutdown.
-      const bestLines = lines.slice(replayStart).filter((line) => /^bestmove(?:\s|$)/.test(line));
-      for (const line of bestLines) parseBestmove(line);
-      if (bestLines.length !== expectedSearches) {
-        throw new Error(`Unexpected replay bestmove coverage: expected ${expectedSearches}, got ${bestLines.length}`);
+      if (cell.nativeBench) {
+        validateCompletions(lines.slice(nativeBenchStart, replayStart), defaults.filter((entry) => !entry.startsWith('setoption ')).length, 'native built-in bench');
       }
+      validateCompletions(lines.slice(replayStart), expectedSearches, 'replay');
     }
   }
 }
