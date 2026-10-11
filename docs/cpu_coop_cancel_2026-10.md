@@ -210,10 +210,16 @@ Final transcripts are `cpu-coop-cancel-browser-final-fast.json` and
 `cpu-coop-cancel-browser-explicit-stop.json`, and `cpu-coop-cancel-browser-no-sab.json`.
 Browser sessions and server were stopped.
 
-`npm run typecheck` clean; full `npm test` green (1012 pass, three expected environment skips).
+`npm run typecheck` clean; full `npm test` green (1014 pass, three expected environment skips).
 Focused tests green. Biome is clean for the adapter, worker, build script, probe,
 and focused tests. `analysisBrowser.ts` and `write_engine_source_archive.mjs` retain
 only their pre-existing lint/format findings; no unrelated reformatting was done.
+Codex review found one probe-only bug: a deeper request that finished before the
+cancel timer was validated against the normal depth. The completed-result boundary
+now validates the actual requested search depth; focused pure unit tests cover
+that missed-cancel case and rejection of incomplete output. A real depth-1/depth-2
+CLI recheck waited for an unrelated shared mutex holder until the foreground
+timeout, without starting any measurements; no additional timing is claimed.
 The mandatory final branch review and commit IDs are recorded in the task report.
 
 Remaining limits: no mobile/other-browser performance claim; cold NNUE initialization

@@ -7,6 +7,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Worker as NodeWorker } from 'node:worker_threads';
+import { recordCompletedProbeSearch } from './lib/cpu_cancel_probe_result.mjs';
 
 const args = process.argv.slice(2);
 function option(name, fallback) {
@@ -124,9 +125,8 @@ WebAssembly.instantiate = async (...args) => { const result = await instantiate(
               : null;
           try {
             const searchDepth = timer ? cancelDepth : depth;
-            row.info = await engine.analyze(startFen, { depth: searchDepth, moves: positions[index], signal: controller.signal });
-            row.cancelMissed = Boolean(timer);
-            assert.equal(row.info[0]?.depth, depth);
+            const infos = await engine.analyze(startFen, { depth: searchDepth, moves: positions[index], signal: controller.signal });
+            recordCompletedProbeSearch(row, infos, searchDepth, Boolean(timer));
           } catch (error) {
             if (!timer || error.name !== 'AbortError') throw error;
             row.aborted = true;
