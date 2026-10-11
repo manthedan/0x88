@@ -19,6 +19,11 @@ export interface CpuArenaPosition {
   ply: number;
 }
 
+/** Shared by live and captured diagnostics; never consults the old page pools. */
+export function cpuArenaRuntimeSummary(seat: CpuArenaSeat, hashMb: number): string {
+  return `${seat.name}: Threads=1 · Hash=${hashMb} MiB · ${seat.engine.runtimeLabel()}`;
+}
+
 /** Snapshot a finished game's diagnostics before its workers/identities leave. */
 export function captureCpuArenaDiagnostics(
   seats: readonly CpuArenaSeat[],
@@ -26,7 +31,7 @@ export function captureCpuArenaDiagnostics(
   searchSummary: (ids: string[]) => string,
 ): { runtime: string; search: string } {
   return {
-    runtime: `Engine diagnostics: ${seats.map((seat) => `${seat.name}: Threads=1 · Hash=${hashMb} MiB · ${seat.engine.runtimeLabel()}`).join(' | ')}`,
+    runtime: `Engine diagnostics: ${seats.map((seat) => cpuArenaRuntimeSummary(seat, hashMb)).join(' | ')}`,
     search: searchSummary(seats.map((seat) => seat.id)),
   };
 }

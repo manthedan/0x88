@@ -25,6 +25,7 @@ import {
   type CpuArenaPosition,
   type CpuArenaSeat,
   captureCpuArenaDiagnostics,
+  cpuArenaRuntimeSummary,
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
@@ -459,6 +460,7 @@ const resourceBroker = new EngineResourceBroker({ policy: 'exclusive', dial: ini
 resourceBroker.register('sf-lite', { ...engineResourceProfile('sf') });
 resourceBroker.register('sf-full', { ...engineResourceProfile('sf') });
 const isolatedCpuEngines = new Set<BrowserUciEngine>();
+const isolatedCpuSeats = new Map<string, { seat: CpuArenaSeat; row: EngineRow }>();
 let cpuTournamentBroker: EngineResourceBroker | null = null;
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
@@ -1216,7 +1218,7 @@ function renderArenaSearchStatus(ids: string[]): void {
     return;
   }
   const thinkingId = ids.find((id) => thinkingEngineIds.has(id));
-  const thinkingName = thinkingId ? (engines.get(thinkingId)?.name ?? thinkingId) : null;
+  const thinkingName = thinkingId ? (isolatedCpuSeats.get(thinkingId)?.seat.name ?? engines.get(thinkingId)?.name ?? thinkingId) : null;
   const text = running ? (thinkingName ? `${thinkingName}: starting search…` : 'Waiting for the next search…') : 'Search progress appears here during play.';
   host.innerHTML = `<div class="search-progress-placeholder">${htmlEscape(text)}</div>`;
 }
@@ -1226,7 +1228,7 @@ function renderEngineOutputs(): void {
   renderArenaSearchStatus(ids);
   const cards = ids.map((id) => {
     const snapshot = engineOutputs.get(id);
-    const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
+    const name = snapshot?.engineName ?? isolatedCpuSeats.get(id)?.seat.name ?? engines.get(id)?.name ?? id;
     const thinking = thinkingEngineIds.has(id);
     if (!snapshot && !running && !thinking) return '';
     if (!snapshot)
@@ -1830,11 +1832,11 @@ function lc0CacheFootprint(): Lc0EvaluationCacheFootprint | undefined {
 
 function diagnosticEngineIds(): string[] {
   const ids = activeEngineIds.length ? activeEngineIds : [seatEngineId(0), seatEngineId(1)];
-  return [...new Set(ids)].filter((id) => engines.has(id));
+  return [...new Set(ids)].filter((id) => engines.has(id) || isolatedCpuSeats.has(id));
 }
 
 function rowForEngineId(engineId: string): EngineRow | undefined {
-  return activeSeatRows().find((row) => engineIdForRow(row) === engineId);
+  return isolatedCpuSeats.get(engineId)?.row ?? activeSeatRows().find((row) => engineIdForRow(row) === engineId);
 }
 
 function budgetText(row: EngineRow | undefined): string {
@@ -1848,6 +1850,8 @@ function engineRuntimeDiagnosticsText(): string {
   const ids = diagnosticEngineIds();
   if (!ids.length) return 'Engine diagnostics: choose engines.';
   const parts = ids.map((id) => {
+    const privateSeat = isolatedCpuSeats.get(id);
+    if (privateSeat) return cpuArenaRuntimeSummary(privateSeat.seat, cpuEngineHashMbForSurface('arena'));
     const row = rowForEngineId(id);
     const name = engines.get(id)?.name ?? id;
     if (row?.family === 'lc0' && !isLc0BigNetVariant(row.variant)) {
@@ -3379,6 +3383,7 @@ async function runIsolatedCpuTournament(
             isolatedCpuEngines.add(engine);
             const seat = { id: `arena:${index}:${color}:${pid}`, name: participant.name, engine };
             seats.push(seat);
+            isolatedCpuSeats.set(seat.id, { seat, row });
             broker.register(seat.id, { resourceClass: 'cpu', maxThreads: 1 });
             engine.setOptions({ depth: timed ? undefined : row.strength, movetimeMs: timed ? movetimeMs : undefined, threads: 1 });
             engines.set(seat.id, { id: seat.id, name: seat.name, move: async () => null });
@@ -3413,6 +3418,7 @@ async function runIsolatedCpuTournament(
           for (const seat of seats) {
             seat.engine.dispose();
             isolatedCpuEngines.delete(seat.engine);
+            isolatedCpuSeats.delete(seat.id);
             broker.unregister(seat.id);
             engines.delete(seat.id);
             thinkingEngineIds.delete(seat.id);
@@ -3740,6 +3746,7 @@ function disposeRuntimeResources(): void {
   disposeStockfish();
   for (const engine of isolatedCpuEngines) engine.dispose();
   isolatedCpuEngines.clear();
+  isolatedCpuSeats.clear();
   recklessEngines.disposeAll();
   viridithasEngines.disposeAll();
   berserkEngines.disposeAll();

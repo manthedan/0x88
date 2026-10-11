@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { appendCpuArenaTrail, captureCpuArenaDiagnostics, playCpuArenaGame, settleCpuArenaSearch } from '../src/lc0/arenaCpuGame.ts';
+import { appendCpuArenaTrail, captureCpuArenaDiagnostics, cpuArenaRuntimeSummary, playCpuArenaGame, settleCpuArenaSearch } from '../src/lc0/arenaCpuGame.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from '../src/lc0/arenaScheduleRunner.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
@@ -235,6 +235,7 @@ test('completed diagnostics snapshot only that game, independent of live focus a
   assert.equal(snapshot.search, 'game:0:w: 10 searches | game:0:b: 20 searches');
   assert.ok(snapshot.runtime.includes('Hash=64 MiB · ready'));
   assert.ok(!snapshot.runtime.includes('disposed'));
+  assert.equal(cpuArenaRuntimeSummary(seats[0], 64), 'game:0:w: Threads=1 · Hash=64 MiB · disposed');
   assert.ok(!snapshot.search.includes('game:1'));
 });
 

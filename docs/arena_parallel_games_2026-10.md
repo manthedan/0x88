@@ -89,13 +89,14 @@ Raw traces/PGNs and results there: `arena-parallel-games-throughput-matched.json
 
 ## Review-driven regression checks
 
-The first two Codex reviews identified four valid integration bugs. All were accepted and fixed; the first two were fixed before remeasurement:
+The first three Codex reviews identified five valid integration bugs. All were accepted and fixed; the first two were fixed before remeasurement:
 
 1. **Preparation cancellation:** abort now immediately disposes both private seats, including during readiness (Stockfish's initialization itself does not observe its signal). The listener is removed on settlement, and ordinary `finally` cleanup remains. Built fault injection dropped the Stockfish `uci` handshake: two private workers stayed unready, Stop terminated both and re-enabled Start in 12.8 ms rather than awaiting the adapter's 120-second initialization timeout. This is a single functional check, not a stop-latency benchmark.
 2. **Live replay identity:** one trail object and entry array are maintained per game, appended in place and passed unchanged to the finished-game log. Built K=2 check entered review at move 1/4; while the game advanced, the same review reached move 1/11 and Last jumped to its current end. Four workers were running; stopping then left zero.
 
 3. **Completed-game diagnostics:** runtime/search summaries are captured using that game's private seats before disposal or focus switching, then passed to completion. Logs no longer read the next/live game's diagnostic identities.
 4. **Background completion markers:** the completed engine's thinking/progress entries are cleared before the visibility guard; background completion cannot leave stale indicators when the game later regains focus. Both UI fixes have focused state/ownership regression tests.
+5. **Live runtime identity:** a private-seat registry holds the captured row and actual engine instance for each namespaced ID, independent of late probes rebuilding the old surface map. Live runtime diagnostics use the same private-engine summary formatter as completed snapshots; names/rows remain resolvable and the registry is removed during game/page cleanup. The diagnostics test checks live state versus the immutable completed snapshot.
 
 Remeasured depth/node exports matched the pre-fix golden exports. Review artifacts, additional final browser checks and verdict are recorded in the delegated final report.
 
