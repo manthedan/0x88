@@ -11,7 +11,10 @@ try {
     returnOnExit: true, stdin: fds[0], stdout: fds[1], stderr: fds[2] });
   const module = await WebAssembly.compile(readFileSync(wasm));
   const instance = await WebAssembly.instantiate(module, wasi.getImportObject());
-  process.exitCode = wasi.start(instance) ?? 0;
+  const status = wasi.start(instance) ?? 0;
+  // WASI has a wider status than the host's process exit code (e.g. POSIX
+  // truncates 256 to zero). Preserve every nonzero status as a worker failure.
+  if (status !== 0) throw new Error(`WASI bench exited with status ${status}`);
 } finally {
   for (const fd of fds) closeSync(fd);
 }

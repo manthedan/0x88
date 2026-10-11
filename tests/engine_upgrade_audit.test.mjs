@@ -199,7 +199,7 @@ function wasm(instructions) {
 
 // A tiny real WASI module writes a supplied UCI transcript through fd_write.
 // No engine artifacts, compiler or network are needed for the parity fixture.
-function wasiTranscript(text, stderr = '') {
+function wasiTranscript(text, stderr = '', exitStatus) {
   const leb = (n) => n < 128 ? [n] : [(n & 127) | 128, ...leb(n >>> 7)];
   const string = (value) => [value.length, ...new TextEncoder().encode(value)];
   const section = (id, bytes) => [id, ...leb(bytes.length), ...bytes];
@@ -215,12 +215,14 @@ function wasiTranscript(text, stderr = '') {
   data.set(error, 32 + output.length);
   const body = [0,
     0x41, 2, 0x41, 8, 0x41, 1, 0x41, 24, 0x10, 0, 0x1a,
-    0x41, 1, 0x41, 0, 0x41, 1, 0x41, 24, 0x10, 0, 0x1a, 0x0b];
+    0x41, 1, 0x41, 0, 0x41, 1, 0x41, 24, 0x10, 0, 0x1a,
+    ...(exitStatus === undefined ? [] : [0x41, ...leb(exitStatus), 0x10, 1]), 0x0b];
   return Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0,
-    ...section(1, [2, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 0]),
-    ...section(2, [1, ...string('wasi_snapshot_preview1'), ...string('fd_write'), 0, 0]),
+    ...section(1, [3, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 0, 0x60, 1, 0x7f, 0]),
+    ...section(2, [2, ...string('wasi_snapshot_preview1'), ...string('fd_write'), 0, 0,
+      ...string('wasi_snapshot_preview1'), ...string('proc_exit'), 0, 2]),
     ...section(3, [1, 1]), ...section(5, [1, 0, 1]),
-    ...section(7, [2, ...string('memory'), 2, 0, ...string('_start'), 0, 1]),
+    ...section(7, [2, ...string('memory'), 2, 0, ...string('_start'), 0, 2]),
     ...section(10, [1, ...leb(body.length), ...body]),
     ...section(11, [1, 0, 0x41, 0, 0x0b, ...leb(data.length), ...data]),
   ]);
@@ -239,6 +241,17 @@ test('importable SIMD inspector counts relaxed opcodes using spec subop values',
   assert.equal(simdStatus('scalar', inspectWasmSimd(wasm([]))), 'PASS');
   for (const name of ['simd128', 'sse41', 'relaxed']) assert.equal(simdStatus(name, inspectWasmSimd(wasm([]))), 'FAIL');
 });
+
+test('every nonzero WASI status fails even when its low host exit byte is zero', () => temporary(async (dir) => {
+  const context = { tmp: dir, engine: 'viridithas', options: { timeout: 5000 } };
+  const binary = join(dir, 'fixture.wasm');
+  for (const status of [1, 256, 512]) {
+    writeFileSync(binary, wasiTranscript('Bench: 100 nodes 1 nps\n', '', status));
+    await assert.rejects(runWasiBench(context, { name: 'fixture', wasm: binary }), new RegExp(`WASI bench exited with status ${status}`));
+  }
+  writeFileSync(binary, wasiTranscript('Bench: 100 nodes 1 nps\n', '', 0));
+  assert.equal((await runWasiBench(context, { name: 'fixture', wasm: binary })).nodes, 100);
+}));
 
 test('Reckless native and WASI use the same row-producing stdin bench protocol', () => temporary(async (dir) => {
   assert.deepEqual(wasiBenchProtocol('reckless'), { args: ['reckless'], stdin: 'bench\nquit\n' });
