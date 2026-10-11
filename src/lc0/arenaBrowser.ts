@@ -20,7 +20,18 @@ import {
 import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { evalBarWhitePercent } from './analysisFormat.ts';
+import {
+  appendCpuArenaTrail,
+  arenaChartEngineName,
+  type CpuArenaPosition,
+  type CpuArenaSeat,
+  captureCpuArenaDiagnostics,
+  cpuArenaRuntimeSummary,
+  playCpuArenaGame,
+  settleCpuArenaSearch,
+} from './arenaCpuGame.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
+import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import {
@@ -178,6 +189,7 @@ interface ArenaEngine {
 }
 interface GameRecord {
   pgn: string;
+  scheduleIndex: number;
 }
 interface MatchScore {
   a: number;
@@ -448,12 +460,16 @@ function initialPerformanceDial(): PerformanceDial {
 const resourceBroker = new EngineResourceBroker({ policy: 'exclusive', dial: initialPerformanceDial() });
 resourceBroker.register('sf-lite', { ...engineResourceProfile('sf') });
 resourceBroker.register('sf-full', { ...engineResourceProfile('sf') });
+const isolatedCpuEngines = new Set<BrowserUciEngine>();
+const isolatedCpuSeats = new Map<string, { seat: CpuArenaSeat; row: EngineRow }>();
+let cpuTournamentBroker: EngineResourceBroker | null = null;
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
 interface GameChartSample {
   ply: number;
   engineId: string;
+  engineName: string;
   whiteScore?: number;
   moveMs: number;
   nps?: number;
@@ -1010,6 +1026,8 @@ function applyArenaQueryParams(): void {
 
   inputEl('gamesInput').value = String(intParam('gamesPerOpening', intParam('games', Number(inputEl('gamesInput').value) || 2, 1, 20), 1, 20));
   inputEl('delayInput').value = String(intParam('delayMs', intParam('delay', Number(inputEl('delayInput').value) || 0, 0, 3000), 0, 3000));
+  const concurrency = params.get('arenaConcurrency');
+  if (concurrency && ['auto', '1', '2', '3'].includes(concurrency)) selectEl('arenaConcurrencySelect').value = concurrency;
   const budget = params.get('budgetMode') ?? params.get('budget');
   if (budget === 'movetime' || budget === 'fixed') selectEl('budgetModeSelect').value = budget;
   inputEl('movetimeInput').value = String(intParam('movetimeMs', intParam('movetime', Number(inputEl('movetimeInput').value) || 500, 10, 60000), 10, 60000));
@@ -1202,7 +1220,7 @@ function renderArenaSearchStatus(ids: string[]): void {
     return;
   }
   const thinkingId = ids.find((id) => thinkingEngineIds.has(id));
-  const thinkingName = thinkingId ? (engines.get(thinkingId)?.name ?? thinkingId) : null;
+  const thinkingName = thinkingId ? (isolatedCpuSeats.get(thinkingId)?.seat.name ?? engines.get(thinkingId)?.name ?? thinkingId) : null;
   const text = running ? (thinkingName ? `${thinkingName}: starting search…` : 'Waiting for the next search…') : 'Search progress appears here during play.';
   host.innerHTML = `<div class="search-progress-placeholder">${htmlEscape(text)}</div>`;
 }
@@ -1212,7 +1230,7 @@ function renderEngineOutputs(): void {
   renderArenaSearchStatus(ids);
   const cards = ids.map((id) => {
     const snapshot = engineOutputs.get(id);
-    const name = snapshot?.engineName ?? engines.get(id)?.name ?? id;
+    const name = snapshot?.engineName ?? isolatedCpuSeats.get(id)?.seat.name ?? engines.get(id)?.name ?? id;
     const thinking = thinkingEngineIds.has(id);
     if (!snapshot && !running && !thinking) return '';
     if (!snapshot)
@@ -1709,6 +1727,28 @@ function refreshSeatControls(): void {
   el('addSeat').toggleAttribute('hidden', arenaTournamentMode() === 'match');
   el('addSeat').toggleAttribute('disabled', running);
   selectEl('tournamentModeSelect').disabled = running;
+  selectEl('arenaConcurrencySelect').disabled = running;
+  refreshArenaConcurrencyNote();
+}
+
+function isolatedCpuPool(): boolean {
+  return (
+    arenaCpuOnlyPool(activeSeatRows().map((row) => row.family)) && (!activeSeatRows().some((row) => row.family === 'sf') || stockfishThreadsPlanned() === 1)
+  );
+}
+
+function selectedArenaConcurrency(): number {
+  if (!isolatedCpuPool()) return 1;
+  return arenaGameConcurrency(
+    { hardwareConcurrency: navigator.hardwareConcurrency, deviceMemory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory },
+    selectEl('arenaConcurrencySelect').value,
+  );
+}
+
+function refreshArenaConcurrencyNote(): void {
+  el('arenaConcurrencyNote').textContent = isolatedCpuPool()
+    ? `${selectedArenaConcurrency()} game(s) at once · private workers, Threads=1, Hash=64 MiB per engine. Board follows the earliest active game.`
+    : 'One game at a time for neural pools or threaded Stockfish.';
 }
 
 function arenaBudgetMode(): 'fixed' | 'movetime' {
@@ -1794,11 +1834,11 @@ function lc0CacheFootprint(): Lc0EvaluationCacheFootprint | undefined {
 
 function diagnosticEngineIds(): string[] {
   const ids = activeEngineIds.length ? activeEngineIds : [seatEngineId(0), seatEngineId(1)];
-  return [...new Set(ids)].filter((id) => engines.has(id));
+  return [...new Set(ids)].filter((id) => engines.has(id) || isolatedCpuSeats.has(id));
 }
 
 function rowForEngineId(engineId: string): EngineRow | undefined {
-  return activeSeatRows().find((row) => engineIdForRow(row) === engineId);
+  return isolatedCpuSeats.get(engineId)?.row ?? activeSeatRows().find((row) => engineIdForRow(row) === engineId);
 }
 
 function budgetText(row: EngineRow | undefined): string {
@@ -1812,6 +1852,8 @@ function engineRuntimeDiagnosticsText(): string {
   const ids = diagnosticEngineIds();
   if (!ids.length) return 'Engine diagnostics: choose engines.';
   const parts = ids.map((id) => {
+    const privateSeat = isolatedCpuSeats.get(id);
+    if (privateSeat) return cpuArenaRuntimeSummary(privateSeat.seat, cpuEngineHashMbForSurface('arena'));
     const row = rowForEngineId(id);
     const name = engines.get(id)?.name ?? id;
     if (row?.family === 'lc0' && !isLc0BigNetVariant(row.variant)) {
@@ -1921,8 +1963,7 @@ function bt4TelemetrySummary(t: Bt4Telemetry, searcher: Bt4WorkerSearcher): stri
   return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · visits ${t.completedVisits} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · last ${formatMs(t.lastElapsedMs)} · ${searcher.loaded ? `backend ${searcher.backend || 'WebGPU'}` : 'worker not loaded'}`;
 }
 
-function engineSearchDiagnosticsText(): string {
-  const ids = diagnosticEngineIds();
+function engineSearchDiagnosticsText(ids = diagnosticEngineIds()): string {
   if (!ids.length) return 'Search diagnostics: choose engines.';
   const parts = ids.map((id) => {
     const row = rowForEngineId(id);
@@ -1955,8 +1996,8 @@ function renderEngineDiagnosticsInfo(): void {
   el('searchTelemetryInfo').innerHTML = diagnosticsHtml('Search', engineSearchDiagnosticsText());
 }
 
-function searchTelemetryText(): string {
-  return engineSearchDiagnosticsText();
+function searchTelemetryText(ids = diagnosticEngineIds()): string {
+  return engineSearchDiagnosticsText(ids);
 }
 
 function renderSearchTelemetryInfo(): void {
@@ -2132,8 +2173,11 @@ function recordUciOutput(
   move: string | null,
   lines: StockfishInfoLine[],
   elapsedMs?: number,
+  visible = true,
 ): void {
+  settleCpuArenaSearch(engineId, thinkingEngineIds, arenaSearchProgress);
   recordUciTelemetry(engineId, engineName, lines, elapsedMs);
+  if (!visible) return;
   const best = lines[0];
   recordEngineOutput({
     engineId,
@@ -2182,7 +2226,7 @@ function recordStormphraxOutput(engineId: string, engineName: string, fen: strin
   recordUciOutput(engineId, engineName, 'Stormphrax', fen, move, lines, elapsedMs);
 }
 
-function recordEngineThinking(engine: ArenaEngine): void {
+function recordEngineThinking(engine: Pick<ArenaEngine, 'id' | 'name'>): void {
   thinkingEngineIds.add(engine.id);
   arenaSearchProgress.set(engine.id, { label: engine.name, units: 'search', indeterminate: true });
   renderSideLabels();
@@ -3115,7 +3159,7 @@ function renderGameCharts(): void {
   const ids = [...new Set(gameChartSamples.map((sample) => sample.engineId))];
   const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] =>
     ids.map((id) => ({
-      label: engines.get(id)?.name ?? id,
+      label: arenaChartEngineName(gameChartSamples, id),
       color: chartColorFor(id),
       points: gameChartSamples
         .filter((sample) => sample.engineId === id)
@@ -3137,7 +3181,7 @@ function renderGameCharts(): void {
     { yMin: 0, formatY: formatCompactNumber },
   );
   el('chartLegend').innerHTML = ids
-    .map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(engines.get(id)?.name ?? id)}</span>`)
+    .map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(arenaChartEngineName(gameChartSamples, id))}</span>`)
     .join('');
 }
 
@@ -3163,11 +3207,11 @@ function renderRootChart(engineId: string): void {
   );
 }
 
-function recordGameChartSample(ply: number, engine: ArenaEngine, moveMs: number): void {
+function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number): void {
   const snapshot = engineOutputs.get(engine.id);
   const lc0 = lastLc0SearchResults.get(engine.id);
   const nps = snapshot?.nps ?? (lc0 && moveMs > 0 ? Math.round((lc0.visits / moveMs) * 1000) : undefined);
-  gameChartSamples.push({ ply, engineId: engine.id, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
+  gameChartSamples.push({ ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
   renderGameCharts();
   renderRootChart(engine.id);
 }
@@ -3265,6 +3309,132 @@ async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.si
 function clearStartPending(): void {
   startPending = false;
   if (!running) el('start').toggleAttribute('disabled', false);
+}
+
+function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
+  if (row.family === 'sf')
+    return new StockfishEngine(
+      { threads: 1, hashMb: cpuEngineHashMbForSurface('arena'), skillLevel: 20 },
+      stockfishFlavorUrl(row.variant === 'full' ? 'single' : 'lite-single'),
+    );
+  if (row.family === 'reckless') return createRecklessEngine(recklessVariantForKey(row.variant), undefined, ARENA_CPU_ENGINE_OPTIONS);
+  if (row.family === 'viridithas') return createViridithasEngine(viridithasVariantForKey(row.variant), {}, ARENA_CPU_ENGINE_OPTIONS);
+  if (row.family === 'berserk') return createBerserkEngine(berserkVariantForKey(row.variant), ARENA_CPU_ENGINE_OPTIONS);
+  if (row.family === 'plentychess') return createPlentyChessEngine(plentyChessVariantForKey(row.variant), ARENA_CPU_ENGINE_OPTIONS);
+  if (row.family === 'stormphrax') return createStormphraxEngine(stormphraxVariantForKey(row.variant), ARENA_CPU_ENGINE_OPTIONS);
+  throw new Error(`Not a CPU arena seat: ${row.family}`);
+}
+
+async function runIsolatedCpuTournament(
+  schedule: ScheduledGame<ArenaOpening>[],
+  byPid: Map<string, { index: number; name: string }>,
+  signal: AbortSignal,
+  complete: (index: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail, diagnostics: { runtime: string; search: string }) => void,
+): Promise<void> {
+  const concurrency = selectedArenaConcurrency();
+  const broker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: concurrency, dial: resourceBroker.getDial() });
+  cpuTournamentBroker = broker;
+  const rows = seatRows.map((row) => ({ ...row }));
+  const timed = arenaBudgetMode() === 'movetime';
+  const movetimeMs = arenaMovetimeMs();
+  const delayMs = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
+  const live = new Map<number, { position: CpuArenaPosition; white: CpuArenaSeat; black: CpuArenaSeat; trail: GameTrail }>();
+  let displayed = -1;
+  const show = (index: number) => {
+    if (signal.aborted || index !== Math.min(...live.keys())) return;
+    const game = live.get(index)!;
+    if (displayed !== index) {
+      displayed = index;
+      el('message').textContent = 'Playing…';
+      activeEngineIds = [game.white.id, game.black.id];
+      setBoardSideEngines(game.white.id, game.white.name, game.black.id, game.black.name);
+      resetGameCharts();
+    }
+    const position = game.position;
+    historyBoards = position.positions;
+    board = historyBoards[historyBoards.length - 1];
+    lastUci = position.lastUci;
+    liveTrail = game.trail;
+    el('pairing').textContent =
+      `Game ${index + 1}/${schedule.length}: ${game.white.name} (W) vs ${game.black.name} (B) · ${live.size} active (K=${concurrency})`;
+    renderBoard();
+  };
+  try {
+    // Do not retain the old surface pools alongside the per-game workers.
+    disposeStockfish();
+    recklessEngines.disposeAll();
+    viridithasEngines.disposeAll();
+    berserkEngines.disposeAll();
+    plentyChessEngines.disposeAll();
+    stormphraxEngines.disposeAll();
+    await runArenaSchedule({
+      count: schedule.length,
+      concurrency,
+      signal,
+      play: async (index, gameSignal) => {
+        const seats: CpuArenaSeat[] = [];
+        const game = schedule[index];
+        try {
+          for (const [color, pid] of [
+            ['w', game.whiteId],
+            ['b', game.blackId],
+          ] as const) {
+            const participant = byPid.get(pid)!;
+            const row = rows[participant.index];
+            const engine = createIsolatedCpuEngine(row);
+            isolatedCpuEngines.add(engine);
+            const seat = { id: `arena:${index}:${color}:${pid}`, name: participant.name, engine };
+            seats.push(seat);
+            isolatedCpuSeats.set(seat.id, { seat, row });
+            broker.register(seat.id, { resourceClass: 'cpu', maxThreads: 1 });
+            engine.setOptions({ depth: timed ? undefined : row.strength, movetimeMs: timed ? movetimeMs : undefined, threads: 1 });
+            engines.set(seat.id, { id: seat.id, name: seat.name, move: async () => null });
+          }
+          const [white, black] = seats;
+          const tree = gameTreeFromOpening(game.opening);
+          const trail = trailFromTree(tree, `${white.name} vs ${black.name}`, openingHistoryBoards(game.opening).length - 1);
+          const outcome = await playCpuArenaGame({
+            tree,
+            white,
+            black,
+            broker,
+            signal: gameSignal,
+            beforeMove: (seat) => {
+              if (!signal.aborted && displayed === index) recordEngineThinking(seat);
+            },
+            afterMove: (seat, fen, move, elapsedMs) => {
+              if (signal.aborted) return;
+              recordUciOutput(seat.id, seat.name, seat.name, fen, move, seat.engine.lastInfo(), elapsedMs, displayed === index);
+              if (displayed === index) recordGameChartSample(live.get(index)!.position.ply, seat, elapsedMs);
+            },
+            position: (position) => {
+              if (signal.aborted) return;
+              appendCpuArenaTrail(trail, position);
+              live.set(index, { position, white, black, trail });
+              show(index);
+            },
+            delay: () => sleep(delayMs, gameSignal),
+          });
+          return { ...outcome, trail, diagnostics: captureCpuArenaDiagnostics(seats, cpuEngineHashMbForSurface('arena'), searchTelemetryText) };
+        } finally {
+          for (const seat of seats) {
+            seat.engine.dispose();
+            isolatedCpuEngines.delete(seat.engine);
+            isolatedCpuSeats.delete(seat.id);
+            broker.unregister(seat.id);
+            engines.delete(seat.id);
+            thinkingEngineIds.delete(seat.id);
+            arenaSearchProgress.delete(seat.id);
+          }
+          live.delete(index);
+          if (live.size) show(Math.min(...live.keys()));
+        }
+      },
+      complete: (index, outcome) => complete(index, outcome.result, outcome.reason, outcome.tree, outcome.trail, outcome.diagnostics),
+    });
+  } finally {
+    if (cpuTournamentBroker === broker) cpuTournamentBroker = null;
+  }
 }
 
 async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> {
@@ -3393,72 +3563,93 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
   if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
   else renderStandings(standings, schedule.length);
+  const completeGame = (
+    i: number,
+    result: GameResultCode,
+    reason: string,
+    tree: GameTree,
+    trail: GameTrail | null,
+    diagnostics?: { runtime: string; search: string },
+  ) => {
+    if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
+    const { whiteId, blackId, opening } = schedule[i];
+    const white = byPid.get(whiteId)!;
+    const black = byPid.get(blackId)!;
+    score.games += 1;
+    standings.record(whiteId, blackId, result);
+    if (result === '1/2-1/2') {
+      score.draws += 1;
+      score.a += 0.5;
+      score.b += 0.5;
+    } else {
+      const winnerIsA = (whiteId === participants[0].pid) === (result === '1-0');
+      if (winnerIsA) {
+        score.a += 1;
+        score.aWins += 1;
+      } else {
+        score.b += 1;
+        score.bWins += 1;
+      }
+    }
+    const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
+    games.push({ pgn: gameTreeToPgn(tree, tags, result), scheduleIndex: i });
+    games.sort((a, b) => a.scheduleIndex - b.scheduleIndex);
+    if (trail) {
+      trail.label = `Game ${i + 1}: ${white.name} vs ${black.name} (${result})`;
+      finishedTrails[i] = trail;
+    }
+    renderCacheInfo();
+    appendLog(
+      `${i + 1}. ${white.name} vs ${black.name} [${opening.name}]: ${result} (${reason}) · ${diagnostics?.runtime ?? engineRuntimeDiagnosticsText()} · ${diagnostics?.search ?? searchTelemetryText()}`,
+      i,
+    );
+    if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
+    else renderStandings(standings, schedule.length);
+  };
   let enginesReady = false;
   try {
-    resetLc0SearchTrees(seatIds);
-    await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
-    enginesReady = true;
-    if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
-    for (let i = 0; i < schedule.length; i++) {
-      if (matchAbort.signal.aborted) break;
-      const { whiteId, blackId, opening } = schedule[i];
-      const white = byPid.get(whiteId)!;
-      const black = byPid.get(blackId)!;
-      const whiteEngine = white.engine!;
-      const blackEngine = black.engine!;
-      // Reset trees per game (fresh game tree); within a game the shared tree is
-      // reused across both sides' plies — i.e. self-play when both seats match.
+    if (isolatedCpuPool()) {
+      enginesReady = true;
+      el('message').textContent = 'Preparing private CPU workers…';
+      await runIsolatedCpuTournament(schedule, byPid, matchAbort.signal, completeGame);
+    } else {
       resetLc0SearchTrees(seatIds);
-      for (const key of ARENA_BIG_NET_KEYS) {
-        const searcher = peekBigNetSearcher(key);
-        if (!searcher) continue;
-        if (searcher.loaded) await searcher.resetTree();
-      }
-      // Reset only this game's CPU participants; mirror seats share a worker.
-      const gameRows = [rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)];
-      const gameCpuEngines = new Set<BrowserUciEngine>();
-      for (const row of gameRows) {
-        if (row?.family === 'viridithas') gameCpuEngines.add(getViridithasFor(row.variant));
-        else if (row?.family === 'berserk') gameCpuEngines.add(getBerserkFor(row.variant));
-        else if (row?.family === 'plentychess') gameCpuEngines.add(getPlentyChessFor(row.variant));
-        else if (row?.family === 'stormphrax') gameCpuEngines.add(getStormphraxFor(row.variant));
-      }
-      for (const engine of gameCpuEngines) await engine.newGame(matchAbort.signal);
-      if (isStaleMount(mountSignal) || matchAbort.signal.aborted) break;
-      setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
-      el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
-      el('message').textContent = 'Playing…';
-      const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, matchAbort.signal);
-      if (reason === 'cancelled') break;
-      score.games += 1;
-      standings.record(whiteId, blackId, result);
-      if (result === '1/2-1/2') {
-        score.draws += 1;
-        score.a += 0.5;
-        score.b += 0.5;
-      } else {
-        const winnerIsA = (whiteId === participants[0].pid) === (result === '1-0');
-        if (winnerIsA) {
-          score.a += 1;
-          score.aWins += 1;
-        } else {
-          score.b += 1;
-          score.bWins += 1;
+      await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
+      enginesReady = true;
+      if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
+      for (let i = 0; i < schedule.length; i++) {
+        if (matchAbort.signal.aborted) break;
+        const { whiteId, blackId, opening } = schedule[i];
+        const white = byPid.get(whiteId)!;
+        const black = byPid.get(blackId)!;
+        const whiteEngine = white.engine!;
+        const blackEngine = black.engine!;
+        // Reset trees per game (fresh game tree); within a game the shared tree is
+        // reused across both sides' plies — i.e. self-play when both seats match.
+        resetLc0SearchTrees(seatIds);
+        for (const key of ARENA_BIG_NET_KEYS) {
+          const searcher = peekBigNetSearcher(key);
+          if (!searcher) continue;
+          if (searcher.loaded) await searcher.resetTree();
         }
+        // Reset only this game's CPU participants; mirror seats share a worker.
+        const gameRows = [rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)];
+        const gameCpuEngines = new Set<BrowserUciEngine>();
+        for (const row of gameRows) {
+          if (row?.family === 'viridithas') gameCpuEngines.add(getViridithasFor(row.variant));
+          else if (row?.family === 'berserk') gameCpuEngines.add(getBerserkFor(row.variant));
+          else if (row?.family === 'plentychess') gameCpuEngines.add(getPlentyChessFor(row.variant));
+          else if (row?.family === 'stormphrax') gameCpuEngines.add(getStormphraxFor(row.variant));
+        }
+        for (const engine of gameCpuEngines) await engine.newGame(matchAbort.signal);
+        if (isStaleMount(mountSignal) || matchAbort.signal.aborted) break;
+        setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
+        el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
+        el('message').textContent = 'Playing…';
+        const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, matchAbort.signal);
+        if (reason === 'cancelled') break;
+        completeGame(i, result, reason, tree, liveTrail);
       }
-      const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
-      games.push({ pgn: gameTreeToPgn(tree, tags, result) });
-      if (liveTrail) {
-        liveTrail.label = `Game ${i + 1}: ${whiteEngine.name} vs ${blackEngine.name} (${result})`;
-        finishedTrails[i] = liveTrail;
-      }
-      renderCacheInfo();
-      appendLog(
-        `${i + 1}. ${whiteEngine.name} vs ${blackEngine.name} [${opening.name}]: ${result} (${reason}) · ${engineRuntimeDiagnosticsText()} · ${searchTelemetryText()}`,
-        i,
-      );
-      if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
-      else renderStandings(standings, schedule.length);
     }
     if (!isStaleMount(mountSignal)) {
       el('message').textContent = matchAbort.signal.aborted
@@ -3555,6 +3746,9 @@ function disposeRuntimeResources(): void {
   centipawnEvaluatorPromises.clear();
   centipawnEvaluatorLoadTokens.clear();
   disposeStockfish();
+  for (const engine of isolatedCpuEngines) engine.dispose();
+  isolatedCpuEngines.clear();
+  isolatedCpuSeats.clear();
   recklessEngines.disposeAll();
   viridithasEngines.disposeAll();
   berserkEngines.disposeAll();
@@ -3898,6 +4092,7 @@ async function runArenaBenchAutorun(): Promise<void> {
         lc0BatchSize: lc0BatchSize(),
         lc0BatchPipelineDepth: lc0BatchPipelineDepth(),
         stockfishThreads: stockfishThreadsPlanned(),
+        arenaConcurrency: selectedArenaConcurrency(),
         ortRuntimeDiagnostics,
       },
       summary: {
@@ -4070,6 +4265,7 @@ function wireEvents() {
     renderPlentyChessRuntimeInfo();
     renderStormphraxRuntimeInfo();
   });
+  el('arenaConcurrencySelect').addEventListener('change', refreshArenaConcurrencyNote);
   el('startingPositionSelect').addEventListener('change', refreshOpeningPreview);
   el('openingText').addEventListener('input', refreshOpeningPreview);
   el('cacheEntriesInput').addEventListener('input', () => {
@@ -4112,6 +4308,7 @@ function wireEvents() {
     inputEl('stockfishThreadsInput').value = String(stockfishThreadsCap());
     // Threads flips single<->threaded flavor (different wasm); rebuild on next use.
     disposeStockfish();
+    refreshArenaConcurrencyNote();
   });
   if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
   arenaPagehideHandler = (event: PageTransitionEvent) => {
