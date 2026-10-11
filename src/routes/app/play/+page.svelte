@@ -54,6 +54,20 @@ onMount(() => {
       </div>
     </div>
     <div id="promoPicker" hidden></div>
+    <div class="move-nav" role="group" aria-label="Browse moves">
+      <button id="navFirst" type="button" title="First move (Home / ↑)" aria-label="First move" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3v10M12 3.5 7 8l5 4.5" /></svg>
+      </button>
+      <button id="navPrev" type="button" title="Previous move (←)" aria-label="Previous move" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5 5.5 8l5 4.5" /></svg>
+      </button>
+      <button id="navNext" type="button" title="Next move (→)" aria-label="Next move" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5 10.5 8l-5 4.5" /></svg>
+      </button>
+      <button id="navLast" type="button" title="Last move (End / ↓)" aria-label="Last move" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3.5 9 8l-5 4.5M12.5 3v10" /></svg>
+      </button>
+    </div>
     <div id="moveList" class="move-panel"></div>
   </section>
   <section class="panel app-sidebar" aria-label="Game controls">
@@ -184,8 +198,15 @@ onMount(() => {
     font-family:var(--mono); font-size:12px; line-height:1.65;
   }
   :global(#moveList .num),:global(#moveList .placeholder){color:var(--muted)}
-  :global(#moveList .san){padding:1px 3px; border-radius:4px}
+  :global(#moveList .san){padding:1px 3px; border-radius:4px; cursor:pointer}
+  :global(#moveList .san:hover){background:var(--accent-soft); color:var(--accent-soft-text)}
   :global(#moveList .san.current){background:var(--accent); color:var(--on-accent); font-weight:600}
+  .move-nav{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; margin-top:8px}
+  .move-nav button{display:flex; align-items:center; justify-content:center; min-height:36px; padding:6px 0}
+  .move-nav svg{width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
+  :global(.move-nav button.live-pending){background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+  :global(.move-nav button.live-pending:hover:not(:disabled)){background:var(--accent-hover); color:var(--on-accent)}
+  :global(#status.browsing){border-style:dashed; border-left:2px solid var(--accent); color:var(--ink)}
   :global(#pgnOut){
     max-height:220px; overflow:auto; margin-top:8px;
     font-family:var(--mono); font-size:10px; line-height:1.45;

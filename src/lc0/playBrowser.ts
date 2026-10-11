@@ -42,6 +42,16 @@ import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, Maia3BrowserEvaluator, type Maia3MoveStyle } from './maia3.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
+import {
+  displayedPly,
+  type MoveNavAction,
+  moveNavActionForKey,
+  moveNavAvailability,
+  navigateViewPly,
+  normalizeViewPly,
+  plyLabel,
+  viewPlyFor,
+} from './moveNavigation.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { loadPlayPreferences, type PlayPreferences, type PreferenceStorage, savePlayPreferences } from './playPreferences.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -175,6 +185,15 @@ interface PlayContext {
   gameOver: { result: GameResultCode; reason: string } | null;
   engineThinking: boolean;
   pendingPromotion: Move[] | null;
+  /**
+   * Browsed ply (position after N half-moves) or null when following the live
+   * game. View-only: the engine, takeback and the human-move path all keep
+   * operating on the live `board`/`positions`. A browsing user stays where
+   * they are when the engine replies (lichess behaviour).
+   */
+  viewPly: number | null;
+  /** Last view key the move list was scrolled for, so engine replies do not yank a manually scrolled list. */
+  moveListScrollKey: string;
   pendingRestart: { engine: string; color: 'white' | 'black' | 'random' } | null;
   activeEngineId: string;
   activeColor: 'white' | 'black' | 'random';
@@ -206,6 +225,8 @@ function createPlayContext(): PlayContext {
     gameOver: null,
     engineThinking: false,
     pendingPromotion: null,
+    viewPly: null,
+    moveListScrollKey: '',
     pendingRestart: null,
     activeEngineId: 'maia3',
     activeColor: 'white',
@@ -439,7 +460,8 @@ function ctxShowSearchProgress(
   bar.setAttribute('aria-valuetext', `${completed} of ${requested} visits`);
   const text = document.createElement('div');
   text.className = 'dl-label small';
-  text.textContent = ctxSearchProgressText(label, progress);
+  // The search always runs on the live position; say so while the board shows an earlier ply.
+  text.textContent = ctxSearchProgressText(ctx.viewPly === null ? label : `${label} (live position)`, progress);
   row.append(bar, text);
   container.replaceChildren(row);
   container.hidden = false;
@@ -932,6 +954,11 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
 }
 
 function ctxOnUserMove(ctx: PlayContext, from: Key, to: Key): void {
+  if (ctx.viewPly !== null) {
+    // Browsing an earlier ply is view-only; snap the board back to the browsed position.
+    ctxRender(ctx);
+    return;
+  }
   if (!ctx.engineReady && !ctx.preparingEngine && !ctx.gameOver && ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
   if (ctx.preparingEngine || !ctx.engineReady || ctx.engineThinking || ctx.gameOver || ctx.board.turn !== ctx.humanColor) {
     ctxRender(ctx);
@@ -971,6 +998,7 @@ function ctxNewGame(ctx: PlayContext): void {
   ctx.sans = [];
   ctx.gameOver = null;
   ctx.pendingPromotion = null;
+  ctx.viewPly = null;
   lc0Searcher?.resetTree();
   for (const key of BIG_NET_KEYS) {
     const searcher = peekBigNetSearcher(key);
@@ -1001,6 +1029,7 @@ function ctxTakeback(ctx: PlayContext): void {
   } while (ctx.moves.length && ctx.board.turn !== ctx.humanColor);
   ctx.gameOver = null;
   ctx.pendingPromotion = null;
+  ctx.viewPly = null;
   ctxRender(ctx);
   if (ctx.board.turn !== ctx.humanColor) void ctxEngineTurn(ctx);
   else if (!ctx.engineReady) void ctxVerifySelectedEngineReady(ctx);
@@ -1072,6 +1101,13 @@ function ctxVerdictText(ctx: PlayContext): string {
 }
 
 function ctxStatusText(ctx: PlayContext): string {
+  if (ctx.viewPly === null) return ctxLiveStatusText(ctx);
+  const ply = ctx.viewPly;
+  const live = ctxLiveStatusText(ctx);
+  return `Viewing ${plyLabel(ply, ctx.sans[ply - 1])} — press → or End to return. Live game: ${/[.…!?]$/.test(live) ? live : `${live}.`}`;
+}
+
+function ctxLiveStatusText(ctx: PlayContext): string {
   if (ctx.gameOver) return ctxVerdictText(ctx);
   if (ctx.pendingPromotion) return 'Choose a promotion piece';
   if (ctx.preparingEngine) return `Preparing ${ctxSelectedEngine(ctx).label} before the first move…`;
@@ -1089,14 +1125,57 @@ function ctxRenderMoveList(ctx: PlayContext): void {
     return;
   }
   const parts: string[] = [];
-  const last = ctx.sans.length - 1;
-  const san = (i: number) => `<span class="san${i === last ? ' current' : ''}">${ctx.sans[i]}</span>`;
+  const shown = displayedPly(ctx.viewPly, ctx.sans.length);
+  // Span i is the move that produces ply i + 1; clicking it shows that position.
+  const san = (i: number) => `<span class="san${i + 1 === shown ? ' current' : ''}" data-ply="${i + 1}">${ctx.sans[i]}</span>`;
   for (let i = 0; i < ctx.sans.length; i += 2) {
     const number = i / 2 + 1;
     parts.push(`<span class="num">${number}.</span> ${san(i)}${i + 1 < ctx.sans.length ? ` ${san(i + 1)}` : ''}`);
   }
   list.innerHTML = parts.join(' ');
-  list.scrollTop = list.scrollHeight;
+  if (ctx.viewPly === null) {
+    ctx.moveListScrollKey = 'live';
+    list.scrollTop = list.scrollHeight;
+    return;
+  }
+  // Only scroll when the browsed ply changes, so an engine reply arriving
+  // mid-browse does not yank a list the user scrolled by hand.
+  const scrollKey = `ply:${shown}`;
+  if (ctx.moveListScrollKey === scrollKey) return;
+  ctx.moveListScrollKey = scrollKey;
+  const current = list.querySelector<HTMLElement>('.san.current');
+  if (!current) {
+    list.scrollTop = 0;
+    return;
+  }
+  const listRect = list.getBoundingClientRect();
+  const rect = current.getBoundingClientRect();
+  if (rect.top < listRect.top) list.scrollTop -= listRect.top - rect.top + 4;
+  else if (rect.bottom > listRect.bottom) list.scrollTop += rect.bottom - listRect.bottom + 4;
+}
+
+function ctxRenderMoveNav(ctx: PlayContext): void {
+  const available = moveNavAvailability(ctx.viewPly, ctx.moves.length);
+  buttonEl('navFirst').disabled = !available.first;
+  buttonEl('navPrev').disabled = !available.prev;
+  buttonEl('navNext').disabled = !available.next;
+  const last = buttonEl('navLast');
+  last.disabled = !available.last;
+  last.classList.toggle('live-pending', ctx.viewPly !== null);
+  last.title = ctx.viewPly === null ? 'Last move (End / ↓)' : 'Back to the live game (End / ↓)';
+}
+
+function ctxNavigate(ctx: PlayContext, action: MoveNavAction): void {
+  ctxSetViewPly(ctx, navigateViewPly(ctx.viewPly, ctx.moves.length, action));
+}
+
+function ctxSetViewPly(ctx: PlayContext, viewPly: number | null): void {
+  const next = normalizeViewPly(viewPly, ctx.moves.length);
+  if (next === ctx.viewPly) return;
+  // A promotion choice belongs to the live position; leaving it cancels the pick.
+  if (ctx.pendingPromotion) ctx.pendingPromotion = null;
+  ctx.viewPly = next;
+  ctxRender(ctx);
 }
 
 function ctxRenderRestartBanner(ctx: PlayContext): void {
@@ -1209,8 +1288,11 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
 
 function ctxRender(ctx: PlayContext): void {
   if (ctx.disposed) return;
+  ctx.viewPly = normalizeViewPly(ctx.viewPly, ctx.moves.length);
+  const browsing = ctx.viewPly !== null;
   el('status').textContent = ctxStatusText(ctx);
   el('status').classList.toggle('over', !!ctx.gameOver);
+  el('status').classList.toggle('browsing', browsing);
   el('status').setAttribute('aria-busy', ctx.engineThinking ? 'true' : 'false');
   ctxRenderMaia3Controls(ctx);
   el('levelCaption').textContent = ctxStrengthCaption(ctx);
@@ -1218,10 +1300,12 @@ function ctxRender(ctx: PlayContext): void {
   buttonEl('resign').disabled = !!ctx.gameOver || !ctx.moves.length;
   selectEl('engineSelect').disabled = ctx.engineThinking;
   ctxRenderMoveList(ctx);
+  ctxRenderMoveNav(ctx);
   ctxRenderPromotionPicker(ctx);
   ctxRenderRestartBanner(ctx);
   el('pgnOut').textContent = '';
   const humanCanMove =
+    !browsing &&
     !ctx.pendingPreferredEngineId &&
     !ctx.preparingEngine &&
     ctx.engineReady &&
@@ -1229,14 +1313,16 @@ function ctxRender(ctx: PlayContext): void {
     !ctx.gameOver &&
     !ctx.pendingPromotion &&
     ctx.board.turn === ctx.humanColor;
-  const lastUci = ctx.moves.length ? moveToUci(ctx.moves[ctx.moves.length - 1]) : undefined;
+  const shownPly = displayedPly(ctx.viewPly, ctx.moves.length);
+  const shownBoard = ctx.positions[shownPly] ?? ctx.board;
+  const lastUci = shownPly > 0 ? moveToUci(ctx.moves[shownPly - 1]) : undefined;
   const config = {
     orientation: ctx.orientation,
-    fen: boardToFen(ctx.board).split(' ')[0],
-    turnColor: ctx.board.turn === 'w' ? ('white' as const) : ('black' as const),
+    fen: boardToFen(shownBoard).split(' ')[0],
+    turnColor: shownBoard.turn === 'w' ? ('white' as const) : ('black' as const),
     coordinates: true,
     trustAllEvents: true,
-    check: boardCheck(ctx.board),
+    check: boardCheck(shownBoard),
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 160 },
     movable: {
@@ -1302,6 +1388,7 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
   ctx.sans = [];
   ctx.gameOver = null;
   ctx.pendingPromotion = null;
+  ctx.viewPly = null;
   ctx.pendingRestart = null;
   ctx.activeEngineId = selectEl('engineSelect').value;
   ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
@@ -1355,6 +1442,24 @@ function ctxInit(ctx: PlayContext): void {
     if (playOptionMatchesRuntimeAudit(ctxSelectedEngine(ctx), detail)) ctxRestoreSelectedRuntimeWarning(ctx);
   });
   trackListener(ctx, el('takeback'), 'click', () => ctxTakeback(ctx));
+  trackListener(ctx, el('navFirst'), 'click', () => ctxNavigate(ctx, 'first'));
+  trackListener(ctx, el('navPrev'), 'click', () => ctxNavigate(ctx, 'prev'));
+  trackListener(ctx, el('navNext'), 'click', () => ctxNavigate(ctx, 'next'));
+  trackListener(ctx, el('navLast'), 'click', () => ctxNavigate(ctx, 'last'));
+  trackListener(ctx, el('moveList'), 'click', (event: Event) => {
+    const span = (event.target as HTMLElement | null)?.closest?.('.san[data-ply]') as HTMLElement | null;
+    if (!span) return;
+    ctxSetViewPly(ctx, viewPlyFor(Number(span.dataset.ply), ctx.moves.length));
+  });
+  trackListener(ctx, document, 'keydown', (event: Event) => {
+    const keyEvent = event as KeyboardEvent;
+    // The promotion overlay owns the arrow keys (and Escape) while it is open.
+    if (keyEvent.defaultPrevented || ctx.pendingPromotion) return;
+    const action = moveNavActionForKey(keyEvent);
+    if (!action) return;
+    keyEvent.preventDefault();
+    ctxNavigate(ctx, action);
+  });
   trackListener(ctx, el('resign'), 'click', () => ctxResign(ctx));
   trackListener(ctx, el('flip'), 'click', () => {
     ctx.orientation = ctx.orientation === 'white' ? 'black' : 'white';
@@ -1531,6 +1636,10 @@ function hasPlayBrowserDom(): boolean {
     'resign',
     'flip',
     'moveList',
+    'navFirst',
+    'navPrev',
+    'navNext',
+    'navLast',
     'exportPgn',
     'copyPgn',
     'pgnOut',
