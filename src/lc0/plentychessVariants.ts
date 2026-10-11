@@ -38,8 +38,8 @@ export const PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL = resolvePublicAssetUrl('/plent
 export const PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-sse41.wasm');
 export const PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.js');
 export const PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.wasm');
-export const PLENTYCHESS_MAIN_NETWORK = '0134-2r24-s0.bin';
-export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/${PLENTYCHESS_MAIN_NETWORK}`;
+export const PLENTYCHESS_MAIN_NETWORK = '0178r.bin';
+export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0178r/${PLENTYCHESS_MAIN_NETWORK}`;
 
 const assetStatuses = new Map<string, PlentyChessAssetStatus>();
 const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
@@ -104,7 +104,7 @@ export const PLENTYCHESS_EMSCRIPTEN_VARIANT: PlentyChessVariant = {
   wasmUrl: PLENTYCHESS_EMSCRIPTEN_WASM_URL,
   dataUrl: PLENTYCHESS_EMSCRIPTEN_DATA_URL,
   sourceNetworkUrl: PLENTYCHESS_SOURCE_NETWORK_URL,
-  note: 'Smoked PlentyChess 7.0.66 single-thread Emscripten worker build with processed NNUE preloaded in .data.',
+  note: 'Smoked PlentyChess 8.0.0 single-thread Emscripten worker build with processed NNUE preloaded in .data.',
 };
 
 export const PLENTYCHESS_EMSCRIPTEN_SSE41_VARIANT: PlentyChessVariant = {

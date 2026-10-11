@@ -8,12 +8,12 @@ const root = process.cwd();
 const engineDir = path.resolve(process.env.PLENTYCHESS_BUILD_DIR ?? path.join(root, '.local_engines', 'plentychess-emscripten-src'));
 const netDir = path.resolve(process.env.PLENTYCHESS_NET_DIR ?? path.join(root, '.local_engines', 'plentychess-nets'));
 const repo = process.env.PLENTYCHESS_REPO ?? 'https://github.com/Yoshie2000/PlentyChess.git';
-const ref = process.env.PLENTYCHESS_REF ?? '58d8ba2505ae2b49f48dd410d214a457d15c12c6';
-const netId = process.env.PLENTYCHESS_NET_ID ?? '0134-2r24-s0';
+const ref = process.env.PLENTYCHESS_REF ?? '50ad9f1b523063cbbbf599fe0547f42870fe2906';
+const netId = process.env.PLENTYCHESS_NET_ID ?? '0178r';
 const netName = process.env.PLENTYCHESS_NETWORK ?? `${netId}.bin`;
 const netUrl = process.env.PLENTYCHESS_NET_URL ?? `https://github.com/Yoshie2000/PlentyNetworks/releases/download/${netId}/${netName}`;
-const netSha256 = process.env.PLENTYCHESS_NET_SHA256 ?? '550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061';
-const processedSha256 = process.env.PLENTYCHESS_PROCESSED_SHA256 ?? '691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4';
+const netSha256 = process.env.PLENTYCHESS_NET_SHA256 ?? '663e0531ac71c6c7c6d3bc4f1fac923bf69136f9786fa1da5c4ac25382aee54b';
+const processedSha256 = process.env.PLENTYCHESS_PROCESSED_SHA256 ?? '5cedef19778f1bb784e181fc013543127d1fdcde227795710b1a48f6e53d79cd';
 const patchPath = path.resolve(process.env.PLENTYCHESS_PATCH ?? path.join(root, 'patches', 'plentychess-emscripten.patch'));
 const jsOut = path.resolve(process.env.PLENTYCHESS_EMSCRIPTEN_JS_OUT ?? path.join(root, 'public', 'plentychess', 'plentychess-emscripten.js'));
 const outBase = path.basename(jsOut, '.js');
@@ -24,7 +24,12 @@ const sharedDataPath = path.resolve(process.env.PLENTYCHESS_SHARED_DATA ?? path.
 const processedName = process.env.PLENTYCHESS_PROCESSED_NETWORK ?? 'processed.bin';
 const processedPath = path.join(engineDir, processedName);
 const emsdkImage = process.env.PLENTYCHESS_EMSDK_IMAGE ?? 'emscripten/emsdk:latest';
-const nativeArch = process.env.PLENTYCHESS_NATIVE_ARCH ?? (process.arch === 'arm64' ? 'arm64' : 'generic');
+// The helper must emit the 128-bit sparse-L1 layout used by wasm. generic
+// emits dense L1 weights, while AVX2/AVX512 also permute the input rows.
+const nativeArch = process.env.PLENTYCHESS_NATIVE_ARCH ?? (process.arch === 'arm64' ? 'arm64' : 'ssse3');
+if (!['arm64', 'ssse3', 'fma'].includes(nativeArch)) {
+  throw new Error(`PLENTYCHESS_NATIVE_ARCH=${nativeArch} does not produce the wasm NNUE layout; use arm64, ssse3, or fma`);
+}
 const skipGit = process.env.PLENTYCHESS_SKIP_GIT === '1';
 
 function run(command, args, options = {}) {
@@ -123,7 +128,13 @@ run('make', ['-C', 'tools', `arch=${nativeArch}`], { cwd: engineDir });
 run(path.join('.', 'tools', 'process_net'), ['false', netName, processedName], { cwd: engineDir });
 verifySha256(processedPath, processedSha256, processedName);
 
-run('git', ['apply', '--unidiff-zero', '--ignore-space-change', '--ignore-whitespace', patchPath], { cwd: engineDir });
+// An unpacked corresponding-source tree may live inside this repository.
+// Without a ceiling, git discovers the enclosing worktree and exits 0 while
+// skipping every src/* patch because the current subdirectory does not match.
+run('git', ['apply', '--unidiff-zero', '--ignore-space-change', '--ignore-whitespace', patchPath], {
+  cwd: engineDir,
+  env: { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(engineDir) },
+});
 
 const sources = [
   'src/engine.cpp',

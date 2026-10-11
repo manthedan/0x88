@@ -1,14 +1,15 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-06-25T06:37:10.817Z",
+  "generatedAt": "2026-10-11T00:20:56.450Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "plentychess",
   "flavor": "emscripten-single-thread",
   "status": "experimental",
   "upstream": {
     "repo": "https://github.com/Yoshie2000/PlentyChess.git",
-    "commit": "58d8ba2505ae2b49f48dd410d214a457d15c12c6",
-    "version": "7.0.66",
+    "commit": "50ad9f1b523063cbbbf599fe0547f42870fe2906",
+    "tag": "b-v8.0.0",
+    "version": "8.0.0",
     "license": "GPL-3.0"
   },
   "build": {
@@ -17,61 +18,66 @@
     "patches": [
       "patches/plentychess-emscripten.patch"
     ],
-    "toolchain": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 5.0.7-git"
+    "defaultCompilerFlags": {
+      "base": "-O2",
+      "sse41": "-O2",
+      "relaxedSimd128": "-O2"
+    },
+    "toolchain": "Emscripten 5.0.7-git; native NNUE helper arm64 (cross-checked SSSE3); wasm -O2, LTO off, SIMD128 / SSE4.1 / relaxed SIMD128"
   },
   "artifacts": [
     {
       "path": "public/plentychess/plentychess-emscripten.js",
-      "bytes": 70886,
-      "sha256": "8f4762d5df9efd36b6793fad2cf65a06f3ac39eebe4e76682920912b7858f20e",
+      "bytes": 70903,
+      "sha256": "fe98220301e57b4afad6b5429001403bb46a612f74514dda44508691cc247a09",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 20021,
-          "ratio": 0.2824
+          "bytes": 20019,
+          "ratio": 0.2823
         },
         "brotli": {
-          "bytes": 17743,
-          "ratio": 0.2503
+          "bytes": 17758,
+          "ratio": 0.2505
         }
       }
     },
     {
       "path": "public/plentychess/plentychess-emscripten.wasm",
-      "bytes": 389983,
-      "sha256": "39fc84dec6bcc703727ac4bf58f02d03e260c17c190b4dc25378491ff8046ab3",
+      "bytes": 395075,
+      "sha256": "bc65d81536c9fe27b9b5de90c9ecc106056d3f4afba5e038f4087301a8c039e1",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 150243,
-          "ratio": 0.3853
+          "bytes": 151259,
+          "ratio": 0.3829
         },
         "brotli": {
-          "bytes": 122064,
-          "ratio": 0.313
+          "bytes": 122865,
+          "ratio": 0.311
         }
       }
     },
     {
       "path": "public/plentychess/plentychess-emscripten.data",
-      "bytes": 63023936,
-      "sha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
+      "bytes": 53111616,
+      "sha256": "5cedef19778f1bb784e181fc013543127d1fdcde227795710b1a48f6e53d79cd",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 34010279,
-          "ratio": 0.5396
+          "bytes": 31208345,
+          "ratio": 0.5876
         },
         "brotli": {
-          "bytes": 32447720,
-          "ratio": 0.5148
+          "bytes": 29685001,
+          "ratio": 0.5589
         }
       }
     },
     {
       "path": "public/plentychess/plentychess-emscripten-sse41.js",
       "bytes": 70933,
-      "sha256": "a8273a5bcb3f6d2d3338432d88860d613874085afa27aab90619b458a3d93dc6",
+      "sha256": "3771fe60ba9ea980905fa7b911eb8d5cde71fd50f8d335706437f920bfa022fa",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
@@ -79,31 +85,31 @@
           "ratio": 0.2823
         },
         "brotli": {
-          "bytes": 17763,
-          "ratio": 0.2504
+          "bytes": 17772,
+          "ratio": 0.2505
         }
       }
     },
     {
       "path": "public/plentychess/plentychess-emscripten-sse41.wasm",
-      "bytes": 388663,
-      "sha256": "172d5436a429bd68c50374bf56df3cce3f5083ebe0a3900cd96c8791c197ef67",
+      "bytes": 394229,
+      "sha256": "6ae5f0ef036c35e5ddf62b6957ec1eee2d71eced164c3ad15a420d37a3d911c7",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 150132,
-          "ratio": 0.3863
+          "bytes": 151809,
+          "ratio": 0.3851
         },
         "brotli": {
-          "bytes": 122026,
-          "ratio": 0.314
+          "bytes": 123465,
+          "ratio": 0.3132
         }
       }
     },
     {
       "path": "public/plentychess/plentychess-emscripten-relaxed-simd128.js",
       "bytes": 70983,
-      "sha256": "850b884c518b23cd6d84e15f408a1fa0edad02f28dd5a4ea24199cc39fe8668d",
+      "sha256": "cb3b3bad2caeb6866c3459a0e4482cf5e3efbdff3546231d48df3eee6ede8ee6",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
@@ -111,52 +117,52 @@
           "ratio": 0.2823
         },
         "brotli": {
-          "bytes": 17768,
+          "bytes": 17769,
           "ratio": 0.2503
         }
       }
     },
     {
       "path": "public/plentychess/plentychess-emscripten-relaxed-simd128.wasm",
-      "bytes": 386827,
-      "sha256": "c030812786c33a56f706b6c84ae36ca7934c7156542dcc9b6f36e9ca2f384dc4",
+      "bytes": 392393,
+      "sha256": "52be064d006012062a068fe48af5514ffe03b6237850147786079346208aae2d",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 149306,
-          "ratio": 0.386
+          "bytes": 150944,
+          "ratio": 0.3847
         },
         "brotli": {
-          "bytes": 121491,
-          "ratio": 0.3141
+          "bytes": 122860,
+          "ratio": 0.3131
         }
       }
     }
   ],
   "assets": [
     {
-      "name": "0134-2r24-s0.bin",
-      "sourceUrl": "https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin",
-      "rawSha256": "550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061",
+      "name": "0178r.bin",
+      "sourceUrl": "https://github.com/Yoshie2000/PlentyNetworks/releases/download/0178r/0178r.bin",
+      "rawSha256": "663e0531ac71c6c7c6d3bc4f1fac923bf69136f9786fa1da5c4ac25382aee54b",
       "processedPath": "/processed.bin",
-      "processedSha256": "691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4",
+      "processedSha256": "5cedef19778f1bb784e181fc013543127d1fdcde227795710b1a48f6e53d79cd",
       "processingCommand": "tools/process_net false",
       "licenseNote": "Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.",
       "embeddedIn": "public/plentychess/plentychess-emscripten.data (one canonical preload package shared by every SIMD tier)"
     }
   ],
   "totals": {
-    "bytes": 64402211,
-    "gzipBytes": 34520041,
-    "brotliBytes": 32866575,
-    "gzipRatio": 0.536,
-    "brotliRatio": 0.5103
+    "bytes": 54506132,
+    "gzipBytes": 31722436,
+    "brotliBytes": 30107490,
+    "gzipRatio": 0.582,
+    "brotliRatio": 0.5524
   },
   "sourceArchive": {
     "required": true,
     "path": "public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz",
-    "bytes": 33590971,
-    "sha256": "822a26f9c33b392418502e46cf5ffa46dbb60468bee66ca8145bc09b055f2d23",
+    "bytes": 30768044,
+    "sha256": "b53391706151a91e6b492d88e261d883de5d5db41a2a2a42c6a673d846fe9a0d",
     "url": "/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

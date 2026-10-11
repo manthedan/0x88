@@ -30,6 +30,19 @@ test('rotated and reversed order gives every artifact every slot over ten rounds
   assert.deepEqual(items, ['current', 'o2', 'o3', 'o2-lto', 'o3-lto']);
 });
 
+test('even-sized matrices counterbalance A/B and give every artifact every slot', () => {
+  assert.deepEqual(roundOrder(['A', 'B'], 0), ['A', 'B']);
+  assert.deepEqual(roundOrder(['A', 'B'], 1), ['B', 'A']);
+  for (const size of [2, 4]) {
+    const items = Array.from({ length: size }, (_, i) => i);
+    const counts = items.map(() => Array(size).fill(0));
+    for (let round = 0; round < 2 * size; round++) {
+      roundOrder(items, round).forEach((item, slot) => counts[item][slot]++);
+    }
+    for (const slots of counts) assert.deepEqual(slots, Array(size).fill(2));
+  }
+});
+
 test('protocol pins hash and threads, resets before each search, excludes warmup', () => {
   const stdout = [];
   const commands = [];

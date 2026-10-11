@@ -1,5 +1,10 @@
 # PlentyChess WASM SIMD audit
 
+**v8 re-check (2026-10-10):** see [plentychess_upgrade_v8.md](plentychess_upgrade_v8.md).
+The integer activation constants and all three f32 gates are unchanged;
+the relaxed extension is rebased onto the release. The evidence below is
+historical 7.0.66 evidence, not a substitute for same-commit native parity.
+
 Branch: `feature/plentychess-simd-audit` (2026-06-10). Companion to
 `docs/cpu_engines_simd_audit.md` on `feature/cpu-engines-simd-audit`
 (Reckless/Viridithas/Berserk), applying the same lens: does SIMD actually

@@ -1,6 +1,10 @@
 # PlentyChess browser port notes
 
-Last updated: 2026-06-05
+Last updated: 2026-10-10
+
+Current release: **8.0.0** (`b-v8.0.0`); upgrade evidence and the current
+size/performance gates are in [plentychess_upgrade_v8.md](plentychess_upgrade_v8.md).
+The smoke/benchmark snapshots below document the original 7.0.66 port.
 
 ## Status
 
@@ -13,7 +17,8 @@ npm run plentychess:build-emscripten
 npm run plentychess:smoke-emscripten
 ```
 
-Generated artifacts are intentionally ignored under `public/plentychess/`.
+Release artifacts are tracked under `public/plentychess/`; large WASM/data/source
+archives use Git LFS. Local experiment outputs remain ignored.
 
 Browser worker smoke page:
 
@@ -24,12 +29,13 @@ Browser worker smoke page:
 ## Source and assets
 
 - Upstream repo: `https://github.com/Yoshie2000/PlentyChess.git`
-- Browser proof-build pin: `58d8ba2505ae2b49f48dd410d214a457d15c12c6`
-- Reported version at that pin: `7.0.66`
-- Network id: `0134-2r24-s0`
-- Raw network URL: `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin`
-- Raw network sha256: `550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061`
-- Processed network sha256 after upstream `tools/process_net false`: `691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4`
+- Release pin: `50ad9f1b523063cbbbf599fe0547f42870fe2906` (`b-v8.0.0`)
+- Reported version: `8.0.0`
+- Network id: `0178r`
+- Raw network URL: `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0178r/0178r.bin`
+- Raw network sha256: `663e0531ac71c6c7c6d3bc4f1fac923bf69136f9786fa1da5c4ac25382aee54b`
+- Processed network sha256 after upstream `tools/process_net false`: `5cedef19778f1bb784e181fc013543127d1fdcde227795710b1a48f6e53d79cd`
+- Native helper architecture must be `arm64`, `ssse3`, or `fma` (128-bit sparse layout); generic/AVX2/AVX512 layouts are not valid for this WASM build.
 
 ## Build shape
 
