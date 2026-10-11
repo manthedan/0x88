@@ -157,6 +157,96 @@
       {
         "repeat": 1,
         "k": 1,
+        "elapsedMs": 12549.615000009537,
+        "workers": 0,
+        "peak": 2
+      },
+      {
+        "repeat": 1,
+        "k": 2,
+        "elapsedMs": 6346.125,
+        "workers": 0,
+        "peak": 4
+      },
+      {
+        "repeat": 2,
+        "k": 1,
+        "elapsedMs": 12533.304999947548,
+        "workers": 0,
+        "peak": 2
+      },
+      {
+        "repeat": 2,
+        "k": 2,
+        "elapsedMs": 6363.555000066757,
+        "workers": 0,
+        "peak": 4
+      },
+      {
+        "repeat": 3,
+        "k": 1,
+        "elapsedMs": 12483.814999938011,
+        "workers": 0,
+        "peak": 2
+      },
+      {
+        "repeat": 3,
+        "k": 2,
+        "elapsedMs": 6438.389999985695,
+        "workers": 0,
+        "peak": 4
+      }
+    ],
+    "matchesBeforeReviewGolden": true
+  },
+  "builtNodes": {
+    "nodes": 10000,
+    "transport": "research-only Worker.postMessage substitution, not a product nodes budget",
+    "pgnSha256": "4490ea0f748e874d4970fe8825e1b9e5279fcb9887fc32557d258aab50a590d5",
+    "allPgnEqual": true,
+    "allStandingsEqual": true,
+    "runs": [
+      {
+        "k": 2,
+        "elapsedMs": 5203.445000052452,
+        "workers": 0,
+        "peak": 4
+      },
+      {
+        "k": 1,
+        "elapsedMs": 9257.164999961851,
+        "workers": 0,
+        "peak": 2
+      },
+      {
+        "k": 2,
+        "elapsedMs": 4602.789999961853,
+        "workers": 0,
+        "peak": 4
+      }
+    ]
+  },
+  "stop": {
+    "before": {
+      "pairing": "Game 1/60: Stockfish Lite (W) vs Berserk Relaxed SIMD (B) \u00b7 2 active (K=2)",
+      "peak": 4,
+      "workers": 4
+    },
+    "message": "Stopped after 0 game(s).",
+    "standings": "0/60 games \u00b7 Elo vs pool, \u00b195% approx#EngineEloWDLPtsG1Berserk Relaxed SIMD\u2014000002PlentyChess SSE4.1\u2014000003Stockfish Lite\u201400000",
+    "stopMs": 11.524999976158142,
+    "workers": 0
+  },
+  "beforeReviewBuiltDepth": {
+    "protocol": "SF Lite/Berserk relaxed/PlentyChess SSE4.1, depth 10, Threads 1, Hash 64 MiB; 3-engine RR, two openings, six games, delay 0; ABABAB; wall includes worker startup, disposal and rendering",
+    "pgnSha256": "9cdf94d55864bc6c290854063deb36eb470b3131951c3122b2e2fa6dfb55474b",
+    "allPgnEqual": true,
+    "allStandingsEqual": true,
+    "standings": "6/6 games \u00b7 Elo vs pool, \u00b195% approx#EngineEloWDLPtsG1PlentyChess SSE4.1 10depth+191 \u00b1393220342Berserk Relaxed SIMD 10depth+0 \u00b1340121243Stockfish Lite 10depth-191 \u00b139302214",
+    "runs": [
+      {
+        "repeat": 1,
+        "k": 1,
         "elapsedMs": 13135.899999976158,
         "workers": 0,
         "peak": 2
@@ -198,42 +288,28 @@
       }
     ]
   },
-  "builtNodes": {
-    "nodes": 10000,
-    "transport": "research-only Worker.postMessage substitution, not a product nodes budget",
-    "pgnSha256": "4490ea0f748e874d4970fe8825e1b9e5279fcb9887fc32557d258aab50a590d5",
-    "allPgnEqual": true,
-    "allStandingsEqual": true,
-    "runs": [
-      {
-        "k": 2,
-        "elapsedMs": 5203.445000052452,
-        "workers": 0,
-        "peak": 4
+  "reviewRegressionChecks": {
+    "preparationStop": {
+      "before": {
+        "blockedInit": 2,
+        "message": "Preparing private CPU workers\u2026",
+        "workers": 2
       },
-      {
-        "k": 1,
-        "elapsedMs": 9257.164999961851,
-        "workers": 0,
-        "peak": 2
-      },
-      {
-        "k": 2,
-        "elapsedMs": 4602.789999961853,
-        "workers": 0,
-        "peak": 4
-      }
-    ]
-  },
-  "stop": {
-    "before": {
-      "pairing": "Game 1/60: Stockfish Lite (W) vs Berserk Relaxed SIMD (B) \u00b7 2 active (K=2)",
-      "peak": 4,
+      "message": "Stopped after 0 game(s).",
+      "ready": true,
+      "stopMs": 12.829999923706056,
+      "workers": 0
+    },
+    "liveReplay": {
+      "after": 11,
+      "atEnd": true,
+      "before": 4,
+      "finalWorkers": 0,
+      "pairing": "Game 1/6: Stockfish Lite (W) vs Berserk Relaxed SIMD (B) \u00b7 2 active (K=2)",
+      "reviewAfter": "Stockfish Lite vs Berserk Relaxed SIMD \u00b7 move 1/11",
+      "reviewBefore": "Stockfish Lite vs Berserk Relaxed SIMD \u00b7 move 1/4",
       "workers": 4
     },
-    "message": "Stopped after 0 game(s).",
-    "standings": "0/60 games \u00b7 Elo vs pool, \u00b195% approx#EngineEloWDLPtsG1Berserk Relaxed SIMD\u2014000002PlentyChess SSE4.1\u2014000003Stockfish Lite\u201400000",
-    "stopMs": 11.524999976158142,
-    "workers": 0
+    "finalNodesMatchesBeforeReviewGolden": true
   }
 }

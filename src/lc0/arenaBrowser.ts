@@ -20,7 +20,7 @@ import {
 import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { evalBarWhitePercent } from './analysisFormat.ts';
-import { type CpuArenaPosition, type CpuArenaSeat, playCpuArenaGame } from './arenaCpuGame.ts';
+import { appendCpuArenaTrail, type CpuArenaPosition, type CpuArenaSeat, playCpuArenaGame } from './arenaCpuGame.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -3325,7 +3325,7 @@ async function runIsolatedCpuTournament(
   const timed = arenaBudgetMode() === 'movetime';
   const movetimeMs = arenaMovetimeMs();
   const delayMs = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
-  const live = new Map<number, { position: CpuArenaPosition; white: CpuArenaSeat; black: CpuArenaSeat }>();
+  const live = new Map<number, { position: CpuArenaPosition; white: CpuArenaSeat; black: CpuArenaSeat; trail: GameTrail }>();
   let displayed = -1;
   const show = (index: number) => {
     if (signal.aborted || index !== Math.min(...live.keys())) return;
@@ -3341,7 +3341,7 @@ async function runIsolatedCpuTournament(
     historyBoards = position.positions;
     board = historyBoards[historyBoards.length - 1];
     lastUci = position.lastUci;
-    liveTrail = trailFromTree(position.tree, `${game.white.name} vs ${game.black.name}`, openingHistoryBoards(schedule[index].opening).length - 1);
+    liveTrail = game.trail;
     el('pairing').textContent =
       `Game ${index + 1}/${schedule.length}: ${game.white.name} (W) vs ${game.black.name} (B) · ${live.size} active (K=${concurrency})`;
     renderBoard();
@@ -3377,8 +3377,10 @@ async function runIsolatedCpuTournament(
             engines.set(seat.id, { id: seat.id, name: seat.name, move: async () => null });
           }
           const [white, black] = seats;
+          const tree = gameTreeFromOpening(game.opening);
+          const trail = trailFromTree(tree, `${white.name} vs ${black.name}`, openingHistoryBoards(game.opening).length - 1);
           const outcome = await playCpuArenaGame({
-            tree: gameTreeFromOpening(game.opening),
+            tree,
             white,
             black,
             broker,
@@ -3393,19 +3395,13 @@ async function runIsolatedCpuTournament(
             },
             position: (position) => {
               if (signal.aborted) return;
-              live.set(index, { position, white, black });
+              appendCpuArenaTrail(trail, position);
+              live.set(index, { position, white, black, trail });
               show(index);
             },
             delay: () => sleep(delayMs, gameSignal),
           });
-          return {
-            ...outcome,
-            trail: trailFromTree(
-              outcome.tree,
-              `Game ${index + 1}: ${white.name} vs ${black.name} (${outcome.result})`,
-              openingHistoryBoards(game.opening).length - 1,
-            ),
-          };
+          return { ...outcome, trail };
         } finally {
           for (const seat of seats) {
             seat.engine.dispose();

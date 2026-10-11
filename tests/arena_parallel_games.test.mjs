@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { playCpuArenaGame } from '../src/lc0/arenaCpuGame.ts';
+import { appendCpuArenaTrail, playCpuArenaGame } from '../src/lc0/arenaCpuGame.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from '../src/lc0/arenaScheduleRunner.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
@@ -165,6 +165,60 @@ test('CPU game resets both private engines, has a local board, and releases name
   }
   assert.deepEqual(broker.snapshot().activeLeases, []);
   assert.deepEqual(broker.snapshot().queuedEngineIds, []);
+});
+
+test('abort disposes both private seats while readiness ignores its signal', async () => {
+  const controller = new AbortController();
+  let rejectReady;
+  let disposedWhite = 0;
+  let disposedBlack = 0;
+  const white = {
+    id: 'white',
+    name: 'white',
+    engine: {
+      prewarm: () =>
+        new Promise((_, reject) => {
+          rejectReady = reject;
+        }),
+      newGame: () => assert.fail('aborted initialization must not advance'),
+      dispose: () => {
+        disposedWhite++;
+        rejectReady?.(new DOMException('Disposed', 'AbortError'));
+      },
+    },
+  };
+  const black = {
+    id: 'black',
+    name: 'black',
+    engine: {
+      prewarm: () => assert.fail('second worker must not start after abort'),
+      dispose: () => disposedBlack++,
+    },
+  };
+  const pending = playCpuArenaGame({ tree: new GameTree(), white, black, broker: new EngineResourceBroker(), signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(disposedWhite, 1);
+  assert.equal(disposedBlack, 1);
+});
+
+test('live replay readers see later plies without losing trail/array identity', () => {
+  const tree = new GameTree();
+  const trail = { entries: [{ fen: tree.root.fen, uci: null, san: null }] };
+  const reviewing = trail;
+  const entries = trail.entries;
+  appendCpuArenaTrail(trail, { tree, positions: tree.historyBoards(), lastUci: null, ply: 0 });
+  for (const [ply, uci] of ['e2e4', 'e7e5'].entries()) {
+    assert.ok(tree.addUci(uci));
+    appendCpuArenaTrail(trail, { tree, positions: tree.historyBoards(), lastUci: uci, ply: ply + 1 });
+  }
+  assert.equal(reviewing, trail);
+  assert.equal(reviewing.entries, entries);
+  assert.deepEqual(
+    reviewing.entries.map((entry) => entry.uci),
+    [null, 'e2e4', 'e7e5'],
+  );
+  assert.equal(reviewing.entries.at(-1).san, 'e5');
 });
 
 test('CPU move failure does not leak its lease', async () => {

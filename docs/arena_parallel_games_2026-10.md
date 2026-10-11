@@ -2,7 +2,7 @@
 
 ## Verdict
 
-**Ship K=2 as the conservative desktop Auto setting.** All three gates passed on this 10-core Apple M4: K=2 retained **95.1% Stockfish / 91.9% Berserk** per-engine throughput, deterministic games agreed, and the built-app round robin saved **49.7% median wall time**. K=3 remains explicit opt-in, not the default.
+**Ship K=2 as the conservative desktop Auto setting.** All three gates passed on this 10-core Apple M4: K=2 retained **95.1% Stockfish / 91.9% Berserk** per-engine throughput, deterministic games agreed, and the built-app round robin saved **49.2% median wall time**. K=3 remains explicit opt-in, not the default.
 
 Base: `5c161a9`; branch: `perf/arena-parallel-games`. Compact numerical evidence: [`evidence/arena_parallel_games_2026-10.json`](evidence/arena_parallel_games_2026-10.json).
 
@@ -65,30 +65,40 @@ Warm-cache button-to-finished wall clock includes **new worker initialization, s
 
 | K | Runs (s) | Median (s) | Min–max (s) | Peak / final workers |
 |---|---|---:|---|---|
-| 1 | 13.136, 13.066, 13.167 | **13.136** | 13.066–13.167 | 2 / 0 |
-| 2 | 6.593, 6.612, 6.649 | **6.612** | 6.593–6.649 | 4 / 0 |
+| 1 | 12.550, 12.533, 12.484 | **12.533** | 12.484–12.550 | 2 / 0 |
+| 2 | 6.346, 6.364, 6.438 | **6.364** | 6.346–6.438 | 4 / 0 |
 
-**49.7% median saving**, above the 30% gate. Initial separate autoruns also agreed (13.509 / 6.669 s); those are not mixed into the repeated-run medians. All exports matched byte-for-byte, including order and opening replay plies. Fixed-depth PGN SHA-256: `9cdf94d55864bc6c290854063deb36eb470b3131951c3122b2e2fa6dfb55474b`.
+**49.2% median saving**, above the 30% gate, on the final reviewed-fix build. Before review fixes, three AB pairs gave 13.136 / 6.612 s (49.7%); initial separate autoruns also agreed (13.509 / 6.669 s). These earlier samples are retained in the evidence but not mixed into the final medians. All exports matched byte-for-byte, including order and opening replay plies. Fixed-depth PGN SHA-256: `9cdf94d55864bc6c290854063deb36eb470b3131951c3122b2e2fa6dfb55474b`.
 
 Standings for both K: PlentyChess W2 D2 L0, 3/4 points; Berserk W1 D2 L1, 2/4; Stockfish W0 D2 L2, 1/4. Scores, ordering and displayed Elo/error text matched.
 
-Built fixed-node round robin: `go nodes 10000` substituted by the research browser init script, K sequence 1,2,1,2. All four six-game exports and standings agreed; final worker count was zero. PGN SHA-256: `4490ea0f748e874d4970fe8825e1b9e5279fcb9887fc32557d258aab50a590d5`.
+Built fixed-node round robin: `go nodes 10000` substituted by the research browser init script, K sequence 1,2,1,2. All four six-game exports and standings agreed; final worker count was zero. After the review fixes, both K=1 and K=2 were repeated and matched that same export/standings. PGN SHA-256: `4490ea0f748e874d4970fe8825e1b9e5279fcb9887fc32557d258aab50a590d5`.
 
 Stop test: 60-game schedule, K=2, 1,000 ms/move; stopped with two games running and four live workers. Both child searches settled, no partial games counted, all four workers terminated, Start re-enabled, `Stopped after 0 game(s).` (observed warm stop-to-ready 11.5 ms; a single functionality check, **not** a latency benchmark). Auto displayed effective K=2 on this machine.
 
-Timing runs held benchlock in <20-minute chunks; no builds were run while holding it. Other agents' timing loads were serialized. The desktop was not an OS-level clean room: load average roughly 3, modest Brave/WindowServer/VM background activity, no sustained external engine/GPU load observed. Built wall-clock spread was under 1%; no core pinning or thermal/device-portability claim.
+Timing runs held benchlock in <20-minute chunks; no builds were run while holding it. Other agents' timing loads were serialized. The desktop was not an OS-level clean room: load average roughly 3, modest Brave/WindowServer/VM background activity, no sustained external engine/GPU load observed. Final built wall-clock spread was under 1.5%; no core pinning or thermal/device-portability claim.
 
 Screenshots (opened/visually checked), under the delegated scratchpad root `/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad/`:
 
 - `arena-parallel-games-gate.png`
 - `arena-parallel-games-built-K2-standings.png`
 - `arena-parallel-games-built-stop.png`
+- `arena-parallel-games-built-live-replay.png` (final fix build, two active games and a growing review trail)
 
-Raw traces/PGNs and results there: `arena-parallel-games-throughput-matched.json`, `arena-parallel-games-parity-summary.json`, `arena-parallel-games-memory.json`, `arena-parallel-games-built-depth-K1-1.json`, `arena-parallel-games-built-depth-K2-1.json`, `arena-parallel-games-built-depth-repeats.json`, `arena-parallel-games-built-nodes.json`, `arena-parallel-games-stop.json`. The compact committed evidence is sufficient to recompute gate medians/spreads; raw evidence includes the full exports.
+Raw traces/PGNs and results there: `arena-parallel-games-throughput-matched.json`, `arena-parallel-games-parity-summary.json`, `arena-parallel-games-memory.json`, `arena-parallel-games-built-depth-K1-1.json`, `arena-parallel-games-built-depth-K2-1.json`, `arena-parallel-games-built-depth-repeats.json`, `arena-parallel-games-built-nodes.json`, `arena-parallel-games-stop.json`, `arena-parallel-games-built-depth-final.json`, `arena-parallel-games-built-nodes-final.json`, `arena-parallel-games-prep-stop.json`, `arena-parallel-games-replay.json`. The compact committed evidence is sufficient to recompute gate medians/spreads; raw evidence includes the full exports.
+
+## Review-driven regression checks
+
+The first Codex review identified two valid integration bugs. Both were fixed before final remeasurement:
+
+1. **Preparation cancellation:** abort now immediately disposes both private seats, including during readiness (Stockfish's initialization itself does not observe its signal). The listener is removed on settlement, and ordinary `finally` cleanup remains. Built fault injection dropped the Stockfish `uci` handshake: two private workers stayed unready, Stop terminated both and re-enabled Start in 12.8 ms rather than awaiting the adapter's 120-second initialization timeout. This is a single functional check, not a stop-latency benchmark.
+2. **Live replay identity:** one trail object and entry array are maintained per game, appended in place and passed unchanged to the finished-game log. Built K=2 check entered review at move 1/4; while the game advanced, the same review reached move 1/11 and Last jumped to its current end. Four workers were running; stopping then left zero.
+
+Final depth/node exports matched the pre-fix golden exports. Review artifacts and verdict are recorded in the delegated final report.
 
 ## Verification and remaining scope
 
-- `npm test`: **1,009 pass, 3 expected environment-dependent skips, zero failures** (1,012 total); included a clean typecheck.
-- Seven focused new tests: CPU/memory admission, out-of-order completion/standings/export equivalence, individual child signals and cancellation, sibling failure/drain, pre-aborted runs, private board/reset/lease accounting, search-failure lease release.
+- Final `npm test`: **1,011 pass, 3 expected environment-dependent skips, zero failures** (1,014 total); included a clean typecheck.
+- Nine focused new tests: CPU/memory admission, out-of-order completion/standings/export equivalence, individual child signals and cancellation, sibling failure/drain, pre-aborted runs, private board/reset/lease accounting, search-failure lease release, abort during signal-ignoring readiness, and stable replay trail/entry-array identity.
 - Existing tournament and resource-broker suites pass. Biome has no new issues; pre-existing arena/Svelte unused-variable warnings remain untouched.
 - No GPU parallelism, SMP, adapter cancellation redesign, individual-game Stop UI or TT resizing. K=3 product round-robin wall time, full-net/Stormphrax memory and real constrained/mobile hardware were not measured. K=3 is explicitly gated and opt-in; fixed-node support remains research-only.
