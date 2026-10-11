@@ -1186,6 +1186,9 @@ function ctxSetViewPly(ctx: PlayContext, viewPly: number | null): void {
   if (next === ctx.viewPly) return;
   // A promotion choice belongs to the live position; leaving it cancels the pick.
   if (ctx.pendingPromotion) ctx.pendingPromotion = null;
+  // Chessground's set() keeps an active selection or drag; drop it so it does
+  // not leak into the browsed position or back into live play.
+  ctx.ground?.cancelMove();
   ctx.viewPly = next;
   ctxRender(ctx);
 }
