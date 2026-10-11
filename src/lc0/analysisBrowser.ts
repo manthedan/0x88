@@ -145,6 +145,14 @@ import {
   viridithasCacheKey,
 } from './engineProvision.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
+import {
+  cancelHiddenTabWork,
+  type HiddenTabPause,
+  type HiddenTabWork,
+  initialHiddenTabPause,
+  requestHiddenTabWork,
+  transitionHiddenTab,
+} from './hiddenTabPause.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationProvider, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
@@ -376,6 +384,10 @@ function assetProbePending(status: string): boolean {
 let analysisKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 let analysisPagehideHandler: ((event: PageTransitionEvent) => void) | null = null;
 let analysisAuditHandler: ((event: Event) => void) | null = null;
+let hiddenTab: HiddenTabPause = initialHiddenTabPause(false);
+let hiddenTabListener: (() => void) | null = null;
+let analysisWorkerProgressMessages = 0;
+let analysisUiProgressSamples = 0;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
 let analysisReloadAbort: AbortController | null = null;
@@ -662,6 +674,7 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
       showModelProgress('Lc0 small net', message.loadedBytes ?? 0, message.totalBytes, 'Downloading');
       return;
     }
+    if (message.type === 'searchProgress') analysisWorkerProgressMessages += 1;
     const pending = workerPending.get(message.id);
     if (!pending) return;
     if (message.type === 'searchProgress') {
@@ -767,7 +780,8 @@ function progressKey(runId: number, label: string): string {
 }
 
 function showAnalysisProgress(runId: number, fen: string, label: string, progress: WorkerSearchProgress): void {
-  if (runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+  analysisUiProgressSamples += 1;
   const completed = progress.completedVisits ?? progress.visits;
   const elapsedMs = progress.elapsedMs ?? 0;
   searchProgressByEngine.set(progressKey(runId, label), {
@@ -804,7 +818,7 @@ function showMoveSearchProgress(
 }
 
 function showIndeterminateSearchProgress(runId: number, fen: string, label: string): void {
-  if (runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
   searchProgressByEngine.set(progressKey(runId, label), { label, units: 'search', indeterminate: true });
   renderAnalysisSearchProgress();
   renderEngineComparison(lineCache.get(fen) ?? []);
@@ -2742,6 +2756,53 @@ function hasActiveAnalysisRun(): boolean {
   return (analyzing && analysisAbort !== null && !analysisAbort.signal.aborted) || (analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted);
 }
 
+function hiddenTabActive(): HiddenTabWork[] {
+  const active: HiddenTabWork[] = [];
+  if (hasActiveAnalysisRun()) active.push('analysis');
+  if (maia3PanelTimer !== null || maia3PanelEvaluating) active.push('maia');
+  if (analysisAssetPrefetchControllers.size > 0) active.push('prefetch');
+  return active;
+}
+
+function deferHiddenTabWork(kind: HiddenTabWork): boolean {
+  const requested = requestHiddenTabWork(hiddenTab, kind);
+  hiddenTab = requested.state;
+  return !requested.start;
+}
+
+function applyHiddenTab(hidden: boolean): void {
+  const transition = transitionHiddenTab(hiddenTab, hidden, hiddenTabActive());
+  hiddenTab = transition.state;
+  if (transition.pause.includes('prefetch')) cancelAllAnalysisAssetPrefetches();
+  if (transition.pause.includes('maia')) {
+    maia3PanelTask?.invalidate();
+    if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+    maia3PanelTimer = null;
+  }
+  if (transition.pause.includes('analysis')) {
+    cancelActiveAnalysisRun();
+    el('message').textContent = 'Analysis paused while this tab is hidden.';
+  }
+  if (transition.resume.includes('prefetch')) {
+    for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
+  }
+  if (transition.resume.includes('maia')) scheduleMaia3Panel();
+  if (transition.resume.includes('analysis') && !mountAbort.signal.aborted) void analyzeCurrent();
+}
+
+function installHiddenTabPause(): void {
+  if (hiddenTabListener) document.removeEventListener('visibilitychange', hiddenTabListener);
+  hiddenTab = initialHiddenTabPause(document.visibilityState === 'hidden');
+  hiddenTabListener = () => applyHiddenTab(document.visibilityState === 'hidden');
+  document.addEventListener('visibilitychange', hiddenTabListener);
+}
+
+function removeHiddenTabPause(): void {
+  if (!hiddenTabListener) return;
+  document.removeEventListener('visibilitychange', hiddenTabListener);
+  hiddenTabListener = null;
+}
+
 function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): boolean {
   if (!hasActiveAnalysisRun()) return false;
   analyzeAfterActiveRun = true;
@@ -3006,6 +3067,7 @@ function cancelAllAnalysisAssetPrefetches(): void {
 function prefetchAnalysisAssetsForAddedRow(row: EngineRow): void {
   const urls = analysisCpuEngineAssetUrls(row);
   if (!urls.some(Boolean) || mountAbort.signal.aborted) return;
+  if (deferHiddenTabWork('prefetch')) return;
   cancelAnalysisAssetPrefetch(row);
   const controller = new AbortController();
   const abortOnUnmount = () => controller.abort();
@@ -3118,6 +3180,7 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
+  if (deferHiddenTabWork('analysis')) return;
   reviewAbort?.abort();
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
@@ -3504,6 +3567,9 @@ function afterNavigation() {
   scheduleMaia3Panel();
   if (inputEl('autoAnalyze').checked && !cached) void analyzeCurrent();
   else {
+    // A cached position, or auto-analyze off, must not restart the search that
+    // was paused on the position we just left.
+    hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
     renderEvalBar();
     setShapes(bestShapes());
   }
@@ -3520,6 +3586,7 @@ let maia3PanelLoading = false;
 let maia3PanelLoadGeneration = 0;
 let maia3PanelTask: LatestOnlyTask<string> | null = null;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
+let maia3PanelEvaluating = false;
 
 function maia3PanelStatus(text: string): void {
   el('maia3PanelStatus').textContent = text;
@@ -3577,6 +3644,7 @@ function scheduleMaia3Panel(): void {
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   maia3PanelTimer = null;
   if (!task) return;
+  if (deferHiddenTabWork('maia')) return;
   maia3PanelTimer = setTimeout(() => {
     maia3PanelTimer = null;
     task.request(tree.current.fen || START_FEN);
@@ -3591,35 +3659,40 @@ function bestEngineUci(fen: string): string | null {
 }
 
 async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, isCurrent: () => boolean): Promise<void> {
-  if (!isCurrent()) return;
-  const board = parseFen(fen);
-  if (!legalMoves(board).length) {
+  maia3PanelEvaluating = true;
+  try {
+    if (!isCurrent()) return;
+    const board = parseFen(fen);
+    if (!legalMoves(board).length) {
+      maia3PanelStatus('');
+      el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>';
+      return;
+    }
+    const evaluations = await evaluator.evaluateConditions(
+      board,
+      MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })),
+    );
+    if (!isCurrent()) return;
     maia3PanelStatus('');
-    el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>';
-    return;
+    const engineUci = bestEngineUci(fen);
+    const sanByUci = new Map(legalMoves(board).map((move) => [moveToUci(move), moveToSan(board, move)]));
+    const rows = evaluations.map((evaluation, i) => {
+      const score = maia3WinProbability(evaluation);
+      const top = evaluation.legalPriors
+        .slice(0, 3)
+        .map((entry) => {
+          const san = sanByUci.get(entry.uci) ?? entry.uci;
+          const agree = engineUci && entry.uci === engineUci ? ' ✓' : '';
+          const width = Math.max(3, Math.round(entry.prior * 70));
+          return `<span class="maia3-move">${san}${agree} <span class="maia3-bar" style="width:${width}px"></span> ${(entry.prior * 100).toFixed(0)}%</span>`;
+        })
+        .join('');
+      return `<div class="maia3-row"><span class="maia3-elo">${MAIA3_PANEL_RATINGS[i]}</span><span class="maia3-score" title="Expected points for White in a human game at this rating">${score.toFixed(2)}</span>${top}</div>`;
+    });
+    el('maia3Grid').innerHTML = rows.join('');
+  } finally {
+    maia3PanelEvaluating = false;
   }
-  const evaluations = await evaluator.evaluateConditions(
-    board,
-    MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })),
-  );
-  if (!isCurrent()) return;
-  maia3PanelStatus('');
-  const engineUci = bestEngineUci(fen);
-  const sanByUci = new Map(legalMoves(board).map((move) => [moveToUci(move), moveToSan(board, move)]));
-  const rows = evaluations.map((evaluation, i) => {
-    const score = maia3WinProbability(evaluation);
-    const top = evaluation.legalPriors
-      .slice(0, 3)
-      .map((entry) => {
-        const san = sanByUci.get(entry.uci) ?? entry.uci;
-        const agree = engineUci && entry.uci === engineUci ? ' ✓' : '';
-        const width = Math.max(3, Math.round(entry.prior * 70));
-        return `<span class="maia3-move">${san}${agree} <span class="maia3-bar" style="width:${width}px"></span> ${(entry.prior * 100).toFixed(0)}%</span>`;
-      })
-      .join('');
-    return `<div class="maia3-row"><span class="maia3-elo">${MAIA3_PANEL_RATINGS[i]}</span><span class="maia3-score" title="Expected points for White in a human game at this rating">${score.toFixed(2)}</span>${top}</div>`;
-  });
-  el('maia3Grid').innerHTML = rows.join('');
 }
 
 async function onUserMove(from: Key, to: Key) {
@@ -3735,8 +3808,11 @@ function wireEvents() {
     void analyzeCurrent({ force: true });
   });
   el('stop').addEventListener('click', () => {
+    hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
+    hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
     cancelAllAnalysisAssetPrefetches();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+    if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
   });
   el('engineList').addEventListener('change', (event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
@@ -4038,6 +4114,7 @@ function disposeRuntimeResources(): void {
 }
 
 function disposePageResources(): void {
+  removeHiddenTabPause();
   analysisReloadAbort?.abort();
   analysisReloadAbort = null;
   disposeRuntimeResources();
@@ -4049,6 +4126,7 @@ function disposePageResources(): void {
   maia3PanelTask?.dispose();
   maia3PanelTask = null;
   maia3PanelTimer = null;
+  maia3PanelEvaluating = false;
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = null;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
@@ -4298,6 +4376,9 @@ export function mountAnalysisBrowser(): () => void {
   }
   lastAnalysisMountHref = href;
   resetAnalysisPageState();
+  analysisWorkerProgressMessages = 0;
+  analysisUiProgressSamples = 0;
+  installHiddenTabPause();
   const controller = new AbortController();
   mountAbort = controller;
   analysisMountedCallbackCache = new WeakMap();
@@ -4310,14 +4391,23 @@ export function mountAnalysisBrowser(): () => void {
     analyzing,
     searchActive: analysisAbort !== null && !analysisAbort.signal.aborted,
     reloadActive: analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
+    hidden: hiddenTab.hidden,
+    suspended: hiddenTab.suspended.join(','),
+    fen: tree.current.fen,
+    workerProgressMessages: analysisWorkerProgressMessages,
+    uiProgressSamples: analysisUiProgressSamples,
+    message: document.getElementById('message')?.textContent ?? '',
   });
+  const setHiddenHook = (hidden: boolean) => applyHiddenTab(hidden);
   type AnalysisSmokeGlobal = typeof globalThis & {
     __analysisUserMove?: typeof hook;
     __analysisSchedulingState?: typeof schedulingStateHook;
+    __analysisSetHidden?: typeof setHiddenHook;
   };
   const smokeGlobal = globalThis as AnalysisSmokeGlobal;
   smokeGlobal.__analysisUserMove = hook;
   smokeGlobal.__analysisSchedulingState = schedulingStateHook;
+  smokeGlobal.__analysisSetHidden = setHiddenHook;
   void init(controller.signal);
   return () => {
     controller.abort();
@@ -4326,5 +4416,6 @@ export function mountAnalysisBrowser(): () => void {
     // installed its own).
     if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
     if (smokeGlobal.__analysisSchedulingState === schedulingStateHook) delete smokeGlobal.__analysisSchedulingState;
+    if (smokeGlobal.__analysisSetHidden === setHiddenHook) delete smokeGlobal.__analysisSetHidden;
   };
 }
