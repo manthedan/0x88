@@ -19,6 +19,11 @@ export interface CpuArenaPosition {
   ply: number;
 }
 
+/** Chart labels survive pool rebuilds and disposal of a game's private seats. */
+export function arenaChartEngineName(samples: readonly { engineId: string; engineName: string }[], engineId: string): string {
+  return samples.find((sample) => sample.engineId === engineId)?.engineName ?? engineId;
+}
+
 /** Shared by live and captured diagnostics; never consults the old page pools. */
 export function cpuArenaRuntimeSummary(seat: CpuArenaSeat, hashMb: number): string {
   return `${seat.name}: Threads=1 · Hash=${hashMb} MiB · ${seat.engine.runtimeLabel()}`;

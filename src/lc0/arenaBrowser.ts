@@ -22,6 +22,7 @@ import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPo
 import { evalBarWhitePercent } from './analysisFormat.ts';
 import {
   appendCpuArenaTrail,
+  arenaChartEngineName,
   type CpuArenaPosition,
   type CpuArenaSeat,
   captureCpuArenaDiagnostics,
@@ -468,6 +469,7 @@ const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
 interface GameChartSample {
   ply: number;
   engineId: string;
+  engineName: string;
   whiteScore?: number;
   moveMs: number;
   nps?: number;
@@ -3157,7 +3159,7 @@ function renderGameCharts(): void {
   const ids = [...new Set(gameChartSamples.map((sample) => sample.engineId))];
   const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] =>
     ids.map((id) => ({
-      label: engines.get(id)?.name ?? id,
+      label: arenaChartEngineName(gameChartSamples, id),
       color: chartColorFor(id),
       points: gameChartSamples
         .filter((sample) => sample.engineId === id)
@@ -3179,7 +3181,7 @@ function renderGameCharts(): void {
     { yMin: 0, formatY: formatCompactNumber },
   );
   el('chartLegend').innerHTML = ids
-    .map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(engines.get(id)?.name ?? id)}</span>`)
+    .map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(arenaChartEngineName(gameChartSamples, id))}</span>`)
     .join('');
 }
 
@@ -3209,7 +3211,7 @@ function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'na
   const snapshot = engineOutputs.get(engine.id);
   const lc0 = lastLc0SearchResults.get(engine.id);
   const nps = snapshot?.nps ?? (lc0 && moveMs > 0 ? Math.round((lc0.visits / moveMs) * 1000) : undefined);
-  gameChartSamples.push({ ply, engineId: engine.id, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
+  gameChartSamples.push({ ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
   renderGameCharts();
   renderRootChart(engine.id);
 }

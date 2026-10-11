@@ -89,7 +89,7 @@ Raw traces/PGNs and results there: `arena-parallel-games-throughput-matched.json
 
 ## Review-driven regression checks
 
-The first three Codex reviews identified five valid integration bugs. All were accepted and fixed; the first two were fixed before remeasurement:
+The first four Codex reviews identified six valid integration bugs. All were accepted and fixed; the first two were fixed before remeasurement:
 
 1. **Preparation cancellation:** abort now immediately disposes both private seats, including during readiness (Stockfish's initialization itself does not observe its signal). The listener is removed on settlement, and ordinary `finally` cleanup remains. Built fault injection dropped the Stockfish `uci` handshake: two private workers stayed unready, Stop terminated both and re-enabled Start in 12.8 ms rather than awaiting the adapter's 120-second initialization timeout. This is a single functional check, not a stop-latency benchmark.
 2. **Live replay identity:** one trail object and entry array are maintained per game, appended in place and passed unchanged to the finished-game log. Built K=2 check entered review at move 1/4; while the game advanced, the same review reached move 1/11 and Last jumped to its current end. Four workers were running; stopping then left zero.
@@ -97,12 +97,13 @@ The first three Codex reviews identified five valid integration bugs. All were a
 3. **Completed-game diagnostics:** runtime/search summaries are captured using that game's private seats before disposal or focus switching, then passed to completion. Logs no longer read the next/live game's diagnostic identities.
 4. **Background completion markers:** the completed engine's thinking/progress entries are cleared before the visibility guard; background completion cannot leave stale indicators when the game later regains focus. Both UI fixes have focused state/ownership regression tests.
 5. **Live runtime identity:** a private-seat registry holds the captured row and actual engine instance for each namespaced ID, independent of late probes rebuilding the old surface map. Live runtime diagnostics use the same private-engine summary formatter as completed snapshots; names/rows remain resolvable and the registry is removed during game/page cleanup. The diagnostics test checks live state versus the immutable completed snapshot.
+6. **Chart labels after late probes:** chart samples retain the captured engine name; series and legends no longer depend on either engine registry remaining populated. A regression test checks names independently of pool/instance lifetime.
 
 Remeasured depth/node exports matched the pre-fix golden exports. Review artifacts, additional final browser checks and verdict are recorded in the delegated final report.
 
 ## Verification and remaining scope
 
-- Final `npm test`: **1,013 pass, 3 expected environment-dependent skips, zero failures** (1,016 total); included a clean typecheck.
-- Eleven focused new tests: CPU/memory admission, out-of-order completion/standings/export equivalence, individual child signals and cancellation, sibling failure/drain, pre-aborted runs, private board/reset/lease accounting, search-failure lease release, abort during signal-ignoring readiness, stable replay trail/entry-array identity, completed diagnostics snapshots independent of live focus/disposal, and clearing a background search's own markers.
+- Final `npm test`: **1,014 pass, 3 expected environment-dependent skips, zero failures** (1,017 total); included a clean typecheck.
+- Twelve focused new tests: CPU/memory admission, out-of-order completion/standings/export equivalence, individual child signals and cancellation, sibling failure/drain, pre-aborted runs, private board/reset/lease accounting, search-failure lease release, abort during signal-ignoring readiness, stable replay trail/entry-array identity, completed diagnostics snapshots independent of live focus/disposal, clearing a background search's own markers, and retaining chart labels after pool changes.
 - Existing tournament and resource-broker suites pass. Biome has no new issues; pre-existing arena/Svelte unused-variable warnings remain untouched.
 - No GPU parallelism, SMP, adapter cancellation redesign, individual-game Stop UI or TT resizing. K=3 product round-robin wall time, full-net/Stormphrax memory and real constrained/mobile hardware were not measured. K=3 is explicitly gated and opt-in; fixed-node support remains research-only.

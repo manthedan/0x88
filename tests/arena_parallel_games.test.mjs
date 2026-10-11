@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { appendCpuArenaTrail, captureCpuArenaDiagnostics, cpuArenaRuntimeSummary, playCpuArenaGame, settleCpuArenaSearch } from '../src/lc0/arenaCpuGame.ts';
+import {
+  appendCpuArenaTrail,
+  arenaChartEngineName,
+  captureCpuArenaDiagnostics,
+  cpuArenaRuntimeSummary,
+  playCpuArenaGame,
+  settleCpuArenaSearch,
+} from '../src/lc0/arenaCpuGame.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from '../src/lc0/arenaScheduleRunner.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
@@ -250,6 +257,14 @@ test('background completion clears only its own thinking/progress before refocus
   assert.deepEqual([...progress.keys()], ['game:0:w']);
   settleCpuArenaSearch('game:1:w', thinking, progress);
   assert.deepEqual([...thinking], ['game:0:w']);
+});
+
+test('chart names are captured independently of private or surface engine lifetime', () => {
+  const engine = { id: 'arena:0:w:0', name: 'Stockfish Lite 10depth' };
+  const samples = [{ engineId: engine.id, engineName: engine.name }];
+  engine.name = 'pool was rebuilt';
+  assert.equal(arenaChartEngineName(samples, 'arena:0:w:0'), 'Stockfish Lite 10depth');
+  assert.equal(arenaChartEngineName(samples, 'missing'), 'missing');
 });
 
 test('CPU move failure does not leak its lease', async () => {
