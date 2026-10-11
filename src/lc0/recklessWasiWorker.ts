@@ -16,6 +16,8 @@ type PersistentWorkerRequest = {
   type: 'start-persistent';
   wasmUrl: string;
   inputBuffer: SharedArrayBuffer;
+  /** Viridithas v20 cooperative-stop word, exposed as nonblocking WASI fd 4. */
+  stopBuffer?: SharedArrayBuffer;
   executableName?: string;
   preopenFiles?: PreopenFileSpec[];
 };
@@ -104,6 +106,20 @@ class SharedStdin extends Fd {
       if (Atomics.load(this.control, 2) !== 0) return { ret: wasi.ERRNO_SUCCESS, data: new Uint8Array() };
       Atomics.wait(this.control, 1, writePos, 1000);
     }
+  }
+}
+
+/** Optional, separate from stdin so a search cannot consume queued UCI commands. */
+export class SharedStopFlag extends Fd {
+  private readonly flag: Int32Array;
+
+  constructor(buffer: SharedArrayBuffer) {
+    super();
+    this.flag = new Int32Array(buffer);
+  }
+
+  fd_read(size: number): { ret: number; data: Uint8Array } {
+    return { ret: wasi.ERRNO_SUCCESS, data: size > 0 ? Uint8Array.of(Atomics.load(this.flag, 0) !== 0 ? 1 : 0) : new Uint8Array() };
   }
 }
 
@@ -349,6 +365,7 @@ async function runPersistentWasiUci(
   inputBuffer: SharedArrayBuffer,
   executableName = 'reckless',
   preopenFiles?: PreopenFileSpec[],
+  stopBuffer?: SharedArrayBuffer,
 ): Promise<void> {
   const wasiInstance = new WASI(
     [executableName],
@@ -358,6 +375,7 @@ async function runPersistentWasiUci(
       lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stdout', line }), isUsefulUciStdoutLine),
       lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stderr', line })),
       await buildPreopenDirectory(preopenFiles),
+      ...(stopBuffer ? [new SharedStopFlag(stopBuffer)] : []),
     ],
     { debug: false },
   );
@@ -378,7 +396,7 @@ self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
     return;
   }
   if (message.type === 'start-persistent') {
-    void runPersistentWasiUci(message.wasmUrl, message.inputBuffer, message.executableName, message.preopenFiles).catch((error) =>
+    void runPersistentWasiUci(message.wasmUrl, message.inputBuffer, message.executableName, message.preopenFiles, message.stopBuffer).catch((error) =>
       post({ type: 'persistent-error', error: (error as Error).message }),
     );
   }

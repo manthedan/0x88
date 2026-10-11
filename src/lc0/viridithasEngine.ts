@@ -21,6 +21,8 @@ type PersistentPending = Pending & {
   stdout: string[];
   stderr: string[];
   resolveWhenLine: (line: string, stream: 'stdout' | 'stderr') => boolean;
+  aborted?: boolean;
+  abortTimer?: ReturnType<typeof setTimeout>;
 };
 
 type SharedInput = {
@@ -48,6 +50,7 @@ export interface ViridithasRuntimeStatus {
 const SHARED_STDIN_HEADER_INTS = 4;
 const SHARED_STDIN_HEADER_BYTES = SHARED_STDIN_HEADER_INTS * Int32Array.BYTES_PER_ELEMENT;
 const PERSISTENT_STDIN_CAPACITY_BYTES = 64 * 1024;
+const PERSISTENT_ABORT_GRACE_MS = 100;
 
 function abortError(): Error {
   const error = new Error('Viridithas search aborted');
@@ -107,6 +110,7 @@ export class ViridithasEngine implements BrowserUciEngine {
   private pending = new Map<number, Pending>();
   private persistentPending: PersistentPending | null = null;
   private sharedInput: SharedInput | null = null;
+  private sharedStop: Int32Array<SharedArrayBuffer> | null = null;
   private persistentDisabled = false;
   private persistentInitialized = false;
   private persistentHashCommand: string | null = null;
@@ -115,11 +119,15 @@ export class ViridithasEngine implements BrowserUciEngine {
   private queueTail: Promise<void> = Promise.resolve();
   private lastInfoLines: StockfishInfoLine[] = [];
 
-  constructor(
-    private options: RecklessOptions = {},
-    private readonly wasmUrl = DEFAULT_VIRIDITHAS_WASM_URL,
-    private readonly runtimeOptions: ViridithasRuntimeOptions = {},
-  ) {}
+  private options: RecklessOptions;
+  private readonly wasmUrl: string;
+  private readonly runtimeOptions: ViridithasRuntimeOptions;
+
+  constructor(options: RecklessOptions = {}, wasmUrl = DEFAULT_VIRIDITHAS_WASM_URL, runtimeOptions: ViridithasRuntimeOptions = {}) {
+    this.options = options;
+    this.wasmUrl = wasmUrl;
+    this.runtimeOptions = runtimeOptions;
+  }
 
   setOptions(next: RecklessOptions): void {
     this.options = { ...this.options, ...next };
@@ -137,7 +145,9 @@ export class ViridithasEngine implements BrowserUciEngine {
       if (message.type === 'error') pending.reject(new Error(message.error ?? 'Viridithas WASI worker error'));
       else pending.resolve({ stdout: message.stdout ?? [], stderr: message.stderr ?? [], exitCode: message.exitCode ?? 0 });
     };
-    worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Viridithas WASI worker error'));
+    worker.onerror = (event) => {
+      if (this.worker === worker) this.rejectAllAndDispose(new Error(event.message || 'Viridithas WASI worker error'));
+    };
     this.worker = worker;
     this.workerMode = 'oneshot';
     return worker;
@@ -148,13 +158,24 @@ export class ViridithasEngine implements BrowserUciEngine {
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'viridithas-wasi-persistent' });
     const sharedInput = createSharedInput();
-    worker.onmessage = (event: MessageEvent) =>
+    worker.onmessage = (event: MessageEvent) => {
+      if (this.worker !== worker) return;
       this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string });
-    worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Viridithas persistent WASI worker error'));
+    };
+    worker.onerror = (event) => {
+      if (this.worker === worker) this.rejectAllAndDispose(new Error(event.message || 'Viridithas persistent WASI worker error'));
+    };
     this.worker = worker;
     this.workerMode = 'persistent';
     this.sharedInput = sharedInput;
-    worker.postMessage({ type: 'start-persistent', wasmUrl: this.wasmUrl, inputBuffer: sharedInput.buffer, executableName: 'viridithas' });
+    this.sharedStop = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+    worker.postMessage({
+      type: 'start-persistent',
+      wasmUrl: this.wasmUrl,
+      inputBuffer: sharedInput.buffer,
+      stopBuffer: this.sharedStop.buffer,
+      executableName: 'viridithas',
+    });
     return worker;
   }
 
@@ -185,7 +206,8 @@ export class ViridithasEngine implements BrowserUciEngine {
     const active = this.persistentPending;
     if (!active) return;
     this.persistentPending = null;
-    active.resolve(result);
+    if (active.aborted) active.reject(abortError());
+    else active.resolve(result);
   }
 
   private rejectAllAndDispose(error: Error): void {
@@ -204,6 +226,7 @@ export class ViridithasEngine implements BrowserUciEngine {
     this.worker = null;
     this.workerMode = null;
     this.sharedInput = null;
+    this.sharedStop = null;
     this.persistentInitialized = false;
     this.persistentHashCommand = null;
     this.persistentThreadsCommand = null;
@@ -285,21 +308,40 @@ export class ViridithasEngine implements BrowserUciEngine {
     if (!sharedInput) return Promise.reject(new Error('Viridithas persistent stdin was not initialized'));
     return new Promise<RunResult>((resolve, reject) => {
       let active: PersistentPending;
+      const cleanup = () => {
+        clearTimeout(active.abortTimer);
+        signal?.removeEventListener('abort', onAbort);
+      };
       const onAbort = () => {
         if (this.persistentPending !== active) return;
-        this.persistentPending = null;
-        this.disposeWorker();
-        reject(abortError());
+        active.aborted = true;
+        if (this.sharedStop) Atomics.store(this.sharedStop, 0, 1);
+        try {
+          writeSharedInput(sharedInput, 'stop\n');
+        } catch {
+          this.persistentPending = null;
+          this.disposeWorker();
+          active.reject(abortError());
+          return;
+        }
+        // Keep the exclusive queue occupied until the old bestmove is drained.
+        // An old/custom WASM or a cold startup may not acknowledge in time.
+        active.abortTimer = setTimeout(() => {
+          if (this.persistentPending !== active) return;
+          this.persistentPending = null;
+          this.disposeWorker();
+          active.reject(abortError());
+        }, PERSISTENT_ABORT_GRACE_MS);
       };
       active = {
         stdout: [],
         stderr: [],
         resolve: (result) => {
-          signal?.removeEventListener('abort', onAbort);
+          cleanup();
           resolve(result);
         },
         reject: (error) => {
-          signal?.removeEventListener('abort', onAbort);
+          cleanup();
           reject(error);
         },
         resolveWhenLine,
@@ -307,11 +349,12 @@ export class ViridithasEngine implements BrowserUciEngine {
       this.persistentPending = active;
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
+        if (this.sharedStop) Atomics.store(this.sharedStop, 0, 0);
         writeSharedInput(sharedInput, `${this.optimizePersistentCommands(commands).join('\n')}\n`);
       } catch (error) {
-        signal?.removeEventListener('abort', onAbort);
         this.persistentPending = null;
-        reject(error as Error);
+        this.disposeWorker();
+        active.reject(error as Error);
       }
     });
   }

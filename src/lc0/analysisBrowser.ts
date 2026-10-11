@@ -1727,7 +1727,7 @@ const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: Re
   createRecklessEngine(variant, renderRecklessRuntimeInfo, ANALYSIS_CPU_ENGINE_OPTIONS),
 );
 const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) =>
-  createViridithasEngine(variant, { forceOneShot: true }, ANALYSIS_CPU_ENGINE_OPTIONS),
+  createViridithasEngine(variant, {}, ANALYSIS_CPU_ENGINE_OPTIONS),
 );
 const berserkEngines = new DisposableVariantPool(berserkCacheKey, (variant: BerserkVariant) => createBerserkEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS));
 const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (variant: PlentyChessVariant) =>
@@ -3319,6 +3319,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
               controller.signal,
               [variant.wasmUrl],
               async (signal) => {
+                await engine.newGame(signal);
                 engine.setOptions({ depth: 1, movetimeMs: undefined });
                 await engine.bestMove(START_FEN, signal);
               },

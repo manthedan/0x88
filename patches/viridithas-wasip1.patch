@@ -686,7 +686,7 @@ index c4a1398..fb14d90 100644
 +#[cfg(not(target_arch = "wasm32"))]
 +pub use imp::*;
 diff --git a/src/uci.rs b/src/uci.rs
-index 45eefbd..52f90c1 100644
+index 45eefbd..607f3fc 100644
 --- a/src/uci.rs
 +++ b/src/uci.rs
 @@ -56,6 +56,8 @@ const BENCH_THREADS: usize = 1;
@@ -729,7 +729,7 @@ index 45eefbd..52f90c1 100644
                          }
  
                          let chess960 = control.chess960.load(Ordering::Relaxed);
-@@ -782,11 +784,53 @@ fn parse_setoption(
+@@ -782,11 +784,78 @@ fn parse_setoption(
      Ok(out)
  }
  
@@ -753,6 +753,31 @@ index 45eefbd..52f90c1 100644
 +
 +fn should_poll_stdin_during_search() -> bool {
 +    cfg!(not(target_arch = "wasm32"))
++}
++
++// Browser-only, nonblocking stop word exposed as WASI fd 4. Argv UCI runs
++// never poll, and hosts without this optional descriptor simply return EBADF.
++// Called only at the engine's existing time-check cadence, not per node.
++#[cfg(target_arch = "wasm32")]
++pub fn wasm_stop_requested() -> bool {
++    if WASM_ARG_COMMANDS.load(Ordering::Relaxed) {
++        return false;
++    }
++    #[repr(C)]
++    struct Iovec {
++        buf: *mut u8,
++        len: usize,
++    }
++    #[link(wasm_import_module = "wasi_snapshot_preview1")]
++    unsafe extern "C" {
++        #[link_name = "fd_read"]
++        fn stop_fd_read(fd: u32, iovs: *const Iovec, len: usize, nread: *mut usize) -> u32;
++    }
++    let mut stop = 0u8;
++    let iov = Iovec { buf: &mut stop, len: 1 };
++    let mut nread = 0usize;
++    // The stack buffers remain live for this synchronous WASI call.
++    unsafe { stop_fd_read(4, &iov, 1, &mut nread) == 0 && nread == 1 && stop != 0 }
 +}
 +
 +fn read_next_command(stdin: &Mutex<mpsc::Receiver<String>>) -> Result<Option<String>, UciError> {
@@ -783,7 +808,7 @@ index 45eefbd..52f90c1 100644
  fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
      let (sender, receiver) = mpsc::channel();
      let handle = std::thread::Builder::new()
-@@ -795,6 +839,21 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
+@@ -795,6 +864,21 @@ fn stdin_reader(control: Arc<Control>) -> Result<StdinReader, std::io::Error> {
      Ok((receiver, handle))
  }
  
@@ -805,3 +830,19 @@ index 45eefbd..52f90c1 100644
  fn stdin_reader_worker(sender: mpsc::Sender<String>, control: &Control) -> Result<(), UciError> {
      let mut linebuf = String::with_capacity(128);
      while let Ok(bytes) = std::io::stdin().read_line(&mut linebuf) {
+diff --git a/src/searchinfo.rs b/src/searchinfo.rs
+index 0c9f430..cc606fb 100644
+--- a/src/searchinfo.rs
++++ b/src/searchinfo.rs
+@@ -149,6 +149,11 @@ impl<'a> SearchInfo<'a> {
+         if already_stopped {
+             return true;
+         }
++        #[cfg(target_arch = "wasm32")]
++        if crate::uci::wasm_stop_requested() {
++            self.stopped.store(true, Ordering::SeqCst);
++            return true;
++        }
+         let res = self.clock.check_up(self.stopped, self.nodes.get_global());
+         if let Some(Ok(cmd)) = self.stdin_rx.map(|m| m.lock().unwrap().try_recv()) {
+             let cmd = cmd.trim();
