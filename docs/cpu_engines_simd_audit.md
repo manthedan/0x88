@@ -6,6 +6,10 @@ the same audit lens — does SIMD actually engage, are the kernels staying in
 vector registers, and is the relaxed integer dot provably applicable — to the
 other CPU engines.
 
+The Viridithas numbers in this file are that date's pre-release pin
+(`20d74020`, atlantis). The v20.0.0 tag remeasure is in
+[`viridithas_v20_upgrade.md`](./viridithas_v20_upgrade.md).
+
 ## Summary table
 
 | Engine | Before | Finding | After (Node, exact parity) |

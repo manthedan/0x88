@@ -1,0 +1,259 @@
+{
+  "date": "2026-10-10",
+  "decision": "no-go: broader native-bench parity fails in both SIMD tiers; production pin unchanged",
+  "oldRef": "0010617448bdef4c8cd7d4f4825b7e42c8bc262a",
+  "candidateRef": "31d9cd6fd2bea6d9f72eeb35e0bac70daa295fb1",
+  "rust": "1.95.0",
+  "licenseSha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+  "nnueSha256": "7f587dfb1fe5d74d53909328afa6fd51650c8c7f45907602db7fbb1e52948c61",
+  "nnueBytes": 63266880,
+  "simdOpcodeCounts": {
+    "wasiScalar": 0,
+    "wasiSimd": 1833,
+    "wasiRelaxed": 1782,
+    "wasiExternal": 1833,
+    "apiScalar": 0,
+    "apiSimd": 1621,
+    "apiExternal": 1621
+  },
+  "rotatedSuite": {
+    "macNode": {
+      "pairs": 700,
+      "exact": 700
+    },
+    "browser": {
+      "pairs": 840,
+      "exact": 840
+    },
+    "yukonNode": {
+      "pairs": 120,
+      "exact": 120
+    }
+  },
+  "fullBench": {
+    "native": 2801205,
+    "wasiScalar": 2801205,
+    "wasiSimd": 2646409,
+    "wasiRelaxed": 2646409,
+    "relaxedFloatMaddDiagnosticProbe": 2801205
+  },
+  "strength": {
+    "tc": "8+0.08",
+    "threads": 1,
+    "hashMb": 16,
+    "concurrency": 3,
+    "cores": "9-11",
+    "book": "UHO_Lichess_4852_v1.epd",
+    "seed": 31092026,
+    "ratedPairedGames": 600,
+    "elo": 1.16,
+    "elo95HalfWidth": 13.63,
+    "losPct": 56.62,
+    "wins": 149,
+    "losses": 147,
+    "draws": 304,
+    "pentanomial": [3, 61, 168, 67, 1],
+    "candidateTimeouts": 2,
+    "candidateCrashes": 0,
+    "pgnRecords": 601,
+    "extraUnpairedRecords": 1
+  },
+  "browser": {
+    "speed": {
+      "scalar": {
+        "old": {
+          "medianNps": 186049,
+          "repeatMedians": [186049, 191972, 168749.5],
+          "wallMedian": 191.80750006437302,
+          "rows": 60
+        },
+        "new": {
+          "medianNps": 163176.5,
+          "repeatMedians": [163955, 172930.5, 154850.5],
+          "wallMedian": 174.15499991178513,
+          "rows": 60
+        },
+        "changePct": -12.293804320367219
+      },
+      "simd": {
+        "old": {
+          "medianNps": 541563.5,
+          "repeatMedians": [545271.5, 550343.5, 538302.5],
+          "wallMedian": 60.7224999666214,
+          "rows": 60
+        },
+        "new": {
+          "medianNps": 534888.5,
+          "repeatMedians": [540740, 530616, 534095],
+          "wallMedian": 56.222500026226044,
+          "rows": 60
+        },
+        "changePct": -1.2325424442378385
+      },
+      "relaxed": {
+        "old": {
+          "medianNps": 533809.5,
+          "repeatMedians": [576213, 510747.5, 522596.5],
+          "wallMedian": 62.54249995946884,
+          "rows": 60
+        },
+        "new": {
+          "medianNps": 533294.5,
+          "repeatMedians": [563068, 516106.5, 509752],
+          "wallMedian": 55.11500000953674,
+          "rows": 60
+        },
+        "changePct": -0.09647636469564125
+      }
+    },
+    "parity": {
+      "scalar": {
+        "pairs": 120,
+        "exact": 120,
+        "mismatches": []
+      },
+      "simd": {
+        "pairs": 120,
+        "exact": 120,
+        "mismatches": []
+      },
+      "relaxed": {
+        "pairs": 120,
+        "exact": 120,
+        "mismatches": []
+      },
+      "api-scalar": {
+        "pairs": 120,
+        "exact": 120,
+        "mismatches": []
+      },
+      "api-simd": {
+        "pairs": 120,
+        "exact": 120,
+        "mismatches": []
+      },
+      "external": {
+        "pairs": 120,
+        "exact": 120,
+        "mismatches": []
+      },
+      "api-external": {
+        "pairs": 120,
+        "exact": 120,
+        "mismatches": []
+      }
+    },
+    "startup": {
+      "scalar/old": {
+        "median": 148.81499993801117,
+        "min": 73.3199999332428,
+        "max": 430.4850000143051,
+        "samples": [430.4850000143051, 148.81499993801117, 73.3199999332428]
+      },
+      "scalar/new": {
+        "median": 117.81499993801116,
+        "min": 59.22000002861023,
+        "max": 176.68999993801117,
+        "samples": [117.81499993801116, 176.68999993801117, 59.22000002861023]
+      },
+      "simd/old": {
+        "median": 147.70000004768372,
+        "min": 61.269999980926514,
+        "max": 154.93500006198883,
+        "samples": [154.93500006198883, 147.70000004768372, 61.269999980926514]
+      },
+      "simd/new": {
+        "median": 144,
+        "min": 59.2299998998642,
+        "max": 173.27999997138977,
+        "samples": [173.27999997138977, 144, 59.2299998998642]
+      },
+      "relaxed/old": {
+        "median": 123.36499989032744,
+        "min": 60.4099999666214,
+        "max": 174.5199999809265,
+        "samples": [123.36499989032744, 174.5199999809265, 60.4099999666214]
+      },
+      "relaxed/new": {
+        "median": 147.5549999475479,
+        "min": 64.04499995708466,
+        "max": 150.61000001430511,
+        "samples": [147.5549999475479, 150.61000001430511, 64.04499995708466]
+      }
+    }
+  },
+  "x86Node": {
+    "scalar": {
+      "oldMedianNps": 124794,
+      "newMedianNps": 115977,
+      "changePct": -7.065243521323139,
+      "oldRepeatMedians": [125792, 122335, 126478.5],
+      "newRepeatMedians": [116144, 114384, 116729.5]
+    },
+    "simd": {
+      "oldMedianNps": 529978.5,
+      "newMedianNps": 529334.5,
+      "changePct": -0.12151436331850896,
+      "oldRepeatMedians": [533666.5, 515956.5, 538128],
+      "newRepeatMedians": [535302, 514605, 537500]
+    },
+    "relaxed": {
+      "oldMedianNps": 552660,
+      "newMedianNps": 566378.5,
+      "changePct": 2.4822675786197568,
+      "oldRepeatMedians": [562358, 545200, 562047],
+      "newRepeatMedians": [567916, 558588, 580135.5]
+    }
+  },
+  "sizes": {
+    "scalar": {
+      "old": {
+        "raw": 64577670,
+        "brotliQ4": 43032565
+      },
+      "new": {
+        "raw": 64557776,
+        "brotliQ4": 43018885
+      }
+    },
+    "simd": {
+      "old": {
+        "raw": 64579221,
+        "brotliQ4": 43036404
+      },
+      "new": {
+        "raw": 64556310,
+        "brotliQ4": 43023340
+      }
+    },
+    "relaxed": {
+      "old": {
+        "raw": 64578859,
+        "brotliQ4": 43037133
+      },
+      "new": {
+        "raw": 64555953,
+        "brotliQ4": 43025260
+      }
+    }
+  },
+  "sourceRoundtrip": {
+    "variant": "api-simd128-external",
+    "offline": true,
+    "byteIdentical": true,
+    "bytes": 1240948
+  },
+  "mac": {
+    "cpu": "Apple M4",
+    "architecture": "arm64",
+    "browser": "Headless Chromium 149.0.0.0",
+    "crossOriginIsolated": true
+  },
+  "baselineFullBench": {
+    "upstreamAndYukonNative": 3634130,
+    "wasiScalar": 3652376,
+    "wasiSimd": 3744067,
+    "wasiRelaxed": 3744067,
+    "note": "Inherited compatibility gap also detected; old native Mac not sampled."
+  }
+}

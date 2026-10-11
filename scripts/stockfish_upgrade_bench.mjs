@@ -1,0 +1,188 @@
+#!/usr/bin/env node
+// Run Mac timings under benchlock; on Yukon taskset the entire process to 0-2.
+// Cells: {label, command, args, parityGroup?}. The first cell in each group is
+// its native SAME-SOURCE/SAME-NET reference, never the old-release speed cell.
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ROTATED_FEN_SUITE, exactSearch, parseInfo, roundOrder } from './emscripten_uci_protocol.mjs';
+
+export function benchSignature(lines) {
+  const matches = lines.join('\n').matchAll(/Nodes searched\s*:\s*(\d+)/g);
+  return [...matches].at(-1)?.[1] ?? null;
+}
+
+export function benchDefaults(source) {
+  const block = source.match(/const std::vector<std::string> Defaults = \{([\s\S]*?)\n\};/)?.[1];
+  if (!block) throw new Error('Upstream bench Defaults changed');
+  const entries = [...block.matchAll(/^\s*"([^"]+)"/gm)].map((m) => m[1]);
+  if (entries.filter((s) => !s.startsWith('setoption ')).length !== 51) throw new Error('Unexpected SF19 bench position count');
+  return entries;
+}
+
+export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults } = {}) {
+  const started = performance.now();
+  const child = spawn(cell.command, cell.args || [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const lines = [];
+  let failure;
+  let cursor = 0;
+  const pending = new Set();
+  let exited = false;
+  const fail = (err) => {
+    failure = err;
+    for (const notify of pending) notify();
+  };
+  child.on('error', fail);
+  child.on('exit', (code, signal) => {
+    exited = true;
+    fail(new Error(`${cell.label} exited (${code}, ${signal}): ${lines.slice(-8).join('\n')}`));
+  });
+  for (const stream of [child.stdout, child.stderr]) {
+    let buffer = '';
+    stream.setEncoding('utf8');
+    stream.on('data', (chunk) => {
+      buffer += chunk;
+      const parts = buffer.split(/\r?\n/);
+      buffer = parts.pop();
+      lines.push(...parts);
+      for (const notify of pending) notify();
+    });
+  }
+  const command = (text) => child.stdin.write(`${text}\n`);
+  const wait = (predicate) => new Promise((accept, reject) => {
+    const timer = setTimeout(() => { pending.delete(check); reject(new Error(`${cell.label} timed out: ${lines.slice(-8).join('\n')}`)); }, timeout);
+    const check = () => {
+      for (; cursor < lines.length; cursor += 1) {
+        if (predicate(lines[cursor])) {
+          const line = lines[cursor++];
+          clearTimeout(timer);
+          pending.delete(check);
+          accept(line);
+          return;
+        }
+      }
+      if (failure) { clearTimeout(timer); pending.delete(check); reject(failure); }
+    };
+    pending.add(check);
+    check();
+  });
+  try {
+    command('uci');
+    await wait((l) => l === 'uciok');
+    command(`setoption name Threads value ${threads}`);
+    command('setoption name Hash value 16');
+    command('isready');
+    await wait((l) => l === 'readyok');
+    const startupMs = performance.now() - started;
+    let nativeSignature;
+    if (cell.nativeBench) {
+      const benchStart = lines.length;
+      command(`bench 16 1 ${benchDepth} default depth`);
+      await wait((l) => /Nodes searched\s*:/.test(l));
+      command('isready');
+      await wait((l) => l === 'readyok');
+      nativeSignature = benchSignature(lines.slice(benchStart));
+    }
+    // Stockfish.js compiles bench out. Replay setup_bench's exact command
+    // sequence, with ONE reset before the suite (not one reset per position).
+    command('setoption name Threads value 1');
+    command('setoption name Hash value 16');
+    command('ucinewgame');
+    command('isready');
+    await wait((l) => l === 'readyok');
+    let benchNodes = 0;
+    const benchRows = [];
+    for (const entry of defaults) {
+      if (entry.startsWith('setoption ')) { command(entry); continue; }
+      const from = lines.length;
+      command(`position fen ${entry}`);
+      command(`go depth ${benchDepth}`);
+      const best = await wait((l) => l.startsWith('bestmove '));
+      const infos = lines.slice(from).filter((l) => l.startsWith('info ') && /\bnodes \d+/.test(l));
+      const nodes = infos.length ? parseInfo(infos.at(-1)).nodes : 0;
+      if (!infos.length && !/bestmove (?:0000|\(none\))/.test(best)) throw Error(`Missing bench nodes: ${entry}`);
+      benchNodes += nodes;
+      benchRows.push({ fen: entry, nodes });
+    }
+    const signature = String(benchNodes);
+    if (!benchNodes || (cell.nativeBench && nativeSignature !== signature)) throw Error(`Bench replay mismatch: native=${nativeSignature}, replay=${signature}`);
+    command(`setoption name Threads value ${threads}`);
+    const rows = [];
+    // Rotate each round's positions without changing the reference suite.
+    const suite = ROTATED_FEN_SUITE.slice(0, positions);
+    const offset = (cell.round || 0) % suite.length;
+    for (const [label, fen] of [...suite.slice(offset), ...suite.slice(0, offset)]) {
+      command('ucinewgame');
+      command('isready');
+      await wait((l) => l === 'readyok');
+      const infoStart = lines.length;
+      command(`position fen ${fen}`);
+      const t = performance.now();
+      command(`go depth ${depth}`);
+      const best = await wait((l) => l.startsWith('bestmove '));
+      const wallMs = performance.now() - t;
+      const info = lines.slice(infoStart).filter((l) => l.startsWith('info ') && l.includes(' pv ')).at(-1);
+      if (!info) throw new Error(`${label}: missing search info`);
+      rows.push({ position: label, depth, bestmove: best.split(/\s+/)[1], ...parseInfo(info), wallMs });
+    }
+    return { ...cell, startupMs, benchDepth, benchSignature: signature, nativeSignature, benchRows, depth, threads, hash: 16, rows,
+      wallNps: rows.reduce((n, r) => n + r.nodes, 0) * 1000 / rows.reduce((n, r) => n + r.wallMs, 0) };
+  } finally {
+    if (!exited) {
+      child.stdin.end('quit\n');
+      const timer = setTimeout(() => child.kill('SIGKILL'), 2000);
+      await new Promise((done) => child.once('exit', done));
+      clearTimeout(timer);
+    }
+  }
+}
+
+export function parityReport(cells) {
+  const result = [];
+  for (const group of [...new Set(cells.map((c) => c.parityGroup).filter(Boolean))]) {
+    const subset = cells.filter((c) => c.parityGroup === group);
+    const ref = subset[0];
+    for (const cell of subset.slice(1)) {
+      const mismatches = cell.rows.filter((row) => {
+        const baseline = ref.rows.find((r) => r.position === row.position && r.depth === row.depth);
+        return !baseline || !exactSearch(baseline, row);
+      });
+      result.push({ group, reference: ref.label, candidate: cell.label, round: cell.round,
+        benchMatch: ref.benchSignature === cell.benchSignature, pairs: cell.rows.length,
+        exact: cell.rows.length - mismatches.length, mismatches });
+    }
+  }
+  return result;
+}
+
+async function main() {
+  const args = new Map();
+  for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i].replace(/^--/, ''), process.argv[i + 1]);
+  const config = JSON.parse(readFileSync(args.get('config'), 'utf8'));
+  const rounds = Number(args.get('rounds') || 3);
+  const defaults = benchDefaults(readFileSync(args.get('bench-source') || '.local_engines/stockfish-js-19-src/src/benchmark.cpp', 'utf8'));
+  const options = { depth: Number(args.get('depth') || 9), benchDepth: Number(args.get('bench-depth') || 8),
+    positions: Number(args.get('positions') || 20), threads: Number(args.get('threads') || 1) };
+  for (const [key, n] of Object.entries({ rounds, ...options })) {
+    if (!Number.isInteger(n) || n < 1 || (key === 'positions' && n > ROTATED_FEN_SUITE.length)) throw Error(`Invalid ${key}`);
+  }
+  const report = { runtime: process.version, platform: process.platform, arch: process.arch, options, rounds, cells: [], parity: [] };
+  for (const cell of config) {
+    if (cell.wasm) cell.wasmSha256 = createHash('sha256').update(readFileSync(cell.wasm)).digest('hex');
+  }
+  for (let round = 0; round < rounds; round += 1) {
+    for (const cell of roundOrder(config, round)) {
+      const measured = await runCell({ ...cell, round }, { ...options, defaults });
+      report.cells.push(measured);
+      console.log(`${round} ${cell.label}: bench=${measured.benchSignature}, NPS=${Math.round(measured.wallNps)}, startup=${Math.round(measured.startupMs)}ms`);
+      writeFileSync(args.get('json'), `${JSON.stringify(report, null, 2)}\n`);
+    }
+  }
+  report.parity = parityReport(report.cells);
+  writeFileSync(args.get('json'), `${JSON.stringify(report, null, 2)}\n`);
+  if (report.parity.some((p) => !p.benchMatch || p.exact !== p.pairs)) process.exitCode = 1;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

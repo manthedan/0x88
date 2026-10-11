@@ -126,7 +126,7 @@ best move, score, node count, and PV across the sampled positions.
 | Engine | Browser relaxed-SIMD result on Apple M4 / Chromium | Parity gate |
 | --- | ---: | --- |
 | Reckless | `+24%` NPS vs old kernels | `60/60` exact fixed-depth parity |
-| Viridithas | `+14%` NPS over standard SIMD | `40/40` exact fixed-depth parity |
+| Viridithas | `+16%` NPS over standard SIMD on the v20.0.0 tag (persistent startpos, movetime 1000 ms; see `viridithas_v20_upgrade.md`). The 2026-06-09 depth-10 figure was `+14%`. | `40/40` exact fixed-depth parity |
 | Berserk | `1.50M` NPS vs `1.38M` SIMD (`+8%`) | `40/40` exact fixed-depth parity |
 | PlentyChess | `992k` NPS vs `603k` default (`+64%`) | `40/40` exact fixed-depth parity |
 | Stockfish | not measured; current package is upstream Stockfish.js rather than a local relaxed-SIMD build | N/A |

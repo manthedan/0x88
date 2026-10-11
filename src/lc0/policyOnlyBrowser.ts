@@ -28,6 +28,7 @@ import { workerFallbackReplayAbort } from './ortWorkerFallback.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { Lc0PuctSearcher, type Lc0SearchChild, type Lc0SearchOptions, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine } from './stockfishEngine.ts';
+import { roundedBackendTimingRecord, roundedNumericRecord } from './timingReport.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 type NativePrior = { uci: string; index: number; prior: number };
@@ -1694,14 +1695,6 @@ function sampleTimingStats(samples: number[], source: string): Record<string, un
   };
 }
 
-function roundedNumericRecord(value: unknown, digits = 4): Record<string, number> | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
-    .map(([key, numberValue]) => [key, Number(numberValue.toFixed(digits))] as const);
-  return entries.length ? Object.fromEntries(entries) : undefined;
-}
-
 function evaluationExecutionFootprint(evaluation: Lc0Evaluation | undefined): ExecutionFootprint | undefined {
   return (evaluation as (Lc0Evaluation & { executionFootprint?: ExecutionFootprint }) | undefined)?.executionFootprint;
 }
@@ -3125,7 +3118,7 @@ async function runWorkerEvalBenchmark(): Promise<void> {
       bestMove: last?.move,
       q: last?.evaluation.q,
       mlh: last?.evaluation.mlh,
-      lastBackendTiming: roundedNumericRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
+      lastBackendTiming: roundedBackendTimingRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
       executionFootprint: evaluationExecutionFootprint(last?.evaluation),
       executionFootprintMB: executionFootprintMB(evaluationExecutionFootprint(last?.evaluation)),
       phaseTimingStats: summarizeNumericTimingSamples(backendTimingSamples, 'onnx worker eval backend timing'),
@@ -3318,7 +3311,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
         iterations: evalIterations,
         timingStats: sampleTimingStats(evalTimes, 'hybrid warm eval round trips'),
         phaseTimingStats: summarizeNumericTimingSamples(evalTimingSamples, 'hybrid warm eval backend timing'),
-        lastBackendTiming: roundedNumericRecord((lastEval?.evaluation as { timing?: unknown } | undefined)?.timing),
+        lastBackendTiming: roundedBackendTimingRecord((lastEval?.evaluation as { timing?: unknown } | undefined)?.timing),
         timesMs: evalTimes.map((time) => roundReportMs(time)),
         bestMove: lastEval?.move,
         q: lastEval?.evaluation.q === undefined ? undefined : Number(lastEval.evaluation.q.toFixed(8)),
@@ -3330,7 +3323,7 @@ async function runHybridSearchBenchmark(): Promise<void> {
         batchSize: searchBatchSize,
         timingStats: sampleTimingStats(batchEvalTimes, 'hybrid physical batch eval round trips'),
         phaseTimingStats: summarizeNumericTimingSamples(batchEvalTimingSamples, 'hybrid physical batch eval backend timing'),
-        lastBackendTiming: roundedNumericRecord(lastBatchEvalTiming),
+        lastBackendTiming: roundedBackendTimingRecord(lastBatchEvalTiming),
         timesMs: batchEvalTimes.map((time) => roundReportMs(time)),
         bestMoves: lastBatchEval?.map((entry) => entry.move),
         allBestMovesMatch: lastBatchEval ? lastBatchEval.every((entry) => entry.move === lastBatchEval?.[0]?.move) : undefined,
@@ -3887,7 +3880,7 @@ async function runHybridInputBenchmark(): Promise<void> {
           id: fixture.id,
           kind: fixture.kind,
           timingStats: sampleTimingStats(fixtureTimes, `${backend} ${fixture.id} input eval round trips`),
-          lastBackendTiming: roundedNumericRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
+          lastBackendTiming: roundedBackendTimingRecord((last?.evaluation as { timing?: unknown } | undefined)?.timing),
           bestMove: last?.move,
           bestMoveMatchesJs: backend === 'js' ? true : baselineBestMoves.has(fixture.id) ? last?.move === baselineBestMoves.get(fixture.id) : undefined,
         });

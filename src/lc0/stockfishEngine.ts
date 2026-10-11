@@ -4,7 +4,7 @@ import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
 
 /**
  * Stockfish "lite" opponent for the engine battle. Drives the single-threaded
- * stockfish-18-lite WASM build (served from /stockfish/) over its UCI worker
+ * stockfish-19-lite WASM build (served from /stockfish/) over its UCI worker
  * protocol and exposes a move provider compatible with engineBattle.
  *
  * Strength is deliberately tunable (depth / Skill Level) so the small LC0 net
@@ -31,8 +31,8 @@ export interface StockfishOptions {
  * roughly depth 12 — the analysis surface routinely searches deeper than
  * that. 64 MB is the conservative step up: every Stockfish artifact we ship
  * is built with INITIAL_MEMORY=128 MB and MAXIMUM_MEMORY=2 GB, so a 64 MB
- * table fits inside the heap the module already reserves at startup and
- * never forces a heap growth just for the TT. It also stays small enough
+ * table is a modest default. The full embedded network plus TT can require
+ * heap growth; the lite network leaves more startup headroom. It stays small enough
  * that arena runs, which can keep several engine workers alive at once,
  * do not multiply into a mobile-browser OOM.
  */
@@ -41,15 +41,15 @@ export const DEFAULT_STOCKFISH_HASH_MB = 64;
 export type StockfishFlavor = 'lite-single' | 'single' | 'lite-threaded' | 'threaded';
 
 export const DEFAULT_STOCKFISH_FLAVOR: StockfishFlavor = 'lite-single';
-export const STOCKFISH_LITE_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single.js');
-export const STOCKFISH_LITE_SINGLE_RELAXED_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-lite-single-relaxed.js');
+export const STOCKFISH_LITE_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-19-lite-single.js');
+export const STOCKFISH_LITE_SINGLE_RELAXED_URL = resolvePublicAssetUrl('/stockfish/stockfish-19-lite-single-relaxed.js');
 // The production app shell intentionally omits this large pair: v0 resolves both
 // the JS and its sibling WASM to the configured R2 asset origin.
-export const STOCKFISH_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-18-single.js');
+export const STOCKFISH_SINGLE_URL = resolvePublicAssetUrl('/stockfish/stockfish-19-single.js');
 // Threaded builds must retain a same-origin worker location so their pthreads
 // resolve back to the native Stockfish script instead of our cross-origin bootstrap.
-export const STOCKFISH_LITE_THREADED_URL = '/stockfish/stockfish-18-lite.js';
-export const STOCKFISH_THREADED_URL = '/stockfish/stockfish-18.js';
+export const STOCKFISH_LITE_THREADED_URL = '/stockfish/stockfish-19-lite.js';
+export const STOCKFISH_THREADED_URL = '/stockfish/stockfish-19.js';
 
 export function defaultStockfishUrl(): string {
   return supportsWasmRelaxedSimd() ? STOCKFISH_LITE_SINGLE_RELAXED_URL : STOCKFISH_LITE_SINGLE_URL;
@@ -113,7 +113,7 @@ function stockfishWasmUrl(jsUrl: string): string {
 function isStockfishPthreadScriptUrl(jsUrl: string): boolean {
   try {
     const pathname = new URL(jsUrl, typeof location === 'undefined' ? 'http://localhost/' : location.href).pathname;
-    return /\/stockfish-18(?:-lite)?\.js$/.test(pathname);
+    return /\/stockfish-(?:18|19)(?:-lite)?\.js$/.test(pathname);
   } catch {
     return false;
   }
@@ -172,6 +172,9 @@ function hashCommand(hashMb: number): string {
 export interface StockfishInfoLine extends BrowserUciInfoLine {}
 
 const STOCKFISH_ABORT_DRAIN_TIMEOUT_MS = 1500;
+// SF19's async instantiateWasm hook can reject without a worker error event.
+// Bound both UCI handshakes, allowing time to download the large full network.
+export const STOCKFISH_INIT_TIMEOUT_MS = 120_000;
 
 /** Parse a UCI `info ... multipv K ... score ... pv ...` line, or null if it lacks a PV. */
 export function parseStockfishInfo(line: string): StockfishInfoLine | null {
@@ -222,6 +225,7 @@ export class StockfishEngine implements BrowserUciEngine {
   private options: StockfishOptions;
   private readonly url: string;
   private workerObjectUrl: string | null = null;
+  private initTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: StockfishOptions = {}, url: string = defaultStockfishUrl()) {
     this.options = options;
@@ -268,7 +272,13 @@ export class StockfishEngine implements BrowserUciEngine {
     this.workerObjectUrl = null;
   }
 
+  private clearInitTimer(): void {
+    if (this.initTimer !== null) clearTimeout(this.initTimer);
+    this.initTimer = null;
+  }
+
   private failActive(error: Error): void {
+    this.clearInitTimer();
     const rejectMove = this.rejectMove;
     const rejectAnalyze = this.rejectAnalyze;
     const rejectReady = this.rejectReady;
@@ -297,6 +307,9 @@ export class StockfishEngine implements BrowserUciEngine {
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise<void>((resolve, reject) => {
       this.rejectInit = reject;
+      this.initTimer = setTimeout(() => {
+        this.failActive(new Error('Stockfish initialization timed out'));
+      }, STOCKFISH_INIT_TIMEOUT_MS);
       try {
         const workerUrl = stockfishWorkerUrl(this.url);
         this.workerObjectUrl = workerUrl.objectUrl ?? null;
@@ -324,6 +337,7 @@ export class StockfishEngine implements BrowserUciEngine {
               resolveReady();
               return;
             }
+            this.clearInitTimer();
             this.rejectInit = null;
             resolve();
             return;
@@ -366,10 +380,14 @@ export class StockfishEngine implements BrowserUciEngine {
         };
         worker.postMessage('uci');
       } catch (error) {
-        this.rejectInit = null;
-        this.revokeWorkerObjectUrl();
+        this.failActive(error as Error);
         reject(error as Error);
       }
+    }).catch((error) => {
+      // A synchronous constructor failure occurs before readyPromise is assigned.
+      // Clear its rejected cache here as well, so the next request can retry.
+      this.readyPromise = null;
+      throw error;
     });
     return this.readyPromise;
   }
@@ -430,7 +448,7 @@ export class StockfishEngine implements BrowserUciEngine {
   }
 
   maxThreads(): number {
-    if (!/stockfish-18(?:-lite)?(?:-relaxed)?\.js(?:[?#].*)?$/.test(this.url)) return 1;
+    if (!/stockfish-(?:18|19)(?:-lite)?(?:-relaxed)?\.js(?:[?#].*)?$/.test(this.url)) return 1;
     if (typeof location === 'undefined') return /^[/.]/.test(this.url) ? 32 : 1;
     return sameOriginUrl(this.url) || isTrustedExecutableAssetUrl(this.url) ? 32 : 1;
   }

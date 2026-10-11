@@ -1,13 +1,14 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-06-25T06:31:29.593Z",
+  "generatedAt": "2026-10-10T23:11:21.367Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "viridithas",
   "flavor": "wasip1-scalar-simd128",
   "status": "experimental",
   "upstream": {
     "repo": "https://github.com/cosmobobak/viridithas.git",
-    "commit": "20d7402065cae084715183e019fdd18089e2dfac",
+    "commit": "0631113e2215714c54d397cce9a8caebc5e6f8ee",
+    "version": "v20.0.0",
     "license": "MIT"
   },
   "build": {
@@ -21,74 +22,74 @@
   "artifacts": [
     {
       "path": "public/viridithas/viridithas.wasm",
-      "bytes": 57442854,
-      "sha256": "792a18d743ce8dda2369549096ae065d38d2908aec270ce39398b675872529db",
+      "bytes": 55763309,
+      "sha256": "97ec4f9151815b38518ae788014ebadc7da2f842f4624b10b0e8132f87eb224a",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 54514620,
-          "ratio": 0.949
+          "bytes": 52829451,
+          "ratio": 0.9474
         },
         "brotli": {
-          "bytes": 54404372,
-          "ratio": 0.9471
+          "bytes": 52722486,
+          "ratio": 0.9455
         }
       }
     },
     {
       "path": "public/viridithas/viridithas-simd128.wasm",
-      "bytes": 57419901,
-      "sha256": "50259f73d2cb49edf9e274217a416fb3cb9b87222efab99145e7d6a7b6594acf",
+      "bytes": 55739644,
+      "sha256": "30ee4af89a3df0284fc4b606e1e15746414e4645646792a737dcea80543ad9b2",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 54506501,
-          "ratio": 0.9493
+          "bytes": 52822027,
+          "ratio": 0.9477
         },
         "brotli": {
-          "bytes": 54400824,
-          "ratio": 0.9474
+          "bytes": 52718628,
+          "ratio": 0.9458
         }
       }
     },
     {
       "path": "public/viridithas/viridithas-relaxed-simd128.wasm",
-      "bytes": 57419372,
-      "sha256": "2a02492fa153cb5aec60c1abe43b4d05bc15ae0536f5c7832f9ff1cae84755a3",
+      "bytes": 55739115,
+      "sha256": "67eae32ef8c7afb24fd6f7b04bc73fe56c6b64ffef503ee0de3e8032c0279079",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 54506346,
-          "ratio": 0.9493
+          "bytes": 52821895,
+          "ratio": 0.9477
         },
         "brotli": {
-          "bytes": 54400250,
-          "ratio": 0.9474
+          "bytes": 52718504,
+          "ratio": 0.9458
         }
       }
     }
   ],
   "assets": [
     {
-      "name": "atlantis-b800.nnue.zst",
-      "sourceUrl": "https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst",
-      "rawSha256": "2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a",
-      "licenseNote": "Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.",
+      "name": "sandhi-s2-b200.nnue.zst",
+      "sourceUrl": "https://github.com/cosmobobak/viridithas-networks/releases/download/v109/sandhi-s2-b200.nnue.zst",
+      "rawSha256": "066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585",
+      "licenseNote": "sandhi-s2-b200.nnue.zst is CC0-1.0 (cosmobobak/viridithas-networks LICENSE at 1040c3ee, 2026-06-08, before the v109 release). The engine source is MIT.",
       "embeddedIn": "public/viridithas/viridithas.wasm, public/viridithas/viridithas-simd128.wasm, and public/viridithas/viridithas-relaxed-simd128.wasm"
     }
   ],
   "totals": {
-    "bytes": 172282127,
-    "gzipBytes": 163527467,
-    "brotliBytes": 163205446,
-    "gzipRatio": 0.9492,
-    "brotliRatio": 0.9473
+    "bytes": 167242068,
+    "gzipBytes": 158473373,
+    "brotliBytes": 158159618,
+    "gzipRatio": 0.9476,
+    "brotliRatio": 0.9457
   },
   "sourceArchive": {
     "required": true,
     "path": "public/viridithas/viridithas-wasip1-corresponding-source.tar.gz",
-    "bytes": 62096377,
-    "sha256": "f7218c099882ec37047aa5a161182492d3b8151db11315257a55345065346c41",
+    "bytes": 60442439,
+    "sha256": "d7eeae4a84e13fb2b30494adccc3bcc407d1ae616fa2f87be727ba52122288b2",
     "url": "/viridithas/viridithas-wasip1-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

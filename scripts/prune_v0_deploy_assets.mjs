@@ -39,13 +39,13 @@ removeMatchingFiles(
   join(root, 'stockfish'),
   (name) =>
     ![
-      'stockfish-18-lite.js',
-      'stockfish-18-lite.wasm',
-      'stockfish-18-lite-single.js',
-      'stockfish-18-lite-single.wasm',
-      'stockfish-18-lite-single-relaxed.js',
-      'stockfish-18-lite-single-relaxed.wasm',
-      'stockfish-18.js',
+      'stockfish-19-lite.js',
+      'stockfish-19-lite.wasm',
+      'stockfish-19-lite-single.js',
+      'stockfish-19-lite-single.wasm',
+      'stockfish-19-lite-single-relaxed.js',
+      'stockfish-19-lite-single-relaxed.wasm',
+      'stockfish-19.js',
     ].includes(name),
 );
 

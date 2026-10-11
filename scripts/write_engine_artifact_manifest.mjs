@@ -5,6 +5,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, relative } from 'node:path';
 import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 
+import { STOCKFISH_RELEASE, stockfishArtifactBases } from './stockfish_release_config.mjs';
+
 const ROOT = process.cwd();
 
 const CONFIGS = {
@@ -167,7 +169,8 @@ const CONFIGS = {
     status: 'experimental',
     upstream: {
       repo: 'https://github.com/cosmobobak/viridithas.git',
-      commit: '20d7402065cae084715183e019fdd18089e2dfac',
+      commit: '0631113e2215714c54d397cce9a8caebc5e6f8ee',
+      version: 'v20.0.0',
       license: 'MIT',
     },
     build: {
@@ -179,47 +182,41 @@ const CONFIGS = {
     artifacts: ['public/viridithas/viridithas.wasm', 'public/viridithas/viridithas-simd128.wasm', 'public/viridithas/viridithas-relaxed-simd128.wasm'],
     assets: [
       {
-        name: 'atlantis-b800.nnue.zst',
-        sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst',
-        rawSha256: '2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a',
-        licenseNote: 'Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.',
+        name: 'sandhi-s2-b200.nnue.zst',
+        sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v109/sandhi-s2-b200.nnue.zst',
+        rawSha256: '066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585',
+        licenseNote: 'sandhi-s2-b200.nnue.zst is CC0-1.0 (cosmobobak/viridithas-networks LICENSE at 1040c3ee, 2026-06-08, before the v109 release). The engine source is MIT.',
         embeddedIn: 'public/viridithas/viridithas.wasm, public/viridithas/viridithas-simd128.wasm, and public/viridithas/viridithas-relaxed-simd128.wasm',
       },
     ],
   },
   stockfish: {
     engine: 'stockfish',
-    flavor: 'stockfish-js-18.0.7',
+    flavor: `stockfish-js-${STOCKFISH_RELEASE.version}`,
     status: 'release',
     upstream: {
-      repo: 'https://github.com/nmrugg/stockfish.js.git',
-      commit: '32d4b5ae40c01db88219bfbe2b82dbe6dec93832',
-      version: '18.0.7',
-      license: 'GPL-3.0',
+      repo: STOCKFISH_RELEASE.repo,
+      tag: STOCKFISH_RELEASE.tag,
+      commit: STOCKFISH_RELEASE.commit,
+      version: STOCKFISH_RELEASE.version,
+      license: STOCKFISH_RELEASE.license,
+      nativeTag: STOCKFISH_RELEASE.nativeTag,
+      nativeCommit: STOCKFISH_RELEASE.nativeCommit,
     },
     build: {
       script: 'upstream build.js; scripts/build_stockfish_relaxed_simd.mjs for relaxed SIMD artifacts',
-      command:
-        'cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f; npm run stockfish:build-relaxed-simd:lite-single',
+      command: 'npm ci && npm run stockfish:build-relaxed-simd:lite-single; baseline WASM pairs are staged from the pinned npm package',
       patches: [
         'scripts/build_stockfish_relaxed_simd.mjs applies the relaxed SIMD source/build edits from the corresponding source tarball; additional full/threaded relaxed variants remain buildable as unpromoted candidates',
       ],
-      toolchain:
-        'Emscripten 3.1.7 as required by Stockfish.js 18 upstream README for upstream artifacts; Emscripten 3.1.40 known-good for the promoted lite-single relaxed SIMD artifact. Lite-threaded/full-threaded relaxed candidates build with 3.1.40 and full-single relaxed builds with 6.0.1/linux-arm64, with 5.0.7 and current 6.x retained in the benchmark matrix before promotion.',
+      toolchain: `${STOCKFISH_RELEASE.toolchain}; SF19 upstream stack/pthread bootstrap; -O3 -flto=full -msimd128; relaxed candidate adds -mrelaxed-simd`,
+      defaultCompilerFlags: { baseline: '-O3 -flto=full', relaxed: '-O3 -flto=full -mrelaxed-simd' },
     },
-    artifacts: [
-      'public/stockfish/stockfish-18-lite-single.js',
-      'public/stockfish/stockfish-18-lite-single.wasm',
-      'public/stockfish/stockfish-18-lite-single-relaxed.js',
-      'public/stockfish/stockfish-18-lite-single-relaxed.wasm',
-      'public/stockfish/stockfish-18-lite.js',
-      'public/stockfish/stockfish-18-lite.wasm',
-      'public/stockfish/stockfish-18-single.js',
-      'public/stockfish/stockfish-18-single.wasm',
-      'public/stockfish/stockfish-18.js',
-      'public/stockfish/stockfish-18.wasm',
-    ],
-    assets: [],
+    artifacts: stockfishArtifactBases.flatMap((base) => ['js', 'wasm'].map((ext) => `public/stockfish/${base}.${ext}`)),
+    assets: STOCKFISH_RELEASE.nets.map((net) => ({ ...net,
+      sourceUrl: `https://tests.stockfishchess.org/api/nn/${net.name}`,
+      licenseNote: 'Required embedded GPL network, included in the corresponding-source archive.',
+    })),
   },
 };
 

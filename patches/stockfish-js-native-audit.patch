@@ -1,0 +1,7 @@
+diff --git a/src/main.cpp b/src/main.cpp
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -72,2 +72,2 @@
+-    uci.loop();
++    uci->loop();
+ #endif
