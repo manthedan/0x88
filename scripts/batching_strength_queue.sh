@@ -25,16 +25,22 @@ fi
 for match in "${matches[@]}"; do
   stall=0
   prev=""
-  restart=(--restart-browser)
+  # zsh reserves `status`. Resume a paused page when this match already has a chunk.
+  status_file="artifacts/batching-strength/$match/chunk-status.json"
+  if [[ -f "$status_file" ]]; then
+    restart=()
+  else
+    restart=(--restart-browser)
+  fi
   echo "MATCH_START $match $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   while true; do
     "$SP/benchlock" node --experimental-strip-types scripts/batching_strength_match.mjs --match "$match" --minutes 16 "${restart[@]}"
     code=$?
     restart=()
-    status="artifacts/batching-strength/$match/chunk-status.json"
-    if [[ -f "$status" ]]; then
-      line=$(node -e 'const fs=require("node:fs"); const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(`games=${s.gamesDone}/${s.gamesTarget} ply=${s.ply ?? "-"} phase=${s.phase} load=${s.loadavg ?? "-"}`);' "$status")
-      key=$(node -e 'const fs=require("node:fs"); const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(`${s.gamesDone} ${s.ply ?? "-"} ${s.phase}`);' "$status")
+    status_file="artifacts/batching-strength/$match/chunk-status.json"
+    if [[ -f "$status_file" ]]; then
+      line=$(node -e 'const fs=require("node:fs"); const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(`games=${s.gamesDone}/${s.gamesTarget} ply=${s.ply ?? "-"} phase=${s.phase} load=${s.loadavg ?? "-"}`);' "$status_file")
+      key=$(node -e 'const fs=require("node:fs"); const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(`${s.gamesDone} ${s.ply ?? "-"} ${s.phase}`);' "$status_file")
       echo "CHUNK match=$match exit=$code $line"
     else
       echo "CHUNK match=$match exit=$code status=missing"
