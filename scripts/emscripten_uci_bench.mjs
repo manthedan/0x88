@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ROTATED_FEN_SUITE, exactSearch, parseInfo } from './emscripten_uci_protocol.mjs';
+import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseInfo, parseUciSearch } from './emscripten_uci_protocol.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -58,13 +58,17 @@ async function loadModule(jsPath) {
   fs.copyFileSync(path.join(dir, `${base}.js`), path.join(tmp, `${base}.cjs`));
   fs.copyFileSync(path.join(dir, `${base}.wasm`), path.join(tmp, `${base}.wasm`));
   fs.copyFileSync(dataPath, path.join(tmp, `${base}.data`));
+  // SIMD glue may still request the canonical preload URL. Preserve both
+  // names, using the selected tier's bytes even when it has a private .data.
+  if (path.basename(canonicalData) !== `${base}.data`) fs.copyFileSync(dataPath, path.join(tmp, path.basename(canonicalData)));
   const factory = require(path.join(tmp, `${base}.cjs`));
   const stdout = [];
   let cursor = 0;
+  const collect = (line) => stdout.push(...String(line).split(/\r?\n/));
   const module = await factory({
     locateFile: (file) => path.join(tmp, file.replace(`${base}.js`, `${base}.cjs`)),
-    print: (line) => stdout.push(String(line)),
-    printErr: () => {},
+    print: collect,
+    printErr: collect,
   });
   const command = (text) => module.ccall('command', null, ['string'], [text]);
   const waitForLine = (predicate, label) => {
@@ -104,14 +108,23 @@ for (const jsPath of jsPaths) {
       const infoStart = engine.lineRange();
       engine.command(`position fen ${fen}`);
       engine.command(`go depth ${depth}`);
-      const bestLine = await engine.waitForLine((line) => line.startsWith('bestmove '), `${label} bestmove`);
-      const infos = engine.stdout.slice(infoStart).filter((line) => line.startsWith('info ') && line.includes(' pv '));
-      const info = infos.length ? parseInfo(infos[infos.length - 1]) : {};
-      rows.push({ artifact: jsPath, depth, position: label, bestmove: bestLine.split(/\s+/)[1] ?? null, ...info });
+      await engine.waitForLine((line) => /^bestmove(?:\s|$)/.test(line), `${label} bestmove`);
+      const info = parseUciSearch(engine.stdout.slice(infoStart), depth);
+      rows.push({ artifact: jsPath, position: label, ...info });
     }
   }
-  engine.command('quit');
-  fs.rmSync(engine.tmp, { recursive: true, force: true });
+  try {
+    engine.command('quit');
+    // Synchronous facades may emit completion records on quit. Validate the
+    // entire transcript from both output callbacks, not just search slices.
+    const completions = engine.stdout.filter((line) => /^bestmove(?:\s|$)/.test(line));
+    for (const line of completions) parseBestmove(line);
+    for (const line of engine.stdout) if (/^info\s/.test(line) && !/^info\s+string\b/.test(line)) parseInfo(line);
+    const expected = positions.length * depths.length;
+    if (completions.length !== expected) throw new Error(`Unexpected parity bestmove coverage: expected ${expected}, got ${completions.length}`);
+  } finally {
+    fs.rmSync(engine.tmp, { recursive: true, force: true });
+  }
 }
 
 function median(values) {

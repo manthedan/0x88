@@ -7,11 +7,20 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROTATED_FEN_SUITE, exactSearch, parseInfo, roundOrder } from './emscripten_uci_protocol.mjs';
+import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseInfo, parseUciSearch, roundOrder } from './emscripten_uci_protocol.mjs';
 
 export function benchSignature(lines) {
-  const matches = lines.join('\n').matchAll(/Nodes searched\s*:\s*(\d+)/g);
-  return [...matches].at(-1)?.[1] ?? null;
+  let nodes = null;
+  for (const summary of lines.filter((line) => /^\s*Nodes\s+searched\b/.test(line))) {
+    const match = summary.match(/^\s*Nodes searched\s*:\s*(\d+)\s*$/);
+    if (!match || !Number.isSafeInteger(Number(match[1])) || Number(match[1]) <= 0) {
+      throw new Error(`Invalid native bench node summary: ${summary}`);
+    }
+    const value = String(Number(match[1]));
+    if (nodes !== null && nodes !== value) throw new Error(`Conflicting native bench summaries: ${nodes} != ${value}`);
+    nodes = value;
+  }
+  return nodes;
 }
 
 export function benchDefaults(source) {
@@ -22,21 +31,88 @@ export function benchDefaults(source) {
   return entries;
 }
 
-export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults } = {}) {
+// Reviewed terminal boards in pinned Stockfish Defaults. New terminal corpus
+// entries need adapter review; a null bestmove alone is never terminal proof.
+const terminalBenchPositions = new Set([
+  '8/8/8/8/8/6k1/6p1/6K1 w - -',
+  '7k/7P/6K1/8/3B4/8/8/8 b - -',
+]);
+function isTerminalBenchPosition(entry) {
+  const fields = entry.trim().split(/\s+/);
+  return (fields.length === 4 || (fields.length === 6 && /^\d+$/.test(fields[4]) && /^\d+$/.test(fields[5])))
+    && terminalBenchPositions.has(fields.slice(0, 4).join(' '));
+}
+
+function markTerminalInfo(lines, start, end, entries, allowed) {
+  let position = 0;
+  for (let i = start; i < end; i += 1) {
+    if (/^bestmove(?:\s|$)/.test(lines[i])) position += 1;
+    else if (/^info\s/.test(lines[i]) && position < entries.length && isTerminalBenchPosition(entries[position])) allowed.add(i);
+  }
+}
+
+function replaySearch(lines, best, entry) {
+  const bestmove = parseBestmove(best);
+  // Select node-bearing records, not just records whose numeric prefix parses.
+  // A corrupt final count must never cause fallback to an earlier info line.
+  const infos = lines.filter((line) => /^info\s/.test(line) && !/^info\s+string\b/.test(line)
+    && line.trim().split(/\s+/).includes('nodes'));
+  const terminal = isTerminalBenchPosition(entry);
+  const noMove = ['0000', '(none)'].includes(bestmove);
+  if (noMove !== terminal) throw new Error(`Invalid terminal bestmove for bench position: ${entry}`);
+  if (!infos.length && !terminal) throw new Error(`Missing bench nodes: ${entry}`);
+  let nodes = 0;
+  for (const info of infos) {
+    const tokens = info.trim().split(/\s+/);
+    const token = tokens[tokens.indexOf('nodes') + 1];
+    if (tokens.filter((part) => part === 'nodes').length !== 1 || !/^\d+$/.test(token ?? '')
+      || !Number.isSafeInteger(Number(token))) throw new Error(`Malformed replay nodes record: ${info}`);
+    nodes = Number(token);
+  }
+  if (nodes === 0 && !terminal) throw new Error(`Missing/zero bench nodes for nonterminal position: ${entry}`);
+  return { nodes, bestmove };
+}
+
+function validateCompletions(lines, expected, phase) {
+  const bestLines = lines.filter((line) => /^bestmove(?:\s|$)/.test(line));
+  for (const line of bestLines) parseBestmove(line);
+  if (bestLines.length !== expected) {
+    throw new Error(`Unexpected ${phase} bestmove coverage: expected ${expected}, got ${bestLines.length}`);
+  }
+}
+
+export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults, ownProcessGroup = true, shutdownTimeout = 2000 } = {}) {
   const started = performance.now();
-  const child = spawn(cell.command, cell.args || [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const grouped = ownProcessGroup && process.platform !== 'win32';
+  const child = spawn(cell.command, cell.args || [], { detached: grouped, stdio: ['pipe', 'pipe', 'pipe'] });
+  const kill = () => {
+    if (!child.pid) return;
+    try { process.kill(grouped ? -child.pid : child.pid, 'SIGKILL'); } catch {}
+  };
   const lines = [];
   let failure;
   let cursor = 0;
   const pending = new Set();
   let exited = false;
+  let completed = false;
+  let exitStatus;
+  let expectedSearches = 0;
+  let replayStart = 0;
+  let nativeBenchStart;
+  let replaySignature;
+  const terminalInfo = new Set();
+  const closed = new Promise((done) => child.once('close', done));
   const fail = (err) => {
     failure = err;
     for (const notify of pending) notify();
   };
-  child.on('error', fail);
+  const onSignal = () => { kill(); fail(new Error(`${cell.label} replay interrupted`)); };
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, onSignal);
+  child.on('error', (error) => { exited = true; fail(error); });
+  child.stdin.on('error', fail);
   child.on('exit', (code, signal) => {
     exited = true;
+    exitStatus = { code, signal };
     fail(new Error(`${cell.label} exited (${code}, ${signal}): ${lines.slice(-8).join('\n')}`));
   });
   for (const stream of [child.stdout, child.stderr]) {
@@ -47,6 +123,10 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       const parts = buffer.split(/\r?\n/);
       buffer = parts.pop();
       lines.push(...parts);
+      for (const notify of pending) notify();
+    });
+    stream.on('end', () => {
+      if (buffer) { lines.push(buffer); buffer = ''; }
       for (const notify of pending) notify();
     });
   }
@@ -78,12 +158,15 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     const startupMs = performance.now() - started;
     let nativeSignature;
     if (cell.nativeBench) {
-      const benchStart = lines.length;
+      nativeBenchStart = lines.length;
       command(`bench 16 1 ${benchDepth} default depth`);
       await wait((l) => /Nodes searched\s*:/.test(l));
       command('isready');
       await wait((l) => l === 'readyok');
-      nativeSignature = benchSignature(lines.slice(benchStart));
+      nativeSignature = benchSignature(lines.slice(nativeBenchStart));
+      const nativeEntries = defaults.filter((entry) => !entry.startsWith('setoption '));
+      validateCompletions(lines.slice(nativeBenchStart), nativeEntries.length, 'native built-in bench');
+      markTerminalInfo(lines, nativeBenchStart, cursor - 1, nativeEntries, terminalInfo);
     }
     // Stockfish.js compiles bench out. Replay setup_bench's exact command
     // sequence, with ONE reset before the suite (not one reset per position).
@@ -92,21 +175,26 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     command('ucinewgame');
     command('isready');
     await wait((l) => l === 'readyok');
+    // Built-in Stockfish bench also emits bestmoves. Its searches precede
+    // this replay and must not count against replay completion coverage.
+    replayStart = lines.length;
     let benchNodes = 0;
     const benchRows = [];
     for (const entry of defaults) {
       if (entry.startsWith('setoption ')) { command(entry); continue; }
       const from = lines.length;
       command(`position fen ${entry}`);
+      expectedSearches += 1;
       command(`go depth ${benchDepth}`);
-      const best = await wait((l) => l.startsWith('bestmove '));
-      const infos = lines.slice(from).filter((l) => l.startsWith('info ') && /\bnodes \d+/.test(l));
-      const nodes = infos.length ? parseInfo(infos.at(-1)).nodes : 0;
-      if (!infos.length && !/bestmove (?:0000|\(none\))/.test(best)) throw Error(`Missing bench nodes: ${entry}`);
-      benchNodes += nodes;
-      benchRows.push({ fen: entry, nodes });
+      const best = await wait((l) => /^bestmove(?:\s|$)/.test(l));
+      markTerminalInfo(lines, from, cursor - 1, [entry], terminalInfo);
+      const search = replaySearch(lines.slice(from, cursor - 1), best, entry);
+      benchNodes += search.nodes;
+      if (!Number.isSafeInteger(benchNodes)) throw new Error('Invalid replay bench node total');
+      benchRows.push({ fen: entry, ...search });
     }
     const signature = String(benchNodes);
+    replaySignature = signature;
     if (!benchNodes || (cell.nativeBench && nativeSignature !== signature)) throw Error(`Bench replay mismatch: native=${nativeSignature}, replay=${signature}`);
     command(`setoption name Threads value ${threads}`);
     const rows = [];
@@ -120,21 +208,59 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       const infoStart = lines.length;
       command(`position fen ${fen}`);
       const t = performance.now();
+      expectedSearches += 1;
       command(`go depth ${depth}`);
-      const best = await wait((l) => l.startsWith('bestmove '));
+      const best = await wait((l) => /^bestmove(?:\s|$)/.test(l));
       const wallMs = performance.now() - t;
-      const info = lines.slice(infoStart).filter((l) => l.startsWith('info ') && l.includes(' pv ')).at(-1);
-      if (!info) throw new Error(`${label}: missing search info`);
-      rows.push({ position: label, depth, bestmove: best.split(/\s+/)[1], ...parseInfo(info), wallMs });
+      const info = parseUciSearch([...lines.slice(infoStart, cursor - 1), best], depth);
+      rows.push({ position: label, ...info, wallMs });
     }
+    completed = true;
     return { ...cell, startupMs, benchDepth, benchSignature: signature, nativeSignature, benchRows, depth, threads, hash: 16, rows,
       wallNps: rows.reduce((n, r) => n + r.nodes, 0) * 1000 / rows.reduce((n, r) => n + r.wallMs, 0) };
   } finally {
-    if (!exited) {
-      child.stdin.end('quit\n');
-      const timer = setTimeout(() => child.kill('SIGKILL'), 2000);
-      await new Promise((done) => child.once('exit', done));
+    let timer;
+    try {
+      if (!exited) child.stdin.end('quit\n');
+      await Promise.race([closed, new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          kill();
+          // Escaped/inherited pipes cannot keep this drain alive forever.
+          // Audit workers inherit their outer owner's group; standalone cells
+          // own a group so launcher descendants are terminated here as well.
+          child.stdin.destroy();
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error(`${cell.label} replay shutdown timed out while draining output`));
+        }, shutdownTimeout);
+      })]);
+    } finally {
       clearTimeout(timer);
+      kill();
+      for (const signal of ['SIGINT', 'SIGTERM']) process.removeListener(signal, onSignal);
+    }
+    if (completed) {
+      if (exitStatus?.code !== 0 || exitStatus?.signal) {
+        throw new Error(`${cell.label} replay engine exited abnormally (${exitStatus?.code}, ${exitStatus?.signal})`);
+      }
+      // Drain the complete transcript, including output after the final search
+      // and partial final lines. A first bestmove is not a license to ignore
+      // malformed or surplus completion records before a clean shutdown.
+      if (cell.nativeBench) {
+        validateCompletions(lines.slice(nativeBenchStart, replayStart), defaults.filter((entry) => !entry.startsWith('setoption ')).length, 'native built-in bench');
+        const finalNativeSignature = benchSignature(lines.slice(nativeBenchStart));
+        if (finalNativeSignature !== replaySignature) {
+          throw new Error(`Bench replay mismatch after shutdown: native=${finalNativeSignature}, replay=${replaySignature}`);
+        }
+      }
+      validateCompletions(lines.slice(replayStart), expectedSearches, 'replay');
+      for (const [index, line] of lines.entries()) {
+        // Only info captured BEFORE completion of a verified terminal corpus
+        // search may omit PV moves. Late/quit records are never sanitized.
+        if (/^info\s/.test(line) && !/^info\s+string\b/.test(line)) {
+          parseInfo(terminalInfo.has(index) ? line.replace(/\s+pv\s*$/, '') : line);
+        }
+      }
     }
   }
 }

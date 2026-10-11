@@ -52,6 +52,7 @@
     "stockfish:artifact-manifest": "node scripts/write_engine_artifact_manifest.mjs stockfish",
     "stockfish:release-manifest": "node scripts/write_engine_artifact_manifest.mjs stockfish --source-archive public/stockfish/stockfish-19.0.1-corresponding-source.tar.gz --source-url /stockfish/stockfish-19.0.1-corresponding-source.tar.gz --out public/stockfish/stockfish-19.0.1.manifest.json --brotli-quality 5",
     "stockfish:upgrade-bench": "node scripts/stockfish_upgrade_bench.mjs",
+    "engine:upgrade-audit": "node scripts/engine_upgrade_audit.mjs",
     "deploy:onnxsim": "node scripts/run_with_onnx_venv.mjs scripts/simplify_onnx_for_deploy.py",
     "eval:chess-ocean": "node --experimental-strip-types eval/chess_ocean_tests.mjs",
     "lc0:prepare-model-assets": "node scripts/lc0_prepare_model_assets.mjs",

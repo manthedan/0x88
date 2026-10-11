@@ -22,15 +22,63 @@ export const ROTATED_FEN_SUITE = [
   ['Ruy Lopez ply 38', 'r1bqr1k1/3nbp1p/p2p2p1/1pnPp3/P3P1P1/1BP4P/1B1N1P1N/R2QR1K1 w - - 1 20'],
 ];
 
+const uciMove = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
+
+export function parseBestmove(line) {
+  const tokens = line.trim().split(/\s+/);
+  if (tokens[0] !== 'bestmove' || ![2, 4].includes(tokens.length)
+    || (!uciMove.test(tokens[1]) && !['0000', '(none)'].includes(tokens[1]))
+    || (tokens.length === 4 && (tokens[2] !== 'ponder' || !uciMove.test(tokens[3])))) {
+    throw new Error(`Malformed bestmove record: ${line}`);
+  }
+  return tokens[1];
+}
+
 export function parseInfo(line) {
-  const get = (key) => {
-    const match = line.match(new RegExp(`\\b${key} (-?\\d+)`));
-    return match ? Number(match[1]) : null;
+  const tokens = line.trim().split(/\s+/);
+  const integer = (token, signed = false) => {
+    if (!(signed ? /^-?\d+$/ : /^\d+$/).test(token ?? '') || !Number.isSafeInteger(Number(token))) {
+      throw new Error(`Malformed UCI info record: ${line}`);
+    }
+    return Number(token);
   };
-  const score = line.match(/score (cp|mate) (-?\d+)/);
-  const pv = line.match(/\bpv (.+)$/);
+  const get = (key) => {
+    const index = tokens.indexOf(key);
+    if (index < 0) return null;
+    if (tokens.lastIndexOf(key) !== index) throw new Error(`Malformed UCI info record: ${line}`);
+    return integer(tokens[index + 1]);
+  };
+  const scoreIndex = tokens.indexOf('score');
+  let score = null;
+  if (scoreIndex >= 0) {
+    if (!['cp', 'mate'].includes(tokens[scoreIndex + 1]) || tokens.lastIndexOf('score') !== scoreIndex) {
+      throw new Error(`Malformed UCI info record: ${line}`);
+    }
+    score = `${tokens[scoreIndex + 1]} ${integer(tokens[scoreIndex + 2], true)}`;
+  }
+  const pvIndex = tokens.indexOf('pv');
+  const moves = pvIndex >= 0 ? tokens.slice(pvIndex + 1) : null;
+  if (moves && (!moves.length || moves.some((move) => !uciMove.test(move)))) throw new Error(`Malformed UCI PV record: ${line}`);
   return { depth: get('depth'), nodes: get('nodes'), nps: get('nps'), timeMs: get('time'),
-    score: score ? `${score[1]} ${score[2]}` : null, pv: pv ? pv[1].trim() : null };
+    score, pv: moves ? moves.join(' ') : null };
+}
+
+export function parseUciSearch(lines, depth) {
+  const bestLines = lines.filter((line) => /^bestmove(?:\s|$)/.test(line));
+  if (bestLines.length !== 1) throw new Error(`Incomplete UCI search: expected one bestmove, got ${bestLines.length}`);
+  const bestmove = parseBestmove(bestLines[0]);
+  if (!uciMove.test(bestmove)) throw new Error('Incomplete nonterminal UCI search: null bestmove');
+  const beforeBest = lines.slice(0, lines.indexOf(bestLines[0]));
+  for (const line of lines) if (/^info\s/.test(line) && !/^info\s+string\b/.test(line)) parseInfo(line);
+  // Validate every info record before selecting the final PV/count. Invalid
+  // trailing fields must not disappear behind an earlier valid search line.
+  const infos = beforeBest.filter((line) => /^info\s/.test(line) && !/^info\s+string\b/.test(line)).map(parseInfo);
+  const info = infos.filter((record) => record.pv !== null).at(-1);
+  const nodes = infos.filter((record) => record.nodes !== null).at(-1)?.nodes;
+  if (!info || info.depth !== depth || !Number.isSafeInteger(nodes) || nodes <= 0 || !info.score || !info.pv) {
+    throw new Error(`Incomplete depth ${depth} UCI search output`);
+  }
+  return { bestmove, ...info, nodes };
 }
 
 export function median(values) {
@@ -75,13 +123,11 @@ export function runSuite(module, stdout, { depth, hash = 16, positions = 20, war
     command(`go depth ${targetDepth}`);
     const wallMs = performance.now() - t;
     const lines = stdout.slice(start);
-    const best = lines.find((s) => s.startsWith('bestmove '));
-    const infos = lines.filter((s) => s.startsWith('info ') && s.includes(' pv '));
-    const info = parseInfo(infos.at(-1) ?? '');
-    if (!best || info.depth !== targetDepth || info.nodes == null || info.score == null || info.pv == null || info.timeMs == null || info.nps == null) {
+    const info = parseUciSearch(lines, targetDepth);
+    if (info.timeMs == null || info.nps == null) {
       throw Error(`Incomplete depth ${targetDepth} output for ${position}: ${lines.join('\n')}`);
     }
-    return { position, bestmove: best.split(/\s+/)[1], ...info, wallMs };
+    return { position, ...info, wallMs };
   };
   if (warmup) search(ROTATED_FEN_SUITE[0], depth);
   return ROTATED_FEN_SUITE.slice(0, positions).map((p) => search(p, depth));

@@ -13,6 +13,7 @@
 //     --depths 7,8 --positions 20 --hash 16 [--nnue path/to/reckless.nnue] [--json out.json]
 import fs from 'node:fs/promises';
 import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from '@bjorn3/browser_wasi_shim';
+import { exactSearch, parseUciSearch } from './emscripten_uci_protocol.mjs';
 
 const ROTATED_FEN_SUITE = [
   ['Start position', 'startpos'],
@@ -65,28 +66,18 @@ const nnueBytes = nnuePath ? await fs.readFile(nnuePath) : null;
 function lineCollector(lines) {
   const decoder = new TextDecoder('utf-8', { fatal: false });
   let pending = '';
-  return new ConsoleStdout((chunk) => {
-    pending += decoder.decode(chunk, { stream: true });
-    const split = pending.split(/\r?\n/);
-    pending = split.pop() ?? '';
-    for (const line of split) lines.push(line);
-  });
-}
-
-function parseInfo(line) {
-  const get = (key) => {
-    const match = line.match(new RegExp(`\\b${key} (-?\\d+)`));
-    return match ? Number(match[1]) : null;
-  };
-  const score = line.match(/score (cp|mate) (-?\d+)/);
-  const pv = line.match(/\bpv (.+)$/);
   return {
-    depth: get('depth'),
-    nodes: get('nodes'),
-    nps: get('nps'),
-    timeMs: get('time'),
-    score: score ? `${score[1]} ${score[2]}` : null,
-    pv: pv ? pv[1].trim() : null,
+    fd: new ConsoleStdout((chunk) => {
+      pending += decoder.decode(chunk, { stream: true });
+      const split = pending.split(/\r?\n/);
+      pending = split.pop() ?? '';
+      for (const line of split) lines.push(line);
+    }),
+    finish: () => {
+      pending += decoder.decode();
+      if (pending) lines.push(pending);
+      pending = '';
+    },
   };
 }
 
@@ -105,13 +96,15 @@ async function runOneShot(module, fen, depth) {
   ].join('\n');
   const stdout = [];
   const stderr = [];
+  const stdoutCollector = lineCollector(stdout);
+  const stderrCollector = lineCollector(stderr);
   const wasi = new WASI(
     ['reckless'],
     [],
     [
       new OpenFile(new File(new TextEncoder().encode(commands))),
-      lineCollector(stdout),
-      lineCollector(stderr),
+      stdoutCollector.fd,
+      stderrCollector.fd,
       new PreopenDirectory('.', nnueBytes ? new Map([[nnueName, new File(nnueBytes)]]) : new Map()),
     ],
     { debug: false },
@@ -125,13 +118,14 @@ async function runOneShot(module, fen, depth) {
   } catch (error) {
     if (typeof error?.code === 'number') exitCode = error.code;
     else throw error;
+  } finally {
+    stdoutCollector.finish();
+    stderrCollector.finish();
   }
   const wallMs = performance.now() - started;
   const rssAfter = process.memoryUsage().rss;
-  const bestmove = stdout.findLast((line) => line.startsWith('bestmove'))?.split(/\s+/)[1] ?? null;
-  const infoLines = stdout.filter((line) => line.startsWith('info ') && line.includes(' pv '));
-  const info = infoLines.length ? parseInfo(infoLines[infoLines.length - 1]) : {};
-  return { wallMs: Number(wallMs.toFixed(2)), rssDeltaBytes: Math.max(0, rssAfter - rssBefore), exitCode, bestmove, ...info, stderr: stderr.slice(0, 5) };
+  const info = parseUciSearch([...stdout, ...stderr], depth);
+  return { wallMs: Number(wallMs.toFixed(2)), rssDeltaBytes: Math.max(0, rssAfter - rssBefore), exitCode, ...info, stderr: stderr.slice(0, 5) };
 }
 
 function median(values) {
@@ -176,7 +170,7 @@ for (const path of wasmPaths.slice(1)) {
     const ref = rows.find((r) => r.artifact === baseline && r.depth === row.depth && r.position === row.position);
     if (!ref) continue;
     pairs += 1;
-    const same = ref.bestmove === row.bestmove && ref.score === row.score && ref.nodes === row.nodes && ref.pv === row.pv;
+    const same = ref.exitCode === 0 && row.exitCode === 0 && exactSearch(ref, row);
     if (same) exact += 1;
     else
       mismatches.push({

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function readVarUint(bytes, cursor) {
   let value = 0;
@@ -145,16 +147,23 @@ const SIMD_NAMES = new Map([
   [177, 'i32x4.sub'],
   [228, 'f32x4.add'],
   [231, 'f32x4.sub'],
-  [257, 'i8x16.relaxed_swizzle'],
-  [258, 'i32x4.relaxed_trunc_f32x4_s'],
-  [259, 'i32x4.relaxed_trunc_f32x4_u'],
-  [260, 'i32x4.relaxed_trunc_f64x2_s_zero'],
+  [256, 'i8x16.relaxed_swizzle'],
+  [257, 'i32x4.relaxed_trunc_f32x4_s'],
+  [258, 'i32x4.relaxed_trunc_f32x4_u'],
+  [259, 'i32x4.relaxed_trunc_f64x2_s_zero'],
+  [260, 'i32x4.relaxed_trunc_f64x2_u_zero'],
   [261, 'f32x4.relaxed_madd'],
   [262, 'f32x4.relaxed_nmadd'],
   [263, 'f64x2.relaxed_madd'],
   [264, 'f64x2.relaxed_nmadd'],
+  [265, 'i8x16.relaxed_laneselect'],
+  [266, 'i16x8.relaxed_laneselect'],
+  [267, 'i32x4.relaxed_laneselect'],
+  [268, 'i64x2.relaxed_laneselect'],
   [269, 'f32x4.relaxed_min'],
   [270, 'f32x4.relaxed_max'],
+  [271, 'f64x2.relaxed_min'],
+  [272, 'f64x2.relaxed_max'],
   [273, 'i16x8.relaxed_q15mulr_s'],
   [274, 'i16x8.relaxed_dot_i8x16_i7x16_s'],
   [275, 'i32x4.relaxed_dot_i8x16_i7x16_add_s'],
@@ -333,7 +342,25 @@ function scanSimd(code) {
   return counts;
 }
 
-const cliArgs = process.argv.slice(2);
+// Shared inspector: only scan instructions in the code section, never data bytes.
+export function inspectWasmSimd(bytes) {
+  const code = findCodeSection(bytes);
+  const counts = scanSimd(code);
+  const total = [...counts.values()].reduce((a, b) => a + b, 0);
+  const relaxed = [...counts].filter(([op]) => op >= 256 && op <= 275);
+  return {
+    total,
+    codeBytes: code.length,
+    relaxedTotal: relaxed.reduce((sum, [, count]) => sum + count, 0),
+    relaxedOps: Object.fromEntries(relaxed.map(([op, count]) => [SIMD_NAMES.get(op), count])),
+    relaxedDot: counts.get(275) ?? 0,
+    relaxedF32: Object.fromEntries(['madd', 'nmadd', 'min', 'max'].map((name) =>
+      [name, counts.get({ madd: 261, nmadd: 262, min: 269, max: 270 }[name]) ?? 0])),
+  };
+}
+
+const isCLI = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const cliArgs = isCLI ? process.argv.slice(2) : [];
 let requiredOp;
 let forbiddenOp;
 const files = [];
@@ -343,7 +370,7 @@ for (let index = 0; index < cliArgs.length; index += 1) {
   else files.push(cliArgs[index]);
 }
 
-if (!files.length) {
+if (isCLI && !files.length) {
   console.error('Usage: node scripts/inspect_wasm_simd.mjs [--require-op NAME] [--forbid-op NAME] <file.wasm> [file2.wasm ...]');
   process.exit(2);
 }
