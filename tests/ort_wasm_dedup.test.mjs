@@ -10,6 +10,7 @@ async function fixture() {
   await mkdir(join(root, 'ort'), { recursive: true });
   await mkdir(join(root, '_app', 'immutable', 'assets'), { recursive: true });
   await writeFile(join(root, 'ort', 'ort-wasm-simd-threaded.asyncify.wasm'), 'canonical webgpu');
+  await writeFile(join(root, 'ort', 'ort-wasm-simd-threaded.jspi.wasm'), 'canonical jspi');
   await writeFile(join(root, 'ort', 'ort-wasm-simd-threaded.wasm'), 'canonical cpu-only');
   return root;
 }
@@ -21,7 +22,7 @@ test('ORT WASM deploy check accepts one canonical staged copy', async () => {
     const report = JSON.parse(stdout);
     assert.equal(report.status, 'ORT_WASM_DEDUP_CHECK_DONE');
     assert.deepEqual(report.bundledCopies, []);
-    assert.equal(report.canonical.length, 2);
+    assert.equal(report.canonical.length, 3);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

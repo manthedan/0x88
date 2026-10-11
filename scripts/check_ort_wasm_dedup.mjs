@@ -4,7 +4,7 @@ import { join, relative, resolve } from 'node:path';
 import { ORT_RUNTIME_WASM_FILES } from './ort_runtime_assets.mjs';
 
 const root = resolve(process.argv[2] ?? 'dist-client');
-// The staged WebGPU (asyncify) and CPU-only wasm binaries.
+// The staged WebGPU (asyncify and JSPI) and CPU-only wasm binaries.
 const canonical = ORT_RUNTIME_WASM_FILES.map((name) => join(root, 'ort', name));
 
 function walk(dir, out = []) {

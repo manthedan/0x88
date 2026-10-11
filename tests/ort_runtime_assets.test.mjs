@@ -15,14 +15,16 @@ async function fixture(files) {
   return root;
 }
 
-test('ORT runtime allowlist stages the WebGPU asyncify pair and the CPU-only wasm pair', () => {
+test('ORT runtime allowlist stages both WebGPU pairs and the CPU-only wasm pair', () => {
   assert.deepEqual(ORT_RUNTIME_ASSET_FILES, [
     'ort-wasm-simd-threaded.asyncify.mjs',
     'ort-wasm-simd-threaded.asyncify.wasm',
+    'ort-wasm-simd-threaded.jspi.mjs',
+    'ort-wasm-simd-threaded.jspi.wasm',
     'ort-wasm-simd-threaded.mjs',
     'ort-wasm-simd-threaded.wasm',
   ]);
-  assert.deepEqual(ORT_PTHREAD_BOOTSTRAP_FILES, ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.mjs']);
+  assert.deepEqual(ORT_PTHREAD_BOOTSTRAP_FILES, ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.jspi.mjs', 'ort-wasm-simd-threaded.mjs']);
 });
 
 test('ORT runtime asset check accepts required files and compressed sidecars', async () => {
@@ -35,7 +37,7 @@ test('ORT runtime asset check rejects missing and unexpected variants', async ()
   assert.throws(() => checkOrtRuntimeAssets(compressedOnlyRoot), /missing: ort-wasm-simd-threaded\.asyncify\.mjs/);
   const missingRoot = await fixture(ORT_RUNTIME_ASSET_FILES.slice(1));
   assert.throws(() => checkOrtRuntimeAssets(missingRoot), /missing: ort-wasm-simd-threaded\.asyncify\.mjs/);
-  const missingCpuOnlyRoot = await fixture(ORT_RUNTIME_ASSET_FILES.slice(0, 2));
+  const missingCpuOnlyRoot = await fixture(ORT_RUNTIME_ASSET_FILES.slice(0, -2));
   assert.throws(() => checkOrtRuntimeAssets(missingCpuOnlyRoot), /missing: ort-wasm-simd-threaded\.mjs, ort-wasm-simd-threaded\.wasm/);
   const extraRoot = await fixture([...ORT_RUNTIME_ASSET_FILES, 'ort-wasm-simd-threaded.jsep.wasm']);
   assert.throws(() => checkOrtRuntimeAssets(extraRoot), /unexpected: ort-wasm-simd-threaded\.jsep\.wasm/);
