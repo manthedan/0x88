@@ -4,12 +4,13 @@ export function parseCommitBench(message) {
 }
 
 export function parseBenchOutput(text, { expectedRows } = {}) {
-  // Identify the final summary record BEFORE validating its fields. Filtering
-  // for valid matches would silently fall back past a malformed final record.
-  // Unlabelled formats retain their nodes/table markers; UCI info and table
-  // position rows are not summaries.
+  // Recognize records before validating them, and validate ALL summaries.
+  // Callers may combine separately captured stdout/stderr without emission
+  // ordering; neither stream may hide a malformed record in the other.
+  // UCI info and table position rows are not summaries.
   const summaryRecord = /^(?:(?:Bench|Results)\s*:|Nodes\s+searched\b|Total\s+nodes\b|TOTAL\b|\S+\s+nodes\b|\S+\s+[\d.+-]\S*s(?:\s|$)|\S+\s+\S+\s+\S+\s+N\/s\b)/i;
-  const summary = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => summaryRecord.test(line)).at(-1);
+  const summaries = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => summaryRecord.test(line));
+  const summary = summaries.at(-1);
   const patterns = [
     /^(\d+)\s+nodes in (\d+(?:\.\d+)?)s(?:\s+\((\d+) nps\))?$/, // Viridithas
     /^(?:Bench:\s*)?(\d+)\s+nodes\s+(\d+) nps$/, // Reckless, Stormphrax
@@ -18,12 +19,14 @@ export function parseBenchOutput(text, { expectedRows } = {}) {
     /^Results:\s*(\d+)\s+nodes(?:\s+(\d+) nps)?$/, // Berserk
     /^(?:Total nodes(?: searched)?\s*[:=]?|TOTAL)\s+(\d+)$/i,
   ];
-  const match = summary && patterns.map((pattern) => summary.match(pattern)).find(Boolean);
-  const nodes = match ? Number(match[1]) : null;
-  if (!match || match.slice(1).some((token) => token !== undefined && !Number.isFinite(Number(token)))) {
-    throw new Error(`Missing/invalid full bench node summary${summary ? `: ${summary}` : ''}`);
+  if (!summaries.length) throw new Error('Missing/invalid full bench node summary');
+  let nodes;
+  for (const record of summaries) {
+    const match = patterns.map((pattern) => record.match(pattern)).find(Boolean);
+    nodes = match ? Number(match[1]) : null;
+    if (!match || match.slice(1).some((token) => token !== undefined && !Number.isFinite(Number(token)))
+      || !Number.isSafeInteger(nodes) || nodes <= 0) throw new Error(`Missing/invalid full bench node summary: ${record}`);
   }
-  if (nodes === null || !Number.isSafeInteger(nodes) || nodes <= 0) throw new Error(`Missing/invalid full bench node summary: ${summary}`);
   const rows = [];
   for (const line of text.split(/\r?\n/).map((record) => record.trim())) {
     if (/^Bench\s*\[/.test(line)) {

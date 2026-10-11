@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { inspectWasmSimd } from '../scripts/inspect_wasm_simd.mjs';
 import { adapters, audit, nativeUnavailable, parseArgs, saveReport, selectReference } from '../scripts/engine_upgrade_audit/core.mjs';
-import { externalNetworkPath, nativeCell, runEmscriptenBuiltin, runNativeBuiltin, runReplay, stageEmscripten } from '../scripts/engine_upgrade_audit/bench.mjs';
+import { externalNetworkPath, nativeCell, runEmscriptenBuiltin, runNativeBuiltin, runReplay, runWasiBench, stageEmscripten } from '../scripts/engine_upgrade_audit/bench.mjs';
 import { validateParityRows } from '../scripts/engine_upgrade_audit/parity.mjs';
 import { benchSource } from '../scripts/engine_upgrade_audit/source.mjs';
 import { benchSignature, runCell } from '../scripts/stockfish_upgrade_bench.mjs';
@@ -69,6 +69,27 @@ test('native built-in bench cannot compare EXACT after a malformed final summary
   const script = join(dir, 'fake-native.mjs');
   writeFileSync(script, `for await (const chunk of process.stdin) {} console.log('Bench: 100 nodes 1 nps\\nBench: invalid');`);
   await assert.rejects(runNativeBuiltin({ options: { nativeCmd: `"${process.execPath}" "${script}"`, timeout: 5000 } }), /Missing\/invalid/);
+}));
+
+test('no output stream can hide a malformed summary in another stream', () => temporary(async (dir) => {
+  for (const lines of [['Bench: invalid', 'Bench: 100 nodes 1 nps'], ['Bench: 100 nodes 1 nps', 'Bench: invalid']]) {
+    assert.throws(() => parseBenchOutput(lines.join('\n')), /Missing\/invalid/);
+  }
+  assert.throws(() => benchSignature(['Nodes searched: invalid', 'Nodes searched: 100']), /Invalid native bench/);
+  const script = join(dir, 'fake-native.mjs');
+  writeFileSync(script, `for await (const chunk of process.stdin) {} console.error('Bench: 100 nodes 1 nps'); console.log('Bench: invalid');`);
+  await assert.rejects(runNativeBuiltin({ options: { nativeCmd: `"${process.execPath}" "${script}"`, timeout: 5000 } }), /Missing\/invalid/);
+  const binary = join(dir, 'stormphrax-emscripten.wasm');
+  const js = join(dir, 'stormphrax-emscripten.js');
+  writeFileSync(binary, wasiTranscript('Bench: invalid\n', 'Bench: 100 nodes 1 nps\n'));
+  await assert.rejects(runWasiBench({ tmp: dir, engine: 'viridithas', options: { timeout: 5000 } },
+    { name: 'fixture', wasm: binary }), /Missing\/invalid/);
+  writeFileSync(join(dir, 'stormphrax-emscripten.data'), 'fixture net');
+  writeFileSync(js, `module.exports = async (options) => ({ ccall: () => {
+    options.printErr('Bench: 100 nodes 1 nps'); options.print('Bench: invalid');
+  } });`);
+  await assert.rejects(runEmscriptenBuiltin({ tmp: dir, artifacts: dir, engine: 'stormphrax', options: { timeout: 5000 } },
+    { name: 'fixture', wasm: binary, js }), /Missing\/invalid/);
 }));
 
 test('per-position bench nodes and bestmove when available', () => {
@@ -177,16 +198,23 @@ function wasm(instructions) {
 
 // A tiny real WASI module writes a supplied UCI transcript through fd_write.
 // No engine artifacts, compiler or network are needed for the parity fixture.
-function wasiTranscript(text) {
+function wasiTranscript(text, stderr = '') {
   const leb = (n) => n < 128 ? [n] : [(n & 127) | 128, ...leb(n >>> 7)];
   const string = (value) => [value.length, ...new TextEncoder().encode(value)];
   const section = (id, bytes) => [id, ...leb(bytes.length), ...bytes];
   const output = new TextEncoder().encode(text);
-  const data = new Uint8Array(16 + output.length);
-  new DataView(data.buffer).setUint32(0, 16, true);
-  new DataView(data.buffer).setUint32(4, output.length, true);
-  data.set(output, 16);
-  const body = [0, 0x41, 1, 0x41, 0, 0x41, 1, 0x41, 8, 0x10, 0, 0x1a, 0x0b];
+  const error = new TextEncoder().encode(stderr);
+  const data = new Uint8Array(32 + output.length + error.length);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 32, true);
+  view.setUint32(4, output.length, true);
+  view.setUint32(8, 32 + output.length, true);
+  view.setUint32(12, error.length, true);
+  data.set(output, 32);
+  data.set(error, 32 + output.length);
+  const body = [0,
+    0x41, 2, 0x41, 8, 0x41, 1, 0x41, 24, 0x10, 0, 0x1a,
+    0x41, 1, 0x41, 0, 0x41, 1, 0x41, 24, 0x10, 0, 0x1a, 0x0b];
   return Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [2, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 0]),
     ...section(2, [1, ...string('wasi_snapshot_preview1'), ...string('fd_write'), 0, 0]),

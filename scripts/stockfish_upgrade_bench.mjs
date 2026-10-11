@@ -10,13 +10,15 @@ import { fileURLToPath } from 'node:url';
 import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseUciSearch, roundOrder } from './emscripten_uci_protocol.mjs';
 
 export function benchSignature(lines) {
-  const summary = lines.filter((line) => /^\s*Nodes\s+searched\b/.test(line)).at(-1);
-  if (summary === undefined) return null;
-  const match = summary.match(/^\s*Nodes searched\s*:\s*(\d+)\s*$/);
-  if (!match || !Number.isSafeInteger(Number(match[1])) || Number(match[1]) <= 0) {
-    throw new Error(`Invalid native bench node summary: ${summary}`);
+  let nodes = null;
+  for (const summary of lines.filter((line) => /^\s*Nodes\s+searched\b/.test(line))) {
+    const match = summary.match(/^\s*Nodes searched\s*:\s*(\d+)\s*$/);
+    if (!match || !Number.isSafeInteger(Number(match[1])) || Number(match[1]) <= 0) {
+      throw new Error(`Invalid native bench node summary: ${summary}`);
+    }
+    nodes = match[1];
   }
-  return match[1];
+  return nodes;
 }
 
 export function benchDefaults(source) {
