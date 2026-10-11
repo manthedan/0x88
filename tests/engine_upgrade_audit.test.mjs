@@ -570,6 +570,9 @@ test('parity rejects matching failed searches, wrong depths and missing rows', (
   const options = { positions: 1, requireExitCode: true };
   assert.deepEqual(validateParityRows(rows, ['scalar', 'simd'], options), []);
   assert.equal(validateParityRows(rows.map((row) => ({ ...row, bestmove: null, exitCode: 1 })), ['scalar', 'simd'], options).length, 2);
+  for (const bestmove of ['0000', '(none)', 'bogus']) {
+    assert.equal(validateParityRows(rows.map((row) => ({ ...row, bestmove })), ['scalar', 'simd'], options).length, 2);
+  }
   assert.ok(validateParityRows([{ ...rows[0], depth: 8 }], ['scalar', 'simd'], options).length);
 });
 
@@ -588,6 +591,7 @@ test('strict UCI search parsing rejects malformed raw records before parity comp
     assert.throws(() => parseBestmove(best), /Malformed bestmove/);
   }
   assert.throws(() => parseInfo('info depth 9 nodes'), /Malformed UCI/);
+  for (const bestmove of ['0000', '(none)']) assert.throws(() => parseUciSearch([valid, `bestmove ${bestmove}`], 9), /Incomplete nonterminal UCI search/);
   assert.throws(() => parseUciSearch([valid, 'bestmove e2e4'], 8), /Incomplete depth/);
 });
 
@@ -596,6 +600,8 @@ for (const engine of ['berserk', 'reckless']) {
     ['valid', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4', 'PASS'],
     ['garbled nodes', 'info depth 9 nodes 100garbage score cp 0 pv e2e4', 'bestmove e2e4', 'FAIL'],
     ['garbled bestmove', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove bogus', 'FAIL'],
+    ['null bestmove 0000', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove 0000', 'FAIL'],
+    ['null bestmove none', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove (none)', 'FAIL'],
     ['unterminated trailing bestmove', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4\nbestmove bogus', 'FAIL'],
   ]) test(`${engine} parity raw-output validation: ${label}`, () => temporary(async (dir) => {
     writeFileSync(join(dir, 'candidate.manifest.json'), JSON.stringify({ engine, upstream: {

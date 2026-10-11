@@ -15,7 +15,7 @@ export function validateParityRows(rows, artifacts, { depth = 9, positions = 20,
     if (seen.has(key)) issues.push(`duplicate search ${key}`);
     seen.add(key);
     if (!artifacts.includes(row.artifact) || !row.position || row.depth !== depth ||
-        !row.bestmove || !row.score || !row.pv || !Number.isSafeInteger(row.nodes) || row.nodes <= 0 ||
+        !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(row.bestmove ?? '') || !row.score || !row.pv || !Number.isSafeInteger(row.nodes) || row.nodes <= 0 ||
         (requireExitCode && row.exitCode !== 0)) issues.push(`failed/incomplete search ${key}`);
   }
   for (const artifact of artifacts) if (rows.filter((row) => row.artifact === artifact).length !== positions) issues.push(`missing coverage: ${artifact}`);
