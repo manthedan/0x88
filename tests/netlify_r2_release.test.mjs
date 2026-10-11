@@ -91,17 +91,17 @@ test('prune_external_model_assets removes Monty from R2 Netlify dist', async () 
   await mkdir(join(dist, 'stockfish'), { recursive: true });
   await writeFile(join(dist, 'models', 'monty', 'nn.network'), 'abc');
   await writeFile(join(dist, 'monty', 'monty.wasm'), 'abc');
-  await writeFile(join(dist, 'stockfish', 'stockfish-18-lite.js'), 'lite');
-  await writeFile(join(dist, 'stockfish', 'stockfish-18.js'), 'full');
-  await writeFile(join(dist, 'stockfish', 'stockfish-18-lite.wasm'), 'wasm');
+  await writeFile(join(dist, 'stockfish', 'stockfish-19-lite.js'), 'lite');
+  await writeFile(join(dist, 'stockfish', 'stockfish-19.js'), 'full');
+  await writeFile(join(dist, 'stockfish', 'stockfish-19-lite.wasm'), 'wasm');
 
   const result = spawnSync(process.execPath, ['scripts/prune_external_model_assets.mjs', dist], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(existsSync(join(dist, 'models', 'monty')), false);
   assert.equal(existsSync(join(dist, 'monty')), false);
-  assert.equal(existsSync(join(dist, 'stockfish', 'stockfish-18-lite.js')), true);
-  assert.equal(existsSync(join(dist, 'stockfish', 'stockfish-18.js')), true);
-  assert.equal(existsSync(join(dist, 'stockfish', 'stockfish-18-lite.wasm')), false);
+  assert.equal(existsSync(join(dist, 'stockfish', 'stockfish-19-lite.js')), true);
+  assert.equal(existsSync(join(dist, 'stockfish', 'stockfish-19.js')), true);
+  assert.equal(existsSync(join(dist, 'stockfish', 'stockfish-19-lite.wasm')), false);
   assert.match(result.stdout, /monty/);
 });
 
@@ -113,24 +113,24 @@ test('prune_v0_deploy_assets keeps production Stockfish assets and Reckless noti
   await writeFile(join(dist, 'reckless', 'NOTICE.md'), 'license notice');
   await writeFile(join(dist, 'reckless', 'reckless.wasm'), 'abc');
   for (const name of [
-    'stockfish-18-lite.js',
-    'stockfish-18-lite.wasm',
-    'stockfish-18-lite-single.js',
-    'stockfish-18-lite-single.wasm',
-    'stockfish-18-lite-single-relaxed.js',
-    'stockfish-18-lite-single-relaxed.wasm',
-    'stockfish-18.js',
+    'stockfish-19-lite.js',
+    'stockfish-19-lite.wasm',
+    'stockfish-19-lite-single.js',
+    'stockfish-19-lite-single.wasm',
+    'stockfish-19-lite-single-relaxed.js',
+    'stockfish-19-lite-single-relaxed.wasm',
+    'stockfish-19.js',
   ]) {
     await writeFile(join(dist, 'stockfish', name), 'abc');
   }
 
   const result = spawnSync(process.execPath, ['scripts/prune_v0_deploy_assets.mjs', dist], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single-relaxed.js')), true);
-  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single-relaxed.wasm')), true);
-  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single.js')), true);
-  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18-lite-single.wasm')), true);
-  assert.equal(existsSync(join(dist, 'stockfish/stockfish-18.js')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-19-lite-single-relaxed.js')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-19-lite-single-relaxed.wasm')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-19-lite-single.js')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-19-lite-single.wasm')), true);
+  assert.equal(existsSync(join(dist, 'stockfish/stockfish-19.js')), true);
   assert.equal(existsSync(join(dist, 'reckless/NOTICE.md')), true);
   assert.equal(existsSync(join(dist, 'reckless/reckless.wasm')), false);
 });
@@ -188,11 +188,11 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   await mkdir(join(source, 'lc0'), { recursive: true });
   await mkdir(join(source, 'artifacts/sha256/deadbeef'), { recursive: true });
   await mkdir(join(root, 'ort-real'), { recursive: true });
-  await writeFile(join(root, 'node_modules/stockfish/bin/stockfish-18-lite.js'), 'abc');
-  await writeFile(join(root, 'node_modules/stockfish/bin/stockfish-18.js'), 'def');
-  await symlink('../../node_modules/stockfish/bin/stockfish-18-lite.js', join(source, 'stockfish/stockfish-18-lite.js'));
-  await symlink('../../node_modules/stockfish/bin/stockfish-18.js', join(source, 'stockfish/stockfish-18.js'));
-  await writeFile(join(source, 'stockfish/stockfish-18.0.7.manifest.json'), '{}');
+  await writeFile(join(root, 'node_modules/stockfish/bin/stockfish-19-lite.js'), 'abc');
+  await writeFile(join(root, 'node_modules/stockfish/bin/stockfish-19.js'), 'def');
+  await symlink('../../node_modules/stockfish/bin/stockfish-19-lite.js', join(source, 'stockfish/stockfish-19-lite.js'));
+  await symlink('../../node_modules/stockfish/bin/stockfish-19.js', join(source, 'stockfish/stockfish-19.js'));
+  await writeFile(join(source, 'stockfish/stockfish-19.0.1.manifest.json'), '{}');
   await writeFile(join(source, 'models/lc0/net.onnx'), 'abc');
   await symlink('/missing/local/net.onnx', join(source, 'models/lc0/missing.onnx'));
   await writeFile(join(source, 'models/lc0/manifest.json'), '{}');
@@ -213,11 +213,11 @@ test('prepare_netlify_r2_public_assets skips R2-hosted blobs but keeps lightweig
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.status, 'R2_PUBLIC_ASSETS_PREPARED');
-  assert.equal(existsSync(join(out, 'stockfish/stockfish-18-lite.js')), true);
-  assert.equal(existsSync(join(out, 'stockfish/stockfish-18.js')), true);
-  assert.equal(await readFile(join(out, 'stockfish/stockfish-18-lite.js'), 'utf8'), 'abc');
-  assert.equal(await readFile(join(out, 'stockfish/stockfish-18.js'), 'utf8'), 'def');
-  assert.equal(existsSync(join(out, 'stockfish/stockfish-18.0.7.manifest.json')), true);
+  assert.equal(existsSync(join(out, 'stockfish/stockfish-19-lite.js')), true);
+  assert.equal(existsSync(join(out, 'stockfish/stockfish-19.js')), true);
+  assert.equal(await readFile(join(out, 'stockfish/stockfish-19-lite.js'), 'utf8'), 'abc');
+  assert.equal(await readFile(join(out, 'stockfish/stockfish-19.js'), 'utf8'), 'def');
+  assert.equal(existsSync(join(out, 'stockfish/stockfish-19.0.1.manifest.json')), true);
   assert.equal(existsSync(join(out, 'models/lc0/net.onnx')), false);
   assert.equal(existsSync(join(out, 'models/lc0/missing.onnx')), false);
   assert.equal(existsSync(join(out, 'models/lc0/manifest.json')), true);
@@ -264,7 +264,7 @@ test('netlify.toml and package scripts use the R2-pruned build path', async () =
   assert.match(netlifyToml, /build:netlify:r2/);
   assert.match(netlifyToml, /VITE_LC0_ARTIFACT_CHANNEL_URL=https:\/\/assets\.0x88\.app\/channels\/stable\.json/);
   assert.match(netlifyToml, /VITE_LC0_BROWSER_ASSET_BASE_URL=https:\/\/assets\.0x88\.app/);
-  for (const file of ['stockfish-18-lite.wasm', 'stockfish-18.wasm']) {
+  for (const file of ['stockfish-19-lite.wasm', 'stockfish-19.wasm']) {
     assert.match(
       netlifyToml,
       new RegExp(

@@ -6,6 +6,8 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
+import { STOCKFISH_RELEASE, stockfishSourceArchive, stockfishSourcePrefix } from './stockfish_release_config.mjs';
+
 const ROOT = process.cwd();
 
 const CONFIGS = {
@@ -167,27 +169,45 @@ const CONFIGS = {
   },
   stockfish: {
     engine: 'stockfish',
-    flavor: 'stockfish-js-18.0.7',
-    upstreamRepo: 'https://github.com/nmrugg/stockfish.js.git',
-    upstreamCommit: '32d4b5ae40c01db88219bfbe2b82dbe6dec93832',
-    upstreamVersion: '18.0.7',
+    flavor: `stockfish-js-${STOCKFISH_RELEASE.version}`,
+    upstreamRepo: STOCKFISH_RELEASE.repo,
+    upstreamCommit: STOCKFISH_RELEASE.commit,
+    upstreamTag: STOCKFISH_RELEASE.tag,
+    upstreamVersion: STOCKFISH_RELEASE.version,
     buildDir: '.local_engines/stockfish-js-src',
-    sourcePrefix: 'upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832/',
-    output: 'public/stockfish/stockfish-18.0.7-corresponding-source.tar.gz',
+    sourcePrefix: stockfishSourcePrefix,
+    output: stockfishSourceArchive,
     buildScript: 'scripts/build_stockfish_relaxed_simd.mjs',
     smokeScript: 'scripts/uci_stockfish_js_wrapper.mjs',
-    adapterFiles: ['src/lc0/stockfishEngine.ts', 'src/lc0/wasmFeatures.ts', 'src/lc0/engineCatalog.ts', 'src/chess/board.ts'],
+    adapterFiles: ['src/lc0/stockfishEngine.ts', 'src/lc0/stockfishPthreadBootstrap.js',
+      'src/lc0/wasmFeatures.ts', 'src/lc0/assetUrls.ts', 'src/lc0/browserUciEngine.ts',
+      'src/lc0/engineCatalog.ts', 'src/chess/board.ts'],
     docs: [
       'docs/engine_artifact_distribution.md',
       'docs/engine_catalog.md',
       'docs/netlify_engine_artifacts.md',
       'docs/stockfish_relaxed_simd_experiment.md',
+      'docs/stockfish_19_upgrade.md',
+      'scripts/stockfish_upgrade_bench.mjs',
+      'scripts/emscripten_uci_protocol.mjs',
+      'patches/stockfish-js-native-audit.patch',
+      'scripts/stockfish_upgrade_browser.mjs',
+      'scripts/stockfish_upgrade_browser_matrix.mjs',
       'public/stockfish/README.md',
       'node_modules/stockfish/README.md',
       'node_modules/stockfish/Copying.txt',
       'node_modules/stockfish/package.json',
+      'node_modules/stockfish/index.js',
+      'node_modules/stockfish/scripts/findEngine.js',
+      'node_modules/stockfish/scripts/cli.js',
     ],
-    assets: [],
+    assetDir: '.local_engines/stockfish-nets',
+    assets: STOCKFISH_RELEASE.nets.map((net) => ({
+      name: net.name,
+      rawSha256: net.sha256,
+      sourceUrl: `https://tests.stockfishchess.org/api/nn/${net.name}`,
+      licenseNote: 'Required embedded Stockfish GPL network; included in Corresponding Source.',
+    })),
     envPrefix: 'STOCKFISH_JS',
   },
 };
@@ -297,7 +317,7 @@ BERSERK_SKIP_GIT=1 BERSERK_BUILD_DIR="$PWD/.build/berserk-relaxed" BERSERK_NET_D
     return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas.wasm" npm run viridithas:build-wasi && ${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_SIMD=1 ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas-simd128.wasm" npm run viridithas:build-wasi`;
   }
   if (config.engine === 'stockfish') {
-    return '(cd upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832 && npm install && node build.js --all -f)\n# Promoted relaxed SIMD artifact from the same upstream source plus the documented patch/build script:\nSTOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd:lite-single\n# Optional unpromoted candidates remain buildable with:\n# STOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd:single\n# STOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd:lite-threaded\n# STOCKFISH_RELAXED_SOURCE_DIR="$PWD/upstream/stockfish-js-32d4b5ae40c01db88219bfbe2b82dbe6dec93832" npm run stockfish:build-relaxed-simd:threaded';
+    return `export STOCKFISH_RELAXED_SOURCE_DIR="${sourceDir}"\nexport STOCKFISH_NNUE_DIR="$PWD/assets"\n# Rebuild each WASM flavor with the pinned Docker toolchain (no ASM-JS release).\nfor variant in lite-single single lite-threaded threaded; do\n  node scripts/build_stockfish_relaxed_simd.mjs --variant "$variant" --simd baseline --out-dir "$PWD/out/public/stockfish"\ndone\nnode scripts/build_stockfish_relaxed_simd.mjs --variant lite-single --out-dir "$PWD/out/public/stockfish"\n# Optional unpromoted relaxed full/pthread candidates: use the same --variant values.`;
   }
   return `npm run ${config.engine}:build`;
 }
@@ -320,12 +340,18 @@ async function writeArchiveDocs(config, archiveRoot) {
     assets: config.assets.map((asset) => asset.name),
   };
   await writeFile(join(archiveRoot, 'SOURCE_ARCHIVE.json'), `${JSON.stringify(meta, null, 2)}\n`);
-  const patchNote = config.patch
+  const patchNote = config.engine === 'stockfish'
+    ? 'The relaxed builder enables the upstream relaxed-dot gate, adds its audited operand-range comment and supports the O2/O3 × LTO matrix. SF19 supplies the stack and pthread bootstrap fixes upstream. The native-audit patch only repairs a pointer typo in the non-WASM CLI.'
+    : config.patch
     ? `The build script applies ${config.patch} to the upstream snapshot in ${config.sourcePrefix}.`
     : `No local source patch is applied; the deployed artifacts come from the pinned upstream/package source in ${config.sourcePrefix}.`;
+  const setup = config.engine === 'stockfish'
+    ? 'Install Node.js and Docker. The pinned Docker image supplies Emscripten and Node; the --no-minify builder needs no host npm dependencies. Do not run npm ci in this source subset (it is not a complete Svelte application).'
+    : 'Install Node dependencies and the documented upstream toolchain, then run:';
+  const install = config.engine === 'stockfish' ? '' : 'npm ci\n';
   await writeFile(
     join(archiveRoot, 'BUILDING.md'),
-    `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser integration scripts/adapters, docs, and required network/model asset provenance for the generated ${config.engine} browser artifacts.\n\n## Rebuild\n\nInstall Node dependencies and the documented upstream toolchain, then run:\n\n\`\`\`sh\nnpm ci\n${rebuildCommand(config)}\n\`\`\`\n\n${patchNote}\n\nThe build writes outputs under \`out/public/${config.engine}/\` or the upstream build directory as noted by the command above.\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`,
+    `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser integration scripts/adapters, docs, and required network/model asset provenance for the generated ${config.engine} browser artifacts.\n\n## Rebuild\n\n${setup}\n\n\`\`\`sh\n${install}${rebuildCommand(config)}\n\`\`\`\n\n${patchNote}\n\nThe build writes outputs under \`out/public/${config.engine}/\` or the upstream build directory as noted by the command above.\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`,
   );
 }
 
@@ -347,6 +373,8 @@ async function writeArchive(config, outPath, allowMissingAssets) {
         config.buildScript,
         config.smokeScript,
         'scripts/write_engine_artifact_manifest.mjs',
+        // The shared manifest helper imports this even for non-Stockfish engines.
+        'scripts/stockfish_release_config.mjs',
         'scripts/precompress_engine_artifacts.mjs',
         config.smokeHtml,
         ...config.adapterFiles,

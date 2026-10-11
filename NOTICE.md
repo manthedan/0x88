@@ -16,7 +16,7 @@ driven over the UCI text protocol. 0x88 does not statically link any engine.
 
 | Engine | Version / pin | Upstream licence | Distributed by this repo? |
 | --- | --- | --- | --- |
-| [Stockfish](https://github.com/nmrugg/stockfish.js) (stockfish.js) | 18.0.7, commit `32d4b5ae` | GPL-3.0 | Yes — binaries, manifest, and corresponding source |
+| [Stockfish](https://github.com/nmrugg/stockfish.js) (stockfish.js) | 19.0.1, commit `0d5dd794` | GPL-3.0 | Yes — binaries, manifest, and corresponding source |
 | [Reckless](https://github.com/codedeliveryservice/Reckless) | v60, commit `00106174` | **AGPL-3.0** | Binaries are built locally / hosted; corresponding source archives are published |
 | [Viridithas](https://github.com/cosmobobak/viridithas) | v20.0.0, commit `20d74020` | MIT | Yes — binaries, manifest, and corresponding source |
 | [PlentyChess](https://github.com/Yoshie2000/PlentyChess) | 7.0.66, commit `58d8ba25` | GPL-3.0 | Yes — binaries, manifest, and corresponding source |

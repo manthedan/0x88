@@ -1,6 +1,21 @@
 # Stockfish.js relaxed SIMD experiment
 
-Status: the lite-single relaxed SIMD artifact is promoted as a feature-detected candidate. Full single-threaded, lite pthread, and full pthread relaxed SIMD artifacts remain reproducible local candidates with smoke/parity evidence, but are not public release artifacts yet. Do not promote relaxed SIMD as an unconditional/default replacement without the broader browser/device matrix below.
+## SF19 supersedes this historical SF18 experiment
+
+The current pin is Stockfish.js **19.0.1** (`v19.0.1`, `0d5dd794`), built with
+`emscripten/emsdk:6.0.9`. Current validation and commands are documented in
+[stockfish_19_upgrade.md](stockfish_19_upgrade.md) and `public/stockfish/README.md`.
+SF19 carries the relaxed-dot implementation, 4 MiB single-thread stack, `-pthread`
+and Emscripten 6.x same-script helper bootstrap upstream. Do not reapply the
+SF18 `worker-extern-post.js`, Asyncify-import whitelist or 1 MiB stack patches.
+The builder keeps the audited activation-as-second/i7 operand, accepts
+`--opt O2|O3 --lto on|off`, and generates `stockfish-19-*` outputs. Both networks
+and their architecture have changed; **the measurements below apply only to SF18**.
+Full/pthread relaxed candidates remain unpromoted.
+
+## Historical SF18 evidence
+
+Status at the SF18 pin: the lite-single relaxed SIMD artifact is promoted as a feature-detected candidate. Full single-threaded, lite pthread, and full pthread relaxed SIMD artifacts remain reproducible local candidates with smoke/parity evidence, but are not public release artifacts yet. Do not promote relaxed SIMD as an unconditional/default replacement without the broader browser/device matrix below.
 
 ## Promotion benchmark matrix
 
