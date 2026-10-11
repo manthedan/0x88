@@ -36,7 +36,8 @@ import { lineChartSvg } from './charts.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { annotatedPgn, type GameReview, type ReviewedMove, type ReviewPosition, reviewGame } from './gameReview.ts';
 import { type GameNode, GameTree } from './gameTree.ts';
-import { Maia3BrowserEvaluator, type Maia3Evaluation, maia3WinProbability } from './maia3.ts';
+import { LatestOnlyTask } from './latestOnlyTask.ts';
+import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import {
   buildOpeningPositionIndex,
   type ImportedGame,
@@ -3493,7 +3494,7 @@ const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
 let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
 let maia3PanelLoadGeneration = 0;
-let maia3PanelSeq = 0;
+let maia3PanelTask: LatestOnlyTask<string> | null = null;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
 
 function maia3PanelStatus(text: string): void {
@@ -3522,6 +3523,10 @@ async function enableMaia3Panel(): Promise<void> {
       return;
     }
     maia3PanelEvaluator = evaluator;
+    maia3PanelTask = new LatestOnlyTask(
+      (fen, isCurrent) => renderMaia3Panel(fen, evaluator, () => isCurrent() && !isStaleMount(mountSignal) && maia3PanelEvaluator === evaluator),
+      (error) => maia3PanelStatus(`Maia3 evaluation failed: ${(error as Error).message}`),
+    );
     hideModelProgress();
     el('maia3Enable').hidden = true;
     el('maia3Grid').hidden = false;
@@ -3542,10 +3547,15 @@ async function enableMaia3Panel(): Promise<void> {
 }
 
 function scheduleMaia3Panel(): void {
-  if (!maia3PanelEvaluator) return;
+  const task = maia3PanelTask;
+  // Invalidate on navigation, not only when the debounce eventually dispatches.
+  task?.invalidate();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  maia3PanelTimer = null;
+  if (!task) return;
   maia3PanelTimer = setTimeout(() => {
-    void renderMaia3Panel();
+    maia3PanelTimer = null;
+    task.request(tree.current.fen || START_FEN);
   }, 120);
 }
 
@@ -3556,27 +3566,19 @@ function bestEngineUci(fen: string): string | null {
   return first?.pvUci[0] ?? null;
 }
 
-async function renderMaia3Panel(): Promise<void> {
-  const evaluator = maia3PanelEvaluator;
-  if (!evaluator) return;
-  const seq = ++maia3PanelSeq;
-  const fen = tree.current.fen || START_FEN;
+async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, isCurrent: () => boolean): Promise<void> {
+  if (!isCurrent()) return;
   const board = parseFen(fen);
   if (!legalMoves(board).length) {
     el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>';
     return;
   }
-  let evaluations: Maia3Evaluation[];
-  try {
-    evaluations = await evaluator.evaluateConditions(
-      board,
-      MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })),
-    );
-  } catch (error) {
-    maia3PanelStatus(`Maia3 evaluation failed: ${(error as Error).message}`);
-    return;
-  }
-  if (seq !== maia3PanelSeq) return;
+  const evaluations = await evaluator.evaluateConditions(
+    board,
+    MAIA3_PANEL_RATINGS.map((elo) => ({ selfElo: elo, oppoElo: elo })),
+  );
+  if (!isCurrent()) return;
+  maia3PanelStatus('');
   const engineUci = bestEngineUci(fen);
   const sanByUci = new Map(legalMoves(board).map((move) => [moveToUci(move), moveToSan(board, move)]));
   const rows = evaluations.map((evaluation, i) => {
@@ -4019,7 +4021,8 @@ function disposePageResources(): void {
   maia3PanelEvaluator = null;
   maia3PanelLoading = false;
   maia3PanelLoadGeneration += 1;
-  maia3PanelSeq += 1;
+  maia3PanelTask?.dispose();
+  maia3PanelTask = null;
   maia3PanelTimer = null;
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = null;
