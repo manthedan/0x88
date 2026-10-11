@@ -95,6 +95,27 @@ test('no output stream can hide a malformed summary in another stream', () => te
     { name: 'fixture', wasm: binary, js }), /Missing\/invalid/);
 }));
 
+test('single-bench runners reject conflicting totals instead of preferring stale stderr', () => temporary(async (dir) => {
+  assert.throws(() => parseBenchOutput('Bench: 101 nodes 1 nps\nBench: 100 nodes 1 nps',
+    { requireConsistentSummaries: true }), /Conflicting full bench summaries/);
+  assert.equal(parseBenchOutput('Bench: 100 nodes 1 nps\nBench: 100 nodes 2 nps',
+    { requireConsistentSummaries: true }).nodes, 100);
+  const script = join(dir, 'fake-native.mjs');
+  writeFileSync(script, `for await (const chunk of process.stdin) {} console.error('Bench: 100 nodes 1 nps'); console.log('Bench: 101 nodes 1 nps');`);
+  await assert.rejects(runNativeBuiltin({ options: { nativeCmd: `"${process.execPath}" "${script}"`, timeout: 5000 } }), /Conflicting full bench summaries/);
+  const binary = join(dir, 'stormphrax-emscripten.wasm');
+  const js = join(dir, 'stormphrax-emscripten.js');
+  writeFileSync(binary, wasiTranscript('Bench: 101 nodes 1 nps\n', 'Bench: 100 nodes 1 nps\n'));
+  await assert.rejects(runWasiBench({ tmp: dir, engine: 'viridithas', options: { timeout: 5000 } },
+    { name: 'fixture', wasm: binary }), /Conflicting full bench summaries/);
+  writeFileSync(join(dir, 'stormphrax-emscripten.data'), 'fixture net');
+  writeFileSync(js, `module.exports = async (options) => ({ ccall: () => {
+    options.printErr('Bench: 100 nodes 1 nps'); options.print('Bench: 101 nodes 1 nps');
+  } });`);
+  await assert.rejects(runEmscriptenBuiltin({ tmp: dir, artifacts: dir, engine: 'stormphrax', options: { timeout: 5000 } },
+    { name: 'fixture', wasm: binary, js }), /Conflicting full bench summaries/);
+}));
+
 test('per-position bench nodes and bestmove when available', () => {
   const result = parseBenchOutput('Bench [# 1]: bestmove e2e4 score 25 1234 nodes 2468 nps | fen\nResults: 1234 nodes 1 nps');
   assert.deepEqual(result.rows, [{ position: 1, bestmove: 'e2e4', nodes: 1234 }]);

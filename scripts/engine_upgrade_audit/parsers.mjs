@@ -3,7 +3,7 @@ export function parseCommitBench(message) {
   return match ? Number(match[1]) : null;
 }
 
-export function parseBenchOutput(text, { expectedRows } = {}) {
+export function parseBenchOutput(text, { expectedRows, requireConsistentSummaries = false } = {}) {
   // Recognize records before validating them, and validate ALL summaries.
   // Callers may combine separately captured stdout/stderr without emission
   // ordering; neither stream may hide a malformed record in the other.
@@ -21,11 +21,16 @@ export function parseBenchOutput(text, { expectedRows } = {}) {
   ];
   if (!summaries.length) throw new Error('Missing/invalid full bench node summary');
   let nodes;
+  let firstNodes;
   for (const record of summaries) {
     const match = patterns.map((pattern) => record.match(pattern)).find(Boolean);
     nodes = match ? Number(match[1]) : null;
     if (!match || match.slice(1).some((token) => token !== undefined && !Number.isFinite(Number(token)))
       || !Number.isSafeInteger(nodes) || nodes <= 0) throw new Error(`Missing/invalid full bench node summary: ${record}`);
+    if (requireConsistentSummaries && firstNodes !== undefined && nodes !== firstNodes) {
+      throw new Error(`Conflicting full bench summaries: ${firstNodes} != ${nodes}; output order cannot establish a reference`);
+    }
+    firstNodes ??= nodes;
   }
   const rows = [];
   for (const line of text.split(/\r?\n/).map((record) => record.trim())) {

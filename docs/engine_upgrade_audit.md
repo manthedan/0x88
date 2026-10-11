@@ -104,7 +104,9 @@ not found" is not proof that an executable is unavailable.
 Runtime failures, incomplete native output and invalid summaries fail. The final
 summary record is selected only after validating every recognized summary's
 complete format and numeric tokens on both stdout and stderr; stream ordering
-or earlier valid output cannot hide a malformed summary.
+or earlier valid output cannot hide a malformed summary. Each built-in runner
+requests one bench and requires all recognized totals to agree; conflicting
+well-formed stdout/stderr totals fail rather than selecting a stale reference.
 Replay likewise validates complete UCI bestmove records and safe-integer node
 tokens before accumulating each search, including the final node-bearing line.
 Supported

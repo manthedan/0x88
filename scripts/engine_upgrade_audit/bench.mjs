@@ -8,6 +8,9 @@ import { wasiBenchProtocol } from './wasi_protocol.mjs';
 const worker = (name) => fileURLToPath(new URL(name, import.meta.url));
 let serial = 0;
 const builtinRows = { berserk: 50, reckless: 50 };
+// Each runner requests ONE bench. Separately captured output streams cannot
+// establish chronological summary precedence, so conflicting totals fail.
+const builtinParserOptions = (engine) => ({ expectedRows: builtinRows[engine], requireConsistentSummaries: true });
 function workspace(context, label) {
   const dir = join(context.tmp, `${label}-${serial++}`);
   mkdirSync(dir);
@@ -55,7 +58,7 @@ export async function runNativeBuiltin(context) {
   // Send the same UCI bench command through stdin. Appending argv to a quoted
   // ssh ... bash -lc command would set bash's $0, not the engine's bench arg.
   const output = await runProcess('bash', ['-lc', command], { input: 'bench\nquit\n', timeout: context.options.timeout });
-  return { ...parseBenchOutput(`${output.stdout}\n${output.stderr}`, { expectedRows: builtinRows[context.engine] }), source: '--native-cmd', command };
+  return { ...parseBenchOutput(`${output.stdout}\n${output.stderr}`, builtinParserOptions(context.engine)), source: '--native-cmd', command };
 }
 
 export function externalNetworkPath(context) {
@@ -74,7 +77,7 @@ export async function runWasiBench(context, tier) {
   await runProcess(process.execPath, [worker('wasi_worker.mjs'), context.engine, tier.wasm, dir], { timeout: context.options.timeout });
   const stdout = readFileSync(join(dir, 'stdout'), 'utf8');
   const stderr = readFileSync(join(dir, 'stderr'), 'utf8');
-  return { ...parseBenchOutput(`${stdout}\n${stderr}`, { expectedRows: builtinRows[context.engine] }), method: 'built-in bench (node:wasi preview1)' };
+  return { ...parseBenchOutput(`${stdout}\n${stderr}`, builtinParserOptions(context.engine)), method: 'built-in bench (node:wasi preview1)' };
 }
 
 export async function runEmscriptenBuiltin(context, tier) {
@@ -84,5 +87,5 @@ export async function runEmscriptenBuiltin(context, tier) {
   if (output.code !== 0) throw new Error(`bench process exit ${output.code}: ${output.stderr.slice(-1000)}`);
   const text = `${output.stdout}\n${output.stderr}`;
   if (/unknown command[^\n]*bench/i.test(text)) return { skip: 'facade explicitly rejects command("bench"); replay not validated in v1', diagnostic: text.slice(-500) };
-  return { ...parseBenchOutput(text, { expectedRows: builtinRows[context.engine] }), method: 'command("bench")' };
+  return { ...parseBenchOutput(text, builtinParserOptions(context.engine)), method: 'command("bench")' };
 }
