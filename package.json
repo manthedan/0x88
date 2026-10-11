@@ -11,6 +11,7 @@
     "test:targeted": "node scripts/run_targeted_tests.mjs",
     "test:stage-lc0-assets": "node scripts/stage_lc0_test_assets.mjs",
     "test:timings": "node scripts/test_timings.mjs",
+    "perf:canary": "node scripts/perf_canary.mjs",
     "validate:quick": "node scripts/validate_change.mjs --mode quick",
     "validate:full": "node scripts/validate_change.mjs --mode final",
     "bench:movegen": "node --experimental-strip-types scripts/bench_movegen.mjs",
