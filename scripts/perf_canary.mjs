@@ -151,6 +151,8 @@ function runBrowser(args) {
   return { status: 'ran', stdoutTail: result.stdout.slice(-2000) };
 }
 
+export const CANARY_FILE = /^canary-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/;
+
 export function previousCanary(outDir) {
   let names;
   try {
@@ -159,12 +161,39 @@ export function previousCanary(outDir) {
     if (error?.code === 'ENOENT') return null;
     throw error;
   }
-  // Filenames are UTC stamps (`canary-2026-10-11T08-59-33-383Z.json`), so
-  // lexicographic order is chronological. mtime lies after a copy between hosts.
-  const candidates = names.filter((name) => /^canary-\d{4}-.*\.json$/.test(name)).sort();
+  // Filenames are UTC stamps from stamp() (`canary-2026-10-11T08-59-33-383Z.json`).
+  // Lexicographic order is chronological. A looser prefix would let
+  // `canary-2026-notes.json` sort after a real stamp and become the baseline.
+  const candidates = names.filter((name) => CANARY_FILE.test(name)).sort();
   if (!candidates.length) return null;
   const name = candidates.at(-1);
   return { name, report: JSON.parse(readFileSync(path.join(outDir, name), 'utf8')) };
+}
+
+export function baselineKey(report) {
+  return {
+    arch: report?.environment?.host?.arch ?? null,
+    cpuModel: report?.environment?.host?.cpuModel ?? null,
+    artifact: report?.runtimeConfiguration?.modelArtifact?.path ?? null,
+    hashMb: report?.runtimeConfiguration?.hashMb ?? null,
+    depth: report?.benchmarkProtocol?.depth ?? null,
+    positionCount: report?.benchmarkProtocol?.positionCount ?? null,
+    suiteId: report?.benchmarkProtocol?.suiteId ?? null,
+  };
+}
+
+export function sameBaseline(previousReport, current) {
+  const prior = baselineKey(previousReport);
+  return (
+    prior.arch === current.arch &&
+    prior.cpuModel === current.cpuModel &&
+    prior.artifact === current.artifact &&
+    prior.hashMb === current.hashMb &&
+    prior.depth === current.depth &&
+    prior.positionCount === current.positionCount &&
+    prior.suiteId === current.suiteId &&
+    prior.suiteId !== null
+  );
 }
 
 function metricSamples(repeats, key) {
@@ -213,7 +242,19 @@ function main() {
   const browser = args.browser
     ? runBrowser(args)
     : { status: 'skipped', reason: 'Browser model-latency fixture not requested. Pass --browser to run scripts/lc0_browser_hybrid_input_bench.mjs.' };
-  const previous = previousCanary(args.out);
+  const found = previousCanary(args.out);
+  const currentKey = {
+    arch: os.arch(),
+    cpuModel: os.cpus()[0]?.model ?? null,
+    artifact: args.js,
+    hashMb: args.hash,
+    depth: args.depth,
+    positionCount: args.positions,
+    suiteId: 'rotated-fen-20',
+  };
+  const compatible = found && sameBaseline(found.report, currentKey);
+  const previous = compatible ? found : null;
+  const skippedBaseline = found && !compatible ? found.name : null;
   const comparison = buildComparison(repeats, previous);
   const cpus = os.cpus();
   const report = {
@@ -239,7 +280,7 @@ function main() {
       depth: args.depth,
       repeats: args.repeats,
       harness: 'scripts/emscripten_uci_bench.mjs',
-      comparison: 'previous local canary median, threshold max(10%, 3*MAD/median)',
+      comparison: 'previous canary on the same host, artifact, depth, positions, and hash; threshold max(10%, 3*MAD/median)',
       ciGate: false,
     },
     environment: {
@@ -261,6 +302,7 @@ function main() {
     },
     browser,
     comparison,
+    skippedBaseline,
     promotionAssessment: {
       role: 'canary',
       ciGate: false,
@@ -291,7 +333,9 @@ function printSummary(report, filePath) {
   console.log(`nps median ${Math.round(nps.median)} MAD ${Math.round(nps.mad)} (${formatRatio(nps.mad / Math.max(nps.median, 1e-9))})`);
   console.log(`engine time ms median ${time.median.toFixed(1)} MAD ${time.mad.toFixed(1)} (${formatRatio(time.mad / Math.max(time.median, 1e-9))})`);
   console.log(report.cpu.deterministicNodes ? 'nodes identical across repeats' : 'nodes differed across repeats');
-  if (!report.comparison) console.log('no previous canary; this run is the baseline');
+  if (report.skippedBaseline) {
+    console.log(`previous canary ${report.skippedBaseline} is a different host or suite; this run is a new baseline`);
+  } else if (!report.comparison) console.log('no previous canary; this run is the baseline');
   else {
     for (const metric of report.comparison.metrics) {
       console.log(

@@ -10,6 +10,7 @@ import { isArtifactChannelManifest, releaseCatalogEntries } from './engine_artif
 import { parseScriptArgs } from './lib/cli.mjs';
 
 const DEFAULT_ROOT = '../models/lc0-bestnets';
+const ASSET_ORIGIN = 'https://assets.0x88.app';
 const PINNED_MANIFEST_URL = new URL('../public/models/lc0/manifest.json', import.meta.url);
 const COMMITTED_CHANNEL_URL = new URL('../public/channels/stable.json', import.meta.url);
 // Required parity fixtures. Integrity comes from the committed model manifest,
@@ -125,6 +126,23 @@ function publishedIdentity(entry, logicalUrl) {
   return published;
 }
 
+/** Absolute http(s) URLs win. Root-relative identity paths use the catalog's http(s) origin, or the public asset origin when the catalog is a local file. */
+export function resolveArtifactDownloadUrl(rawUrl, releaseBase) {
+  if (!rawUrl) throw new Error('Artifact release entry has no download URL');
+  const httpBase = releaseBase && (releaseBase.protocol === 'http:' || releaseBase.protocol === 'https:') ? releaseBase : ASSET_ORIGIN;
+  let url;
+  try {
+    url = new URL(rawUrl, httpBase);
+  } catch {
+    throw new Error(`Artifact download URL is not usable: ${rawUrl}`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(`Artifact download URL must be http(s): ${url.href}`);
+  if (!url.pathname.replace(/^\/+/, '').startsWith('artifacts/sha256/')) {
+    throw new Error(`Artifact download URL is not an identity object: ${url.href}`);
+  }
+  return url;
+}
+
 async function loadCommitPinnedRelease() {
   const channel = JSON.parse(await readFile(COMMITTED_CHANNEL_URL, 'utf8'));
   if (!isArtifactChannelManifest(channel)) throw new Error(`Unexpected committed artifact channel schema: ${channel?.schema}`);
@@ -235,7 +253,8 @@ async function main() {
     if (!entry) throw new Error(`Stable artifact release is missing ${logicalUrl}`);
     const published = publishedIdentity(entry, logicalUrl);
     assertPublishedIntegrity(logicalUrl, published, pinnedAssets.get(logicalUrl));
-    downloads.push(new URL(entry.representation?.url ?? entry.artifact.artifactUrl ?? `/${entry.key}`, catalog.releaseBase));
+    const rawUrl = entry.representation?.url ?? entry.artifact.artifactUrl ?? `/${entry.key}`;
+    downloads.push(resolveArtifactDownloadUrl(rawUrl, catalog.releaseBase));
   }
   if (args.check) throw new Error(`Required LC0 test asset is missing or corrupt: ${missing.map((item) => item.path).join(', ')}`);
   for (const item of missing) {

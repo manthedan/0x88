@@ -7,9 +7,9 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { releaseCatalogEntries } from '../scripts/engine_artifact_registry.mjs';
-import { REQUIRED_ASSETS } from '../scripts/stage_lc0_test_assets.mjs';
+import { REQUIRED_ASSETS, resolveArtifactDownloadUrl } from '../scripts/stage_lc0_test_assets.mjs';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const manifest = JSON.parse(readFileSync(new URL('../public/models/lc0/manifest.json', import.meta.url), 'utf8'));
@@ -210,4 +210,15 @@ test('a missing asset is fetched from the pinned catalog and rejected when the b
   assert.match(rejected.stderr, /Artifact integrity mismatch/);
   await assert.rejects(readFile(join(root, 'onnx', 'tiny.onnx')));
   await assert.rejects(readFile(join(root, 'onnx', `tiny.onnx.partial-${rejected.pid}`)));
+});
+
+test('a local release catalog resolves root-relative identity URLs against the asset origin', () => {
+  const relative = '/artifacts/sha256/abc/identity';
+  const localCatalog = pathToFileURL('/tmp/release.json');
+  assert.equal(resolveArtifactDownloadUrl(relative, localCatalog).href, 'https://assets.0x88.app/artifacts/sha256/abc/identity');
+  const absolute = 'http://127.0.0.1:9/artifacts/sha256/abc/tiny.onnx';
+  assert.equal(resolveArtifactDownloadUrl(absolute, localCatalog).href, absolute);
+  const remoteCatalog = new URL('https://example.test/releases/pin.json');
+  assert.equal(resolveArtifactDownloadUrl(relative, remoteCatalog).href, 'https://example.test/artifacts/sha256/abc/identity');
+  assert.throws(() => resolveArtifactDownloadUrl('/models/lc0/tiny.onnx', localCatalog), /identity object/);
 });

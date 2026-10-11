@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { compareMetric, mad, median } from '../scripts/lib/perf_canary_stats.mjs';
-import { previousCanary } from '../scripts/perf_canary.mjs';
+import { previousCanary, sameBaseline } from '../scripts/perf_canary.mjs';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
@@ -64,6 +64,7 @@ test('the previous canary is the latest stamped file, not latest.json or a newer
   try {
     writeFileSync(path.join(dir, 'latest.json'), '{"cpu":{"aggregate":{"npsMedian":{"median":1}}}}\n');
     writeFileSync(path.join(dir, 'canary-notes.json'), '{"createdAt":"notes"}\n');
+    writeFileSync(path.join(dir, 'canary-2026-notes.json'), '{"createdAt":"unstamped"}\n');
     const earlier = path.join(dir, 'canary-2026-10-11T08-59-33-383Z.json');
     writeFileSync(earlier, '{"createdAt":"first"}\n');
     writeFileSync(path.join(dir, 'canary-2026-10-11T08-59-35-667Z.json'), '{"createdAt":"second"}\n');
@@ -76,3 +77,28 @@ test('the previous canary is the latest stamped file, not latest.json or a newer
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a different depth or host does not compare against the previous canary', () => {
+  const report = {
+    environment: { host: { arch: 'arm64', cpuModel: 'Apple M4' } },
+    runtimeConfiguration: { modelArtifact: { path: 'public/berserk/berserk-emscripten.js' }, hashMb: 16 },
+    benchmarkProtocol: { depth: 8, positionCount: 20, suiteId: 'rotated-fen-20' },
+  };
+  const current = baselineFrom(report);
+  assert.equal(sameBaseline(report, current), true);
+  assert.equal(sameBaseline(report, { ...current, depth: 9 }), false);
+  assert.equal(sameBaseline(report, { ...current, cpuModel: 'AMD Ryzen 9 3900XT 12-Core Processor' }), false);
+  assert.equal(sameBaseline(report, { ...current, hashMb: 32 }), false);
+});
+
+function baselineFrom(report) {
+  return {
+    arch: report.environment.host.arch,
+    cpuModel: report.environment.host.cpuModel,
+    artifact: report.runtimeConfiguration.modelArtifact.path,
+    hashMb: report.runtimeConfiguration.hashMb,
+    depth: report.benchmarkProtocol.depth,
+    positionCount: report.benchmarkProtocol.positionCount,
+    suiteId: report.benchmarkProtocol.suiteId,
+  };
+}

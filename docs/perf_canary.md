@@ -27,9 +27,12 @@ Results land in `.local-dev-artifacts/perf-canary/` (gitignored):
 - `canary-<timestamp>.json` — one run, schema `browser-engine.benchmark-artifact.v1`
 - `latest.json` — a copy of the newest run
 
-The next run diffs its medians against the newest `canary-*.json`. A swing is
-called `regressed` or `improved` only when it is larger than both 10% and
-three times this run's MAD/median. A run whose own MAD/median exceeds 10% is
+The next run diffs its medians against the newest stamped `canary-<UTC>.json`
+whose host, artifact, depth, position count, and hash match this invocation.
+A different machine or a different suite starts a new baseline instead of a
+false regression. `latest.json` and names that are not a full UTC stamp are
+ignored. A swing is called `regressed` or `improved` only when it is larger
+than both 10% and three times this run's MAD/median. A run whose own MAD/median exceeds 10% is
 `noisy-run` and is not treated as a regression. Fewer than three repeats is
 `insufficient-repeats`.
 
@@ -56,6 +59,7 @@ Berserk js/wasm/data files; it does not need `node_modules`.
 
 ```sh
 rsync -a --exclude node_modules --exclude .git --exclude dist-client \
+  --exclude .local-dev-artifacts \
   ./ yukon:~/agents/chore-test-infra-perf-baseline/
 ssh yukon "bash -lc 'cd ~/agents/chore-test-infra-perf-baseline && taskset -c 2 node scripts/perf_canary.mjs'"
 ```
