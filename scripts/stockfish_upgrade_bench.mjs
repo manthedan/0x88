@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseUciSearch, roundOrder } from './emscripten_uci_protocol.mjs';
+import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseInfo, parseUciSearch, roundOrder } from './emscripten_uci_protocol.mjs';
 
 export function benchSignature(lines) {
   let nodes = null;
@@ -219,6 +219,11 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
         }
       }
       validateCompletions(lines.slice(replayStart), expectedSearches, 'replay');
+      for (const line of lines) {
+        // Terminal-root info may have an empty PV; it has no moves to print.
+        // Its node/null-move exception is verified against the corpus above.
+        if (/^info\s/.test(line) && !/^info\s+string\b/.test(line)) parseInfo(line.replace(/\s+pv\s*$/, ''));
+      }
     }
   }
 }

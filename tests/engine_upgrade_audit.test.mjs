@@ -500,6 +500,24 @@ for (const [label, trailing] of [
     { label: 'fixture', command: process.execPath, args: [engine] }, ['startpos'], 1), /Malformed bestmove|Unexpected replay bestmove coverage/);
 }));
 
+test('replay validates info emitted after bestmove and on quit across both streams', () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-trailing-info.mjs');
+  for (const [phase, output] of [['search', 'console.log'], ['quit', 'console.log'], ['quit', 'process.stderr.write']]) {
+    writeFileSync(engine, `import { createInterface } from 'node:readline';
+      for await (const line of createInterface({ input: process.stdin })) {
+        if (line === 'uci') console.log('uciok');
+        if (line === 'isready') console.log('readyok');
+        if (line.startsWith('go ')) {
+          console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+          if (${JSON.stringify(phase)} === 'search') console.log('info nodes invalid');
+        }
+        if (line === 'quit') { if (${JSON.stringify(phase)} === 'quit') ${output}('info nodes invalid'); break; }
+      }`);
+    await assert.rejects(runReplay({ tmp: dir, options: { timeout: 5000 } },
+      { label: 'fixture', command: process.execPath, args: [engine] }, ['startpos'], 1), /Malformed UCI info record/);
+  }
+}));
+
 test('replay accepts complete moves, promotions, ponder and terminal records with the last count', () => temporary(async (dir) => {
   const engine = join(dir, 'fake-valid-replay.mjs');
   const outputs = [
