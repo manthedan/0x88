@@ -19,6 +19,7 @@ import {
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
+import { analysisResultCacheKey, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
@@ -384,6 +385,11 @@ let lastReviewSignature = '';
 let analyzing = false;
 const lineCache = new Map<string, AnalysisLine[]>();
 const engineLineCache = new Map<string, AnalysisLine[]>();
+function cacheEngineLines(key: string, lines: AnalysisLine[]): void {
+  engineLineCache.delete(key);
+  engineLineCache.set(key, lines);
+  if (engineLineCache.size > 512) engineLineCache.delete(engineLineCache.keys().next().value!);
+}
 const completeAnalysisKeys = new Set<string>();
 interface SearchProgressSnapshot {
   label: string;
@@ -1458,10 +1464,15 @@ function rowLabel(row: EngineRow): string {
   return recklessVariantForKey(row.variant).label;
 }
 
-function engineAnalysisCacheKey(fen: string, row: EngineRow): string {
+function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tree.current, requestedMultiPv = multiPv()): string {
   const runtime = row.family === 'lc0' && !isLc0BigNetVariant(row.variant) ? selectedLc0Runtime() : '';
-  const history = tree.historyBoards().map(boardToFen).join('|');
-  return [fen, history, row.family, row.variant, row.strength, `multipv=${multiPv()}`, runtime].join('\u0000');
+  const { dial, cpuBudget } = resourceBroker.snapshot();
+  const participants = activeEngineRows()
+    .filter((entry) => engineResourceProfile(entry.family).resourceClass === 'cpu')
+    .map((entry) => `${entry.family}:${entry.variant}`)
+    .sort();
+  const cpu = engineResourceProfile(row.family).resourceClass === 'cpu' ? JSON.stringify([dial, cpuBudget, participants]) : '';
+  return analysisResultCacheKey(fen, tree.historyBoards(node).map(boardToFen), row, { multiPv: requestedMultiPv, runtime, cpu });
 }
 
 function analysisSelectionCacheKey(fen: string, rows = activeEngineRows()): string {
@@ -2538,9 +2549,8 @@ function clearReviewIfMainlineChanged(): void {
 }
 
 interface ReviewEngineChoice {
-  engine: {
-    analyze(fen: string, opts?: { multipv?: number; depth?: number; signal?: AbortSignal }): Promise<{ scoreCp?: number; mateIn?: number; pvUci: string[] }[]>;
-  };
+  engine: BrowserUciEngine;
+  row: EngineRow;
   label: string;
   depth: number;
 }
@@ -2549,15 +2559,17 @@ interface ReviewEngineChoice {
 function reviewEngineChoice(): ReviewEngineChoice {
   for (const row of activeEngineRows()) {
     if (row.family === 'sf')
-      return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
-    if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), label: recklessVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'viridithas') return { engine: getViridithasFor(row.variant), label: viridithasVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), label: berserkVariantForKey(row.variant).label, depth: row.strength };
+      return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), row, label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
+    if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), row, label: recklessVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'viridithas')
+      return { engine: getViridithasFor(row.variant), row, label: viridithasVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), row, label: berserkVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'plentychess')
-      return { engine: getPlentyChessFor(row.variant), label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'stormphrax') return { engine: getStormphraxFor(row.variant), label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
+      return { engine: getPlentyChessFor(row.variant), row, label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'stormphrax')
+      return { engine: getStormphraxFor(row.variant), row, label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
   }
-  return { engine: getStockfish('lite'), label: 'SF Lite', depth: 12 };
+  return { engine: getStockfish('lite'), row: { family: 'sf', variant: 'lite', strength: 12 }, label: 'SF Lite', depth: 12 };
 }
 
 function winWhiteFromInfo(fen: string, info: { scoreCp?: number; mateIn?: number } | undefined): number {
@@ -2620,7 +2632,15 @@ async function runGameReview(): Promise<void> {
     el('reviewStatus').textContent = 'Load a PGN or play some moves first.';
     return;
   }
-  const { engine, label, depth } = reviewEngineChoice();
+  cancelActiveAnalysisRun();
+  const { engine, row, label, depth } = reviewEngineChoice();
+  const reviewTree = tree;
+  // Review remains a single-PV search. A MultiPV=3 interactive line is not
+  // equivalent to MultiPV=1 at fixed depth, so it deliberately cannot hit.
+  const reviewMultiPv = 1;
+  const cacheKeys = nodes.map((node) => engineAnalysisCacheKey(node.fen, row, node, reviewMultiPv));
+  syncBrokerParticipants([...activeEngineRows(), row]);
+  let cacheHits = 0;
   const controller = new AbortController();
   reviewAbort = controller;
   el('reviewGame').toggleAttribute('disabled', true);
@@ -2640,8 +2660,27 @@ async function runGameReview(): Promise<void> {
         positions.push({ winWhite: inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5, bestUci: null, legalMoves: 0 });
         continue;
       }
-      const lines = await engine.analyze(fen, { multipv: 1, depth, signal: controller.signal });
+      const cached = cachedReviewPosition(engineLineCache.get(cacheKeys[i]), legal);
+      if (cached) {
+        cacheHits += 1;
+        positions.push(cached);
+        continue;
+      }
+      const engineId = row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`;
+      const lines = await withCpuLease(engineId, controller.signal, async (lease) => {
+        cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
+        if (cpuSessions.needsReset(engine, reviewTree)) {
+          await engine.newGame(controller.signal);
+          cpuSessions.prepared(engine, reviewTree);
+        }
+        return withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
+          analyzeCpuPosition(engine, row, fen, analysisGamePosition(reviewTree, nodes[i]), { multipv: reviewMultiPv, depth, signal }),
+        );
+      });
       if (reviewAbort !== controller) return;
+      if (controller.signal.aborted) break;
+      const formatted = stockfishAnalysisLines(lines, fen, label);
+      if (formatted.length) cacheEngineLines(cacheKeys[i], formatted);
       positions.push({
         winWhite: winWhiteFromInfo(fen, lines[0]),
         bestUci: lines[0]?.pvUci?.[0] ?? null,
@@ -2659,7 +2698,7 @@ async function runGameReview(): Promise<void> {
     lastReviewSignature = reviewSignature(nodes);
     renderReview(lastReview, nodes);
     el('reviewCopyPgn').hidden = false;
-    el('reviewStatus').textContent = `Reviewed ${moves.length} moves with ${label}.`;
+    el('reviewStatus').textContent = `Reviewed ${moves.length} moves with ${label} · ${cacheHits}/${nodes.length} cached positions.`;
   } catch (error) {
     if (reviewAbort === controller) {
       el('reviewStatus').textContent = (error as Error).name === 'AbortError' ? 'Review stopped.' : `Review failed: ${(error as Error).message}`;
@@ -3074,6 +3113,7 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
+  reviewAbort?.abort();
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
     return;
@@ -3153,7 +3193,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           try {
             const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
             if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
-            if (lines.length) engineLineCache.set(cacheKey, lines);
+            if (lines.length) cacheEngineLines(cacheKey, lines);
             else engineLineCache.delete(cacheKey);
             lineGroups[index] = lines;
             publishLines();
@@ -3423,6 +3463,7 @@ let analysisGameTree = tree;
 function afterNavigation() {
   if (analysisGameTree !== tree) {
     analysisGameTree = tree;
+    reviewAbort?.abort();
     cancelActiveAnalysisRun();
     searcher?.resetTree();
     (mainEvaluator as CachedLc0Evaluator | null)?.clearCache?.();
