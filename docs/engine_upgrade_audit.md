@@ -102,8 +102,9 @@ automatically. An OS-attested spawn/ENOENT lookup failure also skips. Failures
 inside supplied shell/SSH commands remain FAIL: diagnostic text such as "network
 not found" is not proof that an executable is unavailable.
 Runtime failures, incomplete native output and invalid summaries fail. The final
-summary record is selected before validating its complete format and numeric
-tokens; malformed final output never falls back to an earlier valid summary.
+summary record is selected only after validating every recognized summary's
+complete format and numeric tokens on both stdout and stderr; stream ordering
+or earlier valid output cannot hide a malformed summary.
 Replay likewise validates complete UCI bestmove records and safe-integer node
 tokens before accumulating each search, including the final node-bearing line.
 Supported
@@ -132,7 +133,7 @@ Adapters:
 | Engine | Full-bench protocol |
 | --- | --- |
 | Viridithas | Node `WASI`, preview1, args `['viridithas', 'bench']`, `returnOnExit`; parse `N nodes in ...s`. |
-| Reckless | Node WASI built-in bench; parse table footer or `Bench: N nodes ... nps`; retain per-position nodes where printed. External WASI supported; browser API facades explicitly skip (no `_start`/bench). |
+| Reckless | Node WASI built-in bench via stdin `bench`/`quit` with no bench argv, matching native UCI mode and retaining all 50 table rows. Parse table footer or `Bench: N nodes ... nps`. External WASI supported; browser API facades explicitly skip (no `_start`/bench). |
 | PlentyChess | Never invoke deadlocking single-thread `bench`. Replay **all 46** `BENCH_POSITIONS` at depth 13, preserving `moves ...` suffixes; enable `UCI_Chess960` immediately before **zero-based index 44**. Sum the last UCI nodes before every bestmove. |
 | Stockfish | Reuse `stockfish_upgrade_bench.mjs`: Stockfish.js compiles out bench, so replay **all 51** pinned `benchmark.cpp` Defaults at depth 10, including options/terminal positions. Native built-in depth-10 bench must equal native replay before reference acceptance. Full/lite references are separate: use `--native-lite-cmd` / `--native-lite-bench` for lite. |
 | Berserk | `command("bench")` works in shipped tiers; parse `Results: N nodes`, including position signatures. |

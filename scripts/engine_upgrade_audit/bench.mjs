@@ -3,6 +3,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseBenchOutput } from './parsers.mjs';
 import { runProcess } from './process.mjs';
+import { wasiBenchProtocol } from './wasi_protocol.mjs';
 
 const worker = (name) => fileURLToPath(new URL(name, import.meta.url));
 let serial = 0;
@@ -64,7 +65,7 @@ export function externalNetworkPath(context) {
 
 export async function runWasiBench(context, tier) {
   const dir = workspace(context, 'wasi');
-  writeFileSync(join(dir, 'stdin'), '');
+  writeFileSync(join(dir, 'stdin'), wasiBenchProtocol(context.engine).stdin);
   if (tier.external) {
     const network = externalNetworkPath(context);
     copyFileSync(network, join(dir, 'reckless.nnue'));

@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { runProcess } from '../scripts/engine_upgrade_audit/process.mjs';
 import { emscriptenTiers, wasiTiers } from '../scripts/engine_upgrade_audit/tiers.mjs';
 import { parseBestmove, parseInfo, parseUciSearch } from '../scripts/emscripten_uci_protocol.mjs';
+import { wasiBenchProtocol } from '../scripts/engine_upgrade_audit/wasi_protocol.mjs';
 
 const ref = 'a'.repeat(40);
 function temporary(fn) {
@@ -238,6 +239,24 @@ test('importable SIMD inspector counts relaxed opcodes using spec subop values',
   assert.equal(simdStatus('scalar', inspectWasmSimd(wasm([]))), 'PASS');
   for (const name of ['simd128', 'sse41', 'relaxed']) assert.equal(simdStatus(name, inspectWasmSimd(wasm([]))), 'FAIL');
 });
+
+test('Reckless native and WASI use the same row-producing stdin bench protocol', () => temporary(async (dir) => {
+  assert.deepEqual(wasiBenchProtocol('reckless'), { args: ['reckless'], stdin: 'bench\nquit\n' });
+  assert.deepEqual(wasiBenchProtocol('viridithas'), { args: ['viridithas', 'bench'], stdin: '' });
+  const output = '0 40 0.5s 80 N/s\n1 60 0.5s 120 N/s\n100 1.0s 100 N/s\n';
+  const engine = join(dir, 'fake-native.mjs');
+  writeFileSync(engine, `let input = ''; for await (const chunk of process.stdin) input += chunk;
+    if (input !== ${JSON.stringify(wasiBenchProtocol('reckless').stdin)} || process.argv.length !== 2) process.exit(1);
+    console.log(${JSON.stringify(output)});`);
+  const context = { tmp: dir, engine: 'reckless', options: { nativeCmd: `"${process.execPath}" "${engine}"`, timeout: 5000 } };
+  const native = await runNativeBuiltin(context);
+  const binary = join(dir, 'fixture.wasm');
+  writeFileSync(binary, wasiTranscript(output));
+  const candidate = await runWasiBench(context, { name: 'fixture', wasm: binary });
+  assert.equal(candidate.rows.length, 2);
+  assert.equal(compareBench(candidate, native).status, 'PASS');
+  assert.equal(compareBench(candidate, native).data.perPositionCompared, true);
+}));
 
 test('SIMD inspector ignores opcode-like bytes in immediates and data', () => {
   const scalar = wasm([0x41, 0xfd, 0x00, 0x1a]); // signed constant contains fd
