@@ -70,6 +70,14 @@ export function plyLabel(ply: number, san: string | undefined): string {
   return ply % 2 === 1 ? `${moveNumber}. ${san}` : `${moveNumber}… ${san}`;
 }
 
+/**
+ * Label for engine search progress shown next to the board. The search always
+ * runs on the live position, so while browsing an earlier ply it says so.
+ */
+export function searchProgressLabel(label: string, viewPly: number | null): string {
+  return viewPly === null ? label : `${label} (live position)`;
+}
+
 export interface MoveNavKeyEvent {
   key: string;
   altKey?: boolean;
@@ -93,11 +101,11 @@ export function isKeyboardOwnerTarget(target: unknown): boolean {
 /**
  * Map a keydown to a navigation action, following the analysis page
  * (ArrowLeft/Right step, ArrowUp/Down jump to start/end) plus Home/End.
- * Modified keys (Alt+Left is browser Back) and keys aimed at form controls
- * are ignored.
+ * Modified keys (Alt+Left is browser Back, Shift+arrows extend a caret
+ * browsing selection) and keys aimed at form controls are ignored.
  */
 export function moveNavActionForKey(event: MoveNavKeyEvent): MoveNavAction | null {
-  if (event.altKey || event.ctrlKey || event.metaKey) return null;
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
   if (isKeyboardOwnerTarget(event.target)) return null;
   switch (event.key) {
     case 'ArrowLeft':

@@ -50,6 +50,7 @@ import {
   navigateViewPly,
   normalizeViewPly,
   plyLabel,
+  searchProgressLabel,
   viewPlyFor,
 } from './moveNavigation.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
@@ -192,6 +193,8 @@ interface PlayContext {
    * they are when the engine replies (lichess behaviour).
    */
   viewPly: number | null;
+  /** Latest search progress rendered into #dlProgress, so its live-position label can follow view changes. */
+  searchProgress: { label: string; progress: SearchProgress } | null;
   /** Last view key the move list was scrolled for, so engine replies do not yank a manually scrolled list. */
   moveListScrollKey: string;
   pendingRestart: { engine: string; color: 'white' | 'black' | 'random' } | null;
@@ -226,6 +229,7 @@ function createPlayContext(): PlayContext {
     engineThinking: false,
     pendingPromotion: null,
     viewPly: null,
+    searchProgress: null,
     moveListScrollKey: '',
     pendingRestart: null,
     activeEngineId: 'maia3',
@@ -431,10 +435,9 @@ function ctxSetEngineFailure(ctx: PlayContext, error: unknown): void {
   buttonEl('retryEngine').hidden = false;
 }
 
-function ctxSearchProgressText(
-  label: string,
-  progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number },
-): string {
+type SearchProgress = { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number };
+
+function ctxSearchProgressText(label: string, progress: SearchProgress): string {
   const completed = progress.completedVisits ?? progress.visits;
   const requested = progress.requestedVisits ?? progress.visits;
   const pct = requested > 0 ? ` ${((100 * completed) / requested).toFixed(0)}%` : '';
@@ -442,11 +445,7 @@ function ctxSearchProgressText(
   return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
 }
 
-function ctxShowSearchProgress(
-  ctx: PlayContext,
-  label: string,
-  progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number },
-): void {
+function ctxShowSearchProgress(ctx: PlayContext, label: string, progress: SearchProgress): void {
   const container = maybeEl('dlProgress');
   if (!container) return;
   const completed = progress.completedVisits ?? progress.visits;
@@ -460,8 +459,9 @@ function ctxShowSearchProgress(
   bar.setAttribute('aria-valuetext', `${completed} of ${requested} visits`);
   const text = document.createElement('div');
   text.className = 'dl-label small';
-  // The search always runs on the live position; say so while the board shows an earlier ply.
-  text.textContent = ctxSearchProgressText(ctx.viewPly === null ? label : `${label} (live position)`, progress);
+  text.dataset.searchProgress = '';
+  ctx.searchProgress = { label, progress };
+  text.textContent = ctxSearchProgressText(searchProgressLabel(label, ctx.viewPly), progress);
   row.append(bar, text);
   container.replaceChildren(row);
   container.hidden = false;
@@ -470,6 +470,18 @@ function ctxShowSearchProgress(
     ctx.lastProgressAnnouncement = milestone;
     el('progressAnnouncement').textContent = milestone === 4 ? `${label} search complete.` : `${label} search ${milestone * 25}% complete.`;
   }
+}
+
+/**
+ * Re-label the visible search progress after a view change: the search always
+ * runs on the live position, so it is tagged as such only while browsing.
+ * Only touches a row ctxShowSearchProgress rendered (download progress and
+ * hidden containers have no [data-search-progress] node).
+ */
+function ctxRefreshSearchProgressLabel(ctx: PlayContext): void {
+  const text = maybeEl('dlProgress')?.querySelector<HTMLElement>('[data-search-progress]');
+  if (!text || !ctx.searchProgress) return;
+  text.textContent = ctxSearchProgressText(searchProgressLabel(ctx.searchProgress.label, ctx.viewPly), ctx.searchProgress.progress);
 }
 
 function ctxShowDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Downloading'): void {
@@ -1293,6 +1305,7 @@ function ctxRender(ctx: PlayContext): void {
   el('status').textContent = ctxStatusText(ctx);
   el('status').classList.toggle('over', !!ctx.gameOver);
   el('status').classList.toggle('browsing', browsing);
+  ctxRefreshSearchProgressLabel(ctx);
   el('status').setAttribute('aria-busy', ctx.engineThinking ? 'true' : 'false');
   ctxRenderMaia3Controls(ctx);
   el('levelCaption').textContent = ctxStrengthCaption(ctx);

@@ -9,6 +9,7 @@ import {
   navigateViewPly,
   normalizeViewPly,
   plyLabel,
+  searchProgressLabel,
   viewPlyFor,
 } from '../src/lc0/moveNavigation.ts';
 
@@ -98,10 +99,19 @@ test('modified keys and keys aimed at form controls are ignored', () => {
   assert.equal(moveNavActionForKey({ key: 'ArrowLeft', altKey: true }), null, 'Alt+Left is browser Back');
   assert.equal(moveNavActionForKey({ key: 'ArrowRight', metaKey: true }), null);
   assert.equal(moveNavActionForKey({ key: 'Home', ctrlKey: true }), null);
+  for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']) {
+    assert.equal(moveNavActionForKey({ key, shiftKey: true }), null, `Shift+${key} extends a caret-browsing selection`);
+  }
   for (const owner of ['input', 'textarea', 'select', '.promotion-overlay']) {
     assert.equal(moveNavActionForKey({ key: 'ArrowLeft', target: fakeTarget([owner]) }), null, owner);
   }
   assert.equal(moveNavActionForKey({ key: 'ArrowLeft', target: { isContentEditable: true } }), null);
   assert.equal(isKeyboardOwnerTarget(null), false);
   assert.equal(isKeyboardOwnerTarget({}), false);
+});
+
+test('search progress is tagged as the live position only while browsing', () => {
+  assert.equal(searchProgressLabel('Lc0 search', null), 'Lc0 search');
+  assert.equal(searchProgressLabel('Lc0 search', 0), 'Lc0 search (live position)');
+  assert.equal(searchProgressLabel('Lc0 search', 3), 'Lc0 search (live position)');
 });
