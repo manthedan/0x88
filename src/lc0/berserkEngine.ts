@@ -160,6 +160,7 @@ export class BerserkEngine implements BrowserUciEngine {
   private stderr: string[] = [];
   private options: BerserkOptions;
   private initialized = false;
+  private appliedOptions = new Map<string, string>();
   private queueTail: Promise<void> = Promise.resolve();
   private lastInfoLines: BerserkInfoLine[] = [];
   private readonly jsUrl: string;
@@ -347,6 +348,7 @@ export class BerserkEngine implements BrowserUciEngine {
     if (this.workerObjectUrl) URL.revokeObjectURL(this.workerObjectUrl);
     this.workerObjectUrl = null;
     this.initialized = false;
+    this.appliedOptions.clear();
   }
 
   private restartAfterAbort(): void {
@@ -359,11 +361,18 @@ export class BerserkEngine implements BrowserUciEngine {
     await this.request('command', { command }, signal);
   }
 
-  private applyOptions(signal?: AbortSignal): Promise<void> {
-    const commands: string[] = [];
-    if (this.options.hashMb !== undefined) commands.push(hashCommand(this.options.hashMb));
-    if (this.options.threads !== undefined) commands.push(threadsCommand(this.options.threads));
-    return commands.reduce((promise, command) => promise.then(() => this.sendCommand(command, signal)), Promise.resolve());
+  private async applyOptions(signal?: AbortSignal): Promise<void> {
+    // Berserk's Hash handler calls TTInit even for an unchanged size, clearing
+    // the TT. Cache acknowledged, normalized commands only for this worker.
+    const commands = new Map<string, string>();
+    if (this.options.hashMb !== undefined) commands.set('Hash', hashCommand(this.options.hashMb));
+    if (this.options.threads !== undefined) commands.set('Threads', threadsCommand(this.options.threads));
+    for (const [name, command] of commands) {
+      if (this.appliedOptions.get(name) === command) continue;
+      const worker = this.worker;
+      await this.sendCommand(command, signal);
+      if (this.worker === worker) this.appliedOptions.set(name, command);
+    }
   }
 
   async prewarm(signal?: AbortSignal): Promise<void> {
