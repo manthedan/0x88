@@ -19,7 +19,7 @@ import {
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { analysisResultCacheKey, cachedReviewPosition } from './analysisCache.ts';
+import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
@@ -384,6 +384,7 @@ let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
 let lastReviewSignature = '';
 let analyzing = false;
+let activeAnalysisSelectionKey = '';
 const lineCache = new Map<string, AnalysisLine[]>();
 const engineLineCache = new Map<string, AnalysisLine[]>();
 function cacheEngineLines(key: string, lines: AnalysisLine[]): void {
@@ -3170,6 +3171,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
   const selectedLabels = rows.map((row) => rowLabel(row)).join(' + ');
   const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
+  activeAnalysisSelectionKey = selectionCacheKey;
   el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
   clearAnalysisSearchProgress();
   syncBrokerParticipants(rows);
@@ -3179,6 +3181,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   try {
     const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
     const publishLines = () => {
+      if (controller.signal.aborted || analysisSelectionCacheKey(tree.current.fen) !== selectionCacheKey) return;
       lineCache.set(fen, lineGroups.flat());
       if (tree.current.fen === fen) {
         renderLines();
@@ -3428,7 +3431,10 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     await Promise.all(tasks);
     if (controller.signal.aborted || mountAbort.signal.aborted) return;
     publishLines();
-    if (!hadTaskFailure) completeAnalysisKeys.add(selectionCacheKey);
+    if (!hadTaskFailure) {
+      completeAnalysisKeys.add(selectionCacheKey);
+      if (completeAnalysisKeys.size > 512) completeAnalysisKeys.delete(completeAnalysisKeys.values().next().value!);
+    }
     const message = document.getElementById('message');
     if (message)
       message.textContent = hadTaskFailure
@@ -3468,6 +3474,7 @@ function afterNavigation() {
   if (analysisGameTree !== tree) {
     analysisGameTree = tree;
     reviewAbort?.abort();
+    clearReviewState('Review cleared for the new game.');
     cancelActiveAnalysisRun();
     searcher?.resetTree();
     (mainEvaluator as CachedLc0Evaluator | null)?.clearCache?.();
@@ -3477,11 +3484,25 @@ function afterNavigation() {
     engineLineCache.clear();
     completeAnalysisKeys.clear();
   }
+  const fen = tree.current.fen;
+  const rows = activeEngineRows();
+  const selectionKey = analysisSelectionCacheKey(fen, rows);
+  if (analyzing && analysisAbort && !analysisAbort.signal.aborted && activeAnalysisSelectionKey !== selectionKey) cancelActiveAnalysisRun();
+  // A transposition can have the same FEN but a different neural/repetition
+  // history. A completed-key marker is not provenance for the FEN-only view.
+  const cached = completeAnalysisKeys.has(selectionKey)
+    ? cachedAnalysisSelection(
+        engineLineCache,
+        rows.map((row) => engineAnalysisCacheKey(fen, row)),
+      )
+    : undefined;
+  if (cached) lineCache.set(fen, cached);
+  else lineCache.delete(fen);
   clearStalePgnDatabaseSearchResults();
   clearReviewIfMainlineChanged();
   renderAll();
   scheduleMaia3Panel();
-  if (inputEl('autoAnalyze').checked && !completeAnalysisKeys.has(analysisSelectionCacheKey(tree.current.fen))) void analyzeCurrent();
+  if (inputEl('autoAnalyze').checked && !cached) void analyzeCurrent();
   else {
     renderEvalBar();
     setShapes(bestShapes());

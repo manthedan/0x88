@@ -6,6 +6,13 @@ export function analysisResultCacheKey(fen: string, history: string[], row: Engi
   return JSON.stringify([fen, history, row.family, row.variant, row.strength, settings.multiPv, settings.runtime, settings.cpu]);
 }
 
+/** Restore a complete selection by exact history/settings, not by FEN alone. */
+export function cachedAnalysisSelection(cache: ReadonlyMap<string, AnalysisLine[]>, keys: string[]): AnalysisLine[] | undefined {
+  const groups = keys.map((key) => cache.get(key));
+  if (groups.some((group) => group === undefined)) return undefined;
+  return (groups as AnalysisLine[][]).flat();
+}
+
 /** Analysis lines are already White-relative; do not flip Black scores twice. */
 export function cachedReviewPosition(lines: AnalysisLine[] | undefined, legalMoves: number): ReviewPosition | undefined {
   const first = lines?.find((line) => line.multipv === 1 && !line.error);
