@@ -226,6 +226,7 @@ export class StockfishEngine implements BrowserUciEngine {
   private readonly url: string;
   private workerObjectUrl: string | null = null;
   private initTimer: ReturnType<typeof setTimeout> | null = null;
+  private appliedOptions = new Map<string, string>();
 
   constructor(options: StockfishOptions = {}, url: string = defaultStockfishUrl()) {
     this.options = options;
@@ -235,17 +236,25 @@ export class StockfishEngine implements BrowserUciEngine {
   setOptions(next: StockfishOptions): void {
     this.options = { ...this.options, ...next };
     if (this.worker && next.skillLevel !== undefined) this.worker.postMessage(skillLevelCommand(next.skillLevel));
-    if (this.worker && next.threads !== undefined) this.worker.postMessage(threadsCommand(next.threads));
-    if (this.worker && next.hashMb !== undefined) this.worker.postMessage(hashCommand(next.hashMb));
+    if (next.threads !== undefined) this.sendOption('Threads', threadsCommand(next.threads));
+    if (next.hashMb !== undefined) this.sendOption('Hash', hashCommand(next.hashMb));
+  }
+
+  private sendOption(name: string, command: string): void {
+    if (!this.worker || this.appliedOptions.get(name) === command) return;
+    // Stockfish reallocates/clears the TT on Hash and rebuilds the pool on
+    // Threads, including equal values. These settings survive ucinewgame.
+    this.worker.postMessage(command);
+    this.appliedOptions.set(name, command);
   }
 
   private applyOptions(): void {
     if (this.options.skillLevel !== undefined) this.worker?.postMessage(skillLevelCommand(this.options.skillLevel));
-    if (this.options.threads !== undefined) this.worker?.postMessage(threadsCommand(this.options.threads));
-    // Unconditional: no caller passes `hashMb` today, and leaving it unset
-    // means Stockfish keeps its 16 MB built-in default. Sent after Threads
-    // because Stockfish reallocates the TT when the thread count changes.
-    this.worker?.postMessage(hashCommand(this.options.hashMb ?? DEFAULT_STOCKFISH_HASH_MB));
+    if (this.options.threads !== undefined) this.sendOption('Threads', threadsCommand(this.options.threads));
+    // Every worker must receive the surface budget (or our default), rather
+    // than keep its 16 MB built-in default. Send after Threads because changing
+    // the thread count also reallocates the TT.
+    this.sendOption('Hash', hashCommand(this.options.hashMb ?? DEFAULT_STOCKFISH_HASH_MB));
   }
 
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -294,6 +303,7 @@ export class StockfishEngine implements BrowserUciEngine {
     this.lastInfoLines = [];
     this.worker?.terminate();
     this.worker = null;
+    this.appliedOptions.clear();
     this.revokeWorkerObjectUrl();
     this.readyPromise = null;
     rejectMove?.(error);

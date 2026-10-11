@@ -50,6 +50,7 @@ import {
   LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
   normalizeLc0Runtime,
 } from './browserLc0Runtime.ts';
+import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
@@ -3413,10 +3414,16 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
         if (!searcher) continue;
         if (searcher.loaded) await searcher.resetTree();
       }
-      for (const engine of viridithasEngines.values()) await engine.newGame(matchAbort.signal);
-      for (const engine of berserkEngines.values()) await engine.newGame(matchAbort.signal);
-      for (const engine of plentyChessEngines.values()) await engine.newGame(matchAbort.signal);
-      for (const engine of stormphraxEngines.values()) await engine.newGame(matchAbort.signal);
+      // Reset only this game's CPU participants; mirror seats share a worker.
+      const gameRows = [rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)];
+      const gameCpuEngines = new Set<BrowserUciEngine>();
+      for (const row of gameRows) {
+        if (row?.family === 'viridithas') gameCpuEngines.add(getViridithasFor(row.variant));
+        else if (row?.family === 'berserk') gameCpuEngines.add(getBerserkFor(row.variant));
+        else if (row?.family === 'plentychess') gameCpuEngines.add(getPlentyChessFor(row.variant));
+        else if (row?.family === 'stormphrax') gameCpuEngines.add(getStormphraxFor(row.variant));
+      }
+      for (const engine of gameCpuEngines) await engine.newGame(matchAbort.signal);
       if (isStaleMount(mountSignal) || matchAbort.signal.aborted) break;
       setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
       el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;

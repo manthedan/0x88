@@ -111,13 +111,16 @@ async function fetchAndCompileModule(wasmUrl: string): Promise<WebAssembly.Modul
   const response = await fetch(wasmUrl);
   if (!response.ok) throw new Error(`failed to fetch WASI module ${wasmUrl}: HTTP ${response.status}`);
 
-  // Use streaming compilation when the server advertises an acceptable wasm MIME
-  // type, but keep an ArrayBuffer fallback for dev/static servers that do not.
+  // Do not tee a large successful response merely to retain fallback bytes:
+  // an unread clone branch can buffer the entire decoded module (Viridithas).
   if (typeof WebAssembly.compileStreaming === 'function') {
     try {
-      return await WebAssembly.compileStreaming(response.clone());
+      return await WebAssembly.compileStreaming(response);
     } catch (error) {
       console.warn('Reckless WASM compileStreaming failed; falling back to ArrayBuffer compile', error);
+      const fallback = await fetch(wasmUrl);
+      if (!fallback.ok) throw new Error(`failed to refetch WASI module ${wasmUrl}: HTTP ${fallback.status}`);
+      return WebAssembly.compile(await fallback.arrayBuffer());
     }
   }
   return WebAssembly.compile(await response.arrayBuffer());
@@ -303,6 +306,7 @@ async function buildPreopenDirectory(preopenFiles: PreopenFileSpec[] | undefined
 }
 
 export const recklessWasiWorkerInternalsForTests = {
+  compileModule,
   resetPreopenByteCache(byteBudget = PREOPEN_BYTE_CACHE_BUDGET): void {
     if (!Number.isSafeInteger(byteBudget) || byteBudget < 0) throw new Error(`invalid preopen byte cache budget: ${String(byteBudget)}`);
     verifiedPreopenBytes.clear();
