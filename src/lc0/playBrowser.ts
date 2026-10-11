@@ -34,6 +34,7 @@ import {
   probeBt4Support,
   T3_NET,
 } from './bt4Engine.ts';
+import { inactiveCpuEnginesToEvict } from './cpuEngineResidency.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
@@ -606,9 +607,13 @@ function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
 
 function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<CpuEngine> {
   const existing = cpuEnginePromises.get(option.id);
-  if (existing) return existing;
+  if (existing) {
+    retainCpuEngine(option.id, existing);
+    return existing;
+  }
   const label = option.label;
   const uiGeneration = ctx.enginePreparationGeneration;
+  const slot: { current: Promise<CpuEngine> | null } = { current: null };
   const created = (async (): Promise<CpuEngine> => {
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Loading ${label} (first use downloads the engine)…`);
     try {
@@ -626,12 +631,20 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
     }
   })().catch((error: Error) => {
-    cpuEnginePromises.delete(option.id);
+    if (slot.current && cpuEnginePromises.get(option.id) === slot.current) cpuEnginePromises.delete(option.id);
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`${label} load failed: ${error.message}`, true);
     throw error;
   });
-  cpuEnginePromises.set(option.id, created);
+  slot.current = created;
+  retainCpuEngine(option.id, created);
   return created;
+}
+
+/** Keep `id` as the newest resident engine and dispose inactive engines past the cap. */
+function retainCpuEngine(id: string, pending: Promise<CpuEngine>): void {
+  cpuEnginePromises.delete(id);
+  cpuEnginePromises.set(id, pending);
+  for (const evictId of inactiveCpuEnginesToEvict([...cpuEnginePromises.keys()], id)) disposeCachedCpuEngine(evictId);
 }
 
 function disposeCachedCpuEngine(id: string): void {
