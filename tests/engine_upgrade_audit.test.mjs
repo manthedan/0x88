@@ -596,13 +596,17 @@ test('strict UCI search parsing rejects malformed raw records before parity comp
 });
 
 for (const engine of ['berserk', 'reckless']) {
-  for (const [label, info, best, status] of [
+  for (const [label, info, best, status, shutdown, outputChannel = 'print'] of [
     ['valid', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4', 'PASS'],
     ['garbled nodes', 'info depth 9 nodes 100garbage score cp 0 pv e2e4', 'bestmove e2e4', 'FAIL'],
     ['garbled bestmove', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove bogus', 'FAIL'],
     ['null bestmove 0000', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove 0000', 'FAIL'],
     ['null bestmove none', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove (none)', 'FAIL'],
     ['unterminated trailing bestmove', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4\nbestmove bogus', 'FAIL'],
+    ['malformed completion on quit', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4', 'FAIL', 'bestmove bogus'],
+    ['extra valid completion on quit', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4', 'FAIL', 'bestmove e2e4'],
+    ['stderr malformed completion on quit', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4', 'FAIL', 'bestmove bogus', 'printErr'],
+    ['malformed info on quit', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4', 'FAIL', 'info nodes invalid'],
   ]) test(`${engine} parity raw-output validation: ${label}`, () => temporary(async (dir) => {
     writeFileSync(join(dir, 'candidate.manifest.json'), JSON.stringify({ engine, upstream: {
       repo: 'https://example.invalid', commit: ref, license: 'GPL-3.0' } }));
@@ -610,11 +614,13 @@ for (const engine of ['berserk', 'reckless']) {
       wasm: join(dir, `${engine}-emscripten-${name}.wasm`), js: join(dir, `${engine}-emscripten-${name}.js`) }));
     if (engine === 'berserk') writeFileSync(join(dir, 'berserk-emscripten.data'), 'fixture net');
     for (const tier of tiers) {
-      writeFileSync(tier.wasm, engine === 'reckless' ? wasiTranscript(`${info}\n${best}${label === 'unterminated trailing bestmove' ? '' : '\n'}`) : wasm([]));
+      writeFileSync(tier.wasm, engine === 'reckless' ? wasiTranscript(`${info}\n${best}${label === 'unterminated trailing bestmove' ? '' : '\n'}${outputChannel === 'print' ? shutdown ?? '' : ''}`,
+        outputChannel === 'printErr' ? shutdown ?? '' : '') : wasm([]));
       if (engine === 'berserk') writeFileSync(tier.js, `module.exports = async (options) => ({ ccall: (_, __, ___, [line]) => {
         if (line === 'uci') options.print('uciok');
         if (line === 'isready') options.print('readyok');
         if (line.startsWith('go ')) { options.print(${JSON.stringify(info)}); options.print(${JSON.stringify(best)}); }
+        if (line === 'quit' && ${JSON.stringify(Boolean(shutdown))}) options.${outputChannel}(${JSON.stringify(shutdown ?? '')});
       } });`);
     }
     const original = adapters[engine];

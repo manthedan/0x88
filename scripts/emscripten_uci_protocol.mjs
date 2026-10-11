@@ -69,6 +69,7 @@ export function parseUciSearch(lines, depth) {
   const bestmove = parseBestmove(bestLines[0]);
   if (!uciMove.test(bestmove)) throw new Error('Incomplete nonterminal UCI search: null bestmove');
   const beforeBest = lines.slice(0, lines.indexOf(bestLines[0]));
+  for (const line of lines) if (/^info\s/.test(line) && !/^info\s+string\b/.test(line)) parseInfo(line);
   // Validate every info record before selecting the final PV/count. Invalid
   // trailing fields must not disappear behind an earlier valid search line.
   const infos = beforeBest.filter((line) => /^info\s/.test(line) && !/^info\s+string\b/.test(line)).map(parseInfo);

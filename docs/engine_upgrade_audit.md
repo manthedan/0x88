@@ -180,8 +180,10 @@ Compare bestmove/score/nodes/PV. The wrapper independently validates row coverag
 requested depth, complete fields and Reckless exit codes; matching failed searches
 cannot pass via the harness's aggregate totals. Producing harnesses validate raw
 UCI numeric tokens, bestmove/ponder records and PV moves before forming rows, so
-matching malformed records cannot become exact parity. WASI output collectors
-flush decoder state and unterminated records before parsing. Canonical and tier-specific
+matching malformed records cannot become exact parity. The rotated suite is
+nonterminal, so null bestmoves are rejected. Both output streams are validated
+through shutdown for malformed info and surplus completion records. WASI output
+collectors flush decoder state and unterminated records before parsing. Canonical and tier-specific
 Emscripten preload aliases are preserved by both bench and parity loaders.
 Unsupported Reckless API/external variants are
 listed as excluded; Viridithas has no existing rotated harness and explicitly

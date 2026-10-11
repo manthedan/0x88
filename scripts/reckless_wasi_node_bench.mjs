@@ -124,7 +124,7 @@ async function runOneShot(module, fen, depth) {
   }
   const wallMs = performance.now() - started;
   const rssAfter = process.memoryUsage().rss;
-  const info = parseUciSearch(stdout, depth);
+  const info = parseUciSearch([...stdout, ...stderr], depth);
   return { wallMs: Number(wallMs.toFixed(2)), rssDeltaBytes: Math.max(0, rssAfter - rssBefore), exitCode, ...info, stderr: stderr.slice(0, 5) };
 }
 

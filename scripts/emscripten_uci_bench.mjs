@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ROTATED_FEN_SUITE, exactSearch, parseUciSearch } from './emscripten_uci_protocol.mjs';
+import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseInfo, parseUciSearch } from './emscripten_uci_protocol.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -64,10 +64,11 @@ async function loadModule(jsPath) {
   const factory = require(path.join(tmp, `${base}.cjs`));
   const stdout = [];
   let cursor = 0;
+  const collect = (line) => stdout.push(...String(line).split(/\r?\n/));
   const module = await factory({
     locateFile: (file) => path.join(tmp, file.replace(`${base}.js`, `${base}.cjs`)),
-    print: (line) => stdout.push(String(line)),
-    printErr: () => {},
+    print: collect,
+    printErr: collect,
   });
   const command = (text) => module.ccall('command', null, ['string'], [text]);
   const waitForLine = (predicate, label) => {
@@ -112,8 +113,18 @@ for (const jsPath of jsPaths) {
       rows.push({ artifact: jsPath, position: label, ...info });
     }
   }
-  engine.command('quit');
-  fs.rmSync(engine.tmp, { recursive: true, force: true });
+  try {
+    engine.command('quit');
+    // Synchronous facades may emit completion records on quit. Validate the
+    // entire transcript from both output callbacks, not just search slices.
+    const completions = engine.stdout.filter((line) => /^bestmove(?:\s|$)/.test(line));
+    for (const line of completions) parseBestmove(line);
+    for (const line of engine.stdout) if (/^info\s/.test(line) && !/^info\s+string\b/.test(line)) parseInfo(line);
+    const expected = positions.length * depths.length;
+    if (completions.length !== expected) throw new Error(`Unexpected parity bestmove coverage: expected ${expected}, got ${completions.length}`);
+  } finally {
+    fs.rmSync(engine.tmp, { recursive: true, force: true });
+  }
 }
 
 function median(values) {
