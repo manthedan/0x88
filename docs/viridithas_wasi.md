@@ -11,7 +11,7 @@ npm run viridithas:build-simd-wasi
 
 The script:
 
-1. clones `https://github.com/cosmobobak/viridithas` into `.local_engines/viridithas-wasi-src` and checks out the v20.0.0 tag, commit `0631113e2215714c54d397cce9a8caebc5e6f8ee`;
+1. initializes `.local_engines/viridithas-wasi-src` and shallow-fetches only the v20.0.0 commit `0631113e2215714c54d397cce9a8caebc5e6f8ee` from `https://github.com/cosmobobak/viridithas` (no tags or newer AGPL sources);
 2. downloads the v109 `sandhi-s2-b200.nnue.zst` network into `.local_engines/viridithas-nets`;
 3. applies `patches/viridithas-wasip1.patch`;
 4. builds `wasm32-wasip1` with Rust;
@@ -19,7 +19,7 @@ The script:
 
 The SIMD script sets `VIRIDITHAS_WASM_SIMD=1`, enables wasm `simd128`, and writes `public/viridithas/viridithas-simd128.wasm`.
 
-Generated `public/viridithas/*.wasm` artifacts are ignored and not committed.
+`public/viridithas/*.wasm` and the corresponding-source archive are tracked with Git LFS. Regenerate the source archive and release manifest after changing the patch; do not publish unreviewed artifacts.
 
 ## Patch summary
 
@@ -28,7 +28,8 @@ The WASI patch is intentionally narrow and prototype-oriented:
 - uses wasm-safe NNUE geometry/SIMD shims where Viridithas normally assumes x86/NEON intrinsics, with both scalar and wasm `simd128` NNUE backends;
 - replaces worker-thread dispatch with inline execution on `wasm32`, because browser WASI has no native thread spawning;
 - bypasses temp-file/mmap NNUE caching on `wasm32`, leaking one decompressed network for the process lifetime instead;
-- treats argv entries as queued UCI commands in `wasm32` builds, disables search-time stdin polling for argv-driven runs, and uses a direct blocking `stdin().read_line()` loop when no argv commands are present. That gives the browser worker a real resident UCI process over the shared WASI stdin shim while keeping one-shot and benchmark-batch searches from treating the next queued command as `stop`.
+- treats argv entries as queued UCI commands in `wasm32` builds, disables search-time stdin polling for argv-driven runs, and uses a direct blocking `stdin().read_line()` loop when no argv commands are present. That gives the browser worker a real resident UCI process over the shared WASI stdin shim while keeping one-shot and benchmark-batch searches from treating the next queued command as `stop`;
+- polls a separate shared stop word via optional nonblocking WASI fd 4 at existing time-check boundaries (normally every 1024 nodes). This never reads search commands from stdin or calls JS per node; argv-driven UCI runs skip the poll entirely. The built-in `bench` runs without fd 4; a host without that optional descriptor returns EBADF, treated as no stop.
 
 ## Browser status
 
@@ -38,7 +39,7 @@ The WASI patch is intentionally narrow and prototype-oriented:
 - **one-shot**: argv-driven fallback for non-isolated contexts and for apples-to-apples startup-cost measurements;
 - **batch**: benchmark-only argv mode that feeds a full position sweep to one WASI invocation to estimate startup/NNUE amortisation upside.
 
-The persistent runtime is still experimental. It is good enough for sequential searches, shallow arena games, and benchmark probes, but abort/`stop` handling currently terminates the worker rather than performing a graceful in-search stop. Analysis UI use should therefore remain cautious around rapid position changes/stops.
+The persistent runtime is still experimental, but Analysis now uses it when isolation permits. Abort sets the shared stop word and queues `stop`, drains the old `bestmove` before releasing the exclusive request queue, and rejects the cancelled request without publishing its output. A 100 ms watchdog terminates an unresponsive process (including older/custom modules and aborts during cold NNUE initialization). Non-isolated contexts still use one-shot termination. See [the cooperative-cancellation evidence](cpu_coop_cancel_2026-10.md).
 
 Fast local smoke:
 
