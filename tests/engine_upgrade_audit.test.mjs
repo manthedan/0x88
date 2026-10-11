@@ -15,6 +15,7 @@ import { parsePlentyChessFens, plentyChessDefaults, plentyChessScript } from '..
 import { loadProvenance, provenanceGates, sha256 } from '../scripts/engine_upgrade_audit/provenance.mjs';
 import { fileURLToPath } from 'node:url';
 import { runProcess } from '../scripts/engine_upgrade_audit/process.mjs';
+import { emscriptenTiers, wasiTiers } from '../scripts/engine_upgrade_audit/tiers.mjs';
 
 const ref = 'a'.repeat(40);
 function temporary(fn) {
@@ -171,6 +172,35 @@ test('cheap SIMD failure blocks all bench execution and preserves JSON matrix', 
   assert.equal(report.gates.filter((gate) => gate.name === 'simd' && gate.status === 'FAIL').length, 2);
   assert.equal(report.gates.find((gate) => gate.name === 'bench').status, 'SKIP');
   saveReport(report, join(dir, 'nested', 'matrix.json'));
+}));
+
+test('manifest-only WASI tiers remain inventoried and missing files block all slow gates', () => temporary(async (dir) => {
+  const files = ['reckless.wasm', 'reckless-simd128.wasm', 'reckless-relaxed-simd128.wasm', 'reckless-extra.wasm'];
+  for (const file of files) writeFileSync(join(dir, file), wasm([0xfd, 0x0e]));
+  const manifest = { engine: 'reckless', upstream: { repo: 'https://example.invalid', commit: ref, license: 'MIT' },
+    artifacts: [files[0], 'reckless-simd128-external.wasm', 'reckless-browser-api.wasm'].map((file) => ({ path: `public/reckless/${file}` })) };
+  writeFileSync(join(dir, 'candidate.manifest.json'), JSON.stringify(manifest));
+  const tiers = wasiTiers({ engine: 'reckless', artifacts: dir, provenance: { manifest } });
+  assert.equal(tiers.length, 6);
+  assert.equal(tiers.filter((tier) => tier.wasm === join(dir, files[0])).length, 1);
+  assert.equal(tiers.find((tier) => tier.name === 'reckless-simd128-external').external, true);
+  assert.equal(tiers.find((tier) => tier.name === 'reckless-browser-api').api, true);
+  const report = await audit('reckless', { artifacts: dir, nativeCmd: 'false', upstream: true, parity: true });
+  const failures = report.gates.filter((gate) => gate.name === 'simd' && gate.status === 'FAIL');
+  assert.deepEqual(failures.map((gate) => gate.data.tier), ['reckless-browser-api', 'reckless-simd128-external']);
+  assert.ok(failures.every((gate) => /Missing WASM artifact/.test(gate.detail)));
+  assert.equal(report.gates.find((gate) => gate.data?.check === 'upstream').status, 'SKIP');
+  assert.equal(report.gates.find((gate) => gate.name === 'bench').status, 'SKIP');
+  assert.equal(report.gates.at(-1).status, 'SKIP');
+}));
+
+test('Emscripten inventory also retains nonstandard manifest-only tiers', () => temporary((dir) => {
+  writeFileSync(join(dir, 'berserk-emscripten.wasm'), wasm([]));
+  const tiers = emscriptenTiers({ engine: 'berserk', artifacts: dir, provenance: { manifest: { artifacts: [
+    { path: 'public/berserk/berserk-emscripten.wasm' }, { path: 'public/berserk/berserk-emscripten-extra.wasm' },
+  ] } } }, ['']);
+  assert.deepEqual(tiers.map((tier) => tier.name), ['base', 'extra']);
+  assert.equal(tiers[1].wasm, join(dir, 'berserk-emscripten-extra.wasm'));
 }));
 
 test('bench FAIL records every tier and blocks parity; waiver preserves deltas', () => temporary(async (dir) => {
