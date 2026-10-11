@@ -109,6 +109,9 @@ onMount(() => {
           <div class="unit-input"><input id="movetimeInput" type="number" min="10" max="60000" step="50" value="500" /><span>ms</span></div></div>
         <div class="field"><label for="gamesInput">Games / opening</label>
           <input id="gamesInput" type="number" min="1" max="20" step="1" value="2" /></div>
+        <div class="field"><label for="arenaConcurrencySelect">Concurrent CPU games</label>
+          <select id="arenaConcurrencySelect"><option value="auto">Auto (conservative)</option><option value="1">1</option><option value="2">2</option><option value="3">3 (more memory)</option></select></div>
+        <div id="arenaConcurrencyNote" class="small">Neural pools always play one game at a time.</div>
       </div>
       <div hidden inert>
         <input id="lc0VisitsInput" type="number" value="100" />
