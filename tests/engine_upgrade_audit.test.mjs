@@ -256,7 +256,7 @@ test('every nonzero WASI status fails even when its low host exit byte is zero',
 test('Reckless native and WASI use the same row-producing stdin bench protocol', () => temporary(async (dir) => {
   assert.deepEqual(wasiBenchProtocol('reckless'), { args: ['reckless'], stdin: 'bench\nquit\n' });
   assert.deepEqual(wasiBenchProtocol('viridithas'), { args: ['viridithas', 'bench'], stdin: '' });
-  const output = '0 40 0.5s 80 N/s\n1 60 0.5s 120 N/s\n100 1.0s 100 N/s\n';
+  const output = Array.from({ length: 50 }, (_, index) => `${index} 2 0.01s 200 N/s\n`).join('') + '100 0.5s 200 N/s\n';
   const engine = join(dir, 'fake-native.mjs');
   writeFileSync(engine, `let input = ''; for await (const chunk of process.stdin) input += chunk;
     if (input !== ${JSON.stringify(wasiBenchProtocol('reckless').stdin)} || process.argv.length !== 2) process.exit(1);
@@ -266,9 +266,20 @@ test('Reckless native and WASI use the same row-producing stdin bench protocol',
   const binary = join(dir, 'fixture.wasm');
   writeFileSync(binary, wasiTranscript(output));
   const candidate = await runWasiBench(context, { name: 'fixture', wasm: binary });
-  assert.equal(candidate.rows.length, 2);
+  assert.equal(candidate.rows.length, 50);
   assert.equal(compareBench(candidate, native).status, 'PASS');
   assert.equal(compareBench(candidate, native).data.perPositionCompared, true);
+}));
+
+test('Reckless native and WASI reject truncated row coverage despite exact totals', () => temporary(async (dir) => {
+  const output = '0 100 0.5s 200 N/s\n100 0.5s 200 N/s\n';
+  const engine = join(dir, 'fake-native.mjs');
+  writeFileSync(engine, `for await (const chunk of process.stdin) {} console.log(${JSON.stringify(output)});`);
+  const context = { tmp: dir, engine: 'reckless', options: { nativeCmd: `"${process.execPath}" "${engine}"`, timeout: 5000 } };
+  await assert.rejects(runNativeBuiltin(context), /Missing bench position coverage: expected 50, got 1/);
+  const binary = join(dir, 'fixture.wasm');
+  writeFileSync(binary, wasiTranscript(output));
+  await assert.rejects(runWasiBench(context, { name: 'fixture', wasm: binary }), /Missing bench position coverage: expected 50, got 1/);
 }));
 
 test('SIMD inspector ignores opcode-like bytes in immediates and data', () => {
