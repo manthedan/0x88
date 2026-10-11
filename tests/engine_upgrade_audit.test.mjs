@@ -459,8 +459,23 @@ test('Emscripten replay forwards quit and fails on facade shutdown errors', () =
   await assert.rejects(runReplay(context, stageEmscripten(context, { name: 'base', wasm: binary, js }), ['startpos'], 1), /exited abnormally/);
 }));
 
+test('minimal Stockfish metadata cannot omit required release tiers', () => temporary(async (dir) => {
+  writeFileSync(join(dir, 'stockfish-20-single.wasm'), wasm([0xfd, 0x0e]));
+  const manifest = { engine: 'stockfish', upstream: { repo: 'https://example.invalid', commit: ref, license: 'GPL-3.0' } };
+  writeFileSync(join(dir, 'candidate.manifest.json'), JSON.stringify(manifest));
+  const tiers = adapters.stockfish.tiers({ artifacts: dir, provenance: { manifest } });
+  assert.equal(tiers.length, 5);
+  assert.ok(tiers.every((tier) => tier.wasm.includes('stockfish-20')));
+  const report = await audit('stockfish', { artifacts: dir, nativeBench: 100, upstream: true, parity: true });
+  assert.equal(report.gates.filter((gate) => gate.name === 'simd' && gate.status === 'FAIL' && /Missing WASM artifact/.test(gate.detail)).length, 4);
+  assert.equal(report.gates.find((gate) => gate.name === 'bench').status, 'SKIP');
+  assert.equal(report.gates.at(-1).status, 'SKIP');
+}));
+
 test('an unavailable full-bench corpus blocks optional parity with SKIP', () => temporary(async (dir) => {
-  writeFileSync(join(dir, 'stockfish-19-single.wasm'), wasm([0xfd, 0x0e]));
+  for (const suffix of ['', '-single', '-lite', '-lite-single', '-lite-single-relaxed']) {
+    writeFileSync(join(dir, `stockfish-19${suffix}.wasm`), wasm([0xfd, 0x0e]));
+  }
   writeFileSync(join(dir, 'candidate.manifest.json'), JSON.stringify({ engine: 'stockfish', upstream: {
     repo: 'https://example.invalid', commit: ref, license: 'GPL-3.0' } }));
   const report = await audit('stockfish', { artifacts: dir, parity: true });

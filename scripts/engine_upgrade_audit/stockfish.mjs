@@ -1,16 +1,25 @@
 import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { benchDefaults } from '../stockfish_upgrade_bench.mjs';
 import { nativeCell, runReplay, stageEmscripten } from './bench.mjs';
 import { benchSource } from './source.mjs';
 
 export default {
-  tiers: (context) => [...new Set([
-    ...readdirSync(context.artifacts).filter((file) => file.endsWith('.wasm')),
-    ...(context.provenance.manifest?.artifacts ?? []).map((artifact) => artifact.path.split('/').at(-1)).filter((file) => file.endsWith('.wasm')),
-  ])].sort().map((file) =>
-    ({ name: file.replace(/^stockfish-/, '').replace(/\.wasm$/, ''), wasm: join(context.artifacts, file),
-      js: join(context.artifacts, file.replace(/\.wasm$/, '.js')), flavor: file.includes('lite') ? 'lite' : 'full', requiresSimd: true })),
+  tiers: (context) => {
+    const files = [
+      ...readdirSync(context.artifacts).filter((file) => file.endsWith('.wasm')),
+      ...(context.provenance.manifest?.artifacts ?? []).map((artifact) => basename(artifact.path)).filter((file) => file.endsWith('.wasm')),
+    ];
+    // The supported release layout has five required flavors. Derive the
+    // candidate's versioned stem, never this checkout's historical version.
+    const stems = new Set(files.map((file) => file.match(/^(stockfish-\d+(?:\.\d+)*)(?:-(?:lite(?:-single(?:-relaxed)?)?|single))?\.wasm$/)?.[1]).filter(Boolean));
+    if (stems.size !== 1) throw new Error('Expected one versioned Stockfish release layout; adapter review required');
+    const [stem] = stems;
+    for (const suffix of ['', '-single', '-lite', '-lite-single', '-lite-single-relaxed']) files.push(`${stem}${suffix}.wasm`);
+    return [...new Set(files)].sort().map((file) =>
+      ({ name: file.replace(/^stockfish-/, '').replace(/\.wasm$/, ''), wasm: join(context.artifacts, file),
+        js: join(context.artifacts, file.replace(/\.wasm$/, '.js')), flavor: file.includes('lite') ? 'lite' : 'full', requiresSimd: true }));
+  },
   prepare: async (context) => { context.defaults = benchDefaults(await benchSource(context, 'src/benchmark.cpp')); },
   native: async (context, tier) => {
     const command = tier.flavor === 'lite' ? context.options.nativeLiteCmd : context.options.nativeCmd;
