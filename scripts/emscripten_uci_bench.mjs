@@ -58,6 +58,9 @@ async function loadModule(jsPath) {
   fs.copyFileSync(path.join(dir, `${base}.js`), path.join(tmp, `${base}.cjs`));
   fs.copyFileSync(path.join(dir, `${base}.wasm`), path.join(tmp, `${base}.wasm`));
   fs.copyFileSync(dataPath, path.join(tmp, `${base}.data`));
+  // SIMD glue may still request the canonical preload URL. Preserve both
+  // names, using the selected tier's bytes even when it has a private .data.
+  if (path.basename(canonicalData) !== `${base}.data`) fs.copyFileSync(dataPath, path.join(tmp, path.basename(canonicalData)));
   const factory = require(path.join(tmp, `${base}.cjs`));
   const stdout = [];
   let cursor = 0;

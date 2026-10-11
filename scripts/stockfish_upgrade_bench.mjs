@@ -30,13 +30,17 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
   let cursor = 0;
   const pending = new Set();
   let exited = false;
+  let completed = false;
+  let exitStatus;
   const fail = (err) => {
     failure = err;
     for (const notify of pending) notify();
   };
-  child.on('error', fail);
+  child.on('error', (error) => { exited = true; fail(error); });
+  child.stdin.on('error', fail);
   child.on('exit', (code, signal) => {
     exited = true;
+    exitStatus = { code, signal };
     fail(new Error(`${cell.label} exited (${code}, ${signal}): ${lines.slice(-8).join('\n')}`));
   });
   for (const stream of [child.stdout, child.stderr]) {
@@ -104,7 +108,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       const nodes = infos.length ? parseInfo(infos.at(-1)).nodes : 0;
       if (!infos.length && !/bestmove (?:0000|\(none\))/.test(best)) throw Error(`Missing bench nodes: ${entry}`);
       benchNodes += nodes;
-      benchRows.push({ fen: entry, nodes });
+      benchRows.push({ fen: entry, nodes, bestmove: best.split(/\s+/)[1] });
     }
     const signature = String(benchNodes);
     if (!benchNodes || (cell.nativeBench && nativeSignature !== signature)) throw Error(`Bench replay mismatch: native=${nativeSignature}, replay=${signature}`);
@@ -127,6 +131,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       if (!info) throw new Error(`${label}: missing search info`);
       rows.push({ position: label, depth, bestmove: best.split(/\s+/)[1], ...parseInfo(info), wallMs });
     }
+    completed = true;
     return { ...cell, startupMs, benchDepth, benchSignature: signature, nativeSignature, benchRows, depth, threads, hash: 16, rows,
       wallNps: rows.reduce((n, r) => n + r.nodes, 0) * 1000 / rows.reduce((n, r) => n + r.wallMs, 0) };
   } finally {
@@ -135,6 +140,9 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       const timer = setTimeout(() => child.kill('SIGKILL'), 2000);
       await new Promise((done) => child.once('exit', done));
       clearTimeout(timer);
+    }
+    if (completed && (exitStatus?.code !== 0 || exitStatus?.signal)) {
+      throw new Error(`${cell.label} replay engine exited abnormally (${exitStatus?.code}, ${exitStatus?.signal})`);
     }
   }
 }
