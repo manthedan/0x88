@@ -55,10 +55,11 @@ const CONFIGS = {
     engine: 'plentychess',
     flavor: 'emscripten-single-thread',
     upstreamRepo: 'https://github.com/Yoshie2000/PlentyChess.git',
-    upstreamCommit: '58d8ba2505ae2b49f48dd410d214a457d15c12c6',
-    upstreamVersion: '7.0.66',
+    upstreamCommit: '50ad9f1b523063cbbbf599fe0547f42870fe2906',
+    upstreamTag: 'b-v8.0.0',
+    upstreamVersion: '8.0.0',
     buildDir: '.local_engines/plentychess-emscripten-src',
-    sourcePrefix: 'upstream/plentychess-58d8ba2505ae2b49f48dd410d214a457d15c12c6/',
+    sourcePrefix: 'upstream/plentychess-50ad9f1b523063cbbbf599fe0547f42870fe2906/',
     output: 'public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz',
     patch: 'patches/plentychess-emscripten.patch',
     buildScript: 'scripts/build_plentychess_emscripten.mjs',
@@ -78,16 +79,19 @@ const CONFIGS = {
       'docs/browser_c_engine_porting.md',
       'docs/engine_catalog.md',
       'docs/plentychess_browser_port.md',
+      'docs/plentychess_upgrade_v8.md',
+      'docs/plentychess_upgrade_v8_evidence.json',
+      'docs/plentychess_simd_audit.md',
       'docs/netlify_engine_artifacts.md',
       'public/plentychess/README.md',
     ],
     assetDir: '.local_engines/plentychess-nets',
     assets: [
       {
-        name: '0134-2r24-s0.bin',
-        sourceUrl: 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin',
-        rawSha256: '550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061',
-        processedSha256: '691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4',
+        name: '0178r.bin',
+        sourceUrl: 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0178r/0178r.bin',
+        rawSha256: '663e0531ac71c6c7c6d3bc4f1fac923bf69136f9786fa1da5c4ac25382aee54b',
+        processedSha256: '5cedef19778f1bb784e181fc013543127d1fdcde227795710b1a48f6e53d79cd',
         processingCommand: 'tools/process_net false',
         licenseNote: 'Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.',
       },
@@ -290,8 +294,19 @@ BERSERK_SKIP_GIT=1 BERSERK_BUILD_DIR="$PWD/.build/berserk-simd" BERSERK_NET_DIR=
 BERSERK_SKIP_GIT=1 BERSERK_BUILD_DIR="$PWD/.build/berserk-relaxed" BERSERK_NET_DIR="$PWD/assets" BERSERK_WASM_RELAXED_SIMD=1 BERSERK_EMSCRIPTEN_JS_OUT="$PWD/out/public/berserk/berserk-emscripten-relaxed-simd128.js" node scripts/build_berserk_emscripten.mjs`;
   }
   if (config.engine === 'plentychess') {
-    const outDir = `$PWD/out/public/${config.engine}/${config.engine}-emscripten.js`;
-    return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_EMSCRIPTEN_JS_OUT="${outDir}" npm run ${config.engine}:build-emscripten`;
+    // Each build applies the patch, so use a fresh source copy for each tier.
+    return `mkdir -p "$PWD/.build" "$PWD/out/public/plentychess"
+for tier in base sse41 relaxed; do
+  build="$PWD/.build/plentychess-$tier"
+  rm -rf "$build"
+  cp -a "${sourceDir}" "$build"
+  suffix=""; sse41=0; relaxed=0
+  case "$tier" in
+    sse41) suffix="-sse41"; sse41=1 ;;
+    relaxed) suffix="-relaxed-simd128"; relaxed=1 ;;
+  esac
+  PLENTYCHESS_SKIP_GIT=1 PLENTYCHESS_BUILD_DIR="$build" PLENTYCHESS_NET_DIR="$PWD/assets" PLENTYCHESS_WASM_SSE41="$sse41" PLENTYCHESS_WASM_RELAXED_SIMD="$relaxed" PLENTYCHESS_EMSCRIPTEN_JS_OUT="$PWD/out/public/plentychess/plentychess-emscripten$suffix.js" node scripts/build_plentychess_emscripten.mjs || exit 1
+done`;
   }
   if (config.engine === 'viridithas') {
     return `${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas.wasm" npm run viridithas:build-wasi && ${config.envPrefix}_SKIP_GIT=1 ${config.envPrefix}_BUILD_DIR="${sourceDir}" ${config.envPrefix}_NET_DIR="$PWD/assets" ${config.envPrefix}_WASM_SIMD=1 ${config.envPrefix}_WASM_OUT="$PWD/out/public/viridithas/viridithas-simd128.wasm" npm run viridithas:build-wasi`;
@@ -323,9 +338,15 @@ async function writeArchiveDocs(config, archiveRoot) {
   const patchNote = config.patch
     ? `The build script applies ${config.patch} to the upstream snapshot in ${config.sourcePrefix}.`
     : `No local source patch is applied; the deployed artifacts come from the pinned upstream/package source in ${config.sourcePrefix}.`;
+  // PlentyChess's builder/smoke use only Node built-ins; npm ci would invoke
+  // the application's Svelte prepare script in this deliberately partial tree.
+  const install = config.engine === 'plentychess' ? '' : 'npm ci\n';
+  const prerequisites = config.engine === 'plentychess'
+    ? 'Install Node, Emscripten, a native C++ compiler, make, curl and git (no npm dependencies are needed for the engine build), then run:'
+    : 'Install Node dependencies and the documented upstream toolchain, then run:';
   await writeFile(
     join(archiveRoot, 'BUILDING.md'),
-    `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser integration scripts/adapters, docs, and required network/model asset provenance for the generated ${config.engine} browser artifacts.\n\n## Rebuild\n\nInstall Node dependencies and the documented upstream toolchain, then run:\n\n\`\`\`sh\nnpm ci\n${rebuildCommand(config)}\n\`\`\`\n\n${patchNote}\n\nThe build writes outputs under \`out/public/${config.engine}/\` or the upstream build directory as noted by the command above.\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`,
+    `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser integration scripts/adapters, docs, and required network/model asset provenance for the generated ${config.engine} browser artifacts.\n\n## Rebuild\n\n${prerequisites}\n\n\`\`\`sh\n${install}${rebuildCommand(config)}\n\`\`\`\n\n${patchNote}\n\nThe build writes outputs under \`out/public/${config.engine}/\` or the upstream build directory as noted by the command above.\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`,
   );
 }
 

@@ -455,7 +455,7 @@ onMount(() => {
       <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
       <dt>Source</dt><dd><a href="https://assets.0x88.app/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
     </dl>
-    <p>PlentyChess 7.0.66 is Patrick Leonhardt's C++17 UCI engine. Its threat-input NNUE is trained on more than 15 billion self-generated standard-chess and Fischer-random positions, with self-distillation used for part of the training. 0x88 compiles the pinned revision with Emscripten and serves scalar, SSE4.1-shaped WebAssembly SIMD, and relaxed-SIMD variants with the network embedded.</p>
+    <p>PlentyChess 8.0.0 is Patrick Leonhardt's C++17 UCI engine. Its threat-input NNUE is trained on more than 15 billion self-generated standard-chess and Fischer-random positions, with self-distillation used for part of the training. 0x88 compiles the pinned revision with Emscripten and serves SSSE3-shaped WebAssembly SIMD, SSE4.1, and relaxed-SIMD variants sharing one processed NNUE sidecar.</p>
   </div>
 
   <div class="engine-entry">

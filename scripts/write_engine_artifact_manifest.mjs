@@ -50,14 +50,16 @@ const CONFIGS = {
     status: 'experimental',
     upstream: {
       repo: 'https://github.com/Yoshie2000/PlentyChess.git',
-      commit: '58d8ba2505ae2b49f48dd410d214a457d15c12c6',
-      version: '7.0.66',
+      commit: '50ad9f1b523063cbbbf599fe0547f42870fe2906',
+      tag: 'b-v8.0.0',
+      version: '8.0.0',
       license: 'GPL-3.0',
     },
     build: {
       script: 'scripts/build_plentychess_emscripten.mjs',
       command: 'npm run plentychess:build-emscripten && npm run plentychess:build-sse41-emscripten && npm run plentychess:build-relaxed-simd-emscripten',
       patches: ['patches/plentychess-emscripten.patch'],
+      defaultCompilerFlags: { base: '-O2', sse41: '-O2', relaxedSimd128: '-O2' },
     },
     artifacts: [
       'public/plentychess/plentychess-emscripten.js',
@@ -70,11 +72,11 @@ const CONFIGS = {
     ],
     assets: [
       {
-        name: '0134-2r24-s0.bin',
-        sourceUrl: 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin',
-        rawSha256: '550a0b664b68113fd228f501524b25e0cea1be500a608bb0f26d42a6255c8061',
+        name: '0178r.bin',
+        sourceUrl: 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0178r/0178r.bin',
+        rawSha256: '663e0531ac71c6c7c6d3bc4f1fac923bf69136f9786fa1da5c4ac25382aee54b',
         processedPath: '/processed.bin',
-        processedSha256: '691efaca9d6b32c85be9256d55d852559f470c3ee67d8d4bdeaf8e113169d4d4',
+        processedSha256: '5cedef19778f1bb784e181fc013543127d1fdcde227795710b1a48f6e53d79cd',
         processingCommand: 'tools/process_net false',
         licenseNote: 'Yoshie2000/PlentyNetworks is licensed under GPL-3.0; preserve GPL-3.0 notices with the network asset.',
         embeddedIn: 'public/plentychess/plentychess-emscripten.data (one canonical preload package shared by every SIMD tier)',

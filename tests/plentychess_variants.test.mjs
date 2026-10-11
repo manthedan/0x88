@@ -24,8 +24,8 @@ import {
 } from '../src/lc0/plentychessVariants.ts';
 
 test('PlentyChess variant metadata pins the smoked Emscripten sidecars', () => {
-  assert.equal(PLENTYCHESS_MAIN_NETWORK, '0134-2r24-s0.bin');
-  assert.equal(PLENTYCHESS_SOURCE_NETWORK_URL, 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0134-2r24-s0/0134-2r24-s0.bin');
+  assert.equal(PLENTYCHESS_MAIN_NETWORK, '0178r.bin');
+  assert.equal(PLENTYCHESS_SOURCE_NETWORK_URL, 'https://github.com/Yoshie2000/PlentyNetworks/releases/download/0178r/0178r.bin');
   assert.deepEqual(
     PLENTYCHESS_VARIANTS.map((variant) => variant.key),
     ['emscripten', 'emscripten-sse41', 'emscripten-relaxed'],
