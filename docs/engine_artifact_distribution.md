@@ -174,13 +174,13 @@ not depend on this project redistributing anything.
 
 - License: MIT upstream at the pinned commit (`LICENSE` and `Cargo.toml`).
 - Upstream: `https://github.com/cosmobobak/viridithas.git`
-- Pin: commit `20d7402065cae084715183e019fdd18089e2dfac`
+- Pin: tag `v20.0.0`, commit `0631113e2215714c54d397cce9a8caebc5e6f8ee` (2026-06-27). Replaces the pre-release commit `20d7402065cae084715183e019fdd18089e2dfac` (2026-06-03) that was also labelled v20.0.0.
 - Patch: `patches/viridithas-wasip1.patch`
-- Build: `npm run viridithas:build-wasi` and `npm run viridithas:build-simd-wasi`
+- Build: `npm run viridithas:build-wasi`, `npm run viridithas:build-simd-wasi`, and `npm run viridithas:build-relaxed-simd-wasi`
 - Smoke: `npm run viridithas:smoke`
-- Network: `atlantis-b800.nnue.zst`
-- Network source: `https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst`
-- Raw network SHA-256: `2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a`
+- Network: `sandhi-s2-b200.nnue.zst` (v109, CC0-1.0). The tag's bench signature matches the sandhi retrain, which includes the pawn-pawn feature set introduced after the previous pin. Do not substitute `atlantis-b800.nnue.zst`.
+- Network source: `https://github.com/cosmobobak/viridithas-networks/releases/download/v109/sandhi-s2-b200.nnue.zst`
+- Raw network SHA-256: `066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585`
 - Distribution status: source/provenance archive and manifest are committed beside the deployed WASI binaries.
 
 ### Stockfish.js

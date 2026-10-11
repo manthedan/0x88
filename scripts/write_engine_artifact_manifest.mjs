@@ -167,7 +167,8 @@ const CONFIGS = {
     status: 'experimental',
     upstream: {
       repo: 'https://github.com/cosmobobak/viridithas.git',
-      commit: '20d7402065cae084715183e019fdd18089e2dfac',
+      commit: '0631113e2215714c54d397cce9a8caebc5e6f8ee',
+      version: 'v20.0.0',
       license: 'MIT',
     },
     build: {
@@ -179,10 +180,10 @@ const CONFIGS = {
     artifacts: ['public/viridithas/viridithas.wasm', 'public/viridithas/viridithas-simd128.wasm', 'public/viridithas/viridithas-relaxed-simd128.wasm'],
     assets: [
       {
-        name: 'atlantis-b800.nnue.zst',
-        sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v106/atlantis-b800.nnue.zst',
-        rawSha256: '2d387407b926df4dbda441cdc3e2288fee2e6a2afa8e1bd22262309ec0fb668a',
-        licenseNote: 'Viridithas network required by the WASI build; preserve upstream notices with the MIT engine source and network provider provenance.',
+        name: 'sandhi-s2-b200.nnue.zst',
+        sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v109/sandhi-s2-b200.nnue.zst',
+        rawSha256: '066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585',
+        licenseNote: 'sandhi-s2-b200.nnue.zst is CC0-1.0 (cosmobobak/viridithas-networks LICENSE at 1040c3ee, 2026-06-08, before the v109 release). The engine source is MIT.',
         embeddedIn: 'public/viridithas/viridithas.wasm, public/viridithas/viridithas-simd128.wasm, and public/viridithas/viridithas-relaxed-simd128.wasm',
       },
     ],

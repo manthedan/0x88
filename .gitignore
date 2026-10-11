@@ -51,6 +51,8 @@ public/reckless/*.nnue
 # are intentionally trackable so deployed GPL binaries and their corresponding
 # source archives/manifests cannot be hidden by ignore rules. Keep generated
 # precompressed sidecars ignored; they are rebuilt for dist deploys.
+# Local A/B copies of a previous Viridithas pin. Not release artifacts.
+public/viridithas/ab/
 public/**/*.br
 public/**/*.gz
 # ...but GPL corresponding-source archives must never be hidden by ignores.
