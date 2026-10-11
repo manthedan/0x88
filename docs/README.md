@@ -15,6 +15,7 @@ working documents are local-dev artifacts: keep them under `.local-dev-docs/`
 - [`engine_integration_architecture.md`](engine_integration_architecture.md) — end-to-end engine onboarding architecture.
 - [`browser_runtime.md`](browser_runtime.md) — browser runtime notes.
 - [`browser_runtime_configuration_and_benchmark_schema.md`](browser_runtime_configuration_and_benchmark_schema.md) — runtime benchmark/config schema.
+- [`perf_canary.md`](perf_canary.md) — local CPU fixed-suite canary. Not a CI gate.
 - [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) — browser UCI adapter contract.
 - [`neural_browser_runtimes.md`](neural_browser_runtimes.md) — ONNX WebGPU, TVMJS, custom WGSL, WebNN, and ONNX QDQ runtime lanes.
 - [`cpu_wasm_runtimes.md`](cpu_wasm_runtimes.md) — CPU WebAssembly runtime choices and Emscripten/Rust WASM build targets.

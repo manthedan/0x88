@@ -74,6 +74,10 @@ version), the positions, and the budget (depth or movetime). Benchmark output
 should conform to
 [`docs/browser_runtime_configuration_and_benchmark_schema.md`](docs/browser_runtime_configuration_and_benchmark_schema.md).
 
+`npm run perf:canary` records a local CPU fixed-suite canary and diffs it
+against the previous run. It is not a CI gate. See
+[`docs/perf_canary.md`](docs/perf_canary.md).
+
 A negative result that is measured is worth more than a positive one that is
 assumed. `docs/` has several honest "we tried this and it lost" records — int4
 quantization, speculative pipeline depth, standalone GPU legal-prior

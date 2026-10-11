@@ -1,23 +1,29 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
-import { basename, relative } from 'node:path';
+import { relative } from 'node:path';
 import { parseScriptArgs } from './lib/cli.mjs';
+import { buildImportGraph, formatUnmatched, selectTargetedTests } from './lib/targeted_tests.mjs';
 
 const TEST_TIMEOUT_MS = '120000';
 
 const USAGE = `Usage: node scripts/run_targeted_tests.mjs [options] [tests...]
 
-Runs a focused node:test subset. With no explicit tests, it infers likely test
-files from changed paths, then falls back to a no-op so typecheck can remain
-the quick gate for unrelated changes.
+Runs a focused node:test subset. With no explicit tests, it selects tests from
+the import graph of tests/*.test.mjs and the eval/ scripts they exec, plus
+filename and family mappings (search/PUCT, engine adapters, wasm, cloudflare).
+
+An executable source change that matches nothing fails closed. It does not
+exit 0. Pass tests explicitly, or use --on-unmatched full to run npm test.
+Docs and other non-executable paths still select nothing and exit 0.
 
 Options:
-  --base REF       Include git diff --name-only REF...HEAD when available (default: origin/main)
-  --staged        Only infer from staged files
-  --tests LIST    Comma-separated test files
-  --dry-run       Print the inferred command without running
-  -h, --help      Show this help
+  --base REF            Include git diff --name-only REF...HEAD (default: origin/main)
+  --staged              Only infer from staged files
+  --files LIST          Comma-separated changed paths to infer from, instead of git
+  --tests LIST          Comma-separated test files (skips inference)
+  --on-unmatched MODE   fail (default) or full
+  --dry-run             Print the inferred command without running
+  -h, --help            Show this help
 `;
 
 function parseArgs(argv) {
@@ -25,14 +31,18 @@ function parseArgs(argv) {
     options: {
       base: { type: 'string', default: 'origin/main' },
       staged: { type: 'boolean', default: false },
+      files: { type: 'string', multiple: true },
       tests: { type: 'string', multiple: true },
+      'on-unmatched': { type: 'string', default: 'fail' },
       'dry-run': { type: 'boolean', default: false },
     },
     allowPositionals: true,
     usage: USAGE,
   });
   args.tests = [...(args.tests ?? []).flatMap((list) => list.split(',').filter(Boolean)), ...args.positionals];
+  args.files = (args.files ?? []).flatMap((list) => list.split(',').filter(Boolean));
   delete args.positionals;
+  if (args.onUnmatched !== 'fail' && args.onUnmatched !== 'full') throw new Error('--on-unmatched must be fail or full');
   return args;
 }
 
@@ -45,15 +55,8 @@ function gitLines(args) {
     .filter(Boolean);
 }
 
-function snakeCase(value) {
-  return value
-    .replace(/\.[^.]+$/, '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/[-\s]+/g, '_')
-    .toLowerCase();
-}
-
 function changedFiles(args) {
+  if (args.files.length) return args.files;
   if (args.staged) return gitLines(['diff', '--cached', '--name-only']);
   const files = new Set([
     ...gitLines(['diff', '--name-only']),
@@ -64,87 +67,47 @@ function changedFiles(args) {
   return [...files];
 }
 
-function existingTests() {
-  return new Set(
-    readdirSync('tests')
-      .filter((file) => file.endsWith('.test.mjs'))
-      .map((file) => `tests/${file}`),
-  );
-}
-
-function inferTests(files) {
-  const tests = existingTests();
-  const inferred = new Set();
-  const add = (...names) => {
-    for (const name of names) {
-      const path = name.startsWith('tests/') ? name : `tests/${name}.test.mjs`;
-      if (tests.has(path)) inferred.add(path);
-    }
-  };
-  const exact = new Map([
-    ['src/lc0/analysisBrowser.ts', ['engine_catalog', 'engine_resource_broker', 'lc0_analysis_format', 'disposable_variant_pool']],
-    ['src/lc0/arenaBrowser.ts', ['engine_catalog', 'engine_resource_broker', 'disposable_variant_pool']],
-    ['src/lc0/disposableVariantPool.ts', ['disposable_variant_pool']],
-    ['src/lc0/browserVariantOption.ts', ['browser_variant_option']],
-    ['src/lc0/engineCatalog.ts', ['engine_catalog']],
-    ['src/lc0/engineProvision.ts', ['engine_catalog']],
-    ['src/lc0/playBrowser.ts', ['engine_catalog', 'play_preferences']],
-    ['src/lc0/playPreferences.ts', ['play_preferences']],
-    ['src/lc0/resourceBroker.ts', ['engine_resource_broker']],
-    ['src/lc0/recklessVariants.ts', ['lc0_reckless_variants']],
-    ['src/lc0/recklessWasiWorker.ts', ['lc0_reckless_wasi_worker', 'lc0_reckless_external_nnue']],
-    ['src/lc0/viridithasVariants.ts', ['viridithas_variants']],
-    ['src/lc0/berserkVariants.ts', ['berserk_variants']],
-    ['src/lc0/plentychessVariants.ts', ['plentychess_variants']],
-    ['src/lc0/stormphraxVariants.ts', ['stormphrax_variants']],
-    ['src/lc0/stockfishEngine.ts', ['lc0_stockfish_engine']],
-    ['src/lc0/gameReview.ts', ['game_review']],
-    ['scripts/engine_artifact_registry.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
-    ['scripts/check_browser_engine_assets.mjs', ['engine_artifact_registry']],
-    ['scripts/netlify_r2_release.mjs', ['netlify_r2_release']],
-    ['scripts/precompress_engine_artifacts.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
-    ['scripts/prepare_netlify_r2_public_assets.mjs', ['engine_artifact_registry', 'netlify_r2_release', 'ort_runtime_assets']],
-    ['scripts/prune_external_model_assets.mjs', ['engine_artifact_registry', 'netlify_r2_release']],
-    ['scripts/check_ort_wasm_dedup.mjs', ['ort_wasm_dedup']],
-    ['scripts/ort_runtime_assets.mjs', ['ort_runtime_assets']],
-    ['scripts/check_ort_runtime_assets.mjs', ['ort_runtime_assets']],
-    ['scripts/build_reckless_release_assets.mjs', ['check_reckless_external_wasi_assets']],
-    ['scripts/check_reckless_external_wasi_assets.mjs', ['check_reckless_external_wasi_assets']],
-    ['scripts/r2_brotli_publish_assets.mjs', ['check_reckless_external_wasi_assets']],
-    ['scripts/write_engine_artifact_manifest.mjs', ['check_reckless_external_wasi_assets']],
-    ['scripts/production_browser_smoke.mjs', ['production_browser_smoke']],
-    ['.github/workflows/production-smoke.yml', ['production_browser_smoke']],
-    ['vite.config.ts', ['ort_wasm_dedup']],
-  ]);
-  for (const file of files) {
-    if (file.startsWith('tests/') && tests.has(file)) add(file);
-    for (const name of exact.get(file) ?? []) add(name);
-    const stem = snakeCase(basename(file));
-    add(stem, `lc0_${stem}`);
-  }
-  return [...inferred].sort();
-}
-
 function run(command, commandArgs) {
   const result = spawnSync(command, commandArgs, { stdio: 'inherit' });
   if (result.error) throw result.error;
   process.exitCode = result.status ?? 1;
 }
 
+function testCommand(tests) {
+  return { command: 'node', args: ['--experimental-strip-types', '--test', `--test-timeout=${TEST_TIMEOUT_MS}`, ...tests] };
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const tests = args.tests.length ? args.tests.map((test) => relative(process.cwd(), test)) : inferTests(changedFiles(args));
-  if (!tests.length) {
-    console.log('No targeted tests inferred. Run npm test before commit/deploy, or pass tests explicitly.');
+  if (args.tests.length) {
+    const planned = testCommand(args.tests.map((test) => relative(process.cwd(), test)));
+    if (args.dryRun) {
+      console.log([planned.command, ...planned.args].join(' '));
+      return;
+    }
+    run(planned.command, planned.args);
     return;
   }
-  const command = 'node';
-  const commandArgs = ['--experimental-strip-types', '--test', `--test-timeout=${TEST_TIMEOUT_MS}`, ...tests];
+  const graph = buildImportGraph(process.cwd());
+  const decision = selectTargetedTests(changedFiles(args), graph);
+  const fallback = decision.status === 'fail' && args.onUnmatched === 'full';
+  if (decision.status === 'fail' && !fallback) {
+    console.error(formatUnmatched(decision));
+    process.exit(1);
+  }
+  if (decision.status === 'skip') {
+    if (!decision.ignored.length && !decision.covered.length) console.log('No changed files. Pass tests explicitly, or run npm test.');
+    else console.log(`No executable source changes matched tests. Nothing to run.${decision.ignored.length ? ` Ignored: ${decision.ignored.join(', ')}` : ''}`);
+    return;
+  }
+  const planned = fallback ? { command: 'npm', args: ['test'] } : testCommand(decision.tests);
+  if (fallback) console.error(`${formatUnmatched(decision)}\nFalling back to a full npm test because --on-unmatched full.`);
+  else console.error(`Selected ${decision.tests.length} tests from ${decision.covered.length} changed path(s) in ${Math.round(graph.buildMs)}ms.`);
   if (args.dryRun) {
-    console.log([command, ...commandArgs].join(' '));
+    console.log([planned.command, ...planned.args].join(' '));
     return;
   }
-  run(command, commandArgs);
+  run(planned.command, planned.args);
 }
 
 try {
