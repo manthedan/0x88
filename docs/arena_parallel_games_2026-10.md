@@ -68,7 +68,7 @@ Warm-cache button-to-finished wall clock includes **new worker initialization, s
 | 1 | 12.550, 12.533, 12.484 | **12.533** | 12.484–12.550 | 2 / 0 |
 | 2 | 6.346, 6.364, 6.438 | **6.364** | 6.346–6.438 | 4 / 0 |
 
-**49.2% median saving**, above the 30% gate, on the final reviewed-fix build. Before review fixes, three AB pairs gave 13.136 / 6.612 s (49.7%); initial separate autoruns also agreed (13.509 / 6.669 s). These earlier samples are retained in the evidence but not mixed into the final medians. All exports matched byte-for-byte, including order and opening replay plies. Fixed-depth PGN SHA-256: `9cdf94d55864bc6c290854063deb36eb470b3131951c3122b2e2fa6dfb55474b`.
+**49.2% median saving**, above the 30% gate, on the cancellation/replay-fix build. Subsequent completed-log/thinking-indicator fixes do not change search settings, boards, results or PGN generation. Before review fixes, three AB pairs gave 13.136 / 6.612 s (49.7%); initial separate autoruns also agreed (13.509 / 6.669 s). These earlier samples are retained in the evidence but not mixed into the final medians. All exports matched byte-for-byte, including order and opening replay plies. Fixed-depth PGN SHA-256: `9cdf94d55864bc6c290854063deb36eb470b3131951c3122b2e2fa6dfb55474b`.
 
 Standings for both K: PlentyChess W2 D2 L0, 3/4 points; Berserk W1 D2 L1, 2/4; Stockfish W0 D2 L2, 1/4. Scores, ordering and displayed Elo/error text matched.
 
@@ -89,16 +89,19 @@ Raw traces/PGNs and results there: `arena-parallel-games-throughput-matched.json
 
 ## Review-driven regression checks
 
-The first Codex review identified two valid integration bugs. Both were fixed before final remeasurement:
+The first two Codex reviews identified four valid integration bugs. All were accepted and fixed; the first two were fixed before remeasurement:
 
 1. **Preparation cancellation:** abort now immediately disposes both private seats, including during readiness (Stockfish's initialization itself does not observe its signal). The listener is removed on settlement, and ordinary `finally` cleanup remains. Built fault injection dropped the Stockfish `uci` handshake: two private workers stayed unready, Stop terminated both and re-enabled Start in 12.8 ms rather than awaiting the adapter's 120-second initialization timeout. This is a single functional check, not a stop-latency benchmark.
 2. **Live replay identity:** one trail object and entry array are maintained per game, appended in place and passed unchanged to the finished-game log. Built K=2 check entered review at move 1/4; while the game advanced, the same review reached move 1/11 and Last jumped to its current end. Four workers were running; stopping then left zero.
 
-Final depth/node exports matched the pre-fix golden exports. Review artifacts and verdict are recorded in the delegated final report.
+3. **Completed-game diagnostics:** runtime/search summaries are captured using that game's private seats before disposal or focus switching, then passed to completion. Logs no longer read the next/live game's diagnostic identities.
+4. **Background completion markers:** the completed engine's thinking/progress entries are cleared before the visibility guard; background completion cannot leave stale indicators when the game later regains focus. Both UI fixes have focused state/ownership regression tests.
+
+Remeasured depth/node exports matched the pre-fix golden exports. Review artifacts, additional final browser checks and verdict are recorded in the delegated final report.
 
 ## Verification and remaining scope
 
-- Final `npm test`: **1,011 pass, 3 expected environment-dependent skips, zero failures** (1,014 total); included a clean typecheck.
-- Nine focused new tests: CPU/memory admission, out-of-order completion/standings/export equivalence, individual child signals and cancellation, sibling failure/drain, pre-aborted runs, private board/reset/lease accounting, search-failure lease release, abort during signal-ignoring readiness, and stable replay trail/entry-array identity.
+- Final `npm test`: **1,013 pass, 3 expected environment-dependent skips, zero failures** (1,016 total); included a clean typecheck.
+- Eleven focused new tests: CPU/memory admission, out-of-order completion/standings/export equivalence, individual child signals and cancellation, sibling failure/drain, pre-aborted runs, private board/reset/lease accounting, search-failure lease release, abort during signal-ignoring readiness, stable replay trail/entry-array identity, completed diagnostics snapshots independent of live focus/disposal, and clearing a background search's own markers.
 - Existing tournament and resource-broker suites pass. Biome has no new issues; pre-existing arena/Svelte unused-variable warnings remain untouched.
 - No GPU parallelism, SMP, adapter cancellation redesign, individual-game Stop UI or TT resizing. K=3 product round-robin wall time, full-net/Stormphrax memory and real constrained/mobile hardware were not measured. K=3 is explicitly gated and opt-in; fixed-node support remains research-only.

@@ -20,7 +20,14 @@ import {
 import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { evalBarWhitePercent } from './analysisFormat.ts';
-import { appendCpuArenaTrail, type CpuArenaPosition, type CpuArenaSeat, playCpuArenaGame } from './arenaCpuGame.ts';
+import {
+  appendCpuArenaTrail,
+  type CpuArenaPosition,
+  type CpuArenaSeat,
+  captureCpuArenaDiagnostics,
+  playCpuArenaGame,
+  settleCpuArenaSearch,
+} from './arenaCpuGame.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -1950,8 +1957,7 @@ function bt4TelemetrySummary(t: Bt4Telemetry, searcher: Bt4WorkerSearcher): stri
   return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · visits ${t.completedVisits} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · last ${formatMs(t.lastElapsedMs)} · ${searcher.loaded ? `backend ${searcher.backend || 'WebGPU'}` : 'worker not loaded'}`;
 }
 
-function engineSearchDiagnosticsText(): string {
-  const ids = diagnosticEngineIds();
+function engineSearchDiagnosticsText(ids = diagnosticEngineIds()): string {
   if (!ids.length) return 'Search diagnostics: choose engines.';
   const parts = ids.map((id) => {
     const row = rowForEngineId(id);
@@ -1984,8 +1990,8 @@ function renderEngineDiagnosticsInfo(): void {
   el('searchTelemetryInfo').innerHTML = diagnosticsHtml('Search', engineSearchDiagnosticsText());
 }
 
-function searchTelemetryText(): string {
-  return engineSearchDiagnosticsText();
+function searchTelemetryText(ids = diagnosticEngineIds()): string {
+  return engineSearchDiagnosticsText(ids);
 }
 
 function renderSearchTelemetryInfo(): void {
@@ -2163,6 +2169,7 @@ function recordUciOutput(
   elapsedMs?: number,
   visible = true,
 ): void {
+  settleCpuArenaSearch(engineId, thinkingEngineIds, arenaSearchProgress);
   recordUciTelemetry(engineId, engineName, lines, elapsedMs);
   if (!visible) return;
   const best = lines[0];
@@ -3316,7 +3323,7 @@ async function runIsolatedCpuTournament(
   schedule: ScheduledGame<ArenaOpening>[],
   byPid: Map<string, { index: number; name: string }>,
   signal: AbortSignal,
-  complete: (index: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail) => void,
+  complete: (index: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail, diagnostics: { runtime: string; search: string }) => void,
 ): Promise<void> {
   const concurrency = selectedArenaConcurrency();
   const broker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: concurrency, dial: resourceBroker.getDial() });
@@ -3401,7 +3408,7 @@ async function runIsolatedCpuTournament(
             },
             delay: () => sleep(delayMs, gameSignal),
           });
-          return { ...outcome, trail };
+          return { ...outcome, trail, diagnostics: captureCpuArenaDiagnostics(seats, cpuEngineHashMbForSurface('arena'), searchTelemetryText) };
         } finally {
           for (const seat of seats) {
             seat.engine.dispose();
@@ -3415,7 +3422,7 @@ async function runIsolatedCpuTournament(
           if (live.size) show(Math.min(...live.keys()));
         }
       },
-      complete: (index, outcome) => complete(index, outcome.result, outcome.reason, outcome.tree, outcome.trail),
+      complete: (index, outcome) => complete(index, outcome.result, outcome.reason, outcome.tree, outcome.trail, outcome.diagnostics),
     });
   } finally {
     if (cpuTournamentBroker === broker) cpuTournamentBroker = null;
@@ -3548,7 +3555,14 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
   if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
   else renderStandings(standings, schedule.length);
-  const completeGame = (i: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail | null) => {
+  const completeGame = (
+    i: number,
+    result: GameResultCode,
+    reason: string,
+    tree: GameTree,
+    trail: GameTrail | null,
+    diagnostics?: { runtime: string; search: string },
+  ) => {
     if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
     const { whiteId, blackId, opening } = schedule[i];
     const white = byPid.get(whiteId)!;
@@ -3578,7 +3592,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     }
     renderCacheInfo();
     appendLog(
-      `${i + 1}. ${white.name} vs ${black.name} [${opening.name}]: ${result} (${reason}) · ${engineRuntimeDiagnosticsText()} · ${searchTelemetryText()}`,
+      `${i + 1}. ${white.name} vs ${black.name} [${opening.name}]: ${result} (${reason}) · ${diagnostics?.runtime ?? engineRuntimeDiagnosticsText()} · ${diagnostics?.search ?? searchTelemetryText()}`,
       i,
     );
     if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);

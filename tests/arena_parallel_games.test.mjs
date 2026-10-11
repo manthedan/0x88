@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { appendCpuArenaTrail, playCpuArenaGame } from '../src/lc0/arenaCpuGame.ts';
+import { appendCpuArenaTrail, captureCpuArenaDiagnostics, playCpuArenaGame, settleCpuArenaSearch } from '../src/lc0/arenaCpuGame.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from '../src/lc0/arenaScheduleRunner.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
@@ -219,6 +219,36 @@ test('live replay readers see later plies without losing trail/array identity', 
     [null, 'e2e4', 'e7e5'],
   );
   assert.equal(reviewing.entries.at(-1).san, 'e5');
+});
+
+test('completed diagnostics snapshot only that game, independent of live focus and later disposal', () => {
+  let mode = 'ready';
+  const seats = ['game:0:w', 'game:0:b'].map((id) => ({ id, name: id, engine: { runtimeLabel: () => mode } }));
+  const stats = new Map([
+    ['game:0:w', 10],
+    ['game:0:b', 20],
+    ['game:1:w', 99],
+  ]);
+  const snapshot = captureCpuArenaDiagnostics(seats, 64, (ids) => ids.map((id) => `${id}: ${stats.get(id)} searches`).join(' | '));
+  mode = 'disposed';
+  stats.clear();
+  assert.equal(snapshot.search, 'game:0:w: 10 searches | game:0:b: 20 searches');
+  assert.ok(snapshot.runtime.includes('Hash=64 MiB · ready'));
+  assert.ok(!snapshot.runtime.includes('disposed'));
+  assert.ok(!snapshot.search.includes('game:1'));
+});
+
+test('background completion clears only its own thinking/progress before refocus', () => {
+  const thinking = new Set(['game:0:w', 'game:1:w']);
+  const progress = new Map([
+    ['game:0:w', 'thinking'],
+    ['game:1:w', 'thinking'],
+  ]);
+  settleCpuArenaSearch('game:1:w', thinking, progress);
+  assert.deepEqual([...thinking], ['game:0:w']);
+  assert.deepEqual([...progress.keys()], ['game:0:w']);
+  settleCpuArenaSearch('game:1:w', thinking, progress);
+  assert.deepEqual([...thinking], ['game:0:w']);
 });
 
 test('CPU move failure does not leak its lease', async () => {

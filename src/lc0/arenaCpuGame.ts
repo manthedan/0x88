@@ -19,6 +19,24 @@ export interface CpuArenaPosition {
   ply: number;
 }
 
+/** Snapshot a finished game's diagnostics before its workers/identities leave. */
+export function captureCpuArenaDiagnostics(
+  seats: readonly CpuArenaSeat[],
+  hashMb: number,
+  searchSummary: (ids: string[]) => string,
+): { runtime: string; search: string } {
+  return {
+    runtime: `Engine diagnostics: ${seats.map((seat) => `${seat.name}: Threads=1 · Hash=${hashMb} MiB · ${seat.engine.runtimeLabel()}`).join(' | ')}`,
+    search: searchSummary(seats.map((seat) => seat.id)),
+  };
+}
+
+/** A completed background search must not leave stale visible-search markers. */
+export function settleCpuArenaSearch(engineId: string, thinking: Set<string>, progress: { delete: (id: string) => unknown }): void {
+  thinking.delete(engineId);
+  progress.delete(engineId);
+}
+
 /** Keep replay readers attached to the same growing entry array. */
 export function appendCpuArenaTrail(trail: { entries: { fen: string; uci: string | null; san: string | null }[] }, position: CpuArenaPosition): void {
   if (position.lastUci) trail.entries.push({ fen: position.tree.current.fen, uci: position.lastUci, san: position.tree.current.san });
