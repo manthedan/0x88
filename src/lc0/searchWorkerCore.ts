@@ -47,6 +47,11 @@ type InitMessage = {
   ortDiagnostics?: OrtRuntimeDiagnosticOptions;
   /** Fold weight-only DequantizeLinear at load; omitted = runtime default (on unless ?ortDequantFold=0). */
   dequantFold?: boolean;
+  /**
+   * Lab override for dynamic-batch graphs. Omitted keeps the product path
+   * (symbolic leading dim runs as serial batch-1). 'logical' is one session.run.
+   */
+  physicalBatchMode?: 'declared' | 'logical';
   ortWasmArtifact?: OrtWasmArtifactSelection;
   ortWasmThreads?: number;
   /** Stream model download progress back as 'downloadProgress' messages. */
@@ -290,6 +295,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     ortDiagnostics: message.ortDiagnostics ?? null,
     ortWasmArtifact: message.ortWasmArtifact ?? null,
     ortWasmThreads: message.ortWasmThreads ?? null,
+    physicalBatchMode: message.physicalBatchMode === 'logical' ? 'logical' : 'declared',
   });
   if (evaluator && configuredInitKey === initKey) {
     post({
@@ -374,7 +380,8 @@ async function handleInit(message: InitMessage): Promise<void> {
         }
       : undefined,
   });
-  const baseEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+  const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
+  const baseEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model, { physicalBatchMode });
   const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
   const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
   const diagnostics = await collectOrtRuntimeDiagnostics();

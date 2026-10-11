@@ -3,6 +3,7 @@ import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
+import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
 
 export const LC0_ONNX_INPUT_PLANES = '/input/planes';
@@ -61,6 +62,12 @@ export interface Lc0Evaluation {
 export interface Lc0OnnxEvaluatorOptions {
   policyTemperature?: number;
   historyFill?: Lc0HistoryFill;
+  /**
+   * Lab/query override. Omitted and 'declared' keep today's serial batch-1
+   * path for a dynamic leading dimension. 'logical' submits that whole
+   * logical batch as one session.run. Fixed batch-N graphs are unaffected.
+   */
+  physicalBatchMode?: OrtPhysicalBatchMode;
 }
 
 export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput | Lc0PreparedEvaluatorInput;
@@ -183,9 +190,8 @@ function sessionInputType(session: ort.InferenceSession): 'float32' | 'float16' 
   return sessionInputMetadata(session)?.type === 'float16' ? 'float16' : 'float32';
 }
 
-function sessionFixedInputBatchSize(session: ort.InferenceSession): number {
-  const firstDim = sessionInputMetadata(session)?.shape?.[0];
-  return typeof firstDim === 'number' && Number.isFinite(firstDim) && firstDim > 0 ? Math.floor(firstDim) : 1;
+function sessionDeclaredFirstDim(session: ort.InferenceSession): unknown {
+  return sessionInputMetadata(session)?.shape?.[0];
 }
 
 function arraySlice<T extends ArrayLike<number>>(values: T, start: number, length: number): ArrayLike<number> {
@@ -532,6 +538,7 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
 export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   readonly policyTemperature: number;
   readonly historyFill: Lc0HistoryFill;
+  private readonly physicalBatchMode: OrtPhysicalBatchMode;
   private readonly session: ort.InferenceSession;
   private disposed = false;
 
@@ -539,6 +546,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     this.session = session;
     this.policyTemperature = options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE;
     this.historyFill = options.historyFill ?? 'fen_only';
+    this.physicalBatchMode = options.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   }
 
   static async create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0OnnxEvaluator> {
@@ -666,10 +674,15 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     this.assertNotDisposed();
     if (!inputs.length) return [];
-    const physicalBatchSize = sessionFixedInputBatchSize(this.session);
+    const declared = sessionDeclaredFirstDim(this.session);
     const out: Lc0Evaluation[] = [];
-    for (let offset = 0; offset < inputs.length; offset += physicalBatchSize) {
-      out.push(...(await this.runPhysicalBatch(inputs.slice(offset, offset + physicalBatchSize), physicalBatchSize)));
+    let offset = 0;
+    while (offset < inputs.length) {
+      const logicalCount = inputs.length - offset;
+      const physicalBatchSize = resolveOrtPhysicalBatchSize(declared, logicalCount, this.physicalBatchMode);
+      const count = Math.min(logicalCount, physicalBatchSize);
+      out.push(...(await this.runPhysicalBatch(inputs.slice(offset, offset + count), physicalBatchSize)));
+      offset += count;
     }
     return out;
   }
