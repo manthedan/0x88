@@ -137,3 +137,14 @@ The speed gate passes. The nets are not interchangeable, so the product default 
 ## What is in the tree
 
 `src/nn/ortRuntime.ts` selects the JSPI pair on a production GPU thread. `scripts/ort_runtime_assets.mjs` stages it. Tests cover the preference matrix, the missing-API coercion, the six-file allowlist, the pthread-marker check, the dedup check, and the R2 public-asset copy. The dynamic-batch evaluator, the lab route, and the worker init pins used for the A/B were removed.
+
+## Built-app loader check
+
+`BUILD_SCOPE=product npm run build:client` exited 0 after the ship commit. The built `searchWorker`, `maia3Worker`, and the main ORT chunk call the selector with `prod:!0`. `dist-client/lab/ort-batching/` is absent (HTTP 404). `/ort/ort-wasm-simd-threaded.jspi.wasm` is staged and returns 200 (15,046,878 bytes).
+
+Benchlocked open of `http://127.0.0.1:5184/single-engine/?ep=webgpu` at 2026-10-11T09:27:19Z–09:28:21Z. Load average 2.88 / 4.41 / 4.01 at start. The page reached `Ready. Drag a legal move or ask the engine to move.` GPU status `active`, backend `webgpu->webgpu`, model `/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx`. Main-thread resource timing fetched only:
+
+- `http://127.0.0.1:5184/ort/ort-wasm-simd-threaded.jspi.mjs`
+- `http://127.0.0.1:5184/ort/ort-wasm-simd-threaded.jspi.wasm`
+
+The asyncify wasm was not requested. A second open reproduced the same ready state. `agent-browser screenshot` did not return (killed at 60s for the full page and at 25s for `#gpuStatus`), so there is no PNG. The browser session was closed after each attempt.
