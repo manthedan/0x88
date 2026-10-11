@@ -16,6 +16,7 @@ import { loadProvenance, provenanceGates, sha256 } from '../scripts/engine_upgra
 import { fileURLToPath } from 'node:url';
 import { runProcess } from '../scripts/engine_upgrade_audit/process.mjs';
 import { emscriptenTiers, wasiTiers } from '../scripts/engine_upgrade_audit/tiers.mjs';
+import { parseBestmove, parseInfo, parseUciSearch } from '../scripts/emscripten_uci_protocol.mjs';
 
 const ref = 'a'.repeat(40);
 function temporary(fn) {
@@ -172,6 +173,28 @@ function wasm(instructions) {
   const body = [0, ...instructions, 0x0b];
   const code = [1, body.length, ...body];
   return Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0, 10, code.length, ...code]);
+}
+
+// A tiny real WASI module writes a supplied UCI transcript through fd_write.
+// No engine artifacts, compiler or network are needed for the parity fixture.
+function wasiTranscript(text) {
+  const leb = (n) => n < 128 ? [n] : [(n & 127) | 128, ...leb(n >>> 7)];
+  const string = (value) => [value.length, ...new TextEncoder().encode(value)];
+  const section = (id, bytes) => [id, ...leb(bytes.length), ...bytes];
+  const output = new TextEncoder().encode(text);
+  const data = new Uint8Array(16 + output.length);
+  new DataView(data.buffer).setUint32(0, 16, true);
+  new DataView(data.buffer).setUint32(4, output.length, true);
+  data.set(output, 16);
+  const body = [0, 0x41, 1, 0x41, 0, 0x41, 1, 0x41, 8, 0x10, 0, 0x1a, 0x0b];
+  return Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, [2, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 0]),
+    ...section(2, [1, ...string('wasi_snapshot_preview1'), ...string('fd_write'), 0, 0]),
+    ...section(3, [1, 1]), ...section(5, [1, 0, 1]),
+    ...section(7, [2, ...string('memory'), 2, 0, ...string('_start'), 0, 1]),
+    ...section(10, [1, ...leb(body.length), ...body]),
+    ...section(11, [1, 0, 0x41, 0, 0x0b, ...leb(data.length), ...data]),
+  ]);
 }
 
 test('importable SIMD inspector counts relaxed opcodes using spec subop values', () => {
@@ -388,6 +411,55 @@ test('parity rejects matching failed searches, wrong depths and missing rows', (
   assert.equal(validateParityRows(rows.map((row) => ({ ...row, bestmove: null, exitCode: 1 })), ['scalar', 'simd'], options).length, 2);
   assert.ok(validateParityRows([{ ...rows[0], depth: 8 }], ['scalar', 'simd'], options).length);
 });
+
+test('strict UCI search parsing rejects malformed raw records before parity comparison', () => {
+  const valid = 'info depth 9 nodes 100 score cp -25 time 1 nps 100000 pv e2e4 e7e5';
+  assert.deepEqual(parseUciSearch([valid, 'bestmove e2e4 ponder e7e5'], 9), {
+    bestmove: 'e2e4', depth: 9, nodes: 100, nps: 100000, timeMs: 1, score: 'cp -25', pv: 'e2e4 e7e5',
+  });
+  for (const [from, to] of [['nodes 100', 'nodes 100garbage'], ['depth 9', 'depth 9garbage'],
+    ['cp -25', 'cp -25garbage'], ['time 1', 'time 1garbage'], ['nps 100000', 'nps 100000garbage'],
+    ['pv e2e4 e7e5', 'pv e2e4 bogus'], ['nodes 100', 'nodes 9007199254740992']]) {
+    assert.throws(() => parseUciSearch([valid, valid.replace(from, to), 'bestmove e2e4'], 9), /Malformed UCI/);
+  }
+  assert.throws(() => parseUciSearch([valid, 'info nodes invalid', 'bestmove e2e4'], 9), /Malformed UCI/);
+  for (const best of ['bestmove bogus', 'bestmove ', 'bestmove e2e4 ponder', 'bestmove e2e4 extra']) {
+    assert.throws(() => parseBestmove(best), /Malformed bestmove/);
+  }
+  assert.throws(() => parseInfo('info depth 9 nodes'), /Malformed UCI/);
+  assert.throws(() => parseUciSearch([valid, 'bestmove e2e4'], 8), /Incomplete depth/);
+});
+
+for (const engine of ['berserk', 'reckless']) {
+  for (const [label, info, best, status] of [
+    ['valid', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove e2e4', 'PASS'],
+    ['garbled nodes', 'info depth 9 nodes 100garbage score cp 0 pv e2e4', 'bestmove e2e4', 'FAIL'],
+    ['garbled bestmove', 'info depth 9 nodes 100 score cp 0 pv e2e4', 'bestmove bogus', 'FAIL'],
+  ]) test(`${engine} parity raw-output validation: ${label}`, () => temporary(async (dir) => {
+    writeFileSync(join(dir, 'candidate.manifest.json'), JSON.stringify({ engine, upstream: {
+      repo: 'https://example.invalid', commit: ref, license: 'GPL-3.0' } }));
+    const tiers = ['one', 'two'].map((name) => ({ name,
+      wasm: join(dir, `${engine}-emscripten-${name}.wasm`), js: join(dir, `${engine}-emscripten-${name}.js`) }));
+    if (engine === 'berserk') writeFileSync(join(dir, 'berserk-emscripten.data'), 'fixture net');
+    for (const tier of tiers) {
+      writeFileSync(tier.wasm, engine === 'reckless' ? wasiTranscript(`${info}\n${best}\n`) : wasm([]));
+      if (engine === 'berserk') writeFileSync(tier.js, `module.exports = async (options) => ({ ccall: (_, __, ___, [line]) => {
+        if (line === 'uci') options.print('uciok');
+        if (line === 'isready') options.print('readyok');
+        if (line.startsWith('go ')) { options.print(${JSON.stringify(info)}); options.print(${JSON.stringify(best)}); }
+      } });`);
+    }
+    const original = adapters[engine];
+    // Isolate parity's producing harness; full benches have already passed.
+    adapters[engine] = { ...original, tiers: () => tiers, native: async () => ({ nodes: 100 }), bench: async () => ({ nodes: 100 }) };
+    try {
+      const report = await audit(engine, { artifacts: dir, parity: true, timeout: 5000 });
+      assert.ok(report.gates.filter((gate) => gate.name === 'bench').every((gate) => gate.status === 'PASS'));
+      assert.equal(report.gates.at(-1).name, 'parity');
+      assert.equal(report.gates.at(-1).status, status);
+    } finally { adapters[engine] = original; }
+  }));
+}
 
 test('corresponding-source archive digest is checked before corpus extraction', () => temporary(async (dir) => {
   writeFileSync(join(dir, 'source.tar.gz'), 'tampered archive');

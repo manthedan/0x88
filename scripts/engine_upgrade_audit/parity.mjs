@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exactSearch } from '../emscripten_uci_protocol.mjs';
@@ -47,6 +47,7 @@ export async function parityGate(context, adapter, tiers) {
   const output = await runProcess(process.execPath, [script, reckless ? '--wasm' : '--js', supported.map((tier) => reckless ? tier.wasm : tier.js).join(','),
     '--depths', '9', '--positions', '20', '--json', out], { timeout: context.options.timeout, allowFailure: true, env: { ...process.env, TMPDIR: context.tmp } });
   if (output.timedOut) throw new Error('existing parity harness timed out');
+  if (!existsSync(out)) throw new Error(`existing parity harness exit ${output.code} without a report: ${output.stderr.slice(-1500)}`);
   const report = JSON.parse(readFileSync(out, 'utf8'));
   const comparisons = Object.values(report.parity);
   const issues = validateParityRows(report.rows, supported.map((tier) => reckless ? tier.wasm : tier.js), { requireExitCode: reckless });

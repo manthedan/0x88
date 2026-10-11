@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ROTATED_FEN_SUITE, exactSearch, parseInfo } from './emscripten_uci_protocol.mjs';
+import { ROTATED_FEN_SUITE, exactSearch, parseUciSearch } from './emscripten_uci_protocol.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -107,10 +107,9 @@ for (const jsPath of jsPaths) {
       const infoStart = engine.lineRange();
       engine.command(`position fen ${fen}`);
       engine.command(`go depth ${depth}`);
-      const bestLine = await engine.waitForLine((line) => line.startsWith('bestmove '), `${label} bestmove`);
-      const infos = engine.stdout.slice(infoStart).filter((line) => line.startsWith('info ') && line.includes(' pv '));
-      const info = infos.length ? parseInfo(infos[infos.length - 1]) : {};
-      rows.push({ artifact: jsPath, depth, position: label, bestmove: bestLine.split(/\s+/)[1] ?? null, ...info });
+      await engine.waitForLine((line) => /^bestmove(?:\s|$)/.test(line), `${label} bestmove`);
+      const info = parseUciSearch(engine.stdout.slice(infoStart), depth);
+      rows.push({ artifact: jsPath, position: label, ...info });
     }
   }
   engine.command('quit');

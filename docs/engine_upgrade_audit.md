@@ -24,8 +24,11 @@ Artifacts default to `public/<engine>/`. Select a candidate with `--artifacts`;
 the tool reads that public directory's sibling `engines/<engine>/upstream.lock.json`,
 not this checkout's old lock. The tier inventory merges required tiers, on-disk
 WASM files and manifest-declared WASM files; a missing declared tier is a FAIL,
-including nonstandard external/API variants. Stockfish and Stormphrax use the artifact manifest's
-upstream pin. `--lock` and `--manifest` override this discovery. An arbitrary
+including nonstandard external/API variants. Stockfish also requires its five
+supported versioned release flavors (threaded/full, single/full, threaded/lite,
+single/lite and relaxed single/lite), deriving filenames from the candidate,
+not the current checkout. A changed layout requires adapter review. Stockfish
+and Stormphrax use the artifact manifest's upstream pin. `--lock` and `--manifest` override this discovery. An arbitrary
 artifact directory without a pin fails closed: provide explicit metadata. Multiple
 manifests require `--manifest`. Existing files are checked against manifest hashes;
 regenerate candidate metadata rather than mixing old manifests and new binaries.
@@ -111,8 +114,10 @@ or require forced termination.
 For built-in benches the native command receives `bench` then `quit` over stdin
 (works with quoted `ssh ... bash -lc ...` commands). Replay adapters drive the
 same suite through native UCI and WASM UCI. Threads=1, Hash=16; replay has **one**
-`ucinewgame` before the suite, not one reset per position. Final node totals and,
-when available on both sides, ordered per-position nodes/bestmoves must match.
+`ucinewgame` before the suite, not one reset per position. Final node totals and ordered per-position nodes/bestmoves must match when the
+native reference provides position rows; omitted candidate rows cannot disable
+that comparison. Recognized position records are validated completely, with
+contiguous coverage and a sum matching the summary; Berserk requires all 50 rows.
 `EXACT` is `PASS`; `DIFF(+/-n)` is **FAIL**, even when another narrower suite passes.
 A zero total delta with different position signatures still fails.
 
@@ -164,7 +169,9 @@ existing `emscripten_uci_bench.mjs` / `reckless_wasi_node_bench.mjs` at depth 9,
 references. This is **cross-WASM-tier** parity; it does not imply native parity.
 Compare bestmove/score/nodes/PV. The wrapper independently validates row coverage,
 requested depth, complete fields and Reckless exit codes; matching failed searches
-cannot pass via the harness's aggregate totals. Canonical and tier-specific
+cannot pass via the harness's aggregate totals. Producing harnesses validate raw
+UCI numeric tokens, bestmove/ponder records and PV moves before forming rows, so
+matching malformed records cannot become exact parity. Canonical and tier-specific
 Emscripten preload aliases are preserved by both bench and parity loaders.
 Unsupported Reckless API/external variants are
 listed as excluded; Viridithas has no existing rotated harness and explicitly

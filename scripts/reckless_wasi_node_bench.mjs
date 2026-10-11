@@ -13,6 +13,7 @@
 //     --depths 7,8 --positions 20 --hash 16 [--nnue path/to/reckless.nnue] [--json out.json]
 import fs from 'node:fs/promises';
 import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from '@bjorn3/browser_wasi_shim';
+import { exactSearch, parseUciSearch } from './emscripten_uci_protocol.mjs';
 
 const ROTATED_FEN_SUITE = [
   ['Start position', 'startpos'],
@@ -73,23 +74,6 @@ function lineCollector(lines) {
   });
 }
 
-function parseInfo(line) {
-  const get = (key) => {
-    const match = line.match(new RegExp(`\\b${key} (-?\\d+)`));
-    return match ? Number(match[1]) : null;
-  };
-  const score = line.match(/score (cp|mate) (-?\d+)/);
-  const pv = line.match(/\bpv (.+)$/);
-  return {
-    depth: get('depth'),
-    nodes: get('nodes'),
-    nps: get('nps'),
-    timeMs: get('time'),
-    score: score ? `${score[1]} ${score[2]}` : null,
-    pv: pv ? pv[1].trim() : null,
-  };
-}
-
 async function runOneShot(module, fen, depth) {
   const commands = [
     'uci',
@@ -128,10 +112,8 @@ async function runOneShot(module, fen, depth) {
   }
   const wallMs = performance.now() - started;
   const rssAfter = process.memoryUsage().rss;
-  const bestmove = stdout.findLast((line) => line.startsWith('bestmove'))?.split(/\s+/)[1] ?? null;
-  const infoLines = stdout.filter((line) => line.startsWith('info ') && line.includes(' pv '));
-  const info = infoLines.length ? parseInfo(infoLines[infoLines.length - 1]) : {};
-  return { wallMs: Number(wallMs.toFixed(2)), rssDeltaBytes: Math.max(0, rssAfter - rssBefore), exitCode, bestmove, ...info, stderr: stderr.slice(0, 5) };
+  const info = parseUciSearch(stdout, depth);
+  return { wallMs: Number(wallMs.toFixed(2)), rssDeltaBytes: Math.max(0, rssAfter - rssBefore), exitCode, ...info, stderr: stderr.slice(0, 5) };
 }
 
 function median(values) {
@@ -176,7 +158,7 @@ for (const path of wasmPaths.slice(1)) {
     const ref = rows.find((r) => r.artifact === baseline && r.depth === row.depth && r.position === row.position);
     if (!ref) continue;
     pairs += 1;
-    const same = ref.bestmove === row.bestmove && ref.score === row.score && ref.nodes === row.nodes && ref.pv === row.pv;
+    const same = ref.exitCode === 0 && row.exitCode === 0 && exactSearch(ref, row);
     if (same) exact += 1;
     else
       mismatches.push({

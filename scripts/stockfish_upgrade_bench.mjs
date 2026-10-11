@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROTATED_FEN_SUITE, exactSearch, parseInfo, roundOrder } from './emscripten_uci_protocol.mjs';
+import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseUciSearch, roundOrder } from './emscripten_uci_protocol.mjs';
 
 export function benchSignature(lines) {
   const summary = lines.filter((line) => /^\s*Nodes\s+searched\b/.test(line)).at(-1);
@@ -28,10 +28,7 @@ export function benchDefaults(source) {
 }
 
 function replaySearch(lines, best) {
-  const move = '[a-h][1-8][a-h][1-8][qrbn]?';
-  const match = best.match(new RegExp(`^bestmove\\s+(${move}|0000|\\(none\\))(?:\\s+ponder\\s+(${move}))?\\s*$`));
-  if (!match) throw new Error(`Malformed bestmove record: ${best}`);
-  const bestmove = match[1];
+  const bestmove = parseBestmove(best);
   // Select node-bearing records, not just records whose numeric prefix parses.
   // A corrupt final count must never cause fallback to an earlier info line.
   const infos = lines.filter((line) => /^info\s/.test(line) && !/^info\s+string\b/.test(line)
@@ -152,11 +149,8 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       command(`go depth ${depth}`);
       const best = await wait((l) => /^bestmove(?:\s|$)/.test(l));
       const wallMs = performance.now() - t;
-      const searchLines = lines.slice(infoStart, cursor - 1);
-      const search = replaySearch(searchLines, best);
-      const info = searchLines.filter((l) => l.startsWith('info ') && l.includes(' pv ')).at(-1);
-      if (!info) throw new Error(`${label}: missing search info`);
-      rows.push({ position: label, depth, ...parseInfo(info), ...search, wallMs });
+      const info = parseUciSearch([...lines.slice(infoStart, cursor - 1), best], depth);
+      rows.push({ position: label, ...info, wallMs });
     }
     completed = true;
     return { ...cell, startupMs, benchDepth, benchSignature: signature, nativeSignature, benchRows, depth, threads, hash: 16, rows,
