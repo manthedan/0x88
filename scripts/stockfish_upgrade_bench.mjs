@@ -58,6 +58,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
   let completed = false;
   let exitStatus;
   let expectedSearches = 0;
+  let replayStart = 0;
   const closed = new Promise((done) => child.once('close', done));
   const fail = (err) => {
     failure = err;
@@ -127,6 +128,9 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     command('ucinewgame');
     command('isready');
     await wait((l) => l === 'readyok');
+    // Built-in Stockfish bench also emits bestmoves. Its searches precede
+    // this replay and must not count against replay completion coverage.
+    replayStart = lines.length;
     let benchNodes = 0;
     const benchRows = [];
     for (const entry of defaults) {
@@ -179,7 +183,7 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       // Drain the complete transcript, including output after the final search
       // and partial final lines. A first bestmove is not a license to ignore
       // malformed or surplus completion records before a clean shutdown.
-      const bestLines = lines.filter((line) => /^bestmove(?:\s|$)/.test(line));
+      const bestLines = lines.slice(replayStart).filter((line) => /^bestmove(?:\s|$)/.test(line));
       for (const line of bestLines) parseBestmove(line);
       if (bestLines.length !== expectedSearches) {
         throw new Error(`Unexpected replay bestmove coverage: expected ${expectedSearches}, got ${bestLines.length}`);

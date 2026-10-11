@@ -391,6 +391,26 @@ test('replay rejects an engine that crashes after completing search', () => temp
     { defaults: ['startpos'], benchDepth: 1, positions: 0, timeout: 5000 }), /exited abnormally \(2/);
 }));
 
+test('native Stockfish built-in bestmoves are separate from replay completion coverage', () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-native-stockfish.mjs');
+  writeFileSync(engine, `import { createInterface } from 'node:readline';
+    for await (const line of createInterface({ input: process.stdin })) {
+      if (line === 'uci') console.log('uciok');
+      if (line === 'isready') console.log('readyok');
+      if (line.startsWith('bench ')) console.log('bestmove e2e4\\n'.repeat(51) + 'Nodes searched: 5100');
+      if (line.startsWith('go ')) console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+      if (line === 'quit') break;
+    }`);
+  for (const positions of [0, 1]) {
+    const result = await runCell({ label: 'fixture', command: process.execPath, args: [engine], nativeBench: true },
+      { defaults: Array(51).fill('startpos'), depth: 1, benchDepth: 1, positions, timeout: 5000 });
+    assert.equal(result.nativeSignature, '5100');
+    assert.equal(result.benchSignature, '5100');
+    assert.equal(result.benchRows.length, 51);
+    assert.equal(result.rows.length, positions);
+  }
+}));
+
 for (const [label, final, best] of [
   ['empty bestmove', 'info nodes 100', 'bestmove '],
   ['bare bestmove', 'info nodes 100', 'bestmove'],
