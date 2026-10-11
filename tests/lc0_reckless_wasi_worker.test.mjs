@@ -30,6 +30,79 @@ function resetPreopenState(worker, byteBudget) {
   worker.recklessWasiWorkerInternalsForTests.resetPreopenByteCache(byteBudget);
 }
 
+test('WASI module streaming compilation consumes the original without tee and caches concurrent/sequential loads', async () => {
+  const previousSelf = globalThis.self;
+  const previousFetch = globalThis.fetch;
+  const previousStreaming = WebAssembly.compileStreaming;
+  let fetches = 0;
+  let compiles = 0;
+  try {
+    const worker = await loadWorkerModule([]);
+    const { compileModule } = worker.recklessWasiWorkerInternalsForTests;
+    const response = new Response(Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0]));
+    response.clone = () => {
+      throw new Error('must not tee');
+    };
+    globalThis.fetch = async () => {
+      fetches += 1;
+      return response;
+    };
+    WebAssembly.compileStreaming = async (input) => {
+      compiles += 1;
+      assert.equal(input, response);
+      return WebAssembly.compile(await input.arrayBuffer());
+    };
+    const [first, second] = await Promise.all([compileModule('/stream-cache.wasm'), compileModule('/stream-cache.wasm')]);
+    assert.ok(first instanceof WebAssembly.Module);
+    assert.equal(first, second);
+    assert.equal(await compileModule('/stream-cache.wasm'), first);
+    assert.equal(fetches, 1);
+    assert.equal(compiles, 1);
+  } finally {
+    globalThis.self = previousSelf;
+    globalThis.fetch = previousFetch;
+    WebAssembly.compileStreaming = previousStreaming;
+  }
+});
+
+test('WASI streaming failure after consumption refetches; fallback failures evict the module for retry', async () => {
+  const previousSelf = globalThis.self;
+  const previousFetch = globalThis.fetch;
+  const previousStreaming = WebAssembly.compileStreaming;
+  const previousWarn = console.warn;
+  let fetches = 0;
+  try {
+    const worker = await loadWorkerModule([]);
+    const { compileModule } = worker.recklessWasiWorkerInternalsForTests;
+    const bytes = Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0]);
+    console.warn = () => {};
+    WebAssembly.compileStreaming = async (response) => {
+      await response.arrayBuffer();
+      throw new Error('forced streaming failure');
+    };
+    globalThis.fetch = async () => {
+      fetches += 1;
+      if (fetches === 2) return new Response('', { status: 503 });
+      if (fetches === 4) return new Response('invalid wasm');
+      return new Response(bytes);
+    };
+    await assert.rejects(compileModule('/stream-retry.wasm'), /failed to refetch.*HTTP 503/);
+    await assert.rejects(compileModule('/stream-retry.wasm'), WebAssembly.CompileError);
+    assert.ok((await compileModule('/stream-retry.wasm')) instanceof WebAssembly.Module);
+    assert.equal(fetches, 6);
+    await compileModule('/stream-retry.wasm');
+    assert.equal(fetches, 6);
+    WebAssembly.compileStreaming = undefined;
+    assert.ok((await compileModule('/no-streaming.wasm')) instanceof WebAssembly.Module);
+    assert.equal(fetches, 7, 'no refetch when streaming is unavailable');
+  } finally {
+    globalThis.self = previousSelf;
+    globalThis.fetch = previousFetch;
+    WebAssembly.compileStreaming = previousStreaming;
+    console.warn = previousWarn;
+  }
+});
+
 test('Reckless WASI preopen rejects invalid, oversized, and mismatching decoded length metadata before reading', async () => {
   const previousSelf = globalThis.self;
   const previousFetch = globalThis.fetch;
