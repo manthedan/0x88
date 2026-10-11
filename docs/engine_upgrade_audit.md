@@ -110,7 +110,9 @@ tokens before accumulating each search, including the final node-bearing line.
 Supported
 Emscripten benches that time out or omit a valid total also fail; only an explicit
 unsupported-command response skips. Replay must exit cleanly, not crash on quit
-or require forced termination.
+or require forced termination. Standalone replay cells own their process groups
+and bound shutdown/output draining to two seconds; audit replay cells remain in
+the outer audit process group so its timeout also terminates descendants.
 
 For built-in benches the native command receives `bench` then `quit` over stdin
 (works with quoted `ssh ... bash -lc ...` commands). Replay adapters drive the

@@ -679,6 +679,57 @@ test('owned descendants are terminated when the launcher exits', { skip: process
   if (alive) assert.match(execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }), /Z/);
 }));
 
+test('standalone replay bounds inherited pipe draining and terminates owned descendants', { skip: process.platform === 'win32', timeout: 10000 }, () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-descendant-replay.mjs');
+  const pidFile = join(dir, 'descendant.pid');
+  for (const inheritsPipes of [true, false]) {
+    writeFileSync(engine, `import { createInterface } from 'node:readline'; import { spawn } from 'node:child_process'; import { writeFileSync } from 'node:fs';
+      for await (const line of createInterface({ input: process.stdin })) {
+        if (line === 'uci') console.log('uciok');
+        if (line === 'isready') console.log('readyok');
+        if (line.startsWith('go ')) console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
+        if (line === 'quit') {
+          const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: ${inheritsPipes ? "['ignore', 1, 2]" : "'ignore'"} });
+          writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); child.unref(); process.exit(0);
+        }
+      }`);
+    const result = runCell({ label: 'fixture', command: process.execPath, args: [engine] },
+      { defaults: ['startpos'], benchDepth: 1, positions: 0, timeout: 5000, shutdownTimeout: 100 });
+    if (inheritsPipes) await assert.rejects(result, /shutdown timed out while draining output/);
+    else assert.equal((await result).benchSignature, '100');
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    let alive = true;
+    for (let i = 0; i < 100; i += 1) {
+      try { process.kill(pid, 0); } catch { alive = false; break; }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    if (alive) assert.match(execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }), /Z/);
+  }
+}));
+
+test('audit replay stays in the outer timeout group with its engine descendants', { skip: process.platform === 'win32', timeout: 10000 }, () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-audit-descendant.mjs');
+  const pidFile = join(dir, 'descendant.pid');
+  writeFileSync(engine, `import { createInterface } from 'node:readline'; import { spawn } from 'node:child_process'; import { writeFileSync } from 'node:fs';
+    for await (const line of createInterface({ input: process.stdin })) {
+      if (line === 'uci') console.log('uciok');
+      if (line === 'isready') console.log('readyok');
+      if (line.startsWith('go ')) {
+        const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+        writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); child.unref();
+      }
+    }`);
+  await assert.rejects(runReplay({ tmp: dir, options: { timeout: 2000 } },
+    { label: 'fixture', command: process.execPath, args: [engine] }, ['startpos'], 1), /timeout/);
+  const pid = Number(readFileSync(pidFile, 'utf8'));
+  let alive = true;
+  for (let i = 0; i < 100; i += 1) {
+    try { process.kill(pid, 0); } catch { alive = false; break; }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  if (alive) assert.match(execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }), /Z/);
+}));
+
 test('native unavailable means an OS executable lookup failure, never a diagnostic phrase', () => {
   assert.equal(nativeUnavailable({ code: 'ENOENT', syscall: 'spawn /missing/engine' }), true);
   for (const error of [new Error('Network not found: No such file'), { code: 'ENOENT', syscall: 'open' },

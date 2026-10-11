@@ -71,9 +71,14 @@ function validateCompletions(lines, expected, phase) {
   }
 }
 
-export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults } = {}) {
+export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults, ownProcessGroup = true, shutdownTimeout = 2000 } = {}) {
   const started = performance.now();
-  const child = spawn(cell.command, cell.args || [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const grouped = ownProcessGroup && process.platform !== 'win32';
+  const child = spawn(cell.command, cell.args || [], { detached: grouped, stdio: ['pipe', 'pipe', 'pipe'] });
+  const kill = () => {
+    if (!child.pid) return;
+    try { process.kill(grouped ? -child.pid : child.pid, 'SIGKILL'); } catch {}
+  };
   const lines = [];
   let failure;
   let cursor = 0;
@@ -90,6 +95,8 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     failure = err;
     for (const notify of pending) notify();
   };
+  const onSignal = () => { kill(); fail(new Error(`${cell.label} replay interrupted`)); };
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, onSignal);
   child.on('error', (error) => { exited = true; fail(error); });
   child.stdin.on('error', fail);
   child.on('exit', (code, signal) => {
@@ -198,12 +205,26 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     return { ...cell, startupMs, benchDepth, benchSignature: signature, nativeSignature, benchRows, depth, threads, hash: 16, rows,
       wallNps: rows.reduce((n, r) => n + r.nodes, 0) * 1000 / rows.reduce((n, r) => n + r.wallMs, 0) };
   } finally {
-    if (!exited) {
-      child.stdin.end('quit\n');
-      const timer = setTimeout(() => child.kill('SIGKILL'), 2000);
-      await closed;
+    let timer;
+    try {
+      if (!exited) child.stdin.end('quit\n');
+      await Promise.race([closed, new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          kill();
+          // Escaped/inherited pipes cannot keep this drain alive forever.
+          // Audit workers inherit their outer owner's group; standalone cells
+          // own a group so launcher descendants are terminated here as well.
+          child.stdin.destroy();
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error(`${cell.label} replay shutdown timed out while draining output`));
+        }, shutdownTimeout);
+      })]);
+    } finally {
       clearTimeout(timer);
-    } else await closed;
+      kill();
+      for (const signal of ['SIGINT', 'SIGTERM']) process.removeListener(signal, onSignal);
+    }
     if (completed) {
       if (exitStatus?.code !== 0 || exitStatus?.signal) {
         throw new Error(`${cell.label} replay engine exited abnormally (${exitStatus?.code}, ${exitStatus?.signal})`);
