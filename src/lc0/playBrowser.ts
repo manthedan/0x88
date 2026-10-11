@@ -731,6 +731,9 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     try {
       const result = await chooseMove(ctx.board, evaluator, {
         visits: visitsOrDepth,
+        // Same visit-argmax move as the full budget once the leader cannot be caught.
+        // docs/play_early_stop_2026-10.md. Big-net Play searches stay fixed-visit.
+        earlyStop: 'root-dominance',
         batchSize: Math.max(1, Math.min(32, visitsOrDepth)),
         signal,
         historyFens: ctx.positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16),
@@ -759,6 +762,9 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         { positions: ctx.positions },
         {
           visits: visitsOrDepth,
+          // Same visit-argmax move as the full budget once the leader cannot be caught.
+          // docs/play_early_stop_2026-10.md. Big-net Play searches stay fixed-visit.
+          earlyStop: 'root-dominance',
           signal,
           yieldEveryMs: 16,
           reuseTree: true,
