@@ -1,0 +1,1608 @@
+{
+  "schema": "centipawn_tree_reuse_probe.v1",
+  "base": "2ea6fa1",
+  "hardware": "Apple M4 MacBook Air, 24 GB, macOS 26.4.1",
+  "runtime": "Centipawn TVMJS WebGPU f32/v2-shape-k16",
+  "cacheEntries": 4096,
+  "history": "full search/cache identity; 16-position evaluation window",
+  "visits": "400 total, inherited visits subtracted",
+  "timing": "benchlock; interleaved off/on; no builds while lock held",
+  "reuse": {
+    "play": {
+      "searchesPerRun": 30,
+      "offTotalWallMs": [8541.70999956131, 8404.170000076294, 8044.559999585152, 7254.554999709129],
+      "onTotalWallMs": [8013.465000271797, 7267.800000309944, 7119.179999947548, 7110.250000238419],
+      "offMedianTotalWallMs": 8224.364999830723,
+      "onMedianTotalWallMs": 7193.490000128746,
+      "pairedSavingPercent": [6.184300325305381, 13.52150182297638, 11.503177298513833, 1.9891640421293433],
+      "medianPairedSavingPercent": 8.843738811909606,
+      "offNewNeuralEvals": 7170,
+      "onNewNeuralEvals": 8002,
+      "eligibleTurns": 27,
+      "usefulReusedTurns": 27,
+      "inheritedVisits": {
+        "median": 90,
+        "min": 1,
+        "max": 306
+      },
+      "offMaxRetainedProxyBytes": 9692008,
+      "offMaxNodes": 379,
+      "offMaxEdges": 15679,
+      "offHeapBytesRange": [36028913, 174828950],
+      "onMaxRetainedProxyBytes": 10067126,
+      "onMaxNodes": 400,
+      "onMaxEdges": 16450,
+      "onHeapBytesRange": [34962248, 135318693],
+      "positions": [
+        {
+          "game": 0,
+          "ply": 0,
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "offMove": "e2e4",
+          "onMove": "e2e4",
+          "rootReused": false,
+          "inheritedVisits": 0,
+          "completedVisits": 400,
+          "newNeuralEvalsOffOn": [340, 340],
+          "retainedProxyBytesOffOn": [5889062, 5889062],
+          "wallMsOffOn": [413.9299999475479, 376.289999961853]
+        },
+        {
+          "game": 0,
+          "ply": 2,
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+          "offMove": "g1f3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 240,
+          "completedVisits": 160,
+          "newNeuralEvalsOffOn": [97, 151],
+          "retainedProxyBytesOffOn": [5590700, 6915396],
+          "wallMsOffOn": [229.6449999809265, 200.8550000190735]
+        },
+        {
+          "game": 0,
+          "ply": 4,
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+          "offMove": "f1b5",
+          "onMove": "f1b5",
+          "rootReused": true,
+          "inheritedVisits": 284,
+          "completedVisits": 116,
+          "newNeuralEvalsOffOn": [95, 116],
+          "retainedProxyBytesOffOn": [5965866, 7475544],
+          "wallMsOffOn": [191.95000004768372, 102.28000009059906]
+        },
+        {
+          "game": 0,
+          "ply": 6,
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+          "offMove": "b5a4",
+          "onMove": "b5c6",
+          "rootReused": true,
+          "inheritedVisits": 138,
+          "completedVisits": 262,
+          "newNeuralEvalsOffOn": [158, 251],
+          "retainedProxyBytesOffOn": [6616928, 7633410],
+          "wallMsOffOn": [256.0849999189377, 248.62999999523163]
+        },
+        {
+          "game": 0,
+          "ply": 8,
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5",
+          "offMove": "e1g1",
+          "onMove": "e1g1",
+          "rootReused": true,
+          "inheritedVisits": 161,
+          "completedVisits": 239,
+          "newNeuralEvalsOffOn": [216, 217],
+          "retainedProxyBytesOffOn": [7420340, 7955854],
+          "wallMsOffOn": [301.83000004291534, 222.4349999427795]
+        },
+        {
+          "game": 0,
+          "ply": 10,
+          "fen": "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 6",
+          "offMove": "f1e1",
+          "onMove": "f1e1",
+          "rootReused": true,
+          "inheritedVisits": 4,
+          "completedVisits": 396,
+          "newNeuralEvalsOffOn": [331, 348],
+          "retainedProxyBytesOffOn": [6431800, 6829694],
+          "wallMsOffOn": [326.33000004291534, 337.289999961853]
+        },
+        {
+          "game": 0,
+          "ply": 12,
+          "fen": "r1bqk2r/2ppbppp/p1n2n2/1p2p3/B3P3/5N2/PPPP1PPP/RNBQR1K1 w kq b6 0 7",
+          "offMove": "a4b3",
+          "onMove": "a4b3",
+          "rootReused": true,
+          "inheritedVisits": 90,
+          "completedVisits": 310,
+          "newNeuralEvalsOffOn": [260, 290],
+          "retainedProxyBytesOffOn": [6726792, 7653188],
+          "wallMsOffOn": [317.7450000047684, 297.710000038147]
+        },
+        {
+          "game": 0,
+          "ply": 14,
+          "fen": "r1bqk2r/2p1bppp/p1np1n2/1p2p3/4P3/1B3N2/PPPP1PPP/RNBQR1K1 w kq - 0 8",
+          "offMove": "c2c3",
+          "onMove": "c2c3",
+          "rootReused": true,
+          "inheritedVisits": 173,
+          "completedVisits": 227,
+          "newNeuralEvalsOffOn": [246, 226],
+          "retainedProxyBytesOffOn": [7516710, 8397946],
+          "wallMsOffOn": [309.75999999046326, 198.27499997615817]
+        },
+        {
+          "game": 0,
+          "ply": 16,
+          "fen": "r1bq1rk1/2p1bppp/p1np1n2/1p2p3/4P3/1BP2N2/PP1P1PPP/RNBQR1K1 w - - 1 9",
+          "offMove": "d2d4",
+          "onMove": "h2h3",
+          "rootReused": true,
+          "inheritedVisits": 182,
+          "completedVisits": 218,
+          "newNeuralEvalsOffOn": [180, 196],
+          "retainedProxyBytesOffOn": [7249718, 8188960],
+          "wallMsOffOn": [294.7299998998642, 189.2300000190735]
+        },
+        {
+          "game": 0,
+          "ply": 18,
+          "fen": "rnbq1rk1/2p1bppp/p2p1n2/1p2p3/4P3/1BP2N1P/PP1P1PP1/RNBQR1K1 w - - 1 10",
+          "offMove": "d2d4",
+          "onMove": "d2d4",
+          "rootReused": true,
+          "inheritedVisits": 1,
+          "completedVisits": 399,
+          "newNeuralEvalsOffOn": [308, 307],
+          "retainedProxyBytesOffOn": [6928106, 6948748],
+          "wallMsOffOn": [303.52999997138977, 279.0900000333786]
+        },
+        {
+          "game": 1,
+          "ply": 0,
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "offMove": "e2e4",
+          "onMove": "e2e4",
+          "rootReused": false,
+          "inheritedVisits": 0,
+          "completedVisits": 400,
+          "newNeuralEvalsOffOn": [0, 0],
+          "retainedProxyBytesOffOn": [5889062, 5889062],
+          "wallMsOffOn": [54.17999994754791, 52.93499994277954]
+        },
+        {
+          "game": 1,
+          "ply": 2,
+          "fen": "rnbqkb1r/pppppppp/5n2/8/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 1 2",
+          "offMove": "c2c4",
+          "onMove": "c2c4",
+          "rootReused": true,
+          "inheritedVisits": 4,
+          "completedVisits": 396,
+          "newNeuralEvalsOffOn": [360, 392],
+          "retainedProxyBytesOffOn": [6411640, 7030468],
+          "wallMsOffOn": [343.2700001001358, 347.2300000190735]
+        },
+        {
+          "game": 1,
+          "ply": 4,
+          "fen": "rnbqkb1r/pppp1ppp/4pn2/8/2PP4/8/PP2PPPP/RNBQKBNR w KQkq - 0 3",
+          "offMove": "g1f3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 214,
+          "completedVisits": 186,
+          "newNeuralEvalsOffOn": [181, 186],
+          "retainedProxyBytesOffOn": [6804994, 7266204],
+          "wallMsOffOn": [239.0350000858307, 167.94000005722046]
+        },
+        {
+          "game": 1,
+          "ply": 6,
+          "fen": "rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 2 4",
+          "offMove": "g1f3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 5,
+          "completedVisits": 395,
+          "newNeuralEvalsOffOn": [375, 391],
+          "retainedProxyBytesOffOn": [7052766, 7438214],
+          "wallMsOffOn": [366.85000002384186, 313.35000002384186]
+        },
+        {
+          "game": 1,
+          "ply": 8,
+          "fen": "rnbq1rk1/pppp1ppp/4pn2/8/1bPP4/2N1P3/PP3PPP/R1BQKBNR w KQ - 1 5",
+          "offMove": "f1d3",
+          "onMove": "f1d3",
+          "rootReused": true,
+          "inheritedVisits": 13,
+          "completedVisits": 387,
+          "newNeuralEvalsOffOn": [367, 387],
+          "retainedProxyBytesOffOn": [7465376, 7945558],
+          "wallMsOffOn": [329.07999992370605, 337.2099999189377]
+        },
+        {
+          "game": 1,
+          "ply": 10,
+          "fen": "rnbq1rk1/ppp2ppp/4pn2/3p4/1bPP4/2NBP3/PP3PPP/R1BQK1NR w KQ d6 0 6",
+          "offMove": "g1f3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 91,
+          "completedVisits": 309,
+          "newNeuralEvalsOffOn": [275, 309],
+          "retainedProxyBytesOffOn": [7925778, 8794718],
+          "wallMsOffOn": [306.789999961853, 276.56499993801117]
+        },
+        {
+          "game": 1,
+          "ply": 12,
+          "fen": "rnbq1rk1/pp3ppp/4pn2/2pp4/1bPP4/2NBPN2/PP3PPP/R1BQK2R w KQ c6 0 7",
+          "offMove": "e1g1",
+          "onMove": "e1g1",
+          "rootReused": true,
+          "inheritedVisits": 47,
+          "completedVisits": 353,
+          "newNeuralEvalsOffOn": [317, 353],
+          "retainedProxyBytesOffOn": [8444174, 9429194],
+          "wallMsOffOn": [325.93999993801117, 328.0350000858307]
+        },
+        {
+          "game": 1,
+          "ply": 14,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2pp4/1bPP4/2NBPN2/PP3PPP/R1BQ1RK1 w - - 2 8",
+          "offMove": "a2a3",
+          "onMove": "a2a3",
+          "rootReused": true,
+          "inheritedVisits": 88,
+          "completedVisits": 312,
+          "newNeuralEvalsOffOn": [284, 312],
+          "retainedProxyBytesOffOn": [8543288, 9723380],
+          "wallMsOffOn": [310.29499995708466, 325.60000002384186]
+        },
+        {
+          "game": 1,
+          "ply": 16,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2pp4/2PP4/P1bBPN2/1P3PPP/R1BQ1RK1 w - - 0 9",
+          "offMove": "b2c3",
+          "onMove": "b2c3",
+          "rootReused": true,
+          "inheritedVisits": 127,
+          "completedVisits": 273,
+          "newNeuralEvalsOffOn": [210, 273],
+          "retainedProxyBytesOffOn": [7640420, 9402180],
+          "wallMsOffOn": [296.63499999046326, 229.61000001430511]
+        },
+        {
+          "game": 1,
+          "ply": 18,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2p5/2pP4/P1PBPN2/5PPP/R1BQ1RK1 w - - 0 10",
+          "offMove": "d3c4",
+          "onMove": "d3c4",
+          "rootReused": true,
+          "inheritedVisits": 156,
+          "completedVisits": 244,
+          "newNeuralEvalsOffOn": [226, 244],
+          "retainedProxyBytesOffOn": [8342128, 9614640],
+          "wallMsOffOn": [288.7150000333786, 266.835000038147]
+        },
+        {
+          "game": 2,
+          "ply": 0,
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "offMove": "e2e4",
+          "onMove": "e2e4",
+          "rootReused": false,
+          "inheritedVisits": 0,
+          "completedVisits": 400,
+          "newNeuralEvalsOffOn": [0, 0],
+          "retainedProxyBytesOffOn": [5889062, 5889062],
+          "wallMsOffOn": [59.81499993801117, 59.59500002861023]
+        },
+        {
+          "game": 2,
+          "ply": 2,
+          "fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2",
+          "offMove": "b1c3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 15,
+          "completedVisits": 385,
+          "newNeuralEvalsOffOn": [313, 385],
+          "retainedProxyBytesOffOn": [6162062, 7663456],
+          "wallMsOffOn": [324.50999999046326, 402.0550000667572]
+        },
+        {
+          "game": 2,
+          "ply": 4,
+          "fen": "rnbqkbnr/pp2pppp/3p4/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 3",
+          "offMove": "d2d4",
+          "onMove": "d2d4",
+          "rootReused": true,
+          "inheritedVisits": 38,
+          "completedVisits": 362,
+          "newNeuralEvalsOffOn": [296, 358],
+          "retainedProxyBytesOffOn": [6904682, 8911626],
+          "wallMsOffOn": [321.3600000143051, 363.5349999666214]
+        },
+        {
+          "game": 2,
+          "ply": 6,
+          "fen": "rnbqkbnr/pp2pppp/3p4/8/3pP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 0 4",
+          "offMove": "f3d4",
+          "onMove": "f3d4",
+          "rootReused": true,
+          "inheritedVisits": 306,
+          "completedVisits": 94,
+          "newNeuralEvalsOffOn": [98, 94],
+          "retainedProxyBytesOffOn": [7823660, 9308806],
+          "wallMsOffOn": [194.50499999523163, 77.26499998569489]
+        },
+        {
+          "game": 2,
+          "ply": 8,
+          "fen": "rnbqkb1r/pp2pppp/3p1n2/8/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 1 5",
+          "offMove": "b1c3",
+          "onMove": "b1c3",
+          "rootReused": true,
+          "inheritedVisits": 101,
+          "completedVisits": 299,
+          "newNeuralEvalsOffOn": [226, 290],
+          "retainedProxyBytesOffOn": [7523126, 9474170],
+          "wallMsOffOn": [285.39999997615814, 319.3250000476837]
+        },
+        {
+          "game": 2,
+          "ply": 10,
+          "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 6",
+          "offMove": "c1e3",
+          "onMove": "c1e3",
+          "rootReused": true,
+          "inheritedVisits": 43,
+          "completedVisits": 357,
+          "newNeuralEvalsOffOn": [319, 353],
+          "retainedProxyBytesOffOn": [8768192, 9911106],
+          "wallMsOffOn": [342.3199999332428, 320.460000038147]
+        },
+        {
+          "game": 2,
+          "ply": 12,
+          "fen": "rnbqkb1r/1p3ppp/p2p1n2/4p3/3NP3/2N1B3/PPP2PPP/R2QKB1R w KQkq e6 0 7",
+          "offMove": "d4b3",
+          "onMove": "d4b3",
+          "rootReused": true,
+          "inheritedVisits": 44,
+          "completedVisits": 356,
+          "newNeuralEvalsOffOn": [282, 344],
+          "retainedProxyBytesOffOn": [7857336, 9997638],
+          "wallMsOffOn": [279.32999992370605, 340.52499997615814]
+        },
+        {
+          "game": 2,
+          "ply": 14,
+          "fen": "rn1qkb1r/1p3ppp/p2pbn2/4p3/4P3/1NN1B3/PPP2PPP/R2QKB1R w KQkq - 2 8",
+          "offMove": "d1d2",
+          "onMove": "d1d2",
+          "rootReused": true,
+          "inheritedVisits": 214,
+          "completedVisits": 186,
+          "newNeuralEvalsOffOn": [221, 177],
+          "retainedProxyBytesOffOn": [9692008, 10067126],
+          "wallMsOffOn": [291.68499994277954, 191.42000007629397]
+        },
+        {
+          "game": 2,
+          "ply": 16,
+          "fen": "rn1qk2r/1p2bppp/p2pbn2/4p3/4P3/1NN1BP2/PPP3PP/R2QKB1R w KQkq - 1 9",
+          "offMove": "d1d2",
+          "onMove": "d1d2",
+          "rootReused": true,
+          "inheritedVisits": 9,
+          "completedVisits": 391,
+          "newNeuralEvalsOffOn": [304, 365],
+          "retainedProxyBytesOffOn": [8343628, 9827724],
+          "wallMsOffOn": [337.19000005722046, 445]
+        },
+        {
+          "game": 2,
+          "ply": 18,
+          "fen": "rn1q1rk1/1p2bppp/p2pbn2/4p3/4P3/1NN1BP2/PPPQ2PP/R3KB1R w KQ - 3 10",
+          "offMove": "e1c1",
+          "onMove": "e1c1",
+          "rootReused": true,
+          "inheritedVisits": 35,
+          "completedVisits": 365,
+          "newNeuralEvalsOffOn": [285, 347],
+          "retainedProxyBytesOffOn": [7884734, 9973818],
+          "wallMsOffOn": [299.2699999809265, 396.8899999856949]
+        }
+      ]
+    },
+    "arenaSameEvaluatorEveryPly": {
+      "searchesPerRun": 60,
+      "offTotalWallMs": [14830.169999957085, 16648.309999465942],
+      "onTotalWallMs": [13145.105000138283, 12986.650000214577],
+      "offMedianTotalWallMs": 15739.239999711514,
+      "onMedianTotalWallMs": 13065.87750017643,
+      "pairedSavingPercent": [11.362411892943092, 21.994184390901104],
+      "medianPairedSavingPercent": 16.6782981419221,
+      "offNewNeuralEvals": 9207,
+      "onNewNeuralEvals": 10039,
+      "eligibleTurns": 57,
+      "usefulReusedTurns": 57,
+      "inheritedVisits": {
+        "median": 280,
+        "min": 1,
+        "max": 399
+      },
+      "offMaxRetainedProxyBytes": 9692008,
+      "offMaxNodes": 381,
+      "offMaxEdges": 15679,
+      "offHeapBytesRange": [39800187, 197587335],
+      "onMaxRetainedProxyBytes": 10435964,
+      "onMaxNodes": 400,
+      "onMaxEdges": 16399,
+      "onHeapBytesRange": [51537779, 185733667],
+      "positions": [
+        {
+          "game": 0,
+          "ply": 0,
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "offMove": "e2e4",
+          "onMove": "e2e4",
+          "rootReused": false,
+          "inheritedVisits": 0,
+          "completedVisits": 400,
+          "newNeuralEvalsOffOn": [340, 340],
+          "retainedProxyBytesOffOn": [5889062, 5889062],
+          "wallMsOffOn": [356.5899999141693, 532.6350001096725]
+        },
+        {
+          "game": 0,
+          "ply": 1,
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+          "offMove": "e7e5",
+          "onMove": "e7e5",
+          "rootReused": true,
+          "inheritedVisits": 331,
+          "completedVisits": 69,
+          "newNeuralEvalsOffOn": [45, 69],
+          "retainedProxyBytesOffOn": [5825754, 6584694],
+          "wallMsOffOn": [155.64999997615814, 99.80999994277954]
+        },
+        {
+          "game": 0,
+          "ply": 2,
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+          "offMove": "g1f3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 301,
+          "completedVisits": 99,
+          "newNeuralEvalsOffOn": [68, 99],
+          "retainedProxyBytesOffOn": [5590700, 7081044],
+          "wallMsOffOn": [155.0350000858307, 137.125]
+        },
+        {
+          "game": 0,
+          "ply": 3,
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "offMove": "b8c6",
+          "onMove": "b8c6",
+          "rootReused": true,
+          "inheritedVisits": 352,
+          "completedVisits": 48,
+          "newNeuralEvalsOffOn": [42, 48],
+          "retainedProxyBytesOffOn": [5772194, 7336516],
+          "wallMsOffOn": [112.15499997138976, 65.85500001907349]
+        },
+        {
+          "game": 0,
+          "ply": 4,
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+          "offMove": "f1b5",
+          "onMove": "f1b5",
+          "rootReused": true,
+          "inheritedVisits": 349,
+          "completedVisits": 51,
+          "newNeuralEvalsOffOn": [59, 51],
+          "retainedProxyBytesOffOn": [5965866, 7579948],
+          "wallMsOffOn": [167.36500000953674, 87.89499998092651]
+        },
+        {
+          "game": 0,
+          "ply": 5,
+          "fen": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "offMove": "a7a6",
+          "onMove": "g8f6",
+          "rootReused": true,
+          "inheritedVisits": 351,
+          "completedVisits": 49,
+          "newNeuralEvalsOffOn": [33, 49],
+          "retainedProxyBytesOffOn": [6209406, 7728498],
+          "wallMsOffOn": [84.37000000476837, 65.61000001430511]
+        },
+        {
+          "game": 0,
+          "ply": 6,
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+          "offMove": "b5a4",
+          "onMove": "b5a4",
+          "rootReused": true,
+          "inheritedVisits": 162,
+          "completedVisits": 238,
+          "newNeuralEvalsOffOn": [139, 238],
+          "retainedProxyBytesOffOn": [6616928, 7898616],
+          "wallMsOffOn": [174.39000010490415, 286.039999961853]
+        },
+        {
+          "game": 0,
+          "ply": 7,
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 4",
+          "offMove": "g8f6",
+          "onMove": "g8f6",
+          "rootReused": true,
+          "inheritedVisits": 203,
+          "completedVisits": 197,
+          "newNeuralEvalsOffOn": [156, 172],
+          "retainedProxyBytesOffOn": [6559424, 7649988],
+          "wallMsOffOn": [262.4099999666214, 240.1449999809265]
+        },
+        {
+          "game": 0,
+          "ply": 8,
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5",
+          "offMove": "e1g1",
+          "onMove": "e1g1",
+          "rootReused": true,
+          "inheritedVisits": 339,
+          "completedVisits": 61,
+          "newNeuralEvalsOffOn": [88, 61],
+          "retainedProxyBytesOffOn": [7420340, 8265514],
+          "wallMsOffOn": [167.32499992847443, 82.05000007152557]
+        },
+        {
+          "game": 0,
+          "ply": 9,
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 3 5",
+          "offMove": "f6e4",
+          "onMove": "f6e4",
+          "rootReused": true,
+          "inheritedVisits": 326,
+          "completedVisits": 74,
+          "newNeuralEvalsOffOn": [48, 74],
+          "retainedProxyBytesOffOn": [5835990, 8513324],
+          "wallMsOffOn": [184.79999995231628, 94.72000002861024]
+        },
+        {
+          "game": 0,
+          "ply": 10,
+          "fen": "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 6",
+          "offMove": "f1e1",
+          "onMove": "f1e1",
+          "rootReused": true,
+          "inheritedVisits": 11,
+          "completedVisits": 389,
+          "newNeuralEvalsOffOn": [329, 371],
+          "retainedProxyBytesOffOn": [6431800, 7453424],
+          "wallMsOffOn": [287.75999999046326, 539.7300000190735]
+        },
+        {
+          "game": 0,
+          "ply": 11,
+          "fen": "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQR1K1 b kq - 5 6",
+          "offMove": "d7d6",
+          "onMove": "d7d6",
+          "rootReused": true,
+          "inheritedVisits": 272,
+          "completedVisits": 128,
+          "newNeuralEvalsOffOn": [109, 128],
+          "retainedProxyBytesOffOn": [6748060, 7770264],
+          "wallMsOffOn": [185.17500007152557, 139.375]
+        },
+        {
+          "game": 0,
+          "ply": 12,
+          "fen": "r1bqk2r/2ppbppp/p1n2n2/1p2p3/B3P3/5N2/PPPP1PPP/RNBQR1K1 w kq b6 0 7",
+          "offMove": "a4b3",
+          "onMove": "a4b3",
+          "rootReused": true,
+          "inheritedVisits": 82,
+          "completedVisits": 318,
+          "newNeuralEvalsOffOn": [229, 292],
+          "retainedProxyBytesOffOn": [6726792, 7720826],
+          "wallMsOffOn": [226.63999998569489, 335.2649999856949]
+        },
+        {
+          "game": 0,
+          "ply": 13,
+          "fen": "r1bqk2r/2ppbppp/p1n2n2/1p2p3/4P3/1B3N2/PPPP1PPP/RNBQR1K1 b kq - 1 7",
+          "offMove": "e8g8",
+          "onMove": "e8g8",
+          "rootReused": true,
+          "inheritedVisits": 399,
+          "completedVisits": 1,
+          "newNeuralEvalsOffOn": [32, 1],
+          "retainedProxyBytesOffOn": [7394454, 7727106],
+          "wallMsOffOn": [74.08499991893768, 12.77999997138977]
+        },
+        {
+          "game": 0,
+          "ply": 14,
+          "fen": "r1bqk2r/2p1bppp/p1np1n2/1p2p3/4P3/1B3N2/PPPP1PPP/RNBQR1K1 w kq - 0 8",
+          "offMove": "c2c3",
+          "onMove": "c2c3",
+          "rootReused": true,
+          "inheritedVisits": 143,
+          "completedVisits": 257,
+          "newNeuralEvalsOffOn": [242, 243],
+          "retainedProxyBytesOffOn": [7516710, 8153352],
+          "wallMsOffOn": [241.96999990940097, 313.6950000524521]
+        },
+        {
+          "game": 0,
+          "ply": 15,
+          "fen": "r1bqk2r/2p1bppp/p1np1n2/1p2p3/4P3/1BP2N2/PP1P1PPP/RNBQR1K1 b kq - 0 8",
+          "offMove": "e8g8",
+          "onMove": "e8g8",
+          "rootReused": true,
+          "inheritedVisits": 287,
+          "completedVisits": 113,
+          "newNeuralEvalsOffOn": [128, 113],
+          "retainedProxyBytesOffOn": [7503266, 8255760],
+          "wallMsOffOn": [235.08499991893768, 125.79500007629396]
+        },
+        {
+          "game": 0,
+          "ply": 16,
+          "fen": "r1bq1rk1/2p1bppp/p1np1n2/1p2p3/4P3/1BP2N2/PP1P1PPP/RNBQR1K1 w - - 1 9",
+          "offMove": "d2d4",
+          "onMove": "h2h3",
+          "rootReused": true,
+          "inheritedVisits": 280,
+          "completedVisits": 120,
+          "newNeuralEvalsOffOn": [80, 115],
+          "retainedProxyBytesOffOn": [7249718, 8565602],
+          "wallMsOffOn": [153.57500004768372, 167.03999996185303]
+        },
+        {
+          "game": 0,
+          "ply": 17,
+          "fen": "r1bq1rk1/2p1bppp/p1np1n2/1p2p3/4P3/1BP2N1P/PP1P1PP1/RNBQR1K1 b - - 0 9",
+          "offMove": "c6a5",
+          "onMove": "c6a5",
+          "rootReused": true,
+          "inheritedVisits": 256,
+          "completedVisits": 144,
+          "newNeuralEvalsOffOn": [236, 144],
+          "retainedProxyBytesOffOn": [7073220, 8741280],
+          "wallMsOffOn": [298.6299999952316, 160.5199999809265]
+        },
+        {
+          "game": 0,
+          "ply": 18,
+          "fen": "rnbq1rk1/2p1bppp/p2p1n2/1p2p3/4P3/1BP2N1P/PP1P1PP1/RNBQR1K1 w - - 1 10",
+          "offMove": "d2d4",
+          "onMove": "d2d4",
+          "rootReused": true,
+          "inheritedVisits": 1,
+          "completedVisits": 399,
+          "newNeuralEvalsOffOn": [308, 307],
+          "retainedProxyBytesOffOn": [6928106, 6948748],
+          "wallMsOffOn": [338.52999997138977, 407.79499995708466]
+        },
+        {
+          "game": 0,
+          "ply": 19,
+          "fen": "rnbq1rk1/2p1bppp/p2p1n2/1p2p3/3PP3/1BP2N1P/PP3PP1/RNBQR1K1 b - d3 0 10",
+          "offMove": "b8d7",
+          "onMove": "b8d7",
+          "rootReused": true,
+          "inheritedVisits": 333,
+          "completedVisits": 67,
+          "newNeuralEvalsOffOn": [62, 67],
+          "retainedProxyBytesOffOn": [7256788, 7451672],
+          "wallMsOffOn": [145.93999993801117, 102.3199999332428]
+        },
+        {
+          "game": 1,
+          "ply": 0,
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "offMove": "e2e4",
+          "onMove": "e2e4",
+          "rootReused": false,
+          "inheritedVisits": 0,
+          "completedVisits": 400,
+          "newNeuralEvalsOffOn": [0, 0],
+          "retainedProxyBytesOffOn": [5889062, 5889062],
+          "wallMsOffOn": [64.03999996185303, 72.52500009536743]
+        },
+        {
+          "game": 1,
+          "ply": 1,
+          "fen": "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 1",
+          "offMove": "d7d5",
+          "onMove": "d7d5",
+          "rootReused": true,
+          "inheritedVisits": 25,
+          "completedVisits": 375,
+          "newNeuralEvalsOffOn": [353, 360],
+          "retainedProxyBytesOffOn": [6508740, 6654832],
+          "wallMsOffOn": [362.01000010967255, 415.69000005722046]
+        },
+        {
+          "game": 1,
+          "ply": 2,
+          "fen": "rnbqkb1r/pppppppp/5n2/8/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 1 2",
+          "offMove": "c2c4",
+          "onMove": "c2c4",
+          "rootReused": true,
+          "inheritedVisits": 88,
+          "completedVisits": 312,
+          "newNeuralEvalsOffOn": [269, 312],
+          "retainedProxyBytesOffOn": [6411640, 7088694],
+          "wallMsOffOn": [312.289999961853, 413.5]
+        },
+        {
+          "game": 1,
+          "ply": 3,
+          "fen": "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2",
+          "offMove": "e7e6",
+          "onMove": "e7e6",
+          "rootReused": true,
+          "inheritedVisits": 283,
+          "completedVisits": 117,
+          "newNeuralEvalsOffOn": [80, 117],
+          "retainedProxyBytesOffOn": [6119696, 7266266],
+          "wallMsOffOn": [173.15499997138977, 138.18999993801117]
+        },
+        {
+          "game": 1,
+          "ply": 4,
+          "fen": "rnbqkb1r/pppp1ppp/4pn2/8/2PP4/8/PP2PPPP/RNBQKBNR w KQkq - 0 3",
+          "offMove": "g1f3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 314,
+          "completedVisits": 86,
+          "newNeuralEvalsOffOn": [110, 86],
+          "retainedProxyBytesOffOn": [6804994, 7279130],
+          "wallMsOffOn": [153.62999999523163, 112.38999998569489]
+        },
+        {
+          "game": 1,
+          "ply": 5,
+          "fen": "rnbqkb1r/pppp1ppp/4pn2/8/2PP4/2N5/PP2PPPP/R1BQKBNR b KQkq - 1 3",
+          "offMove": "f8b4",
+          "onMove": "f8b4",
+          "rootReused": true,
+          "inheritedVisits": 7,
+          "completedVisits": 393,
+          "newNeuralEvalsOffOn": [355, 393],
+          "retainedProxyBytesOffOn": [6790070, 7567398],
+          "wallMsOffOn": [417.2000000476837, 449.66999995708466]
+        },
+        {
+          "game": 1,
+          "ply": 6,
+          "fen": "rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 2 4",
+          "offMove": "g1f3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 339,
+          "completedVisits": 61,
+          "newNeuralEvalsOffOn": [77, 61],
+          "retainedProxyBytesOffOn": [7052766, 7511916],
+          "wallMsOffOn": [199.2699999809265, 62.12999999523163]
+        },
+        {
+          "game": 1,
+          "ply": 7,
+          "fen": "rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N1P3/PP3PPP/R1BQKBNR b KQkq - 0 4",
+          "offMove": "e8g8",
+          "onMove": "e8g8",
+          "rootReused": true,
+          "inheritedVisits": 29,
+          "completedVisits": 371,
+          "newNeuralEvalsOffOn": [352, 371],
+          "retainedProxyBytesOffOn": [7367494, 7784030],
+          "wallMsOffOn": [431.4099999666214, 422.25]
+        },
+        {
+          "game": 1,
+          "ply": 8,
+          "fen": "rnbq1rk1/pppp1ppp/4pn2/8/1bPP4/2N1P3/PP3PPP/R1BQKBNR w KQ - 1 5",
+          "offMove": "f1d3",
+          "onMove": "f1d3",
+          "rootReused": true,
+          "inheritedVisits": 159,
+          "completedVisits": 241,
+          "newNeuralEvalsOffOn": [228, 241],
+          "retainedProxyBytesOffOn": [7465376, 7977340],
+          "wallMsOffOn": [333.43500006198883, 279.92000007629395]
+        },
+        {
+          "game": 1,
+          "ply": 9,
+          "fen": "rnbq1rk1/pppp1ppp/4pn2/8/1bPP4/2NBP3/PP3PPP/R1BQK1NR b KQ - 2 5",
+          "offMove": "d7d5",
+          "onMove": "d7d5",
+          "rootReused": true,
+          "inheritedVisits": 127,
+          "completedVisits": 273,
+          "newNeuralEvalsOffOn": [244, 273],
+          "retainedProxyBytesOffOn": [7866870, 8592638],
+          "wallMsOffOn": [352.375, 332.52999997138977]
+        },
+        {
+          "game": 1,
+          "ply": 10,
+          "fen": "rnbq1rk1/ppp2ppp/4pn2/3p4/1bPP4/2NBP3/PP3PPP/R1BQK1NR w KQ d6 0 6",
+          "offMove": "g1f3",
+          "onMove": "g1f3",
+          "rootReused": true,
+          "inheritedVisits": 296,
+          "completedVisits": 104,
+          "newNeuralEvalsOffOn": [88, 104],
+          "retainedProxyBytesOffOn": [7925778, 8802674],
+          "wallMsOffOn": [177.16499996185303, 136.95000004768372]
+        },
+        {
+          "game": 1,
+          "ply": 11,
+          "fen": "rnbq1rk1/ppp2ppp/4pn2/3p4/1bPP4/2NBPN2/PP3PPP/R1BQK2R b KQ - 1 6",
+          "offMove": "d5c4",
+          "onMove": "d5c4",
+          "rootReused": true,
+          "inheritedVisits": 160,
+          "completedVisits": 240,
+          "newNeuralEvalsOffOn": [202, 240],
+          "retainedProxyBytesOffOn": [7976312, 9230822],
+          "wallMsOffOn": [340.9449999332428, 276.34500002861023]
+        },
+        {
+          "game": 1,
+          "ply": 12,
+          "fen": "rnbq1rk1/pp3ppp/4pn2/2pp4/1bPP4/2NBPN2/PP3PPP/R1BQK2R w KQ c6 0 7",
+          "offMove": "e1g1",
+          "onMove": "e1g1",
+          "rootReused": true,
+          "inheritedVisits": 120,
+          "completedVisits": 280,
+          "newNeuralEvalsOffOn": [260, 280],
+          "retainedProxyBytesOffOn": [8444174, 9440304],
+          "wallMsOffOn": [381.8549998998642, 372.4800000190735]
+        },
+        {
+          "game": 1,
+          "ply": 13,
+          "fen": "rnbq1rk1/pp3ppp/4pn2/2pp4/1bPP4/2NBPN2/PP3PPP/R1BQ1RK1 b - - 1 7",
+          "offMove": "d5c4",
+          "onMove": "d5c4",
+          "rootReused": true,
+          "inheritedVisits": 288,
+          "completedVisits": 112,
+          "newNeuralEvalsOffOn": [93, 112],
+          "retainedProxyBytesOffOn": [8354356, 9549072],
+          "wallMsOffOn": [217.9450000524521, 133.33000004291534]
+        },
+        {
+          "game": 1,
+          "ply": 14,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2pp4/1bPP4/2NBPN2/PP3PPP/R1BQ1RK1 w - - 2 8",
+          "offMove": "a2a3",
+          "onMove": "a2a3",
+          "rootReused": true,
+          "inheritedVisits": 142,
+          "completedVisits": 258,
+          "newNeuralEvalsOffOn": [244, 258],
+          "retainedProxyBytesOffOn": [8543288, 9736582],
+          "wallMsOffOn": [398.039999961853, 324.8949999809265]
+        },
+        {
+          "game": 1,
+          "ply": 15,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2pp4/1bPP4/P1NBPN2/1P3PPP/R1BQ1RK1 b - - 0 8",
+          "offMove": "b4c3",
+          "onMove": "b4c3",
+          "rootReused": true,
+          "inheritedVisits": 156,
+          "completedVisits": 244,
+          "newNeuralEvalsOffOn": [174, 244],
+          "retainedProxyBytesOffOn": [7512720, 9422374],
+          "wallMsOffOn": [317.0899999141693, 352.10000002384186]
+        },
+        {
+          "game": 1,
+          "ply": 16,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2pp4/2PP4/P1bBPN2/1P3PPP/R1BQ1RK1 w - - 0 9",
+          "offMove": "b2c3",
+          "onMove": "b2c3",
+          "rootReused": true,
+          "inheritedVisits": 339,
+          "completedVisits": 61,
+          "newNeuralEvalsOffOn": [54, 61],
+          "retainedProxyBytesOffOn": [7640420, 9395840],
+          "wallMsOffOn": [141.55999994277954, 65.21999990940094]
+        },
+        {
+          "game": 1,
+          "ply": 17,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2pp4/2PP4/P1PBPN2/5PPP/R1BQ1RK1 b - - 0 9",
+          "offMove": "b7b6",
+          "onMove": "b7b6",
+          "rootReused": true,
+          "inheritedVisits": 396,
+          "completedVisits": 4,
+          "newNeuralEvalsOffOn": [32, 4],
+          "retainedProxyBytesOffOn": [8318154, 9402076],
+          "wallMsOffOn": [95.53000009059906, 14.539999961853027]
+        },
+        {
+          "game": 1,
+          "ply": 18,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2p5/2pP4/P1PBPN2/5PPP/R1BQ1RK1 w - - 0 10",
+          "offMove": "d3c4",
+          "onMove": "d3c4",
+          "rootReused": true,
+          "inheritedVisits": 165,
+          "completedVisits": 235,
+          "newNeuralEvalsOffOn": [206, 235],
+          "retainedProxyBytesOffOn": [8342128, 9611052],
+          "wallMsOffOn": [262.09500002861023, 308.3600000143051]
+        },
+        {
+          "game": 1,
+          "ply": 19,
+          "fen": "r1bq1rk1/pp3ppp/2n1pn2/2p5/2BP4/P1P1PN2/5PPP/R1BQ1RK1 b - - 0 10",
+          "offMove": "b7b6",
+          "onMove": "b7b6",
+          "rootReused": true,
+          "inheritedVisits": 395,
+          "completedVisits": 5,
+          "newNeuralEvalsOffOn": [33, 5],
+          "retainedProxyBytesOffOn": [9030500, 9620312],
+          "wallMsOffOn": [106.67500007152556, 13.419999957084656]
+        },
+        {
+          "game": 2,
+          "ply": 0,
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "offMove": "e2e4",
+          "onMove": "e2e4",
+          "rootReused": false,
+          "inheritedVisits": 0,
+          "completedVisits": 400,
+          "newNeuralEvalsOffOn": [0, 14],
+          "retainedProxyBytesOffOn": [5889062, 5889062],
+          "wallMsOffOn": [78.46000003814697, 284.57999992370605]
+        },
+        {
+          "game": 2,
+          "ply": 1,
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+          "offMove": "e7e5",
+          "onMove": "e7e5",
+          "rootReused": true,
+          "inheritedVisits": 331,
+          "completedVisits": 69,
+          "newNeuralEvalsOffOn": [45, 69],
+          "retainedProxyBytesOffOn": [5825754, 6584694],
+          "wallMsOffOn": [198.65000009536743, 74.30499994754791]
+        },
+        {
+          "game": 2,
+          "ply": 2,
+          "fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2",
+          "offMove": "b1c3",
+          "onMove": "b1c3",
+          "rootReused": true,
+          "inheritedVisits": 16,
+          "completedVisits": 384,
+          "newNeuralEvalsOffOn": [313, 380],
+          "retainedProxyBytesOffOn": [6162062, 7531744],
+          "wallMsOffOn": [418.02499997615814, 361.51000010967255]
+        },
+        {
+          "game": 2,
+          "ply": 3,
+          "fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "offMove": "b8c6",
+          "onMove": "b8c6",
+          "rootReused": true,
+          "inheritedVisits": 181,
+          "completedVisits": 219,
+          "newNeuralEvalsOffOn": [269, 219],
+          "retainedProxyBytesOffOn": [7065390, 8315854],
+          "wallMsOffOn": [409.2150000333786, 271.36499989032745]
+        },
+        {
+          "game": 2,
+          "ply": 4,
+          "fen": "rnbqkbnr/pp2pppp/3p4/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 3",
+          "offMove": "d2d4",
+          "onMove": "d2d4",
+          "rootReused": true,
+          "inheritedVisits": 55,
+          "completedVisits": 345,
+          "newNeuralEvalsOffOn": [273, 338],
+          "retainedProxyBytesOffOn": [6904682, 8819404],
+          "wallMsOffOn": [384.6800000667572, 436.91999995708466]
+        },
+        {
+          "game": 2,
+          "ply": 5,
+          "fen": "rnbqkbnr/pp2pppp/3p4/2p5/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq d3 0 3",
+          "offMove": "c5d4",
+          "onMove": "c5d4",
+          "rootReused": true,
+          "inheritedVisits": 362,
+          "completedVisits": 38,
+          "newNeuralEvalsOffOn": [59, 38],
+          "retainedProxyBytesOffOn": [7542524, 9090056],
+          "wallMsOffOn": [198.86000001430511, 69.92000007629395]
+        },
+        {
+          "game": 2,
+          "ply": 6,
+          "fen": "rnbqkbnr/pp2pppp/3p4/8/3pP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 0 4",
+          "offMove": "f3d4",
+          "onMove": "f3d4",
+          "rootReused": true,
+          "inheritedVisits": 343,
+          "completedVisits": 57,
+          "newNeuralEvalsOffOn": [51, 57],
+          "retainedProxyBytesOffOn": [7823660, 9262972],
+          "wallMsOffOn": [201.1800000667572, 83.48000001907349]
+        },
+        {
+          "game": 2,
+          "ply": 7,
+          "fen": "rnbqkbnr/pp2pppp/3p4/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq - 0 4",
+          "offMove": "b8c6",
+          "onMove": "b8c6",
+          "rootReused": true,
+          "inheritedVisits": 394,
+          "completedVisits": 6,
+          "newNeuralEvalsOffOn": [44, 6],
+          "retainedProxyBytesOffOn": [8361030, 9296594],
+          "wallMsOffOn": [113.76999998092651, 14.795000076293944]
+        },
+        {
+          "game": 2,
+          "ply": 8,
+          "fen": "rnbqkb1r/pp2pppp/3p1n2/8/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 1 5",
+          "offMove": "b1c3",
+          "onMove": "b1c3",
+          "rootReused": true,
+          "inheritedVisits": 95,
+          "completedVisits": 305,
+          "newNeuralEvalsOffOn": [206, 299],
+          "retainedProxyBytesOffOn": [7523126, 9547412],
+          "wallMsOffOn": [356.05999994277954, 394.8600000143051]
+        },
+        {
+          "game": 2,
+          "ply": 9,
+          "fen": "rnbqkb1r/pp2pppp/3p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R b KQkq - 2 5",
+          "offMove": "b8c6",
+          "onMove": "b8c6",
+          "rootReused": true,
+          "inheritedVisits": 390,
+          "completedVisits": 10,
+          "newNeuralEvalsOffOn": [59, 10],
+          "retainedProxyBytesOffOn": [8160038, 9594804],
+          "wallMsOffOn": [166.86500000953674, 16.43499994277954]
+        },
+        {
+          "game": 2,
+          "ply": 10,
+          "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 6",
+          "offMove": "c1e3",
+          "onMove": "c1e3",
+          "rootReused": true,
+          "inheritedVisits": 45,
+          "completedVisits": 355,
+          "newNeuralEvalsOffOn": [308, 345],
+          "retainedProxyBytesOffOn": [8768192, 9697570],
+          "wallMsOffOn": [395.27499997615814, 421.5750000476837]
+        },
+        {
+          "game": 2,
+          "ply": 11,
+          "fen": "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 1 6",
+          "offMove": "b8c6",
+          "onMove": "b8c6",
+          "rootReused": true,
+          "inheritedVisits": 318,
+          "completedVisits": 82,
+          "newNeuralEvalsOffOn": [53, 80],
+          "retainedProxyBytesOffOn": [8058806, 9728066],
+          "wallMsOffOn": [204.4450000524521, 141.3400000333786]
+        },
+        {
+          "game": 2,
+          "ply": 12,
+          "fen": "rnbqkb1r/1p3ppp/p2p1n2/4p3/3NP3/2N1B3/PPP2PPP/R2QKB1R w KQkq e6 0 7",
+          "offMove": "d4b3",
+          "onMove": "d4b3",
+          "rootReused": true,
+          "inheritedVisits": 61,
+          "completedVisits": 339,
+          "newNeuralEvalsOffOn": [252, 328],
+          "retainedProxyBytesOffOn": [7857336, 9996166],
+          "wallMsOffOn": [385.79499995708466, 421.56500005722046]
+        },
+        {
+          "game": 2,
+          "ply": 13,
+          "fen": "rnbqkb1r/1p3ppp/p2p1n2/4p3/4P3/1NN1B3/PPP2PPP/R2QKB1R b KQkq - 1 7",
+          "offMove": "c8e6",
+          "onMove": "c8e6",
+          "rootReused": true,
+          "inheritedVisits": 340,
+          "completedVisits": 60,
+          "newNeuralEvalsOffOn": [65, 60],
+          "retainedProxyBytesOffOn": [7934872, 10091818],
+          "wallMsOffOn": [206.4349999427795, 65.8199999332428]
+        },
+        {
+          "game": 2,
+          "ply": 14,
+          "fen": "rn1qkb1r/1p3ppp/p2pbn2/4p3/4P3/1NN1B3/PPP2PPP/R2QKB1R w KQkq - 2 8",
+          "offMove": "d1d2",
+          "onMove": "d1d2",
+          "rootReused": true,
+          "inheritedVisits": 288,
+          "completedVisits": 112,
+          "newNeuralEvalsOffOn": [188, 93],
+          "retainedProxyBytesOffOn": [9692008, 9929186],
+          "wallMsOffOn": [371.835000038147, 117.67500007152556]
+        },
+        {
+          "game": 2,
+          "ply": 15,
+          "fen": "rn1qkb1r/1p3ppp/p2pbn2/4p3/4P3/1NN1BP2/PPP3PP/R2QKB1R b KQkq - 0 8",
+          "offMove": "f8e7",
+          "onMove": "f8e7",
+          "rootReused": true,
+          "inheritedVisits": 59,
+          "completedVisits": 341,
+          "newNeuralEvalsOffOn": [263, 322],
+          "retainedProxyBytesOffOn": [8717068, 9914028],
+          "wallMsOffOn": [346.210000038147, 452.09500002861023]
+        },
+        {
+          "game": 2,
+          "ply": 16,
+          "fen": "rn1qk2r/1p2bppp/p2pbn2/4p3/4P3/1NN1BP2/PPP3PP/R2QKB1R w KQkq - 1 9",
+          "offMove": "d1d2",
+          "onMove": "d1d2",
+          "rootReused": true,
+          "inheritedVisits": 180,
+          "completedVisits": 220,
+          "newNeuralEvalsOffOn": [124, 213],
+          "retainedProxyBytesOffOn": [8343628, 10195288],
+          "wallMsOffOn": [317.0150001049042, 284.11500000953674]
+        },
+        {
+          "game": 2,
+          "ply": 17,
+          "fen": "rn1qk2r/1p2bppp/p2pbn2/4p3/4P3/1NN1BP2/PPPQ2PP/R3KB1R b KQkq - 2 9",
+          "offMove": "d6d5",
+          "onMove": "d6d5",
+          "rootReused": true,
+          "inheritedVisits": 346,
+          "completedVisits": 54,
+          "newNeuralEvalsOffOn": [72, 54],
+          "retainedProxyBytesOffOn": [8567554, 10161566],
+          "wallMsOffOn": [196.5, 77.66499996185303]
+        },
+        {
+          "game": 2,
+          "ply": 18,
+          "fen": "rn1q1rk1/1p2bppp/p2pbn2/4p3/4P3/1NN1BP2/PPPQ2PP/R3KB1R w KQ - 3 10",
+          "offMove": "e1c1",
+          "onMove": "e1c1",
+          "rootReused": true,
+          "inheritedVisits": 37,
+          "completedVisits": 363,
+          "newNeuralEvalsOffOn": [282, 362],
+          "retainedProxyBytesOffOn": [7884734, 10427796],
+          "wallMsOffOn": [455.9250000715256, 445.14999997615814]
+        },
+        {
+          "game": 2,
+          "ply": 19,
+          "fen": "rn1q1rk1/1p2bppp/p2pbn2/4p3/4P3/1NN1BP2/PPPQ2PP/2KR1B1R b - - 4 10",
+          "offMove": "b7b5",
+          "onMove": "b7b5",
+          "rootReused": true,
+          "inheritedVisits": 387,
+          "completedVisits": 13,
+          "newNeuralEvalsOffOn": [54, 13],
+          "retainedProxyBytesOffOn": [8430882, 10435964],
+          "wallMsOffOn": [179.77499997615814, 17.299999952316284]
+        }
+      ]
+    }
+  },
+  "reference": {
+    "engine": "/home/ddbb/upgrades/stockfish/sf19-native",
+    "movetimeMs": 500,
+    "threads": 1,
+    "hashMb": 16,
+    "rows": [
+      {
+        "case": "play",
+        "game": 0,
+        "ply": 6,
+        "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+        "fresh": "b5a4",
+        "reuse": "b5c6",
+        "scoresABAB": [
+          {
+            "cp": 26,
+            "depth": 18,
+            "nodes": 294273
+          },
+          {
+            "cp": 5,
+            "depth": 19,
+            "nodes": 299325
+          },
+          {
+            "cp": 26,
+            "depth": 18,
+            "nodes": 295589
+          },
+          {
+            "cp": 2,
+            "depth": 19,
+            "nodes": 329241
+          }
+        ],
+        "reuseMinusFreshCp": -22.5
+      },
+      {
+        "case": "play",
+        "game": 0,
+        "ply": 16,
+        "fen": "r1bq1rk1/2p1bppp/p1np1n2/1p2p3/4P3/1BP2N2/PP1P1PPP/RNBQR1K1 w - - 1 9",
+        "fresh": "d2d4",
+        "reuse": "h2h3",
+        "scoresABAB": [
+          {
+            "cp": 22,
+            "depth": 20,
+            "nodes": 388216
+          },
+          {
+            "cp": 43,
+            "depth": 19,
+            "nodes": 394087
+          },
+          {
+            "cp": 22,
+            "depth": 20,
+            "nodes": 387500
+          },
+          {
+            "cp": 43,
+            "depth": 19,
+            "nodes": 387513
+          }
+        ],
+        "reuseMinusFreshCp": 21.0
+      },
+      {
+        "case": "play",
+        "game": 2,
+        "ply": 2,
+        "fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2",
+        "fresh": "b1c3",
+        "reuse": "g1f3",
+        "scoresABAB": [
+          {
+            "cp": 17,
+            "depth": 19,
+            "nodes": 367991
+          },
+          {
+            "cp": 28,
+            "depth": 20,
+            "nodes": 368279
+          },
+          {
+            "cp": 17,
+            "depth": 19,
+            "nodes": 367391
+          },
+          {
+            "cp": 29,
+            "depth": 20,
+            "nodes": 371390
+          }
+        ],
+        "reuseMinusFreshCp": 11.5
+      },
+      {
+        "case": "arena",
+        "game": 0,
+        "ply": 5,
+        "fen": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+        "fresh": "a7a6",
+        "reuse": "g8f6",
+        "scoresABAB": [
+          {
+            "cp": -41,
+            "depth": 18,
+            "nodes": 331738
+          },
+          {
+            "cp": -21,
+            "depth": 19,
+            "nodes": 299243
+          },
+          {
+            "cp": -44,
+            "depth": 18,
+            "nodes": 272418
+          },
+          {
+            "cp": -21,
+            "depth": 19,
+            "nodes": 296841
+          }
+        ],
+        "reuseMinusFreshCp": 21.5
+      },
+      {
+        "case": "arena",
+        "game": 0,
+        "ply": 16,
+        "fen": "r1bq1rk1/2p1bppp/p1np1n2/1p2p3/4P3/1BP2N2/PP1P1PPP/RNBQR1K1 w - - 1 9",
+        "fresh": "d2d4",
+        "reuse": "h2h3",
+        "scoresABAB": [
+          {
+            "cp": 19,
+            "depth": 19,
+            "nodes": 297820
+          },
+          {
+            "cp": 51,
+            "depth": 18,
+            "nodes": 277723
+          },
+          {
+            "cp": 20,
+            "depth": 20,
+            "nodes": 352947
+          },
+          {
+            "cp": 43,
+            "depth": 19,
+            "nodes": 397016
+          }
+        ],
+        "reuseMinusFreshCp": 27.5
+      }
+    ]
+  },
+  "yield": {
+    "original": {
+      "done": true,
+      "response": [
+        {
+          "abortMs": null,
+          "handlerMs": null,
+          "requestedInputAtMs": 20,
+          "totalMs": 172.8199999332428,
+          "yieldEveryMs": 0
+        },
+        {
+          "abortMs": null,
+          "handlerMs": null,
+          "requestedInputAtMs": 20,
+          "totalMs": 157.98500001430511,
+          "yieldEveryMs": 16
+        },
+        {
+          "abortMs": null,
+          "handlerMs": null,
+          "requestedInputAtMs": 20,
+          "totalMs": 159.8550000190735,
+          "yieldEveryMs": 0
+        },
+        {
+          "abortMs": null,
+          "handlerMs": null,
+          "requestedInputAtMs": 20,
+          "totalMs": 195.48500001430511,
+          "yieldEveryMs": 16
+        }
+      ],
+      "wall": [
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 160.8400000333786,
+          "yieldEveryMs": 0
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 166.54499995708466,
+          "yieldEveryMs": 16
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 161.11000001430511,
+          "yieldEveryMs": 0
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 228.10000002384183,
+          "yieldEveryMs": 16
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 288.4650000333786,
+          "yieldEveryMs": 0
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 242.12000000476837,
+          "yieldEveryMs": 16
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 238.95000004768372,
+          "yieldEveryMs": 0
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 186.25,
+          "yieldEveryMs": 16
+        }
+      ],
+      "summary": {
+        "offMedianMs": 200.03000003099442,
+        "onMedianMs": 207.17500001192093,
+        "pairedOverheadPercent": [3.5470031848558348, 41.58028676282577, -16.066073881839248, -22.05482320032105],
+        "medianPairedOverheadPercent": -6.259535348491706
+      }
+    },
+    "temporaryOuterLoopYieldCorrection": {
+      "wall": [
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 498.4950000047684,
+          "yieldEveryMs": 0
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 691.1400001049042,
+          "yieldEveryMs": 16
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 412.47500002384186,
+          "yieldEveryMs": 0
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 635.4099999666214,
+          "yieldEveryMs": 16
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 431.6899999380112,
+          "yieldEveryMs": 0
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 621.4800000190735,
+          "yieldEveryMs": 16
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 450.86500000953674,
+          "yieldEveryMs": 0
+        },
+        {
+          "misses": 0,
+          "move": "e2e4",
+          "wallMs": 554.039999961853,
+          "yieldEveryMs": 16
+        }
+      ],
+      "response": [
+        {
+          "abortMs": null,
+          "handlerMs": null,
+          "requestedInputAtMs": 20,
+          "totalMs": 425.7300000190735,
+          "yieldEveryMs": 0
+        },
+        {
+          "abortMs": 53.50999999046326,
+          "handlerMs": 53.110000014305115,
+          "requestedInputAtMs": 20,
+          "totalMs": 53.514999985694885,
+          "yieldEveryMs": 16
+        },
+        {
+          "abortMs": null,
+          "handlerMs": null,
+          "requestedInputAtMs": 20,
+          "totalMs": 273.4099999666214,
+          "yieldEveryMs": 0
+        },
+        {
+          "abortMs": 53.04999995231629,
+          "handlerMs": 52.92999994754791,
+          "requestedInputAtMs": 20,
+          "totalMs": 53.05499994754791,
+          "yieldEveryMs": 16
+        },
+        {
+          "abortMs": null,
+          "handlerMs": null,
+          "requestedInputAtMs": 20,
+          "totalMs": 306.06499993801117,
+          "yieldEveryMs": 0
+        },
+        {
+          "abortMs": 40.30999994277954,
+          "handlerMs": 40.13499999046326,
+          "requestedInputAtMs": 20,
+          "totalMs": 40.31499993801117,
+          "yieldEveryMs": 16
+        },
+        {
+          "abortMs": null,
+          "handlerMs": null,
+          "requestedInputAtMs": 20,
+          "totalMs": 290.3199999332428,
+          "yieldEveryMs": 0
+        },
+        {
+          "abortMs": 60.875,
+          "handlerMs": 60.675000071525574,
+          "requestedInputAtMs": 20,
+          "totalMs": 60.87999999523163,
+          "yieldEveryMs": 16
+        }
+      ],
+      "summary": {
+        "offMedianMs": 441.27749997377396,
+        "onMedianMs": 628.4449999928474,
+        "pairedOverheadPercent": [38.64532244020362, 54.04812411173852, 43.96441893681005, 22.883790036958708],
+        "medianPairedOverheadPercent": 41.30487068850684
+      }
+    }
+  }
+}
