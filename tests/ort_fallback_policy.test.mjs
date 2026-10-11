@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ORT_RUNTIME_ASSET_FILES } from '../scripts/ort_runtime_assets.mjs';
 import {
+  coerceOrtRuntimeArtifactKind,
+  gpuOrtRuntimeArtifactForThread,
   ORT_RUNTIME_ARTIFACT_FILES,
+  ortJspiApiAvailable,
   ortRuntimeArtifactKindForCurrentThread,
   requestedOrtWasmArtifact,
   resolvedOrtExecutionProviders,
+  resolveOrtJspiPreference,
   resolveOrtPthreadRuntimeUrls,
   resolveOrtWasmThreads,
   setOrtRuntimeArtifactKindForCurrentThread,
@@ -67,11 +71,42 @@ test('CPU-only ORT runtime URLs resolve from the same staged base', () => {
   });
 });
 
+test('JSPI ORT runtime URLs resolve the matching glue and binary', () => {
+  assert.deepEqual(resolveOrtPthreadRuntimeUrls('/ort/', 'https://0x88.app/app/analysis/', 'jspi'), {
+    mjs: 'https://0x88.app/ort/ort-wasm-simd-threaded.jspi.mjs',
+    wasm: 'https://0x88.app/ort/ort-wasm-simd-threaded.jspi.wasm',
+  });
+  assert.equal(ORT_RUNTIME_ARTIFACT_FILES.jspi.mjs, 'ort-wasm-simd-threaded.jspi.mjs');
+  assert.equal(ORT_RUNTIME_ARTIFACT_FILES.jspi.wasm, 'ort-wasm-simd-threaded.jspi.wasm');
+});
+
+test('JSPI is the production GPU pair only when the suspending API exists', () => {
+  assert.equal(resolveOrtJspiPreference(''), 'auto');
+  assert.equal(resolveOrtJspiPreference('0'), 'off');
+  assert.equal(resolveOrtJspiPreference('asyncify'), 'off');
+  assert.equal(resolveOrtJspiPreference('1'), 'on');
+  assert.equal(resolveOrtJspiPreference('jspi'), 'on');
+  assert.equal(gpuOrtRuntimeArtifactForThread({ prod: false, jspiApiAvailable: true, preference: 'auto' }), 'asyncify');
+  assert.equal(gpuOrtRuntimeArtifactForThread({ prod: true, jspiApiAvailable: false, preference: 'on' }), 'asyncify');
+  assert.equal(gpuOrtRuntimeArtifactForThread({ prod: true, jspiApiAvailable: true, preference: 'off' }), 'asyncify');
+  assert.equal(gpuOrtRuntimeArtifactForThread({ prod: true, jspiApiAvailable: true, preference: 'auto' }), 'jspi');
+  assert.equal(gpuOrtRuntimeArtifactForThread({ prod: true, jspiApiAvailable: true, preference: 'on' }), 'jspi');
+  assert.deepEqual(coerceOrtRuntimeArtifactKind('jspi', false), {
+    kind: 'asyncify',
+    jspiFallback: 'WebAssembly.Suspending or WebAssembly.promising is unavailable',
+  });
+  assert.deepEqual(coerceOrtRuntimeArtifactKind('jspi', true), { kind: 'jspi' });
+  assert.deepEqual(coerceOrtRuntimeArtifactKind('wasm', false), { kind: 'wasm' });
+  assert.equal(typeof ortJspiApiAvailable(), 'boolean');
+});
+
 test('runtime artifact filenames match the deploy staging allowlist', () => {
   assert.deepEqual(
     [
       ORT_RUNTIME_ARTIFACT_FILES.asyncify.mjs,
       ORT_RUNTIME_ARTIFACT_FILES.asyncify.wasm,
+      ORT_RUNTIME_ARTIFACT_FILES.jspi.mjs,
+      ORT_RUNTIME_ARTIFACT_FILES.jspi.wasm,
       ORT_RUNTIME_ARTIFACT_FILES.wasm.mjs,
       ORT_RUNTIME_ARTIFACT_FILES.wasm.wasm,
     ],

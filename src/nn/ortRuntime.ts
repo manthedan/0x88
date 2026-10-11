@@ -18,32 +18,82 @@ export type OrtWasmArtifactSelection = {
 };
 
 /**
- * ORT ships two threaded browser runtimes and we stage both.
+ * ORT ships three threaded browser runtimes. The CPU pair is always the wasm
+ * EP. The GPU pair is either Asyncify or JSPI, and glue and binary must match.
  *
- * - `asyncify`: the WebGPU/JSEP entrypoint. Instrumented for stack unwinding so
- *   the wasm side can suspend across GPU work. ~24MB.
- * - `wasm`: the CPU-only entrypoint. Not asyncify-instrumented, ~13.5MB, and
- *   everything an `executionProviders: ['wasm']` session needs.
+ * - `asyncify`: WebGPU entrypoint instrumented for stack unwinding so wasm can
+ *   suspend across GPU work. ~24MB. Fallback when JSPI is unavailable, and the
+ *   pair the dev server keeps because the `onnxruntime-web/webgpu` bundle
+ *   names this glue.
+ * - `jspi`: the same native WebGPU EP built with Wasm JSPI instead of
+ *   Asyncify. ~15MB. Loaded only from a production build, and only when
+ *   `WebAssembly.Suspending` and `WebAssembly.promising` exist. ORT 1.27
+ *   ships the matching glue as `ort-wasm-simd-threaded.jspi.mjs` (the
+ *   `onnxruntime-web/jspi` JS entry is the same orchestrator with that
+ *   filename baked in). The pthread bootstrap is inside the `.jspi.mjs`.
+ * - `wasm`: the CPU-only entrypoint. Not asyncify-instrumented, ~13.5MB.
  *
- * Both glue modules double as their own Emscripten pthread bootstrap (each
- * spawns `new Worker(new URL(import.meta.url), { name: 'em-pthread' })`), so
- * whichever one we hand to ORT must keep its deployed URL for helper workers to
- * re-import. Glue and binary must come from the same pair: the plain glue
- * refuses to instantiate the asyncify binary (LinkError) and vice versa.
- * `scripts/ort_runtime_assets.mjs` mirrors these names for the deploy-time
- * staging allowlist.
+ * Each glue module is its own Emscripten pthread bootstrap (it spawns
+ * `new Worker(new URL(import.meta.url), { name: 'em-pthread' })`), so the one
+ * we hand to ORT must keep its deployed URL for helper workers to re-import.
+ * The plain glue refuses to instantiate the asyncify or JSPI binary (LinkError)
+ * and vice versa. `scripts/ort_runtime_assets.mjs` stages all three pairs.
+ * Auto-detect does not switch pairs when a file 404s, so the JSPI glue and
+ * binary have to ship with the asyncify pair.
  */
-export type OrtRuntimeArtifactKind = 'asyncify' | 'wasm';
+export type OrtRuntimeArtifactKind = 'asyncify' | 'jspi' | 'wasm';
+export type OrtJspiPreference = 'auto' | 'on' | 'off';
 
 export const ORT_PTHREAD_BOOTSTRAP_FILE = 'ort-wasm-simd-threaded.asyncify.mjs';
 export const ORT_PTHREAD_WASM_FILE = 'ort-wasm-simd-threaded.asyncify.wasm';
+export const ORT_JSPI_BOOTSTRAP_FILE = 'ort-wasm-simd-threaded.jspi.mjs';
+export const ORT_JSPI_WASM_FILE = 'ort-wasm-simd-threaded.jspi.wasm';
 export const ORT_WASM_EP_BOOTSTRAP_FILE = 'ort-wasm-simd-threaded.mjs';
 export const ORT_WASM_EP_WASM_FILE = 'ort-wasm-simd-threaded.wasm';
 
 export const ORT_RUNTIME_ARTIFACT_FILES: Readonly<Record<OrtRuntimeArtifactKind, { mjs: string; wasm: string }>> = Object.freeze({
   asyncify: { mjs: ORT_PTHREAD_BOOTSTRAP_FILE, wasm: ORT_PTHREAD_WASM_FILE },
+  jspi: { mjs: ORT_JSPI_BOOTSTRAP_FILE, wasm: ORT_JSPI_WASM_FILE },
   wasm: { mjs: ORT_WASM_EP_BOOTSTRAP_FILE, wasm: ORT_WASM_EP_WASM_FILE },
 });
+
+const ORT_JSPI_UNAVAILABLE = 'WebAssembly.Suspending or WebAssembly.promising is unavailable';
+
+/** JSPI glue wraps imports with `Suspending` and exports with `promising`. */
+export function ortJspiApiAvailable(
+  wasmGlobal: { Suspending?: unknown; promising?: unknown } | null | undefined = typeof WebAssembly === 'undefined'
+    ? undefined
+    : (WebAssembly as { Suspending?: unknown; promising?: unknown }),
+): boolean {
+  return typeof wasmGlobal?.Suspending === 'function' && typeof wasmGlobal?.promising === 'function';
+}
+
+export function resolveOrtJspiPreference(raw: string | null | undefined): OrtJspiPreference {
+  const normalized = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (!normalized || normalized === 'auto') return 'auto';
+  if (['0', 'false', 'no', 'off', 'asyncify'].includes(normalized)) return 'off';
+  if (['1', 'true', 'yes', 'on', 'jspi'].includes(normalized)) return 'on';
+  return 'auto';
+}
+
+/**
+ * Which GPU binary to load. A non-production bundle cannot point its glue at
+ * the JSPI module (the dev server keeps the asyncify import), so JSPI is a
+ * built-client choice. Missing JSPI is always asyncify, including an explicit
+ * `on`, so a browser without the API still boots.
+ */
+export function gpuOrtRuntimeArtifactForThread(env: { prod: boolean; jspiApiAvailable: boolean; preference: OrtJspiPreference }): 'jspi' | 'asyncify' {
+  if (!env.prod) return 'asyncify';
+  if (env.preference === 'off' || !env.jspiApiAvailable) return 'asyncify';
+  return 'jspi';
+}
+
+export function coerceOrtRuntimeArtifactKind(kind: OrtRuntimeArtifactKind, jspiApiAvailable: boolean): { kind: OrtRuntimeArtifactKind; jspiFallback?: string } {
+  if (kind === 'jspi' && !jspiApiAvailable) return { kind: 'asyncify', jspiFallback: ORT_JSPI_UNAVAILABLE };
+  return { kind };
+}
 
 export function resolveOrtPthreadRuntimeUrls(
   runtimeBase = '/ort/',
@@ -132,6 +182,10 @@ export type OrtRuntimeDiagnostics = {
     simdVariant: OrtWasmSimdVariant;
     /** Which staged ORT runtime pair this thread loads (see OrtRuntimeArtifactKind). */
     runtimeArtifact: OrtRuntimeArtifactKind;
+    jspiApiAvailable?: boolean;
+    jspiPreference?: OrtJspiPreference;
+    /** Set when JSPI was requested and this thread fell back to asyncify. */
+    jspiFallback?: string;
     artifactId?: string;
     mjsUrl?: string;
     wasmUrl?: string;
@@ -470,10 +524,12 @@ export function ortRuntimeArtifactKindIsLocked(): boolean {
  * The choice must be made before ORT initializes and can never change
  * afterwards (the binary is worker-global), which is why "this session happens
  * to run on wasm" is not sufficient on its own:
- * - strict `ep=webgpu` always keeps asyncify, so a GPU-less browser still fails
- *   with "WebGPU unavailable" instead of an opaque link error;
- * - anything that resolves to include `webgpu` keeps asyncify, which also keeps
- *   the in-process WebGPU->WASM fallback in `createOrtSession` on one binary;
+ * - strict `ep=webgpu` keeps a GPU pair (JSPI on a production build that can
+ *   use it, otherwise asyncify), so a GPU-less browser still fails with
+ *   "WebGPU unavailable" instead of an opaque link error;
+ * - anything that resolves to include `webgpu` keeps that same GPU pair, which
+ *   also keeps the in-process WebGPU->WASM fallback in `createOrtSession` on
+ *   one binary;
  * - a CPU-only resolution takes the small build only when escalating to WebGPU
  *   later in this same thread is impossible (`navigator.gpu` missing, i.e.
  *   Safari/Firefox) or has been ruled out by an explicit `?ep=wasm` / env pin.
@@ -483,6 +539,28 @@ export function ortRuntimeArtifactKindIsLocked(): boolean {
  *   `setOrtRuntimeArtifactKindForCurrentThread('wasm')` before its first
  *   session.
  */
+let ortJspiFallbackReason: string | undefined;
+
+function requestedOrtJspiPreference(): OrtJspiPreference {
+  return resolveOrtJspiPreference(browserParam('ortJspi') ?? envValue('ORT_JSPI') ?? envValue('TINY_LEELA_ORT_JSPI'));
+}
+
+function rememberJspiFallback(fallback: string | undefined): void {
+  ortJspiFallbackReason = fallback;
+}
+
+function selectGpuOrtRuntimeArtifact(): 'jspi' | 'asyncify' {
+  const preference = requestedOrtJspiPreference();
+  const available = ortJspiApiAvailable();
+  const kind = gpuOrtRuntimeArtifactForThread({
+    prod: (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true,
+    jspiApiAvailable: available,
+    preference,
+  });
+  rememberJspiFallback(kind === 'asyncify' && preference !== 'off' && !available ? ORT_JSPI_UNAVAILABLE : undefined);
+  return kind;
+}
+
 export function ortRuntimeArtifactKindForCurrentThread(): OrtRuntimeArtifactKind {
   if (lockedOrtRuntimeArtifactKind) return lockedOrtRuntimeArtifactKind;
   // Node (no `location`) imports ORT's bundle with the Emscripten glue inlined,
@@ -497,18 +575,22 @@ export function ortRuntimeArtifactKindForCurrentThread(): OrtRuntimeArtifactKind
   // which is exactly the asyncify-plus-threads combination measured as a 55%
   // regression.
   if (forcedOrtWasmArtifact.variant !== 'bundled') return 'asyncify';
-  if (forcedOrtRuntimeArtifactKind) return forcedOrtRuntimeArtifactKind;
-  if (requestedOrtExecutionProvider() === 'webgpu') return 'asyncify';
-  if (resolvedOrtExecutionProviders().includes('webgpu')) return 'asyncify';
+  if (forcedOrtRuntimeArtifactKind) {
+    const coerced = coerceOrtRuntimeArtifactKind(forcedOrtRuntimeArtifactKind, ortJspiApiAvailable());
+    rememberJspiFallback(coerced.jspiFallback);
+    return coerced.kind;
+  }
+  if (requestedOrtExecutionProvider() === 'webgpu') return selectGpuOrtRuntimeArtifact();
+  if (resolvedOrtExecutionProviders().includes('webgpu')) return selectGpuOrtRuntimeArtifact();
   // `webgpuUsableForProviderSelection`, not `webgpuAvailable`: a browser can
   // expose `navigator.gpu` and still fail to yield an adapter. Once the probe
   // has explicitly failed, provider resolution already drops WebGPU, so keying
   // the artifact off mere API presence would hand that browser the larger
-  // asyncify pair and the single-thread policy for a GPU it can never use.
-  // Strict `ep=webgpu` is unaffected: it returned asyncify above, so a GPU-less
-  // browser still fails with "WebGPU unavailable" rather than a link error.
+  // GPU pair and the single-thread policy for a GPU it can never use.
+  // Strict `ep=webgpu` is unaffected: it returned the GPU pair above, so a
+  // GPU-less browser still fails with "WebGPU unavailable" rather than a link error.
   if (!webgpuUsableForProviderSelection() || explicitWasmOnlyOrtEpPin()) return 'wasm';
-  return 'asyncify';
+  return selectGpuOrtRuntimeArtifact();
 }
 
 function lockOrtRuntimeArtifactKind(providers: string[]): OrtRuntimeArtifactKind {
@@ -607,8 +689,8 @@ export function resolveOrtWasmThreads(context: OrtWasmThreadContext): number {
     // re-executing our worker chunk. Measured on the CPU-only pair (median of
     // 20 evals, t1-256x10 qdq8, 10-core): 1t 61.3ms, 2t 43.4ms, 3t 42.2ms,
     // 4t 40.1ms, 6t 54.0ms, 8t 44.2ms; outputs matched the single-threaded run.
-    // The budget stays 1 on the WebGPU-capable (asyncify) pair: with a WebGPU
-    // session, numThreads=4 *regressed* the same workload from 11.6ms to
+    // The budget stays 1 on a WebGPU-capable pair (asyncify or JSPI): with a
+    // WebGPU session, numThreads=4 *regressed* the same workload from 11.6ms to
     // 17.9ms, and the artifact is worker-global, so only a thread that can
     // never escalate to WebGPU (Safari/Firefox, or an explicit `?ep=wasm` pin)
     // opts in.
@@ -654,8 +736,8 @@ function browserOrtWasmPaths(kind: OrtRuntimeArtifactKind): string | Record<stri
   // SPA-fallback HTML and initWasm fails ("no available backend found").
   // Hand ORT explicit same-origin glue and wasm URLs instead. The glue module
   // is also the Emscripten pthread bootstrap, so preserving its deployed URL
-  // lets helper workers re-import that exact staged module -- which holds for
-  // both staged pairs, each of which bootstraps its own em-pthread workers.
+  // lets helper workers re-import that exact staged module. Each staged glue
+  // bootstraps its own em-pthread workers.
   // `location` (not `document`) detects browser-ness so this also applies
   // inside workers.
   const builtBrowser = typeof location !== 'undefined' && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
@@ -666,7 +748,9 @@ function browserOrtWasmPaths(kind: OrtRuntimeArtifactKind): string | Record<stri
   // this asyncify-named pin; a jsep-named pin breaks its init instead.)
   // That glue is always ORT's own asyncify module -- the only entrypoint the
   // webgpu bundle names -- and glue and binary must match, so dev stays on the
-  // asyncify binary for every EP. The CPU-only build is a production saving.
+  // asyncify binary for every EP, including a wasm-EP request. JSPI is
+  // selected only in the production branch above, where both URLs are
+  // explicit. The CPU-only build is a production saving.
   return { wasm: `/ort/${ORT_PTHREAD_WASM_FILE}` };
 }
 
@@ -1137,6 +1221,9 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
       threadedAvailable: browserThreadedWasmAvailable(),
       simdVariant: artifact.variant,
       runtimeArtifact: ortRuntimeArtifactKindForCurrentThread(),
+      jspiApiAvailable: ortJspiApiAvailable(),
+      jspiPreference: requestedOrtJspiPreference(),
+      ...(ortJspiFallbackReason ? { jspiFallback: ortJspiFallbackReason } : {}),
       ...(artifact.artifactId ? { artifactId: artifact.artifactId } : {}),
       ...(artifact.mjsUrl ? { mjsUrl: artifact.mjsUrl } : {}),
       ...(artifact.wasmUrl ? { wasmUrl: artifact.wasmUrl } : {}),
