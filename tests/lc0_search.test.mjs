@@ -244,6 +244,26 @@ function uniformEvaluator() {
   };
 }
 
+test('LC0 cancellation discards a partially mutated retained root before retry', async () => {
+  let calls = 0;
+  let abortAt = Infinity;
+  let controller = null;
+  const searcher = new Lc0PuctSearcher({
+    evaluate(input) {
+      if (++calls === abortAt) controller.abort();
+      return fakeLc0Evaluation(input);
+    },
+  });
+  await searcher.search(START_FEN, { visits: 32, reuseTree: true });
+  controller = new AbortController();
+  abortAt = calls + 10;
+  await assert.rejects(searcher.search(START_FEN, { visits: 1000, reuseTree: true, signal: controller.signal }), { name: 'AbortError' });
+  abortAt = Infinity;
+  const retry = await searcher.search(START_FEN, { visits: 32, reuseTree: true });
+  assert.equal(retry.search.stats.rootReused, false);
+  assert.equal(retry.visits, 32);
+});
+
 test('LC0 search can reuse the previous subtree after a played move', async () => {
   const searcher = new Lc0PuctSearcher(uniformEvaluator());
   const first = await searcher.search(START_FEN, { visits: 12, reuseTree: true });

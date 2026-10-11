@@ -816,14 +816,25 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   const key = metadataKey(cacheName, resolved.url);
   const cacheKey = new Request(resolved.url);
   const fetchRequest = new Request(resolved.url, { cache: 'force-cache', signal: options.signal });
-  const cache = await caches.open(cacheName);
+  let cache: Cache;
+  let cached: Response | undefined;
   const storagePersistent = await requestPersistentStorage(options.requestPersistentStorage);
   options.signal?.throwIfAborted();
-  const cached = await cache.match(cacheKey);
+  try {
+    cache = await caches.open(cacheName);
+    cached = await cache.match(cacheKey);
+  } catch {
+    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs);
+  }
 
   if (cached) {
     const cacheReadStarted = nowMs();
-    const bytes = await cached.arrayBuffer();
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await cached.arrayBuffer();
+    } catch {
+      return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs);
+    }
     options.signal?.throwIfAborted();
     const cacheReadMs = nowMs() - cacheReadStarted;
     const metadata = await ignoreMetadataFailure(store ? () => store.get(key) : undefined);
@@ -876,7 +887,7 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
       };
     }
 
-    await cache.delete(cacheKey);
+    await cache.delete(cacheKey).catch(() => false);
     options.signal?.throwIfAborted();
     await ignoreMetadataFailure(store ? () => store.delete(key) : undefined);
     options.signal?.throwIfAborted();
@@ -938,6 +949,39 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   });
 }
 
+async function fetchUncachedVerifiedModel(
+  modelUrl: string,
+  resolved: ResolvedModelArtifact,
+  options: Lc0ModelLoadOptions,
+  started: number,
+  manifestMs: number,
+): Promise<Lc0ModelLoadResult> {
+  options.signal?.throwIfAborted();
+  const download = await fetchModelBytes(new Request(resolved.url, { signal: options.signal }), resolved.url, resolved.expectedBytes, options.onProgress);
+  options.signal?.throwIfAborted();
+  const check = await verifyLc0ModelBytes(download.bytes, resolved);
+  // ResolvedModelArtifact uses expectedBytes/expectedSha256, just like the verifier.
+  options.signal?.throwIfAborted();
+  if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
+  return {
+    model: download.bytes,
+    url: resolved.url,
+    logicalUrl: logicalUrlField(modelUrl, resolved.url),
+    mode: 'memory',
+    cacheStatus: 'unavailable',
+    bytes: download.bytes.byteLength,
+    expectedBytes: resolved.expectedBytes,
+    expectedSha256: resolved.expectedSha256,
+    sha256: check.sha256,
+    sha256Valid: check.sha256Checked ? true : undefined,
+    verification: verificationMode(check),
+    downloadMs: download.downloadMs,
+    hashMs: check.hashMs ?? 0,
+    elapsedMs: nowMs() - started,
+    telemetry: telemetry(started, 'memory', { manifestMs, downloadMs: download.downloadMs, hashMs: check.hashMs, preallocatedDownload: download.preallocated }),
+  };
+}
+
 async function fetchAndCacheModel(
   cache: Cache,
   cacheKey: Request,
@@ -960,20 +1004,34 @@ async function fetchAndCacheModel(
   if (!check.ok) throw new Error(`LC0 model validation failed for ${fetchModelUrl}: ${check.reason}`);
 
   const cacheWriteStarted = nowMs();
-  await cache.put(cacheKey, new Response(download.bytes));
+  let cacheWritable = true;
+  try {
+    await cache.put(cacheKey, new Response(download.bytes));
+  } catch {
+    cacheWritable = false;
+  }
   options.signal?.throwIfAborted();
   const cacheWriteMs = nowMs() - cacheWriteStarted;
-  await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, fetchModelUrl, expectation, check)) : undefined);
-  options.signal?.throwIfAborted();
-  await enforceModelCacheBounds(cache, cacheName, fetchModelUrl, store, options);
-  options.signal?.throwIfAborted();
+  if (cacheWritable) {
+    await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, fetchModelUrl, expectation, check)) : undefined);
+    options.signal?.throwIfAborted();
+    try {
+      await enforceModelCacheBounds(cache, cacheName, fetchModelUrl, store, options);
+    } catch {
+      // Do not keep adding entries when optional storage cannot enforce its LRU.
+      cacheWritable = false;
+      await cache.delete(cacheKey).catch(() => false);
+      await ignoreMetadataFailure(store ? () => store.delete(key) : undefined);
+    }
+    options.signal?.throwIfAborted();
+  }
   const hashMs = check.hashMs ?? 0;
   return {
     model: download.bytes,
     url: fetchModelUrl,
     logicalUrl: logicalUrlField(logicalModelUrl, fetchModelUrl),
-    mode: 'cache',
-    cacheStatus: 'miss',
+    mode: cacheWritable ? 'cache' : 'memory',
+    cacheStatus: cacheWritable ? 'miss' : 'unavailable',
     bytes: download.bytes.byteLength,
     expectedBytes: expectation.expectedBytes,
     sha256: check.sha256,

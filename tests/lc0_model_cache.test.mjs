@@ -664,6 +664,45 @@ test('clearLc0ModelCacheEntry removes only the selected model and its metadata',
   );
 });
 
+for (const operation of ['open', 'match', 'put', 'keys']) {
+  test(`optional Cache Storage ${operation} failures keep verified model bytes without refetching`, async () => {
+    await withMockedEnv(
+      async (fetchLog) => {
+        const cache = await globalThis.caches.open('lc0-browser-models-v1');
+        const owner = operation === 'open' ? globalThis.caches : cache;
+        owner[operation] = async () => {
+          throw new DOMException('storage denied', 'QuotaExceededError');
+        };
+        const result = await loadLc0ModelForOrt(MODEL_URL, { cache: true });
+        assert.equal(result.mode, 'memory');
+        assert.equal(result.cacheStatus, 'unavailable');
+        assert.equal(result.sha256Valid, true);
+        assert.deepEqual(result.model, bytesOf('abc'));
+        assert.equal(fetchLog.model, 1);
+      },
+      { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 },
+    );
+  });
+}
+
+test('optional storage fallback never swallows integrity or cancellation errors', async () => {
+  await withMockedEnv(
+    async () => {
+      globalThis.caches.open = async () => {
+        throw Error('denied');
+      };
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, { cache: true }), /sha256 mismatch/);
+      const controller = new AbortController();
+      globalThis.caches.open = async () => {
+        controller.abort();
+        throw Error('denied');
+      };
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, { cache: true, signal: controller.signal }), { name: 'AbortError' });
+    },
+    { serveBytes: () => bytesOf('abc'), manifestSha256: EMPTY_SHA256, manifestBytes: 3 },
+  );
+});
+
 test('external manifest entries use the shared metadata fast path and rehash on mismatch', async () => {
   await withMockedEnv(
     async (fetchLog) => {
