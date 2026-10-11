@@ -250,6 +250,78 @@ test('replay rejects an engine that crashes after completing search', () => temp
     { defaults: ['startpos'], benchDepth: 1, positions: 0, timeout: 5000 }), /exited abnormally \(2/);
 }));
 
+for (const [label, final, best] of [
+  ['empty bestmove', 'info nodes 100', 'bestmove '],
+  ['bare bestmove', 'info nodes 100', 'bestmove'],
+  ['truncated move', 'info nodes 100', 'bestmove e2e'],
+  ['truncated ponder', 'info nodes 100', 'bestmove e2e4 ponder'],
+  ['trailing move garbage', 'info nodes 100', 'bestmove e2e4garbage'],
+  ['node numeric prefix', 'info nodes 100garbage', 'bestmove e2e4'],
+  ['non-numeric final nodes', 'info nodes invalid', 'bestmove e2e4'],
+  ['missing final node token', 'info nodes', 'bestmove e2e4'],
+  ['negative nodes', 'info nodes -100', 'bestmove e2e4'],
+  ['unsafe nodes', 'info nodes 9007199254740992', 'bestmove e2e4'],
+  ['duplicate node fields', 'info nodes 100 nodes 100', 'bestmove e2e4'],
+]) test(`replay worker rejects ${label} rather than using an earlier count`, () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-replay.mjs');
+  const output = `info depth 1 nodes 100 score cp 0 pv e2e4\n${final}\n${best}`;
+  writeFileSync(engine, `import { createInterface } from 'node:readline';
+    for await (const line of createInterface({ input: process.stdin })) {
+      if (line === 'uci') console.log('uciok');
+      if (line === 'isready') console.log('readyok');
+      if (line.startsWith('go ')) console.log(${JSON.stringify(output)});
+      if (line === 'quit') process.exit(0);
+    }`);
+  await assert.rejects(runReplay({ tmp: dir, options: { timeout: 5000 } },
+    { label: 'fixture', command: process.execPath, args: [engine] }, ['startpos'], 1), /Malformed (?:bestmove|replay nodes) record/);
+}));
+
+test('replay accepts complete moves, promotions, ponder and terminal records with the last count', () => temporary(async (dir) => {
+  const engine = join(dir, 'fake-valid-replay.mjs');
+  const outputs = [
+    'info nodes 5\ninfo nodes 10\nbestmove e2e4 ponder e7e5\ninfo nodes 999',
+    'info nodes 20\nbestmove a7a8q',
+    'bestmove 0000',
+    'bestmove (none)',
+  ];
+  writeFileSync(engine, `import { createInterface } from 'node:readline';
+    const outputs = ${JSON.stringify(outputs)}; let index = 0;
+    for await (const line of createInterface({ input: process.stdin })) {
+      if (line === 'uci') console.log('uciok');
+      if (line === 'isready') console.log('readyok');
+      if (line.startsWith('go ')) console.log(outputs[index++]);
+      if (line === 'quit') process.exit(0);
+    }`);
+  const result = await runCell({ label: 'fixture', command: process.execPath, args: [engine] },
+    { defaults: ['one', 'two', 'three', 'four'], benchDepth: 1, positions: 0, timeout: 5000 });
+  assert.equal(result.benchSignature, '30');
+  assert.deepEqual(result.benchRows.map(({ nodes, bestmove }) => ({ nodes, bestmove })), [
+    { nodes: 10, bestmove: 'e2e4' }, { nodes: 20, bestmove: 'a7a8q' },
+    { nodes: 0, bestmove: '0000' }, { nodes: 0, bestmove: '(none)' },
+  ]);
+}));
+
+test('PlentyChess malformed replay cannot PASS an explicit native total', () => temporary(async (dir) => {
+  const source = join(dir, 'bench.h');
+  writeFileSync(source, `BENCH_POSITIONS = { ${Array(46).fill('"startpos"').join(',')} };`);
+  writeFileSync(join(dir, 'candidate.manifest.json'), JSON.stringify({ engine: 'plentychess', upstream: {
+    repo: 'https://example.invalid', commit: ref, license: 'GPL-3.0' } }));
+  writeFileSync(join(dir, 'plentychess-emscripten.data'), 'fixture net');
+  for (const suffix of ['', '-sse41', '-relaxed-simd128']) {
+    writeFileSync(join(dir, `plentychess-emscripten${suffix}.wasm`), wasm([0xfd, 0x0e]));
+    writeFileSync(join(dir, `plentychess-emscripten${suffix}.js`), `module.exports = async (options) => ({ ccall: (_, __, ___, [line]) => {
+      if (line === 'uci') options.print('uciok');
+      if (line === 'isready') options.print('readyok');
+      if (line.startsWith('go ')) { options.print('info nodes 100garbage'); options.print('bestmove '); }
+    } });`);
+  }
+  const report = await audit('plentychess', { artifacts: dir, benchSource: source, nativeBench: 4600, parity: true, timeout: 5000 });
+  const benches = report.gates.filter((gate) => gate.name === 'bench');
+  assert.equal(benches.length, 3);
+  assert.ok(benches.every((gate) => gate.status === 'FAIL' && /Malformed bestmove record/.test(gate.detail)));
+  assert.equal(report.gates.at(-1).status, 'SKIP');
+}));
+
 test('parity rejects matching failed searches, wrong depths and missing rows', () => {
   const rows = ['scalar', 'simd'].map((artifact) => ({ artifact, position: 'start', depth: 9, nodes: 100,
     bestmove: 'e2e4', score: 'cp 0', pv: 'e2e4', exitCode: 0 }));

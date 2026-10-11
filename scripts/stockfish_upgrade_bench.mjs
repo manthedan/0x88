@@ -22,6 +22,27 @@ export function benchDefaults(source) {
   return entries;
 }
 
+function replaySearch(lines, best) {
+  const move = '[a-h][1-8][a-h][1-8][qrbn]?';
+  const match = best.match(new RegExp(`^bestmove\\s+(${move}|0000|\\(none\\))(?:\\s+ponder\\s+(${move}))?\\s*$`));
+  if (!match) throw new Error(`Malformed bestmove record: ${best}`);
+  const bestmove = match[1];
+  // Select node-bearing records, not just records whose numeric prefix parses.
+  // A corrupt final count must never cause fallback to an earlier info line.
+  const infos = lines.filter((line) => /^info\s/.test(line) && !/^info\s+string\b/.test(line)
+    && line.trim().split(/\s+/).includes('nodes'));
+  if (!infos.length && !['0000', '(none)'].includes(bestmove)) throw new Error('Missing bench nodes');
+  let nodes = 0;
+  for (const info of infos) {
+    const tokens = info.trim().split(/\s+/);
+    const token = tokens[tokens.indexOf('nodes') + 1];
+    if (tokens.filter((part) => part === 'nodes').length !== 1 || !/^\d+$/.test(token ?? '')
+      || !Number.isSafeInteger(Number(token))) throw new Error(`Malformed replay nodes record: ${info}`);
+    nodes = Number(token);
+  }
+  return { nodes, bestmove };
+}
+
 export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults } = {}) {
   const started = performance.now();
   const child = spawn(cell.command, cell.args || [], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -103,12 +124,11 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       const from = lines.length;
       command(`position fen ${entry}`);
       command(`go depth ${benchDepth}`);
-      const best = await wait((l) => l.startsWith('bestmove '));
-      const infos = lines.slice(from).filter((l) => l.startsWith('info ') && /\bnodes \d+/.test(l));
-      const nodes = infos.length ? parseInfo(infos.at(-1)).nodes : 0;
-      if (!infos.length && !/bestmove (?:0000|\(none\))/.test(best)) throw Error(`Missing bench nodes: ${entry}`);
-      benchNodes += nodes;
-      benchRows.push({ fen: entry, nodes, bestmove: best.split(/\s+/)[1] });
+      const best = await wait((l) => /^bestmove(?:\s|$)/.test(l));
+      const search = replaySearch(lines.slice(from, cursor - 1), best);
+      benchNodes += search.nodes;
+      if (!Number.isSafeInteger(benchNodes)) throw new Error('Invalid replay bench node total');
+      benchRows.push({ fen: entry, ...search });
     }
     const signature = String(benchNodes);
     if (!benchNodes || (cell.nativeBench && nativeSignature !== signature)) throw Error(`Bench replay mismatch: native=${nativeSignature}, replay=${signature}`);
@@ -125,11 +145,13 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       command(`position fen ${fen}`);
       const t = performance.now();
       command(`go depth ${depth}`);
-      const best = await wait((l) => l.startsWith('bestmove '));
+      const best = await wait((l) => /^bestmove(?:\s|$)/.test(l));
       const wallMs = performance.now() - t;
-      const info = lines.slice(infoStart).filter((l) => l.startsWith('info ') && l.includes(' pv ')).at(-1);
+      const searchLines = lines.slice(infoStart, cursor - 1);
+      const search = replaySearch(searchLines, best);
+      const info = searchLines.filter((l) => l.startsWith('info ') && l.includes(' pv ')).at(-1);
       if (!info) throw new Error(`${label}: missing search info`);
-      rows.push({ position: label, depth, bestmove: best.split(/\s+/)[1], ...parseInfo(info), wallMs });
+      rows.push({ position: label, depth, ...parseInfo(info), ...search, wallMs });
     }
     completed = true;
     return { ...cell, startupMs, benchDepth, benchSignature: signature, nativeSignature, benchRows, depth, threads, hash: 16, rows,
