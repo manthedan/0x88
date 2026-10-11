@@ -143,7 +143,7 @@ import {
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
-import { type Lc0EvaluationProvider, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, type Lc0EvaluationProvider, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import {
   checkPlentyChessVariantAsset,
   hasExplicitPlentyChessVariant,
@@ -584,7 +584,15 @@ function lc0WholeModelTensorCache(): boolean {
 }
 
 function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
-  const common = { type: 'init', modelUrl: MODEL_URL, ep: requestedEp(), cacheModel: false, reportDownloadProgress: MODEL_URL === DEFAULT_MODEL_URL };
+  const common = {
+    type: 'init',
+    modelUrl: MODEL_URL,
+    ep: requestedEp(),
+    cacheModel: true,
+    requestPersistentModelStorage: true,
+    evalCacheEntries: 2048,
+    reportDownloadProgress: MODEL_URL === DEFAULT_MODEL_URL,
+  };
   if (runtime === 'onnx') return common;
   if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME)
     return {
@@ -593,7 +601,6 @@ function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown>
       wholeModelManifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
       wholeModelBatch: lc0WholeModelPhysicalBatch(),
       wholeModelTensorCache: lc0WholeModelTensorCache(),
-      evalCacheEntries: 0,
     };
   return {
     ...common,
@@ -809,7 +816,7 @@ async function workerLc0Lines(
   let searchId: number | null = null;
   try {
     const response = await postWorker<{ result: WorkerSearchResult }>(
-      { type: 'search', input: { positions }, visits, batchSize: 1, multiPv: requestedMultiPv, reportProgress: true },
+      { type: 'search', input: { positions }, visits, batchSize: 1, multiPv: requestedMultiPv, reuseTree: visits <= 16_000, reportProgress: true },
       (id) => {
         searchId = id;
         activeWorkerSearchId = id;
@@ -3156,6 +3163,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
                 { positions: analysisPositions },
                 {
                   visits: row.strength,
+                  reuseTree: row.strength <= 16_000,
                   multiPv: analysisMultiPv,
                   signal: controller.signal,
                   yieldEveryMs: 16,
@@ -3375,7 +3383,20 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   }
 }
 
+let analysisGameTree = tree;
+
 function afterNavigation() {
+  if (analysisGameTree !== tree) {
+    analysisGameTree = tree;
+    cancelActiveAnalysisRun();
+    searcher?.resetTree();
+    (mainEvaluator as CachedLc0Evaluator | null)?.clearCache?.();
+    // Queued behind any cancelled search, so that search cannot repopulate the
+    // old tree/cache after the reset. Model/runtime changes dispose the worker.
+    if (searchWorker) void postWorker({ type: 'resetSearch', clearEvalCache: true }).catch(() => undefined);
+    engineLineCache.clear();
+    completeAnalysisKeys.clear();
+  }
   clearStalePgnDatabaseSearchResults();
   clearReviewIfMainlineChanged();
   renderAll();
@@ -3996,7 +4017,8 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
         });
       } else {
         const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
-          cache: false,
+          cache: true,
+          requestPersistentStorage: true,
           signal: operationSignal,
           onProgress: (loaded, total) => {
             if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
@@ -4008,6 +4030,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
         void nextEvaluator?.dispose?.();
         return false;
       }
+      nextEvaluator = new CachedLc0Evaluator(nextEvaluator, { maxEntries: 2048 });
       const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
       const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
       if (loadCancelled()) {
@@ -4134,6 +4157,9 @@ let lastAnalysisMountHref: string | null = null;
 
 function resetAnalysisPageState(): void {
   tree = new GameTree(params.get('fen') ?? START_FEN);
+  analysisGameTree = tree;
+  engineLineCache.clear();
+  completeAnalysisKeys.clear();
   orientation = 'white';
   analysisAbort = null;
   analysisReloadAbort = null;
