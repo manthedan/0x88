@@ -14,6 +14,25 @@ async function loadWorkerModule(messages) {
   return workerModule;
 }
 
+test('Viridithas shared stop descriptor is nonblocking, sticky and resettable independently of stdin', async () => {
+  const previousSelf = globalThis.self;
+  try {
+    const { SharedStopFlag } = await loadWorkerModule([]);
+    const buffer = new SharedArrayBuffer(4);
+    const flag = new Int32Array(buffer);
+    const fd = new SharedStopFlag(buffer);
+    assert.deepEqual([...fd.fd_read(1).data], [0]);
+    Atomics.store(flag, 0, 1);
+    assert.deepEqual([...fd.fd_read(1).data], [1]);
+    assert.deepEqual([...fd.fd_read(1).data], [1], 'polls do not consume a stop');
+    assert.equal(fd.fd_read(0).data.length, 0);
+    Atomics.store(flag, 0, 0);
+    assert.deepEqual([...fd.fd_read(1).data], [0]);
+  } finally {
+    globalThis.self = previousSelf;
+  }
+});
+
 function streamedResponse(chunks, headers = {}) {
   return new Response(
     new ReadableStream({

@@ -48,9 +48,11 @@ fs.mkdirSync(path.dirname(out), { recursive: true });
 
 if (process.env.VIRIDITHAS_SKIP_GIT !== '1') {
   if (!fs.existsSync(path.join(engineDir, '.git'))) {
-    run('git', ['clone', repo, engineDir]);
+    run('git', ['init', engineDir]);
+    run('git', ['remote', 'add', 'origin', repo], { cwd: engineDir });
   }
-  run('git', ['fetch', '--tags', 'origin'], { cwd: engineDir });
+  // Fetch only the pinned MIT source; v21+ is outside our license boundary.
+  run('git', ['fetch', '--depth=1', '--no-tags', 'origin', ref], { cwd: engineDir });
   run('git', ['checkout', ref], { cwd: engineDir });
   run('git', ['reset', '--hard'], { cwd: engineDir });
   run('git', ['clean', '-fdx', '-e', 'target'], { cwd: engineDir });

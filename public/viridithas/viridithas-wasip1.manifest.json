@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-10-10T23:11:21.367Z",
+  "generatedAt": "2026-10-11T21:33:06.242Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "viridithas",
   "flavor": "wasip1-scalar-simd128",
@@ -22,50 +22,29 @@
   "artifacts": [
     {
       "path": "public/viridithas/viridithas.wasm",
-      "bytes": 55763309,
-      "sha256": "97ec4f9151815b38518ae788014ebadc7da2f842f4624b10b0e8132f87eb224a",
+      "bytes": 55763466,
+      "sha256": "058707d8941e01a27a85274f8ebdc4bda98ce865fb94d0a23066baea405e5683",
       "compression": {
-        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
-        "gzip": {
-          "bytes": 52829451,
-          "ratio": 0.9474
-        },
-        "brotli": {
-          "bytes": 52722486,
-          "ratio": 0.9455
-        }
+        "skipped": true,
+        "note": "Compression estimates skipped for release generation; run the artifact-manifest command without --skip-compression-estimates for research measurements."
       }
     },
     {
       "path": "public/viridithas/viridithas-simd128.wasm",
-      "bytes": 55739644,
-      "sha256": "30ee4af89a3df0284fc4b606e1e15746414e4645646792a737dcea80543ad9b2",
+      "bytes": 55739801,
+      "sha256": "78904e7c6ed20a3cb4cc27552f2faea5f86d95d832372262798aaa822f6c214d",
       "compression": {
-        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
-        "gzip": {
-          "bytes": 52822027,
-          "ratio": 0.9477
-        },
-        "brotli": {
-          "bytes": 52718628,
-          "ratio": 0.9458
-        }
+        "skipped": true,
+        "note": "Compression estimates skipped for release generation; run the artifact-manifest command without --skip-compression-estimates for research measurements."
       }
     },
     {
       "path": "public/viridithas/viridithas-relaxed-simd128.wasm",
-      "bytes": 55739115,
-      "sha256": "67eae32ef8c7afb24fd6f7b04bc73fe56c6b64ffef503ee0de3e8032c0279079",
+      "bytes": 55739272,
+      "sha256": "8f8680be8c5f06500179a1421d639e0b74c4b1be03f237e3edcaef3a4f6cc93b",
       "compression": {
-        "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
-        "gzip": {
-          "bytes": 52821895,
-          "ratio": 0.9477
-        },
-        "brotli": {
-          "bytes": 52718504,
-          "ratio": 0.9458
-        }
+        "skipped": true,
+        "note": "Compression estimates skipped for release generation; run the artifact-manifest command without --skip-compression-estimates for research measurements."
       }
     }
   ],
@@ -79,17 +58,17 @@
     }
   ],
   "totals": {
-    "bytes": 167242068,
-    "gzipBytes": 158473373,
-    "brotliBytes": 158159618,
-    "gzipRatio": 0.9476,
-    "brotliRatio": 0.9457
+    "bytes": 167242539,
+    "gzipBytes": null,
+    "brotliBytes": null,
+    "gzipRatio": null,
+    "brotliRatio": null
   },
   "sourceArchive": {
     "required": true,
     "path": "public/viridithas/viridithas-wasip1-corresponding-source.tar.gz",
-    "bytes": 60442439,
-    "sha256": "d7eeae4a84e13fb2b30494adccc3bcc407d1ae616fa2f87be727ba52122288b2",
+    "bytes": 60464623,
+    "sha256": "f1587c79d7d39fa7a12f42598ca6bad0fdee498ebbfd3fd7d6793589ffe2eeb5",
     "url": "/viridithas/viridithas-wasip1-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

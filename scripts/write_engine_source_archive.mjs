@@ -152,7 +152,15 @@ const CONFIGS = {
     patch: 'patches/viridithas-wasip1.patch',
     buildScript: 'scripts/build_viridithas_wasi.mjs',
     smokeScript: 'scripts/viridithas_wasi_smoke.mjs',
-    adapterFiles: ['src/lc0/viridithasEngine.ts', 'src/lc0/viridithasVariants.ts', 'src/lc0/stockfishEngine.ts', 'src/chess/board.ts'],
+    adapterFiles: [
+      'src/lc0/viridithasEngine.ts',
+      'src/lc0/viridithasVariants.ts',
+      'src/lc0/recklessWasiWorker.ts',
+      'src/lc0/browserUciEngine.ts',
+      'src/lc0/assetUrls.ts',
+      'src/lc0/stockfishEngine.ts',
+      'src/chess/board.ts',
+    ],
     docs: [
       'docs/engine_artifact_distribution.md',
       'docs/browser_c_engine_porting.md',
@@ -254,6 +262,17 @@ async function copyFiles(paths, archiveRoot) {
 
 function ensureGitSource(config) {
   const dir = resolve(config.buildDir);
+  if (config.engine === 'viridithas') {
+    // Do not clone/fetch post-v20 (AGPL) history just to archive the MIT pin.
+    if (!existsSync(join(dir, '.git'))) {
+      mkdirSync(dirname(dir), { recursive: true });
+      run('git', ['init', dir]);
+      run('git', ['remote', 'add', 'origin', config.upstreamRepo], { cwd: dir });
+    }
+    const available = spawnSync('git', ['cat-file', '-e', `${config.upstreamCommit}^{commit}`], { cwd: dir });
+    if (available.status !== 0) run('git', ['fetch', '--depth=1', '--no-tags', 'origin', config.upstreamCommit], { cwd: dir });
+    return dir;
+  }
   if (!existsSync(join(dir, '.git'))) {
     mkdirSync(dirname(dir), { recursive: true });
     run('git', ['clone', config.upstreamRepo, dir]);
@@ -383,6 +402,10 @@ async function writeArchive(config, outPath, allowMissingAssets) {
   mkdirSync(archiveRoot, { recursive: true });
   try {
     await exportUpstream(config, archiveRoot);
+    if (config.engine === 'viridithas') {
+      // Upstream ignores Cargo.lock; preserve the dependencies used by our build.
+      copyFileSync(resolve(config.buildDir, 'Cargo.lock'), join(archiveRoot, config.sourcePrefix, 'Cargo.lock'));
+    }
     await copyFiles(
       [
         'package.json',
