@@ -151,6 +151,7 @@ import {
   finishedRunFollowUp,
   type HiddenTabPause,
   type HiddenTabWork,
+  hiddenAnalysisStopEnabled,
   initialHiddenTabPause,
   rememberDeferredForce,
   requestHiddenTabWork,
@@ -2820,6 +2821,12 @@ function applyHiddenTab(hidden: boolean): void {
     disposeUnusedEnginesAfterActiveRun = false;
     analyzeAfterActiveRun = false;
     cancelActiveAnalysisRun();
+    // The aborted run keeps the previous PV in the line cache. Drop it so the
+    // paused page is the idle copy, not that search.
+    lineCache.delete(tree.current.fen);
+    renderLines();
+    renderEvalBar();
+    setShapes([]);
     el('message').textContent = 'Analysis paused while this tab is hidden.';
   }
   if (transition.resume.includes('prefetch')) {
@@ -3594,7 +3601,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       disposeUnusedEnginesAfterActiveRun = false;
       analysisRunForced = false;
       clearAnalysisSearchProgress();
-      document.getElementById('stop')?.toggleAttribute('disabled', true);
+      document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
     // A cancelled run returns early from the try. Stop still wants queued
