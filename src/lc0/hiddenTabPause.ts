@@ -49,6 +49,14 @@ export function requestHiddenTabWork(state: HiddenTabPause, kind: HiddenTabWork)
  * the tab is visible. Restoring those flags during the hide itself lets the
  * aborted run's finally see them and start a reload while still hidden.
  */
+/** A backend reload counts as analysis only when that reload was going to start a search. */
+export function classifyHiddenReload(searchRunning: boolean, reloadRunning: boolean, reloadWantsSearch: boolean): { analysis: boolean; pauseReload: boolean } {
+  return {
+    analysis: searchRunning || (reloadRunning && reloadWantsSearch),
+    pauseReload: reloadRunning && !reloadWantsSearch,
+  };
+}
+
 export function shouldResumeHiddenAnalysis(hidden: boolean, resume: readonly HiddenTabWork[], savedReload: boolean, savedDispose: boolean): boolean {
   return !hidden && (resume.includes('analysis') || savedReload || savedDispose);
 }

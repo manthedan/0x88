@@ -147,6 +147,7 @@ import {
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import {
   cancelHiddenTabWork,
+  classifyHiddenReload,
   type HiddenTabPause,
   type HiddenTabWork,
   initialHiddenTabPause,
@@ -397,6 +398,7 @@ let analysisUiProgressSamples = 0;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
 let analysisReloadAbort: AbortController | null = null;
+let analysisReloadWantsSearch = false;
 let reviewAbort: AbortController | null = null;
 let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
@@ -2766,7 +2768,12 @@ function hasActiveAnalysisRun(): boolean {
 
 function hiddenTabActive(): HiddenTabWork[] {
   const active: HiddenTabWork[] = [];
-  if (hasActiveAnalysisRun()) active.push('analysis');
+  const reloadClass = classifyHiddenReload(
+    analyzing && analysisAbort !== null && !analysisAbort.signal.aborted,
+    analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
+    analysisReloadWantsSearch,
+  );
+  if (reloadClass.analysis) active.push('analysis');
   if (maia3PanelTimer !== null || maia3PanelEvaluating) active.push('maia');
   if (analysisAssetPrefetchControllers.size > 0) active.push('prefetch');
   return active;
@@ -2779,8 +2786,19 @@ function deferHiddenTabWork(kind: HiddenTabWork): boolean {
 }
 
 function applyHiddenTab(hidden: boolean): void {
+  const wasHidden = hiddenTab.hidden;
+  const reloadClass = classifyHiddenReload(
+    analyzing && analysisAbort !== null && !analysisAbort.signal.aborted,
+    analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
+    analysisReloadWantsSearch,
+  );
   const transition = transitionHiddenTab(hiddenTab, hidden, hiddenTabActive());
   hiddenTab = transition.state;
+  if (hidden && !wasHidden && reloadClass.pauseReload) {
+    // Stop's reload must come back as a reload, not as a search.
+    hiddenResumeReload = true;
+    cancelActiveAnalysisRun();
+  }
   if (transition.pause.includes('prefetch')) cancelAllAnalysisAssetPrefetches();
   if (transition.pause.includes('maia')) {
     maia3PanelTask?.invalidate();
@@ -2862,6 +2880,7 @@ function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolea
   }
   const reloadController = analysisReloadAbort;
   analysisReloadAbort = null;
+  analysisReloadWantsSearch = false;
   reloadController?.abort();
   if (reloadController) {
     disposeRuntimeResources();
@@ -3181,9 +3200,11 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
   if (mountAbort.signal.aborted) return;
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun ||= analyzeAfterLoad;
+    analysisReloadWantsSearch ||= analyzeAfterLoad;
     return;
   }
   const controller = new AbortController();
+  analysisReloadWantsSearch = analyzeAfterLoad;
   analysisReloadAbort = controller;
   analyzing = false;
   clearAnalysisSearchProgress();
@@ -3191,6 +3212,7 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
   const loaded = await reloadLc0Backend('none', controller.signal);
   if (analysisReloadAbort !== controller) return;
   analysisReloadAbort = null;
+  analysisReloadWantsSearch = false;
   if (!loaded && !controller.signal.aborted && (reloadLc0AfterActiveRun || disposeUnusedEnginesAfterActiveRun)) {
     // Settings changed while this load was running; a failed superseded load
     // must not strand them. analyzeCurrent consumes the flags, so this cannot loop.
@@ -3609,8 +3631,9 @@ function afterNavigation() {
     // A cached position, or auto-analyze off, must not restart the search that
     // was paused on the position we just left.
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
-    hiddenResumeReload = false;
-    hiddenResumeDispose = false;
+    const keptMaintenance = stopHiddenTabResume(hiddenResumeReload, hiddenResumeDispose);
+    hiddenResumeReload = keptMaintenance.reload;
+    hiddenResumeDispose = keptMaintenance.dispose;
     renderEvalBar();
     setShapes(bestShapes());
   }
@@ -4162,6 +4185,7 @@ function disposePageResources(): void {
   removeHiddenTabPause();
   analysisReloadAbort?.abort();
   analysisReloadAbort = null;
+  analysisReloadWantsSearch = false;
   disposeRuntimeResources();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   void maia3PanelEvaluator?.dispose();
@@ -4390,6 +4414,7 @@ function resetAnalysisPageState(): void {
   orientation = 'white';
   analysisAbort = null;
   analysisReloadAbort = null;
+  analysisReloadWantsSearch = false;
   analyzeAfterActiveRun = false;
   reloadLc0AfterActiveRun = false;
   disposeUnusedEnginesAfterActiveRun = false;

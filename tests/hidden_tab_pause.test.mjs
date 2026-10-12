@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   cancelHiddenTabWork,
+  classifyHiddenReload,
   initialHiddenTabPause,
   requestHiddenTabWork,
   shouldResumeHiddenAnalysis,
@@ -60,6 +61,13 @@ test('queued maintenance is restored only when the tab is shown', () => {
   assert.equal(shouldResumeHiddenAnalysis(false, shown.resume, true, false), true);
   assert.equal(shouldResumeHiddenAnalysis(false, shown.resume, false, false), true);
   assert.equal(shouldResumeHiddenAnalysis(false, [], false, false), false);
+});
+
+test('a maintenance-only reload is not an analysis resume', () => {
+  assert.deepEqual(classifyHiddenReload(false, true, false), { analysis: false, pauseReload: true });
+  assert.deepEqual(classifyHiddenReload(false, true, true), { analysis: true, pauseReload: false });
+  assert.deepEqual(classifyHiddenReload(true, false, false), { analysis: true, pauseReload: false });
+  assert.deepEqual(classifyHiddenReload(false, false, false), { analysis: false, pauseReload: false });
 });
 
 test('stop while hidden drops the search and keeps queued maintenance', () => {
