@@ -136,14 +136,53 @@ export function analysisSampleReady(state) {
   const known = patterns[family];
   const pattern = known ?? new RegExp(family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
   const settled = /analysis complete|\d+\s*\/\s*\d+\s*(visits|nodes|search)|:\s*searching/i;
-  const failed = /analysis failed|engine failures|could not download|asset missing|unavailable/i;
+  const failedPattern = /analysis failed|engine failures|could not download|asset missing|unavailable/i;
   const namesSettled = (text) => pattern.test(text) && settled.test(text);
   const changed = previous == null || message !== previous;
+  const failed = failedPattern.test(message) || failedPattern.test(progress);
   return {
-    ok: changed && (namesSettled(message) || namesSettled(progress) || failed.test(message) || failed.test(progress)),
+    ok: changed && (namesSettled(message) || namesSettled(progress) || failed),
+    failed,
     message,
+    progress,
     family,
   };
+}
+
+/** True when Lc0 has reported a visit count and the timed window may start. */
+export function lc0TimedRunStarted(ready) {
+  if (!ready?.ok || ready.failed) return false;
+  const message = String(ready.message ?? '');
+  const progress = String(ready.progress ?? '');
+  if (/analysis complete|analysis failed|engine failures|stopped/i.test(message)) return false;
+  const text = `${message}\n${progress}`;
+  return /lc0|leela/i.test(text) && /\d+\s*\/\s*\d+\s*visits/i.test(text);
+}
+
+/**
+ * True while the timed Lc0 search is still producing visit counts.
+ * The start banner and an enabled Stop button do not count. Playwright
+ * serializes only this function.
+ */
+export function analysisLc0StillRunning(state) {
+  const input = state ?? {};
+  let message = input.message;
+  let progress = input.progress;
+  let stopEnabled = input.stopEnabled;
+  if ((message == null || progress == null || stopEnabled == null) && typeof document !== 'undefined') {
+    if (message == null) message = document.querySelector('#message')?.textContent ?? '';
+    if (progress == null) progress = document.querySelector('#analysisSearchProgress')?.textContent ?? '';
+    if (stopEnabled == null) {
+      const stop = document.querySelector('#stop');
+      stopEnabled = !!stop && !stop.disabled;
+    }
+  }
+  message = String(message ?? '');
+  progress = String(progress ?? '');
+  const text = `${message}\n${progress}`;
+  const ended = /analysis complete|analysis failed|engine failures|stopped|could not download|asset missing/i.test(message);
+  const live = /lc0|leela/i.test(text) && /\d+\s*\/\s*\d+\s*visits/i.test(text) && !/complete|stopped|failed/i.test(text);
+  return { running: stopEnabled === true && live && !ended, message };
 }
 
 export function previousCheckpointId(id, plan = checkpointPlan()) {

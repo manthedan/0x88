@@ -26,11 +26,13 @@ import { pathToFileURL } from 'node:url';
 import { parseScriptArgs } from '../lib/cli.mjs';
 import { installWorkerHook, samplePage } from './page_hooks.mjs';
 import {
+  analysisLc0StillRunning,
   analysisSampleReady,
   CPU_ANALYSIS_FAMILIES,
   CPU_PLAY_ENGINE_IDS,
   checkpointPlan,
   DEFAULT_PLAY_ENGINE_ID,
+  lc0TimedRunStarted,
   NEURAL_PLAY_ENGINE_ID,
   renderMarkdown,
   retentionComparisons,
@@ -412,43 +414,32 @@ async function runAnalysis(page, args, run) {
   await record(page, { ...meta('analysis-shell'), note: 'analysis open, auto-analyze unchecked before the timed Lc0 run' }, checkpoints, args);
 
   try {
+    const previousMessage = await page.evaluate(() => document.querySelector('#message')?.textContent ?? '');
     await setAnalysisFamily(page, 'lc0', 100_000);
     await page.evaluate(() => document.querySelector('#analyze')?.click());
-    await waitFor(
-      page,
-      () => {
-        const message = document.querySelector('#message')?.textContent ?? '';
-        const downloading = document.querySelector('#downloadProgress') && !document.querySelector('#downloadProgress').hidden;
-        const stop = document.querySelector('#stop');
-        return { ok: !downloading && ((!!stop && !stop.disabled) || /Analyzing/.test(message)), message, downloading };
-      },
-      null,
-      args.timeoutMs,
-      'Lc0 analysis to start',
-    );
-    const started = Date.now();
-    const runMs = args.lc0Seconds * 1000;
-    let stillRunning = true;
-    let elapsed = 0;
-    while (elapsed < runMs) {
-      await delay(1000);
-      elapsed = Date.now() - started;
-      const state = await page.evaluate(() => {
-        const stop = document.querySelector('#stop');
-        const message = document.querySelector('#message')?.textContent ?? '';
-        const stopEnabled = !!stop && !stop.disabled;
-        const progress = /\d+\s*\/\s*\d+\s*visits/i.test(message) && !/complete|stopped|failed/i.test(message);
-        return { running: stopEnabled && (/Analyzing/i.test(message) || progress), message };
-      });
-      if (!state.running) {
-        stillRunning = false;
-        break;
+    const ready = await waitFor(page, analysisSampleReady, { family: 'lc0', previousMessage }, args.timeoutMs, 'Lc0 search progress');
+    if (!lc0TimedRunStarted(ready)) {
+      const note = ready.failed ? `Lc0 failed before search progress: ${ready.message}` : `Lc0 finished before a running visit count: ${ready.message}`;
+      await record(page, { ...meta('analysis-lc0-30s', 'lc0'), note, stillRunning: false }, checkpoints, args);
+    } else {
+      const started = Date.now();
+      const runMs = args.lc0Seconds * 1000;
+      let stillRunning = true;
+      let elapsed = 0;
+      while (elapsed < runMs) {
+        await delay(1000);
+        elapsed = Date.now() - started;
+        const state = await page.evaluate(analysisLc0StillRunning);
+        if (!state.running) {
+          stillRunning = false;
+          break;
+        }
       }
+      const note = stillRunning
+        ? `Lc0 still running after ${Math.round(elapsed / 1000)}s at 100000 visits`
+        : `Lc0 search ended after ${Math.round(elapsed / 1000)}s, before ${args.lc0Seconds}s`;
+      await record(page, { ...meta('analysis-lc0-30s', 'lc0'), note, stillRunning }, checkpoints, args);
     }
-    const note = stillRunning
-      ? `Lc0 still running after ${Math.round(elapsed / 1000)}s at 100000 visits`
-      : `Lc0 search ended after ${Math.round(elapsed / 1000)}s, before ${args.lc0Seconds}s`;
-    await record(page, { ...meta('analysis-lc0-30s', 'lc0'), note, stillRunning }, checkpoints, args);
   } catch (error) {
     await shot(page, args.screenshotDir, 'fail-analysis-lc0.png');
     checkpoints.push({ ...meta('analysis-lc0-30s', 'lc0'), ok: false, error: error?.message ?? String(error) });

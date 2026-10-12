@@ -8,12 +8,14 @@ import { runInNewContext } from 'node:vm';
 import { installWorkerHook, samplePage } from '../scripts/memory_harness/page_hooks.mjs';
 import {
   aggregateRetention,
+  analysisLc0StillRunning,
   analysisSampleReady,
   CPU_ANALYSIS_FAMILIES,
   CPU_PLAY_ENGINE_IDS,
   checkpointPlan,
   compareRetention,
   formatMib,
+  lc0TimedRunStarted,
   median,
   NOISE_BYTES,
   renderMarkdown,
@@ -203,6 +205,43 @@ test('analysis sample waits for a changed family-named result or a new failure',
   );
 });
 
+test('the Lc0 timer starts on visit progress, not the start banner or a failure', () => {
+  const banner = analysisSampleReady({
+    family: 'lc0',
+    previousMessage: '',
+    message: 'Analyzing (Lc0, 1 lines)…',
+    stopEnabled: true,
+  });
+  assert.equal(banner.ok, false);
+  assert.equal(lc0TimedRunStarted(banner), false);
+  assert.equal(analysisLc0StillRunning({ message: 'Analyzing (Lc0, 1 lines)…', stopEnabled: true }).running, false);
+  const visits = analysisSampleReady({
+    family: 'lc0',
+    previousMessage: 'Analyzing (Lc0, 1 lines)…',
+    message: 'Lc0: 12/100000 visits 0%',
+  });
+  assert.equal(visits.ok, true);
+  assert.equal(visits.failed, false);
+  assert.equal(lc0TimedRunStarted(visits), true);
+  assert.equal(analysisLc0StillRunning({ message: visits.message, stopEnabled: true }).running, true);
+  assert.equal(analysisLc0StillRunning({ message: visits.message, stopEnabled: false }).running, false);
+  const fromProgress = analysisSampleReady({
+    family: 'lc0',
+    previousMessage: '',
+    message: 'Analyzing (Lc0, 1 lines)…',
+    progress: 'Lc0: 4/100000 visits 0%',
+  });
+  assert.equal(lc0TimedRunStarted(fromProgress), true);
+  const failed = analysisSampleReady({ family: 'lc0', previousMessage: '', message: 'Analysis failed: model missing' });
+  assert.equal(failed.ok, true);
+  assert.equal(failed.failed, true);
+  assert.equal(lc0TimedRunStarted(failed), false);
+  assert.equal(analysisLc0StillRunning({ message: failed.message, stopEnabled: true }).running, false);
+  const done = analysisSampleReady({ family: 'lc0', previousMessage: '', message: 'Analysis complete · Lc0' });
+  assert.equal(lc0TimedRunStarted(done), false);
+  assert.equal(analysisLc0StillRunning({ message: done.message, stopEnabled: true }).running, false);
+});
+
 test('analysis sample predicate serializes without module bindings', () => {
   const source = analysisSampleReady.toString();
   const fn = runInNewContext(`(${source})`, {
@@ -216,7 +255,20 @@ test('analysis sample predicate serializes without module bindings', () => {
   });
   const ready = fn({ family: 'lc0', previousMessage: 'Analysis complete · SF Lite' });
   assert.equal(ready.ok, true);
+  assert.equal(ready.failed, false);
   assert.equal(ready.message, 'Analyzing (Lc0, 1 lines)…');
+  assert.equal(lc0TimedRunStarted(ready), true);
+  const stillRunning = runInNewContext(`(${analysisLc0StillRunning.toString()})`, {
+    document: {
+      querySelector(selector) {
+        if (selector === '#message') return { textContent: 'Lc0: 9/100000 visits 0%' };
+        if (selector === '#analysisSearchProgress') return { textContent: '' };
+        if (selector === '#stop') return { disabled: false };
+        throw new Error(`unexpected selector ${selector}`);
+      },
+    },
+  });
+  assert.equal(stillRunning().running, true);
 });
 
 function retentionRun(unreleased) {
