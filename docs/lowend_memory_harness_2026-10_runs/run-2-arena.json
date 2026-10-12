@@ -1,0 +1,279 @@
+{
+  "schema": "lowend-memory-harness/v1",
+  "kind": "phase-run",
+  "run": 2,
+  "phase": "arena",
+  "baseUrl": "http://127.0.0.1:5186",
+  "startedAt": "2026-10-12T04:37:14.244Z",
+  "finishedAt": "2026-10-12T04:39:34.939Z",
+  "durationMs": 140695,
+  "loadavg": {
+    "start": [
+      1.802734375,
+      1.8701171875,
+      2.0556640625
+    ],
+    "end": [
+      4.52734375,
+      2.5361328125,
+      2.2685546875
+    ]
+  },
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "cpuCount": 10,
+    "totalMemBytes": 25769803776,
+    "freeMemBytes": 1013317632,
+    "node": "v25.9.0",
+    "browser": "151.0.7922.34"
+  },
+  "pageErrors": [],
+  "checkpoints": [
+    {
+      "id": "arena-shell",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": null,
+      "run": 2,
+      "note": "Stockfish Lite vs Reckless configured, match not started",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — engine arena",
+        "path": "/app/arena/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Ready (LC0 not loaded for current matchup). Pick engines and start a tournament.",
+        "analysisFamily": null,
+        "matchScore": "No games played yet.",
+        "gameMoves": "",
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 4205623,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 18021,
+      "breakdownTop": [
+        {
+          "bytes": 3503101,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 421218,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 281304,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3592705,
+      "totalJSHeapSize": 5907197,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 0,
+        "created": 0,
+        "serviceWorkers": 1,
+        "breakdownScopes": 0
+      }
+    },
+    {
+      "id": "arena-cpu-match",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": "sf+reckless",
+      "run": 2,
+      "note": "200 ms movetime, 1 game, sampled once a move or a result exists",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — engine arena",
+        "path": "/app/arena/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Match done (1 game).",
+        "analysisFamily": null,
+        "matchScore": "Stockfish Lite 0 – 1 Reckless Relaxed SIMD · 0W 0D 1L over 1 game",
+        "gameMoves": "1. e4 e6 2. d4 d5 3. e5 c5 4. c3 Nc6 5. Nf3 Bd7 6. Be2 Nge7 7. O-O Nf5 8. dxc5 Bxc5 9. b4 Bb6 10. Bd3 a6 11. Nbd2 O-O 12. Nb3 Rc8 13. Re1 Nce7 14. g4 Nh6 15. Bx",
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 139894197,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60003,
+      "breakdownTop": [
+        {
+          "bytes": 135058988,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 3289677,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 1243460,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 302072,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4457359,
+      "totalJSHeapSize": 5204443,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 2,
+        "created": 2,
+        "serviceWorkers": 1,
+        "breakdownScopes": 1
+      }
+    },
+    {
+      "id": "arena-cpu-stopped",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": null,
+      "run": 2,
+      "note": "Stop clicked after the CPU match sample",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — engine arena",
+        "path": "/app/arena/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Match done (1 game).",
+        "analysisFamily": null,
+        "matchScore": "Stockfish Lite 0 – 1 Reckless Relaxed SIMD · 0W 0D 1L over 1 game",
+        "gameMoves": "1. e4 e6 2. d4 d5 3. e5 c5 4. c3 Nc6 5. Nf3 Bd7 6. Be2 Nge7 7. O-O Nf5 8. dxc5 Bxc5 9. b4 Bb6 10. Bd3 a6 11. Nbd2 O-O 12. Nb3 Rc8 13. Re1 Nce7 14. g4 Nh6 15. Bx",
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 140263193,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60005,
+      "breakdownTop": [
+        {
+          "bytes": 135057696,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 4392698,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 468119,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 344680,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4458984,
+      "totalJSHeapSize": 5204448,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 2,
+        "created": 2,
+        "serviceWorkers": 1,
+        "breakdownScopes": 1
+      }
+    }
+  ],
+  "overlay": null
+}

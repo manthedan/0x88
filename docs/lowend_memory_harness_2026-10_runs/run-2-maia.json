@@ -1,0 +1,279 @@
+{
+  "schema": "lowend-memory-harness/v1",
+  "kind": "phase-run",
+  "run": 2,
+  "phase": "maia",
+  "baseUrl": "http://127.0.0.1:5186",
+  "startedAt": "2026-10-12T05:14:15.782Z",
+  "finishedAt": "2026-10-12T05:14:53.485Z",
+  "durationMs": 37703,
+  "loadavg": {
+    "start": [
+      2.47265625,
+      2.5849609375,
+      2.54296875
+    ],
+    "end": [
+      2.30126953125,
+      2.521484375,
+      2.51904296875
+    ]
+  },
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "cpuCount": 10,
+    "totalMemBytes": 25769803776,
+    "freeMemBytes": 722714624,
+    "node": "v25.9.0",
+    "browser": "151.0.7922.34"
+  },
+  "pageErrors": [],
+  "checkpoints": [
+    {
+      "id": "maia-before",
+      "phase": "maia",
+      "surface": "analysis",
+      "resident": null,
+      "run": 2,
+      "note": "analysis shell before Load Maia3; auto-analyze unchecked",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.",
+        "analysisFamily": "lc0",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 4011467,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 16034,
+      "breakdownTop": [
+        {
+          "bytes": 3324167,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 450796,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 236504,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3441806,
+      "totalJSHeapSize": 6699766,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 1,
+        "created": 1,
+        "serviceWorkers": 1,
+        "breakdownScopes": 0
+      }
+    },
+    {
+      "id": "maia-panel",
+      "phase": "maia",
+      "surface": "analysis",
+      "resident": "maia3",
+      "run": 2,
+      "note": "Maia3 model loaded and the rating grid painted",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.",
+        "analysisFamily": "lc0",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": false
+      },
+      "userAgentSpecificBytes": 229353864,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 12022,
+      "breakdownTop": [
+        {
+          "bytes": 117758073,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 107286924,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3485842,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 577569,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 245456,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 25460044,
+      "totalJSHeapSize": 27472708,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 2,
+        "created": 2,
+        "serviceWorkers": 1,
+        "breakdownScopes": 2
+      }
+    },
+    {
+      "id": "landing-after-maia",
+      "phase": "maia",
+      "surface": "landing",
+      "resident": null,
+      "run": 2,
+      "note": "in-app navigation away from the Maia panel",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 | Browser chess engine workbench",
+        "path": "/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 4650002,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 7691,
+      "breakdownTop": [
+        {
+          "bytes": 2589584,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 1726770,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        },
+        {
+          "bytes": 333648,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4140023,
+      "totalJSHeapSize": 4827863,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 0,
+        "created": 2,
+        "serviceWorkers": 1,
+        "breakdownScopes": 0
+      }
+    }
+  ],
+  "overlay": null
+}

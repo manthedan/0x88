@@ -122,6 +122,7 @@ export async function samplePage(meta) {
       matchScore: text('#matchScore')?.slice(0, 200) ?? null,
       gameMoves: text('#gameMoves')?.slice(0, 160) ?? null,
       maiaHidden: document.querySelector('#maia3Grid')?.hidden ?? null,
+      maiaPanelStatus: text('#maia3PanelStatus')?.slice(0, 200) ?? null,
     };
   }
 

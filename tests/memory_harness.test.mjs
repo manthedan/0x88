@@ -402,6 +402,23 @@ test('checkpoint failures cover arena preparation and Maia load text', () => {
     status: { analysisMessage: 'Analysis complete · SF Lite' },
   });
   assert.equal(settled.engineFailed, undefined);
+  const maiaDuringSample = applyObservedEngineFailure({
+    ok: true,
+    engineFailed: false,
+    note: 'Maia3 model loaded; the rating grid had not painted within 30s, so this sample is the loaded evaluator',
+    status: { analysisMessage: null, maiaPanelStatus: 'Maia3 evaluation failed: inference timed out' },
+    userAgentSpecificBytes: 11,
+  });
+  assert.equal(maiaDuringSample.engineFailed, true);
+  assert.equal(maiaDuringSample.engineError, 'Maia3 evaluation failed: inference timed out');
+  assert.equal(maiaDuringSample.userAgentSpecificBytes, 11);
+  assert.match(maiaDuringSample.note, /failed during sample/);
+  const painted = applyObservedEngineFailure({
+    ok: true,
+    note: 'Maia3 model loaded and the rating grid painted',
+    status: { analysisMessage: null, maiaPanelStatus: '' },
+  });
+  assert.equal(painted.engineFailed, undefined);
 });
 
 test('summary keeps an engine failure beside its memory sample', () => {

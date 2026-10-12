@@ -236,13 +236,16 @@ export function checkpointEngineFailure(message) {
 }
 
 /**
- * The memory call can outlast a search. pageStatus() is read after that call,
- * so a failure that lands during the wait has to be copied onto the sample.
+ * The memory call can outlast a search or a Maia inference. pageStatus() is read
+ * after that call, so a failure that lands in #message or #maia3PanelStatus
+ * during the wait has to be copied onto the sample.
  */
 export function applyObservedEngineFailure(reading) {
   if (!reading || reading.engineFailed) return reading;
-  const observed = checkpointEngineFailure(reading.status?.analysisMessage);
-  if (!observed.engineFailed) return reading;
+  const observed = [reading.status?.analysisMessage, reading.status?.maiaPanelStatus]
+    .map((message) => checkpointEngineFailure(message))
+    .find((result) => result.engineFailed);
+  if (!observed) return reading;
   const suffix = `failed during sample: ${observed.engineError}`;
   return {
     ...reading,

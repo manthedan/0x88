@@ -1,0 +1,959 @@
+{
+  "schema": "lowend-memory-harness/v1",
+  "kind": "phase-run",
+  "run": 1,
+  "phase": "analysis",
+  "baseUrl": "http://127.0.0.1:5186",
+  "startedAt": "2026-10-12T05:42:01.253Z",
+  "finishedAt": "2026-10-12T05:49:43.860Z",
+  "durationMs": 462607,
+  "loadavg": {
+    "start": [
+      2.22900390625,
+      2.36474609375,
+      2.40234375
+    ],
+    "end": [
+      0.88330078125,
+      1.34912109375,
+      1.85693359375
+    ]
+  },
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "cpuCount": 10,
+    "totalMemBytes": 25769803776,
+    "freeMemBytes": 809271296,
+    "node": "v25.9.0",
+    "browser": "151.0.7922.34"
+  },
+  "pageErrors": [],
+  "checkpoints": [
+    {
+      "id": "analysis-shell",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": null,
+      "run": 1,
+      "note": "analysis open, auto-analyze unchecked before the timed Lc0 run",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.",
+        "analysisFamily": "lc0",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 259023504,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 16024,
+      "breakdownTop": [
+        {
+          "bytes": 255008969,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3331735,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 446296,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 236504,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3447181,
+      "totalJSHeapSize": 6699905,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 1,
+        "created": 1,
+        "serviceWorkers": 1,
+        "breakdownScopes": 1
+      }
+    },
+    {
+      "id": "analysis-lc0-30s",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "run": 1,
+      "note": "Lc0 still running after 30s at 100000 visits",
+      "stillRunning": true,
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Lc0: 5391/100000 visits 5% · best d2d4 · Q 0.072 · 112.1 v/s",
+        "analysisFamily": "lc0",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 139655468,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 18015,
+      "breakdownTop": [
+        {
+          "bytes": 135547618,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3368174,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 501164,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 238512,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3554414,
+      "totalJSHeapSize": 4373582,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 1,
+        "created": 1,
+        "serviceWorkers": 1,
+        "breakdownScopes": 1
+      }
+    },
+    {
+      "id": "analysis-lc0-stopped",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "run": 1,
+      "note": "Stop clicked after the Lc0 run",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Lc0: 5391/100000 visits 5% · best d2d4 · Q 0.072 · 112.1 v/s",
+        "analysisFamily": "lc0",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 120944372,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 16020,
+      "breakdownTop": [
+        {
+          "bytes": 116834252,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3423754,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 448670,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 237696,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3533618,
+      "totalJSHeapSize": 4373522,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 1,
+        "created": 1,
+        "serviceWorkers": 1,
+        "breakdownScopes": 1
+      }
+    },
+    {
+      "id": "analysis-cpu-sf",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "sf",
+      "run": 1,
+      "note": "depth 2, sampled after a line or a failure message",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Analysis complete · SF Lite",
+        "analysisFamily": "sf",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 120895313,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 19022,
+      "breakdownTop": [
+        {
+          "bytes": 116524404,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3600111,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 529654,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 241144,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 5521551,
+      "totalJSHeapSize": 7644967,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 2,
+        "created": 2,
+        "serviceWorkers": 1,
+        "breakdownScopes": 1
+      }
+    },
+    {
+      "id": "analysis-cpu-reckless",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "reckless",
+      "run": 1,
+      "note": "depth 2, sampled after a line or a failure message",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Analysis complete · Reckless Relaxed SIMD",
+        "analysisFamily": "reckless",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 482461339,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60004,
+      "breakdownTop": [
+        {
+          "bytes": 361343592,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116524416,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3735984,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 624763,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 232584,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3880417,
+      "totalJSHeapSize": 4373953,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 3,
+        "created": 3,
+        "serviceWorkers": 1,
+        "breakdownScopes": 2
+      }
+    },
+    {
+      "id": "analysis-cpu-viridithas",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "viridithas",
+      "run": 1,
+      "note": "depth 2, sampled after a line or a failure message",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Analysis complete · Viridithas Relaxed SIMD",
+        "analysisFamily": "viridithas",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 484109409,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60003,
+      "breakdownTop": [
+        {
+          "bytes": 361338620,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116524428,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 5314398,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 702299,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 229664,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4005143,
+      "totalJSHeapSize": 4439539,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 3,
+        "created": 4,
+        "serviceWorkers": 1,
+        "breakdownScopes": 2
+      }
+    },
+    {
+      "id": "analysis-cpu-berserk",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "berserk",
+      "run": 1,
+      "note": "depth 2, sampled after a line or a failure message",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Analysis complete · Berserk Relaxed SIMD",
+        "analysisFamily": "berserk",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 482755045,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60003,
+      "breakdownTop": [
+        {
+          "bytes": 361338632,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116437041,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4248065,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 503419,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 227888,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4037667,
+      "totalJSHeapSize": 5125307,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 3,
+        "created": 5,
+        "serviceWorkers": 1,
+        "breakdownScopes": 2
+      }
+    },
+    {
+      "id": "analysis-cpu-plentychess",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "plentychess",
+      "run": 1,
+      "note": "depth 2, sampled after a line or a failure message",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Analysis complete · PlentyChess Relaxed SIMD",
+        "analysisFamily": "plentychess",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 482928941,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60003,
+      "breakdownTop": [
+        {
+          "bytes": 361338644,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116432867,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4413305,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 509237,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 234888,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4106398,
+      "totalJSHeapSize": 5125330,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 3,
+        "created": 6,
+        "serviceWorkers": 1,
+        "breakdownScopes": 2
+      }
+    },
+    {
+      "id": "analysis-cpu-stormphrax",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "stormphrax",
+      "run": 1,
+      "note": "depth 2, sampled after a line or a failure message",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Analysis complete · Stormphrax 8 Relaxed SIMD",
+        "analysisFamily": "stormphrax",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 482848332,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60003,
+      "breakdownTop": [
+        {
+          "bytes": 361338656,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116432863,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4337055,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 504542,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 235216,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4165878,
+      "totalJSHeapSize": 5125326,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 3,
+        "created": 7,
+        "serviceWorkers": 1,
+        "breakdownScopes": 2
+      }
+    },
+    {
+      "id": "analysis-after-cpu",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "run": 1,
+      "note": "row switched back to Lc0 after every CPU family",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — analysis board",
+        "path": "/app/analysis/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": "Analyzing (Lc0, 3 lines)…",
+        "analysisFamily": "lc0",
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": true
+      },
+      "userAgentSpecificBytes": 482511388,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60004,
+      "breakdownTop": [
+        {
+          "bytes": 361320280,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116436413,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4005620,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 500443,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 248632,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4168818,
+      "totalJSHeapSize": 5125202,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 2,
+        "created": 7,
+        "serviceWorkers": 1,
+        "breakdownScopes": 2
+      }
+    }
+  ],
+  "overlay": null
+}
