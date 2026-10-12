@@ -12,7 +12,7 @@ Built app, before the fix, a 2,500-visit Lc0 search: worker progress froze at 15
 
 ## Fix
 
-`hiddenAnalysisStopEnabled` keeps Stop enabled while analysis is only suspended. The pause path marks the run idle, clears the search-progress map, deletes the current FEN from `lineCache`, and re-renders the lines, the comparison, the eval bar, and the arrows. Cancel leaves `analyzing` and that map set until the aborted run's `finally`, and that `finally` only clears the progress bar, so rendering before the clear left "Analysis in progress." in the comparison after Stop. Stop while hidden still clears the resume and disables Stop. The paused run's `finally` has already left the button enabled, and it does not run again. Showing the tab does not start a search.
+`hiddenAnalysisStopEnabled` keeps Stop enabled while analysis is only suspended. The pause path marks the run idle, clears the search-progress map, deletes the current FEN from `lineCache`, and re-renders the lines, the comparison, the eval bar, and the arrows. Cancel leaves `analyzing` and that map set until the aborted run's `finally`, and that `finally` only clears the progress bar, so rendering before the clear left "Analysis in progress." in the comparison after Stop. Stop while hidden still clears the resume and disables Stop. The paused run's `finally` has already left the button enabled, and it does not run again. A later Analyze click while hidden suspends a new search and enables Stop again, so that request can be dropped before the tab is shown. Showing the tab after Stop does not start a search.
 
 ## Built-app check after the fix
 
