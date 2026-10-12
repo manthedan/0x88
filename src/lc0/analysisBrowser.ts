@@ -151,6 +151,7 @@ import {
   finishedRunFollowUp,
   type HiddenTabPause,
   type HiddenTabWork,
+  hiddenAnalysisStopEnabled,
   initialHiddenTabPause,
   rememberDeferredForce,
   requestHiddenTabWork,
@@ -2785,6 +2786,11 @@ function hiddenTabActive(): HiddenTabWork[] {
 function deferHiddenTabWork(kind: HiddenTabWork): boolean {
   const requested = requestHiddenTabWork(hiddenTab, kind);
   hiddenTab = requested.state;
+  if (!requested.start && kind === 'analysis') {
+    // Stop may have disabled the button after the previous run's finally.
+    // A new hidden request has no running search to enable it again.
+    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+  }
   return !requested.start;
 }
 
@@ -2820,6 +2826,15 @@ function applyHiddenTab(hidden: boolean): void {
     disposeUnusedEnginesAfterActiveRun = false;
     analyzeAfterActiveRun = false;
     cancelActiveAnalysisRun();
+    // Cancel aborts the run but leaves `analyzing` and the progress map set
+    // until the run's finally. The comparison table reads both, and that
+    // finally only clears the progress bar, so render the idle copy now.
+    analyzing = false;
+    clearAnalysisSearchProgress();
+    lineCache.delete(tree.current.fen);
+    renderLines();
+    renderEvalBar();
+    setShapes([]);
     el('message').textContent = 'Analysis paused while this tab is hidden.';
   }
   if (transition.resume.includes('prefetch')) {
@@ -3594,7 +3609,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       disposeUnusedEnginesAfterActiveRun = false;
       analysisRunForced = false;
       clearAnalysisSearchProgress();
-      document.getElementById('stop')?.toggleAttribute('disabled', true);
+      document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
     // A cancelled run returns early from the try. Stop still wants queued
@@ -3910,6 +3925,9 @@ function wireEvents() {
     cancelAllAnalysisAssetPrefetches();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
+    // The paused run's finally already ran and left Stop enabled. Cancelling
+    // the suspended search has to disable it here; that finally will not run again.
+    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
   });
   el('engineList').addEventListener('change', (event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement;

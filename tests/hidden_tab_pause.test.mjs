@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   cancelHiddenTabWork,
   classifyHiddenReload,
   finishedRunFollowUp,
+  hiddenAnalysisStopEnabled,
   initialHiddenTabPause,
   rememberDeferredForce,
   requestHiddenTabWork,
@@ -92,6 +94,33 @@ test('a forced request while hidden stays forced', () => {
   assert.equal(rememberDeferredForce(false, true), true);
   assert.equal(rememberDeferredForce(true, false), true);
   assert.equal(rememberDeferredForce(false, false), false);
+});
+
+test('a hidden suspended analysis keeps Stop available', async () => {
+  const paused = transitionHiddenTab(initialHiddenTabPause(false), true, ['analysis']).state;
+  assert.equal(hiddenAnalysisStopEnabled(paused), true);
+  assert.equal(hiddenAnalysisStopEnabled(cancelHiddenTabWork(paused, 'analysis')), false);
+  assert.equal(hiddenAnalysisStopEnabled(initialHiddenTabPause(false)), false);
+  assert.equal(hiddenAnalysisStopEnabled({ hidden: true, suspended: ['maia'] }), false);
+  const source = await readFile(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  assert.match(source, /toggleAttribute\('disabled', !hiddenAnalysisStopEnabled\(hiddenTab\)\)/);
+  const pauseAt = source.indexOf("if (transition.pause.includes('analysis'))");
+  const pauseBlock = source.slice(pauseAt, pauseAt + 1400);
+  const clearAt = pauseBlock.indexOf('clearAnalysisSearchProgress()');
+  const idleAt = pauseBlock.indexOf('analyzing = false');
+  const dropAt = pauseBlock.indexOf('lineCache.delete(tree.current.fen)');
+  const renderAt = pauseBlock.indexOf('renderLines()');
+  assert.ok(pauseAt >= 0);
+  assert.ok(idleAt >= 0 && clearAt > idleAt && dropAt > clearAt && renderAt > dropAt);
+  const stopAt = source.indexOf("el('stop').addEventListener('click'");
+  const stopBlock = source.slice(stopAt, stopAt + 900);
+  const cancelAt = stopBlock.indexOf("cancelHiddenTabWork(hiddenTab, 'analysis')");
+  const disableAt = stopBlock.indexOf("toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab))");
+  assert.ok(cancelAt >= 0 && disableAt > cancelAt);
+  const deferAt = source.indexOf('function deferHiddenTabWork');
+  const deferBlock = source.slice(deferAt, deferAt + 600);
+  assert.match(deferBlock, /kind === 'analysis'/);
+  assert.ok(deferBlock.indexOf('hiddenTab = requested.state') < deferBlock.indexOf('hiddenAnalysisStopEnabled(hiddenTab)'));
 });
 
 test('stop while hidden drops the search and keeps queued maintenance', () => {

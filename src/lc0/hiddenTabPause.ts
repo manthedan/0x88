@@ -84,6 +84,14 @@ export function shouldResumeHiddenAnalysis(hidden: boolean, resume: readonly Hid
 }
 
 /**
+ * Pause aborts the run, and that run's cleanup disables Stop. While the search
+ * is only suspended, Stop has to stay enabled so the user can drop the resume.
+ */
+export function hiddenAnalysisStopEnabled(state: HiddenTabPause): boolean {
+  return state.hidden && state.suspended.includes('analysis');
+}
+
+/**
  * Stop drops the paused search. A queued Lc0 reload or unused-engine dispose
  * stays, matching a visible Stop that passes preserveDeferredMaintenance.
  */
