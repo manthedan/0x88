@@ -10,6 +10,24 @@ export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---enable-unsafe-webgpu}"
 export AGENT_BROWSER_SESSION="${AGENT_BROWSER_SESSION:-batching-strength}"
 unset AGENT_BROWSER_WEBGPU
 
+ensure_server() {
+  if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:5187/lab/batching-strength/; then
+    return 0
+  fi
+  echo "SERVER_DOWN restarting $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  PORT=5187 npm run web:isolated:static >> /tmp/batching-strength-server.log 2>&1 &
+  echo $! >> /tmp/batching-strength-server.pids
+  local i
+  for i in {1..30}; do
+    if curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:5187/lab/batching-strength/; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "SERVER_FAILED"
+  return 1
+}
+
 matches=("$@")
 if (( ${#matches} == 0 )); then
   matches=(
@@ -34,9 +52,13 @@ for match in "${matches[@]}"; do
   fi
   echo "MATCH_START $match $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   while true; do
+    ensure_server || exit 1
     "$SP/benchlock" node --experimental-strip-types scripts/batching_strength_match.mjs --match "$match" --minutes 16 "${restart[@]}"
     code=$?
     restart=()
+    if (( code == 1 )); then
+      restart=(--restart-browser)
+    fi
     status_file="artifacts/batching-strength/$match/chunk-status.json"
     if [[ -f "$status_file" ]]; then
       line=$(node -e 'const fs=require("node:fs"); const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(`games=${s.gamesDone}/${s.gamesTarget} ply=${s.ply ?? "-"} phase=${s.phase} load=${s.loadavg ?? "-"}`);' "$status_file")
