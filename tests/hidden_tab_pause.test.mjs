@@ -117,6 +117,10 @@ test('a hidden suspended analysis keeps Stop available', async () => {
   const cancelAt = stopBlock.indexOf("cancelHiddenTabWork(hiddenTab, 'analysis')");
   const disableAt = stopBlock.indexOf("toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab))");
   assert.ok(cancelAt >= 0 && disableAt > cancelAt);
+  const deferAt = source.indexOf('function deferHiddenTabWork');
+  const deferBlock = source.slice(deferAt, deferAt + 600);
+  assert.match(deferBlock, /kind === 'analysis'/);
+  assert.ok(deferBlock.indexOf('hiddenTab = requested.state') < deferBlock.indexOf('hiddenAnalysisStopEnabled(hiddenTab)'));
 });
 
 test('stop while hidden drops the search and keeps queued maintenance', () => {

@@ -2786,6 +2786,11 @@ function hiddenTabActive(): HiddenTabWork[] {
 function deferHiddenTabWork(kind: HiddenTabWork): boolean {
   const requested = requestHiddenTabWork(hiddenTab, kind);
   hiddenTab = requested.state;
+  if (!requested.start && kind === 'analysis') {
+    // Stop may have disabled the button after the previous run's finally.
+    // A new hidden request has no running search to enable it again.
+    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+  }
   return !requested.start;
 }
 
