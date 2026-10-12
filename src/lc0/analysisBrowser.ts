@@ -3920,6 +3920,9 @@ function wireEvents() {
     cancelAllAnalysisAssetPrefetches();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
+    // The paused run's finally already ran and left Stop enabled. Cancelling
+    // the suspended search has to disable it here; that finally will not run again.
+    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
   });
   el('engineList').addEventListener('change', (event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
