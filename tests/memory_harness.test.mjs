@@ -27,6 +27,7 @@ import {
   SCHEMA,
   spread,
   summarizeMeasurements,
+  unsuccessfulCancellation,
   workerCount,
 } from '../scripts/memory_harness/summary.mjs';
 
@@ -419,6 +420,46 @@ test('checkpoint failures cover arena preparation and Maia load text', () => {
     status: { analysisMessage: null, maiaPanelStatus: '' },
   });
   assert.equal(painted.engineFailed, undefined);
+});
+
+test('a Stop timeout is an unsuccessful checkpoint and is left out of retention', () => {
+  assert.equal(unsuccessfulCancellation({ ok: true, message: 'Analysis stopped' }), null);
+  const timedOut = unsuccessfulCancellation({
+    ok: false,
+    error: 'Timed out waiting for analysis to stop. Last={"ok":false,"message":"Lc0: 5000/100000 visits"}',
+  });
+  assert.equal(timedOut.ok, false);
+  assert.match(timedOut.error, /analysis did not stop/);
+  assert.match(timedOut.error, /5000\/100000 visits/);
+  assert.equal(unsuccessfulCancellation(undefined).ok, false);
+  const spec = retentionComparisons().find((entry) => entry.id === 'analysis-lc0-stop');
+  const withBytes = compareRetention(
+    [
+      sample('analysis-shell', 10 * NOISE),
+      sample('analysis-lc0-30s', 40 * NOISE, { stillRunning: true }),
+      { id: 'analysis-lc0-stopped', ok: false, userAgentSpecificBytes: 80 * NOISE },
+    ],
+    spec,
+  );
+  assert.equal(withBytes.missing, true);
+  assert.equal(withBytes.unreleased, false);
+  const summary = summarizeMeasurements([
+    {
+      run: 1,
+      phase: 'analysis',
+      checkpoints: [
+        sample('analysis-shell', 10 * NOISE),
+        sample('analysis-lc0-30s', 40 * NOISE, { stillRunning: true }),
+        { id: 'analysis-lc0-stopped', phase: 'analysis', run: 1, ...timedOut },
+      ],
+    },
+  ]);
+  const stopped = summary.checkpoints.find((entry) => entry.id === 'analysis-lc0-stopped');
+  assert.equal(stopped.okRuns, 0);
+  assert.equal(stopped.median.userAgentSpecificBytes, null);
+  const retention = summary.retention.find((entry) => entry.id === 'analysis-lc0-stop');
+  assert.equal(retention.comparableRuns, 0);
+  assert.equal(retention.repeated, false);
 });
 
 test('summary keeps an engine failure beside its memory sample', () => {

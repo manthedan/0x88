@@ -255,6 +255,16 @@ export function applyObservedEngineFailure(reading) {
   };
 }
 
+/**
+ * A Stop wait that did not settle must not be stored as a successful stopped sample.
+ * Null means Stop was disabled or the status line had already ended.
+ */
+export function unsuccessfulCancellation(stopResult) {
+  if (stopResult?.ok) return null;
+  const detail = String(stopResult?.error || stopResult?.message || 'analysis did not stop');
+  return { ok: false, error: `analysis did not stop: ${detail}` };
+}
+
 export function previousCheckpointId(id, plan = checkpointPlan()) {
   for (const phase of PHASES) {
     const ids = plan[phase].map((entry) => entry.id);

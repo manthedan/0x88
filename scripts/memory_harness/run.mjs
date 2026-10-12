@@ -42,6 +42,7 @@ import {
   retentionComparisons,
   SCHEMA,
   summarizeMeasurements,
+  unsuccessfulCancellation,
 } from './summary.mjs';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:5186';
@@ -395,17 +396,21 @@ async function disableAutoAnalyze(page) {
 
 async function stopAnalysis(page, timeoutMs) {
   await page.evaluate(() => document.querySelector('#stop')?.click());
-  await waitFor(
-    page,
-    () => {
-      const stop = document.querySelector('#stop');
-      const message = document.querySelector('#message')?.textContent ?? '';
-      return { ok: !stop || stop.disabled || /complete|stopped|failed/i.test(message), message };
-    },
-    null,
-    timeoutMs,
-    'analysis to stop',
-  ).catch(() => undefined);
+  try {
+    return await waitFor(
+      page,
+      () => {
+        const stop = document.querySelector('#stop');
+        const message = document.querySelector('#message')?.textContent ?? '';
+        return { ok: !stop || stop.disabled || /complete|stopped|failed/i.test(message), message };
+      },
+      null,
+      timeoutMs,
+      'analysis to stop',
+    );
+  } catch (error) {
+    return { ok: false, error: error?.message ?? String(error) };
+  }
 }
 
 async function runAnalysis(page, args, run) {
@@ -414,7 +419,11 @@ async function runAnalysis(page, args, run) {
   await gotoPath(page, args.baseUrl, '/app/analysis/');
   await disableAutoAnalyze(page);
   await waitFor(page, () => ({ ok: !!document.querySelector('.row-fam') && !!document.querySelector('#analyze') }), null, args.timeoutMs, 'analysis controls');
-  await stopAnalysis(page, 10_000);
+  const shellStop = unsuccessfulCancellation(await stopAnalysis(page, 10_000));
+  if (shellStop) {
+    checkpoints.push({ ...meta('analysis-shell'), ...shellStop });
+    return checkpoints;
+  }
   await record(page, { ...meta('analysis-shell'), note: 'analysis open, auto-analyze unchecked before the timed Lc0 run' }, checkpoints, args);
 
   try {
@@ -465,9 +474,13 @@ async function runAnalysis(page, args, run) {
   }
 
   try {
-    await stopAnalysis(page, args.timeoutMs);
-    await delay(500);
-    await record(page, { ...meta('analysis-lc0-stopped', 'lc0'), note: 'Stop clicked after the Lc0 run' }, checkpoints, args);
+    const stopped = unsuccessfulCancellation(await stopAnalysis(page, args.timeoutMs));
+    if (stopped) {
+      checkpoints.push({ ...meta('analysis-lc0-stopped', 'lc0'), ...stopped });
+    } else {
+      await delay(500);
+      await record(page, { ...meta('analysis-lc0-stopped', 'lc0'), note: 'Stop clicked after the Lc0 run' }, checkpoints, args);
+    }
   } catch (error) {
     checkpoints.push({ ...meta('analysis-lc0-stopped', 'lc0'), ok: false, error: error?.message ?? String(error) });
   }
@@ -501,18 +514,22 @@ async function runAnalysis(page, args, run) {
     await setAnalysisFamily(page, 'lc0', 8);
     await page.evaluate(() => document.querySelector('#analyze')?.click());
     const ready = await waitFor(page, analysisSampleReady, { family: 'lc0', previousMessage }, args.timeoutMs, 'return to Lc0');
-    await stopAnalysis(page, 15_000);
-    await record(
-      page,
-      {
-        ...meta('analysis-after-cpu', 'lc0'),
-        note: ready.failed ? `return to Lc0 failed: ${ready.message}` : 'row switched back to Lc0 after every CPU family',
-        engineFailed: ready.failed === true,
-        engineError: ready.failed ? ready.message : undefined,
-      },
-      checkpoints,
-      args,
-    );
+    const stopped = unsuccessfulCancellation(await stopAnalysis(page, 15_000));
+    if (stopped) {
+      checkpoints.push({ ...meta('analysis-after-cpu', 'lc0'), ...stopped });
+    } else {
+      await record(
+        page,
+        {
+          ...meta('analysis-after-cpu', 'lc0'),
+          note: ready.failed ? `return to Lc0 failed: ${ready.message}` : 'row switched back to Lc0 after every CPU family',
+          engineFailed: ready.failed === true,
+          engineError: ready.failed ? ready.message : undefined,
+        },
+        checkpoints,
+        args,
+      );
+    }
   } catch (error) {
     checkpoints.push({ ...meta('analysis-after-cpu', 'lc0'), ok: false, error: error?.message ?? String(error) });
   }
@@ -583,7 +600,11 @@ async function runMaia(page, args, run) {
   await gotoPath(page, args.baseUrl, '/app/analysis/');
   await disableAutoAnalyze(page);
   await waitFor(page, analysisControllerReady, null, args.timeoutMs, 'analysis controller');
-  await stopAnalysis(page, 10_000);
+  const maiaStop = unsuccessfulCancellation(await stopAnalysis(page, 10_000));
+  if (maiaStop) {
+    checkpoints.push({ ...meta('maia-before', 'analysis'), ...maiaStop });
+    return checkpoints;
+  }
   await record(page, { ...meta('maia-before', 'analysis'), note: 'analysis shell before Load Maia3; auto-analyze unchecked' }, checkpoints, args);
   try {
     await waitFor(page, requestMaiaLoad, null, args.timeoutMs, 'Maia load click');
