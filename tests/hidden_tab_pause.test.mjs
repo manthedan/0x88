@@ -4,6 +4,7 @@ import {
   cancelHiddenTabWork,
   classifyHiddenReload,
   initialHiddenTabPause,
+  rememberDeferredForce,
   requestHiddenTabWork,
   shouldResumeHiddenAnalysis,
   stopHiddenTabResume,
@@ -64,10 +65,17 @@ test('queued maintenance is restored only when the tab is shown', () => {
 });
 
 test('a maintenance-only reload is not an analysis resume', () => {
-  assert.deepEqual(classifyHiddenReload(false, true, false), { analysis: false, pauseReload: true });
-  assert.deepEqual(classifyHiddenReload(false, true, true), { analysis: true, pauseReload: false });
-  assert.deepEqual(classifyHiddenReload(true, false, false), { analysis: true, pauseReload: false });
-  assert.deepEqual(classifyHiddenReload(false, false, false), { analysis: false, pauseReload: false });
+  assert.deepEqual(classifyHiddenReload(false, true, false, false), { analysis: false, pauseReload: true });
+  assert.deepEqual(classifyHiddenReload(false, true, true, false), { analysis: true, pauseReload: false });
+  assert.deepEqual(classifyHiddenReload(false, true, false, true), { analysis: true, pauseReload: false });
+  assert.deepEqual(classifyHiddenReload(true, false, false, false), { analysis: true, pauseReload: false });
+  assert.deepEqual(classifyHiddenReload(false, false, false, false), { analysis: false, pauseReload: false });
+});
+
+test('a forced request while hidden stays forced', () => {
+  assert.equal(rememberDeferredForce(false, true), true);
+  assert.equal(rememberDeferredForce(true, false), true);
+  assert.equal(rememberDeferredForce(false, false), false);
 });
 
 test('stop while hidden drops the search and keeps queued maintenance', () => {

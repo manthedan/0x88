@@ -151,6 +151,7 @@ import {
   type HiddenTabPause,
   type HiddenTabWork,
   initialHiddenTabPause,
+  rememberDeferredForce,
   requestHiddenTabWork,
   shouldResumeHiddenAnalysis,
   stopHiddenTabResume,
@@ -2772,6 +2773,7 @@ function hiddenTabActive(): HiddenTabWork[] {
     analyzing && analysisAbort !== null && !analysisAbort.signal.aborted,
     analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
     analysisReloadWantsSearch,
+    analyzeAfterActiveRun,
   );
   if (reloadClass.analysis) active.push('analysis');
   if (maia3PanelTimer !== null || maia3PanelEvaluating) active.push('maia');
@@ -2791,6 +2793,7 @@ function applyHiddenTab(hidden: boolean): void {
     analyzing && analysisAbort !== null && !analysisAbort.signal.aborted,
     analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
     analysisReloadWantsSearch,
+    analyzeAfterActiveRun,
   );
   const transition = transitionHiddenTab(hiddenTab, hidden, hiddenTabActive());
   hiddenTab = transition.state;
@@ -2808,7 +2811,7 @@ function applyHiddenTab(hidden: boolean): void {
   if (transition.pause.includes('analysis')) {
     // Snapshot before cancel. The aborted run's finally must not see these flags
     // and start a reload while the tab is still hidden.
-    hiddenResumeForce = analysisRunForced;
+    hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, analysisRunForced);
     hiddenResumeReload = reloadLc0AfterActiveRun;
     hiddenResumeDispose = disposeUnusedEnginesAfterActiveRun;
     analysisRunForced = false;
@@ -2916,6 +2919,8 @@ function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250
   if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
+    analysisReloadWantsSearch = true;
+    hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
     return;
   }
   cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
@@ -3238,10 +3243,15 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted) return;
-  if (deferHiddenTabWork('analysis')) return;
+  if (deferHiddenTabWork('analysis')) {
+    hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
+    return;
+  }
   reviewAbort?.abort();
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
+    analysisReloadWantsSearch = true;
+    hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
     return;
   }
   const reloadBeforeRun = reloadLc0AfterActiveRun;
