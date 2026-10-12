@@ -148,6 +148,7 @@ import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import {
   cancelHiddenTabWork,
   classifyHiddenReload,
+  finishedRunFollowUp,
   type HiddenTabPause,
   type HiddenTabWork,
   initialHiddenTabPause,
@@ -3310,6 +3311,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   let runDeferredAnalysis = false;
   let reloadDeferredLc0 = false;
   let disposeDeferredEngines = false;
+  let resumeForce = false;
   try {
     const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
     const publishLines = () => {
@@ -3585,6 +3587,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       runDeferredAnalysis = analyzeAfterActiveRun;
       reloadDeferredLc0 = reloadLc0AfterActiveRun;
       disposeDeferredEngines = disposeUnusedEnginesAfterActiveRun;
+      resumeForce = analysisRunForced;
       analyzeAfterActiveRun = false;
       reloadLc0AfterActiveRun = false;
       disposeUnusedEnginesAfterActiveRun = false;
@@ -3593,11 +3596,26 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       document.getElementById('stop')?.toggleAttribute('disabled', true);
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
-    // In finally: a cancelled run returns early from the try, and Stop must still
-    // apply queued runtime/engine maintenance even though it drops the re-run.
-    if (disposeDeferredEngines) disposeUnusedEngines();
-    if (reloadDeferredLc0) void reloadLc0ForAnalysis(runDeferredAnalysis);
-    else if (runDeferredAnalysis) void analyzeCurrent();
+    // A cancelled run returns early from the try. Stop still wants queued
+    // maintenance, but that work must not start while the tab is hidden: Stop
+    // aborts before hide, so the pause snapshot never sees this run.
+    const followUp = finishedRunFollowUp(hiddenTab.hidden, {
+      reload: reloadDeferredLc0,
+      dispose: disposeDeferredEngines,
+      analyzeAgain: runDeferredAnalysis,
+    });
+    if (!followUp.start) {
+      if (followUp.reload) hiddenResumeReload = true;
+      if (followUp.dispose) hiddenResumeDispose = true;
+      if (followUp.analyzeAgain) {
+        hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, resumeForce);
+        hiddenTab = requestHiddenTabWork(hiddenTab, 'analysis').state;
+      }
+    } else {
+      if (followUp.dispose) disposeUnusedEngines();
+      if (followUp.reload) void reloadLc0ForAnalysis(followUp.analyzeAgain);
+      else if (followUp.analyzeAgain) void analyzeCurrent();
+    }
   }
 }
 

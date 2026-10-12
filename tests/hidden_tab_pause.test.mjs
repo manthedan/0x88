@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   cancelHiddenTabWork,
   classifyHiddenReload,
+  finishedRunFollowUp,
   initialHiddenTabPause,
   rememberDeferredForce,
   requestHiddenTabWork,
@@ -70,6 +71,21 @@ test('a maintenance-only reload is not an analysis resume', () => {
   assert.deepEqual(classifyHiddenReload(false, true, false, true), { analysis: true, pauseReload: false });
   assert.deepEqual(classifyHiddenReload(true, false, false, false), { analysis: true, pauseReload: false });
   assert.deepEqual(classifyHiddenReload(false, false, false, false), { analysis: false, pauseReload: false });
+});
+
+test('a run that finishes while hidden does not start its follow-up', () => {
+  assert.deepEqual(finishedRunFollowUp(true, { reload: true, dispose: true, analyzeAgain: false }), {
+    start: false,
+    reload: true,
+    dispose: true,
+    analyzeAgain: false,
+  });
+  assert.deepEqual(finishedRunFollowUp(false, { reload: true, dispose: false, analyzeAgain: true }), {
+    start: true,
+    reload: true,
+    dispose: false,
+    analyzeAgain: true,
+  });
 });
 
 test('a forced request while hidden stays forced', () => {

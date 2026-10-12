@@ -68,6 +68,17 @@ export function rememberDeferredForce(savedForce: boolean, requestedForce: boole
   return savedForce || requestedForce;
 }
 
+/**
+ * A run that finishes while the tab is hidden must not start its follow-up.
+ * The caller keeps the bits and resumes them on show.
+ */
+export function finishedRunFollowUp(
+  hidden: boolean,
+  followUp: { reload: boolean; dispose: boolean; analyzeAgain: boolean },
+): { start: boolean; reload: boolean; dispose: boolean; analyzeAgain: boolean } {
+  return { start: !hidden, reload: followUp.reload, dispose: followUp.dispose, analyzeAgain: followUp.analyzeAgain };
+}
+
 export function shouldResumeHiddenAnalysis(hidden: boolean, resume: readonly HiddenTabWork[], savedReload: boolean, savedDispose: boolean): boolean {
   return !hidden && (resume.includes('analysis') || savedReload || savedDispose);
 }
