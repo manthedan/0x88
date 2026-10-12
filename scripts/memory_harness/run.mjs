@@ -422,7 +422,18 @@ async function runAnalysis(page, args, run) {
     const ready = await waitFor(page, analysisSampleReady, { family: 'lc0', previousMessage }, args.timeoutMs, 'Lc0 search progress');
     if (!lc0TimedRunStarted(ready)) {
       const note = ready.failed ? `Lc0 failed before search progress: ${ready.message}` : `Lc0 finished before a running visit count: ${ready.message}`;
-      await record(page, { ...meta('analysis-lc0-30s', 'lc0'), note, stillRunning: false }, checkpoints, args);
+      await record(
+        page,
+        {
+          ...meta('analysis-lc0-30s', 'lc0'),
+          note,
+          stillRunning: false,
+          engineFailed: ready.failed === true,
+          engineError: ready.failed ? ready.message : undefined,
+        },
+        checkpoints,
+        args,
+      );
     } else {
       const started = Date.now();
       const runMs = args.lc0Seconds * 1000;
@@ -460,10 +471,15 @@ async function runAnalysis(page, args, run) {
       const previousMessage = await page.evaluate(() => document.querySelector('#message')?.textContent ?? '');
       await setAnalysisFamily(page, family, 2);
       await page.evaluate(() => document.querySelector('#analyze')?.click());
-      await waitFor(page, analysisSampleReady, { family, previousMessage }, args.timeoutMs, `${family} analysis output`);
+      const ready = await waitFor(page, analysisSampleReady, { family, previousMessage }, args.timeoutMs, `${family} analysis output`);
       await record(
         page,
-        { ...meta(`analysis-cpu-${family}`, family), note: 'depth 2, sampled after this family settled or the run failed' },
+        {
+          ...meta(`analysis-cpu-${family}`, family),
+          note: ready.failed ? `depth 2 failed: ${ready.message}` : 'depth 2, sampled after this family settled',
+          engineFailed: ready.failed === true,
+          engineError: ready.failed ? ready.message : undefined,
+        },
         checkpoints,
         args,
       );
@@ -478,9 +494,19 @@ async function runAnalysis(page, args, run) {
     const previousMessage = await page.evaluate(() => document.querySelector('#message')?.textContent ?? '');
     await setAnalysisFamily(page, 'lc0', 8);
     await page.evaluate(() => document.querySelector('#analyze')?.click());
-    await waitFor(page, analysisSampleReady, { family: 'lc0', previousMessage }, args.timeoutMs, 'return to Lc0');
+    const ready = await waitFor(page, analysisSampleReady, { family: 'lc0', previousMessage }, args.timeoutMs, 'return to Lc0');
     await stopAnalysis(page, 15_000);
-    await record(page, { ...meta('analysis-after-cpu', 'lc0'), note: 'row switched back to Lc0 after every CPU family' }, checkpoints, args);
+    await record(
+      page,
+      {
+        ...meta('analysis-after-cpu', 'lc0'),
+        note: ready.failed ? `return to Lc0 failed: ${ready.message}` : 'row switched back to Lc0 after every CPU family',
+        engineFailed: ready.failed === true,
+        engineError: ready.failed ? ready.message : undefined,
+      },
+      checkpoints,
+      args,
+    );
   } catch (error) {
     checkpoints.push({ ...meta('analysis-after-cpu', 'lc0'), ok: false, error: error?.message ?? String(error) });
   }

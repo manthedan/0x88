@@ -152,7 +152,8 @@ export function requestMaiaLoad() {
  * source. Family patterns stay inside the function. The "Analyzing (…)" banner
  * is set before the worker loads, so it is not ready. A progress or completion
  * line must name the selected family. A changed failure line is ready even
- * when the error text omits the family.
+ * when the error text omits the family, including "Model load failed" and
+ * "LC0 … load failed".
  */
 export function analysisSampleReady(state) {
   const patterns = {
@@ -177,7 +178,7 @@ export function analysisSampleReady(state) {
   const known = patterns[family];
   const pattern = known ?? new RegExp(family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
   const settled = /analysis complete|\d+\s*\/\s*\d+\s*(visits|nodes|search)|:\s*searching/i;
-  const failedPattern = /analysis failed|engine failures|could not download|asset missing|unavailable/i;
+  const failedPattern = /analysis failed|engine failures|could not download|asset missing|unavailable|model load failed|\bload failed\b/i;
   const namesSettled = (text) => pattern.test(text) && settled.test(text);
   const changed = previous == null || message !== previous;
   const failed = failedPattern.test(message) || failedPattern.test(progress);
@@ -221,7 +222,7 @@ export function analysisLc0StillRunning(state) {
   message = String(message ?? '');
   progress = String(progress ?? '');
   const text = `${message}\n${progress}`;
-  const ended = /analysis complete|analysis failed|engine failures|stopped|could not download|asset missing/i.test(message);
+  const ended = /analysis complete|analysis failed|engine failures|stopped|could not download|asset missing|model load failed|\bload failed\b/i.test(message);
   const live = /lc0|leela/i.test(text) && /\d+\s*\/\s*\d+\s*visits/i.test(text) && !/complete|stopped|failed/i.test(text);
   return { running: stopEnabled === true && live && !ended, message };
 }
@@ -410,6 +411,9 @@ export function summarizeMeasurements(runs, options = {}) {
         medianDeltaBytes: median(deltas.filter((value) => Number.isFinite(value))),
         stillRunningRuns: samples.filter((sample) => sample.stillRunning === true).length,
         notes: [...new Set(samples.map((sample) => sample.note).filter(Boolean))],
+        engineFailures: samples
+          .filter((sample) => sample.engineFailed === true)
+          .map((sample) => ({ run: sample.run, message: sample.engineError || sample.note || 'engine failed' })),
         errors: samples.filter((sample) => sample.ok === false).map((sample) => ({ run: sample.run, error: sample.error ?? 'failed' })),
         userAgentSpecificErrors: [...new Set(samples.map((sample) => sample.userAgentSpecificError).filter(Boolean))],
         exampleBreakdown: example?.breakdownTop ?? [],
@@ -482,6 +486,14 @@ export function renderMarkdown(summary) {
     lines.push(
       `| ${checkpoint.id} | ${cell(checkpoint.surface)} | ${cell(checkpoint.resident)} | ${formatMib(checkpoint.median.userAgentSpecificBytes)} | ${rangeText} | ${formatMib(checkpoint.medianDeltaBytes)} | ${formatMib(checkpoint.median.usedJSHeapSize)} | ${cell(checkpoint.median.workerCount)} | ${checkpoint.median.measureLatencyMs == null ? 'n/a' : `${Math.round(checkpoint.median.measureLatencyMs)} ms`} |`,
     );
+  }
+  const engineFailures = summary.checkpoints.flatMap((checkpoint) => (checkpoint.engineFailures ?? []).map((failure) => ({ id: checkpoint.id, ...failure })));
+  if (engineFailures.length) {
+    lines.push('');
+    lines.push('## Engine failures');
+    lines.push('');
+    lines.push('These checkpoints still have a memory reading. The engine did not settle, so the number can be the previous resident.');
+    for (const failure of engineFailures) lines.push(`- \`${failure.id}\` run ${failure.run}: ${failure.message}`);
   }
   lines.push('');
   lines.push('## Largest residents');

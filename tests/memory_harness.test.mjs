@@ -239,6 +239,19 @@ test('the Lc0 timer starts on visit progress, not the start banner or a failure'
   assert.equal(failed.failed, true);
   assert.equal(lc0TimedRunStarted(failed), false);
   assert.equal(analysisLc0StillRunning({ message: failed.message, stopEnabled: true }).running, false);
+  for (const message of ['Model load failed: missing net', 'LC0 ORT ONNX load failed: worker exited']) {
+    const backend = analysisSampleReady({ family: 'lc0', previousMessage: 'Ready.', message });
+    assert.equal(backend.ok, true, message);
+    assert.equal(backend.failed, true, message);
+    assert.equal(lc0TimedRunStarted(backend), false, message);
+    assert.equal(analysisLc0StillRunning({ message, stopEnabled: true }).running, false, message);
+  }
+  const staleBackend = analysisSampleReady({
+    family: 'lc0',
+    previousMessage: 'Model load failed: missing net',
+    message: 'Model load failed: missing net',
+  });
+  assert.equal(staleBackend.ok, false);
   const done = analysisSampleReady({ family: 'lc0', previousMessage: '', message: 'Analysis complete · Lc0' });
   assert.equal(lc0TimedRunStarted(done), false);
   assert.equal(analysisLc0StillRunning({ message: done.message, stopEnabled: true }).running, false);
@@ -352,6 +365,30 @@ test('repeated retention requires a strict majority, so ties stay quiet', () => 
   assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(false), retentionRun(false)])[0].repeated, false);
   assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(true), retentionRun(false)])[0].repeated, true);
   assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(false)])[0].repeated, true);
+});
+
+test('summary keeps an engine failure beside its memory sample', () => {
+  const summary = summarizeMeasurements([
+    {
+      run: 1,
+      phase: 'analysis',
+      checkpoints: [
+        sample('analysis-cpu-reckless', 20 * NOISE, {
+          engineFailed: true,
+          engineError: 'Reckless asset missing',
+          note: 'depth 2 failed: Reckless asset missing',
+        }),
+        sample('analysis-cpu-sf', 12 * NOISE, { note: 'depth 2, sampled after this family settled' }),
+      ],
+    },
+  ]);
+  const reckless = summary.checkpoints.find((entry) => entry.id === 'analysis-cpu-reckless');
+  const sf = summary.checkpoints.find((entry) => entry.id === 'analysis-cpu-sf');
+  assert.equal(reckless.median.userAgentSpecificBytes, 20 * NOISE);
+  assert.deepEqual(reckless.engineFailures, [{ run: 1, message: 'Reckless asset missing' }]);
+  assert.deepEqual(sf.engineFailures, []);
+  assert.match(renderMarkdown(summary), /## Engine failures/);
+  assert.match(renderMarkdown(summary), /analysis-cpu-reckless` run 1: Reckless asset missing/);
 });
 
 test('one flagged run out of three is not called repeated', () => {
