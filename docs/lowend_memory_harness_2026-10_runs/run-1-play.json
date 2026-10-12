@@ -1,0 +1,1150 @@
+{
+  "schema": "lowend-memory-harness/v1",
+  "kind": "phase-run",
+  "run": 1,
+  "phase": "play",
+  "baseUrl": "http://127.0.0.1:5186",
+  "startedAt": "2026-10-11T21:52:20.480Z",
+  "finishedAt": "2026-10-11T22:00:35.589Z",
+  "durationMs": 495109,
+  "loadavg": {
+    "start": [
+      2.4482421875,
+      3.3623046875,
+      3.6865234375
+    ],
+    "end": [
+      1.5283203125,
+      2.16845703125,
+      2.8984375
+    ]
+  },
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "cpuCount": 10,
+    "totalMemBytes": 25769803776,
+    "freeMemBytes": 2228568064,
+    "node": "v25.9.0",
+    "browser": "151.0.7922.34"
+  },
+  "pageErrors": [],
+  "checkpoints": [
+    {
+      "id": "landing",
+      "phase": "play",
+      "surface": "landing",
+      "resident": null,
+      "run": 1,
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 | Browser chess engine workbench",
+        "path": "/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 1545462,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 14027,
+      "breakdownTop": [
+        {
+          "bytes": 1070826,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        },
+        {
+          "bytes": 306476,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 168160,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 1593099,
+      "totalJSHeapSize": 2990975,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 0,
+        "created": 0,
+        "serviceWorkers": 1,
+        "breakdownScopes": 0
+      }
+    },
+    {
+      "id": "play-default-after-first-move",
+      "phase": "play",
+      "surface": "play",
+      "resident": "maia3",
+      "run": 1,
+      "note": "fastest level, engine played the first move",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "maia3",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. e4",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 122275071,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 15014,
+      "breakdownTop": [
+        {
+          "bytes": 117900405,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 2912143,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1178443,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 284080,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3770199,
+      "totalJSHeapSize": 4503083,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 1,
+        "created": 1,
+        "serviceWorkers": 1,
+        "breakdownScopes": 1
+      }
+    },
+    {
+      "id": "play-cpu-sf-lite",
+      "phase": "play",
+      "surface": "play",
+      "resident": "sf-lite",
+      "run": 1,
+      "note": "fastest level after a completed first engine move",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "sf-lite",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. d4",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 257391150,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 16022,
+      "breakdownTop": [
+        {
+          "bytes": 135006180,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894461,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3377201,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 819148,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 294160,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3884277,
+      "totalJSHeapSize": 5371657,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 2,
+        "created": 2,
+        "serviceWorkers": 1,
+        "breakdownScopes": 2
+      }
+    },
+    {
+      "id": "play-cpu-sf-full",
+      "phase": "play",
+      "surface": "play",
+      "resident": "sf-full",
+      "run": 1,
+      "note": "fastest level after a completed first engine move",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "sf-full",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. Nf3",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 592464439,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 16014,
+      "breakdownTop": [
+        {
+          "bytes": 334945924,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003664,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894473,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 2922164,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1381206,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 317008,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 3991088,
+      "totalJSHeapSize": 5633896,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 3,
+        "created": 3,
+        "serviceWorkers": 1,
+        "breakdownScopes": 3
+      }
+    },
+    {
+      "id": "play-cpu-reckless",
+      "phase": "play",
+      "surface": "play",
+      "resident": "reckless",
+      "run": 1,
+      "note": "fastest level after a completed first engine move",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "reckless",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. d4",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 592656727,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60003,
+      "breakdownTop": [
+        {
+          "bytes": 334944340,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003660,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894485,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3438635,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1035703,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 339904,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4096830,
+      "totalJSHeapSize": 5634186,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 4,
+        "created": 4,
+        "serviceWorkers": 1,
+        "breakdownScopes": 3
+      }
+    },
+    {
+      "id": "play-cpu-viridithas",
+      "phase": "play",
+      "surface": "play",
+      "resident": "viridithas",
+      "run": 1,
+      "note": "fastest level after a completed first engine move",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "viridithas",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. Nf3",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 592828777,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60005,
+      "breakdownTop": [
+        {
+          "bytes": 334944352,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003672,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894497,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3750616,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 872888,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 362752,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4181413,
+      "totalJSHeapSize": 4847849,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 5,
+        "created": 5,
+        "serviceWorkers": 1,
+        "breakdownScopes": 3
+      }
+    },
+    {
+      "id": "play-cpu-berserk",
+      "phase": "play",
+      "surface": "play",
+      "resident": "berserk",
+      "run": 1,
+      "note": "fastest level after a completed first engine move",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "berserk",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. d4",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 887215301,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60004,
+      "breakdownTop": [
+        {
+          "bytes": 334944364,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 294263852,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
+          ]
+        },
+        {
+          "bytes": 135003684,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894509,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3994321,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 728923,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "usedJSHeapSize": 4275587,
+      "totalJSHeapSize": 5109859,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 6,
+        "created": 6,
+        "serviceWorkers": 1,
+        "breakdownScopes": 4
+      }
+    },
+    {
+      "id": "play-cpu-plentychess",
+      "phase": "play",
+      "surface": "play",
+      "resident": "plentychess",
+      "run": 1,
+      "note": "fastest level after a completed first engine move",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "plentychess",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. d4",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 1209381288,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60005,
+      "breakdownTop": [
+        {
+          "bytes": 334929308,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322302719,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/6277e710-9ae6-43a5-8cf2-d52999211119"
+          ]
+        },
+        {
+          "bytes": 294261172,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
+          ]
+        },
+        {
+          "bytes": 134984060,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117835945,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3947464,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        }
+      ],
+      "usedJSHeapSize": 4229817,
+      "totalJSHeapSize": 5371361,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 7,
+        "created": 7,
+        "serviceWorkers": 1,
+        "breakdownScopes": 5
+      }
+    },
+    {
+      "id": "play-cpu-stormphrax",
+      "phase": "play",
+      "surface": "play",
+      "resident": "stormphrax",
+      "run": 1,
+      "note": "fastest level after a completed first engine move",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "stormphrax",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. Nf3",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 1802947703,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60003,
+      "breakdownTop": [
+        {
+          "bytes": 593509990,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/e992560f-4d12-4b93-bbad-604a084ad96e"
+          ]
+        },
+        {
+          "bytes": 334928976,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300691,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/6277e710-9ae6-43a5-8cf2-d52999211119"
+          ]
+        },
+        {
+          "bytes": 294261184,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
+          ]
+        },
+        {
+          "bytes": 134983808,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834753,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        }
+      ],
+      "usedJSHeapSize": 4257309,
+      "totalJSHeapSize": 5369625,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 8,
+        "created": 8,
+        "serviceWorkers": 1,
+        "breakdownScopes": 6
+      }
+    },
+    {
+      "id": "play-neural-lc0-small",
+      "phase": "play",
+      "surface": "play",
+      "resident": "lc0-small",
+      "run": 1,
+      "note": "neural engine after the CPU tour",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 Chess — play chess vs an engine in your browser",
+        "path": "/app/play/",
+        "engine": "lc0-small",
+        "engineNote": "",
+        "playStatus": "Your move",
+        "moves": "1. Nf3",
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 1316429658,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60004,
+      "breakdownTop": [
+        {
+          "bytes": 334928988,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300703,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/6277e710-9ae6-43a5-8cf2-d52999211119"
+          ]
+        },
+        {
+          "bytes": 294261196,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
+          ]
+        },
+        {
+          "bytes": 134983544,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834765,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 109705200,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        }
+      ],
+      "usedJSHeapSize": 7002386,
+      "totalJSHeapSize": 7724970,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 7,
+        "created": 8,
+        "serviceWorkers": 1,
+        "breakdownScopes": 5
+      }
+    },
+    {
+      "id": "landing-after-play",
+      "phase": "play",
+      "surface": "landing",
+      "resident": null,
+      "run": 1,
+      "note": "in-app navigation away from Play; module caches may remain",
+      "ok": true,
+      "crossOriginIsolated": true,
+      "deviceMemory": 16,
+      "hardwareConcurrency": 10,
+      "status": {
+        "title": "0x88 | Browser chess engine workbench",
+        "path": "/",
+        "engine": null,
+        "engineNote": null,
+        "playStatus": null,
+        "moves": null,
+        "analysisMessage": null,
+        "analysisFamily": null,
+        "matchScore": null,
+        "gameMoves": null,
+        "maiaHidden": null
+      },
+      "userAgentSpecificBytes": 1316247035,
+      "userAgentSpecificError": null,
+      "measureLatencyMs": 60004,
+      "breakdownTop": [
+        {
+          "bytes": 334929000,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300715,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/6277e710-9ae6-43a5-8cf2-d52999211119"
+          ]
+        },
+        {
+          "bytes": 294238868,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
+          ]
+        },
+        {
+          "bytes": 134983556,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834777,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 108852552,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        }
+      ],
+      "usedJSHeapSize": 7017806,
+      "totalJSHeapSize": 8070110,
+      "jsHeapSizeLimit": 4395630592,
+      "workers": {
+        "live": 7,
+        "created": 8,
+        "serviceWorkers": 1,
+        "breakdownScopes": 5
+      }
+    }
+  ],
+  "overlay": null
+}
