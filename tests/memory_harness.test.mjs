@@ -8,6 +8,7 @@ import { runInNewContext } from 'node:vm';
 import { installWorkerHook, samplePage } from '../scripts/memory_harness/page_hooks.mjs';
 import {
   aggregateRetention,
+  analysisControllerReady,
   analysisLc0StillRunning,
   analysisSampleReady,
   CPU_ANALYSIS_FAMILIES,
@@ -19,6 +20,7 @@ import {
   median,
   NOISE_BYTES,
   renderMarkdown,
+  requestMaiaLoad,
   retentionComparisons,
   SCHEMA,
   spread,
@@ -240,6 +242,63 @@ test('the Lc0 timer starts on visit progress, not the start banner or a failure'
   const done = analysisSampleReady({ family: 'lc0', previousMessage: '', message: 'Analysis complete · Lc0' });
   assert.equal(lc0TimedRunStarted(done), false);
   assert.equal(analysisLc0StillRunning({ message: done.message, stopEnabled: true }).running, false);
+});
+
+test('Maia waits for the analysis controller and retries a click that did not land', () => {
+  assert.equal(analysisControllerReady({ hasRows: false, hasMaiaButton: true }).ok, false);
+  assert.equal(analysisControllerReady({ hasRows: true, hasMaiaButton: false }).ok, false);
+  assert.equal(analysisControllerReady({ hasRows: true, hasMaiaButton: true }).ok, true);
+
+  const HTMLButtonElement = class HTMLButtonElement {};
+  const HTMLDetailsElement = class HTMLDetailsElement {};
+  let clicks = 0;
+  const idleButton = new HTMLButtonElement();
+  idleButton.disabled = false;
+  idleButton.hidden = false;
+  idleButton.click = () => {
+    clicks += 1;
+  };
+  const idle = runInNewContext(`(${requestMaiaLoad.toString()})`, {
+    HTMLDetailsElement,
+    HTMLButtonElement,
+    document: {
+      querySelector(selector) {
+        if (selector === 'details.human-moves') return null;
+        if (selector === '#maia3Enable') return idleButton;
+        if (selector === '#maia3Grid') return { hidden: true };
+        if (selector === '#maia3PanelStatus') return { textContent: '' };
+        throw new Error(`unexpected selector ${selector}`);
+      },
+    },
+  });
+  assert.equal(idle().ok, false);
+  assert.equal(clicks, 1);
+
+  const status = { textContent: '' };
+  const button = new HTMLButtonElement();
+  button.disabled = false;
+  button.hidden = false;
+  button.click = function click() {
+    this.disabled = true;
+    status.textContent = 'Loading Maia3…';
+  };
+  const started = runInNewContext(`(${requestMaiaLoad.toString()})`, {
+    HTMLDetailsElement,
+    HTMLButtonElement,
+    document: {
+      querySelector(selector) {
+        if (selector === 'details.human-moves') return null;
+        if (selector === '#maia3Enable') return button;
+        if (selector === '#maia3Grid') return { hidden: true };
+        if (selector === '#maia3PanelStatus') return status;
+        throw new Error(`unexpected selector ${selector}`);
+      },
+    },
+  });
+  const result = started();
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 'Loading Maia3…');
+  assert.equal(started().ok, true);
 });
 
 test('analysis sample predicate serializes without module bindings', () => {

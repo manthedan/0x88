@@ -26,6 +26,7 @@ import { pathToFileURL } from 'node:url';
 import { parseScriptArgs } from '../lib/cli.mjs';
 import { installWorkerHook, samplePage } from './page_hooks.mjs';
 import {
+  analysisControllerReady,
   analysisLc0StillRunning,
   analysisSampleReady,
   CPU_ANALYSIS_FAMILIES,
@@ -35,6 +36,7 @@ import {
   lc0TimedRunStarted,
   NEURAL_PLAY_ENGINE_ID,
   renderMarkdown,
+  requestMaiaLoad,
   retentionComparisons,
   SCHEMA,
   summarizeMeasurements,
@@ -543,15 +545,11 @@ async function runMaia(page, args, run) {
   const meta = (id, surface, resident = null) => ({ id, phase: 'maia', surface, resident, run });
   await gotoPath(page, args.baseUrl, '/app/analysis/');
   await disableAutoAnalyze(page);
-  await waitFor(page, () => ({ ok: !!document.querySelector('#maia3Enable') }), null, args.timeoutMs, 'Maia button');
+  await waitFor(page, analysisControllerReady, null, args.timeoutMs, 'analysis controller');
   await stopAnalysis(page, 10_000);
   await record(page, { ...meta('maia-before', 'analysis'), note: 'analysis shell before Load Maia3; auto-analyze unchecked' }, checkpoints, args);
   try {
-    await page.evaluate(() => {
-      const details = document.querySelector('details.human-moves');
-      if (details instanceof HTMLDetailsElement) details.open = true;
-      document.querySelector('#maia3Enable')?.click();
-    });
+    await waitFor(page, requestMaiaLoad, null, args.timeoutMs, 'Maia load click');
     await waitFor(
       page,
       () => {

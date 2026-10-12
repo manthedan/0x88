@@ -105,6 +105,47 @@ export function retentionComparisons(plan = checkpointPlan()) {
 }
 
 /**
+ * True once Analysis has rendered an engine row. The Maia button is static
+ * markup; its listener is attached with those rows. Playwright serializes
+ * only this function.
+ */
+export function analysisControllerReady(state) {
+  const input = state ?? {};
+  let hasRows = input.hasRows;
+  let hasMaiaButton = input.hasMaiaButton;
+  if ((hasRows == null || hasMaiaButton == null) && typeof document !== 'undefined') {
+    if (hasRows == null) hasRows = !!document.querySelector('.row-fam');
+    if (hasMaiaButton == null) hasMaiaButton = !!document.querySelector('#maia3Enable');
+  }
+  return { ok: hasRows === true && hasMaiaButton === true };
+}
+
+/**
+ * Opens the Maia panel and clicks Load when the click has not taken effect.
+ * A click before the controller is wired leaves the button enabled and the
+ * status empty, so the caller can poll this until ok. Playwright serializes
+ * only this function.
+ */
+export function requestMaiaLoad() {
+  const details = document.querySelector('details.human-moves');
+  if (details instanceof HTMLDetailsElement) details.open = true;
+  const button = document.querySelector('#maia3Enable');
+  const grid = document.querySelector('#maia3Grid');
+  const read = () => {
+    const status = document.querySelector('#maia3PanelStatus')?.textContent ?? '';
+    const current = document.querySelector('#maia3Enable');
+    const engaged =
+      (current instanceof HTMLButtonElement && (current.disabled || current.hidden)) ||
+      /loading|download|failed|error/i.test(status) ||
+      (!!grid && grid.hidden === false);
+    return { ok: engaged, status };
+  };
+  const before = read();
+  if (!before.ok && button instanceof HTMLButtonElement) button.click();
+  return read();
+}
+
+/**
  * True when this analysis run has left the start banner.
  *
  * Playwright passes this function to page.evaluate, which sends only its
