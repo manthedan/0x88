@@ -13,6 +13,7 @@ import {
   analysisSampleReady,
   CPU_ANALYSIS_FAMILIES,
   CPU_PLAY_ENGINE_IDS,
+  checkpointEngineFailure,
   checkpointPlan,
   compareRetention,
   formatMib,
@@ -239,6 +240,9 @@ test('the Lc0 timer starts on visit progress, not the start banner or a failure'
   assert.equal(failed.failed, true);
   assert.equal(lc0TimedRunStarted(failed), false);
   assert.equal(analysisLc0StillRunning({ message: failed.message, stopEnabled: true }).running, false);
+  assert.equal(analysisLc0StillRunning({ message: failed.message, stopEnabled: true }).failed, true);
+  assert.equal(analysisLc0StillRunning({ message: 'Analysis complete · Lc0', stopEnabled: true }).failed, false);
+  assert.equal(analysisLc0StillRunning({ message: 'Lc0: 12/100000 visits 0%', stopEnabled: true }).failed, false);
   for (const message of ['Model load failed: missing net', 'LC0 ORT ONNX load failed: worker exited']) {
     const backend = analysisSampleReady({ family: 'lc0', previousMessage: 'Ready.', message });
     assert.equal(backend.ok, true, message);
@@ -365,6 +369,19 @@ test('repeated retention requires a strict majority, so ties stay quiet', () => 
   assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(false), retentionRun(false)])[0].repeated, false);
   assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(true), retentionRun(false)])[0].repeated, true);
   assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(false)])[0].repeated, true);
+});
+
+test('checkpoint failures cover arena preparation and Maia load text', () => {
+  assert.deepEqual(checkpointEngineFailure('Engine preparation failed'), {
+    engineFailed: true,
+    engineError: 'Engine preparation failed',
+  });
+  assert.deepEqual(checkpointEngineFailure('Maia3 load failed: HTTP 404'), {
+    engineFailed: true,
+    engineError: 'Maia3 load failed: HTTP 404',
+  });
+  assert.deepEqual(checkpointEngineFailure('Analysis complete · SF Lite'), { engineFailed: false, engineError: undefined });
+  assert.deepEqual(checkpointEngineFailure(''), { engineFailed: false, engineError: undefined });
 });
 
 test('summary keeps an engine failure beside its memory sample', () => {

@@ -31,6 +31,7 @@ import {
   analysisSampleReady,
   CPU_ANALYSIS_FAMILIES,
   CPU_PLAY_ENGINE_IDS,
+  checkpointEngineFailure,
   checkpointPlan,
   DEFAULT_PLAY_ENGINE_ID,
   lc0TimedRunStarted,
@@ -439,19 +440,23 @@ async function runAnalysis(page, args, run) {
       const runMs = args.lc0Seconds * 1000;
       let stillRunning = true;
       let elapsed = 0;
+      let lastState = null;
       while (elapsed < runMs) {
         await delay(1000);
         elapsed = Date.now() - started;
-        const state = await page.evaluate(analysisLc0StillRunning);
-        if (!state.running) {
+        lastState = await page.evaluate(analysisLc0StillRunning);
+        if (!lastState.running) {
           stillRunning = false;
           break;
         }
       }
+      const failure = !stillRunning && lastState?.failed ? checkpointEngineFailure(lastState.message) : { engineFailed: false, engineError: undefined };
       const note = stillRunning
         ? `Lc0 still running after ${Math.round(elapsed / 1000)}s at 100000 visits`
-        : `Lc0 search ended after ${Math.round(elapsed / 1000)}s, before ${args.lc0Seconds}s`;
-      await record(page, { ...meta('analysis-lc0-30s', 'lc0'), note, stillRunning }, checkpoints, args);
+        : failure.engineFailed
+          ? `Lc0 failed during the timed run: ${failure.engineError}`
+          : `Lc0 search ended after ${Math.round(elapsed / 1000)}s, before ${args.lc0Seconds}s`;
+      await record(page, { ...meta('analysis-lc0-30s', 'lc0'), note, stillRunning, ...failure }, checkpoints, args);
     }
   } catch (error) {
     await shot(page, args.screenshotDir, 'fail-analysis-lc0.png');
@@ -532,7 +537,7 @@ async function runArena(page, args, run) {
   await record(page, { ...meta('arena-shell'), note: 'Stockfish Lite vs Reckless configured, match not started' }, checkpoints, args);
   try {
     await page.evaluate(() => document.querySelector('#start')?.click());
-    await waitFor(
+    const ready = await waitFor(
       page,
       () => {
         const moves = document.querySelector('#gameMoves')?.innerText?.trim() ?? '';
@@ -546,9 +551,14 @@ async function runArena(page, args, run) {
       args.timeoutMs,
       'arena match to make a move',
     );
+    const failure = checkpointEngineFailure(ready.message);
     await record(
       page,
-      { ...meta('arena-cpu-match', 'sf+reckless'), note: '200 ms movetime, 1 game, sampled once a move or a result exists' },
+      {
+        ...meta('arena-cpu-match', 'sf+reckless'),
+        note: failure.engineFailed ? `match failed: ${failure.engineError}` : '200 ms movetime, 1 game, sampled once a move or a result exists',
+        ...failure,
+      },
       checkpoints,
       args,
     );
@@ -576,7 +586,7 @@ async function runMaia(page, args, run) {
   await record(page, { ...meta('maia-before', 'analysis'), note: 'analysis shell before Load Maia3; auto-analyze unchecked' }, checkpoints, args);
   try {
     await waitFor(page, requestMaiaLoad, null, args.timeoutMs, 'Maia load click');
-    await waitFor(
+    const loaded = await waitFor(
       page,
       () => {
         const grid = document.querySelector('#maia3Grid');
@@ -584,8 +594,8 @@ async function runMaia(page, args, run) {
         const button = document.querySelector('#maia3Enable');
         const text = grid?.innerText?.trim() ?? '';
         const failed = /failed|error/i.test(status);
-        const loaded = !!button?.hidden && !!grid && grid.hidden === false;
-        return { ok: text.length > 0 || failed || loaded, status, hidden: grid?.hidden ?? null, text: text.slice(0, 80) };
+        const modelLoaded = !!button?.hidden && !!grid && grid.hidden === false;
+        return { ok: text.length > 0 || failed || modelLoaded, status, hidden: grid?.hidden ?? null, text: text.slice(0, 80) };
       },
       null,
       args.timeoutMs,
@@ -602,13 +612,17 @@ async function runMaia(page, args, run) {
       30_000,
       'Maia grid',
     ).catch(() => null);
-    const gridNote = painted?.text
-      ? 'Maia3 model loaded and the rating grid painted'
-      : painted
-        ? `Maia3 load reported: ${painted.status}`
-        : 'Maia3 model loaded; the rating grid had not painted within 30s, so this sample is the loaded evaluator';
+    const status = painted?.status || loaded.status || '';
+    const failure = checkpointEngineFailure(status);
+    const gridNote = failure.engineFailed
+      ? `Maia3 failed: ${failure.engineError}`
+      : painted?.text
+        ? 'Maia3 model loaded and the rating grid painted'
+        : painted
+          ? `Maia3 load reported: ${painted.status}`
+          : 'Maia3 model loaded; the rating grid had not painted within 30s, so this sample is the loaded evaluator';
     await shot(page, args.screenshotDir, `maia-panel-run${run}.png`);
-    await record(page, { ...meta('maia-panel', 'analysis', 'maia3'), note: gridNote }, checkpoints, args);
+    await record(page, { ...meta('maia-panel', 'analysis', 'maia3'), note: gridNote, ...failure }, checkpoints, args);
   } catch (error) {
     await shot(page, args.screenshotDir, 'fail-maia.png');
     checkpoints.push({ ...meta('maia-panel', 'analysis', 'maia3'), ok: false, error: error?.message ?? String(error) });

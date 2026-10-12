@@ -222,9 +222,17 @@ export function analysisLc0StillRunning(state) {
   message = String(message ?? '');
   progress = String(progress ?? '');
   const text = `${message}\n${progress}`;
-  const ended = /analysis complete|analysis failed|engine failures|stopped|could not download|asset missing|model load failed|\bload failed\b/i.test(message);
+  const failed = /analysis failed|engine failures|could not download|asset missing|unavailable|model load failed|\bload failed\b/i.test(message);
+  const ended = failed || /analysis complete|stopped/i.test(message);
   const live = /lc0|leela/i.test(text) && /\d+\s*\/\s*\d+\s*visits/i.test(text) && !/complete|stopped|failed/i.test(text);
-  return { running: stopEnabled === true && live && !ended, message };
+  return { running: stopEnabled === true && live && !ended, failed, message };
+}
+
+/** Failure metadata for a checkpoint whose wait treated an error string as done. */
+export function checkpointEngineFailure(message) {
+  const text = String(message ?? '');
+  const failed = /failed|error|unavailable|could not download|asset missing/i.test(text);
+  return failed ? { engineFailed: true, engineError: text } : { engineFailed: false, engineError: undefined };
 }
 
 export function previousCheckpointId(id, plan = checkpointPlan()) {
