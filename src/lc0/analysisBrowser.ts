@@ -2821,8 +2821,11 @@ function applyHiddenTab(hidden: boolean): void {
     disposeUnusedEnginesAfterActiveRun = false;
     analyzeAfterActiveRun = false;
     cancelActiveAnalysisRun();
-    // The aborted run keeps the previous PV in the line cache. Drop it so the
-    // paused page is the idle copy, not that search.
+    // Cancel aborts the run but leaves `analyzing` and the progress map set
+    // until the run's finally. The comparison table reads both, and that
+    // finally only clears the progress bar, so render the idle copy now.
+    analyzing = false;
+    clearAnalysisSearchProgress();
     lineCache.delete(tree.current.fen);
     renderLines();
     renderEvalBar();

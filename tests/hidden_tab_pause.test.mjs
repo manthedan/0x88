@@ -104,7 +104,14 @@ test('a hidden suspended analysis keeps Stop available', async () => {
   assert.equal(hiddenAnalysisStopEnabled({ hidden: true, suspended: ['maia'] }), false);
   const source = await readFile(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
   assert.match(source, /toggleAttribute\('disabled', !hiddenAnalysisStopEnabled\(hiddenTab\)\)/);
-  assert.match(source, /transition\.pause\.includes\('analysis'\)[\s\S]{0,900}lineCache\.delete\(tree\.current\.fen\)/);
+  const pauseAt = source.indexOf("if (transition.pause.includes('analysis'))");
+  const pauseBlock = source.slice(pauseAt, pauseAt + 1400);
+  const clearAt = pauseBlock.indexOf('clearAnalysisSearchProgress()');
+  const idleAt = pauseBlock.indexOf('analyzing = false');
+  const dropAt = pauseBlock.indexOf('lineCache.delete(tree.current.fen)');
+  const renderAt = pauseBlock.indexOf('renderLines()');
+  assert.ok(pauseAt >= 0);
+  assert.ok(idleAt >= 0 && clearAt > idleAt && dropAt > clearAt && renderAt > dropAt);
 });
 
 test('stop while hidden drops the search and keeps queued maintenance', () => {
