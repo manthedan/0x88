@@ -1,0 +1,8169 @@
+{
+  "schema": "lowend-memory-harness/v1",
+  "runs": 3,
+  "repeatable": true,
+  "noiseBytes": 8388608,
+  "retainFraction": 0.5,
+  "checkpoints": [
+    {
+      "id": "landing",
+      "phase": "play",
+      "surface": "landing",
+      "resident": null,
+      "previousId": null,
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1545462,
+        "usedJSHeapSize": 1593099,
+        "totalJSHeapSize": 2728831,
+        "workerCount": 0,
+        "measureLatencyMs": 15018
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1545462,
+          "max": 1546174,
+          "range": 712
+        },
+        "usedJSHeapSize": {
+          "min": 1593099,
+          "max": 1593759,
+          "range": 660
+        },
+        "workerCount": {
+          "min": 0,
+          "max": 0,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 14027,
+          "max": 18029,
+          "range": 4002
+        }
+      },
+      "medianDeltaBytes": null,
+      "stillRunningRuns": 0,
+      "notes": [],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 1070826,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        },
+        {
+          "bytes": 306476,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 168160,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-default-after-first-move",
+      "phase": "play",
+      "surface": "play",
+      "resident": "maia3",
+      "previousId": "landing",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 122277707,
+        "usedJSHeapSize": 3772387,
+        "totalJSHeapSize": 4519467,
+        "workerCount": 1,
+        "measureLatencyMs": 16010
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 122275071,
+          "max": 122278703,
+          "range": 3632
+        },
+        "usedJSHeapSize": {
+          "min": 3770199,
+          "max": 31955578,
+          "range": 28185379
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15014,
+          "max": 18009,
+          "range": 2995
+        }
+      },
+      "medianDeltaBytes": 120731533,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level, engine played the first move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 117900377,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 2663767,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1429435,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 284128,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-sf-lite",
+      "phase": "play",
+      "surface": "play",
+      "resident": "sf-lite",
+      "previousId": "play-default-after-first-move",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 257393306,
+        "usedJSHeapSize": 3886925,
+        "totalJSHeapSize": 4585225,
+        "workerCount": 2,
+        "measureLatencyMs": 17008
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 257391150,
+          "max": 257466934,
+          "range": 75784
+        },
+        "usedJSHeapSize": {
+          "min": 3884277,
+          "max": 3939509,
+          "range": 55232
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 16022,
+          "max": 17018,
+          "range": 996
+        }
+      },
+      "medianDeltaBytes": 135116079,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135006180,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894433,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3077228,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1121257,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 294208,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-sf-full",
+      "phase": "play",
+      "surface": "play",
+      "resident": "sf-full",
+      "previousId": "play-cpu-sf-lite",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592465401,
+        "usedJSHeapSize": 3993168,
+        "totalJSHeapSize": 5633896,
+        "workerCount": 3,
+        "measureLatencyMs": 16014
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592464439,
+          "max": 592505469,
+          "range": 41030
+        },
+        "usedJSHeapSize": {
+          "min": 3991088,
+          "max": 4032043,
+          "range": 40955
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15006,
+          "max": 17019,
+          "range": 2013
+        }
+      },
+      "medianDeltaBytes": 335072095,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334945924,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003664,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894445,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3192893,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1111419,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 317056,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-reckless",
+      "phase": "play",
+      "surface": "play",
+      "resident": "reckless",
+      "previousId": "play-cpu-sf-full",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592657431,
+        "usedJSHeapSize": 4097362,
+        "totalJSHeapSize": 5634186,
+        "workerCount": 4,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592656727,
+          "max": 592658615,
+          "range": 1888
+        },
+        "usedJSHeapSize": {
+          "min": 4096830,
+          "max": 4099054,
+          "range": 2224
+        },
+        "workerCount": {
+          "min": 4,
+          "max": 4,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60003,
+          "range": 0
+        }
+      },
+      "medianDeltaBytes": 192288,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944340,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003660,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894513,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3295209,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1179757,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 339952,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-viridithas",
+      "phase": "play",
+      "surface": "play",
+      "resident": "viridithas",
+      "previousId": "play-cpu-reckless",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592828777,
+        "usedJSHeapSize": 4181413,
+        "totalJSHeapSize": 5109993,
+        "workerCount": 5,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592827253,
+          "max": 592833801,
+          "range": 6548
+        },
+        "usedJSHeapSize": {
+          "min": 4179961,
+          "max": 4182969,
+          "range": 3008
+        },
+        "workerCount": {
+          "min": 5,
+          "max": 5,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 172050,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944352,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003672,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894497,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3750616,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 872888,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 362752,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-berserk",
+      "phase": "play",
+      "surface": "play",
+      "resident": "berserk",
+      "previousId": "play-cpu-viridithas",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 887212205,
+        "usedJSHeapSize": 4275927,
+        "totalJSHeapSize": 5109859,
+        "workerCount": 6,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 887209607,
+          "max": 887215301,
+          "range": 5694
+        },
+        "usedJSHeapSize": {
+          "min": 4275587,
+          "max": 4277251,
+          "range": 1664
+        },
+        "workerCount": {
+          "min": 6,
+          "max": 6,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 294382354,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944364,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 294263544,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/27054805-71bb-4842-9a15-b050e836b19c"
+          ]
+        },
+        {
+          "bytes": 135003684,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894481,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3731130,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 989306,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-plentychess",
+      "phase": "play",
+      "surface": "play",
+      "resident": "plentychess",
+      "previousId": "play-cpu-berserk",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1209383660,
+        "usedJSHeapSize": 4231397,
+        "totalJSHeapSize": 5371361,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1209381288,
+          "max": 1209398942,
+          "range": 17654
+        },
+        "usedJSHeapSize": {
+          "min": 4229817,
+          "max": 4238933,
+          "range": 9116
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 322171455,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334929308,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322303027,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/c144ccc0-52ec-467b-8ac2-968d5ab75d87"
+          ]
+        },
+        {
+          "bytes": 294261172,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/27054805-71bb-4842-9a15-b050e836b19c"
+          ]
+        },
+        {
+          "bytes": 134984060,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117835917,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3520426,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-stormphrax",
+      "phase": "play",
+      "surface": "play",
+      "resident": "stormphrax",
+      "previousId": "play-cpu-plentychess",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1802950011,
+        "usedJSHeapSize": 4258805,
+        "totalJSHeapSize": 5369625,
+        "workerCount": 8,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1802947703,
+          "max": 1802964040,
+          "range": 16337
+        },
+        "usedJSHeapSize": {
+          "min": 4257309,
+          "max": 4264436,
+          "range": 7127
+        },
+        "workerCount": {
+          "min": 8,
+          "max": 8,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60006,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 593566415,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 593511366,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/c1ce0962-f553-42cf-91b1-2c960f3b16a2"
+          ]
+        },
+        {
+          "bytes": 334928976,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300691,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294261184,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983808,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834781,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-neural-lc0-small",
+      "phase": "play",
+      "surface": "play",
+      "resident": "lc0-small",
+      "previousId": "play-cpu-stormphrax",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1316426565,
+        "usedJSHeapSize": 7002386,
+        "totalJSHeapSize": 7774122,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1316422013,
+          "max": 1316429658,
+          "range": 7645
+        },
+        "usedJSHeapSize": {
+          "min": 7001882,
+          "max": 7007058,
+          "range": 5176
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60010,
+          "range": 7
+        }
+      },
+      "medianDeltaBytes": -486523446,
+      "stillRunningRuns": 0,
+      "notes": [
+        "neural engine after the CPU tour"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334928988,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300703,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294261196,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983544,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834793,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 110517170,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "landing-after-play",
+      "phase": "play",
+      "surface": "landing",
+      "resident": null,
+      "previousId": "play-neural-lc0-small",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1316253015,
+        "usedJSHeapSize": 7023522,
+        "totalJSHeapSize": 8070110,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1316247035,
+          "max": 1316254391,
+          "range": 7356
+        },
+        "usedJSHeapSize": {
+          "min": 7017806,
+          "max": 7025290,
+          "range": 7484
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": -173550,
+      "stillRunningRuns": 0,
+      "notes": [
+        "in-app navigation away from Play; module caches may remain"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334929000,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300715,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294238868,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983556,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834805,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 108774682,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-shell",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": null,
+      "previousId": null,
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 259022984,
+        "usedJSHeapSize": 3446737,
+        "totalJSHeapSize": 6699905,
+        "workerCount": 1,
+        "measureLatencyMs": 16024
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 259014822,
+          "max": 259023504,
+          "range": 8682
+        },
+        "usedJSHeapSize": {
+          "min": 3446149,
+          "max": 3447181,
+          "range": 1032
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15016,
+          "max": 19023,
+          "range": 4007
+        }
+      },
+      "medianDeltaBytes": null,
+      "stillRunningRuns": 0,
+      "notes": [
+        "analysis open, auto-analyze unchecked before the timed Lc0 run"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 255008897,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3331323,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 446260,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 236504,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-lc0-30s",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-shell",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 138801666,
+        "usedJSHeapSize": 3537574,
+        "totalJSHeapSize": 4340814,
+        "workerCount": 1,
+        "measureLatencyMs": 13016
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 138706152,
+          "max": 139655468,
+          "range": 949316
+        },
+        "usedJSHeapSize": {
+          "min": 3536862,
+          "max": 3554414,
+          "range": 17552
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 11016,
+          "max": 18015,
+          "range": 6999
+        }
+      },
+      "medianDeltaBytes": -120221318,
+      "stillRunningRuns": 3,
+      "notes": [
+        "Lc0 still running after 30s at 100000 visits"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 134693822,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3423226,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 446106,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 238512,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-lc0-stopped",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-lc0-30s",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 120891680,
+        "usedJSHeapSize": 3533618,
+        "totalJSHeapSize": 4340754,
+        "workerCount": 1,
+        "measureLatencyMs": 15021
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 120887660,
+          "max": 120944372,
+          "range": 56712
+        },
+        "usedJSHeapSize": {
+          "min": 3531830,
+          "max": 3533666,
+          "range": 1836
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 11201,
+          "max": 16020,
+          "range": 4819
+        }
+      },
+      "medianDeltaBytes": -17914006,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Stop clicked after the Lc0 run"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 116781480,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3425174,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 447306,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 237720,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-sf",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "sf",
+      "previousId": "analysis-lc0-stopped",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 120821946,
+        "usedJSHeapSize": 5519224,
+        "totalJSHeapSize": 7644964,
+        "workerCount": 2,
+        "measureLatencyMs": 18020
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 120819860,
+          "max": 120895313,
+          "range": 75453
+        },
+        "usedJSHeapSize": {
+          "min": 5518569,
+          "max": 5521551,
+          "range": 2982
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 16021,
+          "max": 19022,
+          "range": 3001
+        }
+      },
+      "medianDeltaBytes": -65714,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 116454580,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3601999,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 524223,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 241144,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-reckless",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "reckless",
+      "previousId": "analysis-cpu-sf",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482400819,
+        "usedJSHeapSize": 3880417,
+        "totalJSHeapSize": 4373953,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482321215,
+          "max": 482461339,
+          "range": 140124
+        },
+        "usedJSHeapSize": {
+          "min": 3880057,
+          "max": 3880425,
+          "range": 368
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60004,
+          "max": 60004,
+          "range": 0
+        }
+      },
+      "medianDeltaBytes": 361566026,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361343592,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116467512,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3844107,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 513000,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 232608,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-viridithas",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "viridithas",
+      "previousId": "analysis-cpu-reckless",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482729491,
+        "usedJSHeapSize": 4000363,
+        "totalJSHeapSize": 4439539,
+        "workerCount": 3,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482720643,
+          "max": 484109409,
+          "range": 1388766
+        },
+        "usedJSHeapSize": {
+          "min": 4000359,
+          "max": 4005143,
+          "range": 4784
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60006,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 399428,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338620,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116467524,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4158837,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 534822,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 229688,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-berserk",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "berserk",
+      "previousId": "analysis-cpu-viridithas",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482755045,
+        "usedJSHeapSize": 4032999,
+        "totalJSHeapSize": 4912315,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482552623,
+          "max": 483095818,
+          "range": 543195
+        },
+        "usedJSHeapSize": {
+          "min": 4032639,
+          "max": 4037667,
+          "range": 5028
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": -168020,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338632,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116437041,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4248065,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 503419,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 227888,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-plentychess",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "plentychess",
+      "previousId": "analysis-cpu-berserk",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482928941,
+        "usedJSHeapSize": 4104302,
+        "totalJSHeapSize": 5125330,
+        "workerCount": 3,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482924601,
+          "max": 483074941,
+          "range": 150340
+        },
+        "usedJSHeapSize": {
+          "min": 4104298,
+          "max": 4106398,
+          "range": 2100
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 173896,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338644,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116432867,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4413305,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 509237,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 234888,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-stormphrax",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "stormphrax",
+      "previousId": "analysis-cpu-plentychess",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 486172036,
+        "usedJSHeapSize": 4156162,
+        "totalJSHeapSize": 5125326,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482848332,
+          "max": 486380684,
+          "range": 3532352
+        },
+        "usedJSHeapSize": {
+          "min": 4155722,
+          "max": 4165878,
+          "range": 10156
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 3247435,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361320268,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116363039,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 7760997,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 492516,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 235216,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-after-cpu",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-cpu-stormphrax",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482443324,
+        "usedJSHeapSize": 4159278,
+        "totalJSHeapSize": 5125202,
+        "workerCount": 2,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482421506,
+          "max": 482511388,
+          "range": 89882
+        },
+        "usedJSHeapSize": {
+          "min": 4158710,
+          "max": 4168818,
+          "range": 10108
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60004,
+          "max": 60005,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": -3750530,
+      "stillRunningRuns": 0,
+      "notes": [
+        "row switched back to Lc0 after every CPU family"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361319824,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116378889,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3983733,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 512222,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 248656,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "arena-shell",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": null,
+      "previousId": null,
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 4205063,
+        "usedJSHeapSize": 3592145,
+        "totalJSHeapSize": 5907197,
+        "workerCount": 0,
+        "measureLatencyMs": 18021
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 4195393,
+          "max": 4205623,
+          "range": 10230
+        },
+        "usedJSHeapSize": {
+          "min": 3583849,
+          "max": 3592705,
+          "range": 8856
+        },
+        "workerCount": {
+          "min": 0,
+          "max": 0,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15015,
+          "max": 18021,
+          "range": 3006
+        }
+      },
+      "medianDeltaBytes": null,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Stockfish Lite vs Reckless configured, match not started"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 3507957,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 415802,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 281304,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "arena-cpu-match",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": "sf+reckless",
+      "previousId": "arena-shell",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 139893857,
+        "usedJSHeapSize": 4457359,
+        "totalJSHeapSize": 5204443,
+        "workerCount": 2,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 139860557,
+          "max": 139894197,
+          "range": 33640
+        },
+        "usedJSHeapSize": {
+          "min": 4341255,
+          "max": 4499792,
+          "range": 158537
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60001,
+          "max": 60004,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 135688574,
+      "stillRunningRuns": 0,
+      "notes": [
+        "200 ms movetime, 1 game, sampled once a move or a result exists"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135058900,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 3279914,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 1252971,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 302072,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "arena-cpu-stopped",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": null,
+      "previousId": "arena-cpu-match",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 140263193,
+        "usedJSHeapSize": 4458984,
+        "totalJSHeapSize": 5204448,
+        "workerCount": 2,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 140120471,
+          "max": 140315241,
+          "range": 194770
+        },
+        "usedJSHeapSize": {
+          "min": 4343260,
+          "max": 4501417,
+          "range": 158157
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 368996,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Stop clicked after the CPU match sample"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135057696,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 4392698,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 468119,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 344680,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "maia-before",
+      "phase": "maia",
+      "surface": "analysis",
+      "resident": null,
+      "previousId": null,
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 4008985,
+        "usedJSHeapSize": 3441806,
+        "totalJSHeapSize": 6699766,
+        "workerCount": 1,
+        "measureLatencyMs": 12029
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 4007477,
+          "max": 4011467,
+          "range": 3990
+        },
+        "usedJSHeapSize": {
+          "min": 3440554,
+          "max": 3441806,
+          "range": 1252
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 11035,
+          "max": 16034,
+          "range": 4999
+        }
+      },
+      "medianDeltaBytes": null,
+      "stillRunningRuns": 0,
+      "notes": [
+        "analysis shell before Load Maia3; auto-analyze unchecked"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 3330161,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 442320,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 236504,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "maia-panel",
+      "phase": "maia",
+      "surface": "analysis",
+      "resident": "maia3",
+      "previousId": "maia-before",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 229355332,
+        "usedJSHeapSize": 25460044,
+        "totalJSHeapSize": 27472708,
+        "workerCount": 2,
+        "measureLatencyMs": 16016
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 229353864,
+          "max": 229355616,
+          "range": 1752
+        },
+        "usedJSHeapSize": {
+          "min": 25004168,
+          "max": 25594472,
+          "range": 590304
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 12022,
+          "max": 17012,
+          "range": 4990
+        }
+      },
+      "medianDeltaBytes": 225346631,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Maia3 model loaded and the rating grid painted"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 117757885,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 107287140,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3484290,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 580561,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 245456,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "landing-after-maia",
+      "phase": "maia",
+      "surface": "landing",
+      "resident": null,
+      "previousId": "maia-panel",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 4651146,
+        "usedJSHeapSize": 4142775,
+        "totalJSHeapSize": 4877015,
+        "workerCount": 0,
+        "measureLatencyMs": 1702
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 4650002,
+          "max": 4681958,
+          "range": 31956
+        },
+        "usedJSHeapSize": {
+          "min": 4140023,
+          "max": 4142847,
+          "range": 2824
+        },
+        "workerCount": {
+          "min": 0,
+          "max": 0,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 1698,
+          "max": 7691,
+          "range": 5993
+        }
+      },
+      "medianDeltaBytes": -224703862,
+      "stillRunningRuns": 0,
+      "notes": [
+        "in-app navigation away from the Maia panel"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 3672434,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        },
+        {
+          "bytes": 645064,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 333648,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    }
+  ],
+  "largest": [
+    {
+      "id": "play-cpu-stormphrax",
+      "phase": "play",
+      "surface": "play",
+      "resident": "stormphrax",
+      "previousId": "play-cpu-plentychess",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1802950011,
+        "usedJSHeapSize": 4258805,
+        "totalJSHeapSize": 5369625,
+        "workerCount": 8,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1802947703,
+          "max": 1802964040,
+          "range": 16337
+        },
+        "usedJSHeapSize": {
+          "min": 4257309,
+          "max": 4264436,
+          "range": 7127
+        },
+        "workerCount": {
+          "min": 8,
+          "max": 8,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60006,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 593566415,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 593511366,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/c1ce0962-f553-42cf-91b1-2c960f3b16a2"
+          ]
+        },
+        {
+          "bytes": 334928976,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300691,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294261184,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983808,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834781,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-neural-lc0-small",
+      "phase": "play",
+      "surface": "play",
+      "resident": "lc0-small",
+      "previousId": "play-cpu-stormphrax",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1316426565,
+        "usedJSHeapSize": 7002386,
+        "totalJSHeapSize": 7774122,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1316422013,
+          "max": 1316429658,
+          "range": 7645
+        },
+        "usedJSHeapSize": {
+          "min": 7001882,
+          "max": 7007058,
+          "range": 5176
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60010,
+          "range": 7
+        }
+      },
+      "medianDeltaBytes": -486523446,
+      "stillRunningRuns": 0,
+      "notes": [
+        "neural engine after the CPU tour"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334928988,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300703,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294261196,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983544,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834793,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 110517170,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "landing-after-play",
+      "phase": "play",
+      "surface": "landing",
+      "resident": null,
+      "previousId": "play-neural-lc0-small",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1316253015,
+        "usedJSHeapSize": 7023522,
+        "totalJSHeapSize": 8070110,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1316247035,
+          "max": 1316254391,
+          "range": 7356
+        },
+        "usedJSHeapSize": {
+          "min": 7017806,
+          "max": 7025290,
+          "range": 7484
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": -173550,
+      "stillRunningRuns": 0,
+      "notes": [
+        "in-app navigation away from Play; module caches may remain"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334929000,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300715,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294238868,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983556,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834805,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 108774682,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-plentychess",
+      "phase": "play",
+      "surface": "play",
+      "resident": "plentychess",
+      "previousId": "play-cpu-berserk",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1209383660,
+        "usedJSHeapSize": 4231397,
+        "totalJSHeapSize": 5371361,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1209381288,
+          "max": 1209398942,
+          "range": 17654
+        },
+        "usedJSHeapSize": {
+          "min": 4229817,
+          "max": 4238933,
+          "range": 9116
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 322171455,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334929308,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322303027,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/c144ccc0-52ec-467b-8ac2-968d5ab75d87"
+          ]
+        },
+        {
+          "bytes": 294261172,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/27054805-71bb-4842-9a15-b050e836b19c"
+          ]
+        },
+        {
+          "bytes": 134984060,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117835917,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3520426,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-berserk",
+      "phase": "play",
+      "surface": "play",
+      "resident": "berserk",
+      "previousId": "play-cpu-viridithas",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 887212205,
+        "usedJSHeapSize": 4275927,
+        "totalJSHeapSize": 5109859,
+        "workerCount": 6,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 887209607,
+          "max": 887215301,
+          "range": 5694
+        },
+        "usedJSHeapSize": {
+          "min": 4275587,
+          "max": 4277251,
+          "range": 1664
+        },
+        "workerCount": {
+          "min": 6,
+          "max": 6,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 294382354,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944364,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 294263544,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/27054805-71bb-4842-9a15-b050e836b19c"
+          ]
+        },
+        {
+          "bytes": 135003684,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894481,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3731130,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 989306,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-viridithas",
+      "phase": "play",
+      "surface": "play",
+      "resident": "viridithas",
+      "previousId": "play-cpu-reckless",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592828777,
+        "usedJSHeapSize": 4181413,
+        "totalJSHeapSize": 5109993,
+        "workerCount": 5,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592827253,
+          "max": 592833801,
+          "range": 6548
+        },
+        "usedJSHeapSize": {
+          "min": 4179961,
+          "max": 4182969,
+          "range": 3008
+        },
+        "workerCount": {
+          "min": 5,
+          "max": 5,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 172050,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944352,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003672,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894497,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3750616,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 872888,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 362752,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-reckless",
+      "phase": "play",
+      "surface": "play",
+      "resident": "reckless",
+      "previousId": "play-cpu-sf-full",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592657431,
+        "usedJSHeapSize": 4097362,
+        "totalJSHeapSize": 5634186,
+        "workerCount": 4,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592656727,
+          "max": 592658615,
+          "range": 1888
+        },
+        "usedJSHeapSize": {
+          "min": 4096830,
+          "max": 4099054,
+          "range": 2224
+        },
+        "workerCount": {
+          "min": 4,
+          "max": 4,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60003,
+          "range": 0
+        }
+      },
+      "medianDeltaBytes": 192288,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944340,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003660,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894513,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3295209,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1179757,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 339952,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-sf-full",
+      "phase": "play",
+      "surface": "play",
+      "resident": "sf-full",
+      "previousId": "play-cpu-sf-lite",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592465401,
+        "usedJSHeapSize": 3993168,
+        "totalJSHeapSize": 5633896,
+        "workerCount": 3,
+        "measureLatencyMs": 16014
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592464439,
+          "max": 592505469,
+          "range": 41030
+        },
+        "usedJSHeapSize": {
+          "min": 3991088,
+          "max": 4032043,
+          "range": 40955
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15006,
+          "max": 17019,
+          "range": 2013
+        }
+      },
+      "medianDeltaBytes": 335072095,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334945924,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003664,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894445,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3192893,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1111419,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 317056,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-stormphrax",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "stormphrax",
+      "previousId": "analysis-cpu-plentychess",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 486172036,
+        "usedJSHeapSize": 4156162,
+        "totalJSHeapSize": 5125326,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482848332,
+          "max": 486380684,
+          "range": 3532352
+        },
+        "usedJSHeapSize": {
+          "min": 4155722,
+          "max": 4165878,
+          "range": 10156
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 3247435,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361320268,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116363039,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 7760997,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 492516,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 235216,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-plentychess",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "plentychess",
+      "previousId": "analysis-cpu-berserk",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482928941,
+        "usedJSHeapSize": 4104302,
+        "totalJSHeapSize": 5125330,
+        "workerCount": 3,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482924601,
+          "max": 483074941,
+          "range": 150340
+        },
+        "usedJSHeapSize": {
+          "min": 4104298,
+          "max": 4106398,
+          "range": 2100
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 173896,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338644,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116432867,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4413305,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 509237,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 234888,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-berserk",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "berserk",
+      "previousId": "analysis-cpu-viridithas",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482755045,
+        "usedJSHeapSize": 4032999,
+        "totalJSHeapSize": 4912315,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482552623,
+          "max": 483095818,
+          "range": 543195
+        },
+        "usedJSHeapSize": {
+          "min": 4032639,
+          "max": 4037667,
+          "range": 5028
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": -168020,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338632,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116437041,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4248065,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 503419,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 227888,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-viridithas",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "viridithas",
+      "previousId": "analysis-cpu-reckless",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482729491,
+        "usedJSHeapSize": 4000363,
+        "totalJSHeapSize": 4439539,
+        "workerCount": 3,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482720643,
+          "max": 484109409,
+          "range": 1388766
+        },
+        "usedJSHeapSize": {
+          "min": 4000359,
+          "max": 4005143,
+          "range": 4784
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60006,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 399428,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338620,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116467524,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4158837,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 534822,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 229688,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-after-cpu",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-cpu-stormphrax",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482443324,
+        "usedJSHeapSize": 4159278,
+        "totalJSHeapSize": 5125202,
+        "workerCount": 2,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482421506,
+          "max": 482511388,
+          "range": 89882
+        },
+        "usedJSHeapSize": {
+          "min": 4158710,
+          "max": 4168818,
+          "range": 10108
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60004,
+          "max": 60005,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": -3750530,
+      "stillRunningRuns": 0,
+      "notes": [
+        "row switched back to Lc0 after every CPU family"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361319824,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116378889,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3983733,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 512222,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 248656,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-reckless",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "reckless",
+      "previousId": "analysis-cpu-sf",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482400819,
+        "usedJSHeapSize": 3880417,
+        "totalJSHeapSize": 4373953,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482321215,
+          "max": 482461339,
+          "range": 140124
+        },
+        "usedJSHeapSize": {
+          "min": 3880057,
+          "max": 3880425,
+          "range": 368
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60004,
+          "max": 60004,
+          "range": 0
+        }
+      },
+      "medianDeltaBytes": 361566026,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361343592,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116467512,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3844107,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 513000,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 232608,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-shell",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": null,
+      "previousId": null,
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 259022984,
+        "usedJSHeapSize": 3446737,
+        "totalJSHeapSize": 6699905,
+        "workerCount": 1,
+        "measureLatencyMs": 16024
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 259014822,
+          "max": 259023504,
+          "range": 8682
+        },
+        "usedJSHeapSize": {
+          "min": 3446149,
+          "max": 3447181,
+          "range": 1032
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15016,
+          "max": 19023,
+          "range": 4007
+        }
+      },
+      "medianDeltaBytes": null,
+      "stillRunningRuns": 0,
+      "notes": [
+        "analysis open, auto-analyze unchecked before the timed Lc0 run"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 255008897,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3331323,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 446260,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 236504,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-sf-lite",
+      "phase": "play",
+      "surface": "play",
+      "resident": "sf-lite",
+      "previousId": "play-default-after-first-move",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 257393306,
+        "usedJSHeapSize": 3886925,
+        "totalJSHeapSize": 4585225,
+        "workerCount": 2,
+        "measureLatencyMs": 17008
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 257391150,
+          "max": 257466934,
+          "range": 75784
+        },
+        "usedJSHeapSize": {
+          "min": 3884277,
+          "max": 3939509,
+          "range": 55232
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 16022,
+          "max": 17018,
+          "range": 996
+        }
+      },
+      "medianDeltaBytes": 135116079,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135006180,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894433,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3077228,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1121257,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 294208,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "maia-panel",
+      "phase": "maia",
+      "surface": "analysis",
+      "resident": "maia3",
+      "previousId": "maia-before",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 229355332,
+        "usedJSHeapSize": 25460044,
+        "totalJSHeapSize": 27472708,
+        "workerCount": 2,
+        "measureLatencyMs": 16016
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 229353864,
+          "max": 229355616,
+          "range": 1752
+        },
+        "usedJSHeapSize": {
+          "min": 25004168,
+          "max": 25594472,
+          "range": 590304
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 12022,
+          "max": 17012,
+          "range": 4990
+        }
+      },
+      "medianDeltaBytes": 225346631,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Maia3 model loaded and the rating grid painted"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 117757885,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 107287140,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3484290,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 580561,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 245456,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "arena-cpu-stopped",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": null,
+      "previousId": "arena-cpu-match",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 140263193,
+        "usedJSHeapSize": 4458984,
+        "totalJSHeapSize": 5204448,
+        "workerCount": 2,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 140120471,
+          "max": 140315241,
+          "range": 194770
+        },
+        "usedJSHeapSize": {
+          "min": 4343260,
+          "max": 4501417,
+          "range": 158157
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 368996,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Stop clicked after the CPU match sample"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135057696,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 4392698,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 468119,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 344680,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "arena-cpu-match",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": "sf+reckless",
+      "previousId": "arena-shell",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 139893857,
+        "usedJSHeapSize": 4457359,
+        "totalJSHeapSize": 5204443,
+        "workerCount": 2,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 139860557,
+          "max": 139894197,
+          "range": 33640
+        },
+        "usedJSHeapSize": {
+          "min": 4341255,
+          "max": 4499792,
+          "range": 158537
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60001,
+          "max": 60004,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 135688574,
+      "stillRunningRuns": 0,
+      "notes": [
+        "200 ms movetime, 1 game, sampled once a move or a result exists"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135058900,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 3279914,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 1252971,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 302072,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-lc0-30s",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-shell",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 138801666,
+        "usedJSHeapSize": 3537574,
+        "totalJSHeapSize": 4340814,
+        "workerCount": 1,
+        "measureLatencyMs": 13016
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 138706152,
+          "max": 139655468,
+          "range": 949316
+        },
+        "usedJSHeapSize": {
+          "min": 3536862,
+          "max": 3554414,
+          "range": 17552
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 11016,
+          "max": 18015,
+          "range": 6999
+        }
+      },
+      "medianDeltaBytes": -120221318,
+      "stillRunningRuns": 3,
+      "notes": [
+        "Lc0 still running after 30s at 100000 visits"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 134693822,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3423226,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 446106,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 238512,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-default-after-first-move",
+      "phase": "play",
+      "surface": "play",
+      "resident": "maia3",
+      "previousId": "landing",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 122277707,
+        "usedJSHeapSize": 3772387,
+        "totalJSHeapSize": 4519467,
+        "workerCount": 1,
+        "measureLatencyMs": 16010
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 122275071,
+          "max": 122278703,
+          "range": 3632
+        },
+        "usedJSHeapSize": {
+          "min": 3770199,
+          "max": 31955578,
+          "range": 28185379
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15014,
+          "max": 18009,
+          "range": 2995
+        }
+      },
+      "medianDeltaBytes": 120731533,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level, engine played the first move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 117900377,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 2663767,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1429435,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 284128,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-lc0-stopped",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-lc0-30s",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 120891680,
+        "usedJSHeapSize": 3533618,
+        "totalJSHeapSize": 4340754,
+        "workerCount": 1,
+        "measureLatencyMs": 15021
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 120887660,
+          "max": 120944372,
+          "range": 56712
+        },
+        "usedJSHeapSize": {
+          "min": 3531830,
+          "max": 3533666,
+          "range": 1836
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 11201,
+          "max": 16020,
+          "range": 4819
+        }
+      },
+      "medianDeltaBytes": -17914006,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Stop clicked after the Lc0 run"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 116781480,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3425174,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 447306,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 237720,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-sf",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "sf",
+      "previousId": "analysis-lc0-stopped",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 120821946,
+        "usedJSHeapSize": 5519224,
+        "totalJSHeapSize": 7644964,
+        "workerCount": 2,
+        "measureLatencyMs": 18020
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 120819860,
+          "max": 120895313,
+          "range": 75453
+        },
+        "usedJSHeapSize": {
+          "min": 5518569,
+          "max": 5521551,
+          "range": 2982
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 16021,
+          "max": 19022,
+          "range": 3001
+        }
+      },
+      "medianDeltaBytes": -65714,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 116454580,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3601999,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 524223,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 241144,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "landing-after-maia",
+      "phase": "maia",
+      "surface": "landing",
+      "resident": null,
+      "previousId": "maia-panel",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 4651146,
+        "usedJSHeapSize": 4142775,
+        "totalJSHeapSize": 4877015,
+        "workerCount": 0,
+        "measureLatencyMs": 1702
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 4650002,
+          "max": 4681958,
+          "range": 31956
+        },
+        "usedJSHeapSize": {
+          "min": 4140023,
+          "max": 4142847,
+          "range": 2824
+        },
+        "workerCount": {
+          "min": 0,
+          "max": 0,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 1698,
+          "max": 7691,
+          "range": 5993
+        }
+      },
+      "medianDeltaBytes": -224703862,
+      "stillRunningRuns": 0,
+      "notes": [
+        "in-app navigation away from the Maia panel"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 3672434,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        },
+        {
+          "bytes": 645064,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 333648,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "arena-shell",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": null,
+      "previousId": null,
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 4205063,
+        "usedJSHeapSize": 3592145,
+        "totalJSHeapSize": 5907197,
+        "workerCount": 0,
+        "measureLatencyMs": 18021
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 4195393,
+          "max": 4205623,
+          "range": 10230
+        },
+        "usedJSHeapSize": {
+          "min": 3583849,
+          "max": 3592705,
+          "range": 8856
+        },
+        "workerCount": {
+          "min": 0,
+          "max": 0,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15015,
+          "max": 18021,
+          "range": 3006
+        }
+      },
+      "medianDeltaBytes": null,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Stockfish Lite vs Reckless configured, match not started"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 3507957,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 415802,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 281304,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "maia-before",
+      "phase": "maia",
+      "surface": "analysis",
+      "resident": null,
+      "previousId": null,
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 4008985,
+        "usedJSHeapSize": 3441806,
+        "totalJSHeapSize": 6699766,
+        "workerCount": 1,
+        "measureLatencyMs": 12029
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 4007477,
+          "max": 4011467,
+          "range": 3990
+        },
+        "usedJSHeapSize": {
+          "min": 3440554,
+          "max": 3441806,
+          "range": 1252
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 11035,
+          "max": 16034,
+          "range": 4999
+        }
+      },
+      "medianDeltaBytes": null,
+      "stillRunningRuns": 0,
+      "notes": [
+        "analysis shell before Load Maia3; auto-analyze unchecked"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 3330161,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 442320,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 236504,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "landing",
+      "phase": "play",
+      "surface": "landing",
+      "resident": null,
+      "previousId": null,
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1545462,
+        "usedJSHeapSize": 1593099,
+        "totalJSHeapSize": 2728831,
+        "workerCount": 0,
+        "measureLatencyMs": 15018
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1545462,
+          "max": 1546174,
+          "range": 712
+        },
+        "usedJSHeapSize": {
+          "min": 1593099,
+          "max": 1593759,
+          "range": 660
+        },
+        "workerCount": {
+          "min": 0,
+          "max": 0,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 14027,
+          "max": 18029,
+          "range": 4002
+        }
+      },
+      "medianDeltaBytes": null,
+      "stillRunningRuns": 0,
+      "notes": [],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 1070826,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        },
+        {
+          "bytes": 306476,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 168160,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    }
+  ],
+  "largestSteps": [
+    {
+      "id": "play-cpu-stormphrax",
+      "phase": "play",
+      "surface": "play",
+      "resident": "stormphrax",
+      "previousId": "play-cpu-plentychess",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1802950011,
+        "usedJSHeapSize": 4258805,
+        "totalJSHeapSize": 5369625,
+        "workerCount": 8,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1802947703,
+          "max": 1802964040,
+          "range": 16337
+        },
+        "usedJSHeapSize": {
+          "min": 4257309,
+          "max": 4264436,
+          "range": 7127
+        },
+        "workerCount": {
+          "min": 8,
+          "max": 8,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60006,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 593566415,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 593511366,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/c1ce0962-f553-42cf-91b1-2c960f3b16a2"
+          ]
+        },
+        {
+          "bytes": 334928976,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300691,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294261184,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983808,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834781,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-reckless",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "reckless",
+      "previousId": "analysis-cpu-sf",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482400819,
+        "usedJSHeapSize": 3880417,
+        "totalJSHeapSize": 4373953,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482321215,
+          "max": 482461339,
+          "range": 140124
+        },
+        "usedJSHeapSize": {
+          "min": 3880057,
+          "max": 3880425,
+          "range": 368
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60004,
+          "max": 60004,
+          "range": 0
+        }
+      },
+      "medianDeltaBytes": 361566026,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361343592,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116467512,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3844107,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 513000,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 232608,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-sf-full",
+      "phase": "play",
+      "surface": "play",
+      "resident": "sf-full",
+      "previousId": "play-cpu-sf-lite",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592465401,
+        "usedJSHeapSize": 3993168,
+        "totalJSHeapSize": 5633896,
+        "workerCount": 3,
+        "measureLatencyMs": 16014
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592464439,
+          "max": 592505469,
+          "range": 41030
+        },
+        "usedJSHeapSize": {
+          "min": 3991088,
+          "max": 4032043,
+          "range": 40955
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15006,
+          "max": 17019,
+          "range": 2013
+        }
+      },
+      "medianDeltaBytes": 335072095,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334945924,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003664,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894445,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3192893,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1111419,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 317056,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-plentychess",
+      "phase": "play",
+      "surface": "play",
+      "resident": "plentychess",
+      "previousId": "play-cpu-berserk",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1209383660,
+        "usedJSHeapSize": 4231397,
+        "totalJSHeapSize": 5371361,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1209381288,
+          "max": 1209398942,
+          "range": 17654
+        },
+        "usedJSHeapSize": {
+          "min": 4229817,
+          "max": 4238933,
+          "range": 9116
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 322171455,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334929308,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322303027,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/c144ccc0-52ec-467b-8ac2-968d5ab75d87"
+          ]
+        },
+        {
+          "bytes": 294261172,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/27054805-71bb-4842-9a15-b050e836b19c"
+          ]
+        },
+        {
+          "bytes": 134984060,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117835917,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3520426,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-berserk",
+      "phase": "play",
+      "surface": "play",
+      "resident": "berserk",
+      "previousId": "play-cpu-viridithas",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 887212205,
+        "usedJSHeapSize": 4275927,
+        "totalJSHeapSize": 5109859,
+        "workerCount": 6,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 887209607,
+          "max": 887215301,
+          "range": 5694
+        },
+        "usedJSHeapSize": {
+          "min": 4275587,
+          "max": 4277251,
+          "range": 1664
+        },
+        "workerCount": {
+          "min": 6,
+          "max": 6,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 294382354,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944364,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 294263544,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/27054805-71bb-4842-9a15-b050e836b19c"
+          ]
+        },
+        {
+          "bytes": 135003684,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894481,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3731130,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 989306,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "maia-panel",
+      "phase": "maia",
+      "surface": "analysis",
+      "resident": "maia3",
+      "previousId": "maia-before",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 229355332,
+        "usedJSHeapSize": 25460044,
+        "totalJSHeapSize": 27472708,
+        "workerCount": 2,
+        "measureLatencyMs": 16016
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 229353864,
+          "max": 229355616,
+          "range": 1752
+        },
+        "usedJSHeapSize": {
+          "min": 25004168,
+          "max": 25594472,
+          "range": 590304
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 12022,
+          "max": 17012,
+          "range": 4990
+        }
+      },
+      "medianDeltaBytes": 225346631,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Maia3 model loaded and the rating grid painted"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 117757885,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 107287140,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3484290,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 580561,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 245456,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "arena-cpu-match",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": "sf+reckless",
+      "previousId": "arena-shell",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 139893857,
+        "usedJSHeapSize": 4457359,
+        "totalJSHeapSize": 5204443,
+        "workerCount": 2,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 139860557,
+          "max": 139894197,
+          "range": 33640
+        },
+        "usedJSHeapSize": {
+          "min": 4341255,
+          "max": 4499792,
+          "range": 158537
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60001,
+          "max": 60004,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 135688574,
+      "stillRunningRuns": 0,
+      "notes": [
+        "200 ms movetime, 1 game, sampled once a move or a result exists"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135058900,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 3279914,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 1252971,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 302072,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-sf-lite",
+      "phase": "play",
+      "surface": "play",
+      "resident": "sf-lite",
+      "previousId": "play-default-after-first-move",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 257393306,
+        "usedJSHeapSize": 3886925,
+        "totalJSHeapSize": 4585225,
+        "workerCount": 2,
+        "measureLatencyMs": 17008
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 257391150,
+          "max": 257466934,
+          "range": 75784
+        },
+        "usedJSHeapSize": {
+          "min": 3884277,
+          "max": 3939509,
+          "range": 55232
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 16022,
+          "max": 17018,
+          "range": 996
+        }
+      },
+      "medianDeltaBytes": 135116079,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135006180,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894433,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3077228,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1121257,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 294208,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-default-after-first-move",
+      "phase": "play",
+      "surface": "play",
+      "resident": "maia3",
+      "previousId": "landing",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 122277707,
+        "usedJSHeapSize": 3772387,
+        "totalJSHeapSize": 4519467,
+        "workerCount": 1,
+        "measureLatencyMs": 16010
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 122275071,
+          "max": 122278703,
+          "range": 3632
+        },
+        "usedJSHeapSize": {
+          "min": 3770199,
+          "max": 31955578,
+          "range": 28185379
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 15014,
+          "max": 18009,
+          "range": 2995
+        }
+      },
+      "medianDeltaBytes": 120731533,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level, engine played the first move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 117900377,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 2663767,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1429435,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 284128,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-stormphrax",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "stormphrax",
+      "previousId": "analysis-cpu-plentychess",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 486172036,
+        "usedJSHeapSize": 4156162,
+        "totalJSHeapSize": 5125326,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482848332,
+          "max": 486380684,
+          "range": 3532352
+        },
+        "usedJSHeapSize": {
+          "min": 4155722,
+          "max": 4165878,
+          "range": 10156
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 3247435,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361320268,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116363039,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 7760997,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 492516,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 235216,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-viridithas",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "viridithas",
+      "previousId": "analysis-cpu-reckless",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482729491,
+        "usedJSHeapSize": 4000363,
+        "totalJSHeapSize": 4439539,
+        "workerCount": 3,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482720643,
+          "max": 484109409,
+          "range": 1388766
+        },
+        "usedJSHeapSize": {
+          "min": 4000359,
+          "max": 4005143,
+          "range": 4784
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60006,
+          "range": 3
+        }
+      },
+      "medianDeltaBytes": 399428,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338620,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116467524,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4158837,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 534822,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 229688,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "arena-cpu-stopped",
+      "phase": "arena",
+      "surface": "arena",
+      "resident": null,
+      "previousId": "arena-cpu-match",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 140263193,
+        "usedJSHeapSize": 4458984,
+        "totalJSHeapSize": 5204448,
+        "workerCount": 2,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 140120471,
+          "max": 140315241,
+          "range": 194770
+        },
+        "usedJSHeapSize": {
+          "min": 4343260,
+          "max": 4501417,
+          "range": 158157
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 368996,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Stop clicked after the CPU match sample"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 135057696,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 4392698,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/arena/"
+          ]
+        },
+        {
+          "bytes": 468119,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 344680,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-reckless",
+      "phase": "play",
+      "surface": "play",
+      "resident": "reckless",
+      "previousId": "play-cpu-sf-full",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592657431,
+        "usedJSHeapSize": 4097362,
+        "totalJSHeapSize": 5634186,
+        "workerCount": 4,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592656727,
+          "max": 592658615,
+          "range": 1888
+        },
+        "usedJSHeapSize": {
+          "min": 4096830,
+          "max": 4099054,
+          "range": 2224
+        },
+        "workerCount": {
+          "min": 4,
+          "max": 4,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60003,
+          "range": 0
+        }
+      },
+      "medianDeltaBytes": 192288,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944340,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003660,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894513,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3295209,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 1179757,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 339952,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-plentychess",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "plentychess",
+      "previousId": "analysis-cpu-berserk",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482928941,
+        "usedJSHeapSize": 4104302,
+        "totalJSHeapSize": 5125330,
+        "workerCount": 3,
+        "measureLatencyMs": 60003
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482924601,
+          "max": 483074941,
+          "range": 150340
+        },
+        "usedJSHeapSize": {
+          "min": 4104298,
+          "max": 4106398,
+          "range": 2100
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": 173896,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338644,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116432867,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4413305,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 509237,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 234888,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-cpu-viridithas",
+      "phase": "play",
+      "surface": "play",
+      "resident": "viridithas",
+      "previousId": "play-cpu-reckless",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 592828777,
+        "usedJSHeapSize": 4181413,
+        "totalJSHeapSize": 5109993,
+        "workerCount": 5,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 592827253,
+          "max": 592833801,
+          "range": 6548
+        },
+        "usedJSHeapSize": {
+          "min": 4179961,
+          "max": 4182969,
+          "range": 3008
+        },
+        "workerCount": {
+          "min": 5,
+          "max": 5,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": 172050,
+      "stillRunningRuns": 0,
+      "notes": [
+        "fastest level after a completed first engine move"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334944352,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 135003672,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117894497,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 3750616,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        },
+        {
+          "bytes": 872888,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 362752,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-sf",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "sf",
+      "previousId": "analysis-lc0-stopped",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 120821946,
+        "usedJSHeapSize": 5519224,
+        "totalJSHeapSize": 7644964,
+        "workerCount": 2,
+        "measureLatencyMs": 18020
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 120819860,
+          "max": 120895313,
+          "range": 75453
+        },
+        "usedJSHeapSize": {
+          "min": 5518569,
+          "max": 5521551,
+          "range": 2982
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 16021,
+          "max": 19022,
+          "range": 3001
+        }
+      },
+      "medianDeltaBytes": -65714,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 116454580,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3601999,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 524223,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 241144,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-cpu-berserk",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "berserk",
+      "previousId": "analysis-cpu-viridithas",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482755045,
+        "usedJSHeapSize": 4032999,
+        "totalJSHeapSize": 4912315,
+        "workerCount": 3,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482552623,
+          "max": 483095818,
+          "range": 543195
+        },
+        "usedJSHeapSize": {
+          "min": 4032639,
+          "max": 4037667,
+          "range": 5028
+        },
+        "workerCount": {
+          "min": 3,
+          "max": 3,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60005,
+          "range": 2
+        }
+      },
+      "medianDeltaBytes": -168020,
+      "stillRunningRuns": 0,
+      "notes": [
+        "depth 2, sampled after a line or a failure message"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361338632,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116437041,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 4248065,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 503419,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 227888,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "landing-after-play",
+      "phase": "play",
+      "surface": "landing",
+      "resident": null,
+      "previousId": "play-neural-lc0-small",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1316253015,
+        "usedJSHeapSize": 7023522,
+        "totalJSHeapSize": 8070110,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1316247035,
+          "max": 1316254391,
+          "range": 7356
+        },
+        "usedJSHeapSize": {
+          "min": 7017806,
+          "max": 7025290,
+          "range": 7484
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60004,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": -173550,
+      "stillRunningRuns": 0,
+      "notes": [
+        "in-app navigation away from Play; module caches may remain"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334929000,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300715,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294238868,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983556,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834805,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 108774682,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-after-cpu",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-cpu-stormphrax",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 482443324,
+        "usedJSHeapSize": 4159278,
+        "totalJSHeapSize": 5125202,
+        "workerCount": 2,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 482421506,
+          "max": 482511388,
+          "range": 89882
+        },
+        "usedJSHeapSize": {
+          "min": 4158710,
+          "max": 4168818,
+          "range": 10108
+        },
+        "workerCount": {
+          "min": 2,
+          "max": 2,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60004,
+          "max": 60005,
+          "range": 1
+        }
+      },
+      "medianDeltaBytes": -3750530,
+      "stillRunningRuns": 0,
+      "notes": [
+        "row switched back to Lc0 after every CPU family"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 361319824,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite.js"
+          ]
+        },
+        {
+          "bytes": 116378889,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3983733,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 512222,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 248656,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-lc0-stopped",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-lc0-30s",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 120891680,
+        "usedJSHeapSize": 3533618,
+        "totalJSHeapSize": 4340754,
+        "workerCount": 1,
+        "measureLatencyMs": 15021
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 120887660,
+          "max": 120944372,
+          "range": 56712
+        },
+        "usedJSHeapSize": {
+          "min": 3531830,
+          "max": 3533666,
+          "range": 1836
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 11201,
+          "max": 16020,
+          "range": 4819
+        }
+      },
+      "medianDeltaBytes": -17914006,
+      "stillRunningRuns": 0,
+      "notes": [
+        "Stop clicked after the Lc0 run"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 116781480,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3425174,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 447306,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 237720,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "analysis-lc0-30s",
+      "phase": "analysis",
+      "surface": "analysis",
+      "resident": "lc0",
+      "previousId": "analysis-shell",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 138801666,
+        "usedJSHeapSize": 3537574,
+        "totalJSHeapSize": 4340814,
+        "workerCount": 1,
+        "measureLatencyMs": 13016
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 138706152,
+          "max": 139655468,
+          "range": 949316
+        },
+        "usedJSHeapSize": {
+          "min": 3536862,
+          "max": 3554414,
+          "range": 17552
+        },
+        "workerCount": {
+          "min": 1,
+          "max": 1,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 11016,
+          "max": 18015,
+          "range": 6999
+        }
+      },
+      "medianDeltaBytes": -120221318,
+      "stillRunningRuns": 3,
+      "notes": [
+        "Lc0 still running after 30s at 100000 visits"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 134693822,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
+          ]
+        },
+        {
+          "bytes": 3423226,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/analysis/"
+          ]
+        },
+        {
+          "bytes": 446106,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 238512,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "landing-after-maia",
+      "phase": "maia",
+      "surface": "landing",
+      "resident": null,
+      "previousId": "maia-panel",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 4651146,
+        "usedJSHeapSize": 4142775,
+        "totalJSHeapSize": 4877015,
+        "workerCount": 0,
+        "measureLatencyMs": 1702
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 4650002,
+          "max": 4681958,
+          "range": 31956
+        },
+        "usedJSHeapSize": {
+          "min": 4140023,
+          "max": 4142847,
+          "range": 2824
+        },
+        "workerCount": {
+          "min": 0,
+          "max": 0,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 1698,
+          "max": 7691,
+          "range": 5993
+        }
+      },
+      "medianDeltaBytes": -224703862,
+      "stillRunningRuns": 0,
+      "notes": [
+        "in-app navigation away from the Maia panel"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 3672434,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/"
+          ]
+        },
+        {
+          "bytes": 645064,
+          "types": [
+            "Shared"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 333648,
+          "types": [
+            "DOM"
+          ],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
+        }
+      ],
+      "crossOriginIsolated": true
+    },
+    {
+      "id": "play-neural-lc0-small",
+      "phase": "play",
+      "surface": "play",
+      "resident": "lc0-small",
+      "previousId": "play-cpu-stormphrax",
+      "runs": 3,
+      "okRuns": 3,
+      "median": {
+        "userAgentSpecificBytes": 1316426565,
+        "usedJSHeapSize": 7002386,
+        "totalJSHeapSize": 7774122,
+        "workerCount": 7,
+        "measureLatencyMs": 60004
+      },
+      "spread": {
+        "userAgentSpecificBytes": {
+          "min": 1316422013,
+          "max": 1316429658,
+          "range": 7645
+        },
+        "usedJSHeapSize": {
+          "min": 7001882,
+          "max": 7007058,
+          "range": 5176
+        },
+        "workerCount": {
+          "min": 7,
+          "max": 7,
+          "range": 0
+        },
+        "measureLatencyMs": {
+          "min": 60003,
+          "max": 60010,
+          "range": 7
+        }
+      },
+      "medianDeltaBytes": -486523446,
+      "stillRunningRuns": 0,
+      "notes": [
+        "neural engine after the CPU tour"
+      ],
+      "errors": [],
+      "userAgentSpecificErrors": [],
+      "exampleBreakdown": [
+        {
+          "bytes": 334928988,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-single.js"
+          ]
+        },
+        {
+          "bytes": 322300703,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/5e2cd04c-4ef6-4b8f-ba22-fb8729674e10"
+          ]
+        },
+        {
+          "bytes": 294261196,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "http://127.0.0.1:5186/08429a05-55ed-4904-8732-e8e6ff7a3e18"
+          ]
+        },
+        {
+          "bytes": 134983544,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/stockfish/stockfish-19-lite-single-relaxed.js"
+          ]
+        },
+        {
+          "bytes": 117834793,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "DedicatedWorkerGlobalScope"
+          ],
+          "urls": [
+            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
+          ]
+        },
+        {
+          "bytes": 110517170,
+          "types": [
+            "JavaScript"
+          ],
+          "scopes": [
+            "Window"
+          ],
+          "urls": [
+            "/app/play/"
+          ]
+        }
+      ],
+      "crossOriginIsolated": true
+    }
+  ],
+  "retention": [
+    {
+      "id": "play-cpu-tour",
+      "baselineId": "play-default-after-first-move",
+      "afterId": "play-neural-lc0-small",
+      "meaning": "CPU engines switched on Play, then a neural engine (Lc0 small) replaced the selection",
+      "runs": 3,
+      "comparableRuns": 3,
+      "flaggedRuns": 3,
+      "repeated": true,
+      "medianKeptBytes": 1194147862,
+      "medianGainedBytes": 1680672632,
+      "medianReleasedBytes": 486523446,
+      "medianPeakBytes": 1802950011
+    },
+    {
+      "id": "play-left-surface",
+      "baselineId": "landing",
+      "afterId": "landing-after-play",
+      "meaning": "Play was left via in-app navigation back to the landing page",
+      "runs": 3,
+      "comparableRuns": 3,
+      "flaggedRuns": 3,
+      "repeated": true,
+      "medianKeptBytes": 1314707553,
+      "medianGainedBytes": 1801404549,
+      "medianReleasedBytes": 486700668,
+      "medianPeakBytes": 1802950011
+    },
+    {
+      "id": "analysis-lc0-stop",
+      "baselineId": "analysis-shell",
+      "afterId": "analysis-lc0-stopped",
+      "meaning": "Analysis Stop after Lc0 had been running",
+      "runs": 3,
+      "comparableRuns": 3,
+      "flaggedRuns": 0,
+      "repeated": false,
+      "medianKeptBytes": -138123142,
+      "medianGainedBytes": -120221318,
+      "medianReleasedBytes": 17914006,
+      "medianPeakBytes": 138801666
+    },
+    {
+      "id": "analysis-cpu-tour",
+      "baselineId": "analysis-lc0-stopped",
+      "afterId": "analysis-after-cpu",
+      "meaning": "Each CPU family was analyzed, then the row was switched back to Lc0",
+      "runs": 3,
+      "comparableRuns": 3,
+      "flaggedRuns": 3,
+      "repeated": true,
+      "medianKeptBytes": 361551644,
+      "medianGainedBytes": 365284376,
+      "medianReleasedBytes": 3750530,
+      "medianPeakBytes": 486172036
+    },
+    {
+      "id": "arena-stop",
+      "baselineId": "arena-shell",
+      "afterId": "arena-cpu-stopped",
+      "meaning": "A short Stockfish Lite vs Reckless match was stopped",
+      "runs": 3,
+      "comparableRuns": 3,
+      "flaggedRuns": 3,
+      "repeated": true,
+      "medianKeptBytes": 136057570,
+      "medianGainedBytes": 135688574,
+      "medianReleasedBytes": -368996,
+      "medianPeakBytes": 139893857
+    },
+    {
+      "id": "maia-left-surface",
+      "baselineId": "maia-before",
+      "afterId": "landing-after-maia",
+      "meaning": "The Maia3 panel was loaded, then the app navigated back to landing",
+      "runs": 3,
+      "comparableRuns": 3,
+      "flaggedRuns": 0,
+      "repeated": false,
+      "medianKeptBytes": 642161,
+      "medianGainedBytes": 225346631,
+      "medianReleasedBytes": 224703862,
+      "medianPeakBytes": 229355332
+    }
+  ],
+  "generatedAt": "2026-10-12T06:05:23.199Z",
+  "baseUrl": "http://127.0.0.1:5186",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "cpuCount": 10,
+    "totalMemBytes": 25769803776,
+    "freeMemBytes": 809271296,
+    "node": "v25.9.0",
+    "browser": "151.0.7922.34"
+  },
+  "loadavg": {
+    "min": 0.88330078125,
+    "max": 3.6865234375,
+    "samples": [
+      2.22900390625,
+      2.36474609375,
+      2.40234375,
+      2.6298828125,
+      2.42919921875,
+      2.447265625,
+      2.8369140625,
+      2.6591796875,
+      2.56689453125,
+      2.4482421875,
+      3.3623046875,
+      3.6865234375,
+      0.88330078125,
+      1.34912109375,
+      1.85693359375,
+      1.802734375,
+      1.8701171875,
+      2.0556640625,
+      2.47265625,
+      2.5849609375,
+      2.54296875,
+      2.4541015625,
+      2.5087890625,
+      2.65576171875,
+      2.6767578125,
+      1.70361328125,
+      1.77490234375,
+      2.0126953125,
+      2.42578125,
+      2.41650390625,
+      2.19677734375,
+      2.49609375,
+      2.509765625,
+      2.71533203125,
+      2.837890625,
+      2.78076171875
+    ]
+  },
+  "phaseDurations": [
+    {
+      "run": 1,
+      "phase": "analysis",
+      "durationMs": 462607
+    },
+    {
+      "run": 1,
+      "phase": "arena",
+      "durationMs": 140631
+    },
+    {
+      "run": 1,
+      "phase": "maia",
+      "durationMs": 32309
+    },
+    {
+      "run": 1,
+      "phase": "play",
+      "durationMs": 495109
+    },
+    {
+      "run": 2,
+      "phase": "analysis",
+      "durationMs": 450306
+    },
+    {
+      "run": 2,
+      "phase": "arena",
+      "durationMs": 140695
+    },
+    {
+      "run": 2,
+      "phase": "maia",
+      "durationMs": 37703
+    },
+    {
+      "run": 2,
+      "phase": "play",
+      "durationMs": 502320
+    },
+    {
+      "run": 3,
+      "phase": "analysis",
+      "durationMs": 453805
+    },
+    {
+      "run": 3,
+      "phase": "arena",
+      "durationMs": 137723
+    },
+    {
+      "run": 3,
+      "phase": "maia",
+      "durationMs": 31647
+    },
+    {
+      "run": 3,
+      "phase": "play",
+      "durationMs": 497803
+    }
+  ]
+}
