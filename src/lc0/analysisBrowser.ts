@@ -337,6 +337,7 @@ let activeLc0BackendLoad: { cancelled: () => boolean } | null = null;
 let analyzeAfterLc0BackendLoad = false;
 let reloadLc0AfterActiveRun = false;
 let disposeUnusedEnginesAfterActiveRun = false;
+let analysisRunForced = false;
 
 function syncBrokerParticipants(rows: EngineRow[]): void {
   const desired = new Map<string, EngineFamily>();
@@ -386,6 +387,9 @@ let analysisPagehideHandler: ((event: PageTransitionEvent) => void) | null = nul
 let analysisAuditHandler: ((event: Event) => void) | null = null;
 let hiddenTab: HiddenTabPause = initialHiddenTabPause(false);
 let hiddenTabListener: (() => void) | null = null;
+let hiddenResumeForce = false;
+let hiddenResumeReload = false;
+let hiddenResumeDispose = false;
 let analysisWorkerProgressMessages = 0;
 let analysisUiProgressSamples = 0;
 let orientation: 'white' | 'black' = 'white';
@@ -1586,6 +1590,7 @@ async function workerBigNetLines(
   visits: number,
   positions: BoardState[],
   requestedMultiPv: number,
+  signal?: AbortSignal,
 ): Promise<AnalysisLine[]> {
   const { config, searcher } = bigNetFor(variant);
   const label = `Lc0 ${config.name}`;
@@ -1598,6 +1603,7 @@ async function workerBigNetLines(
         multiPv: requestedMultiPv,
         batchSize: config.recommendedBatchSize,
         batchPipelineDepth: config.recommendedPipelineDepth,
+        signal,
         onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
       },
     );
@@ -2780,6 +2786,15 @@ function applyHiddenTab(hidden: boolean): void {
     maia3PanelTimer = null;
   }
   if (transition.pause.includes('analysis')) {
+    // Snapshot before cancel. The aborted run's finally must not see these flags
+    // and start a reload while the tab is still hidden.
+    hiddenResumeForce = analysisRunForced;
+    hiddenResumeReload = reloadLc0AfterActiveRun;
+    hiddenResumeDispose = disposeUnusedEnginesAfterActiveRun;
+    analysisRunForced = false;
+    reloadLc0AfterActiveRun = false;
+    disposeUnusedEnginesAfterActiveRun = false;
+    analyzeAfterActiveRun = false;
     cancelActiveAnalysisRun();
     el('message').textContent = 'Analysis paused while this tab is hidden.';
   }
@@ -2787,7 +2802,15 @@ function applyHiddenTab(hidden: boolean): void {
     for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
   }
   if (transition.resume.includes('maia')) scheduleMaia3Panel();
-  if (transition.resume.includes('analysis') && !mountAbort.signal.aborted) void analyzeCurrent();
+  if ((transition.resume.includes('analysis') || hiddenResumeReload || hiddenResumeDispose) && !mountAbort.signal.aborted) {
+    const force = transition.resume.includes('analysis') && hiddenResumeForce;
+    if (hiddenResumeDispose) disposeUnusedEnginesAfterActiveRun = true;
+    if (hiddenResumeReload) reloadLc0AfterActiveRun = true;
+    hiddenResumeForce = false;
+    hiddenResumeReload = false;
+    hiddenResumeDispose = false;
+    void analyzeCurrent(force ? { force: true } : {});
+  }
 }
 
 function installHiddenTabPause(): void {
@@ -3214,6 +3237,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     return;
   }
   const runId = ++activeAnalysisRunId;
+  analysisRunForced = options.force === true;
   const controller = new AbortController();
   analysisAbort = controller;
   analyzing = true;
@@ -3289,7 +3313,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
         pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () =>
-          workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv),
+          workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv, controller.signal),
         );
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
@@ -3519,6 +3543,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       analyzeAfterActiveRun = false;
       reloadLc0AfterActiveRun = false;
       disposeUnusedEnginesAfterActiveRun = false;
+      analysisRunForced = false;
       clearAnalysisSearchProgress();
       document.getElementById('stop')?.toggleAttribute('disabled', true);
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
@@ -3534,6 +3559,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
 let analysisGameTree = tree;
 
 function afterNavigation() {
+  hiddenResumeForce = false;
   if (analysisGameTree !== tree) {
     analysisGameTree = tree;
     reviewAbort?.abort();
@@ -3570,6 +3596,8 @@ function afterNavigation() {
     // A cached position, or auto-analyze off, must not restart the search that
     // was paused on the position we just left.
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
+    hiddenResumeReload = false;
+    hiddenResumeDispose = false;
     renderEvalBar();
     setShapes(bestShapes());
   }
@@ -3810,6 +3838,9 @@ function wireEvents() {
   el('stop').addEventListener('click', () => {
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
+    hiddenResumeForce = false;
+    hiddenResumeReload = false;
+    hiddenResumeDispose = false;
     cancelAllAnalysisAssetPrefetches();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';

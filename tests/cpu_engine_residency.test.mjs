@@ -21,6 +21,11 @@ test('older inactive engines past the cap are disposed and the active id is not'
   assert.equal(evicted.includes('sf-full'), false);
 });
 
+test('selecting a non-cpu engine keeps only the newest inactive cpu engine', () => {
+  assert.deepEqual(inactiveCpuEnginesToEvict(['sf-lite', 'sf-full'], 'lc0-small'), ['sf-lite']);
+  assert.deepEqual(inactiveCpuEnginesToEvict(['sf-full'], 'lc0-small'), []);
+});
+
 test('a cap of zero drops every inactive engine and still spares the active one', () => {
   assert.deepEqual(inactiveCpuEnginesToEvict(['sf-lite', 'sf-full'], 'sf-full', 0), ['sf-lite']);
 });

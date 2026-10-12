@@ -644,7 +644,11 @@ function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<Cp
 function retainCpuEngine(id: string, pending: Promise<CpuEngine>): void {
   cpuEnginePromises.delete(id);
   cpuEnginePromises.set(id, pending);
-  for (const evictId of inactiveCpuEnginesToEvict([...cpuEnginePromises.keys()], id)) disposeCachedCpuEngine(evictId);
+  evictInactiveCpuEngines(id);
+}
+
+function evictInactiveCpuEngines(activeId: string): void {
+  for (const evictId of inactiveCpuEnginesToEvict([...cpuEnginePromises.keys()], activeId)) disposeCachedCpuEngine(evictId);
 }
 
 function disposeCachedCpuEngine(id: string): void {
@@ -1562,6 +1566,9 @@ function ctxInit(ctx: PlayContext): void {
     ctxPersistPlayPreferences(ctx);
     ctxSetEngineNote('');
     if (previousEngineId === 'stormphrax' && option.id !== 'stormphrax') disposeCachedCpuEngine('stormphrax');
+    // Neural and Maia selections never call ctxCpuEngineFor, so the cap has to
+    // run here too. The id in use is omitted even when it is not a CPU engine.
+    evictInactiveCpuEngines(option.id);
     ctxRenderLevelOptions(ctx);
     ctxRenderMaia3Controls(ctx);
     ctxRenderEngineCaution(ctx);
