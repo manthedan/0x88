@@ -53,6 +53,14 @@ export function shouldResumeHiddenAnalysis(hidden: boolean, resume: readonly Hid
   return !hidden && (resume.includes('analysis') || savedReload || savedDispose);
 }
 
+/**
+ * Stop drops the paused search. A queued Lc0 reload or unused-engine dispose
+ * stays, matching a visible Stop that passes preserveDeferredMaintenance.
+ */
+export function stopHiddenTabResume(savedReload: boolean, savedDispose: boolean): { reload: boolean; dispose: boolean } {
+  return { reload: savedReload, dispose: savedDispose };
+}
+
 /** Drop suspended work so showing the tab does not restart it. */
 export function cancelHiddenTabWork(state: HiddenTabPause, kind: HiddenTabWork): HiddenTabPause {
   if (!state.suspended.includes(kind)) return state;

@@ -152,6 +152,7 @@ import {
   initialHiddenTabPause,
   requestHiddenTabWork,
   shouldResumeHiddenAnalysis,
+  stopHiddenTabResume,
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
@@ -2804,13 +2805,24 @@ function applyHiddenTab(hidden: boolean): void {
   }
   if (transition.resume.includes('maia')) scheduleMaia3Panel();
   if (shouldResumeHiddenAnalysis(hidden, transition.resume, hiddenResumeReload, hiddenResumeDispose) && !mountAbort.signal.aborted) {
-    const force = transition.resume.includes('analysis') && hiddenResumeForce;
-    if (hiddenResumeDispose) disposeUnusedEnginesAfterActiveRun = true;
-    if (hiddenResumeReload) reloadLc0AfterActiveRun = true;
+    const resumeAnalysis = transition.resume.includes('analysis');
+    const force = resumeAnalysis && hiddenResumeForce;
+    const reload = hiddenResumeReload;
+    const dispose = hiddenResumeDispose;
     hiddenResumeForce = false;
     hiddenResumeReload = false;
     hiddenResumeDispose = false;
-    void analyzeCurrent(force ? { force: true } : {});
+    if (resumeAnalysis) {
+      // The search is still wanted, so a queued reload runs and then the search restarts.
+      if (dispose) disposeUnusedEnginesAfterActiveRun = true;
+      if (reload) reloadLc0AfterActiveRun = true;
+      void analyzeCurrent(force ? { force: true } : {});
+    } else {
+      // Stop kept the maintenance and dropped the search. Match a visible Stop:
+      // dispose or reload, and do not start analysis afterwards.
+      if (dispose) disposeUnusedEngines();
+      if (reload) void reloadLc0ForAnalysis(false);
+    }
   }
 }
 
@@ -3840,8 +3852,9 @@ function wireEvents() {
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
     hiddenResumeForce = false;
-    hiddenResumeReload = false;
-    hiddenResumeDispose = false;
+    const kept = stopHiddenTabResume(hiddenResumeReload, hiddenResumeDispose);
+    hiddenResumeReload = kept.reload;
+    hiddenResumeDispose = kept.dispose;
     cancelAllAnalysisAssetPrefetches();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';

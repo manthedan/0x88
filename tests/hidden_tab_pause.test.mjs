@@ -5,6 +5,7 @@ import {
   initialHiddenTabPause,
   requestHiddenTabWork,
   shouldResumeHiddenAnalysis,
+  stopHiddenTabResume,
   transitionHiddenTab,
 } from '../src/lc0/hiddenTabPause.ts';
 
@@ -59,6 +60,16 @@ test('queued maintenance is restored only when the tab is shown', () => {
   assert.equal(shouldResumeHiddenAnalysis(false, shown.resume, true, false), true);
   assert.equal(shouldResumeHiddenAnalysis(false, shown.resume, false, false), true);
   assert.equal(shouldResumeHiddenAnalysis(false, [], false, false), false);
+});
+
+test('stop while hidden drops the search and keeps queued maintenance', () => {
+  let state = transitionHiddenTab(initialHiddenTabPause(false), true, ['analysis']).state;
+  state = cancelHiddenTabWork(state, 'analysis');
+  const kept = stopHiddenTabResume(true, true);
+  assert.deepEqual(kept, { reload: true, dispose: true });
+  const shown = transitionHiddenTab(state, false, []);
+  assert.deepEqual(shown.resume, []);
+  assert.equal(shouldResumeHiddenAnalysis(false, shown.resume, kept.reload, kept.dispose), true);
 });
 
 test('explicit cancel while hidden is not resumed', () => {
