@@ -14,6 +14,9 @@ onMount(() => {
   if (root.dataset.board) {
     boardStyle.set(root.dataset.board as 'night' | 'blue' | 'green');
   }
+  if (new URLSearchParams(location.search).get('memprobe') === '1') {
+    void import('$lib/memprobe').then((module) => module.mountMemprobe());
+  }
   return stop;
 });
 </script>
