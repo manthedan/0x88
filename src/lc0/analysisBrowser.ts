@@ -151,6 +151,7 @@ import {
   type HiddenTabWork,
   initialHiddenTabPause,
   requestHiddenTabWork,
+  shouldResumeHiddenAnalysis,
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
@@ -2802,7 +2803,7 @@ function applyHiddenTab(hidden: boolean): void {
     for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
   }
   if (transition.resume.includes('maia')) scheduleMaia3Panel();
-  if ((transition.resume.includes('analysis') || hiddenResumeReload || hiddenResumeDispose) && !mountAbort.signal.aborted) {
+  if (shouldResumeHiddenAnalysis(hidden, transition.resume, hiddenResumeReload, hiddenResumeDispose) && !mountAbort.signal.aborted) {
     const force = transition.resume.includes('analysis') && hiddenResumeForce;
     if (hiddenResumeDispose) disposeUnusedEnginesAfterActiveRun = true;
     if (hiddenResumeReload) reloadLc0AfterActiveRun = true;

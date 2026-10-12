@@ -44,6 +44,15 @@ export function requestHiddenTabWork(state: HiddenTabPause, kind: HiddenTabWork)
   return { state: { hidden: true, suspended: listed([...state.suspended, kind]) }, start: false };
 }
 
+/**
+ * A paused search, or maintenance snapshotted from it, starts again only when
+ * the tab is visible. Restoring those flags during the hide itself lets the
+ * aborted run's finally see them and start a reload while still hidden.
+ */
+export function shouldResumeHiddenAnalysis(hidden: boolean, resume: readonly HiddenTabWork[], savedReload: boolean, savedDispose: boolean): boolean {
+  return !hidden && (resume.includes('analysis') || savedReload || savedDispose);
+}
+
 /** Drop suspended work so showing the tab does not restart it. */
 export function cancelHiddenTabWork(state: HiddenTabPause, kind: HiddenTabWork): HiddenTabPause {
   if (!state.suspended.includes(kind)) return state;

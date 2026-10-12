@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cancelHiddenTabWork, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab } from '../src/lc0/hiddenTabPause.ts';
+import {
+  cancelHiddenTabWork,
+  initialHiddenTabPause,
+  requestHiddenTabWork,
+  shouldResumeHiddenAnalysis,
+  transitionHiddenTab,
+} from '../src/lc0/hiddenTabPause.ts';
 
 test('hiding pauses only the unbounded work that is running', () => {
   const hidden = transitionHiddenTab(initialHiddenTabPause(false), true, ['prefetch', 'analysis']);
@@ -43,6 +49,16 @@ test('a visible request starts immediately and is not remembered', () => {
   const requested = requestHiddenTabWork(state, 'prefetch');
   assert.equal(requested.start, true);
   assert.equal(requested.state, state);
+});
+
+test('queued maintenance is restored only when the tab is shown', () => {
+  const hidden = transitionHiddenTab(initialHiddenTabPause(false), true, ['analysis']);
+  assert.equal(shouldResumeHiddenAnalysis(true, hidden.resume, true, false), false);
+  assert.equal(shouldResumeHiddenAnalysis(true, hidden.resume, false, true), false);
+  const shown = transitionHiddenTab(hidden.state, false, []);
+  assert.equal(shouldResumeHiddenAnalysis(false, shown.resume, true, false), true);
+  assert.equal(shouldResumeHiddenAnalysis(false, shown.resume, false, false), true);
+  assert.equal(shouldResumeHiddenAnalysis(false, [], false, false), false);
 });
 
 test('explicit cancel while hidden is not resumed', () => {
