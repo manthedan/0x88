@@ -22,6 +22,7 @@ import {
   Lc0OnnxEvaluator,
 } from './onnxEvaluator.ts';
 import { applyOrtExecutionProvider } from './ortWorkerExecutionProvider.ts';
+import { noteSearchCancel, takeSearchCancel } from './pendingSearchCancel.ts';
 import { Lc0PuctSearcher, type Lc0SearchOptions, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
@@ -248,6 +249,8 @@ let configuredOrtWasm: OrtRuntimeDiagnostics['wasm'] | undefined;
 let configuredOrtFallback: OrtRuntimeDiagnostics['fallback'];
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
+/** Cancels whose search message is still queued behind the search that is running. */
+const pendingSearchCancels: number[] = [];
 // This worker owns exactly one ORT session. Queue all model operations so the
 // page can broker repeated eval/search requests here without concurrent
 // session.run() calls against the same static batch-1 WebGPU/WASM session.
@@ -428,6 +431,14 @@ function currentCacheFootprint(): Lc0EvaluationCacheFootprint | undefined {
 
 async function handleSearch(message: SearchMessage): Promise<void> {
   if (!searcher) throw new Error('LC0 search worker is not initialized');
+  if (takeSearchCancel(pendingSearchCancels, message.id)) {
+    post({
+      type: 'searchResult',
+      id: message.id,
+      result: { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true, elapsedMs: 0 },
+    });
+    return;
+  }
   const started = nowMs();
   const controller = new AbortController();
   activeSearches.set(message.id, controller);
@@ -491,7 +502,9 @@ async function handleSearch(message: SearchMessage): Promise<void> {
 
 function handleCancel(message: CancelMessage): void {
   if (message.target !== undefined) {
-    activeSearches.get(message.target)?.abort();
+    const controller = activeSearches.get(message.target);
+    if (controller) controller.abort();
+    else noteSearchCancel(pendingSearchCancels, message.target);
     return;
   }
   for (const controller of activeSearches.values()) controller.abort();
