@@ -11,6 +11,7 @@ import {
   analysisControllerReady,
   analysisLc0StillRunning,
   analysisSampleReady,
+  applyObservedEngineFailure,
   CPU_ANALYSIS_FAMILIES,
   CPU_PLAY_ENGINE_IDS,
   checkpointEngineFailure,
@@ -382,6 +383,25 @@ test('checkpoint failures cover arena preparation and Maia load text', () => {
   });
   assert.deepEqual(checkpointEngineFailure('Analysis complete · SF Lite'), { engineFailed: false, engineError: undefined });
   assert.deepEqual(checkpointEngineFailure(''), { engineFailed: false, engineError: undefined });
+  const aggregate = 'Analysis completed with one or more engine failures/timeouts: —';
+  assert.equal(checkpointEngineFailure(aggregate).engineFailed, true);
+  const duringSample = applyObservedEngineFailure({
+    ok: true,
+    engineFailed: false,
+    note: 'depth 2, sampled after this family settled',
+    status: { analysisMessage: aggregate },
+    userAgentSpecificBytes: 10,
+  });
+  assert.equal(duringSample.engineFailed, true);
+  assert.equal(duringSample.engineError, aggregate);
+  assert.equal(duringSample.userAgentSpecificBytes, 10);
+  assert.match(duringSample.note, /failed during sample/);
+  const settled = applyObservedEngineFailure({
+    ok: true,
+    note: 'depth 2, sampled after this family settled',
+    status: { analysisMessage: 'Analysis complete · SF Lite' },
+  });
+  assert.equal(settled.engineFailed, undefined);
 });
 
 test('summary keeps an engine failure beside its memory sample', () => {

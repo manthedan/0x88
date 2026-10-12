@@ -29,6 +29,7 @@ import {
   analysisControllerReady,
   analysisLc0StillRunning,
   analysisSampleReady,
+  applyObservedEngineFailure,
   CPU_ANALYSIS_FAMILIES,
   CPU_PLAY_ENGINE_IDS,
   checkpointEngineFailure,
@@ -207,7 +208,7 @@ async function sample(page, meta) {
 async function record(page, meta, bucket, args) {
   log(`run ${meta.run} ${meta.phase} sample ${meta.id}`);
   try {
-    const reading = await sample(page, meta);
+    const reading = applyObservedEngineFailure(await sample(page, meta));
     bucket.push(reading);
     const mb = Number.isFinite(reading.userAgentSpecificBytes) ? `${(reading.userAgentSpecificBytes / 1048576).toFixed(1)} MiB` : 'n/a';
     log(`  ${meta.id}: UA ${mb}, heap ${reading.usedJSHeapSize ?? 'n/a'}, workers ${reading.workers?.live ?? 'n/a'}, measure ${reading.measureLatencyMs} ms`);

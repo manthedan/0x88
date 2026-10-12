@@ -231,8 +231,25 @@ export function analysisLc0StillRunning(state) {
 /** Failure metadata for a checkpoint whose wait treated an error string as done. */
 export function checkpointEngineFailure(message) {
   const text = String(message ?? '');
-  const failed = /failed|error|unavailable|could not download|asset missing/i.test(text);
+  const failed = /failed|error|unavailable|could not download|asset missing|engine failures/i.test(text);
   return failed ? { engineFailed: true, engineError: text } : { engineFailed: false, engineError: undefined };
+}
+
+/**
+ * The memory call can outlast a search. pageStatus() is read after that call,
+ * so a failure that lands during the wait has to be copied onto the sample.
+ */
+export function applyObservedEngineFailure(reading) {
+  if (!reading || reading.engineFailed) return reading;
+  const observed = checkpointEngineFailure(reading.status?.analysisMessage);
+  if (!observed.engineFailed) return reading;
+  const suffix = `failed during sample: ${observed.engineError}`;
+  return {
+    ...reading,
+    engineFailed: true,
+    engineError: observed.engineError,
+    note: reading.note ? `${reading.note} (${suffix})` : suffix,
+  };
 }
 
 export function previousCheckpointId(id, plan = checkpointPlan()) {
