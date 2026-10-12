@@ -104,6 +104,48 @@ export function retentionComparisons(plan = checkpointPlan()) {
   ];
 }
 
+/**
+ * True when this analysis run has left the start banner.
+ *
+ * Playwright passes this function to page.evaluate, which sends only its
+ * source. Family patterns stay inside the function. The "Analyzing (…)" banner
+ * is set before the worker loads, so it is not ready. A progress or completion
+ * line must name the selected family. A changed failure line is ready even
+ * when the error text omits the family.
+ */
+export function analysisSampleReady(state) {
+  const patterns = {
+    lc0: /lc0|leela/i,
+    sf: /\bsf\b|stockfish/i,
+    reckless: /reckless/i,
+    viridithas: /viridithas/i,
+    berserk: /berserk/i,
+    plentychess: /plenty/i,
+    stormphrax: /stormphrax/i,
+  };
+  const family = String(state?.family ?? '');
+  let message = state?.message;
+  let progress = state?.progress;
+  if ((message == null || progress == null) && typeof document !== 'undefined') {
+    if (message == null) message = document.querySelector('#message')?.textContent ?? '';
+    if (progress == null) progress = document.querySelector('#analysisSearchProgress')?.textContent ?? '';
+  }
+  message = String(message ?? '');
+  progress = String(progress ?? '');
+  const previous = state?.previousMessage == null ? null : String(state.previousMessage);
+  const known = patterns[family];
+  const pattern = known ?? new RegExp(family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  const settled = /analysis complete|\d+\s*\/\s*\d+\s*(visits|nodes|search)|:\s*searching/i;
+  const failed = /analysis failed|engine failures|could not download|asset missing|unavailable/i;
+  const namesSettled = (text) => pattern.test(text) && settled.test(text);
+  const changed = previous == null || message !== previous;
+  return {
+    ok: changed && (namesSettled(message) || namesSettled(progress) || failed.test(message) || failed.test(progress)),
+    message,
+    family,
+  };
+}
+
 export function previousCheckpointId(id, plan = checkpointPlan()) {
   for (const phase of PHASES) {
     const ids = plan[phase].map((entry) => entry.id);
@@ -218,7 +260,8 @@ export function aggregateRetention(perRunFindings) {
       runs: runCount,
       comparableRuns: comparable.length,
       flaggedRuns: flagged.length,
-      repeated: flagged.length > 0 && flagged.length * 2 >= runCount,
+      // Strict majority. A 1-of-2 or 2-of-4 tie stays unflagged.
+      repeated: flagged.length * 2 > runCount,
       medianKeptBytes: median(comparable.map((finding) => finding.keptBytes)),
       medianGainedBytes: median(comparable.map((finding) => finding.gainedBytes)),
       medianReleasedBytes: median(comparable.map((finding) => finding.releasedBytes)),
@@ -340,7 +383,7 @@ export function renderMarkdown(summary) {
     `User-agent memory is \`performance.measureUserAgentSpecificMemory()\` on a COOP/COEP page. The call waits for garbage collection; \`measure latency\` is that wait. JS heap is \`performance.memory.usedJSHeapSize\` when precise heap info is enabled. Worker count prefers main-thread Worker/SharedWorker objects that have not been terminated, and otherwise counts memory-breakdown scopes whose name contains "Worker".`,
   );
   lines.push(
-    `A later checkpoint counts as unreleased when the peak gained since the baseline is above ${formatMib(summary.noiseBytes ?? NOISE_BYTES)} and more than ${Math.round((summary.retainFraction ?? RETAIN_FRACTION) * 100)}% of that gain is still present. Equal-to-threshold gains are not flagged.`,
+    `A later checkpoint counts as unreleased when the peak gained since the baseline is above ${formatMib(summary.noiseBytes ?? NOISE_BYTES)} and more than ${Math.round((summary.retainFraction ?? RETAIN_FRACTION) * 100)}% of that gain is still present. Equal-to-threshold gains are not flagged. A finding is repeated only on a strict majority of runs; a tie is not.`,
   );
   if (summary.baseUrl) lines.push(`Base URL: ${summary.baseUrl}.`);
   if (summary.host?.cpu) {
@@ -383,7 +426,7 @@ export function renderMarkdown(summary) {
   lines.push('');
   const repeated = (summary.retention ?? []).filter((row) => row.repeated);
   const quiet = (summary.retention ?? []).filter((row) => !row.repeated);
-  if (!repeated.length) lines.push('No retention comparison stayed above the threshold in a majority of runs.');
+  if (!repeated.length) lines.push('No retention comparison stayed above the threshold in a strict majority of runs.');
   for (const row of repeated) {
     lines.push(
       `- \`${row.id}\` (${row.flaggedRuns}/${row.runs} runs): ${row.meaning}. Peak gain ${formatMib(row.medianGainedBytes)}, still held ${formatMib(row.medianKeptBytes)}, dropped ${formatMib(row.medianReleasedBytes)} by \`${row.afterId}\`.`,

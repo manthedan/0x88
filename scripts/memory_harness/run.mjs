@@ -26,6 +26,7 @@ import { pathToFileURL } from 'node:url';
 import { parseScriptArgs } from '../lib/cli.mjs';
 import { installWorkerHook, samplePage } from './page_hooks.mjs';
 import {
+  analysisSampleReady,
   CPU_ANALYSIS_FAMILIES,
   CPU_PLAY_ENGINE_IDS,
   checkpointPlan,
@@ -413,7 +414,6 @@ async function runAnalysis(page, args, run) {
   try {
     await setAnalysisFamily(page, 'lc0', 100_000);
     await page.evaluate(() => document.querySelector('#analyze')?.click());
-    const started = Date.now();
     await waitFor(
       page,
       () => {
@@ -426,6 +426,7 @@ async function runAnalysis(page, args, run) {
       args.timeoutMs,
       'Lc0 analysis to start',
     );
+    const started = Date.now();
     const runMs = args.lc0Seconds * 1000;
     let stillRunning = true;
     let elapsed = 0;
@@ -463,21 +464,16 @@ async function runAnalysis(page, args, run) {
 
   for (const family of CPU_ANALYSIS_FAMILIES) {
     try {
+      const previousMessage = await page.evaluate(() => document.querySelector('#message')?.textContent ?? '');
       await setAnalysisFamily(page, family, 2);
       await page.evaluate(() => document.querySelector('#analyze')?.click());
-      await waitFor(
+      await waitFor(page, analysisSampleReady, { family, previousMessage }, args.timeoutMs, `${family} analysis output`);
+      await record(
         page,
-        () => {
-          const message = document.querySelector('#message')?.textContent ?? '';
-          const lines = document.querySelector('#lines')?.innerText?.trim() ?? '';
-          const failed = /failed|error|unavailable/i.test(message);
-          return { ok: lines.length > 0 || failed, message, lines: lines.slice(0, 80) };
-        },
-        null,
-        args.timeoutMs,
-        `${family} analysis output`,
+        { ...meta(`analysis-cpu-${family}`, family), note: 'depth 2, sampled after this family settled or the run failed' },
+        checkpoints,
+        args,
       );
-      await record(page, { ...meta(`analysis-cpu-${family}`, family), note: 'depth 2, sampled after a line or a failure message' }, checkpoints, args);
     } catch (error) {
       await shot(page, args.screenshotDir, `fail-analysis-${family}.png`);
       checkpoints.push({ ...meta(`analysis-cpu-${family}`, family), ok: false, error: error?.message ?? String(error) });
@@ -486,20 +482,10 @@ async function runAnalysis(page, args, run) {
   }
 
   try {
+    const previousMessage = await page.evaluate(() => document.querySelector('#message')?.textContent ?? '');
     await setAnalysisFamily(page, 'lc0', 8);
     await page.evaluate(() => document.querySelector('#analyze')?.click());
-    await waitFor(
-      page,
-      () => {
-        const family = document.querySelector('.row-fam')?.value;
-        const lines = document.querySelector('#lines')?.innerText?.trim() ?? '';
-        const message = document.querySelector('#message')?.textContent ?? '';
-        return { ok: family === 'lc0' && (lines.length > 0 || /Analyzing|failed|error/i.test(message)), family, message };
-      },
-      null,
-      args.timeoutMs,
-      'return to Lc0',
-    );
+    await waitFor(page, analysisSampleReady, { family: 'lc0', previousMessage }, args.timeoutMs, 'return to Lc0');
     await stopAnalysis(page, 15_000);
     await record(page, { ...meta('analysis-after-cpu', 'lc0'), note: 'row switched back to Lc0 after every CPU family' }, checkpoints, args);
   } catch (error) {

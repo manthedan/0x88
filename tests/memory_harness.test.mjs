@@ -4,9 +4,11 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { installWorkerHook, samplePage } from '../scripts/memory_harness/page_hooks.mjs';
 import {
   aggregateRetention,
+  analysisSampleReady,
   CPU_ANALYSIS_FAMILIES,
   CPU_PLAY_ENGINE_IDS,
   checkpointPlan,
@@ -152,6 +154,93 @@ test('summary takes the median of three runs and repeats a retention flag only o
   assert.match(markdown, /Still resident after switching away/);
   assert.equal(formatMib(NOISE), '8.0 MiB');
   assert.equal(summary.largest[0].id, 'play-cpu-stormphrax');
+});
+
+test('analysis sample waits for a changed family-named result or a new failure', () => {
+  const ready = (state) => analysisSampleReady(state).ok;
+  assert.equal(ready({ family: 'reckless', previousMessage: null, message: 'Make a move or press Analyze to begin.' }), false);
+  assert.equal(
+    ready({
+      family: 'reckless',
+      previousMessage: 'Analysis complete · Reckless Relaxed SIMD',
+      message: 'Analysis complete · Reckless Relaxed SIMD',
+    }),
+    false,
+  );
+  assert.equal(
+    ready({
+      family: 'reckless',
+      previousMessage: 'Analysis complete · SF Lite',
+      message: 'Analysis complete · Reckless Relaxed SIMD',
+    }),
+    true,
+  );
+  assert.equal(ready({ family: 'reckless', previousMessage: '', message: 'Downloading Reckless …' }), false);
+  assert.equal(ready({ family: 'reckless', previousMessage: '', message: 'Analyzing (Reckless Relaxed SIMD, 1 lines)…' }), false);
+  assert.equal(ready({ family: 'lc0', previousMessage: 'Analysis complete · Stormphrax', message: 'Lc0: 100/100000 visits' }), true);
+  assert.equal(ready({ family: 'reckless', previousMessage: '', message: 'Analysis complete · SF Lite' }), false);
+  assert.equal(ready({ family: 'reckless', previousMessage: 'Downloading Reckless', message: 'Reckless asset missing' }), true);
+  assert.equal(ready({ family: 'sf', previousMessage: 'idle', message: 'Analysis complete · SF Lite' }), true);
+  assert.equal(ready({ family: 'plentychess', previousMessage: 'idle', message: 'Analysis complete · PlentyChess' }), true);
+  assert.equal(ready({ family: 'viridithas', previousMessage: 'idle', message: 'Analysis failed: HTTP 404' }), true);
+  assert.equal(
+    ready({
+      family: 'sf',
+      previousMessage: 'Analysis complete · Reckless Relaxed SIMD',
+      message: 'Analyzing (SF Lite, 1 lines)…',
+      progress: 'SF Lite: searching…',
+    }),
+    true,
+  );
+  assert.equal(
+    ready({
+      family: 'reckless',
+      previousMessage: 'Analysis complete · SF Lite',
+      message: 'Analyzing (Reckless Relaxed SIMD, 1 lines)…',
+      progress: 'SF Lite: 2/2 nodes',
+    }),
+    false,
+  );
+});
+
+test('analysis sample predicate serializes without module bindings', () => {
+  const source = analysisSampleReady.toString();
+  const fn = runInNewContext(`(${source})`, {
+    document: {
+      querySelector(selector) {
+        if (selector === '#message') return { textContent: 'Analyzing (Lc0, 1 lines)…' };
+        if (selector === '#analysisSearchProgress') return { textContent: 'Lc0: 3/100000 visits 0%' };
+        throw new Error(`unexpected selector ${selector}`);
+      },
+    },
+  });
+  const ready = fn({ family: 'lc0', previousMessage: 'Analysis complete · SF Lite' });
+  assert.equal(ready.ok, true);
+  assert.equal(ready.message, 'Analyzing (Lc0, 1 lines)…');
+});
+
+function retentionRun(unreleased) {
+  return [
+    {
+      id: 'arena-stop',
+      baselineId: 'a',
+      afterId: 'b',
+      meaning: 'stop',
+      missing: false,
+      unreleased,
+      keptBytes: unreleased ? 3 : 0,
+      gainedBytes: 4,
+      releasedBytes: unreleased ? 1 : 4,
+      peakBytes: 5,
+    },
+  ];
+}
+
+test('repeated retention requires a strict majority, so ties stay quiet', () => {
+  assert.equal(aggregateRetention([retentionRun(true), retentionRun(false)])[0].repeated, false);
+  assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(false), retentionRun(false)])[0].repeated, false);
+  assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(true), retentionRun(false)])[0].repeated, true);
+  assert.equal(aggregateRetention([retentionRun(true), retentionRun(true), retentionRun(false)])[0].repeated, true);
 });
 
 test('one flagged run out of three is not called repeated', () => {
