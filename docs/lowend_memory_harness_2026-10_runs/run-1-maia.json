@@ -3,21 +3,13 @@
   "kind": "phase-run",
   "run": 1,
   "phase": "maia",
-  "baseUrl": "http://127.0.0.1:5186",
-  "startedAt": "2026-10-12T05:13:43.255Z",
-  "finishedAt": "2026-10-12T05:14:15.564Z",
-  "durationMs": 32309,
+  "baseUrl": "http://127.0.0.1:5189",
+  "startedAt": "2026-10-13T19:38:07.498Z",
+  "finishedAt": "2026-10-13T19:38:40.590Z",
+  "durationMs": 33092,
   "loadavg": {
-    "start": [
-      2.8369140625,
-      2.6591796875,
-      2.56689453125
-    ],
-    "end": [
-      2.47265625,
-      2.5849609375,
-      2.54296875
-    ]
+    "start": [9.30517578125, 8.478515625, 6.16259765625],
+    "end": [6.45849609375, 7.8720703125, 6.0224609375]
   },
   "host": {
     "platform": "darwin",
@@ -25,8 +17,8 @@
     "cpu": "Apple M4",
     "cpuCount": 10,
     "totalMemBytes": 25769803776,
-    "freeMemBytes": 868007936,
-    "node": "v25.9.0",
+    "freeMemBytes": 766214144,
+    "node": "v24.16.0",
     "browser": "151.0.7922.34"
   },
   "pageErrors": [],
@@ -53,37 +45,34 @@
         "analysisFamily": "lc0",
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": true
+        "maiaHidden": true,
+        "maiaPanelStatus": ""
       },
-      "userAgentSpecificBytes": 4007477,
+      "userAgentSpecificBytes": 259037180,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 11035,
+      "measureLatencyMs": 10015,
       "breakdownTop": [
         {
-          "bytes": 3325845,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/analysis/"
-          ]
+          "bytes": 255009576,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/searchWorker-BrDSn2jb.js"]
         },
         {
-          "bytes": 445128,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 3347021,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/analysis/"]
+        },
+        {
+          "bytes": 444079,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
           "bytes": 236504,
-          "types": [
-            "DOM"
-          ],
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -94,14 +83,14 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 3440554,
-      "totalJSHeapSize": 6437622,
+      "usedJSHeapSize": 3456395,
+      "totalJSHeapSize": 6966127,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
         "live": 1,
         "created": 1,
         "serviceWorkers": 1,
-        "breakdownScopes": 0
+        "breakdownScopes": 1
       }
     },
     {
@@ -111,6 +100,7 @@
       "resident": "maia3",
       "run": 1,
       "note": "Maia3 model loaded and the rating grid painted",
+      "engineFailed": false,
       "ok": true,
       "crossOriginIsolated": true,
       "deviceMemory": 16,
@@ -126,61 +116,40 @@
         "analysisFamily": "lc0",
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": false
+        "maiaHidden": false,
+        "maiaPanelStatus": ""
       },
-      "userAgentSpecificBytes": 229355332,
+      "userAgentSpecificBytes": 229305388,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 17012,
+      "measureLatencyMs": 13017,
       "breakdownTop": [
         {
           "bytes": 117757885,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 107287140,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/searchWorker-l89oL0Da.js"
-          ]
+          "bytes": 107287907,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/searchWorker-BrDSn2jb.js"]
         },
         {
-          "bytes": 3484290,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/analysis/"
-          ]
+          "bytes": 3431013,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/analysis/"]
         },
         {
-          "bytes": 580561,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 583127,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
           "bytes": 245456,
-          "types": [
-            "DOM"
-          ],
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -191,8 +160,8 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 25004168,
-      "totalJSHeapSize": 27276100,
+      "usedJSHeapSize": 25278253,
+      "totalJSHeapSize": 27345693,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
         "live": 2,
@@ -223,37 +192,28 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 4681958,
+      "userAgentSpecificBytes": 4636903,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 1702,
+      "measureLatencyMs": 7700,
       "breakdownTop": [
         {
-          "bytes": 2589896,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 2482925,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 1758414,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/"
-          ]
+          "bytes": 1820330,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/"]
         },
         {
           "bytes": 333648,
-          "types": [
-            "DOM"
-          ],
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -264,8 +224,8 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 4142847,
-      "totalJSHeapSize": 5302999,
+      "usedJSHeapSize": 4087168,
+      "totalJSHeapSize": 4881072,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
         "live": 0,

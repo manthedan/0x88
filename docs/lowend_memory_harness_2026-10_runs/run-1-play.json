@@ -3,21 +3,13 @@
   "kind": "phase-run",
   "run": 1,
   "phase": "play",
-  "baseUrl": "http://127.0.0.1:5186",
-  "startedAt": "2026-10-11T21:52:20.480Z",
-  "finishedAt": "2026-10-11T22:00:35.589Z",
-  "durationMs": 495109,
+  "baseUrl": "http://127.0.0.1:5189",
+  "startedAt": "2026-10-13T19:38:45.896Z",
+  "finishedAt": "2026-10-13T19:44:14.507Z",
+  "durationMs": 328611,
   "loadavg": {
-    "start": [
-      2.4482421875,
-      3.3623046875,
-      3.6865234375
-    ],
-    "end": [
-      1.5283203125,
-      2.16845703125,
-      2.8984375
-    ]
+    "start": [6.10107421875, 7.7744140625, 5.99853515625],
+    "end": [3.2333984375, 7.279296875, 6.82421875]
   },
   "host": {
     "platform": "darwin",
@@ -25,8 +17,8 @@
     "cpu": "Apple M4",
     "cpuCount": 10,
     "totalMemBytes": 25769803776,
-    "freeMemBytes": 2228568064,
-    "node": "v25.9.0",
+    "freeMemBytes": 1546698752,
+    "node": "v24.16.0",
     "browser": "151.0.7922.34"
   },
   "pageErrors": [],
@@ -52,37 +44,28 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 1545462,
+      "userAgentSpecificBytes": 1545688,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 14027,
+      "measureLatencyMs": 18022,
       "breakdownTop": [
         {
-          "bytes": 1070826,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/"
-          ]
+          "bytes": 1077901,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/"]
         },
         {
-          "bytes": 306476,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 299627,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
           "bytes": 168160,
-          "types": [
-            "DOM"
-          ],
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -93,8 +76,8 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 1593099,
-      "totalJSHeapSize": 2990975,
+      "usedJSHeapSize": 1593802,
+      "totalJSHeapSize": 2466698,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
         "live": 0,
@@ -120,54 +103,39 @@
         "engine": "maia3",
         "engineNote": "",
         "playStatus": "Your move",
-        "moves": "1. e4",
+        "moves": "1. d4",
         "analysisMessage": null,
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 122275071,
+      "userAgentSpecificBytes": 122282405,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 15014,
+      "measureLatencyMs": 16005,
       "breakdownTop": [
         {
-          "bytes": 117900405,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 117900469,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 2912143,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/play/"
-          ]
+          "bytes": 2499564,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 1178443,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 1598244,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 284080,
-          "types": [
-            "DOM"
-          ],
+          "bytes": 284128,
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -178,8 +146,8 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 3770199,
-      "totalJSHeapSize": 4503083,
+      "usedJSHeapSize": 3775453,
+      "totalJSHeapSize": 4585821,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
         "live": 1,
@@ -210,61 +178,40 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 257391150,
+      "userAgentSpecificBytes": 257399364,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 16022,
+      "measureLatencyMs": 12017,
       "breakdownTop": [
         {
-          "bytes": 135006180,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 135006472,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/stockfish/stockfish-19-lite-single-relaxed.js"]
         },
         {
-          "bytes": 117894461,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 117894525,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 3377201,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/play/"
-          ]
+          "bytes": 3581847,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 819148,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 622312,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 294160,
-          "types": [
-            "DOM"
-          ],
+          "bytes": 294208,
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -275,8 +222,8 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 3884277,
-      "totalJSHeapSize": 5371657,
+      "usedJSHeapSize": 3890195,
+      "totalJSHeapSize": 4848187,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
         "live": 2,
@@ -307,79 +254,52 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 592464439,
+      "userAgentSpecificBytes": 592470443,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 16014,
+      "measureLatencyMs": 16021,
       "breakdownTop": [
         {
           "bytes": 334945924,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-single.js"
-          ]
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/stockfish/stockfish-19-single.js"]
         },
         {
           "bytes": 135003664,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/stockfish/stockfish-19-lite-single-relaxed.js"]
         },
         {
-          "bytes": 117894473,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 117894537,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 2922164,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/play/"
-          ]
+          "bytes": 2657965,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 1381206,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 1651297,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 317008,
-          "types": [
-            "DOM"
-          ],
+          "bytes": 317056,
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         }
       ],
-      "usedJSHeapSize": 3991088,
-      "totalJSHeapSize": 5633896,
+      "usedJSHeapSize": 3996562,
+      "totalJSHeapSize": 5110426,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
         "live": 3,
@@ -410,85 +330,58 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 592656727,
+      "userAgentSpecificBytes": 457661781,
       "userAgentSpecificError": null,
       "measureLatencyMs": 60003,
       "breakdownTop": [
         {
           "bytes": 334944340,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-single.js"
-          ]
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/stockfish/stockfish-19-single.js"]
         },
         {
-          "bytes": 135003660,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 117894549,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 117894485,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 3335616,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 3438635,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/play/"
-          ]
-        },
-        {
-          "bytes": 1035703,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 1147324,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 339904,
-          "types": [
-            "DOM"
-          ],
+          "bytes": 339952,
+          "types": ["DOM"],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
           "scopes": [],
           "urls": []
         }
       ],
-      "usedJSHeapSize": 4096830,
-      "totalJSHeapSize": 5634186,
+      "usedJSHeapSize": 4104827,
+      "totalJSHeapSize": 5897035,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 4,
+        "live": 3,
         "created": 4,
         "serviceWorkers": 1,
-        "breakdownScopes": 3
+        "breakdownScopes": 2
       }
     },
     {
@@ -513,85 +406,52 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 592828777,
+      "userAgentSpecificBytes": 122887627,
       "userAgentSpecificError": null,
       "measureLatencyMs": 60005,
       "breakdownTop": [
         {
-          "bytes": 334944352,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-single.js"
-          ]
+          "bytes": 117894561,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 135003672,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 3452331,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 117894497,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
-        },
-        {
-          "bytes": 3750616,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/play/"
-          ]
-        },
-        {
-          "bytes": 872888,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 1177935,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 362752,
-          "types": [
-            "DOM"
-          ],
+          "bytes": 362800,
+          "types": ["DOM"],
+          "scopes": [],
+          "urls": []
+        },
+        {
+          "bytes": 0,
+          "types": [],
           "scopes": [],
           "urls": []
         }
       ],
-      "usedJSHeapSize": 4181413,
-      "totalJSHeapSize": 4847849,
+      "usedJSHeapSize": 4186583,
+      "totalJSHeapSize": 5110611,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 5,
+        "live": 3,
         "created": 5,
         "serviceWorkers": 1,
-        "breakdownScopes": 3
+        "breakdownScopes": 1
       }
     },
     {
@@ -616,89 +476,58 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 887215301,
+      "userAgentSpecificBytes": 417204669,
       "userAgentSpecificError": null,
       "measureLatencyMs": 60004,
       "breakdownTop": [
         {
-          "bytes": 334944364,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-single.js"
-          ]
+          "bytes": 294263496,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["http://127.0.0.1:5189/04718a25-40a3-4645-ae62-252727561124"]
         },
         {
-          "bytes": 294263852,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
-          ]
+          "bytes": 117894573,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 135003684,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 3892166,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 117894509,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 768898,
+          "types": ["Shared"],
+          "scopes": [],
+          "urls": []
         },
         {
-          "bytes": 3994321,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/play/"
-          ]
+          "bytes": 385536,
+          "types": ["DOM"],
+          "scopes": [],
+          "urls": []
         },
         {
-          "bytes": 728923,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 0,
+          "types": [],
           "scopes": [],
           "urls": []
         }
       ],
-      "usedJSHeapSize": 4275587,
-      "totalJSHeapSize": 5109859,
+      "usedJSHeapSize": 4279829,
+      "totalJSHeapSize": 5110477,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 6,
+        "live": 3,
         "created": 6,
         "serviceWorkers": 1,
-        "breakdownScopes": 4
+        "breakdownScopes": 2
       }
     },
     {
@@ -723,93 +552,58 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 1209381288,
+      "userAgentSpecificBytes": 739342558,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 60005,
+      "measureLatencyMs": 19007,
       "breakdownTop": [
         {
-          "bytes": 334929308,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-single.js"
-          ]
+          "bytes": 322302219,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["http://127.0.0.1:5189/f7ea7cbf-1ecb-4d06-a29d-a6671c973d97"]
         },
         {
-          "bytes": 322302719,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/6277e710-9ae6-43a5-8cf2-d52999211119"
-          ]
+          "bytes": 294261124,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["http://127.0.0.1:5189/04718a25-40a3-4645-ae62-252727561124"]
         },
         {
-          "bytes": 294261172,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
-          ]
+          "bytes": 117836009,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 134984060,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 3977739,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 117835945,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 557035,
+          "types": ["Shared"],
+          "scopes": [],
+          "urls": []
         },
         {
-          "bytes": 3947464,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/play/"
-          ]
+          "bytes": 408432,
+          "types": ["DOM"],
+          "scopes": [],
+          "urls": []
         }
       ],
-      "usedJSHeapSize": 4229817,
-      "totalJSHeapSize": 5371361,
+      "usedJSHeapSize": 4231267,
+      "totalJSHeapSize": 5371979,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 7,
+        "live": 3,
         "created": 7,
         "serviceWorkers": 1,
-        "breakdownScopes": 5
+        "breakdownScopes": 3
       }
     },
     {
@@ -834,93 +628,58 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 1802947703,
+      "userAgentSpecificBytes": 1038650887,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 60003,
+      "measureLatencyMs": 14010,
       "breakdownTop": [
         {
-          "bytes": 593509990,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/e992560f-4d12-4b93-bbad-604a084ad96e"
-          ]
+          "bytes": 593512246,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["http://127.0.0.1:5189/f518d1fd-1e6a-4cbd-9eae-44876316669a"]
         },
         {
-          "bytes": 334928976,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-single.js"
-          ]
+          "bytes": 322300207,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["http://127.0.0.1:5189/f7ea7cbf-1ecb-4d06-a29d-a6671c973d97"]
         },
         {
-          "bytes": 322300691,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/6277e710-9ae6-43a5-8cf2-d52999211119"
-          ]
+          "bytes": 117834817,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 294261184,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
-          ]
+          "bytes": 3935770,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 134983808,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 636567,
+          "types": ["Shared"],
+          "scopes": [],
+          "urls": []
         },
         {
-          "bytes": 117834753,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 431280,
+          "types": ["DOM"],
+          "scopes": [],
+          "urls": []
         }
       ],
-      "usedJSHeapSize": 4257309,
-      "totalJSHeapSize": 5369625,
+      "usedJSHeapSize": 4261059,
+      "totalJSHeapSize": 5370191,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 8,
+        "live": 3,
         "created": 8,
         "serviceWorkers": 1,
-        "breakdownScopes": 6
+        "breakdownScopes": 3
       }
     },
     {
@@ -945,93 +704,58 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 1316429658,
+      "userAgentSpecificBytes": 552159020,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 60004,
+      "measureLatencyMs": 18003,
       "breakdownTop": [
         {
-          "bytes": 334928988,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-single.js"
-          ]
+          "bytes": 322300203,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["http://127.0.0.1:5189/f7ea7cbf-1ecb-4d06-a29d-a6671c973d97"]
         },
         {
-          "bytes": 322300703,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/6277e710-9ae6-43a5-8cf2-d52999211119"
-          ]
+          "bytes": 117834829,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 294261196,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
-          ]
+          "bytes": 111012709,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/play/"]
         },
         {
-          "bytes": 134983544,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 557071,
+          "types": ["Shared"],
+          "scopes": [],
+          "urls": []
         },
         {
-          "bytes": 117834765,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 454208,
+          "types": ["DOM"],
+          "scopes": [],
+          "urls": []
         },
         {
-          "bytes": 109705200,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/play/"
-          ]
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
         }
       ],
-      "usedJSHeapSize": 7002386,
-      "totalJSHeapSize": 7724970,
+      "usedJSHeapSize": 7017008,
+      "totalJSHeapSize": 7774688,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 7,
+        "live": 2,
         "created": 8,
         "serviceWorkers": 1,
-        "breakdownScopes": 5
+        "breakdownScopes": 2
       }
     },
     {
@@ -1056,93 +780,58 @@
         "analysisFamily": null,
         "matchScore": null,
         "gameMoves": null,
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 1316247035,
+      "userAgentSpecificBytes": 552004381,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 60004,
+      "measureLatencyMs": 17009,
       "breakdownTop": [
         {
-          "bytes": 334929000,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-single.js"
-          ]
+          "bytes": 322300215,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["http://127.0.0.1:5189/f7ea7cbf-1ecb-4d06-a29d-a6671c973d97"]
         },
         {
-          "bytes": 322300715,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/6277e710-9ae6-43a5-8cf2-d52999211119"
-          ]
+          "bytes": 117834841,
+          "types": ["JavaScript"],
+          "scopes": ["DedicatedWorkerGlobalScope"],
+          "urls": ["/_app/immutable/workers/maia3Worker-9GZN6GLr.js"]
         },
         {
-          "bytes": 294238868,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "http://127.0.0.1:5186/a1ad6c78-578b-44ec-851d-fa04fd27fdb0"
-          ]
+          "bytes": 108430115,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/"]
         },
         {
-          "bytes": 134983556,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 3138914,
+          "types": ["Shared"],
+          "scopes": [],
+          "urls": []
         },
         {
-          "bytes": 117834777,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/_app/immutable/workers/maia3Worker-9GZN6GLr.js"
-          ]
+          "bytes": 300296,
+          "types": ["DOM"],
+          "scopes": [],
+          "urls": []
         },
         {
-          "bytes": 108852552,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/"
-          ]
+          "bytes": 0,
+          "types": [],
+          "scopes": [],
+          "urls": []
         }
       ],
-      "usedJSHeapSize": 7017806,
-      "totalJSHeapSize": 8070110,
+      "usedJSHeapSize": 7048336,
+      "totalJSHeapSize": 8070676,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 7,
+        "live": 2,
         "created": 8,
         "serviceWorkers": 1,
-        "breakdownScopes": 5
+        "breakdownScopes": 2
       }
     }
   ],

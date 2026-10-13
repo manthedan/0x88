@@ -3,21 +3,13 @@
   "kind": "phase-run",
   "run": 3,
   "phase": "arena",
-  "baseUrl": "http://127.0.0.1:5186",
-  "startedAt": "2026-10-12T04:49:43.212Z",
-  "finishedAt": "2026-10-12T04:52:00.935Z",
-  "durationMs": 137723,
+  "baseUrl": "http://127.0.0.1:5189",
+  "startedAt": "2026-10-13T21:40:38.183Z",
+  "finishedAt": "2026-10-13T21:41:11.507Z",
+  "durationMs": 33324,
   "loadavg": {
-    "start": [
-      2.0126953125,
-      2.42578125,
-      2.41650390625
-    ],
-    "end": [
-      2.1806640625,
-      2.25634765625,
-      2.3427734375
-    ]
+    "start": [3.1376953125, 3.69189453125, 4.06884765625],
+    "end": [2.86865234375, 3.56494140625, 4.0068359375]
   },
   "host": {
     "platform": "darwin",
@@ -25,8 +17,8 @@
     "cpu": "Apple M4",
     "cpuCount": 10,
     "totalMemBytes": 25769803776,
-    "freeMemBytes": 1265025024,
-    "node": "v25.9.0",
+    "freeMemBytes": 2257731584,
+    "node": "v24.16.0",
     "browser": "151.0.7922.34"
   },
   "pageErrors": [],
@@ -53,37 +45,28 @@
         "analysisFamily": null,
         "matchScore": "No games played yet.",
         "gameMoves": "",
-        "maiaHidden": null
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 4205063,
+      "userAgentSpecificBytes": 4233239,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 15015,
+      "measureLatencyMs": 10022,
       "breakdownTop": [
         {
-          "bytes": 3507957,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/arena/"
-          ]
+          "bytes": 3529226,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/arena/"]
         },
         {
-          "bytes": 415802,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 417525,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 281304,
-          "types": [
-            "DOM"
-          ],
+          "bytes": 286488,
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -94,8 +77,8 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 3592145,
-      "totalJSHeapSize": 5907197,
+      "usedJSHeapSize": 3608034,
+      "totalJSHeapSize": 5914458,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
         "live": 0,
@@ -111,6 +94,7 @@
       "resident": "sf+reckless",
       "run": 3,
       "note": "200 ms movetime, 1 game, sampled once a move or a result exists",
+      "engineFailed": false,
       "ok": true,
       "crossOriginIsolated": true,
       "deviceMemory": 16,
@@ -124,51 +108,30 @@
         "moves": null,
         "analysisMessage": "Match done (1 game).",
         "analysisFamily": null,
-        "matchScore": "Stockfish Lite 0 – 1 Reckless Relaxed SIMD · 0W 0D 1L over 1 game",
-        "gameMoves": "1. e4 e6 2. d4 d5 3. Nc3 Nf6 4. e5 Nfd7 5. f4 c5 6. Nf3 Be7 7. Be3 Nc6 8. Qd2 a6 9. a3 b6 10. Bd3 f6 11. O-O-O fxe5 12. fxe5 O-O 13. Ne2 cxd4 14. Nexd4 Nxd4 15.",
-        "maiaHidden": null
+        "matchScore": "Stockfish Lite ½ – ½ Reckless Relaxed SIMD · 0W 1D 0L over 1 game",
+        "gameMoves": "1. e4 e6 2. d4 d5 3. e5 c5 4. c3 Nc6 5. Nf3 Bd7 6. Be2 Nge7 7. O-O Ng6 8. Be3 Qb6 9. Nbd2 Qxb2 10. dxc5 Qxc3 11. Rb1 Rb8 12. Re1 Be7 13. Nb3 Qb4 14. Nbd4 Qa5 15",
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 139860557,
+      "userAgentSpecificBytes": 4888635,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 60001,
+      "measureLatencyMs": 14201,
       "breakdownTop": [
         {
-          "bytes": 135058608,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 3329505,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/arena/"]
         },
         {
-          "bytes": 4031347,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/arena/"
-          ]
-        },
-        {
-          "bytes": 468530,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 1252066,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 302072,
-          "types": [
-            "DOM"
-          ],
+          "bytes": 307064,
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -179,14 +142,14 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 4499792,
-      "totalJSHeapSize": 5220888,
+      "usedJSHeapSize": 4854587,
+      "totalJSHeapSize": 7750927,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 2,
+        "live": 0,
         "created": 2,
         "serviceWorkers": 1,
-        "breakdownScopes": 1
+        "breakdownScopes": 0
       }
     },
     {
@@ -209,51 +172,30 @@
         "moves": null,
         "analysisMessage": "Match done (1 game).",
         "analysisFamily": null,
-        "matchScore": "Stockfish Lite 0 – 1 Reckless Relaxed SIMD · 0W 0D 1L over 1 game",
-        "gameMoves": "1. e4 e6 2. d4 d5 3. Nc3 Nf6 4. e5 Nfd7 5. f4 c5 6. Nf3 Be7 7. Be3 Nc6 8. Qd2 a6 9. a3 b6 10. Bd3 f6 11. O-O-O fxe5 12. fxe5 O-O 13. Ne2 cxd4 14. Nexd4 Nxd4 15.",
-        "maiaHidden": null
+        "matchScore": "Stockfish Lite ½ – ½ Reckless Relaxed SIMD · 0W 1D 0L over 1 game",
+        "gameMoves": "1. e4 e6 2. d4 d5 3. e5 c5 4. c3 Nc6 5. Nf3 Bd7 6. Be2 Nge7 7. O-O Ng6 8. Be3 Qb6 9. Nbd2 Qxb2 10. dxc5 Qxc3 11. Rb1 Rb8 12. Re1 Be7 13. Nb3 Qb4 14. Nbd4 Qa5 15",
+        "maiaHidden": null,
+        "maiaPanelStatus": null
       },
-      "userAgentSpecificBytes": 140315241,
+      "userAgentSpecificBytes": 4974704,
       "userAgentSpecificError": null,
-      "measureLatencyMs": 60003,
+      "measureLatencyMs": 6785,
       "breakdownTop": [
         {
-          "bytes": 135064140,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "DedicatedWorkerGlobalScope"
-          ],
-          "urls": [
-            "/stockfish/stockfish-19-lite-single-relaxed.js"
-          ]
+          "bytes": 4170323,
+          "types": ["JavaScript"],
+          "scopes": ["Window"],
+          "urls": ["/app/arena/"]
         },
         {
-          "bytes": 4433783,
-          "types": [
-            "JavaScript"
-          ],
-          "scopes": [
-            "Window"
-          ],
-          "urls": [
-            "/app/arena/"
-          ]
-        },
-        {
-          "bytes": 468942,
-          "types": [
-            "Shared"
-          ],
+          "bytes": 476645,
+          "types": ["Shared"],
           "scopes": [],
           "urls": []
         },
         {
-          "bytes": 348376,
-          "types": [
-            "DOM"
-          ],
+          "bytes": 327736,
+          "types": ["DOM"],
           "scopes": [],
           "urls": []
         },
@@ -264,14 +206,14 @@
           "urls": []
         }
       ],
-      "usedJSHeapSize": 4501417,
-      "totalJSHeapSize": 5220893,
+      "usedJSHeapSize": 4303239,
+      "totalJSHeapSize": 6439739,
       "jsHeapSizeLimit": 4395630592,
       "workers": {
-        "live": 2,
+        "live": 0,
         "created": 2,
         "serviceWorkers": 1,
-        "breakdownScopes": 1
+        "breakdownScopes": 0
       }
     }
   ],
