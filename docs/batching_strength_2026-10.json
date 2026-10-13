@@ -1,0 +1,1478 @@
+{
+  "schema": 3,
+  "defaultsChanged": false,
+  "matches": [
+    {
+      "id": "lqo-v16",
+      "status": "complete",
+      "purpose": "product-comparison",
+      "targetGames": 40,
+      "kind": "equal-visit",
+      "visits": 16,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 100,
+      "observedOpeningUnits": 20,
+      "repeatedOpeningPairs": 0,
+      "recordedGames": 40,
+      "estimate": {
+        "games": 40,
+        "pairs": 20,
+        "unpairedGames": 0,
+        "wins": 20,
+        "draws": 0,
+        "losses": 20,
+        "score": 0.5,
+        "drawRate": 0,
+        "elo": 0,
+        "ci95": [-31.5, 31.5],
+        "pairCounts": {
+          "n0": 0,
+          "n05": 0,
+          "n1": 20,
+          "n15": 0,
+          "n2": 0
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": {
+        "pass": true,
+        "elo": 0,
+        "ciLow": -31.5,
+        "ciHigh": 31.5,
+        "reason": "point estimate >= -10 and 95% CI upper bound >= 0"
+      },
+      "openingUnitEstimate": null,
+      "colors": {
+        "white": {
+          "wins": 19,
+          "draws": 0,
+          "losses": 1
+        },
+        "black": {
+          "wins": 1,
+          "draws": 0,
+          "losses": 19
+        }
+      },
+      "reasons": {
+        "checkmate": 40
+      },
+      "arms": {
+        "lqo-logical": {
+          "moves": 1239,
+          "medianMs": 79.21,
+          "p10Ms": 48.37,
+          "p90Ms": 105.98,
+          "medianVisits": 16,
+          "p10Visits": 16,
+          "p90Visits": 16,
+          "minVisits": 16,
+          "maxVisits": 16
+        },
+        "lqo-serial": {
+          "moves": 1239,
+          "medianMs": 173.38,
+          "p10Ms": 79.32,
+          "p90Ms": 247.89,
+          "medianVisits": 16,
+          "p10Visits": 16,
+          "p90Visits": 16,
+          "minVisits": 16,
+          "maxVisits": 16
+        }
+      },
+      "identicalMovePairs": 2,
+      "identicalResultPairs": 20,
+      "medianFirstDivergencePly": 13,
+      "queenSideScore": 1,
+      "earlyStop": null,
+      "backends": {
+        "lqo-logical": "webgpu->webgpu",
+        "lqo-serial": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "lqo-serial",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "lqo-logical",
+          "logical": 4,
+          "ortPhysicalBatchSize": 4,
+          "expected": 4,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": 0,
+        "ci95": [-108.5, 108.5],
+        "method": "pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/lqo-v16/games.jsonl",
+        "pgn": "artifacts/batching-strength/lqo-v16/games.pgn",
+        "gamesSha256": "95bdfb303605f7dea63a7804ac06d5685c40d8613ea3fa5eadf5410c65a68825",
+        "pgnSha256": "4996dd704f8ea83b05e1a2f0e2a40ca568614d368df5c4df72be8023076709ea"
+      }
+    },
+    {
+      "id": "lqo-v32",
+      "status": "complete",
+      "purpose": "product-comparison",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 32,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 100,
+      "observedOpeningUnits": 100,
+      "repeatedOpeningPairs": 0,
+      "recordedGames": 200,
+      "estimate": {
+        "games": 200,
+        "pairs": 100,
+        "unpairedGames": 0,
+        "wins": 99,
+        "draws": 2,
+        "losses": 99,
+        "score": 0.5,
+        "drawRate": 0.01,
+        "elo": 0,
+        "ci95": [-7.5, 7.5],
+        "pairCounts": {
+          "n0": 0,
+          "n05": 1,
+          "n1": 98,
+          "n15": 1,
+          "n2": 0
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": {
+        "pass": true,
+        "elo": 0,
+        "ciLow": -7.5,
+        "ciHigh": 7.5,
+        "reason": "point estimate >= -10 and 95% CI upper bound >= 0"
+      },
+      "openingUnitEstimate": null,
+      "colors": {
+        "white": {
+          "wins": 78,
+          "draws": 1,
+          "losses": 21
+        },
+        "black": {
+          "wins": 21,
+          "draws": 1,
+          "losses": 78
+        }
+      },
+      "reasons": {
+        "checkmate": 198,
+        "threefold": 1,
+        "max plies": 1
+      },
+      "arms": {
+        "lqo-logical": {
+          "moves": 6641,
+          "medianMs": 157.8,
+          "p10Ms": 86.14,
+          "p90Ms": 203.07,
+          "medianVisits": 32,
+          "p10Visits": 32,
+          "p90Visits": 32,
+          "minVisits": 32,
+          "maxVisits": 32
+        },
+        "lqo-serial": {
+          "moves": 6641,
+          "medianMs": 365.75,
+          "p10Ms": 167.95,
+          "p90Ms": 486.83,
+          "medianVisits": 32,
+          "p10Visits": 32,
+          "p90Visits": 32,
+          "minVisits": 32,
+          "maxVisits": 32
+        }
+      },
+      "identicalMovePairs": 25,
+      "identicalResultPairs": 98,
+      "medianFirstDivergencePly": 15,
+      "queenSideScore": 0.995,
+      "earlyStop": null,
+      "backends": {
+        "lqo-logical": "webgpu->webgpu",
+        "lqo-serial": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "lqo-serial",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "lqo-logical",
+          "logical": 4,
+          "ortPhysicalBatchSize": 4,
+          "expected": 4,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": 0,
+        "ci95": [-47.5, 47.5],
+        "method": "pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/lqo-v32/games.jsonl",
+        "pgn": "artifacts/batching-strength/lqo-v32/games.pgn",
+        "gamesSha256": "bf2235ec3d76485fbb8526ccdd19701498552c2b17044078ace5771425b71b9b",
+        "pgnSha256": "5eba52d2d17bf39938ea6b0ba4b595297b4064bc51b3b03122d54ab67329e894"
+      }
+    },
+    {
+      "id": "lqo-v64",
+      "status": "complete",
+      "purpose": "product-comparison",
+      "targetGames": 80,
+      "kind": "equal-visit",
+      "visits": 64,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 100,
+      "observedOpeningUnits": 40,
+      "repeatedOpeningPairs": 0,
+      "recordedGames": 80,
+      "estimate": {
+        "games": 80,
+        "pairs": 40,
+        "unpairedGames": 0,
+        "wins": 40,
+        "draws": 0,
+        "losses": 40,
+        "score": 0.5,
+        "drawRate": 0,
+        "elo": 0,
+        "ci95": [-16, 16],
+        "pairCounts": {
+          "n0": 0,
+          "n05": 0,
+          "n1": 40,
+          "n15": 0,
+          "n2": 0
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": {
+        "pass": true,
+        "elo": 0,
+        "ciLow": -16,
+        "ciHigh": 16,
+        "reason": "point estimate >= -10 and 95% CI upper bound >= 0"
+      },
+      "openingUnitEstimate": null,
+      "colors": {
+        "white": {
+          "wins": 39,
+          "draws": 0,
+          "losses": 1
+        },
+        "black": {
+          "wins": 1,
+          "draws": 0,
+          "losses": 39
+        }
+      },
+      "reasons": {
+        "checkmate": 80
+      },
+      "arms": {
+        "lqo-logical": {
+          "moves": 2898,
+          "medianMs": 339.65,
+          "p10Ms": 170.47,
+          "p90Ms": 405.38,
+          "medianVisits": 64,
+          "p10Visits": 64,
+          "p90Visits": 64,
+          "minVisits": 64,
+          "maxVisits": 64
+        },
+        "lqo-serial": {
+          "moves": 2898,
+          "medianMs": 811.47,
+          "p10Ms": 332.04,
+          "p90Ms": 993.22,
+          "medianVisits": 64,
+          "p10Visits": 64,
+          "p90Visits": 64,
+          "minVisits": 64,
+          "maxVisits": 64
+        }
+      },
+      "identicalMovePairs": 11,
+      "identicalResultPairs": 40,
+      "medianFirstDivergencePly": 18,
+      "queenSideScore": 1,
+      "earlyStop": null,
+      "backends": {
+        "lqo-logical": "webgpu->webgpu",
+        "lqo-serial": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "lqo-serial",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "lqo-logical",
+          "logical": 4,
+          "ortPhysicalBatchSize": 4,
+          "expected": 4,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": 0,
+        "ci95": [-76, 76],
+        "method": "pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/lqo-v64/games.jsonl",
+        "pgn": "artifacts/batching-strength/lqo-v64/games.pgn",
+        "gamesSha256": "6b423628c8369246747cb8971f24301fabfa40922945ec78c3d757067af14bed",
+        "pgnSha256": "a30e5fd7c4bf7a703ca653e3f5c77ac16a68c02ff64bfc0cde9ea5380949df74"
+      }
+    },
+    {
+      "id": "lqo-v256",
+      "status": "partial",
+      "purpose": "product-comparison",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 256,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 100,
+      "observedOpeningUnits": 46,
+      "repeatedOpeningPairs": 0,
+      "recordedGames": 92,
+      "estimate": {
+        "games": 92,
+        "pairs": 46,
+        "unpairedGames": 0,
+        "wins": 46,
+        "draws": 1,
+        "losses": 45,
+        "score": 0.5054347826086957,
+        "drawRate": 0.010869565217391304,
+        "elo": 3.8,
+        "ci95": [-14, 29],
+        "pairCounts": {
+          "n0": 0,
+          "n05": 1,
+          "n1": 44,
+          "n15": 0,
+          "n2": 1
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": null,
+      "openingUnitEstimate": null,
+      "colors": {
+        "white": {
+          "wins": 44,
+          "draws": 1,
+          "losses": 1
+        },
+        "black": {
+          "wins": 2,
+          "draws": 0,
+          "losses": 44
+        }
+      },
+      "reasons": {
+        "checkmate": 91,
+        "max plies": 1
+      },
+      "arms": {
+        "lqo-logical": {
+          "moves": 3242,
+          "medianMs": 2004.69,
+          "p10Ms": 674.86,
+          "p90Ms": 3307.36,
+          "medianVisits": 256,
+          "p10Visits": 256,
+          "p90Visits": 256,
+          "minVisits": 256,
+          "maxVisits": 256
+        },
+        "lqo-serial": {
+          "moves": 3242,
+          "medianMs": 4310.94,
+          "p10Ms": 1229.32,
+          "p90Ms": 6481.28,
+          "medianVisits": 256,
+          "p10Visits": 256,
+          "p90Visits": 256,
+          "minVisits": 256,
+          "maxVisits": 256
+        }
+      },
+      "identicalMovePairs": 19,
+      "identicalResultPairs": 44,
+      "medianFirstDivergencePly": 4,
+      "queenSideScore": 0.9836956521739131,
+      "earlyStop": {
+        "games": 88,
+        "elo": null,
+        "ci95": null,
+        "reason": "cut by user request 2026-10-12 ~22:55 PDT: saturated queen-odds suite cannot detect degradation; remaining games add hours not information. Partial result, not a gate stop.",
+        "cutBy": "user"
+      },
+      "backends": {
+        "lqo-logical": "webgpu->webgpu",
+        "lqo-serial": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "lqo-serial",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "lqo-logical",
+          "logical": 4,
+          "ortPhysicalBatchSize": 4,
+          "expected": 4,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": 3.8,
+        "ci95": [-14, 29],
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/lqo-v256/games.jsonl",
+        "pgn": "artifacts/batching-strength/lqo-v256/games.pgn",
+        "gamesSha256": "17960de6b2c793333447d4dcc18007a3fb88d44d3617799adbc760056b37c007",
+        "pgnSha256": "2e63e5b5ee83aa8700188791e404a0d3d8465ded5b6daa9933debaf57ab26dca"
+      }
+    },
+    {
+      "id": "lqo-time",
+      "status": "not-run",
+      "purpose": "product-comparison",
+      "targetGames": 200,
+      "kind": "equal-time",
+      "visits": 100000,
+      "movetimeMs": 1600,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 100,
+      "observedOpeningUnits": 0,
+      "repeatedOpeningPairs": 0,
+      "recordedGames": 0,
+      "estimate": null,
+      "gate": null,
+      "openingUnitEstimate": null,
+      "colors": {
+        "white": {
+          "wins": 0,
+          "draws": 0,
+          "losses": 0
+        },
+        "black": {
+          "wins": 0,
+          "draws": 0,
+          "losses": 0
+        }
+      },
+      "reasons": {},
+      "arms": {},
+      "identicalMovePairs": 0,
+      "identicalResultPairs": 0,
+      "medianFirstDivergencePly": null,
+      "queenSideScore": null,
+      "earlyStop": {
+        "games": 0,
+        "elo": null,
+        "ci95": null,
+        "reason": "skipped by user request 2026-10-13 ~01:00 PDT: equal-time on the saturated queen-odds suite cannot detect degradation (same flaw as equal-visit LQO). Not run.",
+        "cutBy": "user"
+      },
+      "backends": {},
+      "probes": [],
+      "originalSummary": null,
+      "files": {
+        "games": "artifacts/batching-strength/lqo-time/games.jsonl",
+        "pgn": "artifacts/batching-strength/lqo-time/games.pgn",
+        "gamesSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "pgnSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "b1-v8",
+      "status": "complete",
+      "purpose": "diagnostic-only",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 8,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 16,
+      "observedOpeningUnits": 16,
+      "repeatedOpeningPairs": 84,
+      "recordedGames": 200,
+      "estimate": {
+        "games": 200,
+        "pairs": 100,
+        "unpairedGames": 0,
+        "wins": 100,
+        "draws": 38,
+        "losses": 62,
+        "score": 0.595,
+        "drawRate": 0.19,
+        "elo": 66.8,
+        "ci95": [22, 111.5],
+        "pairCounts": {
+          "n0": 12,
+          "n05": 7,
+          "n1": 37,
+          "n15": 19,
+          "n2": 25
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": null,
+      "openingUnitEstimate": {
+        "games": 32,
+        "pairs": 16,
+        "unpairedGames": 0,
+        "wins": 16,
+        "draws": 6,
+        "losses": 10,
+        "score": 0.59375,
+        "drawRate": 0.1875,
+        "elo": 65.9,
+        "ci95": [-50, 182],
+        "pairCounts": {
+          "n0": 2,
+          "n05": 1,
+          "n1": 6,
+          "n15": 3,
+          "n2": 4
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "colors": {
+        "white": {
+          "wins": 56,
+          "draws": 20,
+          "losses": 24
+        },
+        "black": {
+          "wins": 44,
+          "draws": 18,
+          "losses": 38
+        }
+      },
+      "reasons": {
+        "checkmate": 162,
+        "max plies": 31,
+        "threefold": 7
+      },
+      "arms": {
+        "small-b8": {
+          "moves": 10505,
+          "medianMs": 34.25,
+          "p10Ms": 32.13,
+          "p90Ms": 36.69,
+          "medianVisits": 8,
+          "p10Visits": 8,
+          "p90Visits": 8,
+          "minVisits": 8,
+          "maxVisits": 8
+        },
+        "small-b1-search8": {
+          "moves": 10492,
+          "medianMs": 77.9,
+          "p10Ms": 35.75,
+          "p90Ms": 87.41,
+          "medianVisits": 8,
+          "p10Visits": 8,
+          "p90Visits": 8,
+          "minVisits": 8,
+          "maxVisits": 8
+        }
+      },
+      "identicalMovePairs": 0,
+      "identicalResultPairs": 37,
+      "medianFirstDivergencePly": 4,
+      "queenSideScore": null,
+      "earlyStop": null,
+      "backends": {
+        "small-b8": "webgpu->webgpu",
+        "small-b1-search8": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "small-b1-search8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "small-b8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 8,
+          "expected": 8,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": 65,
+        "ci95": [22, 108],
+        "method": "pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/b1-v8/games.jsonl",
+        "pgn": "artifacts/batching-strength/b1-v8/games.pgn",
+        "gamesSha256": "716ab1f4e29d228705ee9ae8e39bec025d93e2d37be5875523578d3b80e6f31e",
+        "pgnSha256": "0828e825225e607d83f070f9f018e3ad24c49edcc9cace065060bdffb3bbddb1"
+      }
+    },
+    {
+      "id": "b1-v32",
+      "status": "complete",
+      "purpose": "diagnostic-only",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 32,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 16,
+      "observedOpeningUnits": 16,
+      "repeatedOpeningPairs": 84,
+      "recordedGames": 200,
+      "estimate": {
+        "games": 200,
+        "pairs": 100,
+        "unpairedGames": 0,
+        "wins": 107,
+        "draws": 30,
+        "losses": 63,
+        "score": 0.61,
+        "drawRate": 0.15,
+        "elo": 77.7,
+        "ci95": [34, 123],
+        "pairCounts": {
+          "n0": 7,
+          "n05": 12,
+          "n1": 43,
+          "n15": 6,
+          "n2": 32
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": null,
+      "openingUnitEstimate": {
+        "games": 32,
+        "pairs": 16,
+        "unpairedGames": 0,
+        "wins": 17,
+        "draws": 5,
+        "losses": 10,
+        "score": 0.609375,
+        "drawRate": 0.15625,
+        "elo": 77.2,
+        "ci95": [-31, 196],
+        "pairCounts": {
+          "n0": 1,
+          "n05": 2,
+          "n1": 7,
+          "n15": 1,
+          "n2": 5
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "colors": {
+        "white": {
+          "wins": 69,
+          "draws": 6,
+          "losses": 25
+        },
+        "black": {
+          "wins": 38,
+          "draws": 24,
+          "losses": 38
+        }
+      },
+      "reasons": {
+        "checkmate": 170,
+        "max plies": 6,
+        "insufficientMaterial": 6,
+        "threefold": 18
+      },
+      "arms": {
+        "small-b8": {
+          "moves": 10974,
+          "medianMs": 68.85,
+          "p10Ms": 50.72,
+          "p90Ms": 73.35,
+          "medianVisits": 32,
+          "p10Visits": 32,
+          "p90Visits": 32,
+          "minVisits": 32,
+          "maxVisits": 32
+        },
+        "small-b1-search8": {
+          "moves": 10949,
+          "medianMs": 228.39,
+          "p10Ms": 105.04,
+          "p90Ms": 281.99,
+          "medianVisits": 32,
+          "p10Visits": 32,
+          "p90Visits": 32,
+          "minVisits": 32,
+          "maxVisits": 32
+        }
+      },
+      "identicalMovePairs": 19,
+      "identicalResultPairs": 43,
+      "medianFirstDivergencePly": 9,
+      "queenSideScore": null,
+      "earlyStop": null,
+      "backends": {
+        "small-b8": "webgpu->webgpu",
+        "small-b1-search8": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "small-b1-search8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "small-b8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 8,
+          "expected": 8,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": 74.5,
+        "ci95": [31, 119],
+        "method": "pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/b1-v32/games.jsonl",
+        "pgn": "artifacts/batching-strength/b1-v32/games.pgn",
+        "gamesSha256": "e4ef1f496a1c012e963fe4a037933011f822700d7758dd3f8aa2d1d9337befea",
+        "pgnSha256": "d3dd3e68a53dbe22d770b167bee0b3e9fbe806dda1c7df53503b19596c3c31fb"
+      }
+    },
+    {
+      "id": "b1-v100",
+      "status": "complete",
+      "purpose": "diagnostic-only",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 100,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 16,
+      "observedOpeningUnits": 16,
+      "repeatedOpeningPairs": 84,
+      "recordedGames": 200,
+      "estimate": {
+        "games": 200,
+        "pairs": 100,
+        "unpairedGames": 0,
+        "wins": 63,
+        "draws": 78,
+        "losses": 59,
+        "score": 0.51,
+        "drawRate": 0.39,
+        "elo": 6.9,
+        "ci95": [-24, 38.5],
+        "pairCounts": {
+          "n0": 5,
+          "n05": 18,
+          "n1": 52,
+          "n15": 18,
+          "n2": 7
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": null,
+      "openingUnitEstimate": {
+        "games": 32,
+        "pairs": 16,
+        "unpairedGames": 0,
+        "wins": 10,
+        "draws": 13,
+        "losses": 9,
+        "score": 0.515625,
+        "drawRate": 0.40625,
+        "elo": 10.9,
+        "ci95": [-50.5, 87.5],
+        "pairCounts": {
+          "n0": 0,
+          "n05": 3,
+          "n1": 10,
+          "n15": 2,
+          "n2": 1
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "colors": {
+        "white": {
+          "wins": 30,
+          "draws": 38,
+          "losses": 32
+        },
+        "black": {
+          "wins": 33,
+          "draws": 40,
+          "losses": 27
+        }
+      },
+      "reasons": {
+        "threefold": 44,
+        "max plies": 27,
+        "checkmate": 122,
+        "insufficientMaterial": 7
+      },
+      "arms": {
+        "small-b8": {
+          "moves": 11054,
+          "medianMs": 215.24,
+          "p10Ms": 172,
+          "p90Ms": 299.38,
+          "medianVisits": 100,
+          "p10Visits": 100,
+          "p90Visits": 100,
+          "minVisits": 100,
+          "maxVisits": 100
+        },
+        "small-b1-search8": {
+          "moves": 11045,
+          "medianMs": 733.31,
+          "p10Ms": 441.88,
+          "p90Ms": 1079.72,
+          "medianVisits": 100,
+          "p10Visits": 100,
+          "p90Visits": 100,
+          "minVisits": 100,
+          "maxVisits": 100
+        }
+      },
+      "identicalMovePairs": 3,
+      "identicalResultPairs": 52,
+      "medianFirstDivergencePly": 17,
+      "queenSideScore": null,
+      "earlyStop": null,
+      "backends": {
+        "small-b8": "webgpu->webgpu",
+        "small-b1-search8": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "small-b1-search8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "small-b8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 8,
+          "expected": 8,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": 6.9,
+        "ci95": [-24, 38.5],
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/b1-v100/games.jsonl",
+        "pgn": "artifacts/batching-strength/b1-v100/games.pgn",
+        "gamesSha256": "3a11f355ef6c71f65687cb5b7a6f30898ffff44f5d8439d2b26eb7448a2061d9",
+        "pgnSha256": "ca19f056a2d15220e044c9e4989729bb7d5071539ea996b568a468c2793691e4"
+      }
+    },
+    {
+      "id": "b1-v400",
+      "status": "partial",
+      "purpose": "diagnostic-only",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 400,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 16,
+      "observedOpeningUnits": 14,
+      "repeatedOpeningPairs": 0,
+      "recordedGames": 29,
+      "estimate": {
+        "games": 28,
+        "pairs": 14,
+        "unpairedGames": 1,
+        "wins": 8,
+        "draws": 10,
+        "losses": 10,
+        "score": 0.4642857142857143,
+        "drawRate": 0.35714285714285715,
+        "elo": -24.9,
+        "ci95": [-119, 74],
+        "pairCounts": {
+          "n0": 1,
+          "n05": 4,
+          "n1": 6,
+          "n15": 2,
+          "n2": 1
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": null,
+      "openingUnitEstimate": null,
+      "colors": {
+        "white": {
+          "wins": 6,
+          "draws": 4,
+          "losses": 5
+        },
+        "black": {
+          "wins": 2,
+          "draws": 7,
+          "losses": 5
+        }
+      },
+      "reasons": {
+        "max plies": 6,
+        "checkmate": 18,
+        "insufficientMaterial": 3,
+        "threefold": 2
+      },
+      "arms": {
+        "small-b8": {
+          "moves": 1788,
+          "medianMs": 853.19,
+          "p10Ms": 608.7,
+          "p90Ms": 1174.75,
+          "medianVisits": 400,
+          "p10Visits": 400,
+          "p90Visits": 400,
+          "minVisits": 400,
+          "maxVisits": 400
+        },
+        "small-b1-search8": {
+          "moves": 1792,
+          "medianMs": 2967.12,
+          "p10Ms": 1503.73,
+          "p90Ms": 4353,
+          "medianVisits": 400,
+          "p10Visits": 400,
+          "p90Visits": 400,
+          "minVisits": 400,
+          "maxVisits": 400
+        }
+      },
+      "identicalMovePairs": 0,
+      "identicalResultPairs": 6,
+      "medianFirstDivergencePly": 20.5,
+      "queenSideScore": null,
+      "earlyStop": {
+        "games": 26,
+        "elo": null,
+        "ci95": null,
+        "reason": "cut by user request 2026-10-13 ~01:00 PDT: B1 is diagnostic only (artificial baseline; B2 already rejected the product lever). Partial result, not a gate stop.",
+        "cutBy": "user"
+      },
+      "backends": {
+        "small-b8": "webgpu->webgpu",
+        "small-b1-search8": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "small-b1-search8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "small-b8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 8,
+          "expected": 8,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": -24.9,
+        "ci95": [-119, 74],
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/b1-v400/games.jsonl",
+        "pgn": "artifacts/batching-strength/b1-v400/games.pgn",
+        "gamesSha256": "1d399a0421b970e212776b699a8fe6bb5a52dd66eecf26d583f2aae032c228b7",
+        "pgnSha256": "bd8bdbb529aeb9a906346d46e2a2d85c2789111565eb4744234bbc2ebd6b7bb0"
+      }
+    },
+    {
+      "id": "b2-v8",
+      "status": "complete",
+      "purpose": "product-comparison",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 8,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 16,
+      "observedOpeningUnits": 16,
+      "repeatedOpeningPairs": 84,
+      "recordedGames": 200,
+      "estimate": {
+        "games": 200,
+        "pairs": 100,
+        "unpairedGames": 0,
+        "wins": 12,
+        "draws": 37,
+        "losses": 151,
+        "score": 0.1525,
+        "drawRate": 0.185,
+        "elo": -297.9,
+        "ci95": [-351.5, -249.5],
+        "pairCounts": {
+          "n0": 57,
+          "n05": 25,
+          "n1": 18,
+          "n15": 0,
+          "n2": 0
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": null,
+      "openingUnitEstimate": {
+        "games": 32,
+        "pairs": 16,
+        "unpairedGames": 0,
+        "wins": 2,
+        "draws": 6,
+        "losses": 24,
+        "score": 0.15625,
+        "drawRate": 0.1875,
+        "elo": -293,
+        "ci95": [-437, -168.5],
+        "pairCounts": {
+          "n0": 9,
+          "n05": 4,
+          "n1": 3,
+          "n15": 0,
+          "n2": 0
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "colors": {
+        "white": {
+          "wins": 6,
+          "draws": 6,
+          "losses": 88
+        },
+        "black": {
+          "wins": 6,
+          "draws": 31,
+          "losses": 63
+        }
+      },
+      "reasons": {
+        "checkmate": 163,
+        "max plies": 19,
+        "threefold": 18
+      },
+      "arms": {
+        "small-b8": {
+          "moves": 9479,
+          "medianMs": 34.61,
+          "p10Ms": 32.33,
+          "p90Ms": 37.23,
+          "medianVisits": 8,
+          "p10Visits": 8,
+          "p90Visits": 8,
+          "minVisits": 8,
+          "maxVisits": 8
+        },
+        "small-b1": {
+          "moves": 9542,
+          "medianMs": 64.3,
+          "p10Ms": 31.32,
+          "p90Ms": 86.07,
+          "medianVisits": 8,
+          "p10Visits": 8,
+          "p90Visits": 8,
+          "minVisits": 8,
+          "maxVisits": 8
+        }
+      },
+      "identicalMovePairs": 0,
+      "identicalResultPairs": 18,
+      "medianFirstDivergencePly": 1,
+      "queenSideScore": null,
+      "earlyStop": null,
+      "backends": {
+        "small-b8": "webgpu->webgpu",
+        "small-b1": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "small-b1",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "small-b8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 8,
+          "expected": 8,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": -290.5,
+        "ci95": [-337, -240.5],
+        "method": "pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/b2-v8/games.jsonl",
+        "pgn": "artifacts/batching-strength/b2-v8/games.pgn",
+        "gamesSha256": "fbcba3ae746a2bbd1097a3e006faef519d6e404305d21c9fa24e330c72b3a61a",
+        "pgnSha256": "8810f9703d1b7dcdb56bcac80fe4d5d75ea8b4f55c4d3e9ad4b92ca157e3165f"
+      }
+    },
+    {
+      "id": "b2-v32",
+      "status": "complete",
+      "purpose": "product-comparison",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 32,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 16,
+      "observedOpeningUnits": 16,
+      "repeatedOpeningPairs": 84,
+      "recordedGames": 200,
+      "estimate": {
+        "games": 200,
+        "pairs": 100,
+        "unpairedGames": 0,
+        "wins": 24,
+        "draws": 113,
+        "losses": 63,
+        "score": 0.4025,
+        "drawRate": 0.565,
+        "elo": -68.6,
+        "ci95": [-94.5, -44.5],
+        "pairCounts": {
+          "n0": 7,
+          "n05": 31,
+          "n1": 56,
+          "n15": 6,
+          "n2": 0
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": null,
+      "openingUnitEstimate": {
+        "games": 32,
+        "pairs": 16,
+        "unpairedGames": 0,
+        "wins": 4,
+        "draws": 18,
+        "losses": 10,
+        "score": 0.40625,
+        "drawRate": 0.5625,
+        "elo": -65.9,
+        "ci95": [-137.5, -2.5],
+        "pairCounts": {
+          "n0": 1,
+          "n05": 5,
+          "n1": 9,
+          "n15": 1,
+          "n2": 0
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "colors": {
+        "white": {
+          "wins": 18,
+          "draws": 63,
+          "losses": 19
+        },
+        "black": {
+          "wins": 6,
+          "draws": 50,
+          "losses": 44
+        }
+      },
+      "reasons": {
+        "max plies": 37,
+        "threefold": 69,
+        "insufficientMaterial": 7,
+        "checkmate": 87
+      },
+      "arms": {
+        "small-b8": {
+          "moves": 10333,
+          "medianMs": 69.52,
+          "p10Ms": 52.95,
+          "p90Ms": 74.59,
+          "medianVisits": 32,
+          "p10Visits": 32,
+          "p90Visits": 32,
+          "minVisits": 32,
+          "maxVisits": 32
+        },
+        "small-b1": {
+          "moves": 10367,
+          "medianMs": 234.97,
+          "p10Ms": 101.84,
+          "p90Ms": 286.05,
+          "medianVisits": 32,
+          "p10Visits": 32,
+          "p90Visits": 32,
+          "minVisits": 32,
+          "maxVisits": 32
+        }
+      },
+      "identicalMovePairs": 0,
+      "identicalResultPairs": 56,
+      "medianFirstDivergencePly": 6,
+      "queenSideScore": null,
+      "earlyStop": null,
+      "backends": {
+        "small-b8": "webgpu->webgpu",
+        "small-b1": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "small-b1",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "small-b8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 8,
+          "expected": 8,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": -86,
+        "ci95": [-118.5, -50.5],
+        "method": "pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/b2-v32/games.jsonl",
+        "pgn": "artifacts/batching-strength/b2-v32/games.pgn",
+        "gamesSha256": "f1eca291891228812d3252d2c5f97bf6097c3b28c23691cae9d2aaa792a0ff59",
+        "pgnSha256": "e89bcefc902798c084d0d4b1f7cae18544d89144733189152d8733b3b375aca5"
+      }
+    },
+    {
+      "id": "b2-v100",
+      "status": "partial",
+      "purpose": "product-comparison",
+      "targetGames": 200,
+      "kind": "equal-visit",
+      "visits": 100,
+      "movetimeMs": null,
+      "build": "2026-10-11.1",
+      "requestedOpeningCount": 100,
+      "actualOpeningCount": 16,
+      "observedOpeningUnits": 16,
+      "repeatedOpeningPairs": 53,
+      "recordedGames": 139,
+      "estimate": {
+        "games": 138,
+        "pairs": 69,
+        "unpairedGames": 1,
+        "wins": 23,
+        "draws": 57,
+        "losses": 58,
+        "score": 0.37318840579710144,
+        "drawRate": 0.41304347826086957,
+        "elo": -90.1,
+        "ci95": [-136.5, -44],
+        "pairCounts": {
+          "n0": 12,
+          "n05": 27,
+          "n1": 16,
+          "n15": 12,
+          "n2": 2
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "gate": null,
+      "openingUnitEstimate": {
+        "games": 32,
+        "pairs": 16,
+        "unpairedGames": 0,
+        "wins": 9,
+        "draws": 10,
+        "losses": 13,
+        "score": 0.4375,
+        "drawRate": 0.3125,
+        "elo": -43.7,
+        "ci95": [-147.5, 42.5],
+        "pairCounts": {
+          "n0": 3,
+          "n05": 3,
+          "n1": 5,
+          "n15": 5,
+          "n2": 0
+        },
+        "method": "unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400"
+      },
+      "colors": {
+        "white": {
+          "wins": 12,
+          "draws": 27,
+          "losses": 31
+        },
+        "black": {
+          "wins": 11,
+          "draws": 30,
+          "losses": 28
+        }
+      },
+      "reasons": {
+        "threefold": 28,
+        "checkmate": 82,
+        "max plies": 20,
+        "insufficientMaterial": 9
+      },
+      "arms": {
+        "small-b8": {
+          "moves": 7776,
+          "medianMs": 209.13,
+          "p10Ms": 165.25,
+          "p90Ms": 236.94,
+          "medianVisits": 100,
+          "p10Visits": 100,
+          "p90Visits": 100,
+          "minVisits": 100,
+          "maxVisits": 100
+        },
+        "small-b1": {
+          "moves": 7794,
+          "medianMs": 665.02,
+          "p10Ms": 263.42,
+          "p90Ms": 889.04,
+          "medianVisits": 100,
+          "p10Visits": 100,
+          "p90Visits": 100,
+          "minVisits": 100,
+          "maxVisits": 100
+        }
+      },
+      "identicalMovePairs": 2,
+      "identicalResultPairs": 16,
+      "medianFirstDivergencePly": 8,
+      "queenSideScore": null,
+      "earlyStop": null,
+      "backends": {
+        "small-b8": "webgpu->webgpu",
+        "small-b1": "webgpu->webgpu"
+      },
+      "probes": [
+        {
+          "arm": "small-b1",
+          "logical": 4,
+          "ortPhysicalBatchSize": 1,
+          "expected": 1,
+          "ok": true
+        },
+        {
+          "arm": "small-b8",
+          "logical": 4,
+          "ortPhysicalBatchSize": 8,
+          "expected": 8,
+          "ok": true
+        }
+      ],
+      "originalSummary": {
+        "elo": -89.5,
+        "ci95": [-131.5, -45.5],
+        "method": "pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid"
+      },
+      "files": {
+        "games": "artifacts/batching-strength/b2-v100/games.jsonl",
+        "pgn": "artifacts/batching-strength/b2-v100/games.pgn",
+        "gamesSha256": "f55c1a830840259f967b879eeda99ddc7629e7764132c775bdcc85e90daf1780",
+        "pgnSha256": "c73e0ddc823449a04657dafcb6a6ed0e98cb43ceba7b417e257d1d2fcff65a53"
+      }
+    }
+  ],
+  "modelComparison": {
+    "files": [
+      {
+        "file": "public/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx",
+        "sha256": "9396c11226de7f29dbad8c60147b1082b8093adc7a0b77819cd0fb33103a095f",
+        "bytes": 20558031
+      },
+      {
+        "file": "public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx",
+        "sha256": "203237314baa01a05edc41f1a59f3e34c8f86c445bc47156ad8cab0c379d9273",
+        "bytes": 20558031
+      }
+    ],
+    "initializers": 473,
+    "sameInitializerNames": true,
+    "differentInitializers": ["/const/pos_encoding_shape"],
+    "shapeValues": {
+      "/const/pos_encoding_shape": [[1, 64, 64], [8, 64, 64]]
+    },
+    "nodes": 650,
+    "identicalSerializedNodes": true
+  }
+}

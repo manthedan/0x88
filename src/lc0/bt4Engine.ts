@@ -139,7 +139,7 @@ function latestBoard(input: Lc0EvaluatorInput): BoardState {
   return typeof input === 'string' ? parseFen(input) : input;
 }
 
-function swapColorsInput(input: Lc0EvaluatorInput): Lc0EvaluatorInput {
+export function swapColorsInput(input: Lc0EvaluatorInput): Lc0EvaluatorInput {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     return {
       positions: input.positions.map((position) => rankFlipColorSwapBoard(typeof position === 'string' ? parseFen(position) : position)),
@@ -148,7 +148,7 @@ function swapColorsInput(input: Lc0EvaluatorInput): Lc0EvaluatorInput {
   return rankFlipColorSwapBoard(latestBoard(input));
 }
 
-function swapColorsUci(uci: string): string {
+export function swapColorsUci(uci: string): string {
   return moveToUci(rankFlipMove(moveFromUci(uci)));
 }
 
