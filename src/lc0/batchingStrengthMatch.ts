@@ -1,6 +1,7 @@
 import type { OrtPhysicalBatchMode } from './ortPhysicalBatch.ts';
 
-export const BATCHING_STRENGTH_BUILD = '2026-10-11.1';
+// .1 evidence is historical/unseeded; never resume those checkpoints with .2.
+export const BATCHING_STRENGTH_BUILD = '2026-10-13.2';
 
 export const LQO_MODEL_URL = '/models/lc0/lqo_v2.f16.qdq8.onnx';
 export const SMALL_BATCH1_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';

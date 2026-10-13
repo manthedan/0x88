@@ -16,6 +16,7 @@ import {
   strengthMatch,
 } from './batchingStrengthMatch.ts';
 import { lqoQueenOddsOpenings, SMALL_NET_EPD_PATH, type StrengthOpening, scheduleGame, smallNetOpenings } from './batchingStrengthOpenings.ts';
+import { strengthSeed } from './batchingStrengthRandom.ts';
 import { BATCHING_STRENGTH_GENERATOR_VERSION, type ScoredGame, uciLineToPgn } from './batchingStrengthScore.ts';
 import { swapColorsInput, swapColorsUci } from './bt4Engine.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
@@ -56,6 +57,7 @@ export interface PhysicalProbe {
 
 export interface DeterminismProbe {
   arm: string;
+  visits: number;
   move1: string | null;
   move2: string | null;
   match: boolean;
@@ -65,6 +67,7 @@ export interface StrengthSnapshot {
   build: string;
   generatorVersion: number;
   matchId: string;
+  runToken: string;
   label: string;
   phase: 'idle' | 'loading' | 'probing' | 'thinking' | 'between' | 'paused' | 'done' | 'error';
   gamesDone: number;
@@ -112,7 +115,7 @@ function createWorker(arm: StrengthArm): WorkerClient {
 
   function ensure(): Worker {
     if (worker) return worker;
-    worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module', name: `batching-${arm.name}` });
+    worker = new Worker(new URL('./batchingStrengthWorker.ts', import.meta.url), { type: 'module', name: `batching-${arm.name}` });
     worker.addEventListener('message', (event: MessageEvent) => {
       const message = event.data as { id?: number; type?: string; error?: string };
       if (message.type === 'downloadProgress' || message.type === 'searchProgress') return;
@@ -180,7 +183,7 @@ function createWorker(arm: StrengthArm): WorkerClient {
       return backend;
     },
     async search(input, fields) {
-      const response = await post<{ result?: SearchPayload }>({ type: 'search', input, ...fields }, 180000);
+      const response = await post<{ result?: SearchPayload }>({ type: 'search', input, ...fields, randomSeed: strengthSeed(JSON.stringify(input)) }, 180000);
       return response.result ?? {};
     },
     async evaluateBatch(inputs) {
@@ -258,7 +261,15 @@ async function loadOpenings(spec: StrengthMatchSpec, openingCount: number): Prom
 
 export interface BatchingStrengthApi {
   startFromParams(params: URLSearchParams): Promise<void>;
-  start(options: { matchId: string; games?: number; startIndex?: number; movetimeMs?: number; maxPlies?: number; openingCount?: number }): Promise<void>;
+  start(options: {
+    matchId: string;
+    runToken?: string;
+    games?: number;
+    startIndex?: number;
+    movetimeMs?: number;
+    maxPlies?: number;
+    openingCount?: number;
+  }): Promise<void>;
   pause(): void;
   resume(): void;
   snapshot(): StrengthSnapshot;
@@ -272,6 +283,7 @@ export function installBatchingStrengthPage(): BatchingStrengthApi {
     build: BATCHING_STRENGTH_BUILD,
     generatorVersion: BATCHING_STRENGTH_GENERATOR_VERSION,
     matchId: '',
+    runToken: '',
     label: '',
     phase: 'idle',
     gamesDone: 0,
@@ -317,12 +329,23 @@ export function installBatchingStrengthPage(): BatchingStrengthApi {
     render();
     if (!row.ok) throw new FatalStrengthError(`${arm.name} physical batch ${row.ortPhysicalBatchSize} != expected ${expected}`);
     const fen = PROBE_FENS[0];
-    const once = await client.search(fen, { visits: 8, batchSize: arm.batchSize, batchPipelineDepth: 1, reuseTree: false, earlyStop: 'none', temperature: 0 });
+    const fields = {
+      visits: 100,
+      batchSize: arm.batchSize,
+      batchPipelineDepth: 1,
+      reuseTree: false,
+      earlyStop: 'none',
+      temperature: 0,
+      searchContemptLimit: 16,
+    };
+    const once = await client.search(fen, fields);
     await client.reset();
-    const twice = await client.search(fen, { visits: 8, batchSize: arm.batchSize, batchPipelineDepth: 1, reuseTree: false, earlyStop: 'none', temperature: 0 });
+    const twice = await client.search(fen, fields);
     await client.reset();
-    snapshot.determinism.push({ arm: arm.name, move1: once.move ?? null, move2: twice.move ?? null, match: (once.move ?? null) === (twice.move ?? null) });
+    const match = !!once.move && once.move === twice.move && once.visits === fields.visits && twice.visits === fields.visits;
+    snapshot.determinism.push({ arm: arm.name, visits: fields.visits, move1: once.move ?? null, move2: twice.move ?? null, match });
     render();
+    if (!match) throw new FatalStrengthError(`${arm.name} failed seeded repeat-search probe`);
   }
 
   async function playGame(
@@ -485,6 +508,7 @@ export function installBatchingStrengthPage(): BatchingStrengthApi {
       const openingCount = params.get('openingCount');
       await api.start({
         matchId,
+        runToken: params.get('runToken') ?? undefined,
         games: games ? Number(games) : undefined,
         startIndex: startIndex ? Number(startIndex) : undefined,
         movetimeMs: movetimeMs ? Number(movetimeMs) : undefined,
@@ -501,6 +525,7 @@ export function installBatchingStrengthPage(): BatchingStrengthApi {
       snapshot.fatal = false;
       snapshot.probes = [];
       snapshot.determinism = [];
+      snapshot.runToken = options.runToken ?? crypto.randomUUID();
       try {
         const spec = structuredClone(strengthMatch(options.matchId));
         if (options.movetimeMs && options.movetimeMs > 0) spec.movetimeMs = options.movetimeMs;

@@ -101,40 +101,26 @@ function eloFromScore(score: number): number {
   return -400 * Math.log10(1 / p - 1);
 }
 
-function pairProbs(elo: number, drawRate: number): Record<keyof PairOutcomeCounts, number> | null {
-  const p = scoreFromElo(elo);
-  const d = Math.min(1, Math.max(0, drawRate));
-  const w = p - d / 2;
-  const l = 1 - p - d / 2;
-  if (w < -1e-12 || l < -1e-12) return null;
-  const win = Math.max(0, w);
-  const loss = Math.max(0, l);
-  return {
-    n2: win * win,
-    n15: 2 * win * d,
-    n1: 2 * win * loss + d * d,
-    n05: 2 * d * loss,
-    n0: loss * loss,
-  };
-}
-
-function logLikelihood(elo: number, drawRate: number, counts: PairOutcomeCounts): number {
-  const probs = pairProbs(elo, drawRate);
-  if (!probs) return Number.NEGATIVE_INFINITY;
-  let ll = 0;
-  const terms: Array<[number, number]> = [
-    [counts.n0, probs.n0],
-    [counts.n05, probs.n05],
-    [counts.n1, probs.n1],
-    [counts.n15, probs.n15],
-    [counts.n2, probs.n2],
-  ];
-  for (const [count, prob] of terms) {
-    if (count === 0) continue;
-    if (prob <= 0) return Number.NEGATIVE_INFINITY;
-    ll += count * Math.log(prob);
+/**
+ * Profile the unrestricted five-category pair distribution at a fixed mean.
+ * The two games in an opening pair are NOT assumed independent. The dual
+ * optimum gives p_i = (n_i / N) / (1 + t * (x_i - mean)). Bounds include
+ * unobserved categories, which can absorb probability at a boundary; an
+ * all-split sample therefore has a finite-width interval, not zero variance.
+ */
+function pairLikelihoodRatio(mean: number, counts: PairOutcomeCounts): number {
+  const ns = [counts.n0, counts.n05, counts.n1, counts.n15, counts.n2];
+  const xs = [0, 0.25, 0.5, 0.75, 1];
+  let low = -1 / (1 - mean);
+  let high = 1 / mean;
+  for (let step = 0; step < 80; step++) {
+    const t = (low + high) / 2;
+    const slope = ns.reduce((sum, n, i) => (n ? sum + (n * (xs[i] - mean)) / (1 + t * (xs[i] - mean)) : sum), 0);
+    if (slope > 0) low = t;
+    else high = t;
   }
-  return ll;
+  const t = (low + high) / 2;
+  return 2 * ns.reduce((sum, n, i) => (n ? sum + n * Math.log(1 + t * (xs[i] - mean)) : sum), 0);
 }
 
 export function pentanomialElo(games: readonly ScoredGame[]): EloEstimate {
@@ -151,22 +137,12 @@ export function pentanomialElo(games: readonly ScoredGame[]): EloEstimate {
   const gamesUsed = wins + draws + losses;
   const score = gamesUsed ? (wins + draws * 0.5) / gamesUsed : 0.5;
   const drawRate = gamesUsed ? draws / gamesUsed : 0;
-  let bestElo = 0;
-  let bestLl = Number.NEGATIVE_INFINITY;
-  for (let elo = -1500; elo <= 1500; elo += 0.5) {
-    const ll = logLikelihood(elo, drawRate, counts);
-    if (ll > bestLl) {
-      bestLl = ll;
-      bestElo = elo;
-    }
-  }
+  const bestElo = Math.round(eloFromScore(score) * 10) / 10 || 0;
   let low = bestElo;
   let high = bestElo;
-  if (Number.isFinite(bestLl)) {
-    for (let elo = -1500; elo <= 1500; elo += 0.5) {
-      const ll = logLikelihood(elo, drawRate, counts);
-      if (!Number.isFinite(ll)) continue;
-      if (2 * (bestLl - ll) <= LLR_95) {
+  if (pairs) {
+    for (let elo = -2400; elo <= 2400; elo += 0.5) {
+      if (pairLikelihoodRatio(scoreFromElo(elo), counts) <= LLR_95) {
         low = Math.min(low, elo);
         high = Math.max(high, elo);
       }
@@ -182,10 +158,10 @@ export function pentanomialElo(games: readonly ScoredGame[]): EloEstimate {
     score,
     drawRate,
     elo: gamesUsed ? bestElo : 0,
-    ci95: gamesUsed ? [low, high] : [0, 0],
+    ci95: gamesUsed ? [low, high] : [-2400, 2400],
     pairCounts: counts,
     method:
-      'pentanomial pair likelihood, draw rate fixed at the observed per-game rate, independent-game pair probabilities, 95% CI from a likelihood-ratio cutoff of 3.841 on a 0.5 Elo grid',
+      'unrestricted pentanomial pair-mean profile likelihood (no within-pair independence assumption); logistic score Elo; nominal 95% LR cutoff 3.841 on a 0.5 Elo grid, clipped at +/-2400',
   };
 }
 

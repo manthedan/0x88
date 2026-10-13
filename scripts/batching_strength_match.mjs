@@ -5,6 +5,7 @@
 // The caller must hold SP/benchlock. This process pauses the page before
 // exiting so the GPU is idle when the lock is released.
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BATCHING_STRENGTH_BUILD, strengthMatch } from '../src/lc0/batchingStrengthMatch.ts';
@@ -146,7 +147,8 @@ function armTimes(games) {
 function summarize(spec, games, extra) {
   const ordered = [...games.values()].sort((a, b) => a.index - b.index);
   const estimate = pentanomialElo(ordered);
-  const gate = equalVisitGate(estimate);
+  const status = ordered.length === 0 ? 'not-run' : extra.earlyStop || ordered.length < extra.gamesTarget ? 'partial' : 'complete';
+  const gate = status === 'complete' ? equalVisitGate(estimate) : null;
   let queenPoints = 0;
   let queenGames = 0;
   for (const game of ordered) {
@@ -157,6 +159,7 @@ function summarize(spec, games, extra) {
   }
   return {
     match: spec.id,
+    status,
     label: spec.label,
     kind: spec.movetimeMs ? 'equal-time' : 'equal-visit',
     headline: spec.headline,
@@ -188,9 +191,10 @@ function saveAll(dir, games, summary) {
   writeFileSync(join(dir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
 }
 
-function matchUrl(base, spec, gamesTarget, start, openingCount, maxPlies, movetimeMs) {
+function matchUrl(base, spec, gamesTarget, start, openingCount, maxPlies, movetimeMs, runToken) {
   const url = new URL('/lab/batching-strength/', base);
   url.searchParams.set('match', spec.id);
+  url.searchParams.set('runToken', runToken);
   url.searchParams.set('autostart', '1');
   url.searchParams.set('games', String(gamesTarget));
   url.searchParams.set('start', String(start));
@@ -203,18 +207,32 @@ function matchUrl(base, spec, gamesTarget, start, openingCount, maxPlies, moveti
 async function main() {
   const matchId = arg('--match');
   if (!matchId) throw new Error('missing --match');
-  const spec = strengthMatch(matchId);
+  const spec = { ...strengthMatch(matchId) };
   const minutes = Number(arg('--minutes', '16'));
   const gamesOverride = arg('--games');
-  const dir = arg('--dir', join('artifacts', 'batching-strength', spec.id));
+  const dir = arg('--dir', join(process.env.BATCHING_STRENGTH_ARTIFACT_ROOT || 'artifacts/batching-strength', spec.id));
   const base = arg('--base-url', 'http://127.0.0.1:5187');
   const screenshot = arg('--screenshot');
   if (screenshot) mkdirSync(dirname(screenshot), { recursive: true });
   const restartBrowser = flag('--restart-browser');
+  // Nominal-CI early stop is opt-out; docs explain the optional-stopping caveat.
+  const gateStop = !flag('--no-gate-stop');
   const openingCount = Number(arg('--opening-count', String(spec.openingCount)));
   const maxPlies = Number(arg('--max-plies', String(spec.maxPlies)));
   const movetimeMs = arg('--movetime-ms') ? Number(arg('--movetime-ms')) : spec.movetimeMs;
-  mkdirSync(dir, { recursive: true });
+  if (!(Number.isFinite(minutes) && minutes > 0 && minutes <= 20)) {
+    throw Object.assign(new Error('--minutes must be > 0 and <= 20'), { exitCode: 2 });
+  }
+  for (const [name, value] of [
+    ['opening-count', openingCount],
+    ['max-plies', maxPlies],
+  ]) {
+    if (!Number.isInteger(value) || value < 2) throw Object.assign(new Error(`--${name} must be an integer >= 2`), { exitCode: 2 });
+  }
+  if (movetimeMs !== undefined && !(Number.isFinite(movetimeMs) && movetimeMs > 0)) {
+    throw Object.assign(new Error('--movetime-ms must be positive'), { exitCode: 2 });
+  }
+  spec.movetimeMs = movetimeMs;
   const gamesFile = join(dir, 'games.jsonl');
   const stateFile = join(dir, 'state.json');
   const games = loadGames(gamesFile);
@@ -222,10 +240,19 @@ async function main() {
   if (state && state.generatorVersion !== BATCHING_STRENGTH_GENERATOR_VERSION) {
     throw Object.assign(new Error(`generator version ${state.generatorVersion} != ${BATCHING_STRENGTH_GENERATOR_VERSION}`), { exitCode: 2 });
   }
+  if (
+    state &&
+    (state.match !== spec.id || state.build !== BATCHING_STRENGTH_BUILD || state.maxPlies !== maxPlies || state.movetimeMs !== (movetimeMs ?? null))
+  ) {
+    throw Object.assign(new Error('checkpoint match/build/maxPlies/movetime differs; use a new --dir'), { exitCode: 2 });
+  }
   if (state && state.openingCount !== openingCount) {
     throw Object.assign(new Error(`openingCount locked at ${state.openingCount}, got ${openingCount}`), { exitCode: 2 });
   }
   const gamesTarget = gamesOverride ? Number(gamesOverride) : (state?.gamesTarget ?? spec.games);
+  if (!Number.isInteger(gamesTarget) || gamesTarget < 1) throw Object.assign(new Error('--games must be a positive integer'), { exitCode: 2 });
+  mkdirSync(dir, { recursive: true });
+  const runToken = state?.runToken ?? randomUUID();
   const startedLoad = loadavg();
   // Leave the last three minutes for the in-flight ply to finish so the GPU
   // is idle before benchlock is released. Total hold stays near --minutes.
@@ -240,6 +267,7 @@ async function main() {
   const writeState = (patch) => {
     state = {
       match: spec.id,
+      runToken,
       build: BATCHING_STRENGTH_BUILD,
       generatorVersion: BATCHING_STRENGTH_GENERATOR_VERSION,
       openingCount,
@@ -258,13 +286,14 @@ async function main() {
       probes: state.probes,
       determinism: state.determinism,
       backends: state.backends,
+      earlyStop: existsSync(join(dir, 'early-stop.json')) ? JSON.parse(readFileSync(join(dir, 'early-stop.json'), 'utf8')) : null,
       loadavg: loadavg(),
     });
     saveAll(dir, games, summary);
   };
 
   try {
-    if (nextIndex(games) >= gamesTarget) {
+    if (nextIndex(games) >= gamesTarget || existsSync(join(dir, 'early-stop.json'))) {
       exitCode = 3;
       phase = 'done';
       writeState({});
@@ -275,13 +304,16 @@ async function main() {
     const same =
       snap &&
       snap.matchId === spec.id &&
+      snap.runToken === runToken &&
       snap.build === BATCHING_STRENGTH_BUILD &&
       snap.generatorVersion === BATCHING_STRENGTH_GENERATOR_VERSION &&
+      snap.gamesTarget === gamesTarget &&
+      snap.phase !== 'done' &&
       !snap.fatal &&
       snap.phase !== 'error' &&
       snap.phase !== 'idle';
     if (!same) {
-      const url = matchUrl(base, spec, gamesTarget, nextIndex(games), openingCount, maxPlies, movetimeMs);
+      const url = matchUrl(base, spec, gamesTarget, nextIndex(games), openingCount, maxPlies, movetimeMs, runToken);
       process.stderr.write(`[batching-strength] open ${url}\n`);
       await agentCall(['open', url], 90_000);
       await agentCall(['set', 'viewport', '1280', '800'], 20_000).catch(() => {});
@@ -299,6 +331,9 @@ async function main() {
     }
     if (!snap || snap.matchId !== spec.id) throw new Error(`page did not reach ${spec.id} (phase ${snap?.phase ?? 'none'})`);
     if (snap.fatal) throw Object.assign(new Error(snap.error || 'fatal probe or WebGPU failure'), { exitCode: 2 });
+    if (snap.build !== BATCHING_STRENGTH_BUILD || snap.runToken !== runToken) {
+      throw Object.assign(new Error('built page protocol/token differs from driver; rebuild/reload before measuring'), { exitCode: 2 });
+    }
 
     while (Date.now() < deadline) {
       snap = await readSnapshot().catch(() => null);
@@ -319,11 +354,25 @@ async function main() {
       }
       if (snap.fatal) throw Object.assign(new Error(snap.error || 'fatal'), { exitCode: 2 });
       if (snap.phase === 'error') throw new Error(snap.error || 'match error');
-      if (snap.phase === 'done' || nextIndex(games) >= gamesTarget) {
+      if (nextIndex(games) >= gamesTarget) {
         exitCode = 3;
         phase = 'done';
         break;
       }
+      const estimate = gateStop ? pentanomialElo([...games.values()]) : null;
+      if (estimate && estimate.pairs >= 20 && (estimate.ci95[0] > -10 || estimate.ci95[1] < -10)) {
+        const stop = {
+          games: estimate.games,
+          elo: estimate.elo,
+          ci95: estimate.ci95,
+          reason: 'nominal pair-profile CI entirely on one side of -10 Elo; optional stopping, not a sequentially valid test',
+        };
+        writeFileSync(join(dir, 'early-stop.json'), `${JSON.stringify(stop, null, 2)}\n`);
+        phase = 'gate-stop';
+        break;
+      }
+      // A done page may still have more records than one pull's limit. Drain
+      // those before treating the match as complete.
       await sleep(4000);
     }
 
@@ -352,11 +401,14 @@ async function main() {
       determinism: snap?.determinism ?? state?.determinism ?? [],
       backends: snap?.backends ?? state?.backends ?? {},
     });
-    if (exitCode !== 3 && nextIndex(games) >= gamesTarget) exitCode = 3;
+    if (exitCode !== 3 && (nextIndex(games) >= gamesTarget || existsSync(join(dir, 'early-stop.json')))) exitCode = 3;
   } catch (error) {
     fatalError = error instanceof Error ? error.message : String(error);
     exitCode = error?.exitCode || 1;
     process.stderr.write(`[batching-strength] ${fatalError}\n`);
+    // A failed snapshot/driver call is not proof the page stopped computing.
+    // Close this owned session before returning control to benchlock.
+    await agentCall(['close'], 30_000).catch(() => {});
     try {
       writeState({ error: fatalError });
     } catch {
@@ -384,4 +436,9 @@ async function main() {
   }
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  process.stderr.write(`[batching-strength] ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = error?.exitCode ?? 1;
+}

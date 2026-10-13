@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { rankFlipColorSwapBoard } from '../src/chess/boardNormalization.ts';
+import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves } from '../src/chess/movegen.ts';
 import { BATCHING_STRENGTH_MATCHES } from '../src/lc0/batchingStrengthMatch.ts';
 import {
   LQO_BLACK_MISSING_QUEEN_FEN,
@@ -11,9 +16,11 @@ import {
   scheduleGame,
   smallNetOpenings,
 } from '../src/lc0/batchingStrengthOpenings.ts';
+import { strengthRandom, strengthSeed } from '../src/lc0/batchingStrengthRandom.ts';
 import { candidatePoints, equalVisitGate, pentanomialElo, queenSidePoints, uciLineToPgn } from '../src/lc0/batchingStrengthScore.ts';
 import { swapColorsUci } from '../src/lc0/bt4Engine.ts';
 import { resolveOrtPhysicalBatchSize } from '../src/lc0/ortPhysicalBatch.ts';
+import { searchRoot } from '../src/search/puct.ts';
 
 const WAVE1_NET_VIEW = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR b KQkq - 0 1';
 
@@ -49,6 +56,20 @@ test('physical batch resolver keeps fixed graphs and defaults dynamic dims to se
   assert.equal(resolveOrtPhysicalBatchSize(8, 3, 'declared'), 8);
   assert.equal(resolveOrtPhysicalBatchSize(8, 3, 'logical'), 8);
   assert.equal(resolveOrtPhysicalBatchSize('batch', 0, 'logical'), 1);
+});
+
+test('lab ScLimit RNG is reproducible and sensitive to the full input history', () => {
+  const seed = strengthSeed(START_FEN);
+  const a = strengthRandom(seed);
+  const b = strengthRandom(seed);
+  const values = Array.from({ length: 50 }, () => a());
+  assert.deepEqual(
+    values,
+    Array.from({ length: 50 }, () => b()),
+  );
+  assert.ok(values.every((value) => value >= 0 && value < 1));
+  assert.notEqual(strengthSeed(`${START_FEN}\ne2e4`), seed);
+  assert.notEqual(strengthRandom(seed + 1)(), values[0]);
 });
 
 test('product evaluator and worker default to declared physical batching', () => {
@@ -98,6 +119,38 @@ test('match catalog covers the ladders where moves changed and skips 1600', () =
   assert.equal(BATCHING_STRENGTH_MATCHES['b2-v8'].baseline.batchSize, 1);
   assert.equal(BATCHING_STRENGTH_MATCHES['lqo-v32'].candidate.physicalBatchMode, 'logical');
   assert.equal(BATCHING_STRENGTH_MATCHES['lqo-v32'].baseline.physicalBatchMode, 'declared');
+});
+
+test('physical serial vs grouped evaluation cannot change fixed-visit logical batching with identical outputs', async () => {
+  function evaluator(serial) {
+    const evaluate = (board, context = {}) => {
+      const moves = context.legalMoves ?? legalMoves(board);
+      return { policy: new Map(moves.map((move, i) => [moveToActionId(move), i === 0 ? 0.7 : 0.3 / Math.max(1, moves.length - 1)])), wdl: [0.36, 0.34, 0.3] };
+    };
+    return {
+      evaluate,
+      async evaluateBatch(boards, contexts = []) {
+        if (!serial) return boards.map((board, i) => evaluate(board, contexts[i]));
+        const out = [];
+        for (let i = 0; i < boards.length; i++) {
+          // Separate promise turns mimic serial physical runs, without timing a benchmark.
+          out.push(await Promise.resolve(evaluate(boards[i], contexts[i])));
+        }
+        return out;
+      },
+    };
+  }
+  for (const visits of [8, 32, 100, 400]) {
+    const options = { visits, batchSize: 8, batchPipelineDepth: 1, temperature: 0, earlyStop: 'none', traceSearchVisits: true };
+    const serial = await searchRoot(parseFen(START_FEN), evaluator(true), options);
+    const grouped = await searchRoot(parseFen(START_FEN), evaluator(false), options);
+    assert.equal(moveToUci(serial.move), moveToUci(grouped.move));
+    assert.equal(serial.visits, visits);
+    assert.equal(grouped.visits, visits);
+    assert.deepEqual(serial.policy, grouped.policy);
+    assert.deepEqual(serial.stats.searchTrace, grouped.stats.searchTrace);
+    assert.ok(serial.stats.batchLeafCollisions > 0);
+  }
 });
 
 test('queen-odds openings include both product starts and keep the odds', () => {
@@ -150,8 +203,8 @@ test('pentanomial gate passes a balanced sample and rejects a loss', () => {
   assert.equal(split.wins, 100);
   assert.equal(split.losses, 100);
   assert.ok(Math.abs(split.elo) <= 1);
-  assert.ok(split.ci95[1] >= 40);
-  assert.ok(split.ci95[0] <= -40);
+  assert.ok(split.ci95[1] > 0 && split.ci95[1] < 10);
+  assert.equal(split.ci95[0], -split.ci95[1]);
   assert.equal(equalVisitGate(split).pass, true);
 
   const wins = pentanomialElo(pairGames(20, '1-0', '0-1', true));
@@ -172,6 +225,59 @@ test('pentanomial gate passes a balanced sample and rejects a loss', () => {
   assert.equal(unpaired.pairs, 0);
   assert.equal(equalVisitGate(unpaired).reason, 'no complete pairs');
   assert.equal(candidatePoints('1/2-1/2', false), 0.5);
+});
+
+test('pair likelihood allows correlated outcomes and unobserved pair categories', () => {
+  const split = pentanomialElo(pairGames(100, '1-0', '1-0'));
+  const sweep = pentanomialElo([...pairGames(50, '1-0', '0-1'), ...pairGames(50, '0-1', '1-0')].map((game, index) => ({ ...game, index })));
+  assert.equal(split.score, sweep.score);
+  assert.equal(split.elo, 0);
+  assert.equal(sweep.elo, 0);
+  assert.ok(sweep.ci95[1] > 60, 'correlated sweeps must be wider than split pairs');
+  assert.ok(split.ci95[1] > 0, 'zero observed pair variance is not proof of equality');
+  const allWins = pentanomialElo(pairGames(100, '1-0', '0-1'));
+  assert.ok(allWins.ci95[0] > 600);
+  assert.equal(allWins.ci95[1], 2400);
+  assert.deepEqual(pentanomialElo([]).ci95, [-2400, 2400]);
+});
+
+test('driver rejects unsafe chunks and incompatible checkpoints before launching a browser', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'batching-strength-test-'));
+  const run = (...args) =>
+    spawnSync(process.execPath, ['--experimental-strip-types', 'scripts/batching_strength_match.mjs', '--match', 'b1-v8', '--dir', dir, ...args], {
+      encoding: 'utf8',
+    });
+  try {
+    for (const args of [
+      ['--minutes', '21'],
+      ['--games', '0'],
+      ['--max-plies', 'NaN'],
+      ['--opening-count', '1'],
+      ['--movetime-ms', '0'],
+    ]) {
+      const result = run(...args);
+      assert.equal(result.status, 2, result.stderr);
+      assert.doesNotMatch(result.stderr, /open http/);
+    }
+    writeFileSync(
+      join(dir, 'state.json'),
+      JSON.stringify({ match: 'b1-v8', build: 'incompatible', generatorVersion: 1, maxPlies: 160, movetimeMs: null, openingCount: 100 }),
+    );
+    const result = run();
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /checkpoint match\/build\/maxPlies\/movetime differs/);
+    assert.doesNotMatch(result.stderr, /open http/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('queue parses in zsh and bash without starting a match', () => {
+  for (const shell of ['zsh', 'bash']) {
+    const result = spawnSync(shell, ['-n', 'scripts/batching_strength_queue.sh'], { encoding: 'utf8' });
+    if (result.error?.code === 'ENOENT') continue;
+    assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
+  }
 });
 
 test('queen-side points follow the side that still has a queen', () => {
