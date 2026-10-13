@@ -541,7 +541,10 @@ export function installBatchingStrengthPage(): BatchingStrengthApi {
       render();
       try {
         const spec = structuredClone(strengthMatch(options.matchId));
-        if (options.movetimeMs && options.movetimeMs > 0) spec.movetimeMs = options.movetimeMs;
+        if (options.movetimeMs && options.movetimeMs > 0) {
+          if (!spec.movetimeMs) throw new FatalStrengthError('movetimeMs requires an equal-time match ID; fixed-visit overrides would mislabel evidence');
+          spec.movetimeMs = options.movetimeMs;
+        }
         if (options.maxPlies && options.maxPlies > 0) spec.maxPlies = Math.floor(options.maxPlies);
         const openingCount = Math.max(1, Math.floor(options.openingCount ?? spec.openingCount));
         spec.openingCount = openingCount;

@@ -233,6 +233,10 @@ test('a permanent opening error publishes matching fatal identity without initia
     assert.equal(snapshot.fatal, true, 'driver should stop immediately instead of retrying a permanent suite error');
     assert.match(snapshot.error, /requested 100 distinct openings, got 16/);
     assert.equal(workers, 0);
+    await api.start({ matchId: 'b1-v8', openingCount: 16, games: 32, movetimeMs: 1000 });
+    assert.equal(api.snapshot().fatal, true);
+    assert.match(api.snapshot().error, /movetimeMs requires an equal-time match ID/);
+    assert.equal(workers, 0, 'time overrides on visit matches must fail before engine initialization');
   } finally {
     for (const key of keys) {
       if (saved.get(key) === undefined) delete globalThis[key];
@@ -384,6 +388,7 @@ test('driver rejects unsafe chunks and incompatible checkpoints before launching
       ['--max-plies', 'NaN'],
       ['--opening-count', '1'],
       ['--movetime-ms', '0'],
+      ['--movetime-ms', '1000', '--opening-count', '16', '--games', '32'],
     ]) {
       const result = run(...args);
       assert.equal(result.status, 2, result.stderr);

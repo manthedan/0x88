@@ -238,6 +238,9 @@ async function main() {
   if (movetimeMs !== undefined && !(Number.isFinite(movetimeMs) && movetimeMs > 0)) {
     throw Object.assign(new Error('--movetime-ms must be positive'), { exitCode: 2 });
   }
+  if (movetimeMs !== undefined && !spec.movetimeMs) {
+    throw Object.assign(new Error('--movetime-ms requires an equal-time match ID; fixed-visit overrides would mislabel evidence'), { exitCode: 2 });
+  }
   spec.movetimeMs = movetimeMs;
   const gamesFile = join(dir, 'games.jsonl');
   const stateFile = join(dir, 'state.json');
