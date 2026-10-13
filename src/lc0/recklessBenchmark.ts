@@ -1,4 +1,5 @@
 import { START_FEN } from '../chess/board.ts';
+import { parseValidatedFen } from '../chess/fenValidation.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_EMSCRIPTEN_VARIANT, type BerserkVariant, berserkVariantAssetStatus, checkBerserkVariantAsset } from './berserkVariants.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
@@ -161,7 +162,9 @@ function selectedBudgets(): BenchBudget[] {
 
 function normalizeFen(raw: string): string {
   const value = raw.trim();
-  return value === '' || value.toLowerCase() === 'startpos' ? START_FEN : value;
+  const fen = value === '' || value.toLowerCase() === 'startpos' ? START_FEN : value;
+  parseValidatedFen(fen);
+  return fen;
 }
 
 function selectedPositions(): BenchPosition[] {
@@ -495,7 +498,13 @@ async function timeViridithasBatch(
 async function runBench(): Promise<void> {
   abort?.abort();
   abort = new AbortController();
-  const config = readConfig();
+  let config: BenchConfig;
+  try {
+    config = readConfig();
+  } catch (error) {
+    setStatus((error as Error).message);
+    return;
+  }
   rows.length = 0;
   reportSnapshot = { runtime: runtimeMetadata(), config };
   render();
