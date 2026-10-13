@@ -5,11 +5,11 @@ This follows the speed/output observations in [the wave-1 note](ort_batching_jsp
 
 ## Decisions
 
-- **B1: diagnostic only, not a product win.** The batch-8 export beats an artificial batch-1/export **search-batch-8** baseline at 8 and 32 visits. It does not beat the shipped search-batch-1 configuration (B2). No independently validated equal-time B1 claim; no default can be justified by B1 alone.
-- **B2: abandoned by user decision.** The product batch configuration fails at the completed 8/32-visit levels; the partial 100-visit record is also substantially negative, not a completed gate result. No resumed B2-100, B2-400, equal-time B2, or threshold rollout. This is not evidence about untested higher levels.
+- **B1: diagnostic only, not a product win.** The batch-8 export has positive point scores against an artificial batch-1/export **search-batch-8** baseline at 8 and 32 visits, but only 16 distinct openings were silently repeated. The gains are not significant in the first-pair-per-opening sensitivity. It does not beat the shipped search-batch-1 configuration (B2). No independently validated equal-time B1 claim; no default can be justified by B1 alone.
+- **B2: abandoned by user decision.** The product batch configuration is negative at the completed 8/32-visit levels even when restricted to one pair per opening; the partial 100-visit record is also negative, not a completed gate result. The repeated suite invalidates a formal 200-game gate claim. No resumed B2-100, B2-400, equal-time B2, or threshold rollout. This is not evidence about untested higher levels.
 - **LQO: keep serial physical batch 1.** Logical batching is about 2.2–2.4x faster per move, but these queen-odds self-games are nearly saturated by the side that still has a queen. Zero head-to-head Elo is not output or move equivalence, and does not clearly establish product strength. Do not promote a dynamic-batch default for all models on this evidence.
 
-The original gate is point Elo >= -10 and CI upper bound >= 0 at every tested equal-visit level, plus equal-time not worse. A reported per-match `gate.pass` is only that local arithmetic test, **not a ship decision**, a minimum-sample check, or proof of equivalence. Final compact evidence gives partial/not-run matches `gate: null`; a not-run match has no Elo estimate.
+The original gate is point Elo >= -10 and CI upper bound >= 0 at every tested equal-visit level, plus equal-time not worse. A reported per-match `gate.pass` is only that local arithmetic test, **not a ship decision**, a minimum-sample check, or proof of equivalence. Final compact evidence gives partial/not-run **and repeated-opening** matches `gate: null`; a not-run match has no Elo estimate.
 
 ## Arms and product-path audit
 
@@ -25,7 +25,7 @@ B1/B2 use Play's `drawScore=-0.25`, `searchContemptLimit=16`. LQO's queen-less s
 
 The harness is not the complete Play controller: Play reuses compatible trees, the small net has root-dominance early stop, and LQO has randomized books/policy-book openings. Those are disabled/bypassed to isolate a fixed-visit comparison. B2 matches the product's **batch/model** configuration, not all its game-state policy. Neither B1's baseline nor its gain is today's product baseline.
 
-Small-net openings: the 16 Arena built-in lines, then equal-material entries from `/lc0/opening_books/queen500.epd`, 100 distinct positions. Every opening has two consecutive games with engine colors swapped and exactly the same book history/FEN. LQO includes both product missing-queen start FENs and varied highest-weight product-book lines (100 openings, predominantly black missing the queen). Engine roles swap per pair; the odds FEN itself is not mirrored between those two games.
+**Opening-suite correction (autoreview-1):** small-net runs requested 100 openings, but used only the **16 Arena built-in lines**. All 500 `/lc0/opening_books/queen500.epd` entries lack White's queen, so the equal-material filter rejects every filler. The inherited harness silently cycled the 16 openings. State's `openingCount: 100` was a request, not a measured cardinality. Every pair still has consecutive games with engine colors swapped and exactly the same book history/FEN, but the 100 pairs are **not 100 independent opening units**. The final harness rejects cardinality shortfalls and targets requiring repeated pairs before any worker initialization. LQO includes both product missing-queen start FENs and varied highest-weight product-book lines (100 openings, predominantly black missing the queen). Engine roles swap per pair; the odds FEN itself is not mirrored between those two games.
 
 ## B1 sanity check
 
@@ -38,22 +38,22 @@ Small-net openings: the 16 Arena built-in lines, then equal-material entries fro
 
 In B1, PUCT collects logical leaves with virtual visits/collision retries **before** awaiting evaluation, then backs up returned rows in logical order after the entire batch completes. Both arms take exactly that scheduler. Serial physical runs do not back up between rows. The new focused test supplies identical evaluations through serial promise turns vs grouped evaluation and proves identical move, root policy, search trace/collisions, and exact visits at 8/32/100/400. Thus physical latency alone cannot create a B1 fixed-visit search gain; differing tensor outputs can change priors/values, and consequently later search selections.
 
-The raw 200-game B1-8 record is 100/38/62. Candidate White: 56/20/24; Black: 44/18/38. Both colors have positive score differences; all 100 pairs have the same opening/history and opposite engine colors. B1-32 is 107/30/63: White 69/6/25, Black 38/24/38 (gain concentrated in White). No B1 game is a timeout, resignation or illegal-move forfeit. Every recorded equal-visit move has exactly its requested visits. Independent replay verifies legality and checkmate/material terminal results. The 160-ply draw cap is a limitation (31 draws at the cap for B1-8, 6 for B1-32), not a timeout.
+The raw 200-game B1-8 record is 100/38/62. Candidate White: 56/20/24; Black: 44/18/38. Both colors have positive score differences; each pair has matching opening/history and opposite engine colors. These are repetitions of only 16 opening units, not 100 distinct openings. B1-32 is 107/30/63: White 69/6/25, Black 38/24/38 (gain concentrated in White). No B1 game is a timeout, resignation or illegal-move forfeit. Every recorded equal-visit move has exactly its requested visits. Independent replay verifies legality and checkmate/material terminal results. The 160-ply draw cap is a limitation (31 draws at the cap for B1-8, 6 for B1-32), not a timeout.
 
 **Randomness caveat:** the inherited build `2026-10-11.1` only tested repeated start-position moves at 8 visits. `searchContemptEdge` samples `Math.random()` after an opponent node reaches ScLimit, so temperature 0 does **not** make longer searches reproducible. At B1-8 no node can reach the 16-visit threshold: that gain is a genuine numerical/search-path difference on this opening suite. At 32 and above, numerical drift and uncontrolled ScLimit samples cannot be disentangled from the saved data. No rerun is justified to rescue a product lever already rejected by B2. The final lab-only seeded worker makes future runs reproducible without changing product contempt or its sampling distribution; historical unseeded games are not mixed with it.
 
 ## Results and uncertainty
 
-Candidate-relative W/D/L and Elo use **complete opening pairs only**. CIs are nominal pair-profile intervals, not corrected for repeated looks or multiple tested levels.
+Candidate-relative W/D/L and Elo use **complete opening pairs only**. The following CIs preserve the nominal all-pair computation (including the requested B1-100 +6.9 [−24,38.5] record), **not valid opening-population uncertainty for the repeated small-net suite**. Pair profiling models correlation between the two games of a pair, not across repeated copies of that opening. Intervals are also not corrected for repeated looks or multiple tested levels.
 
-| Match | Recorded / estimated games (pairs) | Candidate W/D/L | Draw rate | Elo [95% CI] | Status / interpretation |
+| Match | Recorded / estimated games (pairs) | Candidate W/D/L | Draw rate | Elo [nominal all-pair CI] | Status / interpretation |
 |---|---:|---:|---:|---:|---|
 | B1 8 visits | 200 / 200 (100) | 100/38/62 | 19% | +66.8 [22, 111.5] | Complete; artificial-baseline diagnostic only |
 | B1 32 visits | 200 / 200 (100) | 107/30/63 | 15% | +77.7 [34, 123] | Complete; diagnostic, unseeded ScLimit caveat |
 | **B1 100 visits** | **200 / 200 (100)** | **63/78/59** | **39%** | **+6.9 [−24, 38.5]** | **Complete; diagnostic only, not a product win** |
 | B1 400 visits | 29 / 28 (14) | 8/10/10 | 35.7% | −24.9 [−119, 74] | **Partial, user cut; no gate verdict** |
-| B2 8 visits | 200 / 200 (100) | 12/37/151 | 18.5% | −297.9 [−351.5, −249.5] | Complete; fails equal-visit gate |
-| B2 32 visits | 200 / 200 (100) | 24/113/63 | 56.5% | −68.6 [−94.5, −44.5] | Complete; fails equal-visit gate |
+| B2 8 visits | 200 / 200 (100) | 12/37/151 | 18.5% | −297.9 [−351.5, −249.5] | Complete record; repeated-suite negative, no formal gate |
+| B2 32 visits | 200 / 200 (100) | 24/113/63 | 56.5% | −68.6 [−94.5, −44.5] | Complete record; repeated-suite negative, no formal gate |
 | B2 100 visits | 139 / 138 (69) | 23/57/58 | 41.3% | −90.1 [−136.5, −44] | **Partial, user abandonment; no completed gate verdict** |
 | LQO 16 visits | 40 / 40 (20) | 20/0/20 | 0% | 0 [−31.5, 31.5] | Complete minor level; odds suite saturated |
 | LQO 32 visits | 200 / 200 (100) | 99/2/99 | 1% | 0 [−7.5, 7.5] | Complete; odds suite saturated, not equivalence |
@@ -61,11 +61,25 @@ Candidate-relative W/D/L and Elo use **complete opening pairs only**. CIs are no
 | LQO 256 visits | 92 / 92 (46) | 46/1/45 | 1.1% | +3.8 [−14, 29] | **Partial, user cut; no gate verdict** |
 | LQO 1600 ms/move | 0 / 0 (0) | — | — | — | **Not run, user skip** |
 
+**Opening-unit sensitivity:** keep only the first complete pair by game index for each exact opening FEN/book history (no outcome-based selection), discarding later repetitions. This treats distinct openings as the sampling units without inventing independent information from cloned games. It is a post-hoc sensitivity, not a replacement gate or proof about arbitrary openings. At B1-8/32 and B2-8/32, all 100 pairs contain only 16 distinct pair move histories, so repetitions add no move/outcome information. At 100 visits uncontrolled ScLimit samples do produce different repeats; discarding those avoids assuming they are new opening diversity.
+
+| Match | Distinct opening pairs used | First-pair Elo [nominal pair-profile CI] |
+|---|---:|---:|
+| B1 8 | 16 | +65.9 [−50, 182] |
+| B1 32 | 16 | +77.2 [−31, 196] |
+| B1 100 | 16 | +10.9 [−50.5, 87.5] |
+| B1 400 (partial) | 14 | −24.9 [−119, 74] |
+| B2 8 | 16 | −293.0 [−437, −168.5] |
+| B2 32 | 16 | −65.9 [−137.5, −2.5] |
+| B2 100 (partial) | 16 | −43.7 [−147.5, 42.5] |
+
+These wider intervals remove the apparent significance of B1-8/32 and of partial B2-100. The latter is inconclusive at the opening-unit level; B2 remains abandoned, not rescued. LQO really generated 100 distinct openings; the complete and partial runs never cycled them. JSON records requested/actual cardinalities, observed units, repeat counts, and the first-pair sensitivity separately from the all-pair historical estimate.
+
 B2 400 and B2 equal-time were not run after abandonment. B1 has no equal-time strength result. No lever meets the full product ship gate.
 
 The committed compact evidence is `docs/batching_strength_2026-10.json`. Raw games and PGNs are local ignored files at `artifacts/batching-strength/<match>/games.jsonl` and `games.pgn`; evidence includes their SHA-256 hashes. Pilots are excluded. Unpaired final games are retained for audit but excluded from the Elo/WDL estimate.
 
-**Estimator correction:** inherited summaries used an independent-game convolution with a fixed observed draw rate, misleadingly labelled pair-based. For example, B1-8/32 originally reported +65/+74.5 and B2-32 -86. Final results use logistic score Elo and profile the unrestricted five-category pair distribution, allowing within-opening correlation. The nominal 95% CI uses LR cutoff 3.841, a 0.5-Elo grid, and endpoints clipped at +/-2400. Tests cover split vs correlated sweep pairs, all-win boundaries, and empty data. Old summary numbers/methods remain in the compact evidence for provenance; use the corrected estimates here.
+**Estimator correction:** inherited summaries used an independent-game convolution with a fixed observed draw rate, misleadingly labelled pair-based. For example, B1-8/32 originally reported +65/+74.5 and B2-32 -86. Final results use logistic score Elo and profile the unrestricted five-category pair distribution, allowing within-opening correlation. The nominal 95% CI uses LR cutoff 3.841, a 0.5-Elo grid, and endpoints clipped at +/-2400. Tests cover split vs correlated sweep pairs, all-win boundaries, and empty data. Old summary numbers/methods remain in the compact evidence for provenance. Neither estimator's all-pair CI fixes between-pair pseudoreplication; use the opening-unit sensitivity for the small-net suite's diversity limitation.
 
 **User stops, not gate stops:** `lqo-v256/early-stop.json` records the request at **88 games** (2026-10-12 ~22:55 PDT), because more saturated odds games would add hours rather than information. The active chunk finished/persisted four more games before stopping: the final artifact has 92. `b1-v400/early-stop.json` records **26 games** (2026-10-13 ~01:00 PDT), because B1 was only diagnostic after B2 rejected the product lever; the final chunk persisted 29, of which 28 form pairs. `lqo-time/early-stop.json` records **0 games**, explicitly skipped by user at ~01:00 PDT for the same saturated-suite limitation. B2-100 was abandoned at ~134 games in the takeover instructions; its inherited final artifact has 139, one unpaired. There is no B2-100 early-stop file. These trailing games are retained transparently, not used to relabel any stopped match as complete.
 
@@ -95,7 +109,7 @@ This is a noisy shared Apple M4 machine: 94 saved chunk-end one-minute load aver
 
 Paired games interleave arms move by move, with both engine colors played for each opening. Table timing is per-move median [p10,p90], not same-position AB benchmark latency: game trajectories and terminal/cache hits affect it. Equal-visit counts are exact; equal-time is the shared PUCT deadline, checked between logical batches, so one in-flight batch can overshoot. A 1600 ms LQO budget targets roughly 100 visits for the serial arm according to wave 1. Report actual realized visits rather than assuming that calibration still holds.
 
-The queue holds `SP/benchlock` for nominal 16-minute chunks (13 minutes active deadline plus up to 3 minutes to finish/pause a ply), releasing it and sleeping 20 seconds between chunks. Browser/search pauses preserve in-flight game progress; disk checkpoints save completed games only. A retry restarts the browser and discards an incomplete game, not scores it as a loss. Model loading/probes are within the lock. The takeover queue PID was 90154, with log `artifacts/batching-strength/remaining-queue.log`; the inherited port-5187 server was PID 50735. They were already stopped at this closeout. The final idle-page smoke used owned server PID 69484, then stopped it and its browser; port 5187 has no listener.
+The queue holds `SP/benchlock` for nominal 16-minute chunks (13 minutes active deadline plus up to 3 minutes to finish/pause a ply), releasing it and sleeping 20 seconds between chunks. Browser/search pauses preserve in-flight game progress; disk checkpoints save completed games only. A retry restarts the browser and discards an incomplete game, not scores it as a loss. Missing/failed pause confirmation now throws through the driver's owned-browser close path before returning control to benchlock; it is never treated as proof of GPU idleness. Model loading/probes are within the lock. The takeover queue PID was 90154, with log `artifacts/batching-strength/remaining-queue.log`; the inherited port-5187 server was PID 50735. They were already stopped at this closeout. The final idle-page smoke used owned server PID 69484, then stopped it and its browser; port 5187 has no listener.
 
 **Trailing shell error:** the log ends with `QUEUE_DONE` followed by `scripts/batching_strength_queue.sh:96: parse error near ')'`. Both `zsh -n` and `bash -n` accept the persisted script, now covered by a no-execution unit test. The error happened after all matches exited and artifacts were checkpointed, so it is harmless to these results (but the historical queue's shell exit was not clean). A live-edit/reread-offset mismatch is a plausible explanation, not a proven cause; the queue now warns against editing its file while running and uses the explicit array element count. No queue was re-executed to diagnose it.
 
@@ -112,19 +126,19 @@ python3 scripts/compare_batching_strength_models.py
 npx biome format --write docs/batching_strength_2026-10.json
 ```
 
-The queue command above is historical/reproduction guidance, **not a request to resume these stopped runs**.
+The queue command above is historical guidance, **not a request to resume these stopped runs**. With the final cardinality guard, today's small-net suite cannot meet a 100-opening request and fails before loading an engine. A future 16-opening diagnostic must explicitly choose `--opening-count 16 --games 32` in a new directory; a genuine 100-opening strength experiment needs a suitable equal-material suite first. No such experiment was run here.
 
 Final build is seeded lab version `2026-10-13.2`; use **new output directories** for new runs. The driver refuses incompatible build/config checkpoints rather than mixing protocols. `--no-gate-stop` disables the nominal-CI early stop for a predeclared fixed-size match. To re-run a deliberately stopped match, use a new directory (do not resume abandoned B2). `--minutes`, `--games`, `--opening-count`, `--max-plies`, `--movetime-ms`, `--dir`, `--base-url`, and `--screenshot` are driver controls. A direct driver call must be wrapped in `SP/benchlock`.
 
 ## Verification
 
-- `npm run typecheck`: clean, 0 errors/warnings (`artifacts/batching-strength/closeout-typecheck.log`).
-- Full `npm test`: **1018 passed, 3 skipped, 0 failed** (1021 total; `artifacts/batching-strength/closeout-full-tests.log`).
-- Focused `node --experimental-strip-types --test tests/batching_strength.test.mjs`: **16 passed** (`closeout-focused-tests.log`). Tests cover pair likelihood, default physical batching, paired openings, exact logical-search equivalence at 8/32/100/400, seeded lab RNG, incompatible checkpoints/unsafe arguments, shell syntax without execution, partial/not-run evidence, and PGN legality.
+- `npm run typecheck`: clean, 0 errors/warnings after review fixes (`artifacts/batching-strength/review-fix-typecheck.log`).
+- Full `npm test`: **1021 passed, 3 skipped, 0 failed** (1024 total; `artifacts/batching-strength/review-fix-full-tests.log`).
+- Focused batching suite: **19 passed**; with PUCT core/ScLimit tests **21 passed** (`review-fix-focused-tests.log`). Tests cover pair likelihood, default physical batching, paired openings, exact logical-search equivalence at 8/32/100/400, seeded lab RNG, incompatible checkpoints/unsafe arguments, shell syntax without execution, partial/not-run evidence, PGN legality, actual small-suite shortfalls, repeated-opening sensitivity, and failed/missing pause confirmations.
 - Read-only audit independently replayed **1580 non-pilot games**, checked opening/color/history pairs and exact equal-visit counts, and hashed all raw game/PGN files. The model protobuf comparison reproduced the identical learned-weight/quantization bytes. No new inference or games were used for either audit.
 - `npx biome check` over all supported touched files: no errors/new issues; one pre-existing `tensorData` unused-function warning in `src/lc0/onnxEvaluator.ts` remains. Shell/Python/Markdown are not parsed by Biome; shell syntax was checked separately.
-- `BUILD_SCOPE=product npm run build:client`: passed (`closeout-build.log`). Built-app **idle-only** browser smoke at `/lab/batching-strength/`: build `2026-10-13.2`, `crossOriginIsolated=true`, 0 games, no model/wasm requests or worker probes (`closeout-idle-browser.json`). Screenshot saved and read: `artifacts/batching-strength/screenshots/closeout-idle.png`. No autostart query was supplied.
+- `BUILD_SCOPE=product npm run build:client`: passed again after review fixes (`review-fix-build.log`). The initial closeout build also passed (`closeout-build.log`); its built-app **idle-only** browser smoke at `/lab/batching-strength/`: build `2026-10-13.2`, `crossOriginIsolated=true`, 0 games, no model/wasm requests or worker probes (`closeout-idle-browser.json`). Screenshot saved and read: `artifacts/batching-strength/screenshots/closeout-idle.png`. No autostart query was supplied.
 - Historical built WebGPU pilot screenshots were also read: `artifacts/batching-strength/screenshots/pilot-b2-v8.png` and `pilot-lqo-v32.png`; they display strict WebGPU backends and correct physical sizes. They are **not** new seeded-run validation. The lab-only RNG is unit-tested/built but not validated by further GPU games, as the user explicitly stopped all matches.
-- Mandatory final-commit Codex branch review and any accepted/rejected findings are recorded in scratchpad `batching-strength-review-N.{txt,json}` and `report_batching-strength.md`.
+- Autoreview-1's accepted findings corrected the 16-opening pseudoreplication and unsafe missing pause confirmation; both have regression tests. Mandatory final-commit Codex branch review and any remaining accepted/rejected findings are recorded in scratchpad `batching-strength-review-N.{txt,json}` and `report_batching-strength.md`.
 
 No manifest, model selection, product batch default, legal masking, queen-odds color-swap behavior, product contempt, or ONNX test tolerance was changed. Only lab overrides, harness/driver, evidence and tests ship. Nothing was merged, pushed, published or deployed.

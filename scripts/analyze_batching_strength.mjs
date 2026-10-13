@@ -10,7 +10,7 @@ import { moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { BATCHING_STRENGTH_MATCHES } from '../src/lc0/batchingStrengthMatch.ts';
 import { lqoQueenOddsOpenings, SMALL_NET_EPD_PATH, smallNetOpenings } from '../src/lc0/batchingStrengthOpenings.ts';
-import { candidatePoints, equalVisitGate, pentanomialElo, queenSidePoints } from '../src/lc0/batchingStrengthScore.ts';
+import { candidatePoints, distinctOpeningElo, equalVisitGate, pentanomialElo, queenSidePoints } from '../src/lc0/batchingStrengthScore.ts';
 import { gameOutcome } from '../src/lc0/engineBattle.ts';
 
 const root = process.argv[2] ?? 'artifacts/batching-strength';
@@ -19,7 +19,7 @@ const round = (n) => Math.round(n * 100) / 100;
 const quantile = (xs, p) => (xs.length ? xs[Math.min(xs.length - 1, Math.floor((xs.length - 1) * p))] : null);
 const median = (xs) => (xs.length ? (xs[Math.floor((xs.length - 1) / 2)] + xs[Math.floor(xs.length / 2)]) / 2 : null);
 const hash = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
-const evidence = { schema: 2, defaultsChanged: false, matches: [] };
+const evidence = { schema: 3, defaultsChanged: false, matches: [] };
 const comparison = join(root, 'model-equivalence.json');
 if (existsSync(comparison)) evidence.modelComparison = JSON.parse(readFileSync(comparison, 'utf8'));
 for (const spec of Object.values(BATCHING_STRENGTH_MATCHES)) {
@@ -28,6 +28,8 @@ for (const spec of Object.values(BATCHING_STRENGTH_MATCHES)) {
   if (!existsSync(file)) continue;
   const games = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
   const estimate = pentanomialElo(games);
+  const openingUnitEstimate = distinctOpeningElo(games);
+  const repeatedOpeningPairs = estimate.pairs - openingUnitEstimate.pairs;
   const state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
   assert.equal(state.generatorVersion, 1, 'audit only supports opening generator 1');
   const openings =
@@ -91,7 +93,7 @@ for (const spec of Object.values(BATCHING_STRENGTH_MATCHES)) {
       arm.ms.push(...game[`${side}MoveMs`]);
       arm.visits.push(...game[`${side}Visits`]);
       assert.equal(game[`${side}MoveMs`].length, game[`${side}Visits`].length);
-      if (!spec.movetimeMs)
+      if (!state.movetimeMs)
         assert.ok(
           game[`${side}Visits`].every((v) => v === spec.visits),
           `${spec.id}: equal visit counts`,
@@ -141,10 +143,16 @@ for (const spec of Object.values(BATCHING_STRENGTH_MATCHES)) {
     visits: spec.visits,
     movetimeMs: state.movetimeMs ?? null,
     build: state.build,
-    openingCount: state.openingCount,
+    requestedOpeningCount: state.openingCount,
+    actualOpeningCount: openings.length,
+    observedOpeningUnits: openingUnitEstimate.pairs,
+    repeatedOpeningPairs,
     recordedGames: games.length,
     estimate: games.length ? estimate : null,
-    gate: status === 'complete' ? equalVisitGate(estimate) : null,
+    // The all-pair CI assumes independent opening units; don't treat a
+    // silently cycling historical suite as a valid gate sample.
+    gate: status === 'complete' && repeatedOpeningPairs === 0 ? equalVisitGate(estimate) : null,
+    openingUnitEstimate: repeatedOpeningPairs ? openingUnitEstimate : null,
     colors,
     reasons,
     arms,

@@ -15,7 +15,14 @@ import {
   type StrengthMatchSpec,
   strengthMatch,
 } from './batchingStrengthMatch.ts';
-import { lqoQueenOddsOpenings, SMALL_NET_EPD_PATH, type StrengthOpening, scheduleGame, smallNetOpenings } from './batchingStrengthOpenings.ts';
+import {
+  lqoQueenOddsOpenings,
+  SMALL_NET_EPD_PATH,
+  type StrengthOpening,
+  scheduleGame,
+  smallNetOpenings,
+  validateStrengthOpenings,
+} from './batchingStrengthOpenings.ts';
 import { strengthSeed } from './batchingStrengthRandom.ts';
 import { BATCHING_STRENGTH_GENERATOR_VERSION, type ScoredGame, uciLineToPgn } from './batchingStrengthScore.ts';
 import { swapColorsInput, swapColorsUci } from './bt4Engine.ts';
@@ -535,7 +542,7 @@ export function installBatchingStrengthPage(): BatchingStrengthApi {
         const gamesTarget = Math.max(1, Math.floor(options.games ?? spec.games));
         const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
         const openings = await loadOpenings(spec, openingCount);
-        if (openings.length < 2) throw new Error(`only ${openings.length} openings`);
+        validateStrengthOpenings(openings, openingCount, gamesTarget);
         await run(spec, gamesTarget, startIndex, openings);
       } catch (error) {
         fail(error, error instanceof FatalStrengthError);

@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { pauseStrengthPage } from '../scripts/lib/batching_strength_pause.mjs';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { rankFlipColorSwapBoard } from '../src/chess/boardNormalization.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
@@ -15,9 +16,10 @@ import {
   lqoQueenOddsOpenings,
   scheduleGame,
   smallNetOpenings,
+  validateStrengthOpenings,
 } from '../src/lc0/batchingStrengthOpenings.ts';
 import { strengthRandom, strengthSeed } from '../src/lc0/batchingStrengthRandom.ts';
-import { candidatePoints, equalVisitGate, pentanomialElo, queenSidePoints, uciLineToPgn } from '../src/lc0/batchingStrengthScore.ts';
+import { candidatePoints, distinctOpeningElo, equalVisitGate, pentanomialElo, queenSidePoints, uciLineToPgn } from '../src/lc0/batchingStrengthScore.ts';
 import { swapColorsUci } from '../src/lc0/bt4Engine.ts';
 import { resolveOrtPhysicalBatchSize } from '../src/lc0/ortPhysicalBatch.ts';
 import { searchRoot } from '../src/search/puct.ts';
@@ -190,6 +192,58 @@ test('small-net openings keep both queens and start with the arena book', () => 
   for (const opening of openings) assert.deepEqual(queens(opening.fen), { w: 1, b: 1 });
 });
 
+test('small-net queen-odds EPD cannot silently become a 100-opening suite', () => {
+  const epd = readFileSync(new URL('../public/lc0/opening_books/queen500.epd', import.meta.url), 'utf8');
+  const openings = smallNetOpenings(epd, 100);
+  assert.equal(openings.length, 16);
+  assert.throws(() => validateStrengthOpenings(openings, 100, 200), /requested 100 distinct openings, got 16/);
+  assert.throws(() => validateStrengthOpenings(openings, 16, 200), /repeat opening pairs/);
+  assert.doesNotThrow(() => validateStrengthOpenings(openings, 16, 32));
+});
+
+test('first-pair opening-unit sensitivity does not count repeated games as new openings', () => {
+  const games = pairGames(100, '1-0', '1-0').map((game) => ({ ...game, startFen: START_FEN, bookMoves: [] }));
+  const repeated = distinctOpeningElo(games);
+  assert.equal(repeated.pairs, 1);
+  assert.ok(repeated.ci95[1] > pentanomialElo(games).ci95[1]);
+  games[2].bookMoves = ['e2e4'];
+  games[3].bookMoves = ['e2e4'];
+  assert.equal(distinctOpeningElo(games).pairs, 2, 'full opening history is part of the unit');
+  assert.equal(distinctOpeningElo(games.slice(0, 1)).pairs, 0);
+  assert.deepEqual(distinctOpeningElo([...games].reverse()), distinctOpeningElo(games), 'choose by index, not caller/outcome order');
+});
+
+test('pause faults propagate to the driver close path instead of asserting GPU idleness', async () => {
+  const fields = { requestPause: async () => {}, sleep: async () => {}, now: () => 0 };
+  for (const phase of ['paused', 'done']) {
+    assert.equal((await pauseStrengthPage({ ...fields, readSnapshot: async () => ({ phase }) })).phase, phase);
+  }
+  await assert.rejects(pauseStrengthPage({ ...fields, readSnapshot: async () => null }), /pause confirmation disappeared/);
+  await assert.rejects(
+    pauseStrengthPage({
+      ...fields,
+      readSnapshot: async () => {
+        throw new Error('snapshot failed');
+      },
+    }),
+    /snapshot failed/,
+  );
+  await assert.rejects(
+    pauseStrengthPage({
+      ...fields,
+      requestPause: async () => {
+        throw new Error('pause failed');
+      },
+    }),
+    /pause failed/,
+  );
+  await assert.rejects(pauseStrengthPage({ ...fields, readSnapshot: async () => ({ phase: 'error' }) }), /failed before pause confirmation/);
+  await assert.rejects(pauseStrengthPage({ ...fields, readSnapshot: async () => ({ phase: 'thinking' }), timeoutMs: 0 }), /pause grace expired/);
+  const driver = readFileSync(new URL('../scripts/batching_strength_match.mjs', import.meta.url), 'utf8');
+  assert.match(driver, /snap = await pauseStrengthPage/);
+  assert.match(driver, /await agentCall\(\['close'\], 30_000\)/);
+});
+
 test('scheduleGame pairs an opening with colors swapped', () => {
   assert.deepEqual(scheduleGame(100, 0), { pair: 0, openingIndex: 0, candidateWhite: true });
   assert.deepEqual(scheduleGame(100, 1), { pair: 0, openingIndex: 0, candidateWhite: false });
@@ -287,6 +341,12 @@ test('final evidence never presents partial or unrun matches as gate results', (
   const b100 = byId['b1-v100'];
   assert.equal(b100.status, 'complete');
   assert.equal(b100.purpose, 'diagnostic-only');
+  assert.equal(b100.requestedOpeningCount, 100);
+  assert.equal(b100.actualOpeningCount, 16);
+  assert.equal(b100.observedOpeningUnits, 16);
+  assert.equal(b100.repeatedOpeningPairs, 84);
+  assert.equal(b100.gate, null);
+  assert.equal(b100.openingUnitEstimate.pairs, 16);
   assert.equal(b100.estimate.games, 200);
   assert.equal(b100.estimate.elo, 6.9);
   assert.deepEqual(b100.estimate.ci95, [-24, 38.5]);

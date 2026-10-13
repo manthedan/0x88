@@ -165,7 +165,30 @@ export function pentanomialElo(games: readonly ScoredGame[]): EloEstimate {
   };
 }
 
-/** Ship gate for one equal-visit level. Elo is the candidate (faster) arm. */
+/**
+ * Historical-suite sensitivity: retain the first complete pair per exact
+ * opening/history, chosen by index (never by outcome). Repeated deterministic
+ * games are not independent opening units. This discards later stochastic
+ * repeats rather than pretending they add new opening diversity.
+ */
+export function distinctOpeningElo(games: readonly (ScoredGame & { startFen: string; bookMoves?: readonly string[] })[]): EloEstimate {
+  const sorted = [...games].sort((a, b) => a.index - b.index);
+  const byIndex = new Map(sorted.map((game) => [game.index, game]));
+  const seen = new Set<string>();
+  const first: ScoredGame[] = [];
+  for (const even of sorted) {
+    if (even.index % 2 !== 0) continue;
+    const odd = byIndex.get(even.index + 1);
+    if (!odd) continue;
+    const key = JSON.stringify([even.startFen, even.bookMoves ?? []]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    first.push(even, odd);
+  }
+  return pentanomialElo(first);
+}
+
+/** Arithmetic gate for one equal-visit level, not validation of its sample design. */
 export function equalVisitGate(estimate: EloEstimate): GateResult {
   const [ciLow, ciHigh] = estimate.ci95;
   if (estimate.pairs < 1) return { pass: false, elo: estimate.elo, ciLow, ciHigh, reason: 'no complete pairs' };

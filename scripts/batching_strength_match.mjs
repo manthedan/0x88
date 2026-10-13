@@ -9,7 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BATCHING_STRENGTH_BUILD, strengthMatch } from '../src/lc0/batchingStrengthMatch.ts';
-import { BATCHING_STRENGTH_GENERATOR_VERSION, equalVisitGate, pentanomialElo, queenSidePoints } from '../src/lc0/batchingStrengthScore.ts';
+import { BATCHING_STRENGTH_GENERATOR_VERSION, distinctOpeningElo, equalVisitGate, pentanomialElo, queenSidePoints } from '../src/lc0/batchingStrengthScore.ts';
+import { pauseStrengthPage } from './lib/batching_strength_pause.mjs';
 import { runAgent } from './lib/process.mjs';
 
 const SESSION = process.env.AGENT_BROWSER_SESSION || 'batching-strength';
@@ -148,7 +149,9 @@ function summarize(spec, games, extra) {
   const ordered = [...games.values()].sort((a, b) => a.index - b.index);
   const estimate = pentanomialElo(ordered);
   const status = ordered.length === 0 ? 'not-run' : extra.earlyStop || ordered.length < extra.gamesTarget ? 'partial' : 'complete';
-  const gate = status === 'complete' ? equalVisitGate(estimate) : null;
+  const openingUnitEstimate = distinctOpeningElo(ordered);
+  const repeatedOpeningPairs = estimate.pairs - openingUnitEstimate.pairs;
+  const gate = status === 'complete' && repeatedOpeningPairs === 0 ? equalVisitGate(estimate) : null;
   let queenPoints = 0;
   let queenGames = 0;
   for (const game of ordered) {
@@ -168,6 +171,9 @@ function summarize(spec, games, extra) {
     games: ordered.length,
     gamesTarget: extra.gamesTarget,
     completePairs: estimate.pairs,
+    observedOpeningUnits: openingUnitEstimate.pairs,
+    repeatedOpeningPairs,
+    openingUnitEstimate: repeatedOpeningPairs ? openingUnitEstimate : null,
     headlineMet: spec.headline ? ordered.length >= spec.games : true,
     wdl: { wins: estimate.wins, draws: estimate.draws, losses: estimate.losses },
     score: estimate.score,
@@ -377,22 +383,13 @@ async function main() {
     }
 
     if (exitCode !== 3) {
-      await agentCall(['eval', '--stdin'], 30_000, 'window.__batchingStrength.pause()').catch(() => {});
-      const pauseDeadline = Date.now() + 3 * 60 * 1000;
-      while (Date.now() < pauseDeadline) {
-        snap = await readSnapshot().catch(() => null);
-        if (!snap) break;
-        phase = snap.phase;
-        ply = snap.ply;
-        if (snap.phase === 'paused' || snap.phase === 'between' || snap.phase === 'done' || snap.phase === 'error') break;
-        await sleep(1000);
-      }
-      if (snap && !['paused', 'between', 'done', 'error', 'idle'].includes(snap.phase)) {
-        process.stderr.write(`[batching-strength] ${snap.phase} still running after pause grace; navigating away to release the GPU\n`);
-        await agentCall(['open', 'about:blank'], 30_000).catch(() => {});
-        if (exitCode === 0) exitCode = 1;
-        phase = snap.phase;
-      }
+      snap = await pauseStrengthPage({
+        requestPause: () => agentCall(['eval', '--stdin'], 30_000, 'window.__batchingStrength.pause()'),
+        readSnapshot,
+        sleep,
+      });
+      phase = snap.phase;
+      ply = snap.ply;
       const pulled = await agentCall(['eval', '--stdin'], 60_000, `JSON.stringify(window.__batchingStrength.pull(${nextIndex(games)}, 20))`).catch(() => null);
       for (const game of unwrap(pulled)?.games ?? []) games.set(game.index, game);
     }

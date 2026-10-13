@@ -140,6 +140,11 @@ export function smallNetOpenings(epdText: string, limit: number): StrengthOpenin
   return out;
 }
 
+export function validateStrengthOpenings(openings: readonly StrengthOpening[], requested: number, gamesTarget: number): void {
+  if (openings.length !== requested) throw new Error(`requested ${requested} distinct openings, got ${openings.length}; supply a suitable opening suite`);
+  if (gamesTarget > openings.length * 2) throw new Error('game target would repeat opening pairs; increase --opening-count');
+}
+
 export function scheduleGame(openingCount: number, gameIndex: number): { pair: number; openingIndex: number; candidateWhite: boolean } {
   const pair = Math.floor(gameIndex / 2);
   const count = Math.max(1, openingCount);
