@@ -280,6 +280,32 @@ test('queue parses in zsh and bash without starting a match', () => {
   }
 });
 
+test('final evidence never presents partial or unrun matches as gate results', () => {
+  const evidence = JSON.parse(readFileSync(new URL('../docs/batching_strength_2026-10.json', import.meta.url), 'utf8'));
+  assert.equal(evidence.defaultsChanged, false);
+  const byId = Object.fromEntries(evidence.matches.map((match) => [match.id, match]));
+  const b100 = byId['b1-v100'];
+  assert.equal(b100.status, 'complete');
+  assert.equal(b100.purpose, 'diagnostic-only');
+  assert.equal(b100.estimate.games, 200);
+  assert.equal(b100.estimate.elo, 6.9);
+  assert.deepEqual(b100.estimate.ci95, [-24, 38.5]);
+  for (const [id, atCut] of [
+    ['lqo-v256', 88],
+    ['b1-v400', 26],
+  ]) {
+    assert.equal(byId[id].status, 'partial');
+    assert.equal(byId[id].gate, null);
+    assert.equal(byId[id].earlyStop.games, atCut);
+    assert.equal(byId[id].earlyStop.cutBy, 'user');
+  }
+  assert.equal(byId['lqo-time'].status, 'not-run');
+  assert.equal(byId['lqo-time'].estimate, null);
+  for (const match of evidence.matches) {
+    if (match.status !== 'complete') assert.equal(match.gate, null, match.id);
+  }
+});
+
 test('queen-side points follow the side that still has a queen', () => {
   assert.equal(queenSidePoints('1-0', 'b'), 1);
   assert.equal(queenSidePoints('0-1', 'b'), 0);
