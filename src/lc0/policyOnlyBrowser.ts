@@ -3,6 +3,7 @@ import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import * as v from 'valibot';
 import { type BoardState, boardToFen, parseFen, START_FEN, squareName } from '../chess/board.ts';
+import { parseValidatedFen } from '../chess/fenValidation.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import {
@@ -1028,7 +1029,7 @@ let searchFpuReduction = clampFloat(params.get('fpuReduction'), 0, 5, 0.33);
 let searchTemperature = clampFloat(params.get('temperature'), 0, 10, 0);
 let engineReplyMode: EngineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
 
-let board: BoardState = parseFen(params.get('fen') ?? START_FEN);
+let board: BoardState = parseValidatedFen(params.get('fen') ?? START_FEN);
 let historyBoards: BoardState[] = [board];
 let ground: Ground | null = null;
 let player: Lc0PolicyOnlyPlayer | null = null;
@@ -3629,7 +3630,7 @@ function fixedSuiteFenRecordsFromParams(limit: number): NativeRecord[] {
     .filter(Boolean)
     .slice(0, limit)
     .map((fen, index) => {
-      parseFen(fen);
+      parseValidatedFen(fen);
       return { id: `fixed-fen-${index + 1}`, fen, bestmove: '', topPriors: [] };
     });
 }
@@ -4513,9 +4514,9 @@ function loadFenFromInput(): boolean {
   }
   let parsed: BoardState;
   try {
-    parsed = parseFen(raw);
+    parsed = parseValidatedFen(raw);
   } catch (error) {
-    el('message').textContent = `Invalid FEN: ${(error as Error).message}`;
+    el('message').textContent = (error as Error).message;
     return false;
   }
   loadPosition(parsed);
@@ -4828,7 +4829,7 @@ function resetPolicyPageState(): void {
   searchFpuReduction = clampFloat(params.get('fpuReduction'), 0, 5, 0.33);
   searchTemperature = clampFloat(params.get('temperature'), 0, 10, 0);
   engineReplyMode = params.get('mode') === 'search' ? 'search' : 'policy';
-  board = parseFen(params.get('fen') ?? START_FEN);
+  board = parseValidatedFen(params.get('fen') ?? START_FEN);
   historyBoards = [board];
   orientation = playerSide;
   lastMove = null;

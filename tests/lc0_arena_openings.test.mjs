@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { boardToFen, START_FEN } from '../src/chess/board.ts';
-import { BUILTIN_ARENA_OPENINGS, parseArenaOpenings, scheduleOpenings } from '../src/lc0/arenaOpenings.ts';
+import { BUILTIN_ARENA_OPENINGS, openingFromUciMoves, parseArenaOpenings, scheduleOpenings } from '../src/lc0/arenaOpenings.ts';
 
 test('parseArenaOpenings accepts raw FEN and named FEN rows', () => {
   const rows = parseArenaOpenings(`
@@ -50,6 +50,34 @@ Italian PGN | 1. e4 e5 2. Nf3 Nc6 3. Bc4
 test('parseArenaOpenings rejects malformed PGN/SAN instead of silently skipping tokens', () => {
   assert.throws(() => parseArenaOpenings('Bad | 1. e4 bogus e5'), /illegal or unsupported SAN token bogus/);
   assert.throws(() => parseArenaOpenings('Bad NAG | 1. e4 $bogus e5'), /Malformed PGN NAG token \$bogus/);
+});
+
+test('parseArenaOpenings rejects illegal FENs with a specific position error and opening name', () => {
+  for (const [fen, error] of [
+    ['4k3/8/8/8/8/8/8/K3R3 w - - 0 1', /Opening Bad: Invalid FEN: black king is in check, but that side is not to move/],
+    ['4k2r/8/8/8/8/8/8/7K b - - 0 1', /white king is in check, but that side is not to move/],
+    ['8/8/8/8/8/8/8/4K3 w - - 0 1', /exactly one black king/],
+    ['k3k3/8/8/8/8/8/8/4K3 w - - 0 1', /exactly one black king/],
+    ['4k3/8/8/8/8/8/8/P3K3 w - - 0 1', /pawns cannot be on rank 1 or 8/],
+  ]) {
+    assert.throws(() => parseArenaOpenings(`Bad | ${fen}`), error);
+  }
+  assert.throws(() => parseArenaOpenings('4k3/8/8/8/8/8/8/K3R3 w - - 0 1'), /Opening Position 1:.*black king is in check/);
+});
+
+test('Arena validates a PGN setup FEN before replaying moves that could hide the illegal root', () => {
+  const illegal = '4k3/8/8/8/8/8/8/K3R3 w - - 0 1';
+  assert.throws(() => parseArenaOpenings(`Bad PGN | [FEN "${illegal}"] 1. Ra2`), /black king is in check/);
+  assert.throws(() => openingFromUciMoves('Bad UCI root', ['e1a2'], illegal), /black king is in check/);
+});
+
+test('Arena accepts a legal check on the side to move and retains PGN setup history', () => {
+  const legal = '4k3/8/8/8/8/8/8/K3R3 b - - 0 1';
+  const [fen, pgn] = parseArenaOpenings(`Checked | ${legal}\nPGN | [FEN "${legal}"] 1... Kd7`);
+  assert.equal(fen.fen, legal);
+  assert.equal(pgn.startFen, legal);
+  assert.deepEqual(pgn.moves, ['e8d7']);
+  assert.equal(pgn.positions.length, 2);
 });
 
 test('scheduleOpenings plays every pairing on every configured position', () => {

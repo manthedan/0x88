@@ -3833,12 +3833,11 @@ function loadFen() {
   const raw = inputEl('fenInput').value.trim();
   if (!raw) return;
   try {
-    parseFen(raw);
+    tree = new GameTree(raw);
   } catch (error) {
-    el('message').textContent = `Invalid FEN: ${(error as Error).message}`;
+    el('message').textContent = (error as Error).message;
     return;
   }
-  tree = new GameTree(raw);
   lineCache.clear();
   completeAnalysisKeys.clear();
   el('message').textContent = 'Loaded FEN.';

@@ -1,4 +1,5 @@
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { parseValidatedFen } from '../chess/fenValidation.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToSan } from '../chess/san.ts';
@@ -29,7 +30,7 @@ export class GameTree {
   private nextId = 1;
 
   constructor(startFen: string = START_FEN) {
-    this.root = { id: 0, parent: null, move: null, san: null, fen: boardToFen(parseFen(startFen)), ply: 0, children: [] };
+    this.root = { id: 0, parent: null, move: null, san: null, fen: boardToFen(parseValidatedFen(startFen)), ply: 0, children: [] };
     this.current = this.root;
   }
 

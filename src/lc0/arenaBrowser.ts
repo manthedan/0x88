@@ -2,6 +2,7 @@ import { Chessground } from 'chessground';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { parseValidatedFen } from '../chess/fenValidation.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
@@ -3916,6 +3917,7 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
   const controller = new AbortController();
   try {
     if (!fens.length) throw new Error('fixedSuiteFens is empty');
+    for (const fen of fens) parseValidatedFen(fen);
     engineOutputs.clear();
     engineOutputHistory.length = 0;
     engineOutputTotalCount = 0;

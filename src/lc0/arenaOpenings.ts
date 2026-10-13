@@ -1,4 +1,5 @@
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { parseValidatedFen, validateFenPosition } from '../chess/fenValidation.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { makeMove } from '../chess/movegen.ts';
 import { sanToMove } from '../chess/pgn.ts';
@@ -51,15 +52,16 @@ export const BUILTIN_ARENA_OPENINGS: ArenaOpening[] = BUILTIN_ARENA_OPENING_DEFS
 });
 
 export function normalizeFen(fen: string): string {
-  return boardToFen(parseFen(fen));
+  return boardToFen(parseValidatedFen(fen));
 }
 
 export function openingFromUciMoves(name: string, moves: readonly string[], startFen = START_FEN): ArenaOpening {
-  const positions = buildBoardHistoryFromMoves(moves, startFen);
+  const normalizedStartFen = normalizeFen(startFen);
+  const positions = buildBoardHistoryFromMoves(moves, normalizedStartFen);
   return {
     name,
     fen: boardToFen(positions[positions.length - 1]),
-    startFen: normalizeFen(startFen),
+    startFen: normalizedStartFen,
     moves: [...moves],
     positions,
   };
@@ -78,11 +80,20 @@ function splitOpeningLine(line: string): { name?: string; body: string } {
 }
 
 function parseFenOpening(name: string, body: string): ArenaOpening | null {
+  let board: BoardState;
   try {
-    return { name, fen: normalizeFen(body) };
+    board = parseFen(body);
   } catch {
     return null;
   }
+  // Once syntax identifies a FEN, preserve position errors instead of trying
+  // to reinterpret an illegal position as SAN or a UCI move list.
+  try {
+    validateFenPosition(board);
+  } catch (error) {
+    throw new Error(`Opening ${name}: ${(error as Error).message}`);
+  }
+  return { name, fen: boardToFen(board) };
 }
 
 function uciTokens(body: string): string[] | null {
@@ -132,7 +143,7 @@ function parsePgnOpening(name: string, body: string): ArenaOpening | null {
   const tokens = pgnSanTokens(body);
   if (!tokens.length) return null;
   const startFen = pgnStartFen(body);
-  let board = parseFen(startFen);
+  let board = parseValidatedFen(startFen);
   const moves: string[] = [];
   for (const token of tokens) {
     const move = sanToMove(board, token);
