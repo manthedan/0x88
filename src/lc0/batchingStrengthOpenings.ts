@@ -93,7 +93,7 @@ export function lqoQueenOddsOpenings(limit: number): StrengthOpening[] {
   const blackLines = bookLines(LQO_BLACK_OPENING_BOOK, LQO_BLACK_MISSING_QUEEN_FEN, 'b', 3);
   const whiteLines = bookLines(LQO_WHITE_OPENING_BOOK, LQO_WHITE_MISSING_QUEEN_FEN, 'w', 2);
   const remaining = want - 2;
-  const whiteBudget = Math.min(whiteLines.length, Math.max(1, Math.round(remaining * 0.2)));
+  const whiteBudget = Math.min(remaining, whiteLines.length, Math.max(1, Math.round(remaining * 0.2)));
   const blackBudget = Math.min(blackLines.length, remaining - whiteBudget);
   const extraWhite = Math.min(whiteLines.length - whiteBudget, remaining - blackBudget - whiteBudget);
   return [blackStart, whiteStart, ...stride(blackLines, blackBudget), ...stride(whiteLines, whiteBudget + Math.max(0, extraWhite))];

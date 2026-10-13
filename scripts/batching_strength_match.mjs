@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BATCHING_STRENGTH_BUILD, strengthMatch } from '../src/lc0/batchingStrengthMatch.ts';
 import { BATCHING_STRENGTH_GENERATOR_VERSION, distinctOpeningElo, equalVisitGate, pentanomialElo, queenSidePoints } from '../src/lc0/batchingStrengthScore.ts';
-import { pauseStrengthPage } from './lib/batching_strength_pause.mjs';
+import { closeStrengthBrowser, pauseStrengthPage } from './lib/batching_strength_pause.mjs';
 import { runAgent } from './lib/process.mjs';
 
 const SESSION = process.env.AGENT_BROWSER_SESSION || 'batching-strength';
@@ -405,7 +405,12 @@ async function main() {
     process.stderr.write(`[batching-strength] ${fatalError}\n`);
     // A failed snapshot/driver call is not proof the page stopped computing.
     // Close this owned session before returning control to benchlock.
-    await agentCall(['close'], 30_000).catch(() => {});
+    await closeStrengthBrowser({
+      close: () => agentCall(['close'], 30_000),
+      sleep,
+      onRetry: (error) =>
+        process.stderr.write(`[batching-strength] shutdown unconfirmed; holding benchlock and retrying owned-session close: ${error.message}\n`),
+    });
     try {
       writeState({ error: fatalError });
     } catch {

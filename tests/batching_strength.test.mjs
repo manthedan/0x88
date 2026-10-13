@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { pauseStrengthPage } from '../scripts/lib/batching_strength_pause.mjs';
+import { closeStrengthBrowser, pauseStrengthPage } from '../scripts/lib/batching_strength_pause.mjs';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { rankFlipColorSwapBoard } from '../src/chess/boardNormalization.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
@@ -183,6 +183,14 @@ test('queen-odds openings include both product starts and keep the odds', () => 
   assert.ok(whiteMissing >= 8, `white-missing openings ${whiteMissing}`);
 });
 
+test('two-opening LQO suite contains only the two requested product starts', () => {
+  const openings = lqoQueenOddsOpenings(2);
+  assert.equal(openings.length, 2);
+  assert.equal(openings[0].fen, LQO_BLACK_MISSING_QUEEN_FEN);
+  assert.equal(openings[1].fen, LQO_WHITE_MISSING_QUEEN_FEN);
+  assert.doesNotThrow(() => validateStrengthOpenings(openings, 2, 4));
+});
+
 test('small-net openings keep both queens and start with the arena book', () => {
   const epd = `${START_FEN}\n${LQO_BLACK_MISSING_QUEEN_FEN}\nrnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1\n`;
   const openings = smallNetOpenings(epd, 20);
@@ -241,7 +249,43 @@ test('pause faults propagate to the driver close path instead of asserting GPU i
   await assert.rejects(pauseStrengthPage({ ...fields, readSnapshot: async () => ({ phase: 'thinking' }), timeoutMs: 0 }), /pause grace expired/);
   const driver = readFileSync(new URL('../scripts/batching_strength_match.mjs', import.meta.url), 'utf8');
   assert.match(driver, /snap = await pauseStrengthPage/);
-  assert.match(driver, /await agentCall\(\['close'\], 30_000\)/);
+  assert.match(driver, /await closeStrengthBrowser/);
+  assert.match(driver, /close: \(\) => agentCall\(\['close'\], 30_000\)/);
+});
+
+test('shutdown retries failed or unacknowledged closes before allowing lock release', async () => {
+  let closes = 0;
+  let sleeps = 0;
+  let retries = 0;
+  let acknowledge;
+  const pending = new Promise((resolve) => {
+    acknowledge = resolve;
+  });
+  let released = false;
+  const done = closeStrengthBrowser({
+    close: async () => {
+      closes++;
+      if (closes === 1) throw new Error('CLI timed out; browser still alive');
+      if (closes === 2) return { closed: false };
+      return pending;
+    },
+    sleep: async () => {
+      sleeps++;
+    },
+    onRetry: () => {
+      retries++;
+    },
+  }).then(() => {
+    released = true;
+  });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  assert.equal(closes, 3);
+  assert.equal(released, false, 'no acknowledgment means benchlock must still be held');
+  acknowledge({ closed: true });
+  await done;
+  assert.equal(released, true);
+  assert.equal(sleeps, 2);
+  assert.equal(retries, 2);
 });
 
 test('scheduleGame pairs an opening with colors swapped', () => {
