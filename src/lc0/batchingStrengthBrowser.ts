@@ -533,6 +533,12 @@ export function installBatchingStrengthPage(): BatchingStrengthApi {
       snapshot.probes = [];
       snapshot.determinism = [];
       snapshot.runToken = options.runToken ?? crypto.randomUUID();
+      // Publish identity before any awaited loading or validation. Otherwise a
+      // configuration error looks like an unrelated page to the chunk driver.
+      snapshot.matchId = options.matchId;
+      snapshot.label = '';
+      snapshot.phase = 'loading';
+      render();
       try {
         const spec = structuredClone(strengthMatch(options.matchId));
         if (options.movetimeMs && options.movetimeMs > 0) spec.movetimeMs = options.movetimeMs;
@@ -542,7 +548,12 @@ export function installBatchingStrengthPage(): BatchingStrengthApi {
         const gamesTarget = Math.max(1, Math.floor(options.games ?? spec.games));
         const startIndex = Math.max(0, Math.floor(options.startIndex ?? 0));
         const openings = await loadOpenings(spec, openingCount);
-        validateStrengthOpenings(openings, openingCount, gamesTarget);
+        try {
+          validateStrengthOpenings(openings, openingCount, gamesTarget);
+        } catch (error) {
+          // A permanently unsuitable suite must not retry for whole chunks.
+          throw new FatalStrengthError(error instanceof Error ? error.message : String(error));
+        }
         await run(spec, gamesTarget, startIndex, openings);
       } catch (error) {
         fail(error, error instanceof FatalStrengthError);

@@ -243,6 +243,9 @@ async function main() {
   const stateFile = join(dir, 'state.json');
   const games = loadGames(gamesFile);
   let state = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : null;
+  if (!state && existsSync(gamesFile) && readFileSync(gamesFile, 'utf8').trim()) {
+    throw Object.assign(new Error('saved games lack checkpoint identity; use a new --dir, never relabel or mix protocols'), { exitCode: 2 });
+  }
   if (state && state.generatorVersion !== BATCHING_STRENGTH_GENERATOR_VERSION) {
     throw Object.assign(new Error(`generator version ${state.generatorVersion} != ${BATCHING_STRENGTH_GENERATOR_VERSION}`), { exitCode: 2 });
   }

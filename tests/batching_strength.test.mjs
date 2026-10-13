@@ -9,6 +9,7 @@ import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { rankFlipColorSwapBoard } from '../src/chess/boardNormalization.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
+import { installBatchingStrengthPage } from '../src/lc0/batchingStrengthBrowser.ts';
 import { BATCHING_STRENGTH_MATCHES } from '../src/lc0/batchingStrengthMatch.ts';
 import {
   LQO_BLACK_MISSING_QUEEN_FEN,
@@ -209,6 +210,37 @@ test('small-net queen-odds EPD cannot silently become a 100-opening suite', () =
   assert.doesNotThrow(() => validateStrengthOpenings(openings, 16, 32));
 });
 
+test('a permanent opening error publishes matching fatal identity without initializing a worker', async () => {
+  const keys = ['window', 'document', 'fetch', 'Worker'];
+  const saved = new Map(keys.map((key) => [key, globalThis[key]]));
+  let workers = 0;
+  try {
+    globalThis.window = {};
+    globalThis.document = { querySelector: () => ({ textContent: '' }) };
+    const epd = readFileSync(new URL('../public/lc0/opening_books/queen500.epd', import.meta.url), 'utf8');
+    globalThis.fetch = async () => ({ ok: true, text: async () => epd });
+    globalThis.Worker = class {
+      constructor() {
+        workers++;
+        throw new Error('must not initialize');
+      }
+    };
+    const api = installBatchingStrengthPage();
+    await api.start({ matchId: 'b1-v8', openingCount: 100, games: 200 });
+    const snapshot = api.snapshot();
+    assert.equal(snapshot.matchId, 'b1-v8');
+    assert.equal(snapshot.phase, 'error');
+    assert.equal(snapshot.fatal, true, 'driver should stop immediately instead of retrying a permanent suite error');
+    assert.match(snapshot.error, /requested 100 distinct openings, got 16/);
+    assert.equal(workers, 0);
+  } finally {
+    for (const key of keys) {
+      if (saved.get(key) === undefined) delete globalThis[key];
+      else globalThis[key] = saved.get(key);
+    }
+  }
+});
+
 test('first-pair opening-unit sensitivity does not count repeated games as new openings', () => {
   const games = pairGames(100, '1-0', '1-0').map((game) => ({ ...game, startFen: START_FEN, bookMoves: [] }));
   const repeated = distinctOpeningElo(games);
@@ -357,6 +389,12 @@ test('driver rejects unsafe chunks and incompatible checkpoints before launching
       assert.equal(result.status, 2, result.stderr);
       assert.doesNotMatch(result.stderr, /open http/);
     }
+    writeFileSync(join(dir, 'games.jsonl'), `${JSON.stringify({ index: 0, result: '1-0', candidateWhite: true })}\n`);
+    const orphan = run();
+    assert.equal(orphan.status, 2);
+    assert.match(orphan.stderr, /saved games lack checkpoint identity/);
+    assert.doesNotMatch(orphan.stderr, /open http/);
+    rmSync(join(dir, 'games.jsonl'));
     writeFileSync(
       join(dir, 'state.json'),
       JSON.stringify({ match: 'b1-v8', build: 'incompatible', generatorVersion: 1, maxPlies: 160, movetimeMs: null, openingCount: 100 }),
