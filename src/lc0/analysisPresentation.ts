@@ -1,8 +1,29 @@
 import { parseFen } from '../chess/board.ts';
 import { uciLineToSan } from '../chess/san.ts';
-import type { AnalysisLine } from './analysisFormat.ts';
+import { type AnalysisLine, engineBrushes } from './analysisFormat.ts';
+import type { EngineRow } from './engineCatalog.ts';
 import { htmlEscape } from './browserDom.ts';
 import type { GameNode } from './gameTree.ts';
+
+/** Fresh rows on every mount/reset; saved manual lists and profiles take precedence. */
+export function defaultAnalysisEngineRows(): EngineRow[] {
+  return [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'sf', variant: 'lite', strength: 12 }];
+}
+
+/** Best moves win collisions, including promotion variants on the same squares. */
+export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean): { uci: string; brush: string }[] {
+  const seen = new Set<string>();
+  return lines.filter((line) => !line.error && line.pvUci[0] && (line.multipv === 1 || showAll))
+    .sort((a, b) => a.multipv - b.multipv)
+    .flatMap((line) => {
+      const uci = line.pvUci[0];
+      const key = uci.slice(0, 4);
+      if (seen.has(key)) return [];
+      seen.add(key);
+      const brushes = engineBrushes(line.engine);
+      return [{ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt }];
+    }).reverse(); // Alternatives sit underneath best moves; width is always chessground's 10.
+}
 
 /** Display names only: engine/cache identities must retain their original labels. */
 export function analysisEngineName(engine: string): string {
@@ -105,5 +126,5 @@ export function analysisMoveMarkup(root: GameNode, current: GameNode): string {
     flush();
     return html;
   };
-  return root.children[0] ? branch(root.children[0], true) : '<p class="history-empty">No moves yet. Play on the board or load a PGN.</p>';
+  return root.children[0] ? branch(root.children[0], true) : '<p class="history-empty">No moves yet. Play on the board or <button type="button" class="load-game-link" data-load-game>Load a game</button>.</p>';
 }

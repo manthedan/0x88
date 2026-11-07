@@ -74,22 +74,22 @@ export interface EngineBrushes {
 
 export const ANALYSIS_DRAWABLE_BRUSHES = {
   green: { key: 'g', color: '#15781B', opacity: 1, lineWidth: 10 },
-  paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: 15 },
+  paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: 10 },
   // Brighter than lichess's #003088 so the arrow stays visible over dark pieces and squares.
   blue: { key: 'b', color: '#1f5fcf', opacity: 1, lineWidth: 10 },
-  paleBlue: { key: 'pb', color: '#1f5fcf', opacity: 0.4, lineWidth: 15 },
+  paleBlue: { key: 'pb', color: '#1f5fcf', opacity: 0.4, lineWidth: 10 },
   red: { key: 'r', color: '#882020', opacity: 1, lineWidth: 10 },
-  paleRed: { key: 'pr', color: '#882020', opacity: 0.4, lineWidth: 15 },
+  paleRed: { key: 'pr', color: '#882020', opacity: 0.4, lineWidth: 10 },
   purple: { key: 'purple', color: '#68217a', opacity: 0.85, lineWidth: 10 },
-  palePurple: { key: 'palePurple', color: '#68217a', opacity: 0.35, lineWidth: 15 },
+  palePurple: { key: 'palePurple', color: '#68217a', opacity: 0.35, lineWidth: 10 },
   orange: { key: 'orange', color: '#c45a11', opacity: 0.85, lineWidth: 10 },
-  paleOrange: { key: 'paleOrange', color: '#c45a11', opacity: 0.35, lineWidth: 15 },
+  paleOrange: { key: 'paleOrange', color: '#c45a11', opacity: 0.35, lineWidth: 10 },
   cyan: { key: 'cyan', color: '#007a87', opacity: 0.85, lineWidth: 10 },
-  paleCyan: { key: 'paleCyan', color: '#007a87', opacity: 0.35, lineWidth: 15 },
+  paleCyan: { key: 'paleCyan', color: '#007a87', opacity: 0.35, lineWidth: 10 },
   pink: { key: 'pink', color: '#b02080', opacity: 0.75, lineWidth: 10 },
-  palePink: { key: 'palePink', color: '#b02080', opacity: 0.3, lineWidth: 15 },
+  palePink: { key: 'palePink', color: '#b02080', opacity: 0.3, lineWidth: 10 },
   yellow: { key: 'y', color: '#e68f00', opacity: 1, lineWidth: 10 },
-  paleGrey: { key: 'pgr', color: '#4a4a4a', opacity: 0.35, lineWidth: 15 },
+  paleGrey: { key: 'pgr', color: '#4a4a4a', opacity: 0.35, lineWidth: 10 },
 } as const;
 
 const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {

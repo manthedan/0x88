@@ -1,9 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveMarkup, analysisPvText } from '../src/lc0/analysisPresentation.ts';
+import { analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveMarkup, analysisPvText, defaultAnalysisEngineRows } from '../src/lc0/analysisPresentation.ts';
+import { ANALYSIS_DRAWABLE_BRUSHES } from '../src/lc0/analysisFormat.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 
 const line = (engine, move, san, scoreCp, mateIn) => ({ engine, pvUci: [move], pvSan: san, scoreCp, mateIn, multipv: 1, scoreText: '', detail: '' });
+
+test('first visit and reset compare two small engines without sharing mutable rows', () => {
+  const rows = defaultAnalysisEngineRows();
+  assert.deepEqual(rows, [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'sf', variant: 'lite', strength: 12 }]);
+  rows[0].variant = 'bt4';
+  assert.equal(defaultAnalysisEngineRows()[0].variant, 'small');
+});
+
+test('default arrows show only engine best moves; opt-in alternatives never cover a best move', () => {
+  const lc0 = line('Lc0', 'd2d4', 'd4', 20);
+  const sf = line('SF Lite', 'e2e4', 'e4', 30);
+  const alternative = { ...line('Lc0', 'e2e4', 'e4', 10), multipv: 2 };
+  const third = { ...line('Lc0', 'g1f3', 'Nf3', 0), multipv: 3 };
+  const failed = { ...line('Berserk', 'a2a4', 'a4', 0), error: 'Unavailable' };
+  const lines = [alternative, lc0, third, sf, failed];
+  assert.deepEqual(analysisArrowCandidates(lines, false), [{ uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'green' }]);
+  assert.deepEqual(analysisArrowCandidates(lines, true), [{ uci: 'g1f3', brush: 'paleGreen' }, { uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'green' }]);
+  assert.equal(lines[0], alternative, 'rendering does not reorder cached lines');
+  assert.ok(Object.values(ANALYSIS_DRAWABLE_BRUSHES).every((brush) => brush.lineWidth === 10));
+  assert.equal(analysisArrowCandidates([lc0, { ...sf, pvUci: ['d2d4'] }], true).length, 1);
+});
 
 test('PVs number White and initial Black moves, including the full continuation', () => {
   const tree = new GameTree();
@@ -73,5 +95,7 @@ test('Black-to-move FEN history leaves the White ply empty and escapes imported 
   assert.match(html, /missing-ply/);
   assert.match(html, /&lt;img/);
   assert.doesNotMatch(html, /<img/);
-  assert.match(analysisMoveMarkup(new GameTree().root, tree.current), /No moves yet/);
+  const empty = analysisMoveMarkup(new GameTree().root, tree.current);
+  assert.match(empty, /No moves yet/);
+  assert.match(empty, /<button[^>]+data-load-game>Load a game<\/button>/);
 });
