@@ -552,6 +552,10 @@ onMount(() => {
     margin-top:6px; padding:7px 8px;
     border:1px dashed var(--rule); border-radius:6px; background:var(--card);
   }
+  /* #engineLegend: shown when opening-book stats exist (not covered by the capture harness). */
+  :global(.legend){display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; font-size:12px; color:var(--muted)}
+  :global(.legend .key){display:inline-flex; align-items:center; gap:5px}
+  :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
   :global(.variation){margin:4px 8px 4px 28px; padding-left:8px; border-left:2px solid var(--border-input)}
   :global(.variation-label){font:12px var(--sans); color:var(--muted)}
   :global(.maia3-grid){margin-top:8px; font-size:13px}
