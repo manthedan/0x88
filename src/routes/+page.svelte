@@ -4,7 +4,7 @@ import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import { HUMAN_OPPONENTS, type RosterEngine, searchEngineRoster } from '$lib/engineRoster';
-import { footerNav, workspaces } from '$lib/nav';
+import { footerNav } from '$lib/nav';
 
 const title = '0x88 | Browser chess engine workbench';
 const description = 'Play against Maia3, compare browser chess engines on one position, or run engine tournaments. Computation stays on your device.';
@@ -43,33 +43,36 @@ function runtimeLabel(engine: RosterEngine, report: BrowserCapabilityReport | nu
 }
 
 $: summary = summarize(caps, capsFailed);
+$: readiness = capsFailed ? 'Device check unavailable'
+  : !caps ? 'Checking this device…'
+  : !caps.wasm ? 'WebAssembly unavailable'
+  : caps.webgpu === true ? `WebGPU ready · ${caps.threadedWasm ? `${caps.threads} threads` : 'single-thread'}`
+  : `WebGPU ${caps.webgpu === null ? 'unknown' : 'unavailable'} · WASM fallback`;
 </script>
 
 <svelte:head>
   <title>{title}</title>
   <meta name="description" content={description} />
 </svelte:head>
-<SiteHeader />
-<main id="main">
+<SiteHeader landing />
+<main id="main" class="home">
 
 <section class="hero" aria-labelledby="hero-h1">
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <h1 id="hero-h1">A chess engine workbench in your browser.</h1>
-      <p class="lede">
-        0x88 runs games and analysis on your device, from a Maia3 opponent to
-        multi-engine tournaments. It needs no account or installation.
-      </p>
+      <h1 id="hero-h1">Your chess engine workbench.</h1>
+      <p class="lede">Compare engines, play Maia3, run tournaments. In your browser. No account or install.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="/app/analysis/">Open analysis <span aria-hidden="true">→</span></a>
         <a class="btn btn-secondary" href="/app/play/">Play a game</a>
+        <a class="btn btn-arena" href="/app/arena/"><span aria-hidden="true">♜</span> Arena · Engine tournaments <span aria-hidden="true">→</span></a>
       </div>
-      <a class="cta-tertiary" href="/app/arena/">Or run an engine tournament in the <b>Arena</b> <span aria-hidden="true">→</span></a>
+      <a class="device-readiness" data-tone={summary.tone} href="#device-details" aria-live="polite"><i aria-hidden="true"></i>{readiness}<span aria-hidden="true">↓</span></a>
     </div>
 
     <div class="preview-wrap"><AnalysisPreview /></div>
 
-    <div class="device" data-tone={summary.tone} aria-live="polite" aria-busy={!caps && !capsFailed}>
+    <div id="device-details" class="device" data-tone={summary.tone} aria-live="polite" aria-busy={!caps && !capsFailed}>
       <p class="device-label">This device</p>
       <p class="device-headline"><i aria-hidden="true"></i>{summary.headline}</p>
       <p class="device-detail">{summary.detail}</p>
@@ -89,23 +92,26 @@ $: summary = summarize(caps, capsFailed);
   <div class="wrap">
     <div class="section-intro">
       <p class="eyebrow"><span></span> Engines</p>
-      <h2 id="engines-h">Analysis engines and human-like opponents</h2>
+      <h2 id="engines-h">Engines and human-like opponents</h2>
       <p>Each engine downloads the first time you use it, then stays cached in this browser.</p>
     </div>
     <div class="roster">
       <div class="roster-group">
         <div class="roster-head">
           <h3>Analysis &amp; Arena</h3>
-          <a href="/app/analysis/">Open analysis <span aria-hidden="true">→</span></a>
+          <span class="roster-guide">Engine guides</span>
         </div>
         <ul class="roster-list">
           {#each searchEngines as engine (engine.id)}
             {@const runtime = runtimeLabel(engine, caps)}
-            <li style={`--engine-color:${engine.color}`}>
-              <span class="roster-avatar" aria-hidden="true">{engine.monogram}</span>
-              <a class="roster-name" href={engine.docHref}>{engine.name}</a>
-              <span class="roster-runtime" data-tone={runtime.tone} title={runtime.title}>{runtime.text}</span>
-              {#if engine.role}<p>{engine.role}</p>{/if}
+            <li>
+              <a class="roster-entry" href={engine.docHref}>
+                <span class="roster-avatar" aria-hidden="true">{engine.monogram}</span>
+                <span class="roster-name">{engine.name}</span>
+                <span class="roster-runtime" data-tone={runtime.tone} title={runtime.title}>{runtime.text}</span>
+                <span class="roster-open" aria-hidden="true">→</span>
+                {#if engine.role}<p>{engine.role}</p>{/if}
+              </a>
             </li>
           {/each}
         </ul>
@@ -113,40 +119,24 @@ $: summary = summarize(caps, capsFailed);
       <div class="roster-group">
         <div class="roster-head">
           <h3>Human-style opponents</h3>
-          <a href="/app/play/">Open play <span aria-hidden="true">→</span></a>
+          <span class="roster-guide">Opponent guides</span>
         </div>
         <ul class="roster-list roster-list-play">
           {#each HUMAN_OPPONENTS as engine (engine.id)}
             {@const runtime = runtimeLabel(engine, caps)}
-            <li style={`--engine-color:${engine.color}`}>
-              <span class="roster-avatar" aria-hidden="true">{engine.monogram}</span>
-              <a class="roster-name" href={engine.docHref}>{engine.name}</a>
-              <span class="roster-runtime" data-tone={runtime.tone} title={runtime.title}>{runtime.text}</span>
-              <p>{engine.role}</p>
+            <li>
+              <a class="roster-entry" href={engine.docHref}>
+                <span class="roster-avatar" aria-hidden="true">{engine.monogram}</span>
+                <span class="roster-name">{engine.name}</span>
+                <span class="roster-runtime" data-tone={runtime.tone} title={runtime.title}>{runtime.text}</span>
+                <span class="roster-open" aria-hidden="true">→</span>
+                <p>{engine.role}</p>
+              </a>
             </li>
           {/each}
         </ul>
         <p class="roster-note">Every analysis engine is also a Play opponent, at five strength levels.</p>
       </div>
-    </div>
-  </div>
-</section>
-
-<section class="modes" aria-labelledby="modes-h">
-  <div class="wrap">
-    <div class="section-intro">
-      <p class="eyebrow"><span></span> Workspaces</p>
-      <h2 id="modes-h">Analyse, compete, play</h2>
-    </div>
-    <div class="mode-index">
-      {#each workspaces as ws, i (ws.href)}
-        <a class="mode" href={ws.href}>
-          <span class="mode-number">{String(i + 1).padStart(2, '0')}</span>
-          <h3>{ws.title}</h3>
-          <p>{ws.blurb}</p>
-          <span class="mode-action">Open {ws.label.toLowerCase()} <b aria-hidden="true">→</b></span>
-        </a>
-      {/each}
     </div>
   </div>
 </section>
@@ -176,25 +166,27 @@ $: summary = summarize(caps, capsFailed);
 </footer>
 
 <style>
+  /* Home-only contrast: frozen workspace tokens are deliberately untouched. */
+  .home{--muted:color-mix(in srgb,var(--ink) 76%,var(--panel)); --rule-strong:color-mix(in srgb,var(--ink) 28%,var(--panel)); --home-boundary:color-mix(in srgb,var(--ink) 56%,var(--panel)); --border-input:var(--home-boundary)}
   .hero{border-bottom:1px solid var(--rule); background:var(--bg-2)}
   .hero-grid{
-    padding-top:56px; padding-bottom:56px;
-    display:grid; grid-template-columns:minmax(0,.74fr) minmax(600px,1.26fr);
+    padding-top:44px; padding-bottom:48px;
+    display:grid; grid-template-columns:minmax(0,.68fr) minmax(740px,1.32fr);
     grid-template-areas:"copy preview" "device preview";
     grid-template-rows:auto 1fr;
-    column-gap:clamp(40px,5vw,72px); row-gap:28px; align-items:start;
+    column-gap:32px; row-gap:24px; align-items:start;
   }
-  .hero-copy{grid-area:copy; max-width:600px; padding-top:18px}
-  .preview-wrap{grid-area:preview; min-width:0; align-self:center}
+  .hero-copy{grid-area:copy; max-width:600px}
+  .preview-wrap{grid-area:preview; min-width:0; align-self:start}
   .eyebrow{
     display:flex; align-items:center; gap:9px; margin:0 0 16px;
-    font-family:var(--mono); font-size:11px; line-height:1.4;
-    text-transform:uppercase; letter-spacing:.09em; color:var(--accent-deep); font-weight:650;
+    font-family:var(--mono); font-size:12px; line-height:1.4;
+    text-transform:uppercase; letter-spacing:.09em; color:var(--accent-soft-text); font-weight:650;
   }
   .eyebrow span{width:24px; height:2px; background:var(--accent); flex:0 0 auto}
   .hero h1{
-    max-width:13ch; margin:0 0 22px; font-size:clamp(42px,5.2vw,64px);
-    line-height:.99; letter-spacing:-.035em; font-weight:600;
+    max-width:13ch; margin:0 0 20px; font-size:clamp(42px,4.2vw,58px);
+    line-height:1.02; letter-spacing:-.035em; font-weight:600;
   }
   .lede{max-width:54ch; margin:0; font-size:17px; line-height:1.65; color:var(--ink-soft)}
   .cta-row{display:flex; flex-wrap:wrap; gap:10px; margin-top:28px}
@@ -209,21 +201,25 @@ $: summary = summarize(caps, capsFailed);
   .btn-primary:hover{background:var(--accent-hover); color:var(--on-accent)}
   .btn-secondary{background:var(--panel); color:var(--ink)}
   .btn-secondary:hover{border-color:var(--accent)}
-  .cta-tertiary{display:inline-flex; align-items:center; gap:5px; min-height:32px; margin-top:12px; color:var(--ink-soft); font-size:14px}
-  .cta-tertiary b{color:var(--ink); font-weight:650}
-  .cta-tertiary span{color:var(--accent)}
-  .cta-tertiary:hover b{text-decoration:underline; text-underline-offset:3px}
+  .btn-arena{flex-basis:100%; justify-content:space-between; min-height:40px; padding-block:7px; background:transparent; color:var(--ink-soft); font-size:13px}
+  .btn-arena:hover{background:var(--panel); border-color:var(--accent)}
+  .btn-arena span{color:var(--accent-soft-text)}
+  .device-readiness{display:flex; align-items:center; gap:7px; width:fit-content; min-height:28px; margin-top:9px; color:var(--ink-soft); font-size:13px}
+  .device-readiness i{width:7px; height:7px; flex-shrink:0; border-radius:50%; background:var(--muted)}
+  .device-readiness[data-tone=ok] i{background:var(--accent)}
+  .device-readiness[data-tone=warn] i{background:var(--warn)}
+  .device-readiness>span{color:var(--ink); margin-left:3px}
 
   /* Device check: live WebGPU / SIMD / threads result, under the hero actions. */
   .device{
-    grid-area:device; align-self:start; max-width:460px; padding:14px 16px;
+    grid-area:device; align-self:start; max-width:460px; padding:14px 16px; scroll-margin-top:84px;
     border:1px solid var(--rule-strong); border-left:3px solid var(--muted-2); border-radius:8px;
     background:var(--panel);
   }
   .device[data-tone=ok]{border-left-color:var(--accent)}
   .device[data-tone=warn]{border-left-color:var(--warn)}
   .device p{margin:0}
-  .device-label{font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
+  .device-label{font-family:var(--mono); font-size:12px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
   .device .device-headline{margin-top:6px}
   .device .device-detail{margin-top:3px}
   .device-headline{display:flex; align-items:center; gap:8px;  color:var(--ink); font-size:15px; font-weight:650}
@@ -233,12 +229,12 @@ $: summary = summarize(caps, capsFailed);
   .device-detail{ color:var(--muted); font-size:13px; line-height:1.5}
   .device-chips{display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 0; padding:0; list-style:none}
   .device-chips li{padding:2px 8px; border:1px solid var(--rule-strong); border-radius:999px; color:var(--ink-soft); font-family:var(--mono); font-size:12px}
-  .device-chips li[data-tone=ok]{color:var(--accent-soft-text); border-color:color-mix(in srgb, var(--accent) 50%, var(--rule))}
+  .device-chips li[data-tone=ok]{color:var(--accent-soft-text); border-color:var(--home-boundary)}
   .device-chips li[data-tone=warn]{color:var(--warn); border-color:color-mix(in srgb, var(--warn) 50%, var(--rule))}
   .device-link{display:inline-block; margin-top:10px; color:var(--ink); font-size:13px; font-weight:650}
   .device-link span{color:var(--accent); margin-left:3px}
 
-  .section-intro{max-width:720px; margin-bottom:32px}
+  .section-intro{max-width:100%; margin-bottom:32px}
   .section-intro .eyebrow{margin:0 0 10px}
   .section-intro h2{margin:0; font-size:clamp(30px,4vw,42px); line-height:1.08; letter-spacing:-.025em}
   .section-intro p:not(.eyebrow){margin:12px 0 0; color:var(--muted); font-size:15px; line-height:1.6}
@@ -249,40 +245,29 @@ $: summary = summarize(caps, capsFailed);
   .roster{display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:28px 40px; align-items:start}
   .roster-head{display:flex; align-items:baseline; justify-content:space-between; gap:16px; padding-bottom:10px; border-bottom:1px solid var(--rule-strong)}
   .roster-head h3{margin:0; font-size:20px}
-  .roster-head a{color:var(--ink); font-size:13px; font-weight:650; white-space:nowrap}
-  .roster-head a span{color:var(--accent); margin-left:3px}
+  .roster-guide{color:var(--muted); font-size:12px; white-space:nowrap}
   .roster-list{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:28px; margin:0; padding:0; list-style:none}
   .roster-list-play{grid-template-columns:minmax(0,1fr)}
-  .roster-list li{
-    display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center;
-    column-gap:10px; row-gap:3px; align-content:start; padding:14px 0; border-bottom:1px solid var(--rule);
+  .roster-list li{border-bottom:1px solid var(--rule-strong)}
+  .roster-entry{
+    display:grid; grid-template-columns:28px minmax(0,1fr) auto 14px; align-items:center;
+    column-gap:8px; row-gap:5px; height:100%; padding:14px 4px; border-radius:5px;
+    color:inherit; transition:background .15s;
   }
+  .roster-entry:hover{background:var(--panel); text-decoration:none}
+  .roster-open{color:var(--muted); transition:transform .15s}
+  .roster-entry:hover .roster-open{color:var(--accent-soft-text); transform:translateX(2px)}
   .roster-avatar{
     width:28px; height:28px; display:grid; place-items:center; border-radius:6px;
-    background:var(--engine-color); color:#fff; font:700 11.5px/1 var(--mono); box-shadow:inset 0 0 0 1px #ffffff26;
+    background:var(--panel); color:var(--ink-soft); border:1px solid var(--rule-strong); font:700 12px/1 var(--mono);
   }
   .roster-name{color:var(--ink); font-size:15px; font-weight:650}
-  .roster-name:hover{text-decoration:underline; text-underline-offset:3px}
-  .roster-runtime{padding:1px 7px; border:1px solid var(--rule-strong); border-radius:999px; color:var(--muted); font-family:var(--mono); font-size:11px; white-space:nowrap}
-  .roster-runtime[data-tone=ok]{color:var(--accent-soft-text); border-color:color-mix(in srgb, var(--accent) 50%, var(--rule))}
+  .roster-entry:hover .roster-name{text-decoration:underline; text-underline-offset:3px}
+  .roster-runtime{padding:1px 6px; border:1px solid var(--home-boundary); border-radius:999px; color:var(--ink-soft); font-family:var(--mono); font-size:12px; white-space:nowrap}
+  .roster-runtime[data-tone=ok]{color:var(--accent-soft-text); border-color:var(--home-boundary)}
   .roster-runtime[data-tone=warn]{color:var(--warn); border-color:color-mix(in srgb, var(--warn) 50%, var(--rule))}
-  .roster-list p{grid-column:2 / -1; margin:0; color:var(--muted); font-size:13px; line-height:1.5}
+  .roster-list p{grid-column:2 / -1; margin:0; color:var(--muted); font-size:14px; line-height:1.55}
   .roster-note{margin:14px 0 0; color:var(--muted); font-size:13px; line-height:1.5}
-
-  .modes .wrap{padding-top:68px; padding-bottom:82px}
-  .mode-index{border-bottom:1px solid var(--rule-strong)}
-  .mode{
-    display:grid; grid-template-columns:120px minmax(250px,.8fr) minmax(300px,1fr) 112px;
-    gap:24px; align-items:start; padding:25px 4px;
-    border-top:1px solid var(--rule-strong); color:inherit; text-decoration:none;
-    transition:background .15s,padding .15s;
-  }
-  .mode:hover{padding-left:12px; padding-right:12px; background:var(--panel); text-decoration:none}
-  .mode-number{padding-top:4px; font-family:var(--mono); font-size:15px; letter-spacing:.02em; color:var(--accent-deep); font-weight:700}
-  .mode h3{margin:0; font-size:23px; line-height:1.18}
-  .mode p{margin:0; max-width:58ch; font-size:14px; line-height:1.65; color:var(--muted)}
-  .mode-action{justify-self:end; padding-top:4px; color:var(--ink); font-size:13px; font-weight:650; white-space:nowrap}
-  .mode-action b{margin-left:5px; color:var(--accent); font-weight:700}
 
   .principle{border-top:1px solid var(--rule-strong); background:var(--bg-workspace)}
   .principle-grid{
@@ -298,41 +283,30 @@ $: summary = summarize(caps, capsFailed);
   footer.site-footer{margin-top:0}
   :global(.landing-footer-wrap){justify-content:flex-end}
 
-  @media(max-width:1180px){
-    .hero-grid{grid-template-columns:minmax(0,.85fr) minmax(500px,1.15fr); column-gap:36px}
-    .mode{grid-template-columns:95px minmax(220px,.8fr) 1fr 100px; gap:18px}
-  }
-  @media(max-width:980px){
+  @media(max-width:1200px){
     .hero-grid{grid-template-columns:1fr; grid-template-areas:"copy" "preview" "device"; grid-template-rows:none; padding-top:48px; padding-bottom:52px}
     .hero-copy{max-width:650px; padding-top:0}
     .hero h1{max-width:14ch}
-    .preview-wrap{width:100%; max-width:680px}
+    .preview-wrap{width:100%; max-width:820px}
     .roster{grid-template-columns:1fr}
   }
   @media(max-width:820px){
-    .mode{grid-template-columns:90px 1fr 1.15fr; gap:18px}
-    .mode-action{grid-column:2; justify-self:start; padding-top:0}
     .principle-grid{grid-template-columns:1fr 1.2fr}
     .principle-grid>a{grid-column:1}
   }
   @media(max-width:600px){
-    .hero-grid{padding:26px 16px 36px; row-gap:22px}
-    .hero h1{font-size:clamp(36px,11vw,48px); margin-bottom:14px}
-    .lede{font-size:15.5px; line-height:1.55}
-    .cta-row{margin-top:20px; gap:8px}
+    .hero-grid{padding:16px 16px 32px; row-gap:14px}
+    .hero h1{font-size:clamp(32px,8.7vw,40px); max-width:none; margin-bottom:10px}
+    .lede{font-size:14.5px; line-height:1.5}
+    .cta-row{margin-top:14px; gap:6px}
     .cta-row .btn{flex:1 1 0; justify-content:center; padding-inline:12px}
-    .cta-tertiary{margin-top:6px}
+    .cta-row .btn-arena{flex-basis:100%; min-height:34px; padding-block:4px; justify-content:space-between}
+    .device-readiness{margin-top:5px; min-height:26px; font-size:12px}
     .device{max-width:none}
     .section-intro{margin-bottom:22px}
     .engines .wrap{padding:48px 16px 52px}
     .roster-list{grid-template-columns:1fr}
-    .roster-list li{padding:11px 0}
-    .modes .wrap{padding:48px 16px 56px}
-    .mode{grid-template-columns:1fr; gap:8px; padding:24px 0}
-    .mode:hover{padding-left:8px; padding-right:8px}
-    .mode-number{padding:0}
-    .mode h3{font-size:22px}
-    .mode-action{grid-column:auto; margin-top:5px}
+    .roster-entry{padding:12px 4px}
     .principle-grid{padding:38px 16px; grid-template-columns:1fr; gap:12px}
     .principle-grid>a{grid-column:auto; margin-top:5px}
   }

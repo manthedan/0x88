@@ -2,12 +2,10 @@
 type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
 type Piece = { color: 'white' | 'black'; role: PieceRole; square: string };
 
-// Sicilian Najdorf, English Attack, after 12...b4 (the same game the
-// Analysis page is reviewed on). Engine numbers below were copied from a run
-// of the built Analysis page with its default engines, Lc0 Small (400 visits)
-// and Stockfish Lite (depth 12), on this position. Re-run before editing them.
+// Sicilian Najdorf, English Attack, after 12...b4. These results were copied
+// from the built Analysis page with Lc0 Small (400 visits) and Stockfish Lite
+// (depth 12). Re-run before editing the scores, search metadata or variations.
 const FEN = 'r2q1rk1/3nbppp/p2pbn2/4p1P1/1p2P3/1NN1BP2/PPPQ3P/2KR1B1R w - - 0 13';
-
 const ROLE: Record<string, PieceRole> = { r: 'rook', n: 'knight', b: 'bishop', q: 'queen', k: 'king', p: 'pawn' };
 const FILES = 'abcdefgh';
 
@@ -31,9 +29,8 @@ function xy(square: string): [number, number] {
   return [FILES.indexOf(square[0]), 8 - Number(square[1])];
 }
 
-// Chessground draws engine brushes at lineWidth 15 on a 64-unit square and
-// stops the shaft 10 units short of the destination centre; mirror that here
-// on a 100-unit square so the preview arrows match the Analysis board.
+// Match the owner's uniform chessground brush width of 15 (64-unit squares).
+// Only one best-move arrow per engine; arrows sit UNDER pieces, not over them.
 const STROKE = (15 / 64) * 100;
 const MARGIN = (10 / 64) * 100;
 function arrow(from: string, to: string) {
@@ -45,58 +42,39 @@ function arrow(from: string, to: string) {
 
 const pieces = fenPieces(FEN);
 const lastMove = ['b5', 'b4'];
-
-type EngineResult = {
-  id: string;
-  name: string;
-  monogram: string;
-  color: string;
-  meta: string;
-  evalText: string;
-  best: string;
-  /** Principal variation after the best move, starting with Black's reply. */
-  line: string;
-  arrow: [string, string];
-};
-
-const engines: EngineResult[] = [
+const engines = [
   {
-    id: 'lc0',
-    name: 'Lc0 Small',
-    monogram: 'L0',
-    color: '#7a4fd6',
-    meta: '365 visits',
-    evalText: '+0.25',
-    best: 'Ne2',
-    line: 'Nh5 14. Ng3 Nf4 15. h4 a5',
+    id: 'lc0', name: 'Lc0 Small', color: '#7a4fd6', meta: '365 visits',
+    evalText: '+0.25', best: 'Ne2', line: 'Nh5 14. Ng3 Nf4 15. h4 a5',
     arrow: ['c3', 'e2'],
   },
   {
-    id: 'sf',
-    name: 'Stockfish Lite',
-    monogram: 'SF',
-    color: '#1f5fcf',
-    meta: 'depth 12',
-    evalText: '+0.55',
-    best: 'gxf6',
-    line: 'bxc3 14. Qxc3 Nxf6 15. Na5 Rc8',
+    id: 'sf', name: 'Stockfish Lite', color: '#1f5fcf', meta: 'depth 12',
+    evalText: '+0.55', best: 'gxf6', line: 'bxc3 14. Qxc3 Nxf6 15. Na5 Rc8',
     arrow: ['g5', 'f6'],
   },
 ];
-
-// Eval bar follows the Analysis page's logistic squash of Lc0's +0.25.
-const whitePct = 50 + 50 * (2 / (1 + Math.exp(-0.004 * 25)) - 1);
+// Keep each numbered move pair together instead of orphaning a final reply.
+function variation(best: string, line: string): string[] {
+  return `13. ${best} ${line}`.split(/ (?=\d+\.)/);
+}
 const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
 </script>
 
 <div class="preview-shell">
 <figure class="analysis-preview" aria-labelledby="preview-caption">
+  <figcaption class="pv-caption" id="preview-caption">
+    <span class="pv-example">Example engine comparison</span>
+    <strong>Engines disagree: Ne2 / gxf6</strong>
+    <span class="pv-perspective">White to move · evaluations from White’s perspective</span>
+  </figcaption>
+
   <div class="pv-board">
-    <div class="evalbar" aria-hidden="true"><span style={`height:${whitePct.toFixed(1)}%`}></span></div>
+    <div class="ranks" aria-hidden="true">{#each [8, 7, 6, 5, 4, 3, 2, 1] as rank}<span>{rank}</span>{/each}</div>
     <div
       class="preview-board cg-wrap"
       role="img"
-      aria-label="Board after 12…b4, White to move. Lc0's arrow shows Ne2 and Stockfish's arrow shows gxf6."
+      aria-label="Board after 12…b4, White to move. Lc0's violet arrow shows Ne2 and Stockfish's blue arrow shows gxf6."
     >
       <cg-board>
         {#each lastMove as sq (sq)}
@@ -120,27 +98,34 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
         {/each}
       </svg>
     </div>
+    <div class="files" aria-hidden="true">{#each FILES as file}<span>{file}</span>{/each}</div>
   </div>
 
-  <div class="pv-head" id="preview-caption">
-    <span class="pv-context"><b>B90</b> Sicilian Najdorf, English Attack · <span class="nowrap">after 12…b4</span></span>
-    <span class="pv-verdict"><strong>Engines disagree: Ne2 / gxf6</strong><span>Eval spread 0.30 <span class="pv-unit">pawns</span></span></span>
+  <div class="pv-results">
+    <p class="pv-legend">Best-move arrows <span>Eval spread <b>0.30 pawns</b></span></p>
+    <ol class="pv-engines" aria-label="Example engine results">
+      {#each engines as engine (engine.id)}
+        <li style={`--engine-color:${engine.color}`}>
+          <div class="pv-result">
+            <span class="pv-swatch" aria-hidden="true">↗</span>
+            <b class="pv-name">{engine.name}</b>
+            <strong class="pv-eval">{engine.evalText}</strong>
+            <span class="pv-best"><span class="sr-only">best move </span>{engine.best}</span>
+          </div>
+          <span class="pv-meta">{engine.meta}</span>
+          <p class="pv-line pv-desktop-line">{#each variation(engine.best, engine.line) as move}<span>{move}</span>{' '}{/each}</p>
+          <details class="pv-expand">
+            <summary>{engine.meta} <span>· View line</span></summary>
+            <p class="pv-line">{#each variation(engine.best, engine.line) as move}<span>{move}</span>{' '}{/each}</p>
+          </details>
+        </li>
+      {/each}
+    </ol>
   </div>
-
-  <ol class="pv-engines" aria-label="Engine results">
-    {#each engines as engine (engine.id)}
-      <li style={`--engine-color:${engine.color}`}>
-        <span class="pv-avatar" aria-hidden="true">{engine.monogram}</span>
-        <span class="pv-name"><b>{engine.name}</b><small>{engine.meta}</small></span>
-        <strong class="pv-eval">{engine.evalText}</strong>
-        <span class="pv-best"><span class="sr-only">best move </span>{engine.best}</span>
-        <span class="pv-line"><b>13. {engine.best}</b> {engine.line}</span>
-      </li>
-    {/each}
-  </ol>
 
   <div class="pv-foot">
-    <p>Each engine draws its own best move. Lc0 moves the attacked knight to safety; Stockfish takes on f6 first.</p>
+    <p class="pv-context"><b>B90</b> Sicilian Najdorf, English Attack · after 12…b4</p>
+    <p>Lc0 moves the attacked knight to safety. Stockfish captures on f6 first. Positive scores favour White.</p>
     <a href={analysisHref}>Analyse this position <span aria-hidden="true">→</span></a>
   </div>
 </figure>
@@ -149,77 +134,65 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
 <style>
   .preview-shell{container-type:inline-size; min-width:0}
   .analysis-preview{
-    min-width:0; margin:0; padding:16px;
-    display:grid; grid-template-columns:minmax(0,1.3fr) minmax(250px,1fr);
-    grid-template-areas:"board head" "board engines" "board foot";
-    grid-template-rows:auto auto 1fr;
-    column-gap:18px; row-gap:12px;
-    border:1px solid color-mix(in srgb, var(--ink) 16%, transparent); border-radius:12px;
-    background:var(--panel);
+    min-width:0; margin:0; padding:14px;
+    display:grid; grid-template-columns:minmax(0,1fr) 258px;
+    grid-template-areas:"caption caption" "board results" "board foot";
+    grid-template-rows:auto auto 1fr; gap:16px;
+    border:1px solid var(--rule-strong); border-radius:12px; background:var(--panel);
     box-shadow:0 30px 70px -45px rgba(45,35,20,.6);
   }
-  .pv-board{grid-area:board; align-self:start; display:grid; grid-template-columns:10px minmax(0,1fr); gap:6px}
-  .evalbar{position:relative; overflow:hidden; border:1px solid #8a8780; border-radius:3px; background:#555550}
-  .evalbar span{position:absolute; inset:auto 0 0; background:var(--eval-white)}
+  .pv-caption{grid-area:caption; display:grid; grid-template-columns:1fr auto; gap:2px 14px; color:var(--ink)}
+  .pv-example{font:600 12px/1.5 var(--mono); color:var(--muted)}
+  .pv-caption strong{grid-column:1; font-size:17px; font-weight:650}
+  .pv-perspective{grid-column:2; grid-row:1 / 3; align-self:end; max-width:28ch; color:var(--muted); font-size:13px; line-height:1.5}
+  .pv-board{grid-area:board; position:relative; align-self:start; padding:0 0 18px 18px}
+  .ranks,.files{position:absolute; display:grid; color:var(--ink-soft); font:500 12px/1 var(--mono); text-align:center}
+  .ranks{left:0; top:0; bottom:18px; width:14px; grid-template-rows:repeat(8,1fr); align-items:center}
+  .files{left:18px; bottom:0; right:0; height:14px; grid-template-columns:repeat(8,1fr); align-items:end}
   .preview-board.cg-wrap{
     position:relative; width:100%!important; height:auto!important; aspect-ratio:1; box-sizing:border-box;
-    overflow:hidden; border-radius:3px; background:var(--board-light);
+    overflow:hidden; border-radius:3px; background:var(--board-light); isolation:isolate;
   }
   .preview-board cg-board{position:absolute; inset:0; display:block; overflow:hidden}
-  .arrows{position:absolute; inset:0; width:100%; height:100%; z-index:4; pointer-events:none; opacity:.6}
-
-  .pv-head{grid-area:head; display:grid; gap:8px; min-width:0}
-  .pv-context{color:var(--muted); font-size:13px; line-height:1.45}
-  .pv-context b{margin-right:4px; color:var(--ink); font-family:var(--mono); font-size:12px; font-weight:650}
-  .nowrap{white-space:nowrap}
-  .pv-verdict{display:grid; gap:2px; padding-top:9px; border-top:1px solid var(--rule)}
-  .pv-verdict strong{color:var(--ink); font-size:15px; line-height:1.35; font-weight:650}
-  .pv-verdict span{color:var(--muted); font-size:13px}
-
-  .pv-engines{grid-area:engines; display:grid; gap:8px; margin:0; padding:0; list-style:none; min-width:0}
-  .pv-engines li{
-    display:grid; grid-template-columns:24px minmax(0,1fr) auto auto; align-items:center;
-    column-gap:9px; row-gap:6px; padding:10px 11px 10px 10px; min-width:0;
-    border:1px solid var(--rule); border-left:3px solid var(--engine-color); border-radius:7px;
-    background:var(--panel-inset);
-  }
-  .pv-avatar{
-    width:24px; height:24px; display:grid; place-items:center; border-radius:5px;
-    background:var(--engine-color); color:#fff; font:700 11px/1 var(--mono); box-shadow:inset 0 0 0 1px #ffffff26;
-  }
-  .pv-name{min-width:0; display:grid; line-height:1.25}
-  .pv-name b{overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--ink); font-size:14px; font-weight:650}
-  .pv-name small{color:var(--muted); font-size:12px}
-  .pv-eval{color:var(--ink); font-family:var(--mono); font-size:18px; font-weight:700; letter-spacing:-.02em}
-  .pv-best{
-    padding:3px 8px; border-radius:5px; color:var(--ink); font-size:14px; font-weight:700;
-    background:color-mix(in srgb, var(--engine-color) 22%, var(--panel));
-  }
-  .pv-line{grid-column:2 / -1; min-width:0; color:var(--ink-soft); font-size:13px; line-height:1.45}
-  .pv-line b{color:var(--ink); font-weight:700}
-
-  .pv-foot{grid-area:foot; align-self:end; display:grid; gap:10px; min-width:0}
-  .pv-foot p{margin:0; color:var(--muted); font-size:13px; line-height:1.5}
+  .arrows{position:absolute; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; opacity:.9; filter:drop-shadow(0 0 1px #fff)}
+  .pv-results{grid-area:results; min-width:0}
+  .pv-legend{display:grid; gap:2px; margin:0 0 10px; color:var(--ink-soft); font-size:13px; line-height:1.5}
+  .pv-legend>span{color:var(--muted)}
+  .pv-legend b{font-weight:600; font-variant-numeric:tabular-nums}
+  .pv-engines{display:grid; gap:10px; margin:0; padding:0; list-style:none; min-width:0}
+  .pv-engines li{padding:10px; min-width:0; border:1px solid var(--rule-strong); border-left:3px solid var(--engine-color); border-radius:7px; background:var(--panel-inset)}
+  .pv-result{display:grid; grid-template-columns:16px minmax(0,1fr) auto auto; gap:6px; align-items:center}
+  .pv-swatch{color:var(--engine-color); font-size:22px; font-weight:750; line-height:1}
+  .pv-name{color:var(--ink); font-size:14px; line-height:1.3; font-weight:650}
+  .pv-eval{color:var(--ink); font:700 17px/1.4 var(--mono); letter-spacing:-.03em}
+  .pv-best{padding:3px 6px; border-radius:4px; color:var(--ink); font:650 13px/1.5 var(--mono); background:color-mix(in srgb, var(--engine-color) 18%, var(--panel))}
+  .pv-meta{display:block; margin:3px 0 7px 22px; color:var(--muted); font-size:13px}
+  .pv-line{display:flex; flex-wrap:wrap; gap:2px 8px; margin:0; color:var(--ink-soft); font:400 13px/1.65 var(--mono); font-variant-numeric:tabular-nums}
+  .pv-line span{white-space:nowrap}
+  .pv-line span:first-child{color:var(--ink); font-weight:600}
+  .pv-expand{display:none}
+  .pv-expand summary{cursor:pointer; color:var(--muted); font-size:13px; min-height:24px; padding-top:3px}
+  .pv-expand summary span{color:var(--ink-soft)}
+  .pv-expand[open] summary{margin-bottom:6px}
+  .pv-foot{grid-area:foot; align-self:end; display:grid; gap:10px; min-width:0; padding-bottom:18px}
+  .pv-foot p{margin:0; color:var(--muted); font-size:13px; line-height:1.6}
+  .pv-context b{color:var(--ink); font-family:var(--mono); font-weight:600}
   .pv-foot a{width:max-content; color:var(--ink); font-size:14px; font-weight:650}
   .pv-foot a span{margin-left:4px; color:var(--accent)}
   .sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
 
-  /* Narrow (phone) frame: the engine verdict and both results lead, the
-     board follows, so a named engine result shows before the board. */
-  @container(max-width:520px){
-    .analysis-preview{
-      grid-template-columns:minmax(0,1fr);
-      grid-template-areas:"head" "engines" "board" "foot";
-      grid-template-rows:none;
-      padding:12px; row-gap:10px;
-    }
-    .pv-context{display:none}
-    .pv-verdict{padding-top:0; border-top:0; grid-template-columns:1fr auto; align-items:baseline; gap:8px}
-    .pv-verdict strong{font-size:14px; white-space:nowrap}
-    .pv-unit{display:none}
-    .pv-verdict span{font-size:12px}
+  @container(max-width:680px){
+    .analysis-preview{grid-template-columns:minmax(0,1fr); grid-template-areas:"caption" "board" "results" "foot"; grid-template-rows:none; padding:10px; gap:10px}
+    .pv-caption{grid-template-columns:1fr; gap:1px}
+    .pv-caption strong{font-size:15px}
+    .pv-perspective{grid-column:1; grid-row:auto; max-width:none; font-size:12px}
+    .pv-example{font-size:12px}
+    .pv-legend{display:flex; justify-content:space-between; gap:8px; margin-bottom:7px; font-size:12px}
     .pv-engines{gap:6px}
-    .pv-engines li{padding:8px 10px 8px 9px; row-gap:4px}
-    .pv-foot{align-self:start}
+    .pv-engines li{padding:7px 10px}
+    .pv-name{font-size:14px}
+    .pv-meta,.pv-desktop-line{display:none}
+    .pv-expand{display:block}
+    .pv-foot{align-self:start; padding:4px 0 2px; gap:8px}
   }
 </style>
