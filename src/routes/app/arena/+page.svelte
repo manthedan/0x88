@@ -567,7 +567,6 @@ onMount(() => {
   .charts-panel:global([data-chart=npsChart]) .chart-card[data-chart=npsChart],
   .charts-panel:global([data-chart=rootChart]) .chart-card[data-chart=rootChart]{display:block}
   .chart-card :global(svg){display:block; width:100%; height:auto; cursor:crosshair}
-  .chart-card[data-chart=rootChart] :global(svg){height:auto}
   .chart-footer{display:flex; align-items:center; flex-wrap:wrap; gap:2px 12px; margin-top:3px}
   .chart-review{display:flex; flex:1; min-width:130px; align-items:center; gap:8px; color:var(--muted); font-size:12px}
   .chart-review input{flex:1; min-width:0; width:auto; min-height:24px; accent-color:var(--accent)}
@@ -626,7 +625,6 @@ onMount(() => {
     .setup-pane :global(.seat-row select){padding-left:8px; font-size:13px}
     .setup-pane :global(.seat-strength-wrap){grid-column:2 / -1}
     .setup-pane :global(.seat-row select), .arena-workspace select, .arena-workspace input[type=number]{min-height:44px}
-    .time-grid{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr)}
     .time-grid label{font-size:12px}
     .time-grid select{padding-left:8px; font-size:12px}
     .scoreboard :global(.sb-points){font-size:28px}

@@ -314,7 +314,7 @@ onMount(() => {
   /* Engine blocks shrink (and scroll) before the move list drops below ~5 rows. */
   .analysis-workspace .engine-strip{order:0; flex:0 1 auto; min-height:0}
   :global(.analysis-workspace .sr-only){position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0}
-  .board-shell{position:relative}
+  .board-shell{position:relative; min-width:0}
   :global(.analysis-workspace #ground coords){font-size:12px; font-weight:700; opacity:1}
   :global(.analysis-workspace #ground .cg-shapes){filter:drop-shadow(0 0 1px #fff9)}
   :global(.analysis-workspace #keyboardBoard){position:absolute; inset:0; z-index:5; pointer-events:none}
@@ -394,7 +394,6 @@ onMount(() => {
     position:absolute; left:0; right:0; top:50%;
     height:2px; background:#99978e; box-shadow:0 1px 0 #0006;
   }
-  .board-shell{min-width:0}
   .nav{display:flex; flex:1 1 auto; gap:6px; min-width:0}
   .nav button{
     flex:1 1 0; height:100%; min-height:0; min-width:0; padding:0; border-radius:7px;
@@ -469,14 +468,12 @@ onMount(() => {
   :global(table.engine-compare tbody th){color:var(--ink); font-weight:550; font-size:13px}
   :global(.compare-move){font:650 14px var(--sans); padding:6px; min-height:36px; color:var(--ink); background:var(--panel-inset)}
   :global(table.engine-compare .mono){font-family:var(--mono); white-space:nowrap}
-  :global(table.engine-compare .pv){font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px}
-  :global(table.engine-compare .agree){color:var(--accent); font-weight:700}
   :global(table.engine-compare tbody tr:hover){background:var(--accent-soft)}
   :global(.model-load-progress), :global(.search-progress-grid){
     margin-top:8px; padding:8px; border:1px solid var(--rule);
     border-radius:var(--radius-sm); background:var(--panel-inset);
   }
-  :global(.model-load-progress progress), :global(.search-progress-grid progress), :global(.search-progress-cell progress){
+  :global(.model-load-progress progress), :global(.search-progress-grid progress){
     width:100%; height:9px; accent-color:var(--accent);
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
@@ -550,16 +547,11 @@ onMount(() => {
   .stepper-field input::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0 }
   .stepper-field input:focus{box-shadow:none; outline:none}
   .profile-row{align-items:end}
-  :global(.profile-row select){min-width:150px}
   .profile-row input[type=text]{min-width:130px}
   :global(.profile-summary){
     margin-top:6px; padding:7px 8px;
     border:1px dashed var(--rule); border-radius:6px; background:var(--card);
   }
-  :global(.legend){display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; font-size:12px; color:var(--muted)}
-  :global(.legend .key){display:inline-flex; align-items:center; gap:5px}
-  :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
-  :global(.load-game-link){display:inline; min-height:0; padding:0; border:0; background:transparent; color:var(--ink); font:inherit; text-decoration:underline; text-underline-offset:3px}
   :global(.variation){margin:4px 8px 4px 28px; padding-left:8px; border-left:2px solid var(--border-input)}
   :global(.variation-label){font:12px var(--sans); color:var(--muted)}
   :global(.maia3-grid){margin-top:8px; font-size:13px}
@@ -677,7 +669,6 @@ onMount(() => {
   :global(.engine-gear:hover:not(:disabled)){background:var(--panel-2)}
   :global(.engine-settings-icon){width:16px; height:16px; fill:none; stroke:var(--muted); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
   :global(.engine-gear:hover .engine-settings-icon), :global(.engine-gear:focus-visible .engine-settings-icon){stroke:var(--ink)}
-  :global(.engine-dot){display:inline-block; width:9px; height:9px; flex:0 0 9px; border-radius:50%; background:var(--engine-color); box-shadow:0 0 0 1.5px var(--panel-inset)}
   :global(.engine-summary-meter){position:absolute; left:0; bottom:-1px; height:2px; width:var(--progress); background:var(--engine-color); transition:width .2s}
   :global(.engine-summary-meter.indeterminate){width:100%; opacity:.55; animation:analysis-pulse 1.4s ease-in-out infinite}
   @keyframes -global-analysis-pulse{50%{opacity:.15}}
@@ -711,7 +702,7 @@ onMount(() => {
   :global(.engine-lines .line-error), :global(.engine-lines .pending-line){display:block; min-height:24px; padding:2px 10px 0 39px; font-size:13px}
   :global(.line-error-text){display:block; color:var(--warn); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   :global(.pending-text){color:var(--muted)}
-  :global(.legend){display:flex; flex-wrap:wrap; gap:12px; padding:6px 12px 0; font-size:13px; color:var(--muted)}
+  :global(.legend){display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; padding:6px 12px 0; font-size:13px; color:var(--muted)}
   :global(.legend[hidden]){display:none}
   :global(.legend .key){display:inline-flex; align-items:center; gap:5px}
   :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
@@ -722,7 +713,6 @@ onMount(() => {
   .workbench-tabs [role=tab]:hover:not(:disabled){background:transparent; color:var(--ink)}
   .workbench-tabs [role=tab][aria-selected=true]{color:var(--ink); border-bottom-color:var(--accent); font-weight:650}
   #enginesTab{display:none}
-  .workbench-tabs :global(.tab-current){display:none}
   .tab-badge{padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
   .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{order:3; flex:1 1 0; min-height:0}
   .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
@@ -751,7 +741,6 @@ onMount(() => {
   :global(.quick-pgn-actions){display:flex; align-items:center; gap:14px}
   :global(.quick-pgn-hint){font-size:13px; color:var(--muted)}
   :global(.quick-pgn-load){min-height:32px; padding:0 14px; border:1px solid var(--border-input-hover); border-radius:7px; background:var(--panel-2); color:var(--ink); font:600 13px var(--sans)}
-  :global(.history-empty .load-game-link){font-size:13px; color:var(--muted)}
   /* Rare long SAN + large eval pairs wrap the score rather than spilling into the next ply. */
   :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:space-between; gap:0 5px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
@@ -759,7 +748,6 @@ onMount(() => {
   :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)) !important; color:var(--ink); font-weight:700}
   :global(.movelist .mv-eval){margin-left:auto; white-space:nowrap; font:13px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
-  :global(.movelist .var){color:var(--muted)}
   @media (max-width:900px){
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
     .board-column{display:contents}
@@ -863,6 +851,5 @@ onMount(() => {
   }
   @media (prefers-reduced-motion: reduce){
     .evalbar .white{transition:none}
-    :global(.lines li:hover){background:none}
   }
 </style>
