@@ -23,7 +23,7 @@ test('default arrows show only engine best moves; opt-in alternatives never cove
   assert.deepEqual(analysisArrowCandidates(lines, false), [{ uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'violet' }]);
   assert.deepEqual(analysisArrowCandidates(lines, true), [{ uci: 'g1f3', brush: 'paleViolet' }, { uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'violet' }]);
   assert.equal(lines[0], alternative, 'rendering does not reorder cached lines');
-  assert.ok(Object.values(ANALYSIS_DRAWABLE_BRUSHES).every((brush) => brush.lineWidth === 10));
+  assert.ok(Object.values(ANALYSIS_DRAWABLE_BRUSHES).every((brush) => brush.lineWidth === 15));
   assert.equal(analysisArrowCandidates([lc0, { ...sf, pvUci: ['d2d4'] }], true).length, 1);
 });
 
