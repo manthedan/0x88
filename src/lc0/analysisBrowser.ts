@@ -130,7 +130,8 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { probeEngineLogos } from './engineLogos.ts';
-import { analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveMarkup, firstAnalysisMove, patchAnalysisResults } from './analysisPresentation.ts';
+import { analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveMarkup, analysisPvText, firstAnalysisMove, patchAnalysisResults } from './analysisPresentation.ts';
+import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import {
   berserkCacheKey,
   cpuEngineHashMbForSurface,
@@ -370,6 +371,7 @@ function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4Worker
   return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
 }
 let ground: Ground | null = null;
+let keyboardBoard: ReturnType<typeof createAnalysisKeyboardBoard> | null = null;
 let mountAbort = new AbortController();
 let analysisMountedCallbackCache = new WeakMap<() => void, () => void>();
 function isStaleMount(signal: AbortSignal = mountAbort.signal): boolean {
@@ -1587,13 +1589,14 @@ function renderEngineList(): void {
       return `<div class="engine-row"><span class="engine-badge" aria-hidden="true">${i + 1}</span><select class="row-fam" data-i="${i}" aria-label="Engine ${i + 1} family">${famSel}</select><select class="row-var" data-i="${i}" aria-label="Engine ${i + 1} model or variant">${varSel}</select><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" aria-label="${label} ${meta.unit}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
     })
     .join('');
-  el('comparisonSection').hidden = activeEngineRows().length < 2;
   renderEngineSetupSummary();
   reconcileActiveRuntimeFallbackWarning();
 }
 
 function renderEngineSetupSummary(): void {
   el('engineSetupSummary').textContent = engineRows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
+  el('engineCount').textContent = String(activeEngineRows().length);
+  renderEngineSummaries(lineCache.get(tree.current.fen) ?? []);
 }
 
 async function workerBigNetLines(
@@ -1832,7 +1835,7 @@ function bestShapes(): DrawShape[] {
     if (!uci || uci.length < 4) continue;
     const brushes = engineBrushes(line.engine);
     // Alternatives are previewed on hover/focus, not drawn over pieces by default.
-    if (line.multipv === 1) candidates.push({ uci, brush: candidates.length === 0 ? brushes.primary : brushes.alt, prio: 0 });
+    if (line.multipv === 1) candidates.push({ uci, brush: brushes.primary, prio: 0 });
   }
   const book = currentBookStats()[0];
   if (book && book.uci.length >= 4) candidates.push({ uci: book.uci, brush: BOOK_BRUSH, prio: 1 });
@@ -1866,7 +1869,8 @@ function renderBoard() {
       free: false,
       color: board.turn === 'w' ? ('white' as const) : ('black' as const),
       dests: legalDests(board),
-      events: { after: onUserMove },
+      // Chessground's third argument is move metadata, not our keyboard-origin flag.
+      events: { after: (from: Key, to: Key) => { void onUserMove(from, to); } },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
     drawable: { brushes: Object.fromEntries(Object.entries(ANALYSIS_DRAWABLE_BRUSHES).map(([key, brush]) => [key, { ...brush, lineWidth: key.startsWith('pale') ? 5 : 7, opacity: key.startsWith('pale') ? 0.35 : 0.8 }])) },
@@ -1876,6 +1880,13 @@ function renderBoard() {
   const cfg = config as unknown as NonNullable<Parameters<typeof Chessground>[1]>;
   if (!ground) ground = Chessground(el('ground'), cfg);
   else ground.set(cfg);
+  el('ground').querySelector('cg-board')?.setAttribute('aria-hidden', 'true');
+  keyboardBoard ??= createAnalysisKeyboardBoard(el('keyboardBoard'), {
+    onSelect: (key) => ground?.selectSquare(key),
+    onMove: (from, to) => { void onUserMove(from, to, true); },
+    announce: (text) => { el('boardAnnouncement').textContent = text; },
+  });
+  keyboardBoard.render(board, orientation);
   el('sideToMove').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
   renderEvalBar();
   setShapes(bestShapes());
@@ -1889,6 +1900,10 @@ function renderEvalBar() {
   el('boardEval').textContent = line?.scoreText ?? '—';
   el('bestMove').textContent = line ? firstAnalysisMove(line) : '—';
   el('evalEngine').textContent = line ? analysisEngineName(line.engine) : 'Awaiting analysis';
+  el('bestMoveEngine').textContent = line ? analysisEngineName(line.engine) : 'Click a line to play';
+  const overview = el('posEval').closest<HTMLElement>('.analysis-overview')!;
+  overview.toggleAttribute('data-has-result', !!line);
+  overview.style.setProperty('--engine-color', line ? engineBrushes(line.engine).swatch : 'transparent');
   el('evalWhite').parentElement?.setAttribute('aria-label', line ? `White's evaluation: ${line.scoreText}, ${analysisEngineName(line.engine)}` : 'No evaluation yet');
 }
 
@@ -1903,7 +1918,25 @@ function signedCp(value: number): string {
   return `${sign}${Math.round(value)}`;
 }
 
+function renderEngineSummaries(lines: AnalysisLine[]): void {
+  patchAnalysisResults(el('engineSummaries'), activeEngineRows().map((row) => {
+    // Summaries deduplicate engines, but settings controls retain the original row indexes.
+    const index = engineRows.findIndex((entry) => entry.family === row.family && entry.variant === row.variant);
+    const name = analysisEngineName(rowLabel(row));
+    const line = lines.find((entry) => analysisEngineName(entry.engine) === name && entry.multipv === 1 && !entry.error);
+    const progress = [...searchProgressByEngine.values()].find((entry) => analysisEngineName(entry.label) === name);
+    const failure = lines.find((entry) => analysisEngineName(entry.engine) === name && entry.error);
+    // Budget is explicitly labeled; do not present a requested depth/visit count as achieved work.
+    const stats = progress ? searchProgressText(progress).replace(`${progress.label}: `, '')
+      : line ? `${line.engine.startsWith('Lc0') ? 'Top move · ' : ''}${line.detail}` : failure ? 'Unavailable · see Lines' : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
+    const engine = line?.engine ?? rowLabel(row);
+    const swatch = engineBrushes(engine).swatch;
+    return `<div class="engine-summary" style="--engine-color:${swatch}"><button class="engine-summary-name" type="button" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="Settings for ${htmlEscape(name)}"><strong><span class="engine-dot" aria-hidden="true"></span>${htmlEscape(name)}</strong><small title="${htmlEscape(stats)}">${htmlEscape(stats)}</small></button><span class="engine-summary-score">${htmlEscape(line?.scoreText ?? '—')}</span>${line?.pvUci[0] ? `<button type="button" class="compare-move" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span></span>'}</div>`;
+  }).join(''));
+}
+
 function renderEngineComparison(lines: AnalysisLine[]): void {
+  renderEngineSummaries(lines);
   const bestByEngine = [...new Map(lines.filter((line) => line.multipv === 1 && line.pvUci[0]).map((line) => [line.engine, line])).values()];
   const body = el('engineCompare').querySelector('tbody')!;
   if (!bestByEngine.length) {
@@ -1925,7 +1958,8 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     ? `${analysisEngineName(bestByEngine[0].engine)} ready${status}`
     : analysisConsensus(bestByEngine) + status;
   const baseline = bestByEngine[0];
-  el('deltaBaseline').textContent = `vs ${analysisEngineName(baseline.engine)}`;
+  el('deltaBaseline').textContent = 'Δ cp';
+  el('deltaBaseline').title = `Centipawns versus ${analysisEngineName(baseline.engine)}`;
   const reference = baseline.mateIn === undefined ? baseline.scoreCp : undefined;
   patchAnalysisResults(body, bestByEngine
     .map((line) => {
@@ -1949,13 +1983,15 @@ function renderLines() {
   const groups = new Map<string, AnalysisLine[]>();
   for (const line of lines) groups.set(line.engine, [...(groups.get(line.engine) ?? []), line]);
   patchAnalysisResults(el('lines'), [...groups].map(([engine, engineLines]) => {
-    const heading = `<h3><span class="engine-badge" aria-hidden="true" style="border-color:${engineBrushes(engine).swatch}">${htmlEscape(engine.startsWith('Lc0') ? 'LC' : engine.startsWith('SF') ? 'SF' : engine.slice(0, 2).toUpperCase())}</span>${htmlEscape(analysisEngineName(engine))}</h3>`;
+    const detail = engineLines.find((line) => line.multipv === 1)?.detail.split(' · ')[0] ?? '';
+    const heading = `<h3 style="--engine-color:${engineBrushes(engine).swatch}"><span class="engine-dot" aria-hidden="true"></span>${htmlEscape(analysisEngineName(engine))}<small>${htmlEscape(detail)}</small></h3>`;
     return `<section class="engine-result" aria-label="${htmlEscape(analysisEngineName(engine))} lines">${heading}<ol>${engineLines.map((line) => {
       if (line.error) return `<li class="line-error">${htmlEscape(line.error)}</li>`;
       const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}"`;
       const key = htmlEscape(`${tree.current.fen}|${engine}|${line.multipv}`);
       const label = `${analysisEngineName(engine)}, line ${line.multipv}: play ${firstAnalysisMove(line)}, evaluation ${line.scoreText}`;
-      return `<li class="result-line" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}"><span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span><span class="pv">${htmlEscape(line.pvSan)}</span></button><details class="pv-expanded" data-result-key="${key}"><summary data-focus-key="${key}|expand" aria-label="Expand ${htmlEscape(analysisEngineName(engine))} line ${line.multipv}">Full line</summary><p>${htmlEscape(line.pvSan)}</p><small>${htmlEscape(line.detail)}</small></details></li>`;
+      const pv = htmlEscape(analysisPvText(tree.current.fen, line));
+      return `<li class="result-line" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}"><span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span><span class="pv">${pv}</span></button><details class="pv-expanded" data-result-key="${key}"><summary data-focus-key="${key}|expand" aria-label="Expand full line, ${htmlEscape(analysisEngineName(engine))} line ${line.multipv}">⌄</summary><p>${pv}</p><small>${htmlEscape(line.detail)}</small></details></li>`;
     }).join('')}</ol></section>`;
   }).join('') || '<p class="small placeholder">Make a move or press Analyze to begin.</p>');
 }
@@ -1976,8 +2012,9 @@ function renderMoveList() {
     // Scroll the history only, never the page/board when navigating a game.
     const viewport = list.getBoundingClientRect();
     const move = selected.getBoundingClientRect();
-    if (move.bottom > viewport.bottom) list.scrollTop += move.bottom - viewport.bottom;
-    else if (move.top < viewport.top) list.scrollTop -= viewport.top - move.top;
+    const padding = 8;
+    if (move.bottom > viewport.bottom - padding) list.scrollTop += move.bottom - viewport.bottom + padding;
+    else if (move.top < viewport.top + padding) list.scrollTop -= viewport.top - move.top + padding;
   }
   for (const id of ['navStart', 'navBack']) el(id).toggleAttribute('disabled', !tree.current.parent);
   for (const id of ['navForward', 'navEnd']) el(id).toggleAttribute('disabled', !tree.current.children.length);
@@ -3530,7 +3567,9 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     if (message)
       message.textContent = hadTaskFailure
         ? `Analysis completed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`
-        : `Analysis complete · ${selectedLabels}`;
+        : rows.length > 1
+          ? analysisConsensus((lineCache.get(fen) ?? []).filter((line) => line.multipv === 1 && !line.error))
+          : `Analysis complete · ${selectedLabels}`;
   } catch (error) {
     controller.abort();
     const message = document.getElementById('message');
@@ -3745,7 +3784,7 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
   }
 }
 
-async function onUserMove(from: Key, to: Key) {
+async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
   const board = tree.current.fen ? parseFen(tree.current.fen) : parseFen(START_FEN);
   const matching = matchUserMoves(board, from, to);
   if (!matching.length) {
@@ -3762,8 +3801,19 @@ async function onUserMove(from: Key, to: Key) {
       onPick: (move) => {
         tree.addMove(move);
         afterNavigation();
+        // The picker removes its focused tile before renderBoard can detect grid focus.
+        if (fromKeyboard) {
+          keyboardBoard?.focus(to);
+          el('boardAnnouncement').textContent = `${parseFen(tree.current.fen).turn === 'w' ? 'White' : 'Black'} to move.`;
+        }
       },
-      onCancel: () => renderBoard(),
+      onCancel: () => {
+        renderBoard();
+        if (fromKeyboard) {
+          keyboardBoard?.focus(from);
+          el('boardAnnouncement').textContent = 'Promotion cancelled.';
+        }
+      },
     });
     return;
   }
@@ -3817,8 +3867,46 @@ function hoverLine(pvUci: string[], engine: string) {
 }
 
 function wireEvents() {
-  // Keep detailed comparison available without delaying the first PV on phones.
-  (el('comparisonSection') as HTMLDetailsElement).open = !window.matchMedia('(max-width: 600px)').matches;
+  const manager = el('engineManager') as HTMLDialogElement;
+  const openEngineManager = (index?: number) => {
+    manager.showModal();
+    if (index !== undefined) manager.querySelector<HTMLElement>(`.row-var[data-i="${index}"]`)?.focus();
+  };
+  el('manageEngines').addEventListener('click', () => openEngineManager());
+  el('closeEngineManager').addEventListener('click', () => manager.close());
+  manager.addEventListener('close', () => el('manageEngines').focus({ preventScroll: true }));
+  const tabs = [...el('analysisContent').querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const setView = (tab: HTMLButtonElement) => {
+    el('analysisContent').dataset.view = tab.dataset.view;
+    for (const item of tabs) {
+      item.setAttribute('aria-selected', String(item === tab));
+      item.tabIndex = item === tab ? 0 : -1;
+    }
+    if (tab.dataset.view === 'moves') renderMoveList();
+  };
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => setView(tab));
+    tab.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const visible = tabs.filter((item) => item.getClientRects().length);
+      const index = visible.indexOf(tab);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? visible.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + visible.length) % visible.length;
+      setView(visible[next]);
+      visible[next].focus();
+    });
+  }
+  const mobileLayout = window.matchMedia('(max-width: 900px)');
+  mobileLayout.addEventListener('change', () => {
+    if (!mobileLayout.matches && el('analysisContent').dataset.view === 'moves') setView(tabs[0]);
+    renderMoveList();
+  }, { signal: mountAbort.signal });
+  el('engineSummaries').addEventListener('click', (event) => {
+    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-engine-settings], [data-uci]');
+    if (target?.dataset.engineSettings !== undefined) openEngineManager(Number(target.dataset.engineSettings));
+    else if (target?.dataset.uci && tree.addUci(target.dataset.uci)) afterNavigation();
+  });
   const positionTools = el('positionTools') as HTMLDetailsElement;
   el('openPosition').addEventListener('click', () => {
     positionTools.open = !positionTools.open;
@@ -4031,7 +4119,7 @@ function wireEvents() {
     if (uci && tree.addUci(uci)) afterNavigation();
   });
   // Pointer and keyboard previews share the same arrow/highlight association.
-  for (const container of [el('lines'), compareBody]) {
+  for (const container of [el('lines'), compareBody, el('engineSummaries')]) {
     const preview = (event: Event) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-pv]');
       if (!target) {
@@ -4119,7 +4207,7 @@ function wireEvents() {
   });
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = (event: KeyboardEvent) => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
+    if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
     if (event.key === 'ArrowLeft') {
       tree.back();
       afterNavigation();
@@ -4200,6 +4288,8 @@ function disposePageResources(): void {
   analysisPagehideHandler = null;
   if (analysisAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
   analysisAuditHandler = null;
+  keyboardBoard?.destroy();
+  keyboardBoard = null;
   (ground as { destroy?: () => void } | null)?.destroy?.();
   ground = null;
 }

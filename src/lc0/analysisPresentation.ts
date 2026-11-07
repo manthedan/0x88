@@ -1,4 +1,5 @@
 import { parseFen } from '../chess/board.ts';
+import { uciLineToSan } from '../chess/san.ts';
 import type { AnalysisLine } from './analysisFormat.ts';
 import { htmlEscape } from './browserDom.ts';
 import type { GameNode } from './gameTree.ts';
@@ -6,11 +7,25 @@ import type { GameNode } from './gameTree.ts';
 /** Display names only: engine/cache identities must retain their original labels. */
 export function analysisEngineName(engine: string): string {
   if (engine === 'Lc0') return 'Lc0 Small';
+  // The catalog shortens t3's name; worker results/progress retain the model suffix.
+  if (engine === 'Lc0 t3-512') return 'Lc0 t3-512 distill';
   return engine.replace(/^SF\b/, 'Stockfish');
 }
 
 export function firstAnalysisMove(line: AnalysisLine): string {
   return line.pvSan.split(/\s+/).find(Boolean) ?? line.pvUci[0] ?? '—';
+}
+
+/** Number every White move, and the initial Black move, without altering engine SAN. */
+export function analysisPvText(fen: string, line: AnalysisLine): string {
+  const board = parseFen(fen);
+  const sans = uciLineToSan(board, line.pvUci).split(/\s+/).filter(Boolean);
+  const startPly = (board.fullmove - 1) * 2 + (board.turn === 'b' ? 1 : 0);
+  return sans.map((san, index) => {
+    const ply = startPly + index;
+    const number = Math.floor(ply / 2) + 1;
+    return ply % 2 === 0 ? `${number}. ${san}` : index === 0 ? `${number}… ${san}` : san;
+  }).join(' ');
 }
 
 export function analysisConsensus(lines: AnalysisLine[]): string {
