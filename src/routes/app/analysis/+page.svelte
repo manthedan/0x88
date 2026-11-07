@@ -60,7 +60,7 @@ onMount(() => {
   <div class="board-column">
   <section class="panel board-panel" aria-label="Board">
     <div class="board-wrap">
-      <div class="evalbar" title="Evaluation (White's perspective)"><div class="mid"></div><div class="white" id="evalWhite"></div><span id="evalScore" class="eval-score">—</span></div>
+      <div class="evalbar" title="Evaluation (White's perspective)"><div class="mid"></div><div class="white" id="evalWhite"></div><span class="eval-chip"><span id="evalSource" class="eval-source" aria-hidden="true"></span><span id="evalScore" class="eval-score">—</span></span></div>
       <div class="board-shell">
         <div id="ground"></div>
         <div id="keyboardBoard"></div>
@@ -85,6 +85,7 @@ onMount(() => {
           <div class="field"><label for="fenInput">FEN</label>
             <input id="fenInput" type="text" spellcheck="false" autocomplete="off" placeholder="Paste a FEN" /></div>
           <button id="loadFen" type="button">Load FEN</button>
+          <button id="copyFen" type="button">Copy FEN</button>
           <button id="reset" type="button">Reset</button>
         </div>
         <div class="pgn-heading"><label for="pgnInput">PGN</label><small>Variations supported</small></div>
@@ -109,33 +110,40 @@ onMount(() => {
         <button id="stop" class="primary run-action stop-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>Stop<span id="stopProgress" class="stop-progress"></span></button>
       </div>
     </header>
-    <div id="engineSummaries" class="engine-summaries" aria-label="Engine summaries and board arrow legend"></div>
-    <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">more available</small></span></button>
-    <div id="comparisonInsight" class="comparison-insight" aria-label="Engine comparison insight" hidden></div>
+    <!-- Engine strip: consensus caption, one tight row per engine, add-engine. -->
+    <div class="engine-strip">
+      <div id="comparisonInsight" class="comparison-insight" aria-label="Engine comparison insight" hidden></div>
+      <div id="engineSummaries" class="engine-summaries" aria-label="Engines: click one to drive the eval bar and expand its lines"></div>
+      <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">more available</small></span></button>
+    </div>
     <div id="message" aria-live="polite">Loading model…</div>
     <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
     <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
     <div id="analysisContent" class="analysis-content" data-view="lines">
+    <!-- Desktop: the lines block sits above the tabs and is always visible; narrow screens make it a tab. -->
+    <div id="linesPanel" class="section-block lines-panel" role="tabpanel" aria-labelledby="linesTab" tabindex="0">
+      <div id="engineLegend" class="legend"></div>
+      <div id="lines" class="lines"></div>
+      <div class="lines-more-anchor"><button id="linesMore" class="lines-more" type="button" hidden>More lines</button></div>
+    </div>
     <div class="workbench-tabs" role="tablist" aria-label="Analysis views">
       <button id="linesTab" type="button" role="tab" aria-selected="true" aria-controls="linesPanel" data-view="lines">Lines</button>
-      <button id="comparisonTab" type="button" role="tab" aria-selected="false" aria-controls="comparisonSection" tabindex="-1" data-view="comparison">Comparison</button>
-      <button id="humanTab" type="button" role="tab" aria-selected="false" aria-controls="humanPanel" tabindex="-1" data-view="human" title="What rated humans play here (Maia3)">Human<span class="tab-long">&nbsp;moves</span> <span class="tab-badge">Maia3</span></button>
       <button id="movesTab" type="button" role="tab" aria-selected="false" aria-controls="historyPanel" tabindex="-1" data-view="moves">Moves</button>
-      <span>Click a line to play it</span>
+      <button id="comparisonTab" type="button" role="tab" aria-selected="false" aria-controls="comparisonSection" tabindex="-1" data-view="comparison">Compare</button>
+      <button id="humanTab" type="button" role="tab" aria-selected="false" aria-controls="humanPanel" tabindex="-1" data-view="human" title="What rated humans play here (Maia3)">Human<span class="tab-badge">Maia3</span></button>
+      <span class="tab-tools">
+        <button id="quickCopyFen" class="copy-chip" type="button" title="Copy this position's FEN"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><span>FEN</span></button>
+        <button id="quickCopyPgn" class="copy-chip" type="button" title="Copy the game as PGN"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><span>PGN</span></button>
+      </span>
     </div>
     <div id="historyPanel" class="history-panel" role="tabpanel" aria-labelledby="movesTab" tabindex="0">
-      <header><h2>Moves</h2><span><kbd>←</kbd> <kbd>→</kbd> to step · click a move to jump</span></header>
       <div id="movelist" class="movelist move-panel" aria-label="Move history"></div>
     </div>
     <div id="comparisonSection" class="section-block comparison-panel" role="tabpanel" aria-labelledby="comparisonTab" tabindex="0">
       <h2 class="sr-only">Comparison</h2>
       <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
-      <table id="engineCompare" class="engine-compare"><thead><tr><th scope="col">Engine</th><th scope="col">Best</th><th scope="col">White’s eval</th><th scope="col" id="deltaBaseline">Δ cp</th></tr></thead><tbody></tbody></table>
-    </div>
-    <div id="linesPanel" class="section-block lines-panel" role="tabpanel" aria-labelledby="linesTab" tabindex="0">
-      <div id="engineLegend" class="legend"></div>
-      <div id="lines" class="lines"></div>
+      <table id="engineCompare" class="engine-compare"><thead><tr><th scope="col">Engine</th><th scope="col">Best</th><th scope="col">White’s eval</th><th scope="col" id="deltaBaseline">Δ</th></tr></thead><tbody></tbody></table>
     </div>
     <div id="humanPanel" class="section-block human-panel" role="tabpanel" aria-labelledby="humanTab" tabindex="0">
       <h2 class="sr-only">Human moves (Maia3)</h2>
@@ -315,15 +323,6 @@ onMount(() => {
   .nav svg{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2.3; stroke-linecap:round; stroke-linejoin:round}
   .analysis-workspace :global(button:focus-visible), .analysis-workspace :global(summary:focus-visible), .analysis-workspace :global(select:focus-visible), .analysis-workspace :global(input:focus-visible){outline:2px solid var(--accent); outline-offset:2px}
   .analysis-workspace .app-sidebar>.analysis-content{display:flex; flex-direction:column; flex:1 1 auto; min-width:0; min-height:0}
-  /* Desktop: game history is always visible under the lines (≈6 rows, current move kept in view). */
-  .history-panel{display:flex; flex:0 1 auto; flex-direction:column; min-width:0; min-height:112px; order:2; overflow:hidden; padding:0; border-top:1px solid var(--rule)}
-  .history-panel :global(.movelist){flex:1 1 auto; min-height:0; max-height:142px}
-  .history-panel:has(:global(.history-empty)){min-height:0}
-  #movesTab{display:none}
-  .history-panel header{display:flex; flex:0 0 auto; justify-content:space-between; align-items:center; min-height:30px; padding:3px 12px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
-  .history-panel h2{font:650 13px var(--sans); letter-spacing:0; text-transform:none; margin:0; padding:0; color:var(--ink)}
-  .history-panel header span{font-size:12px; color:var(--muted)}
-  .history-panel kbd{display:inline-block; min-width:18px; padding:0 4px; border:1px solid var(--border-input); border-radius:4px; font:12px/16px var(--sans); text-align:center; color:var(--ink)}
   .engine-manager{width:min(600px, calc(100vw - 24px)); max-height:85dvh; padding:20px; color:var(--ink); background:var(--panel); border:1px solid var(--border-input); border-radius:12px; box-shadow:0 20px 80px #0008}
   .engine-manager::backdrop{background:#0009}
   .manager-heading{display:flex; align-items:center; justify-content:space-between; gap:12px}
@@ -332,50 +331,13 @@ onMount(() => {
   .engine-setup>p:first-child{font-weight:650}
   .capabilities-slot{margin-top:16px}
   .capabilities-slot :global(.capabilities){margin:0}
-  .engine-summaries{padding:0}
   .arrow-preference{display:flex; align-items:flex-start; gap:8px; margin:0 0 16px; padding:12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink); font-size:14px}
   .arrow-preference input{margin-top:4px; accent-color:var(--accent)}
   .arrow-preference small{display:block; margin-top:3px; font-size:13px; color:var(--muted)}
-  .add-engine-inline{display:flex; align-items:center; gap:9px; width:calc(100% - 16px); min-height:34px; margin:4px 8px; padding:4px 10px; border:1px dashed color-mix(in srgb, var(--ink) 34%, var(--panel)); border-radius:8px; background:transparent; color:var(--ink); text-align:left}
-  .add-engine-inline:hover:not(:disabled){border-style:solid; border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
-  .add-engine-plus{display:inline-grid; place-items:center; width:24px; height:24px; flex:0 0 24px; border-radius:6px; border:1px solid var(--border-input); color:var(--accent); font:600 18px/1 var(--sans)}
-  .add-engine-text{display:flex; align-items:baseline; gap:8px; min-width:0}
-  .add-engine-text strong{white-space:nowrap}
-  .add-engine-text strong{font:650 14px/1.3 var(--sans)}
-  .add-engine-text small{font:12px/1.35 var(--sans); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  .add-engine-text small::before{content:'· '}
-  :global(.add-engine-inline[data-compact=true]){min-height:30px; padding-block:2px}
-  :global(.add-engine-inline[data-compact=true]) .add-engine-plus{width:20px; height:20px; flex-basis:20px; font-size:15px}
-  :global(.engine-summary){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto 64px; align-items:center; gap:10px; min-height:50px; padding:0 12px 0 9px; border-top:1px solid var(--rule); border-left:3px solid var(--engine-color)}
-  :global(.engine-summary-name){display:flex; align-items:center; gap:9px; padding:6px 0; min-width:0; min-height:44px; border:0; background:transparent; text-align:left; color:var(--ink)}
-  :global(.engine-summary-name:hover:not(:disabled)){background:transparent; color:var(--ink)}
-  :global(.engine-summary-name:hover strong){text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--muted)}
-  :global(.engine-summary-text){display:grid; gap:1px; min-width:0}
-  :global(.engine-summary-name strong){font:650 14px/1.3 var(--sans)}
-  :global(.engine-summary-name small){font:13px/1.35 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  :global(.engine-settings-icon){width:16px; height:16px; flex:0 0 16px; margin-left:2px; fill:none; stroke:var(--text-soft); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
-  :global(.engine-summary-name:hover .engine-settings-icon), :global(.engine-summary-name:focus-visible .engine-settings-icon){stroke:var(--ink)}
-  :global(.engine-dot){display:inline-block; width:8px; height:8px; flex:0 0 8px; border-radius:50%; background:var(--engine-color); box-shadow:0 0 0 1px color-mix(in srgb, var(--engine-color), white 30%)}
-  :global(.engine-summary-score){font:700 20px/1 var(--mono); letter-spacing:-.02em; text-align:right; color:var(--ink)}
-  :global(.engine-summary .compare-move){font:650 15px var(--sans); min-height:36px; padding:4px; text-align:center}
-  :global(.engine-summary-meter){position:absolute; left:0; bottom:-1px; height:3px; width:var(--progress); background:var(--engine-color); transition:width .2s}
-  :global(.engine-summary-meter.indeterminate){width:100%; opacity:.55; animation:analysis-pulse 1.4s ease-in-out infinite}
-  @keyframes -global-analysis-pulse{50%{opacity:.15}}
-  :global(.engine-avatar){display:inline-grid; place-items:center; width:24px; height:24px; flex:0 0 24px; border-radius:6px; background:var(--engine-color); color:#fff; font:750 11px/1 var(--sans); letter-spacing:-.01em; box-shadow:inset 0 0 0 1px #ffffff26}
   :global(.engine-logo-frame){display:inline-grid; place-items:center; width:40px; height:28px; flex:0 0 40px; padding:2px; box-sizing:border-box; border-radius:5px; background:#ede8dd; box-shadow:inset 0 0 0 1px #0000001f; overflow:hidden}
   :global(.engine-logo-frame.wordmark){padding:3px; background:#fff}
   :global(.engine-logo-frame .engine-logo), :global(.engine-logo-frame .engine-logo-placeholder){display:block; width:100%; height:100%; border-radius:3px; object-fit:contain}
   :global(.engine-logo-initial){font:700 13px/1 var(--sans); color:#3b352b}
-  .workbench-tabs{order:0; flex:0 0 auto; display:flex; align-items:center; gap:4px; padding:0 8px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); background:var(--panel-inset)}
-  .workbench-tabs button{border:0; border-radius:0; border-bottom:2px solid transparent; min-height:36px; padding:8px; font-size:13px; background:transparent}
-  .workbench-tabs button[aria-selected=true]{color:var(--ink); border-bottom-color:var(--accent); font-weight:650}
-  .workbench-tabs span{margin-left:auto; font-size:12px; color:var(--muted)}
-  .analysis-workspace .lines-panel, .analysis-workspace .comparison-panel{order:1; flex:1 1 0; min-height:184px; border:0; padding:6px 12px 8px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable}
-  :global(.analysis-content:is([data-view=comparison], [data-view=human])) .lines-panel, :global(.analysis-content:not([data-view=comparison])) .comparison-panel, :global(.analysis-content:not([data-view=human])) .human-panel{display:none}
-  .analysis-workspace .lines-panel{background:linear-gradient(var(--panel) 30%, transparent) center top / 100% 16px local, linear-gradient(#0003, transparent) center top / 100% 6px scroll; background-repeat:no-repeat}
-  .analysis-workspace .human-panel{order:1; flex:1 1 0; min-height:184px; border:0; padding:4px 12px 10px; overflow:auto; overscroll-behavior:contain}
-  .human-intro{margin:6px 0 0; font-size:13px; line-height:1.45; color:var(--text-soft)}
-  .tab-badge{margin-left:3px; padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
   :global(.analysis-workspace .engine-row){align-items:center}
   :global(.analysis-workspace .engine-row select), :global(.analysis-workspace .engine-row .row-strength){font-size:14px}
   :global(.analysis-workspace .engine-row .row-rm){min-height:36px}
@@ -391,7 +353,11 @@ onMount(() => {
     position:absolute; left:0; right:0; bottom:0; height:var(--eval-pct);
     background:var(--eval-white); transition:height .25s, width .25s;
   }
-  .eval-score{position:absolute; bottom:0; left:0; right:0; padding:5px 0 4px; border-top:3px solid var(--engine-color); background:#f4efe4; color:#1b160e; font:750 12px/1 var(--sans); font-variant-numeric:proportional-nums; text-align:center; letter-spacing:-.03em; white-space:nowrap}
+  /* Eval chip names its source: a monogram tile in the engine's colour above the number. */
+  .eval-chip{position:absolute; bottom:0; left:0; right:0; display:grid; background:#f4efe4; box-shadow:0 -1px 0 #0003}
+  .eval-source{display:grid; place-items:center; height:16px; background:var(--engine-color); color:#fff; font:700 10px/1 var(--mono)}
+  .eval-source:empty{display:none}
+  .eval-score{padding:4px 0; color:#1b160e; font:750 12px/1 var(--sans); font-variant-numeric:proportional-nums; text-align:center; letter-spacing:-.03em; white-space:nowrap}
   :global(.eval-score[data-long=true]){font-size:10.5px}
   .evalbar .mid{
     position:absolute; left:0; right:0; top:50%;
@@ -406,7 +372,9 @@ onMount(() => {
     display:flex; align-items:center; justify-content:center;
   }
   .nav button:hover:not(:disabled){border-color:var(--border-input-hover); background:var(--card); color:var(--ink)}
-  .nav button:disabled{opacity:.35; cursor:default; color:var(--muted); background:transparent; border-color:transparent}
+  /* Same frame in every state; disabled only dims the glyph. */
+  .nav button:disabled{opacity:1; cursor:default; color:var(--ink)}
+  .nav button:disabled svg{opacity:.3}
   .row{margin-top:10px}
   .engine-list{margin-top:0}
   .engine-list-loading{
@@ -433,37 +401,6 @@ onMount(() => {
   .pgn-heading small{color:var(--muted); font-size:12px}
   .pgn-actions{margin-top:8px}
   input[type=number]:not(.stepper-field input){width:80px}
-  :global(.lines){margin:0; padding:0}
-  :global(.engine-result + .engine-result){margin-top:10px}
-  :global(.engine-result h3){display:flex; gap:7px; align-items:center; margin:0 0 2px; font:650 13px var(--sans); color:var(--ink)}
-  :global(.engine-result h3 .engine-avatar){width:20px; height:20px; flex-basis:20px; border-radius:5px; font-size:10px}
-  :global(.engine-alternatives>summary){padding:3px 4px; color:var(--muted); font:12px/1.4 var(--sans); cursor:pointer}
-  :global(.engine-alternatives>summary:hover){color:var(--ink)}
-  :global(.compact-result){position:relative}
-  :global(.compact-result .engine-alternatives>summary){position:absolute; top:0; right:0; padding:3px 0 3px 8px; background:var(--panel)}
-  :global(.engine-result h3 small){margin-left:auto; font:12px var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
-  :global(.engine-result ol){list-style:none; margin:0; padding:0}
-  :global(.result-line){border-top:1px solid var(--rule); position:relative; min-height:36px}
-  :global(.result-line:has(.line-play:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--accent-soft)}
-  :global(.line-play){display:grid; grid-template-columns:14px 58px minmax(0,1fr); gap:6px; width:calc(100% - 36px); min-height:36px; padding:0 4px 0 2px; text-align:left; border:0; border-radius:0; background:transparent; color:var(--ink); align-items:center}
-  :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
-  :global(.line-rank){font:12px var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); text-align:center}
-  :global(.lines .score){font:700 14px var(--mono); color:var(--ink)}
-  :global(.lines .pv){display:flex; flex-wrap:wrap; column-gap:.4em; height:1.45em; overflow:hidden; font:14.5px/1.45 var(--sans); color:var(--ink)}
-  :global(.lines .pv-move){white-space:nowrap}
-  :global(.lines .pv-move:first-child){font-weight:650}
-  :global(.pv-expanded){margin:0}
-  :global(.pv-expanded summary){position:absolute; right:0; top:0; display:grid; place-items:center; width:36px; height:36px; border-left:1px solid var(--rule); color:var(--muted); cursor:pointer; list-style:none}
-  :global(.pv-expanded summary:hover){background:var(--panel-2, var(--panel)); color:var(--ink)}
-  :global(.pv-expanded summary svg){width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
-  :global(.pv-expanded summary::-webkit-details-marker){display:none}
-  :global(.pv-expanded[open] summary svg){transform:rotate(180deg)}
-  :global(.pv-expanded p){font:14.5px/1.7 var(--sans); color:var(--ink); margin:0 40px 2px 22px; overflow-wrap:anywhere}
-  :global(.pv-expanded small){display:block; margin:0 40px 6px 22px; font-size:12px; color:var(--muted)}
-  :global(.line-error){padding:10px; color:var(--warn); font-size:14px; overflow-wrap:anywhere}
-  :global(.engine-name-with-logo){display:inline-flex; align-items:center; gap:5px}
-  :global(.lines li.placeholder){display:block; color:var(--muted); border-left:none; cursor:default}
-  :global(.lines li.placeholder:hover){background:none}
   :global(.review-chart svg){
     display:block; width:100%; height:auto;
     border:1px solid var(--rule); border-radius:6px; background:var(--card); margin-top:6px;
@@ -524,33 +461,6 @@ onMount(() => {
   :global(.search-activity-row .search-progress-text){
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .analysis-overview{display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:56px; padding:8px 12px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
-  .turn-indicator{display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap}
-  .turn-indicator::before{content:''; width:12px; height:12px; border-radius:50%; background:#f4f1e8; box-shadow:0 0 0 1.5px #0009}
-  :global(.analysis-workspace .turn-indicator[data-turn=b]::before){background:#1d1b18; box-shadow:0 0 0 1.5px #fffa}
-  .position-status{display:flex; align-items:center; gap:8px; min-width:0}
-  .analysis-status{display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 9px 0 8px; border:1px solid var(--rule); border-radius:999px; background:var(--panel); color:var(--text-soft); font:600 12px/1 var(--sans); white-space:nowrap}
-  .analysis-status::before{content:''; width:7px; height:7px; flex:0 0 auto; border-radius:50%; background:currentColor; opacity:.7}
-  :global(.analysis-status[data-state=running]){color:var(--ink); border-color:var(--accent-tint-border)}
-  :global(.analysis-status[data-state=running])::before{width:8px; height:8px; border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent); background:transparent; opacity:1; animation:analysis-spin .8s linear infinite}
-  :global(.analysis-status[data-state=done]){color:var(--accent-soft-text); border-color:var(--accent-tint-border); background:var(--accent-soft)}
-  :global(.analysis-status[data-state=done])::before{content:'✓'; width:auto; height:auto; background:none; opacity:1; font-size:12px; font-weight:800}
-  @keyframes -global-analysis-spin{to{transform:rotate(360deg)}}
-  /* Once results are in, Analyze steps back to a secondary action (re-run). */
-  :global(.analysis-overview[data-status=done] #analyze:not(:disabled)){background:transparent; color:var(--ink); border-color:var(--accent-deep)}
-  .analyze-actions{display:flex; align-items:stretch; gap:8px}
-  .analyze-actions button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:0 14px; border-radius:8px; font-size:14px; white-space:nowrap}
-  .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input-hover)}
-  .engine-count{display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:var(--panel-2); font:700 12px/1 var(--sans); font-variant-numeric:tabular-nums}
-  .manage-engines:hover:not(:disabled){background:var(--panel); color:var(--ink)}
-  .run-action{min-width:118px; font-weight:650}
-  .run-action svg{fill:currentColor; stroke:none}
-  #analyze:disabled{opacity:.55}
-  .stop-action{position:relative; overflow:hidden; isolation:isolate; --progress:0%}
-  .stop-action::before{content:''; position:absolute; inset:0 auto 0 0; width:var(--progress); background:#0000002e; z-index:-1; transition:width .2s}
-  .stop-progress{font:600 12px var(--sans); font-variant-numeric:tabular-nums; opacity:.85}
-  .stop-progress:empty{display:none}
-  .analyze-actions #stop:disabled, .analyze-actions:has(#stop:not(:disabled)) #analyze{display:none}
   .app-sidebar #message{
     margin:6px 12px; padding:4px 8px; max-height:44px; overflow:auto;
     border:0; border-left:2px solid var(--accent); border-radius:0 var(--radius-sm) var(--radius-sm) 0;
@@ -558,19 +468,6 @@ onMount(() => {
     font-size:12px; line-height:1.5;
   }
   .app-sidebar :global(#message[data-routine=true]){position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%)}
-  :global(.comparison-insight){margin:6px 10px; padding:6px 9px; border:1px solid var(--border-input); border-radius:7px; background:var(--panel-inset); font-size:13px; line-height:1.4; color:var(--ink)}
-  :global(.comparison-insight>div){display:flex; align-items:center; gap:7px}
-  :global(.comparison-insight strong){font-weight:650}
-  :global(.insight-spread){margin-left:auto; font-size:12px; color:var(--text-soft); white-space:nowrap; cursor:help}
-  :global(.insight-spread b){color:var(--ink); font-weight:650}
-  :global(.comparison-insight button){margin-left:8px; padding:0 2px; min-height:24px; background:transparent; border:0; color:var(--ink); font-size:12px; text-decoration:underline; text-underline-offset:3px}
-  :global(.insight-moves){flex-wrap:wrap; gap:6px !important; margin-top:4px}
-  :global(.insight-move){display:inline-flex; align-items:center; gap:5px; min-height:24px; padding:1px 7px 1px 6px; border:1px solid var(--border-input-hover); border-radius:5px; background:var(--panel)}
-  :global(.insight-dots){display:inline-flex}
-  :global(.insight-dots .engine-dot + .engine-dot){margin-left:-2px}
-  :global(.insight-san){font-weight:700}
-  :global(.insight-count){font:700 12px var(--sans); color:var(--ink)}
-  :global(.insight-who){font-size:12px; color:var(--text-soft)}
   .app-sidebar :global(.model-load-progress){margin:6px 12px 0}
   /* Per-engine progress lives in the summary rows (meter + stats) and on the Stop button. */
   .app-sidebar #analysisSearchProgress{display:none}
@@ -631,10 +528,6 @@ onMount(() => {
   :global(.legend){display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; font-size:12px; color:var(--muted)}
   :global(.legend .key){display:inline-flex; align-items:center; gap:5px}
   :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
-  :global(.movelist){flex:0 1 auto; font:14px/1.4 var(--sans); min-height:44px; max-height:340px; overflow:auto; background:var(--panel-inset); scroll-padding:8px; overscroll-behavior:contain; scrollbar-gutter:stable; padding:2px 0}
-  :global(.move-pair){display:grid; grid-template-columns:40px minmax(0,110px) minmax(0,110px); justify-content:center; align-items:center; border-bottom:1px solid var(--rule)}
-  :global(.move-number), :global(.missing-ply){text-align:center; color:var(--muted); font-size:12px}
-  :global(.history-empty){font:13px/1.5 var(--sans); margin:0; padding:12px; color:var(--muted)}
   :global(.load-game-link){display:inline; min-height:0; padding:0; border:0; background:transparent; color:var(--ink); font:inherit; text-decoration:underline; text-underline-offset:3px}
   :global(.variation){margin:4px 8px 4px 28px; padding-left:8px; border-left:2px solid var(--border-input)}
   :global(.variation-label){font:12px var(--sans); color:var(--muted)}
@@ -653,12 +546,6 @@ onMount(() => {
     display:inline-block; height:8px;
     background:#5a6e2a; border-radius:2px; opacity:0.75;
   }
-  :global(.movelist .mv){display:flex; align-items:center; justify-content:space-between; gap:6px; cursor:pointer; min-height:26px; padding:1px 10px; border:0; border-radius:3px; text-align:left; background:transparent; color:var(--ink); font:inherit}
-  :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft); color:var(--ink)}
-  :global(.movelist .mv.current){background:var(--selection-bg); color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--muted), inset 0 0 0 1px var(--border-input)}
-  :global(.movelist .mv-eval){font:12px var(--mono); color:var(--muted); font-weight:400}
-  :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
-  :global(.movelist .var){color:var(--muted)}
   .add-engine-row{margin-top:3px; align-items:center}
   .add-engine-row button{
     flex:0 0 auto; width:auto; min-height:0; padding:4px 1px; border:0; background:transparent;
@@ -691,69 +578,234 @@ onMount(() => {
   :global(.wdlbar .w){background:#f4f1e8}
   :global(.wdlbar .d){background:#b9b3a4}
   :global(.wdlbar .b){background:#3a3a3a}
+  /* ── Right column, Lichess-shaped: header → engine strip → top lines → tabs → move list (fills the rest). ── */
+  .analysis-overview{display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
+  .position-status{display:flex; align-items:center; gap:10px; min-width:0}
+  .turn-indicator{display:inline-flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600; color:var(--ink); white-space:nowrap}
+  .turn-indicator::before{content:''; width:12px; height:12px; border-radius:50%; background:#f4f1e8; box-shadow:0 0 0 1.5px #0009}
+  :global(.analysis-workspace .turn-indicator[data-turn=b]::before){background:#1d1b18; box-shadow:0 0 0 1.5px #fffa}
+  /* Quiet, neutral run state: text + glyph, no pill competing with the primary action. */
+  .analysis-status{display:inline-flex; align-items:center; gap:5px; padding-left:10px; border-left:1px solid var(--rule); color:var(--muted); font:500 12.5px/1 var(--sans); white-space:nowrap}
+  .analysis-status::before{content:''; width:6px; height:6px; flex:0 0 auto; border-radius:50%; background:currentColor; opacity:.7}
+  :global(.analysis-status[data-state=running]){color:var(--ink)}
+  :global(.analysis-status[data-state=running])::before{width:8px; height:8px; border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent); background:transparent; opacity:1; animation:analysis-spin .8s linear infinite}
+  :global(.analysis-status[data-state=done])::before{content:'✓'; width:auto; height:auto; background:none; opacity:1; font-size:12px; font-weight:800}
+  @keyframes -global-analysis-spin{to{transform:rotate(360deg)}}
+  .analyze-actions{display:flex; align-items:stretch; gap:8px; flex:0 0 auto}
+  .analyze-actions button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:38px; padding:0 13px; border-radius:8px; font-size:14px; white-space:nowrap}
+  .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input)}
+  .engine-count{display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:var(--panel-2); font:700 12px/1 var(--sans); font-variant-numeric:tabular-nums}
+  .manage-engines:hover:not(:disabled){background:var(--panel); color:var(--ink)}
+  /* Analyze / Stop is the one filled primary in every state. */
+  .run-action{min-width:108px; font-weight:650}
+  .run-action svg{fill:currentColor; stroke:none}
+  #analyze:disabled{opacity:.55}
+  .stop-action{position:relative; overflow:hidden; isolation:isolate; --progress:0%}
+  .stop-action::before{content:''; position:absolute; inset:0 auto 0 0; width:var(--progress); background:#0000002e; z-index:-1; transition:width .2s}
+  .stop-progress{font:600 12px var(--sans); font-variant-numeric:tabular-nums; opacity:.85}
+  .stop-progress:empty{display:none}
+  .analyze-actions #stop:disabled, .analyze-actions:has(#stop:not(:disabled)) #analyze{display:none}
+
+  /* Engine strip */
+  .engine-strip{flex:0 0 auto; display:flex; flex-direction:column; min-width:0}
+  .engine-summaries{max-height:calc(36px * 6); overflow:auto; overscroll-behavior:contain}
+  :global(.comparison-insight){display:flex; align-items:center; gap:8px; min-height:32px; padding:0 8px 0 14px; border-bottom:1px solid var(--rule); font-size:13px; line-height:1.3; color:var(--ink); white-space:nowrap}
+  :global(.comparison-insight[hidden]){display:none}
+  :global(.comparison-insight strong){font-weight:650; overflow:hidden; text-overflow:ellipsis}
+  :global(.insight-dots){display:inline-flex; align-items:center; flex:0 0 auto}
+  :global(.insight-dots .engine-dot + .engine-dot){margin-left:-2px}
+  :global(.insight-sep){width:5px}
+  :global(.insight-spread){font-size:12.5px; color:var(--muted); cursor:help}
+  :global(.insight-spread::before){content:'· '}
+  :global(.insight-spread b){color:var(--ink); font:650 12.5px var(--mono)}
+  :global(.comparison-insight button){margin-left:auto; padding:0 8px; min-height:26px; background:transparent; border:0; border-radius:6px; color:var(--ink); font-size:12.5px; font-weight:600; text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--muted)}
+  :global(.comparison-insight button:hover:not(:disabled)){background:var(--panel-2)}
+  :global(.engine-summary){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto 60px 30px; align-items:center; gap:8px; min-height:36px; padding:0 4px 0 9px; border-bottom:1px solid var(--rule-soft); border-left:3px solid var(--engine-color)}
+  :global(.engine-summary.eval-source){background:color-mix(in srgb, var(--engine-color) 9%, var(--panel))}
+  :global(.engine-summary-name){display:flex; align-items:center; gap:8px; padding:0; min-width:0; min-height:36px; border:0; border-radius:0; background:transparent; text-align:left; color:var(--ink)}
+  :global(.engine-summary-name:hover:not(:disabled)){background:transparent; color:var(--ink)}
+  :global(.engine-summary-name:hover strong){text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--muted)}
+  :global(.engine-summary-text){display:flex; align-items:baseline; gap:8px; min-width:0}
+  :global(.engine-summary-name strong){font:650 13.5px/1.2 var(--sans); white-space:nowrap}
+  :global(.engine-summary-name small){font:12.5px/1.2 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
+  :global(.engine-summary-score){display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; min-width:62px; font:700 17px/1 var(--mono); letter-spacing:-.02em; text-align:right; color:var(--ink)}
+  /* The row driving the eval bar carries a tiny bar glyph in its colour. */
+  :global(.engine-summary.eval-source .engine-summary-score)::before{content:''; width:5px; height:15px; border-radius:2px; background:linear-gradient(#1d1b18 45%, #f4efe4 45%); box-shadow:0 0 0 1.5px var(--engine-color)}
+  :global(.engine-summary .compare-move){height:28px; min-height:0; padding:0 4px; border:1px solid var(--border-input); border-radius:6px; background:var(--panel-inset); font:650 14px var(--sans); text-align:center; color:var(--ink)}
+  :global(.engine-summary .compare-move.agrees){border-color:color-mix(in srgb, var(--accent) 70%, var(--panel)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); background:var(--accent-soft)}
+  :global(.compare-move-empty){text-align:center; color:var(--muted)}
+  :global(.engine-gear){display:grid; place-items:center; width:30px; height:30px; min-height:0; padding:0; border:0; border-radius:6px; background:transparent}
+  :global(.engine-gear:hover:not(:disabled)){background:var(--panel-2)}
+  :global(.engine-settings-icon){width:16px; height:16px; fill:none; stroke:var(--muted); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
+  :global(.engine-gear:hover .engine-settings-icon), :global(.engine-gear:focus-visible .engine-settings-icon){stroke:var(--ink)}
+  :global(.engine-dot){display:inline-block; width:9px; height:9px; flex:0 0 9px; border-radius:50%; background:var(--engine-color); box-shadow:0 0 0 1.5px var(--panel-inset)}
+  :global(.engine-summary-meter){position:absolute; left:0; bottom:-1px; height:2px; width:var(--progress); background:var(--engine-color); transition:width .2s}
+  :global(.engine-summary-meter.indeterminate){width:100%; opacity:.55; animation:analysis-pulse 1.4s ease-in-out infinite}
+  @keyframes -global-analysis-pulse{50%{opacity:.15}}
+  :global(.engine-avatar){display:inline-grid; place-items:center; width:22px; height:22px; flex:0 0 22px; border-radius:5px; background:var(--engine-color); color:#fff; font:700 10.5px/1 var(--mono); letter-spacing:0; box-shadow:inset 0 0 0 1px #ffffff26}
+  .add-engine-inline{display:flex; align-items:center; gap:8px; width:100%; min-height:32px; margin:0; padding:0 12px; border:0; border-bottom:1px solid var(--rule); border-radius:0; background:transparent; color:var(--ink); text-align:left}
+  .add-engine-inline:hover:not(:disabled){background:var(--accent-soft); color:var(--ink)}
+  .add-engine-plus{display:inline-grid; place-items:center; width:20px; height:20px; flex:0 0 20px; border-radius:5px; border:1px dashed color-mix(in srgb, var(--accent) 70%, var(--panel)); color:var(--accent); font:600 15px/1 var(--sans)}
+  .add-engine-text{display:flex; align-items:baseline; gap:6px; min-width:0}
+  .add-engine-text strong{font:600 13.5px/1.3 var(--sans); white-space:nowrap}
+  .add-engine-text small{font:12.5px/1.35 var(--sans); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .add-engine-text small::before{content:'· '}
+
+  /* Top lines block: one row per engine; an engine's multi-PV opens in place. */
+  .analysis-workspace .lines-panel{order:0; position:relative; flex:0 0 auto; min-height:0; padding:0; border:0; overflow:auto; overscroll-behavior:contain; scroll-snap-type:y proximity; scrollbar-width:thin}
+  :global(.lines){margin:0; padding:0}
+  :global(.lines ol){list-style:none; margin:0; padding:0}
+  :global(.line-group){border-left:3px solid transparent}
+  :global(.line-group + .line-group){border-top:1px solid var(--rule-soft)}
+  :global(.line-group.open){border-left-color:var(--engine-color); background:color-mix(in srgb, var(--engine-color) 5%, var(--panel))}
+  :global(.result-line){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:stretch; min-height:34px; scroll-snap-align:start}
+  :global(.result-line.alt-line){grid-template-columns:minmax(0,1fr) 52px; border-top:1px dashed var(--rule-soft)}
+  :global(.result-line:has(.line-play:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--accent-soft)}
+  :global(.line-play){display:grid; grid-template-columns:22px 54px minmax(0,1fr); align-items:center; gap:8px; width:100%; min-height:34px; padding:0 6px 0 8px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left}
+  :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
+  :global(.line-id){display:inline-grid; place-items:center; width:22px}
+  :global(.line-id .engine-avatar){width:20px; height:20px; flex-basis:20px; font-size:10px}
+  :global(.line-rank){font:600 12px var(--mono); color:var(--muted)}
+  :global(.lines .score){font:700 13.5px var(--mono); color:var(--ink); text-align:right}
+  :global(.lines .pv){display:flex; flex-wrap:wrap; column-gap:.45em; height:1.5em; overflow:hidden; font:14px/1.5 var(--sans); color:var(--ink)}
+  /* Opened engines show deeper PVs: up to two lines, wrapping with the score column as a hanging indent. */
+  :global(.line-group.open .pv){height:auto; max-height:3em}
+  :global(.line-group.open .line-play){align-items:start; padding-block:6px}
+  :global(.line-group.open .line-id){height:21px}
+  :global(.line-group.open .score){line-height:21px}
+  :global(.lines .pv-move){white-space:nowrap}
+  :global(.lines .pv-move:first-child){font-weight:700}
+  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:center; gap:2px; width:52px; min-height:0; padding:0 8px 0 4px; border:0; border-radius:0; background:transparent; color:var(--muted); font:600 12.5px var(--sans); font-variant-numeric:tabular-nums}
+  :global(.line-toggle:hover:not(:disabled)){background:var(--panel-2); color:var(--ink)}
+  :global(.line-toggle svg){width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
+  :global(.line-toggle[aria-expanded=true] svg){transform:rotate(180deg)}
+  :global(.line-toggle-spacer){width:52px}
+  :global(.lines .line-error), :global(.lines .pending-line){display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:8px; padding:0 10px 0 8px; font-size:13px}
+  :global(.line-error-text){color:var(--warn); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  :global(.pending-text){color:var(--muted)}
+  :global(.lines-empty){margin:0; padding:10px 14px; font-size:13.5px; color:var(--muted)}
+  :global(.lines-empty b){color:var(--ink); font-weight:650}
+  :global(.legend){display:flex; flex-wrap:wrap; gap:12px; padding:6px 12px 0; font-size:12.5px; color:var(--muted)}
+  :global(.legend[hidden]){display:none}
+  :global(.legend .key){display:inline-flex; align-items:center; gap:5px}
+  :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
+  /* Overflow cue: a sticky 26px bar reserved below the last whole row (height must match LINES_MORE_CUE_PX). */
+  .lines-more-anchor{display:none}
+  .lines-panel:global([data-overflow=true]) .lines-more-anchor{position:sticky; bottom:0; z-index:1; display:flex; align-items:center; justify-content:flex-end; height:26px; padding:0 8px; background:var(--panel); border-top:1px solid var(--rule-soft)}
+  .lines-more{min-height:0; height:20px; padding:0 9px; border:1px solid var(--border-input); border-radius:10px; background:var(--panel-2); color:var(--ink); font:600 12px var(--sans)}
+  .lines-more[hidden]{display:none}
+
+  /* Tabs: Moves is the default; the lines block above is always on screen at desktop widths. */
+  .workbench-tabs{order:1; flex:0 0 auto; display:flex; align-items:center; gap:2px; min-height:38px; padding:0 6px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); background:var(--panel-inset)}
+  .workbench-tabs [role=tab]{display:inline-flex; align-items:center; gap:5px; min-height:37px; padding:0 9px; border:0; border-radius:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); font-size:13px; font-weight:550; white-space:nowrap}
+  .workbench-tabs [role=tab]:hover:not(:disabled){background:transparent; color:var(--ink)}
+  .workbench-tabs [role=tab][aria-selected=true]{color:var(--ink); border-bottom-color:var(--accent); font-weight:650}
+  #linesTab{display:none}
+  .workbench-tabs :global(.tab-current){display:none}
+  .tab-badge{padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
+  .tab-tools{display:flex; gap:4px; margin-left:auto}
+  .copy-chip{display:inline-flex; align-items:center; gap:4px; height:26px; min-height:0; padding:0 8px; border:1px solid var(--border-input); border-radius:6px; background:transparent; color:var(--ink); font:600 12px var(--sans)}
+  .copy-chip:hover:not(:disabled){background:var(--panel-2)}
+  .copy-chip svg{width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+  .copy-chip:global([data-copied=true]){border-color:var(--accent); color:var(--accent-soft-text)}
+  .copy-chip:global([data-copied=true]) span::after{content:' ✓'}
+  .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{order:2; flex:1 1 0; min-height:0}
+  .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
+  :global(.analysis-content:is([data-view=lines], [data-view=moves])) .history-panel{display:flex}
+  .analysis-workspace .comparison-panel{border:0; padding:8px 12px; overflow:auto; overscroll-behavior:contain}
+  .analysis-workspace .human-panel{border:0; padding:4px 12px 10px; overflow:auto; overscroll-behavior:contain}
+  :global(.analysis-content:not([data-view=comparison])) .comparison-panel, :global(.analysis-content:not([data-view=human])) .human-panel{display:none}
+  .human-intro{margin:6px 0 0; font-size:13px; line-height:1.45; color:var(--text-soft)}
+
+  /* Move list: the column's main scroller, Lichess-style numbered pairs. */
+  .history-panel :global(.movelist){flex:1 1 auto; min-height:0; max-height:none}
+  :global(.movelist){font:14px/1.4 var(--sans); overflow:auto; scroll-snap-type:y proximity; background:var(--panel); scroll-padding:8px; overscroll-behavior:contain; scrollbar-width:thin; padding:0}
+  :global(.move-pair){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); align-items:stretch; scroll-snap-align:start}
+  :global(.move-pair:nth-child(even) .mv){background:color-mix(in srgb, var(--ink) 3%, var(--panel))}
+  :global(.move-number), :global(.missing-ply){display:grid; place-items:center; color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
+  :global(.missing-ply){background:transparent; border:0}
+  :global(.history-empty){display:grid; gap:10px; margin:0; padding:18px 16px; font:13.5px/1.55 var(--sans); color:var(--muted)}
+  :global(.history-empty p){margin:0}
+  :global(.history-empty strong){color:var(--ink); font-weight:650}
+  :global(.quick-pgn){width:100%; min-height:72px; resize:vertical; padding:8px 10px; border:1px solid var(--border-input); border-radius:7px; background:var(--panel-inset); color:var(--ink); font:13px/1.45 var(--mono)}
+  :global(.quick-pgn-actions){display:flex; align-items:center; gap:14px}
+  :global(.quick-pgn-load){min-height:32px; padding:0 14px; border:1px solid var(--border-input-hover); border-radius:7px; background:var(--panel-2); color:var(--ink); font:600 13px var(--sans)}
+  :global(.history-empty .load-game-link){font-size:13px; color:var(--muted)}
+  :global(.movelist .mv){display:flex; align-items:center; justify-content:space-between; gap:6px; cursor:pointer; min-height:29px; padding:0 12px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
+  :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
+  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 26%, var(--panel)) !important; color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
+  :global(.movelist .mv-eval){font:12px var(--mono); color:var(--muted); font-weight:400}
+  :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
+  :global(.movelist .var){color:var(--muted)}
   @media (max-width:900px){
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
     .board-column{display:contents}
     .board-panel, .analysis-workspace .app-sidebar{grid-column:1; grid-row:auto}
     .analysis-workspace .app-sidebar{height:auto; max-height:none; overflow:visible}
-    .analysis-workspace .app-sidebar>.analysis-content{display:block}
     .board-toolbar{height:44px}
-    .workbench-tabs span{font-size:10px}
-    /* Narrow screens: history is a tab again (the board and lines need the height). */
-    #movesTab{display:block}
-    .history-panel{display:none; min-height:0; border-top:0}
-    :global(.analysis-content[data-view=moves]) .history-panel{display:flex}
-    :global(.analysis-content[data-view=moves]) .lines-panel{display:none}
-    .analysis-workspace .lines-panel, .analysis-workspace .comparison-panel{min-height:0; max-height:360px}
-    .analysis-workspace .human-panel{min-height:0; max-height:360px}
-    .tab-badge, .tab-long{display:none}
-    .history-panel :global(.movelist){max-height:320px}
-    :global(.movelist .mv){min-height:36px}
+    .workbench-tabs{order:0}
+    .analysis-workspace .lines-panel, .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{order:1; flex:0 0 auto}
+    /* Narrow: board, compact engine strip, then tabs (Lines first). */
+    #linesTab{display:inline-flex}
+    .workbench-tabs{position:static}
+    .analysis-workspace .lines-panel{display:none; max-height:none; overflow:visible; scroll-snap-type:none}
+    :global(.analysis-content[data-view=lines]) .lines-panel{display:block}
+    :global(.analysis-content[data-view=lines]) .history-panel{display:none}
+    .engine-summaries{max-height:none; overflow:visible}
+    .lines-more-anchor{display:none}
+    .history-panel :global(.movelist){max-height:420px}
+    .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}
+    :global(.movelist .mv){min-height:34px}
   }
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
     /* Thin horizontal eval bar above the board so the board runs nearly edge to edge. */
     .board-wrap{grid-template-columns:1fr; gap:3px}
-    .evalbar{width:auto; height:18px; border-radius:3px}
+    .evalbar{width:auto; height:20px; border-radius:3px}
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
     .evalbar .mid{top:0; bottom:0; left:50%; width:1px; height:auto}
-    .eval-score{top:0; right:auto; display:flex; align-items:center; padding:0 7px 0 6px; border-top:0; border-left:3px solid var(--engine-color)}
+    .eval-chip{top:0; right:auto; display:flex; box-shadow:1px 0 0 #0003}
+    .eval-source{height:auto; width:24px}
+    .eval-score{display:flex; align-items:center; padding:0 7px 0 6px}
     .board-panel :global(#ground){border-radius:3px}
     .board-toolbar{gap:4px; margin:6px 0 0}
     .nav{gap:4px}
     .nav button{min-width:0; padding:4px}
-    .position-toggle{padding:0 8px; gap:4px; font-size:12px}
-    .analysis-overview{flex-wrap:wrap; padding:8px; gap:8px; min-height:0}
-    .position-status{flex:1 1 100%; justify-content:space-between}
-    .turn-indicator{font-size:13px; gap:6px}
-    .analyze-actions{flex:1 1 100%; gap:8px}
-    .analyze-actions button{flex:1 1 0; min-height:40px; padding:0 10px; font-size:14px}
-    .run-action{min-width:0}
-    .add-engine-inline{min-height:36px; margin:4px 8px}
-    :global(.comparison-insight){margin:4px 8px; padding:6px 8px}
-    .app-sidebar #message{margin:0 12px 6px}
+    .position-toggle{padding:0 9px; gap:5px; font-size:12.5px}
+    .analysis-overview{gap:8px; min-height:50px; padding:5px 6px 5px 10px}
+    .position-status{gap:8px}
+    .turn-indicator{font-size:13px; gap:7px}
+    /* Status collapses to its glyph; the text stays for assistive tech. */
+    .analysis-status{padding-left:8px; font-size:0; gap:0}
+    .analysis-status::before{font-size:13px}
+    .analyze-actions{gap:6px}
+    .analyze-actions button{min-height:40px; padding:0 11px}
+    .manage-label{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%)}
+    .run-action{min-width:104px}
+    .app-sidebar #message{margin:4px 10px}
     :global(.analysis-workspace #ground coords){font-size:11px}
-    :global(.engine-summary){min-height:42px; padding:0 8px; gap:5px; grid-template-columns:minmax(0,1fr) auto 52px}
-    :global(.engine-summary-name){gap:6px; min-height:42px; padding:3px 0}
+    :global(.comparison-insight){padding:0 4px 0 10px; min-height:34px}
+    :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 34px; gap:6px; min-height:40px; padding:0 2px 0 7px}
+    :global(.engine-summary-name){min-height:40px; gap:7px}
+    :global(.engine-summary-text){display:grid; gap:1px}
     :global(.engine-summary-name strong){font-size:13px}
-    :global(.engine-summary-name small){font-size:12px; line-height:1.25}
-    :global(.engine-summary-score){font-size:18px}
-    :global(.engine-summary .compare-move){min-height:32px; font-size:14px}
-    :global(.line-play){min-height:40px}
-    :global(.pv-expanded summary){height:40px; width:40px}
-    :global(.line-play){width:calc(100% - 40px)}
-    .engine-summaries{padding-bottom:2px}
-    .workbench-tabs span{display:none}
-    .workbench-tabs button{flex:1; min-height:38px}
-    .app-sidebar :global(.model-load-progress){margin-inline:12px}
-    .analyze-controls{padding-block:8px}
+    :global(.engine-summary-name small){font-size:11.5px}
+    :global(.engine-summary-score){min-width:56px; font-size:16px}
+    :global(.engine-summary .compare-move){height:32px}
+    :global(.engine-gear){width:34px; height:36px}
+    .add-engine-inline{min-height:36px; padding-inline:10px}
+    .workbench-tabs{padding:0 2px; gap:0}
+    .workbench-tabs [role=tab]{flex:1 1 auto; justify-content:center; padding:0 6px; min-height:40px}
+    .tab-badge{display:none}
+    .copy-chip{padding:0 6px}
+    .copy-chip svg{display:none}
+    :global(.line-play){min-height:40px; grid-template-columns:22px 50px minmax(0,1fr); gap:6px}
+    :global(.result-line){min-height:40px}
+    :global(.line-toggle){width:46px}
+    :global(.line-toggle-spacer){width:46px}
     .analysis-workspace .section-block{padding:8px 10px}
-    .analysis-workspace .lines-panel{padding-top:4px}
-    .workbench-tabs{padding-inline:4px}
-    .workbench-tabs button{padding-inline:6px}
-    :global(.engine-result h3){margin-bottom:0; height:22px}
-    :global(.engine-result h3 small){display:none}
+    .analysis-workspace .lines-panel{padding:0}
     :global(.analysis-workspace .engine-row){flex-wrap:wrap}
     :global(.analysis-workspace .engine-row .row-unit){display:block}
     :global(.analysis-workspace .engine-row .row-fam){flex-basis:calc(100% - 40px)}

@@ -37,14 +37,21 @@ export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean)
   }).reverse(); // Alternatives sit underneath best moves; width is always chessground's 10.
 }
 
-/** Ring segments (one per backing engine) plus the vote count, for a shared best-move arrow. */
-export function sharedArrowMarkerSvg(swatches: string[]): string {
-  const r = 20;
+/**
+ * Ring segments (one per backing engine) plus the vote count, for a shared best-move arrow.
+ * Drawn with chessground's `center: 'dest'`, whose 1×1 box covers the destination square, so the
+ * badge sits small in one of that square's corners instead of on the piece. `corner` is the screen
+ * corner (x, y signs: -1 = left/top, 1 = right/bottom); callers pick the one facing away from the shaft.
+ */
+export function sharedArrowMarkerSvg(swatches: string[], corner: [number, number] = [1, 1]): string {
+  const cx = corner[0] < 0 ? 21 : 79;
+  const cy = corner[1] < 0 ? 21 : 79;
+  const r = 11;
   const circumference = 2 * Math.PI * r;
   const segment = circumference / swatches.length;
   const ring = swatches.map((color, index) =>
-    `<circle cx="50" cy="50" r="${r}" fill="none" stroke="${color}" stroke-width="9" stroke-dasharray="${segment.toFixed(2)} ${(circumference - segment).toFixed(2)}" stroke-dashoffset="${(-index * segment).toFixed(2)}" transform="rotate(-90 50 50)"/>`).join('');
-  return `<circle cx="50" cy="50" r="26" fill="#fff" fill-opacity=".92"/>${ring}<circle cx="50" cy="50" r="15" fill="#1d1b18"/><text x="50" y="57" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="800" fill="#fff">${swatches.length}</text>`;
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="5" stroke-dasharray="${segment.toFixed(2)} ${(circumference - segment).toFixed(2)}" stroke-dashoffset="${(-index * segment).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"/>`).join('');
+  return `<circle cx="${cx}" cy="${cy}" r="15" fill="#fff" fill-opacity=".95"/>${ring}<circle cx="${cx}" cy="${cy}" r="8.5" fill="#1d1b18"/><text x="${cx}" y="${cy + 4}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11.5" font-weight="800" fill="#fff">${swatches.length}</text>`;
 }
 
 export interface AnalysisMoveGroup {
@@ -84,16 +91,16 @@ export function analysisShortEngineNames(engines: string[]): Map<string, string>
 }
 
 const ENGINE_MONOGRAMS: [RegExp, string][] = [
-  [/^lc0/i, 'L0'], [/^(sf|stockfish)\b/i, 'SF'], [/^plentychess/i, 'PC'], [/^centipawn/i, 'CP'], [/^maia/i, 'Ma'],
+  [/^lc0/i, 'L0'], [/^(sf|stockfish)\b/i, 'SF'], [/^plentychess/i, 'PC'], [/^centipawn/i, 'CP'], [/^maia/i, 'MA'],
 ];
 
-/** 1–2 letter monogram for the engine's colour avatar (En Croissant-style identity, no logos). */
+/** Two-character uppercase monogram for the engine's colour avatar (one rule for every engine). */
 export function engineMonogram(engine: string): string {
   const name = analysisEngineName(engine).trim();
   const known = ENGINE_MONOGRAMS.find(([pattern]) => pattern.test(name));
   if (known) return known[1];
   const letters = name.replace(/[^A-Za-z0-9]/g, '');
-  return letters ? letters.charAt(0).toUpperCase() + letters.charAt(1).toLowerCase() : '?';
+  return letters ? letters.slice(0, 2).toUpperCase() : '?';
 }
 
 /** Display names only: engine/cache identities must retain their original labels. */
@@ -197,5 +204,5 @@ export function analysisMoveMarkup(root: GameNode, current: GameNode): string {
     flush();
     return html;
   };
-  return root.children[0] ? branch(root.children[0], true) : '<p class="history-empty">No moves yet. Play on the board or <button type="button" class="load-game-link" data-load-game>Load a game</button>.</p>';
+  return root.children[0] ? branch(root.children[0], true) : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game to review it.</p><textarea class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" aria-label="Paste a PGN" placeholder="1. e4 c5 2. Nf3 d6 3. d4 …"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load PGN</button><button type="button" class="load-game-link" data-load-game>FEN and more options</button></div></div>';
 }

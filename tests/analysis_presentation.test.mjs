@@ -56,11 +56,11 @@ test('callout groups engines by move and states agreement explicitly', () => {
   assert.deepEqual([...analysisShortEngineNames(['Lc0', 'Lc0 BT4']).values()], ['Lc0 Small', 'Lc0 BT4']);
 });
 
-test('engine avatars use consistent 1–2 letter monograms', () => {
+test('engine avatars use one two-character uppercase monogram rule', () => {
   assert.equal(engineMonogram('Lc0'), 'L0');
   assert.equal(engineMonogram('SF Lite'), 'SF');
   assert.equal(engineMonogram('PlentyChess'), 'PC');
-  assert.equal(engineMonogram('Berserk'), 'Be');
+  assert.equal(engineMonogram('Berserk'), 'BE');
 });
 
 test('PVs number White and initial Black moves, including the full continuation', () => {
@@ -133,5 +133,7 @@ test('Black-to-move FEN history leaves the White ply empty and escapes imported 
   assert.doesNotMatch(html, /<img/);
   const empty = analysisMoveMarkup(new GameTree().root, tree.current);
   assert.match(empty, /No moves yet/);
-  assert.match(empty, /<button[^>]+data-load-game>Load a game<\/button>/);
+  assert.match(empty, /<textarea[^>]+data-quick-pgn/);
+  assert.match(empty, /<button[^>]+data-quick-pgn-load>Load PGN<\/button>/);
+  assert.match(empty, /<button[^>]+data-load-game>FEN and more options<\/button>/);
 });

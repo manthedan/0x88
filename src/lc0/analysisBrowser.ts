@@ -130,7 +130,7 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, patchAnalysisResults, sharedArrowMarkerSvg } from './analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, patchAnalysisResults, sharedArrowMarkerSvg } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import {
   berserkCacheKey,
@@ -1377,6 +1377,10 @@ let engineRows: EngineRow[] = defaultAnalysisEngineRows();
 const ALL_LINE_ARROWS_STORAGE_KEY = '0x88-analysis-all-line-arrows-v1';
 let showAllLineArrows = false;
 let arrowPreview: { fen: string; uci: string; engine: string } | null = null;
+// Engine strip focus: the chosen engine drives the eval bar (default: first with a result).
+let evalSourceEngine: string | null = null;
+// Lines accordion: null = automatic (expand everything when it obviously fits), otherwise explicit per engine.
+let expandedEngines: Set<string> | null = null;
 
 function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
   const variant = String(value ?? '');
@@ -1858,8 +1862,14 @@ function bestShapes(): DrawShape[] {
   return candidates.flatMap(({ uci, brush, shared }: { uci: string; brush: string; shared?: string[] }) => {
     const shape = uciShape(uci, brush);
     if (!shape) return [];
-    // One arrow per move; a ring in every backing engine's colour marks agreement.
-    return [shared ? { ...shape, customSvg: { html: sharedArrowMarkerSvg(shared), center: 'label' as const } } : shape];
+    // One arrow per move; a small ring in every backing engine's colour marks agreement, tucked
+    // into the destination square's corner that faces away from the incoming shaft.
+    if (!shared) return [shape];
+    const flip = orientation === 'black' ? -1 : 1;
+    const dx = Math.sign(uci.charCodeAt(0) - uci.charCodeAt(2)) * flip;
+    const dy = -Math.sign(Number(uci[1]) - Number(uci[3])) * flip;
+    const corner: [number, number] = [dx > 0 ? -1 : 1, dy > 0 ? -1 : dy < 0 ? 1 : -1];
+    return [{ ...shape, customSvg: { html: sharedArrowMarkerSvg(shared, corner), center: 'dest' as const } }];
   });
 }
 
@@ -1905,17 +1915,24 @@ function renderBoard() {
   setShapes(bestShapes());
 }
 
+function evalBarLine(lines: AnalysisLine[]): AnalysisLine | undefined {
+  // The engine picked in the strip wins; otherwise the first selected engine with a valid result,
+  // not whichever worker finished first.
+  const best = activeEngineRows().flatMap((row) => lines.filter((entry) => analysisEngineName(entry.engine) === analysisEngineName(rowLabel(row)) && entry.multipv === 1 && !entry.error));
+  return best.find((entry) => analysisEngineName(entry.engine) === evalSourceEngine) ?? best[0];
+}
+
 function renderEvalBar() {
   const lines = lineCache.get(tree.current.fen) ?? [];
-  // Use the first selected engine with a valid result, not whichever worker finished first.
-  const line = activeEngineRows().flatMap((row) => lines.filter((entry) => analysisEngineName(entry.engine) === analysisEngineName(rowLabel(row)) && entry.multipv === 1 && !entry.error))[0];
+  const line = evalBarLine(lines);
   const pct = line ? evalBarWhitePercent(line.scoreCp, line.mateIn) : 50;
   const bar = el('evalWhite').parentElement;
   bar?.style.setProperty('--eval-pct', `${pct}%`);
   el('evalScore').textContent = line?.scoreText ?? '—';
   el('evalScore').dataset.long = String((line?.scoreText ?? '').length > 5);
+  el('evalSource').textContent = line ? engineMonogram(line.engine) : '';
   bar?.style.setProperty('--engine-color', line ? engineBrushes(line.engine).swatch : 'var(--muted)');
-  bar?.setAttribute('title', line ? `${analysisEngineName(line.engine)}: ${line.scoreText} (White's perspective)` : 'Evaluation (White\'s perspective)');
+  bar?.setAttribute('title', line ? `Eval bar: ${analysisEngineName(line.engine)} ${line.scoreText} (White's perspective). Click another engine row to switch.` : 'Evaluation (White\'s perspective)');
   el('evalWhite').parentElement?.setAttribute('aria-label', line ? `White's evaluation: ${line.scoreText}, ${analysisEngineName(line.engine)}` : 'No evaluation yet');
 }
 
@@ -1923,6 +1940,11 @@ function renderLegend(_lines: AnalysisLine[]) {
   // Engine names live on each result group; only the independent book needs a key.
   el('engineLegend').hidden = currentBookStats().length === 0;
   el('engineLegend').innerHTML = `<span class="key"><span class="dot" style="background:${BOOK_SWATCH}"></span>Opening book</span>`;
+}
+
+function signedPawns(value: number): string {
+  const pawns = value / 100;
+  return `${pawns > 0 ? '+' : pawns < 0 ? '−' : '±'}${Math.abs(pawns).toFixed(2)}`;
 }
 
 function signedCp(value: number): string {
@@ -1948,8 +1970,32 @@ function renderAnalysisStatus(): void {
   if (overview && overview.dataset.status !== state) overview.dataset.status = state;
 }
 
+function activeEngineNames(): string[] {
+  return [...new Set(activeEngineRows().map((row) => analysisEngineName(rowLabel(row))))];
+}
+
+/** Auto mode expands every engine's multi-PV only when it plainly fits: one engine, or two with no game yet. */
+function engineLinesExpanded(name: string): boolean {
+  if (expandedEngines) return expandedEngines.has(name);
+  const count = activeEngineNames().length;
+  return count === 1 || (count <= 2 && !tree.root.children.length);
+}
+
+function toggleEngineLines(name: string): void {
+  const next = new Set(activeEngineNames().filter(engineLinesExpanded));
+  if (next.has(name)) next.delete(name);
+  else next.add(name);
+  expandedEngines = next;
+  renderLines();
+}
+
 function renderEngineSummaries(lines: AnalysisLine[]): void {
   renderAnalysisStatus();
+  const best = lines.filter((entry) => entry.multipv === 1 && !entry.error && entry.pvUci[0]);
+  const groups = analysisMoveGroups(best);
+  // Only a genuine plurality is marked as "agreed": the most-backed move with 2+ engines and no tie.
+  const agreed = groups[0] && groups[0].engines.length >= 2 && (groups[1]?.engines.length ?? 0) < groups[0].engines.length ? groups[0].uci : null;
+  const source = evalBarLine(lines);
   patchAnalysisResults(el('engineSummaries'), activeEngineRows().map((row) => {
     // Summaries deduplicate engines, but settings controls retain the original row indexes.
     const index = engineRows.findIndex((entry) => entry.family === row.family && entry.variant === row.variant);
@@ -1958,13 +2004,19 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
     const progress = [...searchProgressByEngine.values()].find((entry) => analysisEngineName(entry.label) === name);
     const failure = lines.find((entry) => analysisEngineName(entry.engine) === name && entry.error);
     // Budget is explicitly labeled; do not present a requested depth/visit count as achieved work.
-    const stats = progress ? searchProgressText(progress).replace(`${progress.label}: `, '')
-      : line ? `${line.engine.startsWith('Lc0') ? 'Top move · ' : ''}${line.detail}` : failure ? 'Unavailable · see Lines' : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
+    const raw = progress ? searchProgressText(progress).replace(`${progress.label}: `, '')
+      : line ? line.detail : failure ? 'Unavailable' : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
+    // Two units at most in the strip (depth + nodes, or visits); the full string stays in the tooltip.
+    const stats = raw.split(' · ').slice(0, 2).join(' · ');
     const engine = line?.engine ?? rowLabel(row);
     const swatch = engineBrushes(engine).swatch;
     const pct = progress && hasBoundedSearchProgress(progress) ? Math.min(100, Math.round((100 * (progress.completed ?? 0)) / Math.max(1, progress.requested ?? 1))) : null;
     const meter = progress ? `<span class="engine-summary-meter${pct === null ? ' indeterminate' : ''}" style="--progress:${pct ?? 100}%" aria-hidden="true"></span>` : '';
-    return `<div class="engine-summary${progress ? ' searching' : ''}" style="--engine-color:${swatch}"><button class="engine-summary-name" type="button" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(stats)}">${htmlEscape(stats)}</small></span>${GEAR_ICON}</button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${line?.pvUci[0] ? `<button type="button" class="compare-move" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span></span>'}${meter}</div>`;
+    const isSource = !!source && analysisEngineName(source.engine) === name;
+    const expanded = engineLinesExpanded(name);
+    const agrees = !!line && line.pvUci[0] === agreed;
+    const move = line?.pvUci[0] ? `<button type="button" class="compare-move${agrees ? ' agrees' : ''}" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}${agrees ? ' (agreed move)' : ''}" title="Play ${htmlEscape(firstAnalysisMove(line))}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span class="compare-move-empty" aria-hidden="true">—</span>';
+    return `<div class="engine-summary${progress ? ' searching' : ''}${isSource ? ' eval-source' : ''}" style="--engine-color:${swatch}"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-expanded="${expanded}" aria-pressed="${isSource}" title="${htmlEscape(`${name}: show on the eval bar and ${expanded ? 'collapse' : 'expand'} its lines`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective${isSource ? ' (shown on the eval bar)' : ''}">${htmlEscape(line?.scoreText ?? '—')}</span>${move}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button>${meter}</div>`;
   }).join(''));
 }
 
@@ -2002,18 +2054,12 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const consensus = analysisConsensus(bestByEngine);
     const [, spread] = consensus.split(' · ');
     const groups = analysisMoveGroups(bestByEngine);
-    const shortNames = analysisShortEngineNames(bestByEngine.map((line) => line.engine));
     const headline = analysisAgreementHeadline(groups, bestByEngine.length);
-    const spreadCp = spread?.replace(' cp spread', '');
-    const chips = groups.map((group) => {
-      const names = group.engines.map((engine) => analysisEngineName(engine));
-      const dots = group.engines.map((engine) => `<span class="engine-dot" style="--engine-color:${engineBrushes(engine).swatch}" aria-hidden="true"></span>`).join('');
-      const count = group.engines.length > 1 ? `<span class="insight-count" aria-hidden="true">×${group.engines.length}</span>` : '';
-      const who = group.engines.map((engine) => shortNames.get(engine) ?? analysisEngineName(engine)).join(', ');
-      return `<span class="insight-move" title="${htmlEscape(`${group.san}: ${names.join(', ')}`)}"><span class="insight-dots">${dots}</span><span class="insight-san">${htmlEscape(group.san)}</span>${count}<span class="insight-who"><span class="sr-only">chosen by </span>${htmlEscape(who)}</span></span>`;
-    }).join('');
-    const spreadMarkup = spreadCp ? `<span class="insight-spread" title="Best minus worst evaluation across engines (centipawns)">Eval spread <b>${htmlEscape(spreadCp)}</b> cp</span>` : '';
-    patchAnalysisResults(el('comparisonInsight'), `<div class="insight-head"><strong>${htmlEscape(headline)}</strong>${spreadMarkup}<button type="button" data-open-comparison data-focus-key="comparison-shortcut">Compare →</button></div><div class="insight-moves">${chips}</div>`);
+    const spreadCp = Number(spread?.replace(' cp spread', ''));
+    // Spread in pawns, the same unit as every engine evaluation beside it.
+    const spreadMarkup = spread && Number.isFinite(spreadCp) ? `<span class="insight-spread" title="Best minus worst evaluation across engines: ${Math.round(spreadCp)} centipawns">spread <b>${(spreadCp / 100).toFixed(2)}</b></span>` : '';
+    const dots = groups.map((group) => group.engines.map((engine) => `<span class="engine-dot" style="--engine-color:${engineBrushes(engine).swatch}" title="${htmlEscape(`${analysisEngineName(engine)}: ${group.san}`)}"></span>`).join('')).join('<span class="insight-sep" aria-hidden="true"></span>');
+    patchAnalysisResults(el('comparisonInsight'), `<span class="insight-dots" aria-hidden="true">${dots}</span><strong>${htmlEscape(headline)}</strong>${spreadMarkup}<button type="button" data-open-comparison data-focus-key="comparison-shortcut">Compare</button>`);
   }
   if (!bestByEngine.length) {
     const progressRows = [...searchProgressByEngine.values()].map(
@@ -2032,15 +2078,16 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   const status = (pending ? ` · ${pending} pending` : '') + (unavailable ? ` · ${unavailable} unavailable` : '');
   el('engineConsensus').textContent = bestByEngine.length === 1
     ? `${analysisEngineName(bestByEngine[0].engine)} ready${status}`
-    : analysisConsensus(bestByEngine) + status;
+    // Pawn units, matching every evaluation on the page.
+    : analysisConsensus(bestByEngine).replace(/ · (\d+) cp spread$/, (_, cp: string) => ` · spread ${(Number(cp) / 100).toFixed(2)}`) + status;
   const baseline = bestByEngine[0];
-  el('deltaBaseline').textContent = 'Δ cp';
-  el('deltaBaseline').title = `Centipawns versus ${analysisEngineName(baseline.engine)}`;
+  el('deltaBaseline').textContent = 'Δ';
+  el('deltaBaseline').title = `Pawns versus ${analysisEngineName(baseline.engine)}`;
   const reference = baseline.mateIn === undefined ? baseline.scoreCp : undefined;
   patchAnalysisResults(body, bestByEngine
     .map((line) => {
       const swatch = engineBrushes(line.engine).swatch;
-      const delta = reference === undefined || line.scoreCp === undefined || line.mateIn !== undefined ? '—' : signedCp(line.scoreCp - reference);
+      const delta = reference === undefined || line.scoreCp === undefined || line.mateIn !== undefined ? '—' : signedPawns(line.scoreCp - reference);
       return (
         `<tr style="border-left:3px solid ${swatch}">` +
         `<th scope="row">${htmlEscape(analysisEngineName(line.engine))}</th>` +
@@ -2052,6 +2099,8 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     .join(''));
 }
 
+const CHEVRON_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>';
+
 function renderLines() {
   const lines = lineCache.get(tree.current.fen) ?? [];
   decorateMoveEvals();
@@ -2059,26 +2108,88 @@ function renderLines() {
   renderEngineComparison(lines);
   const groups = new Map<string, AnalysisLine[]>();
   for (const line of lines) groups.set(line.engine, [...(groups.get(line.engine) ?? []), line]);
-  const compactGroups = activeEngineRows().length > 2;
-  patchAnalysisResults(el('lines'), [...groups].map(([engine, engineLines]) => {
-    const detail = engineLines.find((line) => line.multipv === 1)?.detail.split(' · ')[0] ?? '';
-    const heading = `<h3 style="--engine-color:${engineBrushes(engine).swatch}">${engineAvatar(engine)}${htmlEscape(analysisEngineName(engine))}<small${compactGroups ? ' class="sr-only"' : ''}>${htmlEscape(detail)}</small></h3>`;
-    const rows = engineLines.map((line) => {
-      if (line.error) return `<li class="line-error">${htmlEscape(line.error)}</li>`;
+  // Strip order: one block per selected engine (pending ones keep their row), then any stragglers.
+  const order = activeEngineRows().map((row) => rowLabel(row));
+  const byName = new Map([...groups].map(([engine, engineLines]) => [analysisEngineName(engine), [engine, engineLines] as const]));
+  const blocks = order.map((label) => byName.get(analysisEngineName(label)) ?? [label, [] as AnalysisLine[]] as const);
+  for (const [engine, engineLines] of groups) if (!order.some((label) => analysisEngineName(label) === analysisEngineName(engine))) blocks.push([engine, engineLines]);
+  const anyResult = lines.length > 0;
+  patchAnalysisResults(el('lines'), (anyResult || analyzing ? blocks.map(([engine, engineLines]) => {
+    const name = analysisEngineName(engine);
+    const open = engineLinesExpanded(name);
+    const sorted = [...engineLines].sort((x, y) => x.multipv - y.multipv);
+    const usable = sorted.filter((line) => !line.error);
+    const shown = open ? sorted : sorted.slice(0, 1);
+    const extra = usable.length - 1;
+    const rows = shown.map((line, index) => {
+      if (line.error) return `<li class="result-line line-error"><span class="line-id">${engineAvatar(engine)}</span><span class="line-error-text" title="${htmlEscape(line.error)}">${htmlEscape(line.error)}</span></li>`;
       const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}"`;
       const key = htmlEscape(`${tree.current.fen}|${engine}|${line.multipv}`);
-      const label = `${analysisEngineName(engine)}, line ${line.multipv}: play ${firstAnalysisMove(line)}, evaluation ${line.scoreText}`;
       const pvText = analysisPvText(tree.current.fen, line);
-      const pv = htmlEscape(pvText);
-      return `<li class="result-line" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}" title="Play ${htmlEscape(firstAnalysisMove(line))}"><span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span><span class="pv">${pvMoveChunks(pvText)}</span></button><details class="pv-expanded" data-result-key="${key}"><summary data-focus-key="${key}|expand" aria-label="Show full line, ${htmlEscape(analysisEngineName(engine))} line ${line.multipv}" title="Show full line"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary><p>${pv}</p><small>${htmlEscape(line.detail)}</small></details></li>`;
+      const label = `${name}, line ${line.multipv}: play ${firstAnalysisMove(line)}, evaluation ${line.scoreText}. ${pvText}`;
+      const id = index === 0 ? engineAvatar(engine) : `<span class="line-rank">${line.multipv}</span>`;
+      const toggle = index === 0
+        ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? '' : `+${extra}`}</span>${CHEVRON_ICON}</button>` : '<span class="line-toggle-spacer" aria-hidden="true"></span>'
+        : '';
+      return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}" title="${htmlEscape(`Play ${firstAnalysisMove(line)} · ${pvText}`)}"><span class="line-id">${id}</span><span class="score">${htmlEscape(line.scoreText)}</span><span class="pv">${pvMoveChunks(pvText)}</span></button>${toggle}</li>`;
     });
-    // With 3+ engines, show every engine's leading candidate before alternatives.
-    // Alternatives remain one disclosure away, and its state survives streaming updates.
-    const results = compactGroups && rows.length > 1
-      ? `<ol>${rows[0]}</ol><details class="engine-alternatives" data-result-key="${htmlEscape(`${tree.current.fen}|${engine}|alternatives`)}"><summary data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|more`)}">${rows.length - 1} more lines</summary><ol>${rows.slice(1).join('')}</ol></details>`
-      : `<ol>${rows.join('')}</ol>`;
-    return `<section class="engine-result${compactGroups ? ' compact-result' : ''}" aria-label="${htmlEscape(analysisEngineName(engine))} lines">${heading}${results}</section>`;
-  }).join('') || '<p class="small placeholder">Make a move or press Analyze to begin.</p>');
+    if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="line-id">${engineAvatar(engine)}</span><span class="pending-text">${analyzing ? 'Searching…' : 'No result for this position'}</span></li>`);
+    return `<section class="line-group${open && sorted.length > 1 ? ' open' : ''}" style="--engine-color:${engineBrushes(engine).swatch}" aria-label="${htmlEscape(name)} lines"><ol>${rows.join('')}</ol></section>`;
+  }).join('') : '') || '<p class="lines-empty placeholder">Make a move or press <b>Analyze</b> to see each engine\'s line here.</p>');
+  fitLinesPanel();
+}
+
+/**
+ * Desktop: the lines block is capped so the move list keeps most of the column, and the cap is
+ * snapped to a row boundary so no row is ever cut mid-text. Overflow gets a visible "N more" cue.
+ */
+function fitLinesPanel(): void {
+  const panel = el('linesPanel');
+  const more = el('linesMore') as HTMLButtonElement;
+  const sidebar = panel.closest<HTMLElement>('.app-sidebar');
+  if (!sidebar || matchMedia('(max-width: 900px)').matches) {
+    panel.style.maxHeight = '';
+    more.hidden = true;
+    return;
+  }
+  const rows = [...panel.querySelectorAll<HTMLElement>('#lines li, #lines .lines-empty, #engineLegend:not([hidden])')];
+  const style = getComputedStyle(panel);
+  const padBottom = parseFloat(style.paddingBottom) || 0;
+  // Leave the move list at least ~6 rows; the lines block may take at most ~46% of the column.
+  const cap = Math.max(96, Math.floor(sidebar.clientHeight * 0.46));
+  panel.style.maxHeight = '';
+  const top = panel.getBoundingClientRect().top - panel.scrollTop;
+  const natural = panel.scrollHeight;
+  if (natural <= cap) {
+    more.hidden = true;
+    panel.dataset.overflow = 'false';
+    return;
+  }
+  // Reserve a slim cue bar under the last whole row; it never sits on top of row text.
+  const cue = LINES_MORE_CUE_PX;
+  let fit = 0;
+  for (const row of rows) {
+    const bottom = row.getBoundingClientRect().bottom - top;
+    if (bottom + padBottom + cue <= cap) fit = Math.max(fit, bottom);
+  }
+  panel.dataset.overflow = 'true';
+  panel.style.maxHeight = `${Math.ceil(fit + padBottom + cue)}px`;
+  updateLinesMore();
+}
+
+const LINES_MORE_CUE_PX = 26;
+
+function updateLinesMore(): void {
+  const panel = el('linesPanel');
+  const more = el('linesMore') as HTMLButtonElement;
+  if (panel.dataset.overflow !== 'true') {
+    more.hidden = true;
+    return;
+  }
+  const limit = panel.getBoundingClientRect().bottom - LINES_MORE_CUE_PX - 2;
+  const hidden = [...panel.querySelectorAll<HTMLElement>('#lines li')].filter((row) => row.getBoundingClientRect().top >= limit).length;
+  more.hidden = hidden === 0;
+  more.textContent = `${hidden} more ${hidden === 1 ? 'line' : 'lines'} ↓`;
 }
 
 /** Show the cached evaluation after each analysed move, as lichess does in its move list. */
@@ -2101,16 +2212,42 @@ function decorateMoveEvals(): void {
   }
 }
 
-/** Scroll the history only (never the page/board) so the current move stays visible. */
+/** Height of one move-list row, or 0 when the list holds no uniform pairs. */
+function moveRowHeight(list: HTMLElement): number {
+  return list.querySelector<HTMLElement>('.move-pair')?.offsetHeight ?? 0;
+}
+
+/**
+ * Desktop: the move list fills the rest of the column, sized to a whole number of rows so the
+ * scroller never shows a half move pair (the sub-row remainder stays as plain panel below it).
+ */
+function fitMoveList(): void {
+  const list = el('movelist');
+  const panel = el('historyPanel');
+  const row = moveRowHeight(list);
+  if (matchMedia('(max-width: 900px)').matches || !row || !panel.clientHeight || list.querySelector('.variation')) {
+    if (list.style.maxHeight) list.style.maxHeight = '';
+    return;
+  }
+  const height = `${Math.max(row, Math.floor(panel.clientHeight / row) * row)}px`;
+  if (list.style.maxHeight !== height) list.style.maxHeight = height;
+}
+
+/** Scroll the history only (never the page/board) so the current move stays visible, on row boundaries. */
 function keepCurrentMoveInView(): void {
   const list = el('movelist');
   const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
   if (!selected || !list.clientHeight) return;
   const viewport = list.getBoundingClientRect();
   const move = selected.getBoundingClientRect();
-  const padding = 8;
-  if (move.bottom > viewport.bottom - padding) list.scrollTop += move.bottom - viewport.bottom + padding;
-  else if (move.top < viewport.top + padding) list.scrollTop -= viewport.top - move.top + padding;
+  const row = list.querySelector('.variation') ? 0 : moveRowHeight(list);
+  if (move.bottom > viewport.bottom) {
+    const target = list.scrollTop + move.bottom - viewport.bottom;
+    list.scrollTop = row ? Math.ceil(target / row) * row : target + 8;
+  } else if (move.top < viewport.top) {
+    const target = list.scrollTop - (viewport.top - move.top);
+    list.scrollTop = row ? Math.floor(target / row) * row : target - 8;
+  }
 }
 
 function renderMoveList() {
@@ -2122,12 +2259,15 @@ function renderMoveList() {
   collect(tree.root);
   const list = el('movelist');
   const hadFocus = list.contains(document.activeElement);
-  list.innerHTML = analysisMoveMarkup(tree.root, tree.current);
+  // Unchanged markup is left alone so a half-typed PGN in the empty-state box survives re-renders.
+  const markup = analysisMoveMarkup(tree.root, tree.current);
+  if (list.innerHTML !== markup) list.innerHTML = markup;
   decorateMoveEvals();
   const currentMove = tree.current.move ? `${parseFen(tree.current.parent!.fen).fullmove}${parseFen(tree.current.parent!.fen).turn === 'w' ? '.' : '…'} ${tree.current.san}` : '';
-  el('movesTab').textContent = currentMove ? `Moves · ${currentMove}` : 'Moves';
+  el('movesTab').innerHTML = currentMove ? `Moves<span class="tab-current"> · ${htmlEscape(currentMove)}</span>` : 'Moves';
   const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
   if (hadFocus) selected?.focus({ preventScroll: true });
+  fitMoveList();
   keepCurrentMoveInView();
   for (const id of ['navStart', 'navBack']) el(id).toggleAttribute('disabled', !tree.current.parent);
   for (const id of ['navForward', 'navEnd']) el(id).toggleAttribute('disabled', !tree.current.children.length);
@@ -3965,6 +4105,13 @@ function loadPgn() {
   }
 }
 
+function copyFen() {
+  const fen = tree.current.fen;
+  inputEl('fenInput').value = fen;
+  void navigator.clipboard?.writeText(fen).catch(() => undefined);
+  el('message').textContent = 'FEN copied to the clipboard.';
+}
+
 function copyPgn() {
   const pgn = gameTreeToPgn(tree, {}, tree.root.children.length ? '*' : '*');
   inputEl('pgnInput').value = pgn;
@@ -3994,8 +4141,12 @@ function wireEvents() {
   mountAbort.signal.addEventListener('abort', () => statusObserver.disconnect(), { once: true });
   renderAnalysisStatus();
   // The always-visible history resizes as engine results stream in; keep the current move in view.
-  const historyObserver = new ResizeObserver(() => keepCurrentMoveInView());
+  const historyObserver = new ResizeObserver(() => {
+    fitMoveList();
+    keepCurrentMoveInView();
+  });
   historyObserver.observe(el('movelist'));
+  historyObserver.observe(el('historyPanel'));
   mountAbort.signal.addEventListener('abort', () => historyObserver.disconnect(), { once: true });
   const manager = el('engineManager') as HTMLDialogElement;
   const openEngineManager = (index?: number) => {
@@ -4030,6 +4181,30 @@ function wireEvents() {
   el('comparisonInsight').addEventListener('click', (event) => {
     if ((event.target as HTMLElement).closest('[data-open-comparison]')) setView(el('comparisonTab') as HTMLButtonElement);
   });
+  // Wide layouts show the lines block permanently above the tabs, so "Lines" is a narrow-screen tab only.
+  const narrow = matchMedia('(max-width: 900px)');
+  const syncViewToLayout = () => {
+    if (!narrow.matches && el('analysisContent').dataset.view === 'lines') setView(el('movesTab') as HTMLButtonElement);
+    fitLinesPanel();
+  };
+  narrow.addEventListener('change', syncViewToLayout);
+  mountAbort.signal.addEventListener('abort', () => narrow.removeEventListener('change', syncViewToLayout), { once: true });
+  syncViewToLayout();
+  const sidebarObserver = new ResizeObserver(() => fitLinesPanel());
+  sidebarObserver.observe(el('linesPanel').closest('.app-sidebar') ?? el('linesPanel'));
+  mountAbort.signal.addEventListener('abort', () => sidebarObserver.disconnect(), { once: true });
+  el('linesPanel').addEventListener('scroll', updateLinesMore, { passive: true });
+  el('linesMore').addEventListener('click', () => {
+    const panel = el('linesPanel');
+    panel.scrollBy({ top: Math.max(32, panel.clientHeight - 40), behavior: 'smooth' });
+  });
+  const flashCopied = (button: HTMLElement) => {
+    button.dataset.copied = 'true';
+    window.setTimeout(() => { delete button.dataset.copied; }, 1400);
+  };
+  el('quickCopyFen').addEventListener('click', () => { copyFen(); flashCopied(el('quickCopyFen')); });
+  el('quickCopyPgn').addEventListener('click', () => { copyPgn(); flashCopied(el('quickCopyPgn')); });
+  el('copyFen').addEventListener('click', () => { copyFen(); flashCopied(el('copyFen')); });
   showAllLineArrows = storageGet(ALL_LINE_ARROWS_STORAGE_KEY) === 'true';
   inputEl('showAllLineArrows').checked = showAllLineArrows;
   inputEl('showAllLineArrows').addEventListener('change', () => {
@@ -4038,9 +4213,14 @@ function wireEvents() {
     setShapes(bestShapes());
   });
   el('engineSummaries').addEventListener('click', (event) => {
-    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-engine-settings], [data-uci]');
+    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-engine-settings], [data-engine-toggle], [data-uci]');
     if (target?.dataset.engineSettings !== undefined) openEngineManager(Number(target.dataset.engineSettings));
-    else if (target?.dataset.uci && tree.addUci(target.dataset.uci)) afterNavigation();
+    else if (target?.dataset.engineToggle !== undefined) {
+      // One click focuses the engine: it drives the eval bar, and its multi-PV opens or closes in place.
+      evalSourceEngine = target.dataset.engineToggle;
+      toggleEngineLines(target.dataset.engineToggle);
+      renderEvalBar();
+    } else if (target?.dataset.uci && tree.addUci(target.dataset.uci)) afterNavigation();
   });
   const positionTools = el('positionTools') as HTMLDetailsElement;
   el('openPosition').addEventListener('click', () => {
@@ -4048,10 +4228,31 @@ function wireEvents() {
     if (positionTools.open) inputEl('fenInput').focus();
   });
   positionTools.addEventListener('toggle', () => el('openPosition').setAttribute('aria-expanded', String(positionTools.open)));
+  // The empty move list doubles as a paste-a-game box; it feeds the same pgnInput/loadPgn path.
+  const loadQuickPgn = () => {
+    const raw = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]')?.value.trim();
+    if (!raw) {
+      el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]')?.focus();
+      return;
+    }
+    inputEl('pgnInput').value = raw;
+    el('loadPgn').click();
+  };
   el('movelist').addEventListener('click', (event) => {
+    if ((event.target as HTMLElement).closest('[data-quick-pgn-load]')) {
+      loadQuickPgn();
+      return;
+    }
     if (!(event.target as HTMLElement).closest('[data-load-game]')) return;
     positionTools.open = true;
     inputEl('pgnInput').focus();
+  });
+  el('movelist').addEventListener('keydown', (event) => {
+    const key = event as KeyboardEvent;
+    if (key.key === 'Enter' && (key.metaKey || key.ctrlKey) && (key.target as HTMLElement).matches('[data-quick-pgn]')) {
+      key.preventDefault();
+      loadQuickPgn();
+    }
   });
   el('maia3Enable').addEventListener('click', () => {
     void enableMaia3Panel();
@@ -4248,6 +4449,11 @@ function wireEvents() {
     }
   });
   el('lines').addEventListener('click', (event) => {
+    const toggle = (event.target as HTMLElement).closest<HTMLElement>('[data-line-toggle]');
+    if (toggle?.dataset.lineToggle) {
+      toggleEngineLines(toggle.dataset.lineToggle);
+      return;
+    }
     const button = (event.target as HTMLElement).closest('button[data-uci]');
     const uci = button?.getAttribute('data-uci');
     if (uci) {
