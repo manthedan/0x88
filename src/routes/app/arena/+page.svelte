@@ -263,6 +263,7 @@ onMount(() => {
     --muted:#5f584c;
     --text-soft:var(--muted);
     --border-input:#8f8470; --border-input-hover:#6f6553;
+    --eng:var(--border-input); /* per-engine colour; arenaBrowser.ts sets it inline on each card/bar */
     --coord-dark:#211d17; --coord-light:#fff8eb;
     --strip-h:46px;
     --action-space:132px;
