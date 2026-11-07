@@ -1,7 +1,6 @@
 // Landing-page engine roster. Which engines appear, their names and their
 // order come from the engine registry; only the one-line roles are written
 // here (sourced from the engine entries on /docs).
-import { engineBrushes } from '../lc0/analysisFormat.ts';
 import { engineMonogram } from '../lc0/analysisPresentation.ts';
 import { type EngineFamily, engineFamilyDefinition, engineFamilyOptions } from '../lc0/engineCatalog.ts';
 
@@ -11,7 +10,6 @@ export interface RosterEngine {
   id: string;
   name: string;
   monogram: string;
-  color: string;
   role: string;
   runtime: RosterRuntime;
   docHref: string;
@@ -36,7 +34,6 @@ export function searchEngineRoster(): RosterEngine[] {
       id: family,
       name: definition.label,
       monogram: engineMonogram(definition.label),
-      color: engineBrushes(definition.label).swatch,
       role: ROLES[family] ?? '',
       runtime: definition.resource.resourceClass,
       docHref: `/docs/#engines-${family === 'sf' ? 'stockfish' : family}`,
@@ -50,7 +47,6 @@ export const HUMAN_OPPONENTS: RosterEngine[] = [
     id: 'maia3',
     name: 'Maia3',
     monogram: engineMonogram('Maia3'),
-    color: engineBrushes('Maia3').swatch,
     role: 'Plays the move a human at your chosen rating would play, from 600 to 2600.',
     runtime: 'gpu',
     docHref: '/docs/#engines-maia3',
@@ -59,7 +55,6 @@ export const HUMAN_OPPONENTS: RosterEngine[] = [
     id: 'lqo',
     name: 'Leela Queen Odds',
     monogram: 'LQ',
-    color: engineBrushes('Lc0').swatch,
     role: 'Starts without its queen and searches for your mistakes.',
     runtime: 'gpu',
     docHref: '/docs/#engines-lqo',
