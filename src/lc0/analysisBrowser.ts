@@ -4220,6 +4220,8 @@ function wireEvents() {
   narrow.addEventListener('change', () => {
     if (!narrow.matches && el('analysisContent').dataset.view === 'engines') setView(el('movesTab') as HTMLButtonElement);
   }, { signal: mountAbort.signal });
+  // On phones the engine results are the first thing to show (the product's main result); Moves is one tap away.
+  if (narrow.matches) setView(el('enginesTab') as HTMLButtonElement);
   const flashCopied = (button: HTMLElement) => {
     button.dataset.copied = 'true';
     window.setTimeout(() => { delete button.dataset.copied; }, 1600);
