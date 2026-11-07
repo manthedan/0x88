@@ -1,271 +1,225 @@
 <script lang="ts">
 type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
-type Piece = { color: 'white' | 'black'; role: PieceRole; file: number; rank: number };
+type Piece = { color: 'white' | 'black'; role: PieceRole; square: string };
 
-// Kiwipete: the classic castling, pin, and move-generation test position.
-const pieces: Piece[] = [
-  { color: 'black', role: 'rook', file: 0, rank: 0 },
-  { color: 'black', role: 'king', file: 4, rank: 0 },
-  { color: 'black', role: 'rook', file: 7, rank: 0 },
-  { color: 'black', role: 'pawn', file: 0, rank: 1 },
-  { color: 'black', role: 'pawn', file: 2, rank: 1 },
-  { color: 'black', role: 'pawn', file: 3, rank: 1 },
-  { color: 'black', role: 'queen', file: 4, rank: 1 },
-  { color: 'black', role: 'pawn', file: 5, rank: 1 },
-  { color: 'black', role: 'bishop', file: 6, rank: 1 },
-  { color: 'black', role: 'bishop', file: 0, rank: 2 },
-  { color: 'black', role: 'knight', file: 1, rank: 2 },
-  { color: 'black', role: 'pawn', file: 4, rank: 2 },
-  { color: 'black', role: 'knight', file: 5, rank: 2 },
-  { color: 'black', role: 'pawn', file: 6, rank: 2 },
-  { color: 'black', role: 'pawn', file: 3, rank: 3 },
-  { color: 'black', role: 'pawn', file: 1, rank: 4 },
-  { color: 'white', role: 'pawn', file: 2, rank: 3 },
-  { color: 'white', role: 'pawn', file: 4, rank: 3 },
-  { color: 'white', role: 'pawn', file: 4, rank: 4 },
-  { color: 'white', role: 'knight', file: 2, rank: 5 },
-  { color: 'white', role: 'knight', file: 5, rank: 5 },
-  { color: 'white', role: 'pawn', file: 0, rank: 6 },
-  { color: 'white', role: 'pawn', file: 1, rank: 6 },
-  { color: 'white', role: 'queen', file: 2, rank: 6 },
-  { color: 'white', role: 'bishop', file: 3, rank: 6 },
-  { color: 'white', role: 'bishop', file: 4, rank: 6 },
-  { color: 'white', role: 'pawn', file: 5, rank: 6 },
-  { color: 'white', role: 'pawn', file: 6, rank: 6 },
-  { color: 'white', role: 'pawn', file: 7, rank: 6 },
-  { color: 'white', role: 'rook', file: 0, rank: 7 },
-  { color: 'white', role: 'king', file: 4, rank: 7 },
-  { color: 'white', role: 'rook', file: 7, rank: 7 },
+// Sicilian Najdorf, English Attack, after 12...b4 (the same game the
+// Analysis page is reviewed on). Engine numbers below were copied from a run
+// of the built Analysis page with its default engines, Lc0 Small (400 visits)
+// and Stockfish Lite (depth 12), on this position. Re-run before editing them.
+const FEN = 'r2q1rk1/3nbppp/p2pbn2/4p1P1/1p2P3/1NN1BP2/PPPQ3P/2KR1B1R w - - 0 13';
+
+const ROLE: Record<string, PieceRole> = { r: 'rook', n: 'knight', b: 'bishop', q: 'queen', k: 'king', p: 'pawn' };
+const FILES = 'abcdefgh';
+
+function fenPieces(fen: string): Piece[] {
+  const out: Piece[] = [];
+  fen.split(' ')[0].split('/').forEach((row, r) => {
+    let f = 0;
+    for (const ch of row) {
+      if (/\d/.test(ch)) f += Number(ch);
+      else {
+        out.push({ color: ch === ch.toUpperCase() ? 'white' : 'black', role: ROLE[ch.toLowerCase()], square: `${FILES[f]}${8 - r}` });
+        f += 1;
+      }
+    }
+  });
+  return out;
+}
+
+/** Square → [file, row-from-top], the order chessground translates by. */
+function xy(square: string): [number, number] {
+  return [FILES.indexOf(square[0]), 8 - Number(square[1])];
+}
+
+// Chessground draws engine brushes at lineWidth 15 on a 64-unit square and
+// stops the shaft 10 units short of the destination centre; mirror that here
+// on a 100-unit square so the preview arrows match the Analysis board.
+const STROKE = (15 / 64) * 100;
+const MARGIN = (10 / 64) * 100;
+function arrow(from: string, to: string) {
+  const [fx, fy] = xy(from).map((v) => v * 100 + 50);
+  const [tx, ty] = xy(to).map((v) => v * 100 + 50);
+  const angle = Math.atan2(ty - fy, tx - fx);
+  return { x1: fx, y1: fy, x2: tx - Math.cos(angle) * MARGIN, y2: ty - Math.sin(angle) * MARGIN };
+}
+
+const pieces = fenPieces(FEN);
+const lastMove = ['b5', 'b4'];
+
+type EngineResult = {
+  id: string;
+  name: string;
+  monogram: string;
+  color: string;
+  meta: string;
+  evalText: string;
+  best: string;
+  /** Principal variation after the best move, starting with Black's reply. */
+  line: string;
+  arrow: [string, string];
+};
+
+const engines: EngineResult[] = [
+  {
+    id: 'lc0',
+    name: 'Lc0 Small',
+    monogram: 'L0',
+    color: '#7a4fd6',
+    meta: '365 visits',
+    evalText: '+0.25',
+    best: 'Ne2',
+    line: 'Nh5 14. Ng3 Nf4 15. h4 a5',
+    arrow: ['c3', 'e2'],
+  },
+  {
+    id: 'sf',
+    name: 'Stockfish Lite',
+    monogram: 'SF',
+    color: '#1f5fcf',
+    meta: 'depth 12',
+    evalText: '+0.55',
+    best: 'gxf6',
+    line: 'bxc3 14. Qxc3 Nxf6 15. Na5 Rc8',
+    arrow: ['g5', 'f6'],
+  },
 ];
+
+// Eval bar follows the Analysis page's logistic squash of Lc0's +0.25.
+const whitePct = 50 + 50 * (2 / (1 + Math.exp(-0.004 * 25)) - 1);
+const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
 </script>
 
-<div class="analysis-preview" role="img" aria-label="Preview of Lc0 and Stockfish analyzing the Kiwipete position in 0x88">
-  <div class="preview-grid" aria-hidden="true">
-    <section class="board-panel">
-      <div class="board-row">
-        <div class="evalbar"><span></span></div>
-        <div class="preview-board cg-wrap">
-          <cg-board>
-            {#each pieces as piece}
-              <piece class={`${piece.color} ${piece.role}`} style={`transform:translate(${piece.file * 100}%,${piece.rank * 100}%)`}></piece>
-            {/each}
-            <svg class="arrows" viewBox="0 0 800 800" preserveAspectRatio="none">
-              <defs>
-                <marker id="preview-arrow" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
-                  <path d="M0,0 L5,2.5 L0,5 Z"></path>
-                </marker>
-              </defs>
-              <line x1="450" y1="350" x2="550" y2="250"></line>
-              <line class="secondary" x1="250" y1="550" x2="350" y2="350"></line>
-              <line class="secondary" x1="450" y1="650" x2="50" y2="250"></line>
-            </svg>
-          </cg-board>
-        </div>
-      </div>
-      <div class="board-nav">
-        <span>|◀</span><span>◀</span><span>▶</span><span>▶|</span><span>⇅</span>
-      </div>
-      <div class="move-list"><strong>Kiwipete</strong> · White to move · castling rights on both sides</div>
-      <div class="position-tools-preview"><span>+</span> Position &amp; PGN</div>
-    </section>
-
-    <section class="analysis-panel">
-      <div class="mini-overview">
-        <div><span>Current position</span><strong>White to move</strong></div>
-        <div><span>Evaluation</span><strong>+12.71</strong></div>
-      </div>
-      <div class="mini-status">Analysis complete · Lc0 + SF Lite</div>
-      <div class="section-title"><span>▾</span> ENGINES</div>
-      <div class="engine-row-preview">
-        <img src="/engine-logos/lc0.svg" alt="" />
-        <span>Lc0</span><b>→</b><span>Small</span><b>→</b><code>400</code><small>visits</small>
-      </div>
-      <div class="engine-row-preview">
-        <img src="/engine-logos/stockfish.png" alt="" />
-        <span>Stockfish</span><b>→</b><span>Lite</span><b>→</b><code>12</code><small>depth</small>
-      </div>
-      <div class="add-engine">+ Add engine</div>
-      <div class="analyze-controls-preview">
-        <div class="analyze-row"><span class="primary">Analyze</span><span class="disabled">Stop</span></div>
-        <div class="options-row">
-          <span class="toggle"><i></i>Auto</span>
-          <span class="stepper"><b>−</b><em>LINES<strong>3</strong></em><b>+</b></span>
-        </div>
-      </div>
-
-      <div class="section-title comparison"><span>▾</span> COMPARISON</div>
-      <div class="consensus">2/2 engines prefer exf6 · eval spread 868 cp</div>
-      <div class="compare-head"><span>ENGINE</span><span>BEST</span><span>EVAL</span><span>Δ</span><span>PV</span></div>
-      <div class="compare-line"><span><img src="/engine-logos/lc0.svg" alt="" />Lc0</span><strong>exf6</strong><code>+12.71</code><code>0</code><code>exf6 Bxf6 Bxa6</code></div>
-      <div class="compare-line"><span><img src="/engine-logos/stockfish.png" alt="" />SF</span><strong>exf6</strong><code>+4.03</code><code>−868</code><code>exf6 Bxf6 Nxd5</code></div>
-
-      <div class="section-title lines-title"><span>▾</span> LINES</div>
-      <div class="legend"><i></i>Lc0 <i class="sf"></i>Stockfish</div>
-      <div class="analysis-line lc0"><strong><img src="/engine-logos/lc0.svg" alt="" />+12.71</strong><code>exf6 Bxf6 Bxa6 Qxc5</code></div>
-      <div class="analysis-line lc0"><strong><img src="/engine-logos/lc0.svg" alt="" />+5.28</strong><code>Nxd5 exd5 exf6 Bxf6</code></div>
-      <div class="analysis-line sf-line"><strong><img src="/engine-logos/stockfish.png" alt="" />+4.03</strong><code>exf6 Bxf6 Nxd5 exd5</code></div>
-      <div class="analysis-line sf-line"><strong><img src="/engine-logos/stockfish.png" alt="" />+3.90</strong><code>Nxd5 exd5 exf6 Bxf6</code></div>
-    </section>
+<div class="preview-shell">
+<figure class="analysis-preview" aria-labelledby="preview-caption">
+  <div class="pv-board">
+    <div class="evalbar" aria-hidden="true"><span style={`height:${whitePct.toFixed(1)}%`}></span></div>
+    <div
+      class="preview-board cg-wrap"
+      role="img"
+      aria-label="Board after 12…b4, White to move. Lc0's arrow shows Ne2 and Stockfish's arrow shows gxf6."
+    >
+      <cg-board>
+        {#each lastMove as sq (sq)}
+          <square class="last-move" style={`transform:translate(${xy(sq)[0] * 100}%,${xy(sq)[1] * 100}%)`}></square>
+        {/each}
+        {#each pieces as piece (piece.square)}
+          <piece class={`${piece.color} ${piece.role}`} style={`transform:translate(${xy(piece.square)[0] * 100}%,${xy(piece.square)[1] * 100}%)`}></piece>
+        {/each}
+      </cg-board>
+      <svg class="arrows" viewBox="0 0 800 800" aria-hidden="true">
+        <defs>
+          {#each engines as engine (engine.id)}
+            <marker id={`preview-head-${engine.id}`} markerWidth="4" markerHeight="4" refX="2.05" refY="2" orient="auto">
+              <path d="M0,0 V4 L3,2 Z" fill={engine.color}></path>
+            </marker>
+          {/each}
+        </defs>
+        {#each engines as engine (engine.id)}
+          {@const a = arrow(engine.arrow[0], engine.arrow[1])}
+          <line {...a} stroke={engine.color} stroke-width={STROKE} stroke-linecap="round" marker-end={`url(#preview-head-${engine.id})`}></line>
+        {/each}
+      </svg>
+    </div>
   </div>
+
+  <div class="pv-head" id="preview-caption">
+    <span class="pv-context"><b>B90</b> Sicilian Najdorf, English Attack · <span class="nowrap">after 12…b4</span></span>
+    <span class="pv-verdict"><strong>Engines disagree: Ne2 / gxf6</strong><span>Eval spread 0.30 <span class="pv-unit">pawns</span></span></span>
+  </div>
+
+  <ol class="pv-engines" aria-label="Engine results">
+    {#each engines as engine (engine.id)}
+      <li style={`--engine-color:${engine.color}`}>
+        <span class="pv-avatar" aria-hidden="true">{engine.monogram}</span>
+        <span class="pv-name"><b>{engine.name}</b><small>{engine.meta}</small></span>
+        <strong class="pv-eval">{engine.evalText}</strong>
+        <span class="pv-best"><span class="sr-only">best move </span>{engine.best}</span>
+        <span class="pv-line"><b>13. {engine.best}</b> {engine.line}</span>
+      </li>
+    {/each}
+  </ol>
+
+  <div class="pv-foot">
+    <p>Each engine draws its own best move. Lc0 moves the attacked knight to safety; Stockfish takes on f6 first.</p>
+    <a href={analysisHref}>Analyse this position <span aria-hidden="true">→</span></a>
+  </div>
+</figure>
 </div>
 
 <style>
+  .preview-shell{container-type:inline-size; min-width:0}
   .analysis-preview{
-    container-type:inline-size;
-    min-width:0; overflow:hidden;
-    border:1px solid var(--rule-strong); border-radius:10px;
-    background:var(--bg-workspace);
+    min-width:0; margin:0; padding:16px;
+    display:grid; grid-template-columns:minmax(0,1.3fr) minmax(250px,1fr);
+    grid-template-areas:"board head" "board engines" "board foot";
+    grid-template-rows:auto auto 1fr;
+    column-gap:18px; row-gap:12px;
+    border:1px solid color-mix(in srgb, var(--ink) 16%, transparent); border-radius:12px;
+    background:var(--panel);
     box-shadow:0 30px 70px -45px rgba(45,35,20,.6);
   }
-  .preview-grid{
-    display:grid; grid-template-columns:minmax(240px,1.06fr) minmax(265px,.94fr);
-    gap:10px; padding:10px;
-  }
-  .board-panel,.analysis-panel{
-    min-width:0; border:1px solid var(--rule); border-radius:8px;
-    background:var(--panel); overflow:hidden;
-  }
-  .board-panel{padding:9px}
-  .board-row{display:grid; grid-template-columns:8px minmax(0,1fr); gap:7px}
-  .evalbar{position:relative; overflow:hidden; border-radius:3px; background:var(--eval-black)}
-  .evalbar span{position:absolute; inset:auto 0 0; height:96%; background:var(--eval-white); border-top:1px solid var(--accent)}
+  .pv-board{grid-area:board; align-self:start; display:grid; grid-template-columns:10px minmax(0,1fr); gap:6px}
+  .evalbar{position:relative; overflow:hidden; border:1px solid #8a8780; border-radius:3px; background:#555550}
+  .evalbar span{position:absolute; inset:auto 0 0; background:var(--eval-white)}
   .preview-board.cg-wrap{
-    width:100%!important; height:auto!important; aspect-ratio:1; box-sizing:border-box;
-    overflow:hidden; border:1px solid var(--border-input); border-radius:4px;
-    background:var(--board-light);
+    position:relative; width:100%!important; height:auto!important; aspect-ratio:1; box-sizing:border-box;
+    overflow:hidden; border-radius:3px; background:var(--board-light);
   }
-  .preview-board cg-board{position:relative; display:block; overflow:hidden}
-  .arrows{position:absolute; inset:0; width:100%; height:100%; z-index:4; pointer-events:none}
-  .arrows line{stroke:#4a8b32; stroke-width:15; opacity:.82; marker-end:url(#preview-arrow)}
-  .arrows line.secondary{stroke:#8aa14e; opacity:.48}
-  .arrows path{fill:#4a8b32}
-  .board-nav{display:grid; grid-template-columns:repeat(5,1fr); gap:4px; margin-top:7px}
-  .board-nav span{
-    height:25px; display:grid; place-items:center;
-    border:1px solid var(--border-input); border-radius:4px;
-    color:var(--text-soft); font-size:9px;
-  }
-  .move-list{
-    margin-top:6px; padding:7px 8px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
-    border:1px solid var(--rule); border-radius:4px; background:var(--panel-inset);
-    color:var(--muted); font-family:var(--mono); font-size:8px;
-  }
-  .move-list strong{color:var(--ink); font-weight:650}
-  .position-tools-preview{
-    margin-top:6px; padding:6px 8px; border:1px solid var(--rule); border-radius:4px;
-    color:var(--muted-2); font-family:var(--mono); font-size:7px; letter-spacing:.06em; text-transform:uppercase;
-  }
-  .position-tools-preview span{color:var(--accent); margin-right:4px}
-  .analysis-panel{padding:9px 10px}
-  .mini-overview{display:grid; grid-template-columns:1fr .8fr; gap:7px; padding-bottom:7px; border-bottom:1px solid var(--rule)}
-  .mini-overview div{min-width:0; display:grid; gap:1px}
-  .mini-overview div+div{padding-left:7px; border-left:1px solid var(--rule); text-align:right}
-  .mini-overview span{font-family:var(--mono); font-size:5px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted)}
-  .mini-overview strong{overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-family:var(--serif); font-size:10px; color:var(--ink)}
-  .mini-status{
-    margin:7px 0 9px; padding:5px 6px; border-left:2px solid var(--accent); background:var(--panel-inset);
-    color:var(--muted); font-family:var(--mono); font-size:6px;
-  }
-  .section-title{
-    color:var(--muted-2); font-family:var(--mono); font-size:8px;
-    line-height:1; letter-spacing:.11em; font-weight:650;
-  }
-  .section-title>span{color:var(--accent); margin-right:4px}
-  .analyze-controls-preview{margin-top:7px; padding-top:7px; border-top:1px solid var(--rule)}
-  .analyze-row{display:grid; grid-template-columns:1fr 1fr; gap:6px}
-  .analyze-row span{
-    min-height:25px; display:grid; place-items:center;
-    border:1px solid var(--border-input); border-radius:5px;
-    font-size:9px; color:var(--text-soft);
-  }
-  .analyze-row .primary{background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:650}
-  .analyze-row .disabled{opacity:.55}
-  .options-row{height:29px; display:flex; align-items:center; gap:10px; margin-top:6px; font-size:9px; color:var(--text-soft)}
-  .toggle{display:flex; align-items:center; gap:5px}
-  .toggle i{width:22px; height:12px; padding:1px; display:block; border-radius:99px; background:var(--accent)}
-  .toggle i::after{content:""; width:8px; height:8px; display:block; margin-left:10px; border-radius:50%; background:#fff}
-  .stepper{height:25px; display:flex; align-items:stretch; overflow:hidden; border:1px solid var(--border-input); border-radius:5px}
-  .stepper b{width:21px; display:grid; place-items:center; background:var(--panel-inset); font-size:11px}
-  .stepper em{width:31px; display:grid; place-items:center; border-inline:1px solid var(--border-input); font-style:normal; font-size:5px; letter-spacing:.06em; color:var(--muted)}
-  .stepper em strong{display:block; font-size:9px; line-height:.8; color:var(--ink)}
-  .engine-row-preview{
-    display:grid; grid-template-columns:13px minmax(42px,1fr) 8px minmax(45px,1fr) 8px 38px auto;
-    gap:4px; align-items:center; margin-top:6px; font-size:8px; color:var(--ink);
-  }
-  .engine-row-preview img,.compare-line img{width:11px; height:11px; object-fit:contain}
-  .engine-row-preview>span,.engine-row-preview>code{
-    min-width:0; padding:5px 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
-    border:1px solid var(--border-input); border-radius:4px; background:var(--card);
-  }
-  .engine-row-preview>b{color:var(--muted); text-align:center}
-  .engine-row-preview code{font-size:8px; font-style:italic}
-  .engine-row-preview small{color:var(--muted); font-size:6px}
-  .add-engine{
-    width:max-content; margin-top:4px; padding:3px 1px;
-    color:var(--accent-deep); font-size:7px; font-weight:650;
-  }
-  .comparison{margin-top:13px}
-  .consensus{
-    margin-top:8px; padding:6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
-    border:1px solid var(--rule); border-radius:4px; background:var(--panel-inset);
-    color:var(--muted); font-size:7px;
-  }
-  .compare-head,.compare-line{display:grid; grid-template-columns:1.15fr .7fr .7fr .35fr 1.4fr; gap:4px; align-items:center}
-  .compare-head{padding:8px 3px 4px; color:var(--muted); font-size:5px; letter-spacing:.05em}
-  .compare-line{padding:5px 3px; border-block:1px solid var(--rule); font-size:7px}
-  .compare-line>span{display:flex; align-items:center; gap:3px; color:var(--ink)}
-  .compare-line code{overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:6px}
-  .lines-title{margin-top:13px}
-  .legend{display:flex; align-items:center; gap:5px; margin-top:7px; color:var(--muted); font-size:7px}
-  .legend i{width:7px; height:7px; border-radius:2px; background:var(--chart-1)}
-  .legend i.sf{margin-left:5px; background:var(--chart-2)}
-  .analysis-line{
-    display:grid; grid-template-columns:38px minmax(0,1fr); gap:5px;
-    padding:5px 3px 5px 7px; border-top:1px solid var(--rule); border-left:2px solid var(--chart-1);
-    color:var(--ink); font-size:7px;
-  }
-  .analysis-line.sf-line{border-left-color:var(--chart-2)}
-  .analysis-line strong{display:flex; align-items:center; gap:3px; color:var(--accent-deep); font-family:var(--mono)}
-  .analysis-line strong img{width:8px; height:8px; object-fit:contain}
-  .analysis-line code{overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--text-soft); font-size:7px}
+  .preview-board cg-board{position:absolute; inset:0; display:block; overflow:hidden}
+  .arrows{position:absolute; inset:0; width:100%; height:100%; z-index:4; pointer-events:none; opacity:.6}
 
-  @container(max-width:520px){
-    .preview-grid{grid-template-columns:minmax(96px,.72fr) minmax(0,1.28fr); gap:6px; padding:6px}
-    .board-panel{padding:6px}
-    .board-row{grid-template-columns:5px minmax(0,1fr); gap:4px}
-    .board-nav{gap:2px; margin-top:4px}
-    .board-nav span{height:18px; font-size:7px}
-    .move-list{margin-top:4px; padding:5px; font-size:6px}
-    .position-tools-preview{margin-top:4px; padding:4px; font-size:5px}
-    .analysis-panel{padding:7px}
-    .mini-overview{padding-bottom:5px}
-    .mini-overview strong{font-size:7px}
-    .mini-status{margin:5px 0 6px; padding:4px; font-size:5px}
-    .section-title{font-size:6px}
-    .analyze-controls-preview{margin-top:4px; padding-top:4px}
-    .analyze-row{gap:4px}
-    .analyze-row span{min-height:20px; font-size:7px}
-    .options-row{height:24px; gap:7px; margin-top:3px; font-size:7px}
-    .engine-row-preview{grid-template-columns:10px minmax(28px,1fr) 6px minmax(31px,1fr) 6px 30px; gap:2px; margin-top:3px; font-size:6px}
-    .engine-row-preview small{display:none}
-    .engine-row-preview>span,.engine-row-preview>code{padding:4px}
-    .engine-row-preview img{width:9px; height:9px}
-    .add-engine{margin-top:4px}
-    .comparison,.lines-title{margin-top:8px}
-    .consensus{margin-top:5px; padding:4px; font-size:5px}
-    .compare-head{padding-top:5px}
-    .compare-line{padding:3px 2px}
-    .compare-line img{display:none}
-    .analysis-line{grid-template-columns:30px minmax(0,1fr); padding:3px 2px 3px 5px; font-size:6px}
-    .analysis-line code{font-size:6px}
-    .legend{margin-top:5px}
+  .pv-head{grid-area:head; display:grid; gap:8px; min-width:0}
+  .pv-context{color:var(--muted); font-size:13px; line-height:1.45}
+  .pv-context b{margin-right:4px; color:var(--ink); font-family:var(--mono); font-size:12px; font-weight:650}
+  .nowrap{white-space:nowrap}
+  .pv-verdict{display:grid; gap:2px; padding-top:9px; border-top:1px solid var(--rule)}
+  .pv-verdict strong{color:var(--ink); font-size:15px; line-height:1.35; font-weight:650}
+  .pv-verdict span{color:var(--muted); font-size:13px}
+
+  .pv-engines{grid-area:engines; display:grid; gap:8px; margin:0; padding:0; list-style:none; min-width:0}
+  .pv-engines li{
+    display:grid; grid-template-columns:24px minmax(0,1fr) auto auto; align-items:center;
+    column-gap:9px; row-gap:6px; padding:10px 11px 10px 10px; min-width:0;
+    border:1px solid var(--rule); border-left:3px solid var(--engine-color); border-radius:7px;
+    background:var(--panel-inset);
   }
-  @container(max-width:460px){
-    /* On phones the scaled-down analysis text is illegible; show just the
-       board so the hero stays compact and readable. */
-    .preview-grid{grid-template-columns:1fr; padding:8px}
-    .analysis-panel{display:none}
-    .board-panel{padding:8px}
-    .move-list{white-space:normal}
+  .pv-avatar{
+    width:24px; height:24px; display:grid; place-items:center; border-radius:5px;
+    background:var(--engine-color); color:#fff; font:700 11px/1 var(--mono); box-shadow:inset 0 0 0 1px #ffffff26;
+  }
+  .pv-name{min-width:0; display:grid; line-height:1.25}
+  .pv-name b{overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--ink); font-size:14px; font-weight:650}
+  .pv-name small{color:var(--muted); font-size:12px}
+  .pv-eval{color:var(--ink); font-family:var(--mono); font-size:18px; font-weight:700; letter-spacing:-.02em}
+  .pv-best{
+    padding:3px 8px; border-radius:5px; color:var(--ink); font-size:14px; font-weight:700;
+    background:color-mix(in srgb, var(--engine-color) 22%, var(--panel));
+  }
+  .pv-line{grid-column:2 / -1; min-width:0; color:var(--ink-soft); font-size:13px; line-height:1.45}
+  .pv-line b{color:var(--ink); font-weight:700}
+
+  .pv-foot{grid-area:foot; align-self:end; display:grid; gap:10px; min-width:0}
+  .pv-foot p{margin:0; color:var(--muted); font-size:13px; line-height:1.5}
+  .pv-foot a{width:max-content; color:var(--ink); font-size:14px; font-weight:650}
+  .pv-foot a span{margin-left:4px; color:var(--accent)}
+  .sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+
+  /* Narrow (phone) frame: the engine verdict and both results lead, the
+     board follows, so a named engine result shows before the board. */
+  @container(max-width:520px){
+    .analysis-preview{
+      grid-template-columns:minmax(0,1fr);
+      grid-template-areas:"head" "engines" "board" "foot";
+      grid-template-rows:none;
+      padding:12px; row-gap:10px;
+    }
+    .pv-context{display:none}
+    .pv-verdict{padding-top:0; border-top:0; grid-template-columns:1fr auto; align-items:baseline; gap:8px}
+    .pv-verdict strong{font-size:14px; white-space:nowrap}
+    .pv-unit{display:none}
+    .pv-verdict span{font-size:12px}
+    .pv-engines{gap:6px}
+    .pv-engines li{padding:8px 10px 8px 9px; row-gap:4px}
+    .pv-foot{align-self:start}
   }
 </style>

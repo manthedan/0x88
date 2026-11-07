@@ -33,8 +33,9 @@ export const workspaces: Workspace[] = [
   {
     href: '/app/play/',
     label: 'Play',
-    title: 'Play with contempt!',
-    blurb: 'Specialized engines such as Maia3 and Leela Queen Odds emulate or exploit human playstyles.',
+    title: 'Play a human-like opponent',
+    blurb:
+      'Maia3 plays the moves a human at your chosen rating would play. Leela Queen Odds starts a queen down and plays to exploit mistakes, with optional contempt settings. Every analysis engine is available too.',
   },
 ];
 
