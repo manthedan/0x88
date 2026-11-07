@@ -1,154 +1,473 @@
 <script lang="ts">
-import { onMount } from 'svelte';
+import { onMount, tick } from 'svelte';
+import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 const title = '0x88 Chess — documentation';
-const description = 'Documentation for the 0x88 browser chess workspaces, engine runtimes, upstream projects, licenses, and corresponding-source archives.';
+const description = 'How to use the 0x88 browser chess workspaces, fix WebGPU and download problems, and find each engine’s license and corresponding source.';
+
+type TocLink = { id: string; label: string };
+type TocItem = TocLink & { children?: TocLink[] };
+/** `id` makes the group heading itself a link to its section; `collapsed` hides its items until that section is current. */
+type TocGroup = { label: string; id?: string; collapsed?: boolean; items: TocItem[] };
+
+// The rail, the mobile contents sheet, scroll-spy and search all read this
+// outline. Its order must match the order of the sections on the page.
+const toc: TocGroup[] = [
+  {
+    label: 'Get started',
+    id: 'pages',
+    items: [
+      { id: 'pages-analysis', label: 'Analyse a position' },
+      { id: 'pages-arena', label: 'Run an engine match' },
+      { id: 'pages-play', label: 'Play a game' },
+      { id: 'human-vs-computer', label: 'Human-like opponents' },
+    ],
+  },
+  {
+    label: 'Troubleshooting',
+    id: 'troubleshooting',
+    items: [
+      { id: 'trouble-device', label: 'Check this browser' },
+      { id: 'trouble-webgpu', label: 'WebGPU unavailable' },
+      { id: 'trouble-downloads', label: 'Slow or repeated downloads' },
+      { id: 'trouble-cache', label: 'Clear downloaded models' },
+      { id: 'trouble-threads', label: 'Stockfish runs single-threaded' },
+    ],
+  },
+  {
+    label: 'Engines',
+    id: 'engines',
+    collapsed: true,
+    items: [
+      { id: 'engines-lc0', label: 'Leela Chess Zero' },
+      { id: 'engines-lqo', label: 'Leela Queen Odds (LQO)' },
+      { id: 'engines-maia3', label: 'Maia3' },
+      { id: 'engines-centipawn', label: 'Centipawn' },
+      { id: 'engines-stockfish', label: 'Stockfish 19' },
+      { id: 'engines-berserk', label: 'Berserk' },
+      { id: 'engines-viridithas', label: 'Viridithas' },
+      { id: 'engines-plentychess', label: 'PlentyChess' },
+      { id: 'engines-stormphrax', label: 'Stormphrax' },
+      { id: 'engines-reckless', label: 'Reckless' },
+    ],
+  },
+  {
+    label: 'Under the hood',
+    items: [
+      { id: 'neural-runtimes', label: 'Neural browser runtimes' },
+      { id: 'cpu-wasm', label: 'CPU WASM runtimes', children: [{ id: 'cpu-wasm-relaxed-simd', label: 'Relaxed SIMD' }] },
+      { id: 'cdn', label: 'Artifact CDN & caching' },
+    ],
+  },
+  {
+    label: 'Licenses & source',
+    id: 'licenses',
+    items: [
+      { id: 'licenses-per-engine', label: 'Per-engine source links' },
+      { id: 'removal', label: 'Removal requests' },
+    ],
+  },
+];
+
+/** Every linkable heading in page order, with the group it sits in and its top-level rail item. */
+type Located = { link: TocLink; group: TocGroup; top: TocLink };
+const outline: Located[] = toc.flatMap((group) => [
+  ...(group.id ? [{ link: { id: group.id, label: group.label }, group, top: { id: group.id, label: group.label } }] : []),
+  ...group.items.flatMap((item) => [{ link: item, group, top: item }, ...(item.children ?? []).map((link) => ({ link, group, top: item }))]),
+]);
+const byId = new Map(outline.map((entry) => [entry.link.id, entry]));
+
+// ---- scroll-spy -----------------------------------------------------------
+let activeId = outline[0].link.id;
+$: activeTopId = byId.get(activeId)?.top.id ?? '';
+$: activeLabel = byId.get(activeId)?.link.label ?? 'Contents';
+$: activeGroup = byId.get(activeId)?.group.label ?? '';
+let headerHeight = 64;
+let rail: HTMLElement | null = null;
+let railList: HTMLElement | null = null;
+
+function updateActive(): void {
+  // Slightly past the scroll-margin, so a heading reached by a link counts as current.
+  const offset = headerHeight + (narrow ? 84 : 24) + 8;
+  let current = outline[0].link.id;
+  for (const { link } of outline) {
+    const el = document.getElementById(link.id);
+    if (!el) continue;
+    if (el.getBoundingClientRect().top - offset <= 0) current = link.id;
+    else break;
+  }
+  const doc = document.documentElement;
+  if (window.innerHeight + window.scrollY >= doc.scrollHeight - 2) current = outline[outline.length - 1].link.id;
+  if (current !== activeId) {
+    activeId = current;
+    void tick().then(keepActiveVisible);
+  }
+}
+
+function keepActiveVisible(): void {
+  if (narrow || !railList) return;
+  const link = railList.querySelector<HTMLElement>('a[aria-current="location"]');
+  if (!link) return;
+  const box = railList.getBoundingClientRect();
+  const item = link.getBoundingClientRect();
+  if (item.top < box.top + 8) railList.scrollTop -= box.top + 8 - item.top;
+  else if (item.bottom > box.bottom - 8) railList.scrollTop += item.bottom - box.bottom + 8;
+}
+
+// ---- mobile contents sheet --------------------------------------------------
+let narrow = false;
 let tocOpen = false;
+
+function closeSheet(): void {
+  tocOpen = false;
+}
+
+// ---- search -----------------------------------------------------------------
+type SearchEntry = { id: string; title: string; group: string; parent: string; text: string; titleLc: string; textLc: string };
+type SearchHit = { entry: SearchEntry; score: number; pre: string; match: string; post: string };
+let index: SearchEntry[] = [];
+let query = '';
+let searchInput: HTMLInputElement | null = null;
+let resultList: HTMLElement | null = null;
+$: hits = searchDocs(query, index);
+$: searching = query.trim().length > 0;
+
+const CONTAINERS = '.page-block, .engine-entry, .trouble';
+
+function cleanText(node: Element): string {
+  const clone = node.cloneNode(true) as Element;
+  // Headings are indexed as titles; the live device check is not documentation.
+  clone.querySelectorAll('.anchor-link, .device-check, h2, h3, script, style').forEach((el) => el.remove());
+  // Keep table cells and list items from running together ("PlayAGPL").
+  clone.querySelectorAll('td, th, li, dt, dd, p, h4, caption, .sub').forEach((el) => el.append(' '));
+  return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function blockText(el: HTMLElement): string {
+  if (el.tagName === 'SECTION') {
+    const parts: string[] = [];
+    for (const child of Array.from(el.children)) {
+      if (child.matches(`h2, ${CONTAINERS}`) || child.id) continue;
+      parts.push(cleanText(child));
+    }
+    return parts.join(' ');
+  }
+  const container = el.parentElement?.closest(CONTAINERS);
+  if (container) return cleanText(container);
+  // A bare h3: gather its following siblings up to the next heading.
+  const parts: string[] = [];
+  let next = el.nextElementSibling;
+  while (next && !/^H[23]$/.test(next.tagName)) {
+    parts.push(cleanText(next));
+    next = next.nextElementSibling;
+  }
+  return parts.join(' ');
+}
+
+function buildIndex(): SearchEntry[] {
+  return outline.flatMap(({ link, group, top }) => {
+    const el = document.getElementById(link.id);
+    if (!el) return [];
+    const text = blockText(el);
+    return [{ id: link.id, title: link.label, group: group.label, parent: top.id === link.id ? '' : top.label, text, titleLc: link.label.toLowerCase(), textLc: text.toLowerCase() }];
+  });
+}
+
+function searchDocs(raw: string, entries: SearchEntry[]): SearchHit[] {
+  const terms = raw.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const found: SearchHit[] = [];
+  for (const entry of entries) {
+    let score = 0;
+    let ok = true;
+    for (const term of terms) {
+      if (entry.titleLc.includes(term)) score += entry.titleLc.startsWith(term) ? 12 : 10;
+      else if (entry.textLc.includes(term)) score += 1;
+      else if (entry.group.toLowerCase().includes(term)) score += 2;
+      else {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+    found.push({ entry, score, ...snippet(entry, terms) });
+  }
+  return found.sort((a, b) => b.score - a.score).slice(0, 12);
+}
+
+function snippet(entry: SearchEntry, terms: string[]): { pre: string; match: string; post: string } {
+  const term = terms.find((t) => entry.textLc.includes(t));
+  if (!term) return { pre: entry.text.slice(0, 110) + (entry.text.length > 110 ? '…' : ''), match: '', post: '' };
+  const at = entry.textLc.indexOf(term);
+  const start = Math.max(0, at - 44);
+  const end = Math.min(entry.text.length, at + term.length + 70);
+  return {
+    pre: (start > 0 ? '…' : '') + entry.text.slice(start, at),
+    match: entry.text.slice(at, at + term.length),
+    post: entry.text.slice(at + term.length, end) + (end < entry.text.length ? '…' : ''),
+  };
+}
+
+function goTo(id: string): void {
+  query = '';
+  closeSheet();
+  const el = document.getElementById(id);
+  if (!el) return;
+  history.replaceState(history.state, '', `#${id}`);
+  el.scrollIntoView({ block: 'start' });
+  const heading = el.matches('h2, h3') ? el : el.querySelector<HTMLElement>('h2, h3');
+  heading?.setAttribute('tabindex', '-1');
+  heading?.focus({ preventScroll: true });
+}
+
+function onSearchKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    if (query) query = '';
+    else if (narrow) closeSheet();
+    return;
+  }
+  if (event.key === 'Enter' && hits.length) {
+    event.preventDefault();
+    goTo(hits[0].entry.id);
+  } else if (event.key === 'ArrowDown' && hits.length) {
+    event.preventDefault();
+    resultList?.querySelector<HTMLElement>('a')?.focus();
+  }
+}
+
+function onResultKey(event: KeyboardEvent): void {
+  if (!(event.target instanceof HTMLElement)) return;
+  const li = event.target.closest('li');
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    li?.nextElementSibling?.querySelector<HTMLElement>('a')?.focus();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    const prev = li?.previousElementSibling?.querySelector<HTMLElement>('a');
+    if (prev) prev.focus();
+    else searchInput?.focus();
+  } else if (event.key === 'Escape') {
+    searchInput?.focus();
+  }
+}
+
+async function focusSearch(): Promise<void> {
+  if (narrow) tocOpen = true;
+  await tick();
+  searchInput?.focus();
+  searchInput?.select();
+}
+
+function onWindowKey(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null;
+  const typing = !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    void focusSearch();
+  } else if (event.key === '/' && !typing) {
+    event.preventDefault();
+    void focusSearch();
+  }
+}
+
+function onWindowClick(event: MouseEvent): void {
+  if (!tocOpen || !rail) return;
+  if (event.target instanceof Node && rail.contains(event.target)) return;
+  closeSheet();
+}
+
+// ---- live browser check -----------------------------------------------------
+let caps: BrowserCapabilityReport | null = null;
+let capsFailed = false;
+
 onMount(() => {
-  const headings = document.querySelectorAll('.doc-content section[id], .doc-content h3[id]');
-  const tocLinks = document.querySelectorAll<HTMLAnchorElement>('.toc a[href^="#"]');
-  if (!('IntersectionObserver' in window) || !headings.length) return;
-  const linkMap = new Map<string, HTMLAnchorElement>();
-  tocLinks.forEach((link) => {
-    const href = link.getAttribute('href');
-    if (href) linkMap.set(href.slice(1), link);
-  });
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        const id = entry.target.getAttribute('id');
-        const link = id ? linkMap.get(id) : undefined;
-        if (!link) return;
-        tocLinks.forEach((item) => {
-          item.classList.remove('active');
-        });
-        link.classList.add('active');
-      });
-    },
-    { rootMargin: '-88px 0px -70% 0px', threshold: 0 },
-  );
-  headings.forEach((heading) => {
-    observer.observe(heading);
-  });
-  return () => observer.disconnect();
+  index = buildIndex();
+  const header = document.querySelector<HTMLElement>('.site-header');
+  const media = window.matchMedia('(max-width: 860px)');
+  const measure = () => {
+    headerHeight = Math.round(header?.getBoundingClientRect().height ?? 64);
+    narrow = media.matches;
+    if (!narrow) tocOpen = false;
+    updateActive();
+  };
+  let frame = 0;
+  const onScroll = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      updateActive();
+    });
+  };
+  measure();
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', measure);
+  detectBrowserCapabilities()
+    .then((report) => (caps = report))
+    .catch(() => (capsFailed = true));
+  return () => {
+    window.removeEventListener('scroll', onScroll);
+    window.removeEventListener('resize', measure);
+    if (frame) cancelAnimationFrame(frame);
+  };
 });
 </script>
 
+<svelte:window on:keydown={onWindowKey} on:click={onWindowClick} />
 <svelte:head>
   <title>{title}</title>
   <meta name="description" content={description} />
 </svelte:head>
-<SiteHeader pageTitle="Docs" />
+<SiteHeader landing />
 <main id="main">
 
-<section class="doc-hero" aria-labelledby="doc-h1">
-  <div class="wrap">
-    <p class="kicker">Documentation</p>
-    <h1 id="doc-h1">Browser chess engines and their source</h1>
-    <p>
-      <strong>0x88.app</strong> is a browser chess platform built from open-source engines and models. This guide explains the app and its browser runtimes. It also credits each upstream project and links every redistributed binary to its license and corresponding source.
-    </p>
-  </div>
-</section>
+<div class="doc-body" style="--hdr:{headerHeight}px">
+<div class="wrap doc-grid">
 
-<div class="doc-body">
-<div class="wrap">
+<header class="doc-intro">
+  <h1 id="doc-h1">Using 0x88</h1>
+  <p class="intro-lede">How to analyse positions, run engine matches and play human-like opponents in your browser, what to check when WebGPU or a download fails, and where each engine’s license and corresponding source live.</p>
+  <nav class="quick-links" aria-label="Documentation sections">
+    <a href="#pages">Get started</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+    <a href="#engines">Engines</a>
+    <a href="#licenses">Licenses &amp; source</a>
+  </nav>
+</header>
 
-<!-- ===== TOC (left rail) ===== -->
-<aside class="toc" class:open={tocOpen} aria-label="On this page">
-  <h4>On this page</h4>
-  <button class="toc-toggle" type="button" aria-expanded={tocOpen} on:click={() => tocOpen = !tocOpen}>
-    <span>On this page</span><span aria-hidden="true">{tocOpen ? '−' : '+'}</span>
+<!-- ===== Contents: left rail on desktop, sticky bar + sheet on phones ===== -->
+<aside class="toc" class:open={tocOpen} aria-label="Documentation contents" bind:this={rail}>
+  <button class="toc-toggle" type="button" aria-expanded={tocOpen} aria-controls="toc-panel" on:click={() => (tocOpen = !tocOpen)}>
+    <span class="toc-toggle-label">Contents</span>
+    <span class="toc-current">{activeLabel}</span>
+    <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
   </button>
-  <ul>
-    <li><a href="#pages">The pages</a>
-      <ul>
-        <li><a href="#pages-analysis">Analysis</a></li>
-        <li><a href="#pages-arena">Arena</a></li>
-        <li><a href="#pages-play">Play</a></li>
-      </ul>
-    </li>
-    <li><a href="#human-vs-computer">Human vs computer play</a></li>
-    <li><a href="#neural-runtimes">Neural browser runtimes</a></li>
-    <li><a href="#cpu-wasm">CPU WASM runtimes</a>
-      <ul>
-        <li><a href="#cpu-wasm-relaxed-simd">Relaxed SIMD</a></li>
-      </ul>
-    </li>
-    <li><a href="#engines">The engines</a>
-      <ul>
-        <li><a href="#engines-lc0">Leela Chess Zero</a></li>
-        <li><a href="#engines-lqo">Leela Queen Odds (LQO)</a></li>
-        <li><a href="#engines-maia3">Maia3</a></li>
-        <li><a href="#engines-centipawn">Centipawn</a></li>
-        <li><a href="#engines-stockfish">Stockfish 19</a></li>
-        <li><a href="#engines-berserk">Berserk</a></li>
-        <li><a href="#engines-viridithas">Viridithas</a></li>
-        <li><a href="#engines-plentychess">PlentyChess</a></li>
-        <li><a href="#engines-stormphrax">Stormphrax</a></li>
-        <li><a href="#engines-reckless">Reckless</a></li>
-      </ul>
-    </li>
-    <li><a href="#licenses">Licenses &amp; source</a>
-      <ul>
-        <li><a href="#licenses-per-engine">Per-engine source links</a></li>
-      </ul>
-    </li>
-    <li><a href="#cdn">Artifact CDN &amp; caching</a></li>
-    <li><a href="#removal">I'm in this project and I don't like it</a></li>
-  </ul>
+  <div id="toc-panel" class="toc-panel">
+    <div class="search" role="search">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>
+      <label class="visually-hidden" for="docSearch">Search the docs</label>
+      <input
+        id="docSearch"
+        type="search"
+        placeholder="Search docs"
+        autocomplete="off"
+        spellcheck="false"
+        aria-describedby="docSearchHint"
+        aria-controls="docSearchResults"
+        bind:value={query}
+        bind:this={searchInput}
+        on:keydown={onSearchKey}
+      />
+      <kbd id="docSearchHint"><span class="visually-hidden">Press </span>/<span class="visually-hidden"> or Ctrl+K to search</span></kbd>
+    </div>
+    {#if searching}
+      <div id="docSearchResults" class="results" aria-live="polite">
+        {#if hits.length}
+          <p class="results-count">{hits.length} {hits.length === 1 ? 'match' : 'matches'}</p>
+          <ul bind:this={resultList}>
+            {#each hits as hit (hit.entry.id)}
+              <li>
+                <a href={`#${hit.entry.id}`} on:click|preventDefault={() => goTo(hit.entry.id)} on:keydown={onResultKey}>
+                  <span class="hit-path">{hit.entry.group}{hit.entry.parent ? ` › ${hit.entry.parent}` : ''}</span>
+                  <span class="hit-title">{hit.entry.title}</span>
+                  {#if hit.pre || hit.match}<span class="hit-snippet">{hit.pre}{#if hit.match}<mark>{hit.match}</mark>{/if}{hit.post}</span>{/if}
+                </a>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="no-results">No matches for “{query.trim()}”. Try an engine name, “WebGPU”, “cache” or “license”.</p>
+        {/if}
+      </div>
+    {:else}
+      <nav class="toc-groups" aria-label="On this page" bind:this={railList}>
+        {#each toc as group (group.label)}
+          <div class="toc-group" class:collapsed={group.collapsed && group.label !== activeGroup}>
+            {#if group.id}
+              <a class="toc-group-label" href={`#${group.id}`} class:active={group.id === activeId} aria-current={group.id === activeId ? 'location' : undefined} on:click={closeSheet}>{group.label}</a>
+            {:else}
+              <p class="toc-group-label">{group.label}</p>
+            {/if}
+            <ul>
+              {#each group.items as item (item.id)}
+                <li class:expanded={item.id === activeTopId}>
+                  <a href={`#${item.id}`} class:active={item.id === activeId} class:in-active={item.id === activeTopId} aria-current={item.id === activeId ? 'location' : undefined} on:click={closeSheet}>{item.label}</a>
+                  {#if item.children}
+                    <ul>
+                      {#each item.children as child (child.id)}
+                        <li><a href={`#${child.id}`} class:active={child.id === activeId} aria-current={child.id === activeId ? 'location' : undefined} on:click={closeSheet}>{child.label}</a></li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/each}
+      </nav>
+    {/if}
+  </div>
 </aside>
 
 <div class="doc-content">
 
-<!-- ===== PAGES ===== -->
+<!-- ===== GET STARTED: THE WORKSPACES ===== -->
 <section id="pages">
-  <h2>The pages <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
-  <p class="lead">0x88 has dedicated workspaces for analysis, engine tournaments, and play. Each workspace runs client-side and loads its engines when needed.</p>
+  <h2>Get started <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
+  <p class="lead">0x88 has three workspaces: Analysis, Arena and Play. Everything runs in your browser. Each engine downloads the first time you use it and is reused after that.</p>
 
   <div class="page-block">
-    <h3 id="pages-analysis"><span class="pn">Analysis</span> Analysis board <a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/app/analysis</span>
-    <p>The Analysis page runs several engines on the same FEN or PGN. Its comparison table places each best move, evaluation, and principal variation together so disagreements are easy to inspect.</p>
+    <h3 id="pages-analysis"><span class="pn">Analysis</span> Analyse a position <a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
+    <p>Run several engines on the same position and compare their best moves, evaluations and lines.</p>
+    <ol class="steps">
+      <li>Open Analysis. It starts with Lc0 (Small net) and Stockfish Lite on the starting position.</li>
+      <li>Make moves on the board, or press <strong>Load</strong> to paste a PGN or FEN.</li>
+      <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to change each engine’s net or build and its search budget (visits or depth).</li>
+      <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
+    </ol>
     <ul>
-      <li><strong>Multi-engine comparison</strong> &mdash; add as many engines as your machine can handle; each contributes its eval, PV, and best move to a shared table.</li>
-      <li><strong>Game review</strong> &mdash; annotate every move of a PGN with accuracy scores, critical moments (best/good/inaccuracy/mistake/blunder), and a win-probability chart.</li>
-      <li><strong>Human-move explorer (Maia3)</strong> &mdash; see what rated humans actually play in the current position, with a per-rating move distribution. Useful for understanding practical chances versus engine truth.</li>
-      <li><strong>Opening explorer</strong> &mdash; once you've loaded your own PGNs into a local IndexedDB database, the explorer surfaces transpositions and frequency stats over <em>your</em> games, not a generic opening book.</li>
-      <li><strong>PGN database</strong> &mdash; import Lichess or Chess.com games by username, store them locally, and search by position across the whole collection.</li>
+      <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines.</li>
+      <li><strong>Compare tab</strong> &mdash; every engine’s best move and evaluation in one table, with the difference between them.</li>
+      <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
     </ul>
+    <p class="not-yet"><strong>Not available yet:</strong> game review (move accuracy and critical moments) and a local opening explorer for your own PGN collections are in development and hidden in the current build.</p>
+    <p class="open-row"><a class="open-link" href="/app/analysis/">Open Analysis <span aria-hidden="true">→</span></a><code class="pg-url">/app/analysis</code></p>
   </div>
 
   <div class="page-block">
-    <h3 id="pages-arena"><span class="pn">Arena</span> Engine arena <a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/app/arena</span>
-    <p>The Arena schedules engine matches and tournaments. Games appear live on the board, and finished results feed the standings and evaluation charts. The project also uses this workspace to compare browser engine builds and Leela Chess Zero networks.</p>
+    <h3 id="pages-arena"><span class="pn">Arena</span> Run an engine match <a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
+    <p>Play engines against each other and keep score. The project also uses Arena to compare browser engine builds and Lc0 networks.</p>
+    <ol class="steps">
+      <li>Open Arena. Under <strong>Matchup</strong>, pick a mode: a two-engine match, a round robin, or a gauntlet of Engine 1 against the field. Use <strong>+ Add engine</strong> for more seats.</li>
+      <li>Under <strong>Time control &amp; openings</strong>, choose equal time per move or a fixed visit/depth budget, the number of games per opening, and the start position, the built-in opening suite or your own positions.</li>
+      <li>Press <strong>Start match</strong>. Games play live on the board, with colours alternating between games.</li>
+      <li>Read the standings: points, wins, draws, losses and an Elo estimate against the pool with a ±95% range.</li>
+    </ol>
     <ul>
-      <li><strong>Tournament formats</strong> &mdash; head-to-head, gauntlet, round-robin, with configurable games-per-pairing and color alternation.</li>
-      <li><strong>Live standings and Elo estimates</strong> &mdash; running score table, Elo updates after each game, and a final ranking.</li>
-      <li><strong>Per-game eval charts and move replays</strong> &mdash; click any finished game to replay it with the eval bar; click any move to jump the board.</li>
-      <li><strong>Configurable engine runtime</strong> &mdash; pick engine, strength, opening book, and time control; the arena handles scheduling and the engines do the rest.</li>
+      <li><strong>Charts</strong> &mdash; evaluation, time and speed for the current game.</li>
+      <li><strong>Review</strong> &mdash; select a finished game or a move to replay it.</li>
+      <li><strong>Export</strong> &mdash; <em>Export PGN</em> under <em>Game log &amp; PGN</em> lists every game as PGN.</li>
     </ul>
+    <p class="open-row"><a class="open-link" href="/app/arena/">Open Arena <span aria-hidden="true">→</span></a><code class="pg-url">/app/arena</code></p>
   </div>
 
   <div class="page-block">
     <h3 id="pages-play"><span class="pn">Play</span> Play a game <a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/app/play</span>
-    <p>The Play page runs a game against Maia3 or one of the available chess engines. Choose a color and strength, then play with takebacks and PGN export available throughout the game.</p>
-    <ul>
-      <li><strong>Maia3 rating slider (600&ndash;2600)</strong> &mdash; conditions Maia3's move probabilities and human-game outcome predictions on the selected rating.</li>
-      <li><strong>Engine opponents at five strength levels</strong> &mdash; adjusts visit, depth, or node limits according to the selected engine.</li>
-      <li><strong>Full game lifecycle</strong> &mdash; takebacks, resign, new game, flip board, move list, and one-click PGN export.</li>
-    </ul>
-    <p>Nothing about your game is sent anywhere. The engine binary and (if needed) the neural network download on first use, then cache locally for next time.</p>
+    <p>Play against Maia3, Leela Queen Odds or any of the analysis engines.</p>
+    <ol class="steps">
+      <li>Open Play. Maia3 is the default opponent; <strong>Change</strong> picks another.</li>
+      <li>For Maia3, pick a rating preset, or set a rating from 600 to 2600 in 100-point steps under <em>Exact rating &amp; opponent details</em>. For other opponents, pick one of five strength levels from Fastest to Deep.</li>
+      <li>Choose White, Black or Random, then press <strong>Play</strong>.</li>
+      <li>Take back or resign during the game. Afterwards, copy or download the PGN, or press <strong>Analyze</strong> to open the game in Analysis.</li>
+    </ol>
+    <p>Your games are not sent anywhere. The engine, and its network if it has one, downloads on first use and is reused from your browser’s storage after that.</p>
+    <p class="open-row"><a class="open-link" href="/app/play/">Open Play <span aria-hidden="true">→</span></a><code class="pg-url">/app/play</code></p>
   </div>
 </section>
 
 <!-- ===== HUMAN VS COMPUTER PLAY ===== -->
 <section id="human-vs-computer">
-  <h2>Human vs computer play <a class="anchor-link" href="#human-vs-computer" aria-label="Link to this section">#</a></h2>
+  <h2>Human-like opponents <a class="anchor-link" href="#human-vs-computer" aria-label="Link to this section">#</a></h2>
   <p class="lead">Maia3 predicts a rating-conditioned human move distribution and human-game outcome. Leela Queen Odds is an Lc0-compatible network trained for games where the engine starts without its queen. The optional contempt controls belong to 0x88's search implementation and model an opponent with limited reply search.</p>
 
   <div class="callout info">
@@ -191,6 +510,257 @@ onMount(() => {
   <p>Maia3's WDL output predicts the result of a human game at the selected rating; it is not an engine centipawn evaluation. The Leela Queen Odds and contempt experiments use 0x88's PUCT search. The full design note lives in <a href="https://github.com/manthedan/0x88/blob/main/docs/human_vs_computer_play.md">docs/human_vs_computer_play.md</a>.</p>
 </section>
 
+<!-- ===== TROUBLESHOOTING ===== -->
+<section id="troubleshooting">
+  <h2>Troubleshooting <a class="anchor-link" href="#troubleshooting" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Most problems come from the browser: no WebGPU, no storage for downloaded models, or no shared memory for threads. Start with the check below, then find the symptom.</p>
+
+  <div class="trouble">
+    <h3 id="trouble-device">Check this browser <a class="anchor-link" href="#trouble-device" aria-label="Link to this section">#</a></h3>
+    <p>0x88 checks these features when a page loads. The same check appears on <a href="/#device-details">Home</a> and in the <em>Browser capabilities</em> panel on Analysis, Arena and Play.</p>
+    <div class="device-check" aria-live="polite" aria-busy={!caps && !capsFailed}>
+      {#if capsFailed}
+        <p class="dc-pending">Could not check this browser. Each engine still picks a fallback runtime when it loads.</p>
+      {:else if !caps}
+        <p class="dc-pending">Checking this browser…</p>
+      {:else}
+        <dl>
+          <div>
+            <dt>WebGPU</dt>
+            <dd><span class="dc-state" data-tone={caps.webgpu === true ? 'ok' : 'warn'}>{caps.webgpu === true ? 'Available' : caps.webgpu === null ? 'No answer' : 'Unavailable'}</span>
+              {caps.webgpu === true ? 'Neural engines can use the GPU.' : caps.webgpu === null ? 'The GPU did not answer within 4 seconds. See WebGPU unavailable below.' : 'See WebGPU unavailable below.'}</dd>
+          </div>
+          <div>
+            <dt>WebAssembly</dt>
+            <dd><span class="dc-state" data-tone={caps.wasm ? 'ok' : 'warn'}>{caps.wasm ? 'Available' : 'Unavailable'}</span>
+              {caps.wasm ? `SIMD ${caps.wasmSimd ? 'yes' : 'no'} · relaxed SIMD ${caps.wasmRelaxedSimd ? 'yes' : 'no'}.` : 'The engines cannot run in this browser.'}</dd>
+          </div>
+          <div>
+            <dt>Threads</dt>
+            <dd><span class="dc-state" data-tone={caps.threadedWasm ? 'ok' : 'warn'}>{caps.threadedWasm ? 'Available' : 'Single-thread'}</span>
+              {caps.threadedWasm ? `${caps.threads} logical thread${caps.threads === 1 ? '' : 's'} reported.` : 'Shared memory is unavailable, so CPU engines run on one thread.'}</dd>
+          </div>
+          <div>
+            <dt>Model cache</dt>
+            <dd><span class="dc-state" data-tone={caps.cacheStorage ? 'ok' : 'warn'}>{caps.cacheStorage ? 'Available' : 'Unavailable'}</span>
+              {caps.cacheStorage ? 'Downloaded models are kept for later visits.' : 'Models may download again on every visit.'}</dd>
+          </div>
+        </dl>
+      {/if}
+    </div>
+  </div>
+
+  <div class="trouble">
+    <h3 id="trouble-webgpu">WebGPU unavailable <a class="anchor-link" href="#trouble-webgpu" aria-label="Link to this section">#</a></h3>
+    <p>0x88 asks the browser for a WebGPU adapter once per page load. If the browser has no WebGPU or returns no adapter, WebGPU counts as unavailable. If the request takes longer than 4 seconds, the check reports no answer. Without WebGPU:</p>
+    <ul>
+      <li><strong>CPU engines are unaffected.</strong> Stockfish, Reckless, Berserk, Viridithas, PlentyChess and Stormphrax always run as WebAssembly on the CPU.</li>
+      <li><strong>Lc0 (Small net) and Maia3</strong> run through ONNX Runtime and fall back to WebAssembly on the CPU, which is slower.</li>
+      <li><strong>Centipawn</strong> tries its TVMJS WebGPU runtime first and falls back to ONNX Runtime automatically.</li>
+      <li><strong>Large Lc0 nets (t3, BT4) and Leela Queen Odds</strong> fall back to the CPU in Analysis and Play. Play lowers their visit budgets and warns that each move can take several seconds. In Arena they need WebGPU, and a match that includes them will not start without it.</li>
+    </ul>
+    <p>If your browser offers WebGPU behind a setting or flag, turn it on and reload the page so the check runs again.</p>
+  </div>
+
+  <div class="trouble">
+    <h3 id="trouble-downloads">Slow or repeated downloads <a class="anchor-link" href="#trouble-downloads" aria-label="Link to this section">#</a></h3>
+    <p>Engines and networks download the first time you use them, and the workspace shows download progress. The largest downloads are the neural networks:</p>
+    <table class="doc-table compact">
+      <thead><tr><th scope="col">Download</th><th scope="col">Approximate size</th></tr></thead>
+      <tbody>
+        <tr><td>Lc0 BT4-it332 net</td><td>178&nbsp;MB</td></tr>
+        <tr><td>Lc0 t3-512 net</td><td>163&nbsp;MB</td></tr>
+        <tr><td>Leela Queen Odds net</td><td>96&nbsp;MB</td></tr>
+        <tr><td>Maia3 model</td><td>28&nbsp;MB</td></tr>
+        <tr><td>Centipawn TVMJS runtime</td><td>26&nbsp;MB</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>Later visits</strong> load neural models from the browser’s Cache Storage instead of the network. Each cached model is checked against its manifest, and a damaged or outdated copy is discarded and downloaded again.</li>
+      <li><strong>Downloading every visit?</strong> If the browser reports too little free storage, 0x88 still loads the model but does not cache it, so it downloads again next time. The same happens when the check above shows the model cache as unavailable.</li>
+      <li><strong>Low-memory devices.</strong> When a device reports 4&nbsp;GB of RAM or less, Play warns before loading a large Lc0 net. Lc0 Small, Maia3 and the CPU engines are lighter choices.</li>
+    </ul>
+  </div>
+
+  <div class="trouble">
+    <h3 id="trouble-cache">Clear downloaded models <a class="anchor-link" href="#trouble-cache" aria-label="Link to this section">#</a></h3>
+    <p>0x88 has no in-app button for this. Downloaded models live in your browser’s storage for this site: Cache Storage entries named <code>lc0-browser-models-v1</code> and <code>maia3-browser-models-v1</code>, plus verification records in an IndexedDB database named <code>lc0-browser-model-cache-metadata</code>. Clearing this site’s data in your browser settings removes them; each model downloads again the next time you use it.</p>
+  </div>
+
+  <div class="trouble">
+    <h3 id="trouble-threads">Stockfish runs single-threaded <a class="anchor-link" href="#trouble-threads" aria-label="Link to this section">#</a></h3>
+    <p>Multi-threaded WebAssembly needs a cross-origin-isolated page with <code>SharedArrayBuffer</code>. 0x88 sends the headers for this, and when they take effect Analysis and Arena run Stockfish’s threaded build. If the check above shows <em>Single-thread</em>, Stockfish uses its single-threaded build instead. The other CPU engines are single-threaded builds either way.</p>
+  </div>
+</section>
+
+<!-- ===== ENGINES ===== -->
+<section id="engines">
+  <h2>The engines <a class="anchor-link" href="#engines" aria-label="Link to this section">#</a></h2>
+  <p class="lead">These entries separate upstream engine and model facts from 0x88's browser packaging. The <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">CCRL 40/15 list</a> and <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC engine status</a> provide context for native builds under their own hardware and tournament conditions; neither measures the browser artifacts served here.</p>
+
+  <table class="doc-table engine-table">
+    <caption class="visually-hidden">Engines at a glance</caption>
+    <thead>
+      <tr><th scope="col">Engine</th><th scope="col">Runs on</th><th scope="col">How it picks moves</th><th scope="col">Where</th><th scope="col">License</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row"><a href="#engines-lc0">Leela Chess Zero</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Neural network (Small, t3, BT4) with 0x88’s PUCT search</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0-or-later</span></td></tr>
+      <tr><th scope="row"><a href="#engines-lqo">Leela Queen Odds</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Queen-odds network with 0x88’s PUCT search</td><td>Play</td><td><span class="lic agpl">AGPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-maia3">Maia3</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Rating-conditioned human-move model, no search</td><td>Play, Analysis (Human tab)</td><td><span class="lic agpl">AGPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-centipawn">Centipawn</a></th><td>GPU<span class="sub">ORT fallback</span></td><td>0x88’s experimental neural engine</td><td>Analysis, Arena, Play</td><td><span class="lic own">0x88 project</span></td></tr>
+      <tr><th scope="row"><a href="#engines-stockfish">Stockfish 19</a></th><td>CPU</td><td>Alpha-beta search with NNUE, Lite and full builds</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-berserk">Berserk</a></th><td>CPU</td><td>Principal-variation search with bucketed NNUE</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-viridithas">Viridithas</a></th><td>CPU</td><td>Search with NNUE evaluation</td><td>Analysis, Arena, Play</td><td><span class="lic mit">MIT (pinned)</span></td></tr>
+      <tr><th scope="row"><a href="#engines-plentychess">PlentyChess</a></th><td>CPU</td><td>Search with threat-input NNUE evaluation</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-stormphrax">Stormphrax</a></th><td>CPU</td><td>Search with self-play-trained NNUE evaluation</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0-or-later</span></td></tr>
+      <tr><th scope="row"><a href="#engines-reckless">Reckless</a></th><td>CPU</td><td>Alpha-beta search with NNUE</td><td>Analysis, Arena, Play</td><td><span class="lic agpl">AGPL-3.0</span></td></tr>
+    </tbody>
+  </table>
+  <p class="table-note">GPU engines use WebGPU when the browser has it; see <a href="#trouble-webgpu">WebGPU unavailable</a> for what each one does without it. Each engine’s license and source offer is listed under <a href="#licenses-per-engine">per-engine source links</a>.</p>
+
+  <div class="engine-entry">
+    <h3 id="engines-lc0">Leela Chess Zero <a class="anchor-link" href="#engines-lc0" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Project</dt><dd>Leela Chess Zero &middot; <a href="https://github.com/LeelaChessZero/lc0" rel="noopener">github.com/LeelaChessZero/lc0</a></dd>
+      <dt>License</dt><dd><span class="lic gpl">GPL-3.0-or-later</span></dd>
+      <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
+      <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (browser runtime, ONNX export &amp; quantization scripts)</dd>
+    </dl>
+    <p>Leela Chess Zero is an open-source UCI engine that combines neural-network policy and value evaluation with Monte Carlo tree search. 0x88 does not compile the upstream C++ engine into WebAssembly. It exports selected Lc0 network weights (T1, T3, and BT4) to browser formats, evaluates them with ONNX Runtime WebGPU or custom WebGPU kernels, and searches them with 0x88's own PUCT implementation.</p>
+    <details>
+      <summary>Architecture &amp; packaging details</summary>
+      <div class="details-body">
+        <p>The served networks expose policy and value/WDL outputs used by the browser search. 0x88 exports the weights to ONNX and, for selected artifacts, applies QDQ int8 weight quantization while retaining floating-point computation after dequantization. The T1, T3, and BT4 options form a size ladder for different download, memory, and inference budgets.</p>
+      </div>
+    </details>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-lqo">Leela Queen Odds (LQO) <a class="anchor-link" href="#engines-lqo" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Author</dt><dd>notune &middot; <a href="https://github.com/notune/LeelaQueenOdds" rel="noopener">github.com/notune/LeelaQueenOdds</a></dd>
+      <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
+      <dt>Artifact</dt><dd><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.qdq8.onnx">/models/lc0/lqo_v2.f16.qdq8.onnx</a> (~96 MB, QDQ int8)</dd>
+      <dt>Derived from</dt><dd><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.onnx">lqo_v2.f16.onnx</a> (fp16 source export)</dd>
+      <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
+    </dl>
+    <p>Leela Queen Odds v2 is an Lc0-compatible network trained specifically to play human opponents while the engine starts without its queen. The Play page therefore removes the bot's queen, not the user's. Upstream warns that the network is unsuitable for ordinary-position analysis because it evaluates its specialized queen-odds starting position as equal.</p>
+    <details>
+      <summary>Search parameters &amp; packaging details</summary>
+      <div class="details-body">
+        <p>Upstream recommends 15,000 nodes when the network plays White and 12,000 when it plays Black, with <code>ScLimit</code> 40/32, <code>CPuct 1.5</code>, <code>FpuValue 0.4</code>, color-specific <code>DrawScore</code>, and <code>SwapColors</code> when the network plays Black. 0x88 uses lower visit budgets and maps those settings into its own PUCT and search-contempt implementation.</p>
+        <p>The served artifact is a QDQ int8 quantization of the fp16 export, derived in-tree and shipped from the LC0 manifest alongside the other big nets (BT4, t3).</p>
+      </div>
+    </details>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-maia3">Maia3 <a class="anchor-link" href="#engines-maia3" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Authors</dt><dd>Daniel Monroe, George Eilender, Philip Chalmers, Zhenwei Tang, and Ashton Anderson (CSSLab) &middot; <a href="https://github.com/CSSLab/maia3" rel="noopener">github.com/CSSLab/maia3</a></dd>
+      <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
+      <dt>Paper</dt><dd><a href="https://arxiv.org/abs/2605.19091" rel="noopener">Chessformer: A Unified Architecture for Chess Modeling</a></dd>
+      <dt>Provenance</dt><dd><a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">/docs/model_provenance/maia3.md</a></dd>
+      <dt>Frontend</dt><dd><a href="https://github.com/CSSLab/maia-platform-frontend" rel="noopener">github.com/CSSLab/maia-platform-frontend</a> (byte-identical upstream fp16 model)</dd>
+    </dl>
+    <p>Maia-3 is a family of Chessformer models for predicting human moves across skill levels. The browser model returns rating-conditioned move probabilities and human-game WDL predictions rather than a searched centipawn evaluation. The Play page can sample from that policy or choose its highest-probability move.</p>
+    <div class="callout info">
+      <h4>AGPL source offer</h4>
+      <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. The AGPL source offer includes the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> for that artifact.</p>
+    </div>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-centipawn">Centipawn <a class="anchor-link" href="#engines-centipawn" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (in-house)</dd>
+    </dl>
+    <p>Centipawn is 0x88's own edge-deployed neural chess engine, and it is experimental. It evaluates the SquareFormer/BT4 network family in the browser with TVMJS WebGPU as the primary runtime and automatic ONNX Runtime WebGPU fallback, and appears on the Play, Analysis, and Arena pages at five strength levels.</p>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-stockfish">Stockfish 19 <a class="anchor-link" href="#engines-stockfish" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Project</dt><dd><a href="https://github.com/official-stockfish/Stockfish" rel="noopener">official-stockfish/Stockfish</a> &middot; browser package via <a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></dd>
+      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
+      <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/stockfish/stockfish-19.0.1-corresponding-source.tar.gz">stockfish-19.0.1-corresponding-source.tar.gz</a></dd>
+    </dl>
+    <p>Stockfish is a community-developed UCI engine derived from Glaurung 2.1. It combines alpha-beta search with NNUE evaluation, and proposed changes are tested through the distributed Fishtest system. Stockfish 18 led the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and Stockfish finished first in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 ships the Stockfish.js 19.0.1 package in Lite and full-network forms; SF19 uses new networks for both variants.</p>
+    <div class="callout info">
+      <h4>Relaxed SIMD candidate</h4>
+      <p>The Lite single-thread build has a feature-detected relaxed-SIMD candidate, with the baseline kept as a fallback. SF19 validation compares each WASM variant against its same-network native build using exact node-count bench signatures and fixed-depth best move, score, nodes, and PV. The Lite network has a different feature architecture from full Stockfish. Full single-threaded, Lite pthread, and full pthread relaxed builds remain local candidates, not default release artifacts. Historical SF18 relaxed-SIMD speedups do not describe the new SF19 networks.</p>
+    </div>
+    <details>
+      <summary>Architecture &amp; packaging details</summary>
+      <div class="details-body">
+        <p>Stockfish uses an efficiently updatable neural network as its static evaluation function inside search. The Stockfish.js package compiles the engine to WebAssembly through Emscripten and embeds the required NNUE data. The manifest serves both the smaller Lite package and the full-network variants.</p>
+      </div>
+    </details>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-berserk">Berserk <a class="anchor-link" href="#engines-berserk" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Author</dt><dd>Jay Honnold &middot; <a href="https://github.com/jhonnold/berserk" rel="noopener">github.com/jhonnold/berserk</a></dd>
+      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
+      <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
+    </dl>
+    <p>Berserk 14 is Jay Honnold's UCI engine written in C. Its documented implementation uses principal-variation search with standard alpha-beta pruning techniques and a bucketed NNUE evaluation. 0x88 compiles the pinned release with Emscripten and serves scalar, WebAssembly SIMD, and relaxed-SIMD variants.</p>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-viridithas">Viridithas <a class="anchor-link" href="#engines-viridithas" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Author</dt><dd>Cosmo Bobak &middot; <a href="https://github.com/cosmobobak/viridithas" rel="noopener">github.com/cosmobobak/viridithas</a></dd>
+      <dt>License</dt><dd><span class="lic mit">MIT</span> at pinned commit <a href="https://github.com/cosmobobak/viridithas/commit/20d7402065cae084715183e019fdd18089e2dfac" rel="noopener"><code>20d7402</code></a>; upstream relicensed to AGPL-3.0-only as of v21; v20.0.0 and earlier remain MIT</dd>
+      <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a></dd>
+    </dl>
+    <p>Viridithas is Cosmo Bobak's Rust UCI engine with NNUE evaluation. The project documents that its network training does not use evaluations produced by other chess engines. 0x88 pins commit <code>20d7402</code>, whose license is MIT, and serves scalar, WebAssembly SIMD, and relaxed-SIMD WASI builds.</p>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-plentychess">PlentyChess <a class="anchor-link" href="#engines-plentychess" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Author</dt><dd>Yoshie2000 &middot; <a href="https://github.com/Yoshie2000/PlentyChess" rel="noopener">github.com/Yoshie2000/PlentyChess</a></dd>
+      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
+      <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
+    </dl>
+    <p>PlentyChess 8.0.0 is Patrick Leonhardt's C++17 UCI engine. Its threat-input NNUE is trained on more than 15 billion self-generated standard-chess and Fischer-random positions, with self-distillation used for part of the training. 0x88 compiles the pinned revision with Emscripten and serves SSSE3-shaped WebAssembly SIMD, SSE4.1, and relaxed-SIMD variants sharing one processed NNUE sidecar.</p>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-stormphrax">Stormphrax <a class="anchor-link" href="#engines-stormphrax" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Author</dt><dd>Ciekce &middot; <a href="https://github.com/Ciekce/Stormphrax" rel="noopener">github.com/Ciekce/Stormphrax</a></dd>
+      <dt>License</dt><dd><span class="lic gpl">GPL-3.0-or-later</span></dd>
+      <dt>Network</dt><dd><code>undertown.nnue</code>, trained from Stormphrax self-play data</dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz">stormphrax-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
+    </dl>
+    <p>Stormphrax 8.0.0 is Ciekce's C++ UCI engine with an explicit Chess960 focus. Its NNUE starts from random weights and is trained on data generated by Stormphrax rather than a third-party engine. 0x88 serves a single-thread Emscripten build with WebAssembly SIMD and a feature-detected relaxed-SIMD candidate.</p>
+  </div>
+
+  <div class="engine-entry">
+    <h3 id="engines-reckless">Reckless <a class="anchor-link" href="#engines-reckless" aria-label="Link to this section">#</a></h3>
+    <dl class="engine-meta">
+      <dt>Project</dt><dd>CodeDeliveryService &middot; <a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">github.com/codedeliveryservice/Reckless</a></dd>
+      <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
+      <dt>Notice</dt><dd><a href="/reckless/NOTICE.md">/reckless/NOTICE.md</a></dd>
+      <dt>Source</dt><dd><a href="https://assets.0x88.app/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://assets.0x88.app/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://assets.0x88.app/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a></dd>
+      <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (build scripts &amp; release policy)</dd>
+    </dl>
+    <p>Reckless is a competitive Rust UCI engine using alpha-beta search and NNUE evaluation. Native Reckless 0.9.0 placed second on the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and a development build finished second in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 pins development commit <a href="https://github.com/codedeliveryservice/Reckless/commit/0010617448bdef4c8cd7d4f4825b7e42c8bc262a" rel="noopener"><code>0010617</code></a> and serves scalar, WebAssembly SIMD, and relaxed-SIMD WASI builds.</p>
+    <div class="callout info">
+      <h4>Public v0 engine</h4>
+      <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives for the scalar, SIMD, and relaxed SIMD builds are hosted beside the binaries.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== UNDER THE HOOD ===== -->
 <!-- ===== NEURAL BROWSER RUNTIMES ===== -->
 <section id="neural-runtimes">
   <h2>Neural browser runtimes <a class="anchor-link" href="#neural-runtimes" aria-label="Link to this section">#</a></h2>
@@ -339,151 +909,19 @@ onMount(() => {
   <p>The promotion rule is deliberately conservative: build scripts must pin upstream source and NNUE assets, Node and browser smokes must pass, benchmarks must justify the variant, and GPL/AGPL artifacts need manifests plus matching source archives before public distribution. Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/cpu_wasm_runtimes.md">docs/cpu_wasm_runtimes.md</a> and the C/C++ porting recipe in <a href="https://github.com/manthedan/0x88/blob/main/docs/browser_c_engine_porting.md">docs/browser_c_engine_porting.md</a>.</p>
 </section>
 
-<!-- ===== ENGINES ===== -->
-<section id="engines">
-  <h2>The engines <a class="anchor-link" href="#engines" aria-label="Link to this section">#</a></h2>
-  <p class="lead">These entries separate upstream engine and model facts from 0x88's browser packaging. The <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">CCRL 40/15 list</a> and <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC engine status</a> provide context for native builds under their own hardware and tournament conditions; neither measures the browser artifacts served here.</p>
+<!-- ===== CDN ===== -->
+<section id="cdn">
+  <h2>Artifact CDN &amp; caching <a class="anchor-link" href="#cdn" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from 130 KB to 60+ MB, so caching and compression are critical for the site to function.</p>
 
-  <div class="engine-entry">
-    <h3 id="engines-lc0">Leela Chess Zero <a class="anchor-link" href="#engines-lc0" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Project</dt><dd>Leela Chess Zero &middot; <a href="https://github.com/LeelaChessZero/lc0" rel="noopener">github.com/LeelaChessZero/lc0</a></dd>
-      <dt>License</dt><dd><span class="lic gpl">GPL-3.0-or-later</span></dd>
-      <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
-      <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (browser runtime, ONNX export &amp; quantization scripts)</dd>
-    </dl>
-    <p>Leela Chess Zero is an open-source UCI engine that combines neural-network policy and value evaluation with Monte Carlo tree search. 0x88 does not compile the upstream C++ engine into WebAssembly. It exports selected Lc0 network weights (T1, T3, and BT4) to browser formats, evaluates them with ONNX Runtime WebGPU or custom WebGPU kernels, and searches them with 0x88's own PUCT implementation.</p>
-    <details>
-      <summary>Architecture &amp; packaging details</summary>
-      <div class="details-body">
-        <p>The served networks expose policy and value/WDL outputs used by the browser search. 0x88 exports the weights to ONNX and, for selected artifacts, applies QDQ int8 weight quantization while retaining floating-point computation after dequantization. The T1, T3, and BT4 options form a size ladder for different download, memory, and inference budgets.</p>
-      </div>
-    </details>
+  <div class="callout info">
+    <h4>Two-plane model</h4>
+    <p><strong>Control plane</strong> &mdash; channel and release manifests (mutable, short TTL). <strong>Data plane</strong> &mdash; content-addressed blobs under <code>/artifacts/sha256/</code> (immutable, 1-year edge cache). The Worker maps friendly URLs like <code>/viridithas/viridithas-relaxed-simd128.wasm</code> to the correct blob by reading the channel manifest.</p>
   </div>
 
-  <div class="engine-entry">
-    <h3 id="engines-lqo">Leela Queen Odds (LQO) <a class="anchor-link" href="#engines-lqo" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Author</dt><dd>notune &middot; <a href="https://github.com/notune/LeelaQueenOdds" rel="noopener">github.com/notune/LeelaQueenOdds</a></dd>
-      <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
-      <dt>Artifact</dt><dd><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.qdq8.onnx">/models/lc0/lqo_v2.f16.qdq8.onnx</a> (~96 MB, QDQ int8)</dd>
-      <dt>Derived from</dt><dd><a href="https://assets.0x88.app/models/lc0/lqo_v2.f16.onnx">lqo_v2.f16.onnx</a> (fp16 source export)</dd>
-      <dt>Manifest</dt><dd><a href="/models/lc0/manifest.json">/models/lc0/manifest.json</a></dd>
-    </dl>
-    <p>Leela Queen Odds v2 is an Lc0-compatible network trained specifically to play human opponents while the engine starts without its queen. The Play page therefore removes the bot's queen, not the user's. Upstream warns that the network is unsuitable for ordinary-position analysis because it evaluates its specialized queen-odds starting position as equal.</p>
-    <details>
-      <summary>Search parameters &amp; packaging details</summary>
-      <div class="details-body">
-        <p>Upstream recommends 15,000 nodes when the network plays White and 12,000 when it plays Black, with <code>ScLimit</code> 40/32, <code>CPuct 1.5</code>, <code>FpuValue 0.4</code>, color-specific <code>DrawScore</code>, and <code>SwapColors</code> when the network plays Black. 0x88 uses lower visit budgets and maps those settings into its own PUCT and search-contempt implementation.</p>
-        <p>The served artifact is a QDQ int8 quantization of the fp16 export, derived in-tree and shipped from the LC0 manifest alongside the other big nets (BT4, t3).</p>
-      </div>
-    </details>
-  </div>
+  <p>The Worker also handles range requests (delegated to R2's native reader), sets <code>no-transform</code> on binary types to prevent CDN auto-compression of WASM, and attaches CORS/CORP headers for cross-origin isolation. Pre-compression (brotli + gzip sidecars) is done at publish time, not at the edge. Browser-side, the Cache Storage API validates responses by byte length and SHA-256, and compiled <code>WebAssembly.Module</code> objects are cached per worker session.</p>
 
-  <div class="engine-entry">
-    <h3 id="engines-maia3">Maia3 <a class="anchor-link" href="#engines-maia3" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Authors</dt><dd>Daniel Monroe, George Eilender, Philip Chalmers, Zhenwei Tang, and Ashton Anderson (CSSLab) &middot; <a href="https://github.com/CSSLab/maia3" rel="noopener">github.com/CSSLab/maia3</a></dd>
-      <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
-      <dt>Paper</dt><dd><a href="https://arxiv.org/abs/2605.19091" rel="noopener">Chessformer: A Unified Architecture for Chess Modeling</a></dd>
-      <dt>Provenance</dt><dd><a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">/docs/model_provenance/maia3.md</a></dd>
-      <dt>Frontend</dt><dd><a href="https://github.com/CSSLab/maia-platform-frontend" rel="noopener">github.com/CSSLab/maia-platform-frontend</a> (byte-identical upstream fp16 model)</dd>
-    </dl>
-    <p>Maia-3 is a family of Chessformer models for predicting human moves across skill levels. The browser model returns rating-conditioned move probabilities and human-game WDL predictions rather than a searched centipawn evaluation. The Play page can sample from that policy or choose its highest-probability move.</p>
-    <div class="callout info">
-      <h4>AGPL source offer</h4>
-      <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. The AGPL source offer includes the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> for that artifact.</p>
-    </div>
-  </div>
-
-  <div class="engine-entry">
-    <h3 id="engines-centipawn">Centipawn <a class="anchor-link" href="#engines-centipawn" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (in-house)</dd>
-    </dl>
-    <p>Centipawn is 0x88's own edge-deployed neural chess engine, and it is experimental. It evaluates the SquareFormer/BT4 network family in the browser with TVMJS WebGPU as the primary runtime and automatic ONNX Runtime WebGPU fallback, and appears on the Play, Analysis, and Arena pages at five strength levels.</p>
-  </div>
-
-  <div class="engine-entry">
-    <h3 id="engines-stockfish">Stockfish 19 <a class="anchor-link" href="#engines-stockfish" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Project</dt><dd><a href="https://github.com/official-stockfish/Stockfish" rel="noopener">official-stockfish/Stockfish</a> &middot; browser package via <a href="https://github.com/nmrugg/stockfish.js" rel="noopener">nmrugg/stockfish.js</a></dd>
-      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
-      <dt>Source</dt><dd><a href="https://assets.0x88.app/stockfish/stockfish-19.0.1-corresponding-source.tar.gz">stockfish-19.0.1-corresponding-source.tar.gz</a></dd>
-    </dl>
-    <p>Stockfish is a community-developed UCI engine derived from Glaurung 2.1. It combines alpha-beta search with NNUE evaluation, and proposed changes are tested through the distributed Fishtest system. Stockfish 18 led the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and Stockfish finished first in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 ships the Stockfish.js 19.0.1 package in Lite and full-network forms; SF19 uses new networks for both variants.</p>
-    <div class="callout info">
-      <h4>Relaxed SIMD candidate</h4>
-      <p>The Lite single-thread build has a feature-detected relaxed-SIMD candidate, with the baseline kept as a fallback. SF19 validation compares each WASM variant against its same-network native build using exact node-count bench signatures and fixed-depth best move, score, nodes, and PV. The Lite network has a different feature architecture from full Stockfish. Full single-threaded, Lite pthread, and full pthread relaxed builds remain local candidates, not default release artifacts. Historical SF18 relaxed-SIMD speedups do not describe the new SF19 networks.</p>
-    </div>
-    <details>
-      <summary>Architecture &amp; packaging details</summary>
-      <div class="details-body">
-        <p>Stockfish uses an efficiently updatable neural network as its static evaluation function inside search. The Stockfish.js package compiles the engine to WebAssembly through Emscripten and embeds the required NNUE data. The manifest serves both the smaller Lite package and the full-network variants.</p>
-      </div>
-    </details>
-  </div>
-
-  <div class="engine-entry">
-    <h3 id="engines-berserk">Berserk <a class="anchor-link" href="#engines-berserk" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Author</dt><dd>Jay Honnold &middot; <a href="https://github.com/jhonnold/berserk" rel="noopener">github.com/jhonnold/berserk</a></dd>
-      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
-      <dt>Source</dt><dd><a href="https://assets.0x88.app/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz">berserk-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
-    </dl>
-    <p>Berserk 14 is Jay Honnold's UCI engine written in C. Its documented implementation uses principal-variation search with standard alpha-beta pruning techniques and a bucketed NNUE evaluation. 0x88 compiles the pinned release with Emscripten and serves scalar, WebAssembly SIMD, and relaxed-SIMD variants.</p>
-  </div>
-
-  <div class="engine-entry">
-    <h3 id="engines-viridithas">Viridithas <a class="anchor-link" href="#engines-viridithas" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Author</dt><dd>Cosmo Bobak &middot; <a href="https://github.com/cosmobobak/viridithas" rel="noopener">github.com/cosmobobak/viridithas</a></dd>
-      <dt>License</dt><dd><span class="lic mit">MIT</span> at pinned commit <a href="https://github.com/cosmobobak/viridithas/commit/20d7402065cae084715183e019fdd18089e2dfac" rel="noopener"><code>20d7402</code></a>; upstream relicensed to AGPL-3.0-only as of v21; v20.0.0 and earlier remain MIT</dd>
-      <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
-      <dt>Source</dt><dd><a href="https://assets.0x88.app/viridithas/viridithas-wasip1-corresponding-source.tar.gz">viridithas-wasip1-corresponding-source.tar.gz</a></dd>
-    </dl>
-    <p>Viridithas is Cosmo Bobak's Rust UCI engine with NNUE evaluation. The project documents that its network training does not use evaluations produced by other chess engines. 0x88 pins commit <code>20d7402</code>, whose license is MIT, and serves scalar, WebAssembly SIMD, and relaxed-SIMD WASI builds.</p>
-  </div>
-
-  <div class="engine-entry">
-    <h3 id="engines-plentychess">PlentyChess <a class="anchor-link" href="#engines-plentychess" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Author</dt><dd>Yoshie2000 &middot; <a href="https://github.com/Yoshie2000/PlentyChess" rel="noopener">github.com/Yoshie2000/PlentyChess</a></dd>
-      <dt>License</dt><dd><span class="lic gpl">GPL-3.0</span></dd>
-      <dt>Manifest</dt><dd><a href="https://assets.0x88.app/channels/stable.json">/channels/stable.json</a></dd>
-      <dt>Source</dt><dd><a href="https://assets.0x88.app/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz">plentychess-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
-    </dl>
-    <p>PlentyChess 8.0.0 is Patrick Leonhardt's C++17 UCI engine. Its threat-input NNUE is trained on more than 15 billion self-generated standard-chess and Fischer-random positions, with self-distillation used for part of the training. 0x88 compiles the pinned revision with Emscripten and serves SSSE3-shaped WebAssembly SIMD, SSE4.1, and relaxed-SIMD variants sharing one processed NNUE sidecar.</p>
-  </div>
-
-  <div class="engine-entry">
-    <h3 id="engines-stormphrax">Stormphrax <a class="anchor-link" href="#engines-stormphrax" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Author</dt><dd>Ciekce &middot; <a href="https://github.com/Ciekce/Stormphrax" rel="noopener">github.com/Ciekce/Stormphrax</a></dd>
-      <dt>License</dt><dd><span class="lic gpl">GPL-3.0-or-later</span></dd>
-      <dt>Network</dt><dd><code>undertown.nnue</code>, trained from Stormphrax self-play data</dd>
-      <dt>Source</dt><dd><a href="https://assets.0x88.app/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz">stormphrax-emscripten-single-thread-corresponding-source.tar.gz</a></dd>
-    </dl>
-    <p>Stormphrax 8.0.0 is Ciekce's C++ UCI engine with an explicit Chess960 focus. Its NNUE starts from random weights and is trained on data generated by Stormphrax rather than a third-party engine. 0x88 serves a single-thread Emscripten build with WebAssembly SIMD and a feature-detected relaxed-SIMD candidate.</p>
-  </div>
-
-  <div class="engine-entry">
-    <h3 id="engines-reckless">Reckless <a class="anchor-link" href="#engines-reckless" aria-label="Link to this section">#</a></h3>
-    <dl class="engine-meta">
-      <dt>Project</dt><dd>CodeDeliveryService &middot; <a href="https://github.com/codedeliveryservice/Reckless" rel="noopener">github.com/codedeliveryservice/Reckless</a></dd>
-      <dt>License</dt><dd><span class="lic agpl">AGPL-3.0</span></dd>
-      <dt>Notice</dt><dd><a href="/reckless/NOTICE.md">/reckless/NOTICE.md</a></dd>
-      <dt>Source</dt><dd><a href="https://assets.0x88.app/reckless/reckless-scalar-corresponding-source.tar.gz">scalar</a>, <a href="https://assets.0x88.app/reckless/reckless-simd128-corresponding-source.tar.gz">SIMD</a>, and <a href="https://assets.0x88.app/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz">relaxed SIMD</a></dd>
-      <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (build scripts &amp; release policy)</dd>
-    </dl>
-    <p>Reckless is a competitive Rust UCI engine using alpha-beta search and NNUE evaluation. Native Reckless 0.9.0 placed second on the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and a development build finished second in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 pins development commit <a href="https://github.com/codedeliveryservice/Reckless/commit/0010617448bdef4c8cd7d4f4825b7e42c8bc262a" rel="noopener"><code>0010617</code></a> and serves scalar, WebAssembly SIMD, and relaxed-SIMD WASI builds.</p>
-    <div class="callout info">
-      <h4>Public v0 engine</h4>
-      <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives for the scalar, SIMD, and relaxed SIMD builds are hosted beside the binaries.</p>
-    </div>
-  </div>
+  <p>Full architecture, compression pipeline details, artifact size table, and operational playbook (diagnostics, publishing, adding new engines) are in <a href="https://github.com/manthedan/0x88/blob/main/docs/cdn_artifact_caching.md">docs/cdn_artifact_caching.md</a>.</p>
 </section>
 
 <!-- ===== LICENSES ===== -->
@@ -572,24 +1010,9 @@ onMount(() => {
   </blockquote>
 </section>
 
-<!-- ===== CDN ===== -->
-<section id="cdn">
-  <h2>Artifact CDN &amp; caching <a class="anchor-link" href="#cdn" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from 130 KB to 60+ MB, so caching and compression are critical for the site to function.</p>
-
-  <div class="callout info">
-    <h4>Two-plane model</h4>
-    <p><strong>Control plane</strong> &mdash; channel and release manifests (mutable, short TTL). <strong>Data plane</strong> &mdash; content-addressed blobs under <code>/artifacts/sha256/</code> (immutable, 1-year edge cache). The Worker maps friendly URLs like <code>/viridithas/viridithas-relaxed-simd128.wasm</code> to the correct blob by reading the channel manifest.</p>
-  </div>
-
-  <p>The Worker also handles range requests (delegated to R2's native reader), sets <code>no-transform</code> on binary types to prevent CDN auto-compression of WASM, and attaches CORS/CORP headers for cross-origin isolation. Pre-compression (brotli + gzip sidecars) is done at publish time, not at the edge. Browser-side, the Cache Storage API validates responses by byte length and SHA-256, and compiled <code>WebAssembly.Module</code> objects are cached per worker session.</p>
-
-  <p>Full architecture, compression pipeline details, artifact size table, and operational playbook (diagnostics, publishing, adding new engines) are in <a href="https://github.com/manthedan/0x88/blob/main/docs/cdn_artifact_caching.md">docs/cdn_artifact_caching.md</a>.</p>
-</section>
-
 <!-- ===== REMOVAL ===== -->
 <section id="removal">
-  <h2>I'm in this project and I don't like it <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h2>
+  <h2>Removal requests <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h2>
   <p class="lead">The engines and models above belong to their respective projects. 0x88 packages them for browser use.</p>
   <p>Maintainers and rights holders can request removal by <a href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">opening an issue on GitHub</a>. The requested engine or model will be removed.</p>
   <p>
@@ -613,85 +1036,127 @@ onMount(() => {
     </span>
   </div>
 </footer>
-
 <style>
-  .doc-hero{
-    border-bottom:1px solid var(--rule);
-    background:
-      radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--accent-soft) 55%, transparent), transparent 65%),
-      var(--panel);
+  .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
+
+  /* ---- layout: contents rail | intro + content ---- */
+  .doc-body .doc-grid{
+    padding:36px 28px 64px;
+    display:grid; grid-template-columns:236px minmax(0,1fr);
+    grid-template-areas:"toc intro" "toc content";
+    column-gap:56px; align-items:start;
   }
-  .doc-hero .wrap{padding:48px 24px 40px}
-  .doc-hero .kicker{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--accent); margin:0 0 10px}
-  .doc-hero h1{font-size:clamp(28px,5vw,42px); margin:0 0 14px; line-height:1.1; letter-spacing:-.015em}
-  .doc-hero p{margin:0; color:var(--ink-soft); font-size:16px; max-width:62ch; line-height:1.6}
-  .doc-hero p strong{color:var(--ink)}
-  .doc-body .wrap{
-    padding:48px 24px 64px;
-    display:grid; grid-template-columns:220px minmax(0,1fr);
-    gap:56px; align-items:start;
+  .doc-intro{grid-area:intro; max-width:880px; margin-bottom:40px}
+  .doc-intro h1{font-size:clamp(30px,4vw,40px); margin:0 0 10px; line-height:1.1; letter-spacing:-.015em}
+  .intro-lede{margin:0; color:var(--ink-soft); font-size:16.5px; max-width:66ch; line-height:1.6}
+  .quick-links{display:flex; flex-wrap:wrap; gap:8px; margin-top:18px}
+  .quick-links a{
+    display:inline-flex; align-items:center; min-height:34px; padding:6px 13px;
+    border:1px solid var(--rule-strong); border-radius:99px; background:var(--panel);
+    color:var(--ink); font-size:13.5px; font-weight:600; text-decoration:none;
   }
-  /* Wide tables (per-engine source links) scroll inside their own box
-     instead of forcing the whole column past narrow viewports. */
+  .quick-links a:hover{border-color:var(--border-input-hover); background:var(--panel-2)}
+  .doc-content{grid-area:content; max-width:880px; min-width:0}
+
+  /* Wide tables scroll inside their own box instead of widening the page. */
   .doc-content :global(table){display:block; overflow-x:auto}
-  /* Long slash-joined tokens (best/good/inaccuracy/…) have no natural
-     break points; let them wrap rather than overflow on phones. */
   .doc-content{overflow-wrap:break-word}
+
+  /* ---- contents rail ---- */
   .toc{
-    position:sticky; top:88px;
-    font-size:13px; max-height:calc(100vh - 100px); overflow-y:auto;
-    padding-right:16px; border-right:1px solid var(--rule);
-  }
-  .toc h4{
-    font-family:var(--sans); font-size:11px;
-    text-transform:uppercase; letter-spacing:.07em;
-    color:var(--muted-2); margin:0 0 12px; font-weight:600;
+    grid-area:toc;
+    position:sticky; top:calc(var(--hdr, 64px) + 20px);
+    font-size:13.5px;
   }
   .toc-toggle{display:none}
-  .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:2px}
-  .toc a{
-    color:var(--muted); text-decoration:none;
-    display:block; padding:4px 10px; border-radius:5px;
-    line-height:1.35; font-size:13px;
+  .toc-panel{display:flex; flex-direction:column; max-height:calc(100vh - var(--hdr, 64px) - 40px)}
+  .search{position:relative; margin:0 0 14px; flex:0 0 auto}
+  .search-icon{position:absolute; left:10px; top:50%; width:15px; height:15px; transform:translateY(-50%); fill:none; stroke:var(--muted); stroke-width:2; stroke-linecap:round; pointer-events:none}
+  .search input{
+    width:100%; box-sizing:border-box; min-height:38px; padding:8px 34px 8px 32px;
+    border:1px solid var(--border-input); border-radius:var(--radius-sm);
+    background:var(--input-bg); color:var(--ink); font:inherit; font-size:14px;
   }
-  .toc a:hover{color:var(--ink); background:var(--rule-soft)}
-  :global(.toc a.active){
-    color:var(--accent); font-weight:500;
-    background:var(--accent-soft);
+  .search input::placeholder{color:var(--muted)}
+  .search input:hover{border-color:var(--border-input-hover)}
+  .search input:focus{outline:none; border-color:var(--accent); box-shadow:var(--focus-ring)}
+  .search input::-webkit-search-cancel-button{display:none}
+  .search kbd{
+    position:absolute; right:8px; top:50%; transform:translateY(-50%);
+    min-width:18px; padding:1px 5px; border:1px solid var(--rule-strong); border-radius:4px;
+    background:var(--panel); color:var(--muted); font-family:var(--mono); font-size:11px; text-align:center; pointer-events:none;
   }
-  .toc ul ul{margin:2px 0 4px 12px; gap:1px}
-  .toc ul ul a{font-size:12px; padding:3px 8px}
-  .doc-content{max-width:760px}
-  .doc-content section{scroll-margin-top:88px; padding:0 0 48px}
+  .search input:focus ~ kbd{display:none}
+  .toc-groups,.results{overflow-y:auto; min-height:0; padding-right:6px; margin-right:-6px}
+  .toc-group + .toc-group{margin-top:14px; padding-top:14px; border-top:1px solid var(--rule)}
+  .toc-groups .toc-group-label{
+    display:block; margin:0 0 4px; padding:5px 10px; border-radius:6px;
+    font-size:13.5px; font-weight:700; color:var(--ink); text-decoration:none;
+  }
+  .toc-groups a.toc-group-label:hover{background:var(--rule-soft)}
+  .toc-group.collapsed > ul{display:none}
+  .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:1px}
+  .toc-groups a{
+    display:block; padding:5px 10px; border-radius:6px;
+    color:var(--text); text-decoration:none; line-height:1.35;
+  }
+  .toc-groups a:hover{color:var(--ink); background:var(--rule-soft)}
+  .toc-groups a.in-active{color:var(--ink)}
+  .toc-groups a.active{color:var(--ink); font-weight:650; background:var(--accent-soft); box-shadow:inset 0 0 0 1px var(--accent-tint-border)}
+  .toc-groups a.active::after{content:""; display:inline-block; width:6px; height:6px; margin-left:8px; border-radius:50%; background:var(--accent); vertical-align:middle}
+  .toc ul ul{margin:1px 0 4px 12px; display:none}
+  .toc li.expanded > ul{display:grid}
+  .toc ul ul a{font-size:13px; padding:4px 10px}
+
+  /* ---- search results ---- */
+  .results-count,.no-results{margin:0 0 8px; padding:0 4px; color:var(--text-soft); font-size:12.5px}
+  .no-results{color:var(--text); line-height:1.5}
+  .results ul{gap:2px}
+  .results a{
+    display:grid; gap:2px; padding:8px 10px; border-radius:6px;
+    text-decoration:none; color:var(--text);
+  }
+  .results a:hover,.results a:focus-visible{background:var(--rule-soft); outline:none}
+  .results a:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+  .hit-path{font-size:11.5px; color:var(--text-soft)}
+  .hit-title{color:var(--ink); font-weight:650; font-size:14px}
+  .hit-snippet{font-size:12.5px; line-height:1.45; color:var(--text)}
+  .hit-snippet mark{background:var(--accent-soft); color:var(--accent-soft-text); font-weight:650; border-radius:2px; padding:0 1px}
+
+  /* ---- content ---- */
+  .doc-content section{padding:0 0 52px}
   .doc-content section:last-child{padding-bottom:0}
+  .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 20px)}
   .doc-content h2{
     font-size:28px; margin:8px 0 14px;
     line-height:1.2; letter-spacing:-.01em;
     display:flex; align-items:center; gap:10px;
   }
   .doc-content h2::before{
-    content:""; display:block; width:28px; height:3px;
+    content:""; display:block; width:28px; height:3px; flex:0 0 28px;
     background:var(--accent); border-radius:2px;
   }
   .doc-content h2 .anchor-link,
   .doc-content h3 .anchor-link{
     margin-left:8px; opacity:0;
-    color:var(--muted-2); font-size:.7em;
+    color:var(--muted); font-size:.7em;
     text-decoration:none; font-family:var(--mono);
     transition:opacity .12s;
   }
   .doc-content h2:hover .anchor-link,
-  .doc-content h3:hover .anchor-link{opacity:1}
+  .doc-content h3:hover .anchor-link,
+  .doc-content .anchor-link:focus-visible{opacity:1}
   .doc-content h2 .anchor-link:hover,
   .doc-content h3 .anchor-link:hover{color:var(--accent); opacity:1}
   .doc-content h3{font-size:20px; margin:36px 0 10px; line-height:1.25}
   .doc-content h3 .anchor-link{font-size:.6em; vertical-align:middle}
+  .doc-content :global(h2:focus),.doc-content :global(h3:focus){outline:none}
   .doc-content > section > p.lead{
-    color:var(--muted); margin:0 0 28px;
-    font-size:16px; max-width:64ch; line-height:1.65;
+    color:var(--ink-soft); margin:0 0 26px;
+    font-size:16px; max-width:66ch; line-height:1.65;
   }
   .doc-content p{margin:0 0 14px; line-height:1.7; color:var(--ink-soft); max-width:72ch}
-  .doc-content ul{
+  .doc-content ul,.doc-content ol{
     margin:0 0 16px; padding-left:24px;
     line-height:1.7; color:var(--ink-soft); max-width:70ch;
   }
@@ -702,48 +1167,105 @@ onMount(() => {
     border-radius:4px; color:var(--ink);
   }
   .doc-content a{font-weight:500}
+
+  /* ---- workspace cards ---- */
   .page-block{
     background:var(--panel); border:1px solid var(--rule);
     border-radius:var(--radius); padding:24px 28px; margin-bottom:20px;
   }
-  .page-block h3{margin:0 0 6px; font-size:20px; display:flex; align-items:center; gap:12px}
+  .page-block h3{margin:0 0 8px; font-size:20px; display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px}
   .page-block h3 .pn{
     font-family:var(--mono); font-size:11px;
-    color:var(--accent-deep); background:var(--accent-soft);
+    color:var(--accent-soft-text); background:var(--accent-soft);
     padding:3px 10px; border-radius:99px;
     font-weight:700; letter-spacing:.04em; text-transform:uppercase;
   }
-  .page-block .pg-url{
-    font-family:var(--mono); font-size:12px;
-    color:var(--muted); margin:0 0 14px; display:block;
-  }
   .page-block p{margin:0 0 12px}
-  .page-block p:last-child{margin-bottom:0}
-  .page-block ul{margin:0 0 12px}
-  .page-block ul li::marker{color:var(--accent)}
+  .page-block ul{margin:0 0 14px}
+  .doc-content .steps{counter-reset:step; list-style:none; padding-left:0; margin:4px 0 18px; display:grid; gap:8px}
+  .steps li{counter-increment:step; position:relative; padding-left:36px; line-height:1.6}
+  .steps li::before{
+    content:counter(step); position:absolute; left:0; top:1px;
+    width:24px; height:24px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center;
+    background:var(--panel-2); border:1px solid var(--rule-strong);
+    color:var(--ink); font:700 12px/1 var(--sans);
+  }
+  .doc-content .not-yet{
+    padding:10px 14px; border:1px dashed var(--rule-strong); border-radius:var(--radius-sm);
+    font-size:14px; color:var(--text); max-width:none;
+  }
+  .doc-content .open-row{display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; margin:16px 0 0}
+  .doc-content .open-link{
+    display:inline-flex; align-items:center; gap:8px; min-height:40px;
+    padding:8px 16px; border-radius:var(--radius-sm);
+    background:var(--accent); color:var(--on-accent); font-weight:650; font-size:14px;
+    text-decoration:none;
+  }
+  .doc-content .open-link:hover{background:var(--accent-hover); text-decoration:none}
+  .open-link span{transition:transform .15s ease}
+  .open-link:hover span{transform:translateX(3px)}
+  .doc-content .pg-url{background:none; padding:0; color:var(--text-soft); font-size:12.5px}
+
+  /* ---- troubleshooting ---- */
+  .trouble{padding:4px 0 8px}
+  .trouble + .trouble{border-top:1px solid var(--rule); margin-top:12px}
+  .trouble h3{margin-top:22px}
+  .device-check{
+    margin:14px 0 8px; padding:14px 18px; max-width:640px;
+    border:1px solid var(--rule); border-radius:var(--radius); background:var(--panel);
+  }
+  .device-check dl{margin:0; display:grid; gap:10px}
+  .device-check dl > div{display:grid; grid-template-columns:110px minmax(0,1fr); gap:12px; align-items:baseline}
+  .device-check dt{font-weight:650; color:var(--ink); font-size:14px}
+  .device-check dd{margin:0; color:var(--text); font-size:14px; line-height:1.5}
+  .dc-state{
+    display:inline-block; margin-right:8px; padding:1px 8px; border-radius:99px;
+    font-family:var(--mono); font-size:11.5px; font-weight:700; border:1px solid var(--rule-strong);
+  }
+  .dc-state[data-tone=ok]{color:var(--accent-soft-text); background:var(--accent-soft); border-color:var(--accent-tint-border)}
+  .dc-state[data-tone=warn]{color:var(--warn); background:var(--warn-soft); border-color:color-mix(in srgb, var(--warn) 35%, var(--rule))}
+  .doc-content .dc-pending{margin:0; color:var(--text); font-size:14px}
+
+  /* ---- tables ---- */
+  .doc-table{width:100%; border-collapse:collapse; font-size:13.5px; margin:8px 0 18px}
+  .doc-table th,.doc-table td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; color:var(--ink-soft)}
+  .doc-table thead th{
+    border-bottom:2px solid var(--rule-strong); padding-top:6px; padding-bottom:6px;
+    font-family:var(--mono); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-soft);
+  }
+  .doc-table tbody tr:last-child > *{border-bottom:none}
+  .doc-table tbody th{font-weight:650; white-space:nowrap}
+  .doc-table.compact{width:auto; min-width:320px}
+  .engine-table td:nth-child(2){white-space:nowrap; font-weight:600; color:var(--ink)}
+  .engine-table .sub{display:block; font-weight:400; font-size:12px; color:var(--text-soft)}
+  .table-note{font-size:14px}
+
+  /* ---- engine entries ---- */
   .engine-entry{padding:8px 0 32px; border-bottom:1px solid var(--rule-soft)}
   .engine-entry:last-of-type{border-bottom:none}
   .engine-meta{
     display:grid; grid-template-columns:auto 1fr;
     gap:4px 16px; margin:10px 0 16px;
-    font-size:13px; max-width:100%; border-collapse:collapse;
+    font-size:13.5px; max-width:100%;
   }
   .engine-meta dt{
     font-family:var(--mono); font-size:11px;
     text-transform:uppercase; letter-spacing:.05em;
-    color:var(--muted-2); font-weight:600;
-    white-space:nowrap; padding:4px 0; vertical-align:top;
+    color:var(--text-soft); font-weight:700;
+    white-space:nowrap; padding:4px 0;
   }
-  .engine-meta dd{margin:0; padding:4px 0; color:var(--ink-soft); vertical-align:top}
+  .engine-meta dd{margin:0; padding:4px 0; color:var(--ink-soft)}
   .engine-meta dd a{font-weight:500}
-  .engine-meta .lic{
+  .lic{
     font-family:var(--mono); font-size:11px; font-weight:700;
     padding:2px 9px; border-radius:99px;
     white-space:nowrap; display:inline-block;
   }
-  .engine-meta .lic.gpl{background:color-mix(in srgb, var(--gold) 16%, transparent); color:var(--gold)}
-  .engine-meta .lic.agpl{background:var(--warn-soft); color:var(--warn)}
-  .engine-meta .lic.mit{background:var(--accent-soft); color:var(--accent-deep)}
+  .lic.gpl{background:color-mix(in srgb, var(--gold) 16%, transparent); color:color-mix(in srgb, var(--gold) 55%, var(--ink))}
+  .lic.agpl{background:var(--warn-soft); color:var(--warn)}
+  .lic.mit{background:var(--accent-soft); color:var(--accent-soft-text)}
+  .lic.own{background:var(--rule-soft); color:var(--ink-soft)}
   .engine-entry details{
     margin-top:8px; border:1px solid var(--rule);
     border-radius:var(--radius-sm); background:var(--panel); overflow:hidden;
@@ -751,37 +1273,39 @@ onMount(() => {
   .engine-entry details summary{
     cursor:pointer; padding:10px 16px;
     font-family:var(--mono); font-size:12px;
-    color:var(--muted); font-weight:600;
+    color:var(--text); font-weight:600;
     letter-spacing:.03em; text-transform:uppercase;
     list-style:none; user-select:none;
   }
   .engine-entry details summary::-webkit-details-marker{display:none}
-  .engine-entry details summary::before{content:"\25B8  "; color:var(--accent); transition:transform .12s; display:inline-block}
+  .engine-entry details summary::before{content:"\25B8  "; color:var(--accent); display:inline-block}
   .engine-entry details[open] summary::before{content:"\25BE  "}
   .engine-entry details summary:hover{color:var(--ink); background:var(--rule-soft)}
   .engine-entry details .details-body{padding:0 16px 14px}
   .engine-entry details .details-body p:last-child{margin-bottom:0}
+
+  /* ---- callouts ---- */
   .callout{
-    border-radius:var(--radius); padding:22px 26px;
+    border-radius:var(--radius); padding:20px 24px;
     margin:20px 0; border:1px solid var(--rule);
   }
   .callout.info{
     background:var(--accent-soft);
-    border-color:color-mix(in srgb, var(--accent) 30%, var(--rule));
+    border-color:var(--accent-tint-border);
   }
   .callout h4{
     margin:0 0 10px; font-size:14px;
     font-family:var(--sans); letter-spacing:.02em;
     display:flex; align-items:center; gap:8px;
   }
-  .callout.info h4{color:var(--accent-deep)}
+  .callout.info h4{color:var(--accent-soft-text)}
   .callout h4::before{
     font-family:var(--mono); font-size:14px;
     width:20px; height:20px; border-radius:4px;
     display:inline-flex; align-items:center; justify-content:center;
   }
-  .callout.info h4::before{content:"i"; background:var(--accent); color:var(--panel); font-style:italic}
-  .callout p{margin:0 0 10px; line-height:1.65; font-size:14px; max-width:64ch}
+  .callout.info h4::before{content:"i"; background:var(--accent); color:var(--on-accent); font-style:italic}
+  .callout p{margin:0 0 10px; line-height:1.65; font-size:14px; max-width:64ch; color:var(--ink-soft)}
   .callout p:last-child{margin:0}
   .callout code{
     font-family:var(--mono); font-size:12px;
@@ -792,35 +1316,65 @@ onMount(() => {
   .removal-cta{
     display:inline-flex; align-items:center; gap:8px;
     margin-top:4px; padding:11px 18px; border-radius:10px;
-    background:var(--accent); color:#fbf8f0; font-weight:600; font-size:14px;
+    background:var(--accent); color:var(--on-accent); font-weight:600; font-size:14px;
     border:1px solid var(--accent); text-decoration:none;
-    transition:background .15s ease, transform .15s ease;
+    transition:background .15s ease;
   }
-  .removal-cta:hover{background:var(--accent-2); transform:translateY(-1px); text-decoration:none}
+  .removal-cta:hover{background:var(--accent-hover); text-decoration:none}
   .removal-cta span{transition:transform .15s ease}
   .removal-cta:hover span{transform:translateX(3px)}
   .doc-content blockquote{
     margin:24px 0; padding:16px 22px;
     border-left:3px solid var(--rule);
-    color:var(--muted); font-size:14px; line-height:1.65; max-width:68ch;
+    color:var(--text); font-size:14px; line-height:1.65; max-width:68ch;
   }
-  .doc-content blockquote p{margin:0; color:var(--muted)}
+  .doc-content blockquote p{margin:0; color:var(--text)}
+
+  /* ---- phones and narrow tablets: sticky contents bar + sheet ---- */
   @media(max-width:860px){
-    .doc-body .wrap{grid-template-columns:minmax(0,1fr); gap:0}
+    .doc-body .doc-grid{
+      grid-template-columns:minmax(0,1fr);
+      grid-template-areas:"intro" "toc" "content";
+      padding:20px 16px 56px;
+    }
+    .doc-intro{margin-bottom:16px}
+    .doc-intro h1{font-size:30px; margin-bottom:8px}
+    .intro-lede{font-size:15.5px; line-height:1.55}
+    /* The sticky contents bar right below does this job on phones. */
+    .quick-links{display:none}
     .toc{
-      position:static; max-height:none; padding:0;
-      margin-bottom:28px; border:1px solid var(--rule); border-radius:var(--radius);
-      background:var(--panel); overflow:hidden;
+      top:var(--hdr, 64px); z-index:30;
+      margin:0 -16px 24px; padding:8px 16px;
+      background:color-mix(in srgb, var(--bg) 92%, transparent);
+      -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+      border-bottom:1px solid var(--rule-strong);
     }
-    .toc h4{display:none}
     .toc-toggle{
-      width:100%; min-height:46px; padding:10px 14px; border:0; border-radius:0;
-      display:flex; align-items:center; justify-content:space-between;
-      background:transparent; color:var(--ink); font-family:var(--mono); font-size:11px;
-      text-transform:uppercase; letter-spacing:.08em; font-weight:650;
+      width:100%; min-height:44px; padding:8px 12px;
+      display:flex; align-items:center; gap:10px;
+      border:1px solid var(--rule-strong); border-radius:var(--radius);
+      background:var(--panel); color:var(--ink); font:inherit; text-align:left; cursor:pointer;
     }
-    .toc.open .toc-toggle{border-bottom:1px solid var(--rule)}
-    .toc:not(.open)>ul{display:none}
-    .toc>ul{padding:10px 8px 12px}
+    .toc-toggle-label{flex:0 0 auto; font-size:12px; font-weight:700; color:var(--text-soft)}
+    .toc-current{flex:1 1 auto; min-width:0; font-size:14.5px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+    .chevron{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
+    .toc.open .chevron{transform:rotate(180deg)}
+    .toc-panel{
+      display:none; position:absolute; left:16px; right:16px; top:calc(100% - 2px);
+      max-height:calc(100vh - var(--hdr, 64px) - 80px);
+      padding:12px; border:1px solid var(--rule-strong); border-radius:var(--radius);
+      background:var(--panel); box-shadow:var(--shadow-lg);
+    }
+    .toc.open .toc-panel{display:flex}
+    .search kbd{display:none}
+    .search input{min-height:44px; font-size:16px}
+    .toc ul ul,.toc-group.collapsed > ul{display:grid}
+    .toc-groups a{padding:8px 10px}
+    .toc ul ul a{padding:7px 10px}
+    .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 76px)}
+    .doc-content h2{font-size:25px}
+    .page-block{padding:18px 18px}
+    .device-check{padding:12px 14px}
+    .device-check dl > div{grid-template-columns:1fr; gap:2px}
   }
 </style>
