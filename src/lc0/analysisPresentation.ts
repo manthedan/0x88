@@ -10,19 +10,90 @@ export function defaultAnalysisEngineRows(): EngineRow[] {
   return [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'sf', variant: 'lite', strength: 12 }];
 }
 
-/** Best moves win collisions, including promotion variants on the same squares. */
-export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean): { uci: string; brush: string }[] {
+/**
+ * Best moves win collisions, including promotion variants on the same squares.
+ * When several engines share a best move it is drawn once; `shared` then lists
+ * every backing engine's swatch (in engine order) so the board can mark the
+ * agreement instead of letting one engine's choice vanish under another's.
+ */
+export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean): { uci: string; brush: string; shared?: string[] }[] {
+  const usable = lines.filter((line) => !line.error && line.pvUci[0] && (line.multipv === 1 || showAll))
+    .sort((a, b) => a.multipv - b.multipv);
+  const backers = new Map<string, string[]>();
+  for (const line of usable) {
+    if (line.multipv !== 1) continue;
+    const key = line.pvUci[0].slice(0, 4);
+    backers.set(key, [...(backers.get(key) ?? []), engineBrushes(line.engine).swatch]);
+  }
   const seen = new Set<string>();
-  return lines.filter((line) => !line.error && line.pvUci[0] && (line.multipv === 1 || showAll))
-    .sort((a, b) => a.multipv - b.multipv)
-    .flatMap((line) => {
-      const uci = line.pvUci[0];
-      const key = uci.slice(0, 4);
-      if (seen.has(key)) return [];
-      seen.add(key);
-      const brushes = engineBrushes(line.engine);
-      return [{ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt }];
-    }).reverse(); // Alternatives sit underneath best moves; width is always chessground's 10.
+  return usable.flatMap((line) => {
+    const uci = line.pvUci[0];
+    const key = uci.slice(0, 4);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const brushes = engineBrushes(line.engine);
+    const shared = line.multipv === 1 ? backers.get(key) ?? [] : [];
+    return [{ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt, ...(shared.length > 1 ? { shared } : {}) }];
+  }).reverse(); // Alternatives sit underneath best moves; width is always chessground's 10.
+}
+
+/** Ring segments (one per backing engine) plus the vote count, for a shared best-move arrow. */
+export function sharedArrowMarkerSvg(swatches: string[]): string {
+  const r = 20;
+  const circumference = 2 * Math.PI * r;
+  const segment = circumference / swatches.length;
+  const ring = swatches.map((color, index) =>
+    `<circle cx="50" cy="50" r="${r}" fill="none" stroke="${color}" stroke-width="9" stroke-dasharray="${segment.toFixed(2)} ${(circumference - segment).toFixed(2)}" stroke-dashoffset="${(-index * segment).toFixed(2)}" transform="rotate(-90 50 50)"/>`).join('');
+  return `<circle cx="50" cy="50" r="26" fill="#fff" fill-opacity=".92"/>${ring}<circle cx="50" cy="50" r="15" fill="#1d1b18"/><text x="50" y="57" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="800" fill="#fff">${swatches.length}</text>`;
+}
+
+export interface AnalysisMoveGroup {
+  uci: string;
+  san: string;
+  engines: string[];
+}
+
+/** Engines' best moves grouped by move, most-backed first (ties keep engine order). */
+export function analysisMoveGroups(bestLines: AnalysisLine[]): AnalysisMoveGroup[] {
+  const groups = new Map<string, AnalysisMoveGroup>();
+  for (const line of bestLines) {
+    const uci = line.pvUci[0];
+    if (!uci) continue;
+    const group = groups.get(uci) ?? { uci, san: firstAnalysisMove(line), engines: [] };
+    group.engines.push(line.engine);
+    groups.set(uci, group);
+  }
+  return [...groups.values()].sort((a, b) => b.engines.length - a.engines.length);
+}
+
+/** One-line verdict for the comparison callout: agreement is stated, never implied. */
+export function analysisAgreementHeadline(groups: AnalysisMoveGroup[], total: number): string {
+  const [top, next] = groups;
+  if (!top) return 'No best move yet';
+  if (groups.length === 1) return total > 2 ? `All ${total} engines agree on ${top.san}` : `Engines agree on ${top.san}`;
+  if (top.engines.length >= 2 && next.engines.length < top.engines.length) return `${top.engines.length} of ${total} agree on ${top.san}`;
+  return top.engines.length >= 2 ? 'Engines split' : 'Engines disagree';
+}
+
+/** Short, collision-free engine labels for dense chips ("Lc0", "Stockfish"). */
+export function analysisShortEngineNames(engines: string[]): Map<string, string> {
+  const short = (engine: string) => analysisEngineName(engine).split(' ')[0];
+  const counts = new Map<string, number>();
+  for (const engine of new Set(engines)) counts.set(short(engine), (counts.get(short(engine)) ?? 0) + 1);
+  return new Map(engines.map((engine) => [engine, (counts.get(short(engine)) ?? 0) > 1 ? analysisEngineName(engine) : short(engine)]));
+}
+
+const ENGINE_MONOGRAMS: [RegExp, string][] = [
+  [/^lc0/i, 'L0'], [/^(sf|stockfish)\b/i, 'SF'], [/^plentychess/i, 'PC'], [/^centipawn/i, 'CP'], [/^maia/i, 'Ma'],
+];
+
+/** 1–2 letter monogram for the engine's colour avatar (En Croissant-style identity, no logos). */
+export function engineMonogram(engine: string): string {
+  const name = analysisEngineName(engine).trim();
+  const known = ENGINE_MONOGRAMS.find(([pattern]) => pattern.test(name));
+  if (known) return known[1];
+  const letters = name.replace(/[^A-Za-z0-9]/g, '');
+  return letters ? letters.charAt(0).toUpperCase() + letters.charAt(1).toLowerCase() : '?';
 }
 
 /** Display names only: engine/cache identities must retain their original labels. */

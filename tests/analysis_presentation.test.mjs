@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveMarkup, analysisPvText, defaultAnalysisEngineRows } from '../src/lc0/analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, sharedArrowMarkerSvg } from '../src/lc0/analysisPresentation.ts';
 import { ANALYSIS_DRAWABLE_BRUSHES } from '../src/lc0/analysisFormat.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 
@@ -25,6 +25,42 @@ test('default arrows show only engine best moves; opt-in alternatives never cove
   assert.equal(lines[0], alternative, 'rendering does not reorder cached lines');
   assert.ok(Object.values(ANALYSIS_DRAWABLE_BRUSHES).every((brush) => brush.lineWidth === 10));
   assert.equal(analysisArrowCandidates([lc0, { ...sf, pvUci: ['d2d4'] }], true).length, 1);
+});
+
+test('a shared best move is one arrow that names every backing engine colour', () => {
+  const lc0 = line('Lc0', 'c3e2', 'Ne2', 25);
+  const sf = line('SF Lite', 'c3e2', 'Ne2', 39);
+  const berserk = line('Berserk', 'c3a4', 'Na4', 48);
+  const candidates = analysisArrowCandidates([lc0, sf, berserk], false);
+  assert.equal(candidates.length, 2);
+  assert.deepEqual(candidates.find((c) => c.uci === 'c3e2'), { uci: 'c3e2', brush: 'green', shared: ['#15781B', '#1f5fcf'] });
+  assert.equal(candidates.find((c) => c.uci === 'c3a4').shared, undefined);
+  const marker = sharedArrowMarkerSvg(['#15781B', '#1f5fcf']);
+  assert.match(marker, /#15781B/);
+  assert.match(marker, /#1f5fcf/);
+  assert.match(marker, />2<\/text>/);
+});
+
+test('callout groups engines by move and states agreement explicitly', () => {
+  const lc0 = line('Lc0', 'c3e2', 'Ne2', 25);
+  const sf = line('SF Lite', 'c3e2', 'Ne2', 39);
+  const berserk = line('Berserk', 'c3a4', 'Na4', 48);
+  const plenty = line('PlentyChess', 'g5f6', 'gxf6', 9);
+  const groups = analysisMoveGroups([berserk, lc0, sf, plenty]);
+  assert.deepEqual(groups.map((g) => [g.san, g.engines.length]), [['Ne2', 2], ['Na4', 1], ['gxf6', 1]]);
+  assert.equal(analysisAgreementHeadline(groups, 4), '2 of 4 agree on Ne2');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2), 'Engines disagree');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf]), 2), 'Engines agree on Ne2');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, berserk, { ...plenty, pvUci: ['c3a4'] }]), 4), 'Engines split');
+  assert.deepEqual([...analysisShortEngineNames(['Lc0', 'SF Lite']).values()], ['Lc0', 'Stockfish']);
+  assert.deepEqual([...analysisShortEngineNames(['Lc0', 'Lc0 BT4']).values()], ['Lc0 Small', 'Lc0 BT4']);
+});
+
+test('engine avatars use consistent 1–2 letter monograms', () => {
+  assert.equal(engineMonogram('Lc0'), 'L0');
+  assert.equal(engineMonogram('SF Lite'), 'SF');
+  assert.equal(engineMonogram('PlentyChess'), 'PC');
+  assert.equal(engineMonogram('Berserk'), 'Be');
 });
 
 test('PVs number White and initial Black moves, including the full continuation', () => {

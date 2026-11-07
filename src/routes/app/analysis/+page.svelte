@@ -60,7 +60,7 @@ onMount(() => {
   <div class="board-column">
   <section class="panel board-panel" aria-label="Board">
     <div class="board-wrap">
-      <div class="evalbar" title="Evaluation (White's perspective)"><div class="mid"></div><div class="white" id="evalWhite" style="height:50%"></div><span id="evalSource" class="eval-source">White’s eval</span><span id="evalScore" class="eval-score">—</span></div>
+      <div class="evalbar" title="Evaluation (White's perspective)"><div class="mid"></div><div class="white" id="evalWhite"></div><span id="evalScore" class="eval-score">—</span></div>
       <div class="board-shell">
         <div id="ground"></div>
         <div id="keyboardBoard"></div>
@@ -99,15 +99,18 @@ onMount(() => {
   </div>
   <section class="panel app-sidebar" aria-label="Analysis">
     <header class="analysis-overview">
-      <span id="sideToMove" class="turn-indicator" data-turn="w">White to move</span>
+      <div class="position-status">
+        <span id="sideToMove" class="turn-indicator" data-turn="w">White to move</span>
+        <span id="analysisStatus" class="analysis-status" data-state="loading" role="status">Loading…</span>
+      </div>
       <div class="analyze-actions">
-        <button id="manageEngines" class="manage-engines" type="button" aria-label="Manage engines and add an engine" aria-haspopup="dialog" aria-controls="engineManager"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span class="manage-label">Engines</span> <span id="engineCount">2</span><span aria-hidden="true">+</span></button>
+        <button id="manageEngines" class="manage-engines" type="button" aria-label="Manage engines" title="Manage engines: models, search budget, arrows" aria-haspopup="dialog" aria-controls="engineManager"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span class="manage-label">Engines</span><span id="engineCount" class="engine-count">2</span></button>
         <button id="analyze" class="primary run-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Analyze</button>
         <button id="stop" class="primary run-action stop-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>Stop<span id="stopProgress" class="stop-progress"></span></button>
       </div>
     </header>
     <div id="engineSummaries" class="engine-summaries" aria-label="Engine summaries and board arrow legend"></div>
-    <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">Compare with another engine</small></span></button>
+    <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">more available</small></span></button>
     <div id="comparisonInsight" class="comparison-insight" aria-label="Engine comparison insight" hidden></div>
     <div id="message" aria-live="polite">Loading model…</div>
     <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
@@ -117,11 +120,12 @@ onMount(() => {
     <div class="workbench-tabs" role="tablist" aria-label="Analysis views">
       <button id="linesTab" type="button" role="tab" aria-selected="true" aria-controls="linesPanel" data-view="lines">Lines</button>
       <button id="comparisonTab" type="button" role="tab" aria-selected="false" aria-controls="comparisonSection" tabindex="-1" data-view="comparison">Comparison</button>
+      <button id="humanTab" type="button" role="tab" aria-selected="false" aria-controls="humanPanel" tabindex="-1" data-view="human" title="What rated humans play here (Maia3)">Human<span class="tab-long">&nbsp;moves</span> <span class="tab-badge">Maia3</span></button>
       <button id="movesTab" type="button" role="tab" aria-selected="false" aria-controls="historyPanel" tabindex="-1" data-view="moves">Moves</button>
       <span>Click a line to play it</span>
     </div>
     <div id="historyPanel" class="history-panel" role="tabpanel" aria-labelledby="movesTab" tabindex="0">
-      <header><h2>Moves</h2><span><kbd>←</kbd> <kbd>→</kbd> to step</span></header>
+      <header><h2>Moves</h2><span><kbd>←</kbd> <kbd>→</kbd> to step · click a move to jump</span></header>
       <div id="movelist" class="movelist move-panel" aria-label="Move history"></div>
     </div>
     <div id="comparisonSection" class="section-block comparison-panel" role="tabpanel" aria-labelledby="comparisonTab" tabindex="0">
@@ -132,6 +136,16 @@ onMount(() => {
     <div id="linesPanel" class="section-block lines-panel" role="tabpanel" aria-labelledby="linesTab" tabindex="0">
       <div id="engineLegend" class="legend"></div>
       <div id="lines" class="lines"></div>
+    </div>
+    <div id="humanPanel" class="section-block human-panel" role="tabpanel" aria-labelledby="humanTab" tabindex="0">
+      <h2 class="sr-only">Human moves (Maia3)</h2>
+      <p class="human-intro">What players at each rating actually choose here, from the Maia3 human-move model. Runs locally after a one-time download.</p>
+      <div class="row">
+        <button id="maia3Enable" type="button">Load Maia3 (~28MB, cached)</button>
+        <span id="maia3PanelStatus" class="small"></span>
+      </div>
+      <div id="maia3Grid" class="maia3-grid" hidden></div>
+      <div id="maia3Caption" class="small" hidden>What rated humans actually play here (Maia3 move predictions; score = expected points for White in a human game at that rating, not an engine eval). ✓ = matches the current best engine move.</div>
     </div>
     </div>
     <dialog id="engineManager" class="engine-manager" aria-labelledby="engineManagerTitle">
@@ -211,15 +225,6 @@ onMount(() => {
       <div class="capabilities-slot"><BrowserCapabilities /></div>
       </div>
     </dialog>
-    <details class="section-block human-moves">
-      <summary>Human moves <span>Maia3</span></summary>
-      <div class="row">
-        <button id="maia3Enable" type="button">Load Maia3 (~28MB, cached)</button>
-        <span id="maia3PanelStatus" class="small"></span>
-      </div>
-      <div id="maia3Grid" class="maia3-grid" hidden></div>
-      <div id="maia3Caption" class="small" hidden>What rated humans actually play here (Maia3 move predictions; score = expected points for White in a human game at that rating, not an engine eval). ✓ = matches the current best engine move.</div>
-    </details>
     <!-- Parked: features below are intentionally hidden. Remove hidden to re-enable. -->
     <details class="section-block" hidden>
       <summary>Game review</summary>
@@ -284,14 +289,15 @@ onMount(() => {
     --engine-color:var(--accent); /* overridden inline per engine row */
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
     --board-size:min(704px, calc(100dvh - 166px), calc(100vw - 536px));
-    grid-template-columns:calc(var(--board-size) + 50px) minmax(0, 470px); gap:16px; align-items:start;
+    grid-template-columns:calc(var(--board-size) + 56px) minmax(0, 470px); gap:16px; align-items:start;
     max-width:1288px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
   }
   .board-column{min-width:0}
   .board-panel{min-width:0; padding:8px}
-  .board-wrap{display:grid; grid-template-columns:30px 1fr; gap:4px; position:relative}
-  .board-toolbar{display:flex; align-items:stretch; gap:6px; margin:8px 0 0 34px; height:40px}
-  .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:auto; max-height:calc(var(--board-size) + 64px); overflow:hidden}
+  .board-wrap{display:grid; grid-template-columns:36px 1fr; gap:4px; position:relative}
+  .board-toolbar{display:flex; align-items:stretch; gap:6px; margin:8px 0 0 40px; height:40px}
+  /* Desktop: the panel shares the board column's baseline (board + toolbar), so there is no dead block under it. */
+  .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:calc(var(--board-size) + 64px); max-height:none; overflow:hidden}
   .analysis-workspace .app-sidebar>*{flex:0 0 auto}
   :global(.analysis-workspace .sr-only){position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0}
   .board-shell{position:relative}
@@ -306,11 +312,15 @@ onMount(() => {
   .position-toggle{display:inline-flex; align-items:center; gap:6px; height:100%; min-height:0; padding:0 12px; border-radius:7px; border:1px solid var(--border-input); background:var(--panel-inset); color:var(--ink); font-size:13px; font-weight:600; white-space:nowrap}
   :global(.analysis-workspace .position-toggle[aria-expanded=true]){border-color:var(--accent); color:var(--ink)}
   .position-toggle svg, .analyze-actions svg{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
-  .nav svg{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
+  .nav svg{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2.3; stroke-linecap:round; stroke-linejoin:round}
   .analysis-workspace :global(button:focus-visible), .analysis-workspace :global(summary:focus-visible), .analysis-workspace :global(select:focus-visible), .analysis-workspace :global(input:focus-visible){outline:2px solid var(--accent); outline-offset:2px}
-  .analysis-workspace .app-sidebar>.analysis-content{display:grid; grid-template-rows:auto minmax(0,1fr); flex:0 1 auto; min-width:0; min-height:0}
-  .history-panel{grid-row:2; display:none; flex-direction:column; min-width:0; min-height:0; overflow:hidden; padding:0; border-top:0}
-  .history-panel header{display:flex; flex:0 0 auto; justify-content:space-between; align-items:center; padding:5px 12px; border-bottom:1px solid var(--rule)}
+  .analysis-workspace .app-sidebar>.analysis-content{display:flex; flex-direction:column; flex:1 1 auto; min-width:0; min-height:0}
+  /* Desktop: game history is always visible under the lines (≈6 rows, current move kept in view). */
+  .history-panel{display:flex; flex:0 1 auto; flex-direction:column; min-width:0; min-height:112px; order:2; overflow:hidden; padding:0; border-top:1px solid var(--rule)}
+  .history-panel :global(.movelist){flex:1 1 auto; min-height:0; max-height:142px}
+  .history-panel:has(:global(.history-empty)){min-height:0}
+  #movesTab{display:none}
+  .history-panel header{display:flex; flex:0 0 auto; justify-content:space-between; align-items:center; min-height:30px; padding:3px 12px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
   .history-panel h2{font:650 13px var(--sans); letter-spacing:0; text-transform:none; margin:0; padding:0; color:var(--ink)}
   .history-panel header span{font-size:12px; color:var(--muted)}
   .history-panel kbd{display:inline-block; min-width:18px; padding:0 4px; border:1px solid var(--border-input); border-radius:4px; font:12px/16px var(--sans); text-align:center; color:var(--ink)}
@@ -326,13 +336,16 @@ onMount(() => {
   .arrow-preference{display:flex; align-items:flex-start; gap:8px; margin:0 0 16px; padding:12px; border:1px solid var(--rule); border-radius:8px; color:var(--ink); font-size:14px}
   .arrow-preference input{margin-top:4px; accent-color:var(--accent)}
   .arrow-preference small{display:block; margin-top:3px; font-size:13px; color:var(--muted)}
-  .add-engine-inline{display:flex; align-items:center; gap:9px; width:calc(100% - 16px); min-height:36px; margin:4px 8px; padding:4px 10px; border:1px dashed color-mix(in srgb, var(--ink) 34%, var(--panel)); border-radius:8px; background:transparent; color:var(--ink); text-align:left}
+  .add-engine-inline{display:flex; align-items:center; gap:9px; width:calc(100% - 16px); min-height:34px; margin:4px 8px; padding:4px 10px; border:1px dashed color-mix(in srgb, var(--ink) 34%, var(--panel)); border-radius:8px; background:transparent; color:var(--ink); text-align:left}
   .add-engine-inline:hover:not(:disabled){border-style:solid; border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
   .add-engine-plus{display:inline-grid; place-items:center; width:24px; height:24px; flex:0 0 24px; border-radius:6px; border:1px solid var(--border-input); color:var(--accent); font:600 18px/1 var(--sans)}
   .add-engine-text{display:flex; align-items:baseline; gap:8px; min-width:0}
   .add-engine-text strong{white-space:nowrap}
   .add-engine-text strong{font:650 14px/1.3 var(--sans)}
   .add-engine-text small{font:12px/1.35 var(--sans); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .add-engine-text small::before{content:'· '}
+  :global(.add-engine-inline[data-compact=true]){min-height:30px; padding-block:2px}
+  :global(.add-engine-inline[data-compact=true]) .add-engine-plus{width:20px; height:20px; flex-basis:20px; font-size:15px}
   :global(.engine-summary){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto 64px; align-items:center; gap:10px; min-height:50px; padding:0 12px 0 9px; border-top:1px solid var(--rule); border-left:3px solid var(--engine-color)}
   :global(.engine-summary-name){display:flex; align-items:center; gap:9px; padding:6px 0; min-width:0; min-height:44px; border:0; background:transparent; text-align:left; color:var(--ink)}
   :global(.engine-summary-name:hover:not(:disabled)){background:transparent; color:var(--ink)}
@@ -340,7 +353,7 @@ onMount(() => {
   :global(.engine-summary-text){display:grid; gap:1px; min-width:0}
   :global(.engine-summary-name strong){font:650 14px/1.3 var(--sans)}
   :global(.engine-summary-name small){font:13px/1.35 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  :global(.engine-settings-icon){width:16px; height:16px; flex:0 0 16px; margin-left:2px; fill:none; stroke:var(--muted); stroke-width:1.5; stroke-linejoin:round}
+  :global(.engine-settings-icon){width:16px; height:16px; flex:0 0 16px; margin-left:2px; fill:none; stroke:var(--text-soft); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
   :global(.engine-summary-name:hover .engine-settings-icon), :global(.engine-summary-name:focus-visible .engine-settings-icon){stroke:var(--ink)}
   :global(.engine-dot){display:inline-block; width:8px; height:8px; flex:0 0 8px; border-radius:50%; background:var(--engine-color); box-shadow:0 0 0 1px color-mix(in srgb, var(--engine-color), white 30%)}
   :global(.engine-summary-score){font:700 20px/1 var(--mono); letter-spacing:-.02em; text-align:right; color:var(--ink)}
@@ -348,35 +361,38 @@ onMount(() => {
   :global(.engine-summary-meter){position:absolute; left:0; bottom:-1px; height:3px; width:var(--progress); background:var(--engine-color); transition:width .2s}
   :global(.engine-summary-meter.indeterminate){width:100%; opacity:.55; animation:analysis-pulse 1.4s ease-in-out infinite}
   @keyframes -global-analysis-pulse{50%{opacity:.15}}
+  :global(.engine-avatar){display:inline-grid; place-items:center; width:24px; height:24px; flex:0 0 24px; border-radius:6px; background:var(--engine-color); color:#fff; font:750 11px/1 var(--sans); letter-spacing:-.01em; box-shadow:inset 0 0 0 1px #ffffff26}
   :global(.engine-logo-frame){display:inline-grid; place-items:center; width:40px; height:28px; flex:0 0 40px; padding:2px; box-sizing:border-box; border-radius:5px; background:#ede8dd; box-shadow:inset 0 0 0 1px #0000001f; overflow:hidden}
   :global(.engine-logo-frame.wordmark){padding:3px; background:#fff}
   :global(.engine-logo-frame .engine-logo), :global(.engine-logo-frame .engine-logo-placeholder){display:block; width:100%; height:100%; border-radius:3px; object-fit:contain}
   :global(.engine-logo-initial){font:700 13px/1 var(--sans); color:#3b352b}
-  .workbench-tabs{grid-row:1; display:flex; align-items:center; gap:4px; padding:0 8px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); background:var(--panel-inset)}
+  .workbench-tabs{order:0; flex:0 0 auto; display:flex; align-items:center; gap:4px; padding:0 8px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); background:var(--panel-inset)}
   .workbench-tabs button{border:0; border-radius:0; border-bottom:2px solid transparent; min-height:36px; padding:8px; font-size:13px; background:transparent}
   .workbench-tabs button[aria-selected=true]{color:var(--ink); border-bottom-color:var(--accent); font-weight:650}
   .workbench-tabs span{margin-left:auto; font-size:12px; color:var(--muted)}
-  .analysis-workspace .lines-panel, .analysis-workspace .comparison-panel{grid-row:2; min-height:0; border:0; padding:6px 12px 8px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable}
-  :global(.analysis-content:not([data-view=lines])) .lines-panel, :global(.analysis-content:not([data-view=comparison])) .comparison-panel{display:none}
-  :global(.analysis-content[data-view=moves]) .history-panel{display:flex}
+  .analysis-workspace .lines-panel, .analysis-workspace .comparison-panel{order:1; flex:1 1 0; min-height:184px; border:0; padding:6px 12px 8px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable}
+  :global(.analysis-content:is([data-view=comparison], [data-view=human])) .lines-panel, :global(.analysis-content:not([data-view=comparison])) .comparison-panel, :global(.analysis-content:not([data-view=human])) .human-panel{display:none}
   .analysis-workspace .lines-panel{background:linear-gradient(var(--panel) 30%, transparent) center top / 100% 16px local, linear-gradient(#0003, transparent) center top / 100% 6px scroll; background-repeat:no-repeat}
-  .human-moves{position:relative; border-top:1px solid var(--rule); background:var(--panel)}
+  .analysis-workspace .human-panel{order:1; flex:1 1 0; min-height:184px; border:0; padding:4px 12px 10px; overflow:auto; overscroll-behavior:contain}
+  .human-intro{margin:6px 0 0; font-size:13px; line-height:1.45; color:var(--text-soft)}
+  .tab-badge{margin-left:3px; padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
   :global(.analysis-workspace .engine-row){align-items:center}
   :global(.analysis-workspace .engine-row select), :global(.analysis-workspace .engine-row .row-strength){font-size:14px}
   :global(.analysis-workspace .engine-row .row-rm){min-height:36px}
   :global(.analysis-workspace .engine-row .row-unit){font-size:12px}
   :global(.analysis-workspace .engine-row .row-strength){flex-basis:76px; width:76px}
   .evalbar{
-    width:30px; border:1px solid var(--border-input); border-radius:5px;
+    --eval-pct:50%;
+    width:36px; border:1px solid var(--border-input); border-radius:5px;
     overflow:hidden; background:var(--eval-black); position:relative; flex:0 0 auto;
     box-sizing:border-box;
   }
   .evalbar .white{
-    position:absolute; left:0; right:0; bottom:0;
-    background:var(--eval-white); transition:height .25s;
+    position:absolute; left:0; right:0; bottom:0; height:var(--eval-pct);
+    background:var(--eval-white); transition:height .25s, width .25s;
   }
-  .eval-source{position:absolute; top:8px; left:7px; writing-mode:vertical-rl; font:600 11px/1.2 var(--sans); color:#f4efe4; text-shadow:0 1px 2px #000}
-  .eval-score{position:absolute; bottom:0; left:0; right:0; padding:5px 0; border-top:3px solid var(--engine-color); background:#f4efe4; color:#221c12; font:700 10px/1 var(--mono); text-align:center; letter-spacing:-.06em}
+  .eval-score{position:absolute; bottom:0; left:0; right:0; padding:5px 0 4px; border-top:3px solid var(--engine-color); background:#f4efe4; color:#1b160e; font:750 12px/1 var(--sans); font-variant-numeric:proportional-nums; text-align:center; letter-spacing:-.03em; white-space:nowrap}
+  :global(.eval-score[data-long=true]){font-size:10.5px}
   .evalbar .mid{
     position:absolute; left:0; right:0; top:50%;
     height:1px; background:var(--accent); opacity:.6;
@@ -385,12 +401,12 @@ onMount(() => {
   .nav{display:flex; flex:1; gap:6px; min-width:0}
   .nav button{
     flex:1 1 0; height:100%; min-height:0; border-radius:7px;
-    border:1px solid var(--border-input); background:var(--panel-inset);
-    color:var(--text-soft); font-size:14px; cursor:pointer;
+    border:1px solid var(--border-input-hover); background:var(--panel-2);
+    color:var(--ink); font-size:14px; cursor:pointer;
     display:flex; align-items:center; justify-content:center;
   }
   .nav button:hover:not(:disabled){border-color:var(--border-input-hover); background:var(--card); color:var(--ink)}
-  .nav button:disabled{opacity:1; cursor:default; color:color-mix(in srgb, var(--ink) 32%, var(--panel-inset)); background:transparent}
+  .nav button:disabled{opacity:.35; cursor:default; color:var(--muted); background:transparent; border-color:transparent}
   .row{margin-top:10px}
   .engine-list{margin-top:0}
   .engine-list-loading{
@@ -420,7 +436,7 @@ onMount(() => {
   :global(.lines){margin:0; padding:0}
   :global(.engine-result + .engine-result){margin-top:10px}
   :global(.engine-result h3){display:flex; gap:7px; align-items:center; margin:0 0 2px; font:650 13px var(--sans); color:var(--ink)}
-  :global(.engine-result h3 .engine-logo-frame){width:32px; height:22px; flex-basis:32px; border-radius:4px}
+  :global(.engine-result h3 .engine-avatar){width:20px; height:20px; flex-basis:20px; border-radius:5px; font-size:10px}
   :global(.engine-alternatives>summary){padding:3px 4px; color:var(--muted); font:12px/1.4 var(--sans); cursor:pointer}
   :global(.engine-alternatives>summary:hover){color:var(--ink)}
   :global(.compact-result){position:relative}
@@ -510,12 +526,22 @@ onMount(() => {
   }
   .analysis-overview{display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:56px; padding:8px 12px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
   .turn-indicator{display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap}
-  .turn-indicator::before{content:''; width:10px; height:10px; border-radius:2px; background:#f4f1e8; box-shadow:0 0 0 1px #0007}
-  :global(.analysis-overview:has(~ #message[data-routine=true]) .turn-indicator)::after{content:'✓'; font-size:12px; color:var(--muted)}
-  :global(.analysis-workspace .turn-indicator[data-turn=b]::before){background:#1d1b18; box-shadow:0 0 0 1px #fff8}
+  .turn-indicator::before{content:''; width:12px; height:12px; border-radius:50%; background:#f4f1e8; box-shadow:0 0 0 1.5px #0009}
+  :global(.analysis-workspace .turn-indicator[data-turn=b]::before){background:#1d1b18; box-shadow:0 0 0 1.5px #fffa}
+  .position-status{display:flex; align-items:center; gap:8px; min-width:0}
+  .analysis-status{display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 9px 0 8px; border:1px solid var(--rule); border-radius:999px; background:var(--panel); color:var(--text-soft); font:600 12px/1 var(--sans); white-space:nowrap}
+  .analysis-status::before{content:''; width:7px; height:7px; flex:0 0 auto; border-radius:50%; background:currentColor; opacity:.7}
+  :global(.analysis-status[data-state=running]){color:var(--ink); border-color:var(--accent-tint-border)}
+  :global(.analysis-status[data-state=running])::before{width:8px; height:8px; border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent); background:transparent; opacity:1; animation:analysis-spin .8s linear infinite}
+  :global(.analysis-status[data-state=done]){color:var(--accent-soft-text); border-color:var(--accent-tint-border); background:var(--accent-soft)}
+  :global(.analysis-status[data-state=done])::before{content:'✓'; width:auto; height:auto; background:none; opacity:1; font-size:12px; font-weight:800}
+  @keyframes -global-analysis-spin{to{transform:rotate(360deg)}}
+  /* Once results are in, Analyze steps back to a secondary action (re-run). */
+  :global(.analysis-overview[data-status=done] #analyze:not(:disabled)){background:transparent; color:var(--ink); border-color:var(--accent-deep)}
   .analyze-actions{display:flex; align-items:stretch; gap:8px}
   .analyze-actions button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:0 14px; border-radius:8px; font-size:14px; white-space:nowrap}
-  .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input)}
+  .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input-hover)}
+  .engine-count{display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:var(--panel-2); font:700 12px/1 var(--sans); font-variant-numeric:tabular-nums}
   .manage-engines:hover:not(:disabled){background:var(--panel); color:var(--ink)}
   .run-action{min-width:118px; font-weight:650}
   .run-action svg{fill:currentColor; stroke:none}
@@ -535,10 +561,16 @@ onMount(() => {
   :global(.comparison-insight){margin:6px 10px; padding:6px 9px; border:1px solid var(--border-input); border-radius:7px; background:var(--panel-inset); font-size:13px; line-height:1.4; color:var(--ink)}
   :global(.comparison-insight>div){display:flex; align-items:center; gap:7px}
   :global(.comparison-insight strong){font-weight:650}
-  :global(.comparison-insight button){margin-left:auto; padding:0 2px; min-height:24px; background:transparent; border:0; color:var(--ink); font-size:12px; text-decoration:underline; text-underline-offset:3px}
-  :global(.insight-moves){flex-wrap:wrap; margin-top:2px}
-  :global(.insight-move){display:inline-flex; align-items:center; gap:5px; padding:1px 5px; border:1px solid color-mix(in srgb, var(--engine-color) 60%, var(--rule)); border-radius:4px; font-weight:650}
-  :global(.insight-moves b){margin-left:auto; font:600 12px var(--sans); color:var(--muted)}
+  :global(.insight-spread){margin-left:auto; font-size:12px; color:var(--text-soft); white-space:nowrap; cursor:help}
+  :global(.insight-spread b){color:var(--ink); font-weight:650}
+  :global(.comparison-insight button){margin-left:8px; padding:0 2px; min-height:24px; background:transparent; border:0; color:var(--ink); font-size:12px; text-decoration:underline; text-underline-offset:3px}
+  :global(.insight-moves){flex-wrap:wrap; gap:6px !important; margin-top:4px}
+  :global(.insight-move){display:inline-flex; align-items:center; gap:5px; min-height:24px; padding:1px 7px 1px 6px; border:1px solid var(--border-input-hover); border-radius:5px; background:var(--panel)}
+  :global(.insight-dots){display:inline-flex}
+  :global(.insight-dots .engine-dot + .engine-dot){margin-left:-2px}
+  :global(.insight-san){font-weight:700}
+  :global(.insight-count){font:700 12px var(--sans); color:var(--ink)}
+  :global(.insight-who){font-size:12px; color:var(--text-soft)}
   .app-sidebar :global(.model-load-progress){margin:6px 12px 0}
   /* Per-engine progress lives in the summary rows (meter + stats) and on the Stop button. */
   .app-sidebar #analysisSearchProgress{display:none}
@@ -627,10 +659,6 @@ onMount(() => {
   :global(.movelist .mv-eval){font:12px var(--mono); color:var(--muted); font-weight:400}
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   :global(.movelist .var){color:var(--muted)}
-  .human-moves>summary span{
-    margin-left:5px; padding:2px 5px; border:1px solid var(--accent-tint-border); border-radius:3px;
-    color:var(--accent); font-size:12px; font-weight:600;
-  }
   .add-engine-row{margin-top:3px; align-items:center}
   .add-engine-row button{
     flex:0 0 auto; width:auto; min-height:0; padding:4px 1px; border:0; background:transparent;
@@ -668,49 +696,50 @@ onMount(() => {
     .board-column{display:contents}
     .board-panel, .analysis-workspace .app-sidebar{grid-column:1; grid-row:auto}
     .analysis-workspace .app-sidebar{height:auto; max-height:none; overflow:visible}
-    .analysis-workspace .app-sidebar>.analysis-content{grid-template-rows:none}
+    .analysis-workspace .app-sidebar>.analysis-content{display:block}
     .board-toolbar{height:44px}
-    .workbench-tabs{grid-row:1}
     .workbench-tabs span{font-size:10px}
-    .history-panel{grid-row:2; display:none}
-    .analysis-workspace .lines-panel, .analysis-workspace .comparison-panel{grid-row:2; max-height:360px}
-    :global(.movelist){max-height:320px}
+    /* Narrow screens: history is a tab again (the board and lines need the height). */
+    #movesTab{display:block}
+    .history-panel{display:none; min-height:0; border-top:0}
+    :global(.analysis-content[data-view=moves]) .history-panel{display:flex}
+    :global(.analysis-content[data-view=moves]) .lines-panel{display:none}
+    .analysis-workspace .lines-panel, .analysis-workspace .comparison-panel{min-height:0; max-height:360px}
+    .analysis-workspace .human-panel{min-height:0; max-height:360px}
+    .tab-badge, .tab-long{display:none}
+    .history-panel :global(.movelist){max-height:320px}
     :global(.movelist .mv){min-height:36px}
   }
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
-    .board-wrap{grid-template-columns:28px 1fr; gap:2px}
-    .evalbar{width:28px; border-radius:2px}
-    .eval-source{left:6px; font-size:11px}
+    /* Thin horizontal eval bar above the board so the board runs nearly edge to edge. */
+    .board-wrap{grid-template-columns:1fr; gap:3px}
+    .evalbar{width:auto; height:18px; border-radius:3px}
+    .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
+    .evalbar .mid{top:0; bottom:0; left:50%; width:1px; height:auto}
+    .eval-score{top:0; right:auto; display:flex; align-items:center; padding:0 7px 0 6px; border-top:0; border-left:3px solid var(--engine-color)}
     .board-panel :global(#ground){border-radius:3px}
-    .board-toolbar{gap:4px; margin:6px 2px 0 0}
+    .board-toolbar{gap:4px; margin:6px 0 0}
     .nav{gap:4px}
     .nav button{min-width:0; padding:4px}
     .position-toggle{padding:0 8px; gap:4px; font-size:12px}
-    .analysis-overview{padding:0 8px; gap:6px; min-height:44px}
-    .turn-indicator{font-size:12px; gap:5px}
-    .analyze-actions{gap:4px}
-    .analyze-actions button{min-height:36px; padding:0 8px; font-size:13px}
-    .analyze-actions .manage-engines{gap:4px}
-    .analyze-actions .manage-engines svg{display:none}
-    .run-action{min-width:88px}
-    .add-engine-inline{display:none}
-    :global(.comparison-insight){display:flex; align-items:center; gap:6px; margin:3px 8px; padding:3px 7px}
-    :global(.comparison-insight>div){gap:5px}
-    :global(.comparison-insight>div:first-child){order:2}
-    :global(.insight-moves){flex:1; margin-top:0}
-    :global(.comparison-insight strong){display:none}
+    .analysis-overview{flex-wrap:wrap; padding:8px; gap:8px; min-height:0}
+    .position-status{flex:1 1 100%; justify-content:space-between}
+    .turn-indicator{font-size:13px; gap:6px}
+    .analyze-actions{flex:1 1 100%; gap:8px}
+    .analyze-actions button{flex:1 1 0; min-height:40px; padding:0 10px; font-size:14px}
+    .run-action{min-width:0}
+    .add-engine-inline{min-height:36px; margin:4px 8px}
+    :global(.comparison-insight){margin:4px 8px; padding:6px 8px}
     .app-sidebar #message{margin:0 12px 6px}
     :global(.analysis-workspace #ground coords){font-size:11px}
     :global(.engine-summary){min-height:42px; padding:0 8px; gap:5px; grid-template-columns:minmax(0,1fr) auto 52px}
     :global(.engine-summary-name){gap:6px; min-height:42px; padding:3px 0}
     :global(.engine-summary-name strong){font-size:13px}
-    :global(.engine-summary-name small){font-size:11px; line-height:1.2}
+    :global(.engine-summary-name small){font-size:12px; line-height:1.25}
     :global(.engine-summary-score){font-size:18px}
     :global(.engine-summary .compare-move){min-height:32px; font-size:14px}
-    :global(.engine-summary .engine-logo-frame){width:36px; height:24px; flex-basis:36px}
-    :global(.engine-settings-icon){width:14px; height:14px; flex-basis:14px}
     :global(.line-play){min-height:40px}
     :global(.pv-expanded summary){height:40px; width:40px}
     :global(.line-play){width:calc(100% - 40px)}

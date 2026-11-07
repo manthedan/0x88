@@ -129,8 +129,8 @@ import {
   stockfishEngineLabel,
   stockfishVariantOptions,
 } from './engineCatalog.ts';
-import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
-import { analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveMarkup, analysisPvText, defaultAnalysisEngineRows, firstAnalysisMove, patchAnalysisResults } from './analysisPresentation.ts';
+import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, patchAnalysisResults, sharedArrowMarkerSvg } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import {
   berserkCacheKey,
@@ -1615,9 +1615,9 @@ function renderEngineSetupSummary(): void {
   el('engineCount').textContent = String(activeEngineRows().length);
   const present = new Set(engineRows.map((row) => row.family));
   const next = analysisEngineFamilyOptions().filter((option) => !present.has(option.value)).map((option) => option.label);
-  el('addEngineHint').textContent = next.length
-    ? `Compare with ${next[0]}${next.length > 1 ? ` · also ${next.slice(1, 3).join(', ')}${next.length > 3 ? '…' : ''}` : ''}`
-    : 'Compare another model or search budget';
+  el('addEngineHint').textContent = next.length ? `${next.length} more available` : 'Another model or search budget';
+  el('addEngine').title = next.length ? `Add an engine: ${next.join(', ')}` : 'Add another model or search budget';
+  el('addEngine').dataset.compact = String(activeEngineRows().length >= 3);
   renderEngineSummaries(lineCache.get(tree.current.fen) ?? []);
 }
 
@@ -1855,9 +1855,11 @@ function bestShapes(): DrawShape[] {
   if (book && !candidates.some((candidate) => candidate.uci.slice(0, 4) === book.uci.slice(0, 4))) {
     candidates.unshift({ uci: book.uci, brush: BOOK_BRUSH });
   }
-  return candidates.flatMap(({ uci, brush }) => {
+  return candidates.flatMap(({ uci, brush, shared }: { uci: string; brush: string; shared?: string[] }) => {
     const shape = uciShape(uci, brush);
-    return shape ? [shape] : [];
+    if (!shape) return [];
+    // One arrow per move; a ring in every backing engine's colour marks agreement.
+    return [shared ? { ...shape, customSvg: { html: sharedArrowMarkerSvg(shared), center: 'label' as const } } : shape];
   });
 }
 
@@ -1908,10 +1910,10 @@ function renderEvalBar() {
   // Use the first selected engine with a valid result, not whichever worker finished first.
   const line = activeEngineRows().flatMap((row) => lines.filter((entry) => analysisEngineName(entry.engine) === analysisEngineName(rowLabel(row)) && entry.multipv === 1 && !entry.error))[0];
   const pct = line ? evalBarWhitePercent(line.scoreCp, line.mateIn) : 50;
-  (el('evalWhite') as HTMLElement).style.height = `${pct}%`;
-  el('evalScore').textContent = line?.scoreText ?? '—';
-  el('evalSource').textContent = line ? `${analysisEngineName(line.engine)} · White’s eval` : 'White’s eval';
   const bar = el('evalWhite').parentElement;
+  bar?.style.setProperty('--eval-pct', `${pct}%`);
+  el('evalScore').textContent = line?.scoreText ?? '—';
+  el('evalScore').dataset.long = String((line?.scoreText ?? '').length > 5);
   bar?.style.setProperty('--engine-color', line ? engineBrushes(line.engine).swatch : 'var(--muted)');
   bar?.setAttribute('title', line ? `${analysisEngineName(line.engine)}: ${line.scoreText} (White's perspective)` : 'Evaluation (White\'s perspective)');
   el('evalWhite').parentElement?.setAttribute('aria-label', line ? `White's evaluation: ${line.scoreText}, ${analysisEngineName(line.engine)}` : 'No evaluation yet');
@@ -1928,7 +1930,26 @@ function signedCp(value: number): string {
   return `${sign}${Math.round(value)}`;
 }
 
+/** Labelled run state beside the turn pip: running, complete, or waiting — never an unexplained glyph. */
+function renderAnalysisStatus(): void {
+  const status = document.getElementById('analysisStatus');
+  if (!status) return;
+  const running = !(el('stop') as HTMLButtonElement).disabled;
+  const lines = lineCache.get(tree.current.fen) ?? [];
+  const ready = new Set(lines.filter((line) => line.multipv === 1 && !line.error).map((line) => analysisEngineName(line.engine))).size;
+  const failed = new Set(lines.filter((line) => line.error).map((line) => analysisEngineName(line.engine))).size;
+  const [state, text, title] = running ? ['running', 'Analyzing…', 'Engines are searching this position']
+    : ready ? ['done', failed ? `Done · ${failed} failed` : 'Done', failed ? `Analysis complete; ${failed} engine${failed > 1 ? 's' : ''} unavailable` : 'Analysis complete for this position']
+      : (el('analyze') as HTMLButtonElement).disabled ? ['loading', 'Loading…', 'Preparing engines'] : ['idle', 'Not analyzed', 'Press Analyze to evaluate this position'];
+  if (status.dataset.state !== state) status.dataset.state = state;
+  if (status.textContent !== text) status.textContent = text;
+  status.title = title;
+  const overview = status.closest<HTMLElement>('.analysis-overview');
+  if (overview && overview.dataset.status !== state) overview.dataset.status = state;
+}
+
 function renderEngineSummaries(lines: AnalysisLine[]): void {
+  renderAnalysisStatus();
   patchAnalysisResults(el('engineSummaries'), activeEngineRows().map((row) => {
     // Summaries deduplicate engines, but settings controls retain the original row indexes.
     const index = engineRows.findIndex((entry) => entry.family === row.family && entry.variant === row.variant);
@@ -1943,11 +1964,18 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
     const swatch = engineBrushes(engine).swatch;
     const pct = progress && hasBoundedSearchProgress(progress) ? Math.min(100, Math.round((100 * (progress.completed ?? 0)) / Math.max(1, progress.requested ?? 1))) : null;
     const meter = progress ? `<span class="engine-summary-meter${pct === null ? ' indeterminate' : ''}" style="--progress:${pct ?? 100}%" aria-hidden="true"></span>` : '';
-    return `<div class="engine-summary${progress ? ' searching' : ''}" style="--engine-color:${swatch}"><button class="engine-summary-name" type="button" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="Settings for ${htmlEscape(name)}">${engineLogoFrame(engineLogoHtml(engineLogoFamilyForEngineFamily(row.family)), name)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(stats)}">${htmlEscape(stats)}</small></span><svg class="engine-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1-2 4 2 2v3l3 2 1 3h6l1-3 3-2v-3l2-2-2-4-3-1-1-3z"/><circle cx="12" cy="12" r="3"/></svg></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${line?.pvUci[0] ? `<button type="button" class="compare-move" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span></span>'}${meter}</div>`;
+    return `<div class="engine-summary${progress ? ' searching' : ''}" style="--engine-color:${swatch}"><button class="engine-summary-name" type="button" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(stats)}">${htmlEscape(stats)}</small></span>${GEAR_ICON}</button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${line?.pvUci[0] ? `<button type="button" class="compare-move" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span></span>'}${meter}</div>`;
   }).join(''));
 }
 
-/** Every engine logo sits in the same framed box so mixed SVG/PNG assets read as one set. */
+const GEAR_ICON = '<svg class="engine-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
+
+/** Dense surfaces identify engines by a monogram tile in the engine colour (matches stripe, dot and arrow). */
+function engineAvatar(engine: string): string {
+  return `<span class="engine-avatar" style="--engine-color:${engineBrushes(engine).swatch}" aria-hidden="true">${htmlEscape(engineMonogram(engine))}</span>`;
+}
+
+/** Manage-engines dialog only: every logo sits in the same framed box so mixed SVG/PNG assets read as one set. */
 function engineLogoFrame(logo: string, name: string): string {
   // Engines without a bundled mark (or before the logo probe resolves) get their initial in the same frame.
   const mark = logo.includes('engine-logo-placeholder') || name.startsWith('PlentyChess') ? `<span class="engine-logo-initial">${htmlEscape(name.trim().charAt(0).toUpperCase())}</span>` : logo;
@@ -1972,8 +2000,20 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   el('comparisonInsight').hidden = bestByEngine.length < 2;
   if (bestByEngine.length >= 2) {
     const consensus = analysisConsensus(bestByEngine);
-    const [agreement, spread] = consensus.split(' · ');
-    patchAnalysisResults(el('comparisonInsight'), `<div><strong>${agreement.startsWith('Engines agree') ? 'Engines agree' : agreement.includes('engines prefer') ? htmlEscape(agreement) : 'Engines disagree'}</strong><button type="button" data-open-comparison data-focus-key="comparison-shortcut">Compare →</button></div><div class="insight-moves">${bestByEngine.map((line) => `<span class="insight-move" style="--engine-color:${engineBrushes(line.engine).swatch}" title="${htmlEscape(analysisEngineName(line.engine))}"><span class="engine-dot" aria-hidden="true"></span><span class="sr-only">${htmlEscape(analysisEngineName(line.engine))}: </span>${htmlEscape(firstAnalysisMove(line))}</span>`).join('')}${spread ? `<b>${htmlEscape(spread)}</b>` : ''}</div>`);
+    const [, spread] = consensus.split(' · ');
+    const groups = analysisMoveGroups(bestByEngine);
+    const shortNames = analysisShortEngineNames(bestByEngine.map((line) => line.engine));
+    const headline = analysisAgreementHeadline(groups, bestByEngine.length);
+    const spreadCp = spread?.replace(' cp spread', '');
+    const chips = groups.map((group) => {
+      const names = group.engines.map((engine) => analysisEngineName(engine));
+      const dots = group.engines.map((engine) => `<span class="engine-dot" style="--engine-color:${engineBrushes(engine).swatch}" aria-hidden="true"></span>`).join('');
+      const count = group.engines.length > 1 ? `<span class="insight-count" aria-hidden="true">×${group.engines.length}</span>` : '';
+      const who = group.engines.map((engine) => shortNames.get(engine) ?? analysisEngineName(engine)).join(', ');
+      return `<span class="insight-move" title="${htmlEscape(`${group.san}: ${names.join(', ')}`)}"><span class="insight-dots">${dots}</span><span class="insight-san">${htmlEscape(group.san)}</span>${count}<span class="insight-who"><span class="sr-only">chosen by </span>${htmlEscape(who)}</span></span>`;
+    }).join('');
+    const spreadMarkup = spreadCp ? `<span class="insight-spread" title="Best minus worst evaluation across engines (centipawns)">Eval spread <b>${htmlEscape(spreadCp)}</b> cp</span>` : '';
+    patchAnalysisResults(el('comparisonInsight'), `<div class="insight-head"><strong>${htmlEscape(headline)}</strong>${spreadMarkup}<button type="button" data-open-comparison data-focus-key="comparison-shortcut">Compare →</button></div><div class="insight-moves">${chips}</div>`);
   }
   if (!bestByEngine.length) {
     const progressRows = [...searchProgressByEngine.values()].map(
@@ -2022,7 +2062,7 @@ function renderLines() {
   const compactGroups = activeEngineRows().length > 2;
   patchAnalysisResults(el('lines'), [...groups].map(([engine, engineLines]) => {
     const detail = engineLines.find((line) => line.multipv === 1)?.detail.split(' · ')[0] ?? '';
-    const heading = `<h3 style="--engine-color:${engineBrushes(engine).swatch}"><span class="engine-dot" aria-hidden="true"></span>${engineLogoFrame(engineLogoHtmlForName(engine), analysisEngineName(engine))}${htmlEscape(analysisEngineName(engine))}<small${compactGroups ? ' class="sr-only"' : ''}>${htmlEscape(detail)}</small></h3>`;
+    const heading = `<h3 style="--engine-color:${engineBrushes(engine).swatch}">${engineAvatar(engine)}${htmlEscape(analysisEngineName(engine))}<small${compactGroups ? ' class="sr-only"' : ''}>${htmlEscape(detail)}</small></h3>`;
     const rows = engineLines.map((line) => {
       if (line.error) return `<li class="line-error">${htmlEscape(line.error)}</li>`;
       const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}"`;
@@ -2061,6 +2101,18 @@ function decorateMoveEvals(): void {
   }
 }
 
+/** Scroll the history only (never the page/board) so the current move stays visible. */
+function keepCurrentMoveInView(): void {
+  const list = el('movelist');
+  const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
+  if (!selected || !list.clientHeight) return;
+  const viewport = list.getBoundingClientRect();
+  const move = selected.getBoundingClientRect();
+  const padding = 8;
+  if (move.bottom > viewport.bottom - padding) list.scrollTop += move.bottom - viewport.bottom + padding;
+  else if (move.top < viewport.top + padding) list.scrollTop -= viewport.top - move.top + padding;
+}
+
 function renderMoveList() {
   nodeIndex.clear();
   const collect = (n: GameNode) => {
@@ -2076,14 +2128,7 @@ function renderMoveList() {
   el('movesTab').textContent = currentMove ? `Moves · ${currentMove}` : 'Moves';
   const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
   if (hadFocus) selected?.focus({ preventScroll: true });
-  if (selected) {
-    // Scroll the history only, never the page/board when navigating a game.
-    const viewport = list.getBoundingClientRect();
-    const move = selected.getBoundingClientRect();
-    const padding = 8;
-    if (move.bottom > viewport.bottom - padding) list.scrollTop += move.bottom - viewport.bottom + padding;
-    else if (move.top < viewport.top + padding) list.scrollTop -= viewport.top - move.top + padding;
-  }
+  keepCurrentMoveInView();
   for (const id of ['navStart', 'navBack']) el(id).toggleAttribute('disabled', !tree.current.parent);
   for (const id of ['navForward', 'navEnd']) el(id).toggleAttribute('disabled', !tree.current.children.length);
 }
@@ -3944,6 +3989,14 @@ function wireEvents() {
   messageObserver.observe(message, { childList: true, characterData: true, subtree: true });
   mountAbort.signal.addEventListener('abort', () => messageObserver.disconnect(), { once: true });
   updateMessageState();
+  const statusObserver = new MutationObserver(renderAnalysisStatus);
+  for (const id of ['stop', 'analyze']) statusObserver.observe(el(id), { attributes: true, attributeFilter: ['disabled'] });
+  mountAbort.signal.addEventListener('abort', () => statusObserver.disconnect(), { once: true });
+  renderAnalysisStatus();
+  // The always-visible history resizes as engine results stream in; keep the current move in view.
+  const historyObserver = new ResizeObserver(() => keepCurrentMoveInView());
+  historyObserver.observe(el('movelist'));
+  mountAbort.signal.addEventListener('abort', () => historyObserver.disconnect(), { once: true });
   const manager = el('engineManager') as HTMLDialogElement;
   const openEngineManager = (index?: number) => {
     manager.showModal();
