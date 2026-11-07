@@ -75,8 +75,9 @@ export interface EngineBrushes {
 export const ANALYSIS_DRAWABLE_BRUSHES = {
   green: { key: 'g', color: '#15781B', opacity: 1, lineWidth: 10 },
   paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: 15 },
-  blue: { key: 'b', color: '#003088', opacity: 1, lineWidth: 10 },
-  paleBlue: { key: 'pb', color: '#003088', opacity: 0.4, lineWidth: 15 },
+  // Brighter than lichess's #003088 so the arrow stays visible over dark pieces and squares.
+  blue: { key: 'b', color: '#1f5fcf', opacity: 1, lineWidth: 10 },
+  paleBlue: { key: 'pb', color: '#1f5fcf', opacity: 0.4, lineWidth: 15 },
   red: { key: 'r', color: '#882020', opacity: 1, lineWidth: 10 },
   paleRed: { key: 'pr', color: '#882020', opacity: 0.4, lineWidth: 15 },
   purple: { key: 'purple', color: '#68217a', opacity: 0.85, lineWidth: 10 },
@@ -93,7 +94,7 @@ export const ANALYSIS_DRAWABLE_BRUSHES = {
 
 const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {
   green: { primary: 'green', alt: 'paleGreen', swatch: '#15781B' },
-  blue: { primary: 'blue', alt: 'paleBlue', swatch: '#003088' },
+  blue: { primary: 'blue', alt: 'paleBlue', swatch: '#1f5fcf' },
   red: { primary: 'red', alt: 'paleRed', swatch: '#882020' },
   purple: { primary: 'purple', alt: 'palePurple', swatch: '#68217a' },
   orange: { primary: 'orange', alt: 'paleOrange', swatch: '#c45a11' },

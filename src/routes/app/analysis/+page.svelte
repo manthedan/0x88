@@ -69,7 +69,6 @@ onMount(() => {
       <p id="boardAnnouncement" class="sr-only" aria-live="polite"></p>
     </div>
     <div class="board-toolbar">
-    <span id="boardEval" class="board-eval" title="Evaluation from White's perspective">—</span>
     <div class="nav" aria-label="Move navigation">
       <button id="navStart" type="button" title="Start (Up)" aria-label="Go to first move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M18 5l-8 7 8 7" /></svg></button>
       <button id="navBack" type="button" title="Back (Left)" aria-label="Go back one move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-8 7 8 7" /></svg></button>
@@ -77,10 +76,7 @@ onMount(() => {
       <button id="navEnd" type="button" title="End (Down)" aria-label="Go to last move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg></button>
       <button id="flip" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
     </div>
-    <div class="board-actions">
-      <button id="openPosition" type="button" aria-controls="positionTools" aria-expanded="false">Load FEN / PGN</button>
-      <span id="sideToMove">White to move</span>
-    </div>
+    <button id="openPosition" class="position-toggle" type="button" aria-controls="positionTools" aria-expanded="false" title="Load or copy FEN / PGN"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z M14 3v5h5 M10 13h6 M10 17h6"/></svg>FEN / PGN</button>
     </div>
     <details id="positionTools" class="position-tools">
       <summary hidden>Position input &amp; export</summary>
@@ -103,23 +99,15 @@ onMount(() => {
   </div>
   <section class="panel app-sidebar" aria-label="Analysis">
     <header class="analysis-overview">
-      <div class="evaluation-readout">
-        <span>White's evaluation</span>
-        <strong id="posEval">—</strong>
-        <small id="evalEngine">Awaiting analysis</small>
-      </div>
-      <div class="best-move-readout">
-        <span>Best move</span>
-        <strong id="bestMove">—</strong>
-        <small id="bestMoveEngine">Click a line to play</small>
-      </div>
+      <span id="sideToMove" class="turn-indicator" data-turn="w">White to move</span>
       <div class="analyze-actions">
-        <button id="analyze" class="primary" type="button" disabled>Analyze</button>
-        <button id="stop" type="button" disabled>Stop</button>
-        <button id="manageEngines" type="button" aria-haspopup="dialog" aria-controls="engineManager">Manage engines · <span id="engineCount">1</span></button>
+        <button id="manageEngines" class="manage-engines" type="button" aria-haspopup="dialog" aria-controls="engineManager"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Manage engines · <span id="engineCount">1</span></button>
+        <button id="analyze" class="primary run-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Analyze</button>
+        <button id="stop" class="primary run-action stop-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>Stop<span id="stopProgress" class="stop-progress"></span></button>
       </div>
     </header>
     <div id="engineSummaries" class="engine-summaries" aria-label="Engine summaries and board arrow legend"></div>
+    <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">Compare with another engine</small></span></button>
     <div id="message" aria-live="polite">Loading model…</div>
     <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
@@ -129,10 +117,10 @@ onMount(() => {
       <button id="linesTab" type="button" role="tab" aria-selected="true" aria-controls="linesPanel" data-view="lines">Lines</button>
       <button id="comparisonTab" type="button" role="tab" aria-selected="false" aria-controls="comparisonSection" tabindex="-1" data-view="comparison">Comparison</button>
       <button id="movesTab" class="mobile-moves-tab" type="button" role="tab" aria-selected="false" aria-controls="historyPanel" tabindex="-1" data-view="moves">Moves</button>
-      <span>Click a line to play</span>
+      <span>Click a line to play it</span>
     </div>
     <section id="historyPanel" class="history-panel" aria-label="Game moves">
-      <header><h2>Game moves</h2><span>← → to navigate</span></header>
+      <header><h2>Moves</h2><span><kbd>←</kbd> <kbd>→</kbd> to step</span></header>
       <div id="movelist" class="movelist move-panel" aria-label="Move history"></div>
     </section>
     <div id="comparisonSection" class="section-block comparison-panel" role="tabpanel" aria-labelledby="comparisonTab" tabindex="0">
@@ -169,7 +157,7 @@ onMount(() => {
         <div class="engine-list-loading">Preparing engine controls…</div>
       </div>
       <div class="row add-engine-row">
-        <button id="addEngine" type="button">+ Add engine</button>
+        <button id="addEngineInManager" type="button">+ Add engine</button>
         {#if devMode}
         <div class="field"><label for="engineProfileSelect">Profile</label>
           <select id="engineProfileSelect"><option value="">default</option></select></div>
@@ -218,6 +206,7 @@ onMount(() => {
       <div id="recklessRuntimeInfo"></div>
     </div>
     {/if}
+      <div class="capabilities-slot"><BrowserCapabilities /></div>
       </div>
     </dialog>
     <details class="section-block human-moves">
@@ -229,7 +218,6 @@ onMount(() => {
       <div id="maia3Grid" class="maia3-grid" hidden></div>
       <div id="maia3Caption" class="small" hidden>What rated humans actually play here (Maia3 move predictions; score = expected points for White in a human game at that rating, not an engine eval). ✓ = matches the current best engine move.</div>
     </details>
-    <div class="capabilities-slot"><BrowserCapabilities /></div>
     <!-- Parked: features below are intentionally hidden. Remove hidden to re-enable. -->
     <details class="section-block" hidden>
       <summary>Game review</summary>
@@ -291,6 +279,7 @@ onMount(() => {
     --muted:color-mix(in srgb, var(--ink) 78%, var(--panel));
     --muted-2:var(--muted); --text-soft:var(--muted);
     --border-input:color-mix(in srgb, var(--ink) 38%, var(--panel));
+    --engine-color:var(--accent); /* overridden inline per engine row */
     --board-size:min(720px, calc(100dvh - 166px), calc(100vw - 520px));
     grid-template-columns:calc(var(--board-size) + 34px) minmax(0, 470px); gap:16px;
     max-width:1288px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
@@ -298,13 +287,12 @@ onMount(() => {
   .board-column{min-width:0}
   .board-panel{min-width:0; padding:8px}
   .board-wrap{display:grid; grid-template-columns:14px 1fr; gap:4px; position:relative}
-  .board-toolbar{display:flex; align-items:center; gap:8px; margin-top:8px}
-  .board-eval{flex:0 0 48px; text-align:center; color:var(--ink); font:700 12px var(--mono)}
-  .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0}
+  .board-toolbar{display:flex; align-items:stretch; gap:6px; margin:8px 0 0 18px; height:40px}
+  .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:calc(var(--board-size) + 64px); overflow:hidden}
+  .analysis-workspace .app-sidebar>*{flex:0 0 auto}
   .sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0}
   .board-shell{position:relative}
-  :global(.analysis-workspace #ground coords){font-size:13px; font-weight:750; text-shadow:0 1px 1px #0008}
-  :global(.analysis-workspace #ground coords.files){text-shadow:none}
+  :global(.analysis-workspace #ground coords){font-size:12px; font-weight:700; opacity:1}
   :global(.analysis-workspace #ground .cg-shapes){filter:drop-shadow(0 0 1px #fff9)}
   :global(.analysis-workspace #keyboardBoard){position:absolute; inset:0; z-index:5; pointer-events:none}
   :global(.analysis-workspace .keyboard-row){display:contents}
@@ -312,42 +300,60 @@ onMount(() => {
   :global(.analysis-workspace .keyboard-square:focus-visible){outline:3px solid #fff; outline-offset:-4px; box-shadow:inset 0 0 0 6px #225ca0; background:#fff2}
   .analysis-workspace .section-block>summary{font:650 13px/1.3 var(--sans); letter-spacing:0; text-transform:none; color:var(--ink)}
   .analysis-workspace .section-block>summary::before{font-size:12px}
-  .board-actions{display:flex; flex-direction:column; align-items:center; gap:2px}
-  .board-actions button{font-size:12px; padding:5px 8px; color:var(--ink); min-height:30px; white-space:nowrap}
-  .board-actions span{font-size:11px; color:var(--muted)}
+  .position-toggle{display:inline-flex; align-items:center; gap:6px; height:100%; min-height:0; padding:0 12px; border-radius:7px; border:1px solid var(--border-input); background:var(--panel-inset); color:var(--ink); font-size:13px; font-weight:600; white-space:nowrap}
+  :global(.analysis-workspace .position-toggle[aria-expanded=true]){border-color:var(--accent); color:var(--ink)}
+  .position-toggle svg, .analyze-actions svg{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
   .nav svg{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
   .analysis-workspace :global(button:focus-visible), .analysis-workspace :global(summary:focus-visible), .analysis-workspace :global(select:focus-visible), .analysis-workspace :global(input:focus-visible){outline:2px solid var(--accent); outline-offset:2px}
-  .analysis-content{display:grid; min-width:0}
+  .analysis-workspace .app-sidebar>.analysis-content{display:grid; grid-template-rows:auto auto minmax(0,1fr); flex:1 1 auto; min-width:0; min-height:0}
   .history-panel{grid-row:1; min-width:0; overflow:hidden; padding:0; border-top:1px solid var(--rule)}
-  .history-panel header{display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid var(--rule)}
-  .history-panel h2{font:650 14px var(--sans); letter-spacing:0; text-transform:none; margin:0; padding:0}
+  .history-panel header{display:flex; justify-content:space-between; align-items:center; padding:5px 12px; border-bottom:1px solid var(--rule)}
+  .history-panel h2{font:650 13px var(--sans); letter-spacing:0; text-transform:none; margin:0; padding:0; color:var(--ink)}
   .history-panel header span{font-size:12px; color:var(--muted)}
+  .history-panel kbd{display:inline-block; min-width:18px; padding:0 4px; border:1px solid var(--border-input); border-radius:4px; font:12px/16px var(--sans); text-align:center; color:var(--ink)}
   .engine-manager{width:min(600px, calc(100vw - 24px)); max-height:85dvh; padding:20px; color:var(--ink); background:var(--panel); border:1px solid var(--border-input); border-radius:12px; box-shadow:0 20px 80px #0008}
   .engine-manager::backdrop{background:#0009}
   .manager-heading{display:flex; align-items:center; justify-content:space-between; gap:12px}
   .manager-heading h2{font:650 20px var(--sans); color:var(--ink); text-transform:none; letter-spacing:0; margin:0}
   .engine-setup>p{margin:12px 0}
   .engine-setup>p:first-child{font-weight:650}
-  .engine-summaries{padding:0 12px 4px}
-  :global(.engine-summary){display:grid; grid-template-columns:minmax(0,1fr) 62px 58px; align-items:center; gap:8px; min-height:44px; border-top:1px solid var(--rule)}
-  :global(.engine-summary-name){padding:5px 0; min-width:0; border:0; background:transparent; text-align:left; color:var(--ink)}
-  :global(.engine-summary-name strong){display:flex; align-items:center; gap:7px; font:650 13px var(--sans)}
-  :global(.engine-summary-name small){display:block; margin:3px 0 0 15px; font:11px var(--mono); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .capabilities-slot{margin-top:16px}
+  .capabilities-slot :global(.capabilities){margin:0}
+  .engine-summaries{padding:0}
+  .add-engine-inline{display:flex; align-items:center; gap:9px; width:calc(100% - 16px); min-height:46px; margin:4px 8px; padding:4px 10px; border:1px dashed color-mix(in srgb, var(--ink) 34%, var(--panel)); border-radius:8px; background:transparent; color:var(--ink); text-align:left}
+  .add-engine-inline:hover:not(:disabled){border-style:solid; border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
+  .add-engine-plus{display:inline-grid; place-items:center; width:24px; height:24px; flex:0 0 24px; border-radius:6px; border:1px solid var(--border-input); color:var(--accent); font:600 18px/1 var(--sans)}
+  .add-engine-text{display:grid; gap:1px; min-width:0}
+  .add-engine-text strong{font:650 14px/1.3 var(--sans)}
+  .add-engine-text small{font:12px/1.35 var(--sans); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  :global(.engine-summary){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto 64px; align-items:center; gap:10px; min-height:50px; padding:0 12px 0 9px; border-top:1px solid var(--rule); border-left:3px solid var(--engine-color)}
+  :global(.engine-summary-name){display:flex; align-items:center; gap:9px; padding:6px 0; min-width:0; min-height:44px; border:0; background:transparent; text-align:left; color:var(--ink)}
+  :global(.engine-summary-name:hover:not(:disabled)){background:transparent; color:var(--ink)}
+  :global(.engine-summary-name:hover strong){text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--muted)}
+  :global(.engine-summary-text){display:grid; gap:1px; min-width:0}
+  :global(.engine-summary-name strong){font:650 14px/1.3 var(--sans)}
+  :global(.engine-summary-name small){font:12px/1.35 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   :global(.engine-dot){display:inline-block; width:8px; height:8px; flex:0 0 8px; border-radius:50%; background:var(--engine-color); box-shadow:0 0 0 1px color-mix(in srgb, var(--engine-color), white 30%)}
-  :global(.engine-summary-score){font:700 15px var(--mono); text-align:right}
-  :global(.engine-summary .compare-move){font-size:14px; min-height:30px; padding:4px; text-align:center}
+  :global(.engine-summary-score){font:700 20px/1 var(--mono); letter-spacing:-.02em; text-align:right; color:var(--ink)}
+  :global(.engine-summary .compare-move){font:650 15px var(--sans); min-height:36px; padding:4px; text-align:center}
+  :global(.engine-summary-meter){position:absolute; left:0; bottom:-1px; height:3px; width:var(--progress); background:var(--engine-color); transition:width .2s}
+  :global(.engine-summary-meter.indeterminate){width:100%; opacity:.55; animation:analysis-pulse 1.4s ease-in-out infinite}
+  @keyframes -global-analysis-pulse{50%{opacity:.15}}
+  :global(.engine-logo-frame){display:inline-grid; place-items:center; width:24px; height:24px; flex:0 0 24px; padding:1px; box-sizing:border-box; border-radius:6px; background:#f4f0e6; box-shadow:inset 0 0 0 1px #0000001f; overflow:hidden}
+  :global(.engine-logo-frame .engine-logo), :global(.engine-logo-frame .engine-logo-placeholder){display:block; width:100%; height:100%; border-radius:3px; object-fit:contain}
+  :global(.engine-logo-initial){font:700 13px/1 var(--sans); color:#3b352b}
   .workbench-tabs{grid-row:2; display:flex; align-items:center; gap:4px; padding:0 8px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); background:var(--panel-inset)}
   .workbench-tabs button{border:0; border-radius:0; border-bottom:2px solid transparent; min-height:36px; padding:8px; font-size:13px; background:transparent}
   .workbench-tabs button[aria-selected=true]{color:var(--ink); border-bottom-color:var(--accent); font-weight:650}
-  .workbench-tabs span{margin-left:auto; font-size:11px; color:var(--muted)}
+  .workbench-tabs span{margin-left:auto; font-size:12px; color:var(--muted)}
   .workbench-tabs .mobile-moves-tab{display:none}
-  .analysis-workspace .lines-panel, .analysis-workspace .comparison-panel{grid-row:3; border:0; padding:8px 12px; max-height:clamp(150px, calc(100dvh - 690px), 256px); overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable}
+  .analysis-workspace .lines-panel, .analysis-workspace .comparison-panel{grid-row:3; min-height:0; border:0; padding:6px 12px 8px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable}
   :global(.analysis-content[data-view=comparison]) .lines-panel, :global(.analysis-content:not([data-view=comparison])) .comparison-panel{display:none}
-  :global(.analysis-workspace .engine-badge){display:inline-flex; justify-content:center; align-items:center; width:26px; height:26px; flex:0 0 26px; border:2px solid var(--border-input); border-radius:6px; background:var(--panel-inset); color:var(--ink); font:700 12px var(--mono)}
+  :global(.analysis-workspace .engine-row){align-items:center}
   :global(.analysis-workspace .engine-row select), :global(.analysis-workspace .engine-row .row-strength){font-size:14px}
   :global(.analysis-workspace .engine-row .row-rm){min-height:36px}
   :global(.analysis-workspace .engine-row .row-unit){font-size:12px}
-  :global(.analysis-workspace .engine-row .row-strength){flex-basis:66px; width:66px}
+  :global(.analysis-workspace .engine-row .row-strength){flex-basis:76px; width:76px}
   .evalbar{
     width:14px; border:1px solid var(--border-input); border-radius:5px;
     overflow:hidden; background:var(--eval-black); position:relative; flex:0 0 auto;
@@ -362,23 +368,23 @@ onMount(() => {
     height:1px; background:var(--accent); opacity:.6;
   }
   .board-shell{min-width:0}
-  .nav{display:flex; flex:1; gap:5px; min-width:0}
+  .nav{display:flex; flex:1; gap:6px; min-width:0}
   .nav button{
-    flex:1 1 auto; height:36px; border-radius:7px;
+    flex:1 1 0; height:100%; min-height:0; border-radius:7px;
     border:1px solid var(--border-input); background:var(--panel-inset);
     color:var(--text-soft); font-size:14px; cursor:pointer;
     display:flex; align-items:center; justify-content:center;
   }
   .nav button:hover:not(:disabled){border-color:var(--border-input-hover); background:var(--card); color:var(--ink)}
-  .nav button:disabled{opacity:.35; cursor:default}
+  .nav button:disabled{opacity:1; cursor:default; color:color-mix(in srgb, var(--ink) 32%, var(--panel-inset)); background:transparent}
   .row{margin-top:10px}
   .engine-list{margin-top:0}
   .engine-list-loading{
-    padding:8px 0; color:var(--muted); font-family:var(--mono); font-size:11px;
+    padding:8px 0; color:var(--muted); font-size:12px;
   }
   :global(.runtime-warning){
     margin-top:7px; padding:7px 9px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule));
-    border-radius:6px; background:var(--warn-soft); color:var(--warn); font-family:var(--mono); font-size:10px; line-height:1.4;
+    border-radius:6px; background:var(--warn-soft); color:var(--warn); font-size:12px; line-height:1.4;
   }
   .field{margin-top:10px}
   .position-tools{border:0; overflow:hidden}
@@ -398,28 +404,29 @@ onMount(() => {
   .pgn-actions{margin-top:8px}
   input[type=number]:not(.stepper-field input){width:80px}
   :global(.lines){margin:0; padding:0}
-  :global(.engine-result + .engine-result){margin-top:6px}
-  :global(.engine-result h3){display:flex; gap:8px; align-items:center; margin:0 0 4px; font:650 13px var(--sans); color:var(--ink)}
-  :global(.engine-result h3 small){margin-left:auto; font:11px var(--mono); color:var(--muted); font-weight:400}
+  :global(.engine-result + .engine-result){margin-top:10px}
+  :global(.engine-result h3){display:flex; gap:7px; align-items:center; margin:0 0 2px; font:650 13px var(--sans); color:var(--ink)}
+  :global(.engine-result h3 .engine-logo-frame){width:20px; height:20px; flex-basis:20px; border-radius:5px}
+  :global(.engine-result h3 small){margin-left:auto; font:12px var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
   :global(.engine-result ol){list-style:none; margin:0; padding:0}
-  :global(.result-line){border-top:1px solid var(--rule); border-radius:4px; position:relative; min-height:30px}
-  :global(.result-line:hover), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--accent-soft)}
-  :global(.line-play){display:grid; grid-template-columns:12px 55px minmax(0,1fr); gap:6px; width:calc(100% - 32px); min-height:30px; padding:4px 2px; text-align:left; border:0; background:transparent; color:var(--ink); align-items:baseline}
-  :global(.line-rank){font:12px var(--mono); color:var(--muted)}
+  :global(.result-line){border-top:1px solid var(--rule); position:relative; min-height:36px}
+  :global(.result-line:has(.line-play:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--accent-soft)}
+  :global(.line-play){display:grid; grid-template-columns:14px 58px minmax(0,1fr); gap:6px; width:calc(100% - 36px); min-height:36px; padding:0 4px 0 2px; text-align:left; border:0; border-radius:0; background:transparent; color:var(--ink); align-items:center}
+  :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
+  :global(.line-rank){font:12px var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); text-align:center}
   :global(.lines .score){font:700 14px var(--mono); color:var(--ink)}
-  :global(.lines .pv){font:14px/1.5 var(--sans); color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  :global(.lines .pv){display:flex; flex-wrap:wrap; column-gap:.4em; height:1.45em; overflow:hidden; font:14.5px/1.45 var(--sans); color:var(--ink)}
+  :global(.lines .pv-move){white-space:nowrap}
+  :global(.lines .pv-move:first-child){font-weight:650}
   :global(.pv-expanded){margin:0}
-  :global(.pv-expanded summary){position:absolute; right:0; top:0; display:grid; place-items:center; width:32px; height:30px; font-size:20px; color:var(--muted); cursor:pointer; list-style:none}
+  :global(.pv-expanded summary){position:absolute; right:0; top:0; display:grid; place-items:center; width:36px; height:36px; border-left:1px solid var(--rule); color:var(--muted); cursor:pointer; list-style:none}
+  :global(.pv-expanded summary:hover){background:var(--panel-2, var(--panel)); color:var(--ink)}
+  :global(.pv-expanded summary svg){width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
   :global(.pv-expanded summary::-webkit-details-marker){display:none}
-  :global(.pv-expanded[open] summary){transform:rotate(180deg)}
-  :global(.pv-expanded p){font:14px/1.8 var(--sans); color:var(--ink); margin:0 8px 6px 22px; overflow-wrap:anywhere}
-  :global(.pv-expanded small){font-size:12px; color:var(--muted)}
+  :global(.pv-expanded[open] summary svg){transform:rotate(180deg)}
+  :global(.pv-expanded p){font:14.5px/1.7 var(--sans); color:var(--ink); margin:0 40px 2px 22px; overflow-wrap:anywhere}
+  :global(.pv-expanded small){display:block; margin:0 40px 6px 22px; font-size:12px; color:var(--muted)}
   :global(.line-error){padding:10px; color:var(--warn); font-size:14px; overflow-wrap:anywhere}
-  :global(.engine-logo){width:16px; height:16px; object-fit:contain; border-radius:3px; vertical-align:middle; flex:0 0 auto}
-  :global(.engine-logo-placeholder){display:inline-block; width:16px; height:16px; border-radius:3px; background:var(--rule-soft); flex:0 0 auto; vertical-align:middle}
-  :global(.engine-row .engine-logo), :global(.engine-row .engine-logo-placeholder){width:18px; height:18px}
-  :global(.legend .engine-logo), :global(.lines .engine-logo), :global(table.engine-compare .engine-logo),
-  :global(.legend .engine-logo-placeholder), :global(.lines .engine-logo-placeholder), :global(table.engine-compare .engine-logo-placeholder){width:14px; height:14px}
   :global(.engine-name-with-logo){display:inline-flex; align-items:center; gap:5px}
   :global(.lines li.placeholder){display:block; color:var(--muted); border-left:none; cursor:default}
   :global(.lines li.placeholder:hover){background:none}
@@ -458,9 +465,9 @@ onMount(() => {
   }
   :global(table.engine-compare thead th){color:var(--muted); font-weight:500; font-size:12px}
   :global(table.engine-compare tbody th){color:var(--ink); font-weight:550; font-size:13px}
-  :global(.compare-move){font:700 14px var(--mono); padding:6px; min-height:36px; color:var(--ink); background:var(--panel-inset)}
+  :global(.compare-move){font:650 14px var(--sans); padding:6px; min-height:36px; color:var(--ink); background:var(--panel-inset)}
   :global(table.engine-compare .mono){font-family:var(--mono); white-space:nowrap}
-  :global(table.engine-compare .pv){font-family:var(--mono); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px}
+  :global(table.engine-compare .pv){font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px}
   :global(table.engine-compare .agree){color:var(--accent); font-weight:700}
   :global(table.engine-compare tbody tr:hover){background:var(--accent-soft)}
   :global(.model-load-progress), :global(.search-progress-grid){
@@ -471,7 +478,7 @@ onMount(() => {
     width:100%; height:9px; accent-color:var(--accent);
   }
   :global(.loading-progress-row), :global(.search-progress-row){display:grid; gap:3px; margin:4px 0}
-  :global(.dl-label), :global(.search-progress-text){font-family:var(--mono); font-size:11px; color:var(--muted)}
+  :global(.dl-label), :global(.search-progress-text){font-size:12px; font-variant-numeric:tabular-nums; color:var(--muted)}
   :global(.search-activity-row){
     min-width:0; min-height:20px; display:grid; grid-template-columns:7px minmax(0,1fr);
     align-items:center; gap:8px;
@@ -483,24 +490,31 @@ onMount(() => {
   :global(.search-activity-row .search-progress-text){
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .analysis-overview{display:grid; grid-template-columns:1fr 1fr auto; gap:8px; padding:10px 12px; background:var(--panel-inset)}
-  .analysis-overview>div{min-width:0; display:grid; gap:3px; align-content:center}
-  .analysis-overview span, .analysis-overview small{font-size:12px; line-height:1.4; color:var(--muted)}
-  .analysis-overview strong{overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--ink); font:700 22px/1.3 var(--mono)}
-  .analysis-overview .analyze-actions{display:flex; flex-direction:column; gap:5px; justify-content:center}
-  .analyze-actions button{min-height:30px; padding:5px 10px; font-size:13px}
-  .analyze-actions #manageEngines, .analyze-actions #manageEngines span{font-size:11px; color:var(--muted)}
+  .analysis-overview{display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:56px; padding:8px 12px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
+  .turn-indicator{display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap}
+  .turn-indicator::before{content:''; width:12px; height:12px; border-radius:50%; background:#f4f1e8; box-shadow:0 0 0 1px #0007, 0 0 0 2px #fff3}
+  :global(.analysis-workspace .turn-indicator[data-turn=b]::before){background:#1d1b18; box-shadow:0 0 0 1px #fff8}
+  .analyze-actions{display:flex; align-items:stretch; gap:8px}
+  .analyze-actions button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:0 14px; border-radius:8px; font-size:14px; white-space:nowrap}
+  .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input)}
+  .manage-engines:hover:not(:disabled){background:var(--panel); color:var(--ink)}
+  .run-action{min-width:118px; font-weight:650}
+  .run-action svg{fill:currentColor; stroke:none}
+  #analyze:disabled{opacity:.55}
+  .stop-action{position:relative; overflow:hidden; isolation:isolate; --progress:0%}
+  .stop-action::before{content:''; position:absolute; inset:0 auto 0 0; width:var(--progress); background:#0000002e; z-index:-1; transition:width .2s}
+  .stop-progress{font:600 12px var(--sans); font-variant-numeric:tabular-nums; opacity:.85}
+  .stop-progress:empty{display:none}
   .analyze-actions #stop:disabled, .analyze-actions:has(#stop:not(:disabled)) #analyze{display:none}
-  :global(.analysis-overview[data-has-result]) #analyze{background:transparent; border-color:var(--border-input); color:var(--ink)}
-  :global(.analysis-overview[data-has-result]) .evaluation-readout small, :global(.analysis-overview[data-has-result]) .best-move-readout small{display:flex; align-items:center; gap:5px; font-size:11px}
-  :global(.analysis-overview[data-has-result]) .evaluation-readout small::before, :global(.analysis-overview[data-has-result]) .best-move-readout small::before{content:''; width:6px; height:6px; border-radius:50%; background:var(--engine-color)}
   .app-sidebar #message{
-    margin:0 12px 6px; padding:3px 8px; max-height:42px; overflow:auto;
+    margin:6px 12px; padding:4px 8px; max-height:44px; overflow:auto;
     border:0; border-left:2px solid var(--accent); border-radius:0 var(--radius-sm) var(--radius-sm) 0;
     background:var(--panel-inset); color:var(--text-soft);
     font-size:12px; line-height:1.5;
   }
   .app-sidebar :global(.model-load-progress){margin:6px 12px 0}
+  /* Per-engine progress lives in the summary rows (meter + stats) and on the Stop button. */
+  .app-sidebar #analysisSearchProgress{display:none}
   .analyze-controls{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px}
   .toggle{
     display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
@@ -558,8 +572,12 @@ onMount(() => {
   :global(.legend){display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; font-size:12px; color:var(--muted)}
   :global(.legend .key){display:inline-flex; align-items:center; gap:5px}
   :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
-  :global(.movelist){font:14px/1.4 var(--sans); min-height:44px; max-height:clamp(180px, calc(100dvh - 570px), 350px); overflow:auto; background:var(--panel-inset); scroll-padding:8px; overscroll-behavior:contain; scrollbar-gutter:stable; padding:4px 0}
-  :global(.move-pair){display:grid; grid-template-columns:44px 1fr 1fr; align-items:center; border-bottom:1px solid var(--rule)}
+  :global(.movelist){font:14px/1.4 var(--sans); min-height:44px; max-height:clamp(96px, calc(var(--board-size) - 524px), 196px); overflow:auto; background:var(--panel-inset); scroll-padding:8px; overscroll-behavior:contain; scrollbar-gutter:stable; padding:2px 0}
+  /* With three or more engines, give the extra summary rows' height back from the move list. */
+  @media (min-width:901px){
+    :global(.app-sidebar:has(.engine-summary:nth-child(3)) .movelist){max-height:clamp(80px, calc(var(--board-size) - 600px), 130px)}
+  }
+  :global(.move-pair){display:grid; grid-template-columns:40px minmax(0,1fr) minmax(0,1fr); align-items:center; border-bottom:1px solid var(--rule)}
   :global(.move-number), :global(.missing-ply){text-align:center; color:var(--muted); font-size:12px}
   :global(.history-empty){font:13px/1.5 var(--sans); margin:0; padding:12px; color:var(--muted)}
   :global(.variation){margin:4px 8px 4px 28px; padding-left:8px; border-left:2px solid var(--border-input)}
@@ -579,13 +597,15 @@ onMount(() => {
     display:inline-block; height:8px;
     background:#5a6e2a; border-radius:2px; opacity:0.75;
   }
-  :global(.movelist .mv){cursor:pointer; min-height:24px; padding:2px 10px; border:0; border-left:2px solid transparent; border-radius:3px; text-align:left; background:transparent; color:var(--ink); font:inherit}
-  :global(.movelist .mv:hover){background:var(--accent-soft)}
-  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 23%, transparent); border-left-color:var(--accent); color:var(--ink); font-weight:650}
+  :global(.movelist .mv){display:flex; align-items:center; justify-content:space-between; gap:6px; cursor:pointer; min-height:26px; padding:1px 10px; border:0; border-radius:3px; text-align:left; background:transparent; color:var(--ink); font:inherit}
+  :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft); color:var(--ink)}
+  :global(.movelist .mv.current){background:var(--accent); color:var(--on-accent); font-weight:700; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--on-accent) 35%, transparent)}
+  :global(.movelist .mv-eval){font:12px var(--mono); color:var(--muted); font-weight:400}
+  :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   :global(.movelist .var){color:var(--muted)}
   .human-moves>summary span{
     margin-left:5px; padding:2px 5px; border:1px solid var(--accent-tint-border); border-radius:3px;
-    color:var(--accent-deep); font-size:8px; letter-spacing:.06em;
+    color:var(--accent); font-size:12px; font-weight:600;
   }
   .add-engine-row{margin-top:3px; align-items:center}
   .add-engine-row button{
@@ -601,13 +621,13 @@ onMount(() => {
   :global(.pgn-db-card){display:grid; grid-template-columns:1fr auto; gap:3px 8px; text-align:left; background:var(--card)}
   :global(.pgn-db-card.selected){border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset}
   :global(.pgn-db-card .name){font-weight:700; color:var(--ink)}
-  :global(.pgn-db-card .meta), :global(.pgn-db-hit .meta){color:var(--muted); font-size:11px}
+  :global(.pgn-db-card .meta), :global(.pgn-db-hit .meta){color:var(--muted); font-size:12px}
   :global(.pgn-db-hit){padding:7px 8px; border:1px solid var(--rule); border-radius:6px; background:var(--card)}
   :global(.pgn-db-hit .name){font-weight:700; color:var(--ink)}
   :global(.pgn-db-hit .moves){font-family:var(--mono); color:var(--ink); margin-top:3px; overflow-wrap:anywhere}
   :global(table.opening){width:100%; border-collapse:collapse; font-size:13px; margin-top:8px}
   :global(table.opening th), :global(table.opening td){text-align:left; padding:5px 8px; border-bottom:1px solid var(--rule)}
-  :global(table.opening th){color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase}
+  :global(table.opening th){color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase}
   :global(table.opening td.num), :global(table.opening th.num){text-align:right; font-family:var(--mono)}
   :global(table.opening tr.mv){cursor:pointer}
   :global(table.opening tr.mv:hover td){background:var(--accent-soft)}
@@ -623,6 +643,9 @@ onMount(() => {
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
     .board-column{display:contents}
     .board-panel, .analysis-workspace .app-sidebar{grid-column:1; grid-row:auto}
+    .analysis-workspace .app-sidebar{height:auto; overflow:visible}
+    .analysis-workspace .app-sidebar>.analysis-content{grid-template-rows:none}
+    .board-toolbar{height:44px}
     .workbench-tabs{grid-row:1}
     .workbench-tabs .mobile-moves-tab{display:block}
     .workbench-tabs span{font-size:10px}
@@ -639,21 +662,22 @@ onMount(() => {
     .board-wrap{grid-template-columns:8px 1fr; gap:2px}
     .evalbar{width:8px; border-radius:2px}
     .board-panel :global(#ground){border-radius:3px}
-    .board-toolbar{flex-wrap:wrap; gap:4px; margin:6px 2px 0}
-    .board-eval{flex-basis:44px; font-size:11px}
-    .nav{gap:3px}
-    .nav button{height:36px; min-width:0; padding:4px}
-    .board-actions{flex-direction:row; width:100%; justify-content:space-between; margin:0 2px}
-    .board-actions button{min-height:30px}
-    .analysis-overview{padding:8px 12px; gap:6px; grid-template-columns:1fr .8fr auto}
-    .analysis-overview strong{font-size:22px}
-    .analysis-overview small{font-size:11px}
-    .analyze-actions button{min-height:32px}
+    .board-toolbar{gap:4px; margin:6px 2px 0 10px}
+    .nav{gap:4px}
+    .nav button{min-width:0; padding:4px}
+    .position-toggle{padding:0 10px; gap:5px}
+    .analysis-overview{padding:8px 10px; gap:8px}
+    .turn-indicator{font-size:0; gap:0} /* text stays in the accessibility tree; the swatch carries it visually */
+    .turn-indicator::before{width:14px; height:14px}
+    .analyze-actions{gap:6px}
+    .analyze-actions button{min-height:44px; padding:0 11px}
+    .run-action{min-width:104px}
     .app-sidebar #message{margin:0 12px 6px}
     :global(.analysis-workspace #ground coords){font-size:11px}
-    :global(.engine-summary){min-height:40px}
-    :global(.line-play){min-height:36px; padding-block:7px}
-    :global(.pv-expanded summary){height:36px}
+    :global(.engine-summary){min-height:52px; padding-right:10px}
+    :global(.line-play){min-height:44px}
+    :global(.pv-expanded summary){height:44px; width:40px}
+    :global(.line-play){width:calc(100% - 40px)}
     .engine-summaries{padding-bottom:2px}
     .workbench-tabs span{display:none}
     .workbench-tabs button{flex:1; min-height:38px}
