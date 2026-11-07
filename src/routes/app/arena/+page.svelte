@@ -41,6 +41,7 @@ onMount(() => {
 
 <SiteHeader pageTitle="Arena" />
 <main id="main" class="app-main arena-workspace" data-phase="setup" data-match="none" data-config="closed">
+  <div class="board-column">
   <section class="panel board-panel" aria-label="Board">
     <div id="blackSideLabel" class="player-strip" aria-label="Black player"></div>
     <div class="board-with-eval">
@@ -48,7 +49,35 @@ onMount(() => {
       <div class="board-shell"><div id="ground"></div></div>
     </div>
     <div id="whiteSideLabel" class="player-strip" aria-label="White player"></div>
+    <div id="evalSource" class="eval-source">No evaluation yet</div>
   </section>
+  <section id="chartsPanel" class="panel charts-panel" aria-label="Game charts" data-chart="evalChart" hidden>
+    <div class="charts-head">
+      <h2 class="block-heading">This game</h2>
+      <div class="chart-tabs" role="group" aria-label="Chart metric">
+        <button type="button" data-chart="evalChart" aria-pressed="true">Eval</button>
+        <button type="button" data-chart="timeChart" aria-pressed="false">Time</button>
+        <button type="button" data-chart="npsChart" aria-pressed="false">Speed</button>
+        <button id="rootChartTab" type="button" data-chart="rootChart" aria-pressed="false" hidden>Root visits</button>
+      </div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-card" data-chart="evalChart"><div class="chart-title">White expected score · 50% = equal</div><div id="evalChart"></div></div>
+      <div class="chart-card" data-chart="timeChart"><div class="chart-title">Search time per move · milliseconds</div><div id="timeChart"></div></div>
+      <div class="chart-card" data-chart="npsChart"><div class="chart-title">Search speed · nodes or visits per second</div><div id="npsChart"></div></div>
+      <div class="chart-card" data-chart="rootChart" hidden><div class="chart-title" id="rootChartTitle">LC0 root visits</div><div id="rootChart"></div>
+        <label class="root-review">Preview candidate <select id="rootCandidate" aria-label="Preview a root search candidate"></select></label>
+      </div>
+    </div>
+    <div class="chart-footer">
+      <div id="chartLegend" class="chart-legend"></div>
+      <div class="chart-review">
+        <input id="chartPly" type="range" min="0" max="0" value="0" aria-label="Review game position" title="Review a position (arrow keys move one ply)" />
+        <button id="chartLive" type="button">Latest</button>
+      </div>
+    </div>
+  </section>
+  </div>
   <section class="panel app-sidebar arena-sidebar" aria-label="Arena">
     <div class="status-block">
       <div id="message" class="arena-status" aria-live="polite">Loading…</div>
@@ -68,16 +97,15 @@ onMount(() => {
         <span class="sb-state" data-state="final">Final</span>
         <span class="sb-state" data-state="stopped">Stopped</span>
         <span class="sb-state" data-state="failed">Not started</span>
+        <div class="match-controls">
+          <button id="editSetup" class="ghost-button" type="button" aria-expanded="false" aria-controls="setupPane" title="View the match settings (locked until you stop)">Settings</button>
+          <button id="stop" class="stop-button" type="button" disabled>Stop</button>
+        </div>
       </div>
-      <div id="pairing" class="sb-progress"></div>
       <div id="matchScore" aria-live="polite"></div>
+      <div class="sb-context"><span id="setupSummaryText"></span><span id="pairing" class="sb-progress"></span></div>
       <div id="gameChips" class="sb-chips" aria-label="Finished games" hidden></div>
     </section>
-    <div class="setup-summary">
-      <span id="setupSummaryText" class="summary-text"></span>
-      <button id="editSetup" class="ghost-button" type="button" aria-expanded="false" aria-controls="setupPane" title="View the match settings (locked until you stop)">Settings</button>
-      <button id="stop" class="stop-button" type="button" disabled>Stop</button>
-    </div>
     <div id="setupPane" class="setup-pane">
     <p class="locked-note">Settings are locked while games run. Stop to change them.</p>
     <details class="section-block" open>
@@ -193,14 +221,16 @@ onMount(() => {
     {/if}
     </div>
     <div class="arena-actions">
+      <div id="startSummary" class="start-summary"></div>
       <button id="start" class="primary" type="button" disabled>Start match</button>
     </div>
     <section id="engineOutputsSection" class="engines-block" aria-label="Engine outputs" hidden>
       <h2 class="block-heading">Engines <span class="block-hint">evals from White's view</span></h2>
       <div id="engineEvalInfo" class="eng-grid"></div>
-      <details class="eng-more"><summary>Search details</summary><div id="engineRaw" class="eng-raw"></div></details>
     </section>
     <section id="movesBlock" class="moves-block" aria-label="Moves" hidden>
+      <h2 class="block-heading moves-heading">Moves <span class="block-hint">Select a move to review</span></h2>
+      <div class="move-columns" aria-hidden="true"><span>#</span><span>White</span><span>Black</span></div>
       <div id="reviewBar" class="review-bar" hidden><span id="reviewLabel"></span></div>
       <div id="gameMoves" class="move-list"></div>
       <div class="move-nav" role="group" aria-label="Browse moves">
@@ -211,6 +241,7 @@ onMount(() => {
         <button id="revLive" type="button" class="primary live-button" title="Back to the live game (Esc)" hidden>Back to live</button>
       </div>
     </section>
+    <details class="eng-more search-details"><summary>Search details</summary><div id="engineRaw" class="eng-raw"></div></details>
     <details id="resultSection" class="section-block results-block">
       <summary>Game log &amp; PGN</summary>
       <div class="log" id="log"></div>
@@ -224,37 +255,35 @@ onMount(() => {
       <div class="capabilities-slot"><BrowserCapabilities /></div>
     </details>
   </section>
-  <section id="chartsPanel" class="panel charts-panel" aria-label="Game charts" hidden>
-    <h2 class="block-heading">This game</h2>
-    <div class="chart-grid">
-      <div class="chart-card"><div class="chart-title">White win % per move</div><div id="evalChart"></div></div>
-      <div class="chart-card"><div class="chart-title">Move time (ms)</div><div id="timeChart"></div></div>
-      <div class="chart-card"><div class="chart-title">Speed (nodes or visits per second)</div><div id="npsChart"></div></div>
-      <div class="chart-card" hidden><div class="chart-title" id="rootChartTitle">LC0 root visits</div><div id="rootChart"></div></div>
-    </div>
-    <div id="chartLegend" class="chart-legend"></div>
-  </section>
 </main>
 
 <style>
   /* Page-local tokens (as on Play): readable secondary text and >=3:1 control boundaries in both themes. */
   .arena-workspace{
-    --muted:color-mix(in srgb, var(--ink) 72%, var(--panel));
+    --muted:#5f584c;
     --text-soft:var(--muted);
     --border-input:#8f8470; --border-input-hover:#6f6553;
     --coord-dark:#211d17; --coord-light:#fff8eb;
     --strip-h:46px;
+    --action-space:132px;
     --eval-dark:#2b2722; --eval-light:#f4f1e8;
     font-variant-numeric:tabular-nums;
+    scroll-margin-top:74px;
   }
-  :global(:root[data-theme="dark"]) .arena-workspace{--border-input:#766d5a; --border-input-hover:#958b77}
+  :global(:root[data-theme="dark"]) .arena-workspace{--muted:color-mix(in srgb, var(--ink) 72%, var(--panel)); --border-input:#766d5a; --border-input-hover:#958b77}
   @media (prefers-color-scheme: dark){
-    :global(:root:not([data-theme])) .arena-workspace{--border-input:#766d5a; --border-input-hover:#958b77}
+    :global(:root:not([data-theme])) .arena-workspace{--muted:color-mix(in srgb, var(--ink) 72%, var(--panel)); --border-input:#766d5a; --border-input-hover:#958b77}
+  }
+
+  .board-column{display:grid; gap:10px; min-width:0}
+  /* Keep one chart in view without shrinking the scoresheet. */
+  @media (min-width:901px){
+    .arena-workspace{grid-template-columns:minmax(0, clamp(360px, calc(100dvh - 340px), 690px)) minmax(440px,480px); max-width:1250px; column-gap:18px; row-gap:10px}
   }
 
   /* ── Board column: strip / eval bar + board / strip ── */
   .board-panel{display:flex; flex-direction:column; gap:4px; min-width:0; padding:8px}
-  .board-with-eval{display:grid; grid-template-columns:24px minmax(0,1fr); gap:8px; align-items:stretch}
+  .board-with-eval{display:grid; grid-template-columns:38px minmax(0,1fr); gap:8px; align-items:stretch}
   .board-shell{position:relative}
   .arena-workspace :global(#ground coords){font-size:12px; font-weight:700; opacity:1}
   .arena-eval-bar{
@@ -266,12 +295,14 @@ onMount(() => {
   .arena-eval-bar :global(.eval-midline){position:absolute; left:0; right:0; top:50%; height:1px; background:#9a8f7a}
   .arena-eval-bar :global(.eval-bar-value){
     position:absolute; left:0; right:0; text-align:center;
-    font:700 10.5px/1 var(--sans); letter-spacing:-.04em; pointer-events:none;
+    font:700 11px/1 var(--sans); letter-spacing:-.04em; pointer-events:none;
   }
   .arena-eval-bar :global(.eval-bar-value.at-white){bottom:5px; color:var(--eval-dark)}
   .arena-eval-bar :global(.eval-bar-value.at-black){top:5px; color:var(--eval-light)}
-  .arena-eval-bar.empty :global(.eval-fill){height:50%}
-  .arena-eval-bar:global(.empty){opacity:.55}
+  .arena-eval-bar:global(.empty){background:var(--panel-inset); border-color:var(--rule-strong)}
+  .arena-eval-bar :global(.eval-none){position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:18px}
+  .eval-source{min-height:18px; color:var(--muted); text-align:right; font-size:12px; line-height:18px}
+  .eval-source :global(strong){color:var(--ink)}
 
   .player-strip{
     display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h);
@@ -296,17 +327,13 @@ onMount(() => {
     border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent);
     animation:arena-spin .8s linear infinite;
   }
-  .player-strip :global(.strip-eval){flex:0 0 auto; color:var(--ink); font:700 15px var(--sans)}
-  .player-strip :global(.strip-clock){
-    flex:0 0 auto; min-width:68px; padding:4px 8px; text-align:right;
-    border:1px solid var(--rule-strong); border-radius:6px; background:var(--panel-inset);
-    color:var(--text); font:600 14px var(--sans);
-  }
-  .player-strip:global([data-turn=true]) :global(.strip-clock){background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+  .player-strip :global(.strip-metric){display:flex; flex:0 0 auto; flex-direction:column; align-items:flex-end; gap:1px; color:var(--ink); font:650 14px/1.2 var(--sans)}
+  .player-strip :global(.strip-metric small){color:var(--muted); font:500 11px/1.2 var(--sans)}
+  .player-strip :global(.strip-clock){min-width:66px}
   @keyframes arena-spin{to{transform:rotate(360deg)}}
 
   /* ── Sidebar: setup state vs running state (data-phase on <main>) ── */
-  .arena-workspace .arena-sidebar{display:flex; flex-direction:column; max-height:calc(100dvh - 90px); overflow:auto; overscroll-behavior:contain}
+  .arena-workspace .arena-sidebar{display:flex; flex-direction:column; max-height:none; overflow:hidden; position:static}
   .arena-sidebar > *{flex:0 0 auto}
   .status-block{padding:12px 14px 11px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
   .status-block:not(:has(#message:not(:empty), #runtimeWarning:not([hidden]), #engineWarmupStatus:not([hidden]), #downloadProgress:not([hidden]))){display:none}
@@ -331,17 +358,21 @@ onMount(() => {
   /* Scoreboard */
   .scoreboard{display:none; padding:12px 14px; border-bottom:1px solid var(--rule)}
   .arena-workspace:global(:not([data-match=none])) .scoreboard{display:block}
-  .sb-head{display:flex; align-items:center; gap:10px}
+  .sb-head{display:flex; align-items:center; gap:8px}
+  .match-controls{display:none; align-items:center; gap:6px; margin-left:4px}
+  .arena-workspace:global([data-phase=running]) .match-controls{display:flex}
   .sb-title{flex:1 1 auto; color:var(--ink); font:650 13px var(--sans)}
   .sb-state{display:none; align-items:center; gap:6px; padding:2px 9px; border-radius:999px; font:650 12px var(--sans); border:1px solid var(--rule-strong); color:var(--text)}
   .arena-workspace:global([data-match=live]) .sb-state[data-state=live],
   .arena-workspace:global([data-match=final]) .sb-state[data-state=final],
   .arena-workspace:global([data-match=stopped]) .sb-state[data-state=stopped],
   .arena-workspace:global([data-match=failed]) .sb-state[data-state=failed]{display:inline-flex}
-  .sb-state[data-state=live]{color:var(--accent-soft-text); border-color:var(--accent-tint-border); background:var(--accent-soft)}
+  .sb-state[data-state=live]{color:var(--on-accent); border-color:var(--accent); background:var(--accent)}
+  .sb-state[data-state=live] .live-dot{background:currentColor}
   .live-dot{width:7px; height:7px; border-radius:50%; background:var(--accent); animation:arena-pulse 1.6s ease-in-out infinite}
   @keyframes arena-pulse{50%{opacity:.35}}
-  .sb-progress{margin-top:2px; color:var(--text); font:500 13px/1.4 var(--sans)}
+  .sb-context{display:flex; flex-wrap:wrap; gap:2px 8px; margin-top:9px; color:var(--muted); font:500 12px/1.4 var(--sans)}
+  .sb-progress:not(:empty)::before{content:'·'; margin-right:8px}
   .sb-progress:empty{display:none}
   .scoreboard :global(.sb-match){display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:10px; margin-top:10px}
   .scoreboard :global(.sb-player){display:flex; align-items:center; gap:8px; min-width:0}
@@ -349,7 +380,7 @@ onMount(() => {
   .scoreboard :global(.sb-name){display:flex; flex-direction:column; min-width:0; line-height:1.25}
   .scoreboard :global(.sb-name strong){color:var(--ink); font:650 14px var(--sans); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .scoreboard :global(.sb-name small){color:var(--muted); font-size:12px}
-  .scoreboard :global(.sb-points){color:var(--ink); font:700 26px/1 var(--sans); white-space:nowrap}
+  .scoreboard :global(.sb-points){color:var(--ink); font:750 32px/1 var(--sans); white-space:nowrap}
   .scoreboard :global(.sb-dash){margin:0 7px; color:var(--muted); font-weight:500}
   .scoreboard :global(.sb-record){margin-top:7px; color:var(--muted); font-size:12.5px; line-height:1.4}
   .scoreboard :global(.standings){width:100%; margin-top:8px; border-collapse:collapse; font-size:13px}
@@ -367,20 +398,18 @@ onMount(() => {
   .sb-chips :global(.sb-chip.win){border-color:var(--accent); background:var(--accent-soft); color:var(--accent-soft-text)}
   .sb-chips :global(.sb-chip.loss){border-color:color-mix(in srgb, var(--warn) 60%, var(--rule)); color:var(--warn)}
 
-  /* Locked-setup summary + Stop (running), setup pane + Start (setup) */
-  .setup-summary{display:none; align-items:center; gap:8px; padding:10px 12px 10px 14px; border-bottom:1px solid var(--rule)}
-  .arena-workspace:global([data-phase=running]) .setup-summary{display:flex}
-  .summary-text{flex:1 1 auto; min-width:0; color:var(--ink); font:600 13.5px/1.35 var(--sans)}
+  /* Locked settings stay available during play. */
   .locked-note{display:none; margin:0; padding:10px 14px 0; color:var(--muted); font-size:12.5px}
   .arena-workspace:global([data-phase=running]) .locked-note{display:block}
-  .ghost-button{min-height:38px; padding:0 11px; border-radius:7px; background:transparent; border-color:var(--border-input); color:var(--text); font:600 13px var(--sans)}
+  .ghost-button{min-height:32px; padding:0 11px; border-radius:7px; background:transparent; border-color:var(--border-input); color:var(--text); font:600 13px var(--sans)}
   .ghost-button:global([aria-expanded=true]){border-color:var(--accent); color:var(--ink)}
-  .stop-button{min-height:38px; padding:0 14px; border-radius:7px; border-color:var(--warn); background:transparent; color:var(--warn); font:650 13.5px var(--sans)}
+  .stop-button{min-height:32px; padding:0 14px; border-radius:7px; border-color:var(--warn); background:transparent; color:var(--warn); font:650 13.5px var(--sans)}
   .stop-button:hover:not(:disabled){background:var(--warn); border-color:var(--warn); color:var(--bg)}
   .arena-workspace:global([data-phase=running]:not([data-config=open])) .setup-pane{display:none}
   .arena-workspace:global([data-phase=running]) .setup-pane{border-bottom:1px solid var(--rule); background:var(--panel-inset)}
   .arena-workspace:global([data-phase=running]) .arena-actions{display:none}
   .arena-actions{padding:4px 14px 14px}
+  .start-summary{display:none}
   .arena-actions #start{width:100%; min-height:46px; border-radius:8px; font:700 15px var(--sans)}
   .arena-workspace button:disabled{opacity:1; cursor:not-allowed; background:var(--panel-2); border-color:var(--rule-strong); color:color-mix(in srgb, var(--ink) 50%, var(--panel))}
 
@@ -443,7 +472,7 @@ onMount(() => {
   .block-hint{color:var(--muted); font-weight:500; font-size:12px}
   .eng-grid{display:grid; gap:8px}
   .eng-grid :global(.eng-card){
-    display:grid; gap:7px; min-width:0; padding:9px 11px;
+    display:grid; gap:6px; min-width:0; padding:8px 11px;
     border:1px solid var(--rule-strong); border-left:4px solid var(--eng); border-radius:8px; background:var(--panel);
   }
   .eng-grid :global(.eng-card.thinking){background:color-mix(in srgb, var(--accent) 7%, var(--panel))}
@@ -452,31 +481,26 @@ onMount(() => {
   .eng-grid :global(.eng-name){color:var(--ink); font:650 14px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .eng-grid :global(.eng-side){color:var(--muted); font-size:12px}
   .eng-grid :global(.eng-eval){color:var(--ink); font:700 21px/1 var(--sans)}
-  .eng-grid :global(.eng-live){display:grid; gap:5px}
-  .eng-grid :global(.eng-thinking){display:flex; flex-wrap:wrap; align-items:center; gap:2px 10px; color:var(--text); font-size:12.5px}
-  .eng-grid :global(.eng-thinking-label){color:var(--accent-soft-text); font-weight:650}
-  .eng-grid :global(.eng-thinking-mark){
-    width:10px; height:10px; border-radius:50%;
-    border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent);
-    animation:arena-spin .8s linear infinite;
-  }
-  .eng-grid :global(.eng-live progress){width:100%; height:6px; accent-color:var(--accent)}
+  .eng-grid :global(.eng-thinking-label){margin-left:7px; color:var(--accent-soft-text); font:650 12px var(--sans)}
+  .eng-grid :global(.eng-search-meter){width:100%; height:4px; accent-color:var(--accent)}
   .eng-grid :global(.eng-wdl){display:flex; align-items:center; gap:9px; color:var(--text); font-size:12.5px}
   .eng-grid :global(.wdl-bar){display:flex; flex:0 0 110px; height:11px; box-sizing:border-box; border:1px solid var(--border-input); border-radius:5px; overflow:hidden}
   .eng-grid :global(.wdl-bar .w){background:var(--eval-light)}
   .eng-grid :global(.wdl-bar .d){background:#9a9282}
   .eng-grid :global(.wdl-bar .l){background:var(--eval-dark)}
-  .eng-grid :global(.eng-stats){display:flex; flex-wrap:wrap; gap:3px 16px; margin:0}
-  .eng-grid :global(.eng-stats div){display:flex; align-items:baseline; gap:5px}
+  .eng-grid :global(.eng-stats){display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:0}
+  .eng-grid :global(.eng-stats div){display:grid; align-content:start; gap:1px}
+  .eng-grid :global(.eng-stats .move-time){grid-column:4}
   .eng-grid :global(.eng-stats dt){color:var(--muted); font-size:12px}
   .eng-grid :global(.eng-stats dd){margin:0; color:var(--ink); font:600 13px var(--sans)}
-  .eng-grid :global(.eng-line){margin:0; color:var(--text); font:500 14px/1.55 var(--sans)}
+  .eng-grid :global(.eng-line){margin:0; overflow:auto; white-space:nowrap; color:var(--text); font:500 13px/1.7 var(--mono); scrollbar-width:thin}
+  .eng-grid :global(.eng-line:focus-visible){outline:2px solid var(--accent); outline-offset:2px}
   .eng-grid :global(.eng-line-label){margin-right:4px; color:var(--muted); font-size:12px}
   .eng-grid :global(.pv-move){white-space:nowrap}
   .eng-grid :global(.pv-move.first){color:var(--ink); font-weight:700}
   .eng-grid :global(.pv-num){margin-right:3px; color:var(--muted); font-weight:500}
   .eng-grid :global(.eng-empty){margin:0; color:var(--muted); font-size:13px}
-  .eng-more{margin-top:6px}
+  .eng-more{margin-top:0; padding:7px 14px; border-top:1px solid var(--rule)}
   .eng-more>summary, .more-options>summary{display:flex; align-items:center; gap:7px; min-height:28px; cursor:pointer; list-style:none; color:var(--text); font:600 12.5px var(--sans)}
   .eng-more>summary::-webkit-details-marker, .more-options>summary::-webkit-details-marker{display:none}
   .eng-more>summary::before, .more-options>summary::before{content:''; width:6px; height:6px; margin:0 2px; border:solid var(--muted); border-width:0 2px 2px 0; transform:rotate(-45deg); transition:transform .15s}
@@ -486,11 +510,15 @@ onMount(() => {
   .eng-raw :global(strong){display:block; color:var(--ink); font:600 12px var(--sans)}
 
   /* Move table (number | White | Black), as on Play */
-  .arena-sidebar > .moves-block{display:flex; flex:1 1 auto; flex-direction:column; min-height:150px; border-top:1px solid var(--rule)}
+  .arena-sidebar > .moves-block{display:flex; flex-direction:column; border-top:1px solid var(--rule)}
+  .moves-heading{padding:10px 14px 0}
+  .move-columns{display:grid; grid-template-columns:44px 1fr 1fr; color:var(--muted); font:500 12px/24px var(--sans); border-bottom:1px solid var(--rule)}
+  .move-columns span{padding-left:12px}
+  .move-columns span:first-child{text-align:center; padding-left:0}
   .arena-sidebar > .moves-block[hidden]{display:none}
   .review-bar{padding:7px 14px; border-bottom:1px solid var(--accent-tint-border); background:var(--accent-soft); color:var(--accent-soft-text); font:600 12.5px/1.4 var(--sans)}
-  .move-list{position:relative; flex:1 1 auto; min-height:0; max-height:260px; overflow:auto; overscroll-behavior:contain; font:500 15px/1.4 var(--sans)}
-  .move-list :global(.move-row){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); min-height:32px}
+  .move-list{position:relative; height:256px; flex:0 0 256px; overflow:auto; overscroll-behavior:contain; scroll-snap-type:y proximity; font:500 15px/1.4 var(--sans)}
+  .move-list :global(.move-row){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); height:32px; scroll-snap-align:start}
   .move-list :global(.move-row:nth-child(even)){background:color-mix(in srgb, var(--ink) 3%, var(--panel))}
   .move-list :global(.num){display:grid; place-items:center; color:var(--muted); font-size:13px; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
   .move-list :global(.san){display:flex; align-items:center; min-height:32px; padding:0 12px; border:0; border-radius:0; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer}
@@ -498,7 +526,7 @@ onMount(() => {
   .move-list :global(.san.empty){cursor:default; color:var(--muted)}
   .move-list :global(button.san:hover:not(.current)){background:var(--accent-soft)}
   .move-list :global(.san.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)); color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
-  .move-nav{display:flex; gap:4px; padding:8px 10px; border-top:1px solid var(--rule)}
+  .move-nav{display:flex; gap:4px; padding:6px 10px; border-top:1px solid var(--rule)}
   .move-nav button{display:grid; place-items:center; width:40px; height:34px; padding:0; border-radius:7px; border:1px solid var(--border-input); background:var(--panel-2); color:var(--ink)}
   .move-nav button:disabled{background:transparent; border-color:var(--rule)}
   .move-nav button:disabled svg{opacity:.3}
@@ -508,7 +536,8 @@ onMount(() => {
   /* Log, PGN, runtime */
   .results-block, .runtime-block{border-top:1px solid var(--rule)}
   .arena-workspace:global([data-phase=running]) .runtime-block{display:none}
-  .arena-workspace:global([data-match=none]) .results-block{display:none}
+  .arena-workspace:global([data-match=none]) .results-block,
+  .arena-workspace:global([data-match=none]) .search-details{display:none}
   .log{min-height:0; max-height:200px; overflow:auto; font:11.5px/1.45 var(--mono); color:var(--text)}
   .log :global(div){padding:3px 0; border-top:1px solid var(--rule)}
   .log :global(div.replayable){cursor:pointer}
@@ -523,13 +552,29 @@ onMount(() => {
   .runtime-badge:global(.warn){color:var(--warn); border-color:color-mix(in srgb, var(--warn) 35%, var(--rule)); background:var(--warn-soft)}
   .runtime-block .capabilities-slot{padding:0; border-top:0}
 
-  /* Charts (below the board) */
-  .charts-panel{grid-column:1; padding:12px 14px}
-  .chart-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
-  .chart-card{border:1px solid var(--rule-strong); border-radius:6px; padding:6px 8px; background:var(--card)}
-  .chart-card :global(svg){display:block; width:100%; height:auto; cursor:pointer}
+  /* One compact chart at a time; every metric remains available. */
+  .charts-panel{grid-column:1; padding:8px 12px; min-width:0}
+  .charts-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:3px}
+  .charts-head .block-heading{margin:0; white-space:nowrap}
+  .chart-tabs{display:flex; gap:2px; flex-wrap:wrap}
+  .chart-tabs button{min-height:28px; padding:2px 8px; background:transparent; border-color:transparent; color:var(--muted); font:600 12px var(--sans)}
+  .chart-tabs button[aria-pressed=true]{background:var(--accent-soft); border-color:var(--accent-tint-border); color:var(--accent-soft-text)}
+  .chart-grid{min-width:0}
+  .chart-card{display:none; min-width:0}
+  .charts-panel:global([data-chart=evalChart]) .chart-card[data-chart=evalChart],
+  .charts-panel:global([data-chart=timeChart]) .chart-card[data-chart=timeChart],
+  .charts-panel:global([data-chart=npsChart]) .chart-card[data-chart=npsChart],
+  .charts-panel:global([data-chart=rootChart]) .chart-card[data-chart=rootChart]{display:block}
+  .chart-card :global(svg){display:block; width:100%; height:auto; cursor:crosshair}
+  .chart-card[data-chart=rootChart] :global(svg){height:auto}
+  .chart-footer{display:flex; align-items:center; flex-wrap:wrap; gap:2px 12px; margin-top:3px}
+  .chart-review{display:flex; flex:1; min-width:130px; align-items:center; gap:8px; color:var(--muted); font-size:12px}
+  .chart-review input{flex:1; min-width:0; width:auto; min-height:24px; accent-color:var(--accent)}
+  .chart-review button{min-height:28px; padding:2px 8px; font-size:12px}
+  .root-review{display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px}
+  .root-review select{min-width:0; flex:1}
   .chart-title{margin-bottom:2px; color:var(--muted); font-size:12px}
-  .chart-legend{display:flex; flex-wrap:wrap; gap:14px; margin-top:6px; color:var(--text); font-size:12px}
+  .chart-legend{display:flex; flex-wrap:wrap; gap:10px; color:var(--text); font-size:12px}
   .chart-legend :global(.swatch){display:inline-block; width:9px; height:9px; margin-right:4px; border-radius:2px; vertical-align:-1px}
 
   /* Dev-only advanced settings (?dev) */
@@ -545,15 +590,19 @@ onMount(() => {
   @media (max-width:900px){
     .arena-workspace .arena-sidebar{max-height:none; overflow:visible}
     .charts-panel{grid-column:auto}
-    .chart-grid{grid-template-columns:1fr}
-    /* A persistent Start / Stop bar while the board fills the screen. */
-    .arena-actions, .arena-workspace:global([data-phase=running]) .setup-summary{
-      position:sticky; bottom:0; z-index:4; background:var(--panel);
-      box-shadow:0 -1px 0 var(--rule), 0 -10px 18px -14px rgba(0,0,0,.45);
+    /* Setup first before the first game; running games keep the board first. */
+    .arena-workspace:global([data-match=none]) .arena-sidebar{grid-row:1}
+    .arena-workspace:global([data-phase=setup]){padding-bottom:calc(var(--action-space) + env(safe-area-inset-bottom))}
+    .arena-workspace :global(:is(input,select,textarea,button,summary)){scroll-margin-bottom:calc(var(--action-space) + env(safe-area-inset-bottom) + 16px)}
+    .arena-actions{
+      position:fixed; left:0; right:0; bottom:0; z-index:4; background:var(--panel);
+      border-top:1px solid var(--border-input); padding:10px max(12px, calc((100vw - 650px) / 2)) calc(10px + env(safe-area-inset-bottom));
+      box-shadow:0 -8px 24px #00000020;
     }
-    .arena-actions{padding:10px 12px; border-radius:0 0 var(--radius-lg) var(--radius-lg)}
-    .arena-sidebar > .moves-block{flex:0 0 auto}
-    .move-list{max-height:180px}
+    .start-summary{display:block; margin-bottom:7px; color:var(--text); font:500 12px/1.4 var(--sans)}
+    .start-summary :global(strong){display:block; color:var(--ink); font-weight:650}
+    .chart-tabs button{min-height:36px}
+    .chart-review{min-width:100%}
     .move-nav button{height:40px; flex:1 1 0; width:auto}
     .move-nav .live-button{flex:1.6 1 0}
   }
@@ -567,21 +616,25 @@ onMount(() => {
     .player-strip{gap:8px}
     .arena-workspace :global(.player-strip .arena-avatar){flex-basis:30px; width:30px; height:30px; font-size:11.5px}
     .player-strip :global(.strip-id strong){font-size:14px}
-    .player-strip :global(.strip-clock){min-width:60px; font-size:13px; padding:4px 6px}
+    .player-strip :global(.strip-clock){min-width:58px; font-size:13px}
     .status-block{padding:10px 12px}
     .arena-workspace .section-block{padding:11px 12px}
-    .setup-pane :global(.seat-head), .setup-pane :global(.seat-row){grid-template-columns:auto minmax(0,1fr) minmax(0,1fr) auto}
-    .setup-pane :global(.seat-head){display:none}
-    .setup-pane :global(.seat-row .seat-name span:last-child){position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%)}
-    .setup-pane :global(.seat-row select), .arena-workspace select, .arena-workspace input[type=number]{min-height:44px}
+    .setup-pane :global(.seat-head), .setup-pane :global(.seat-row){grid-template-columns:92px minmax(0,1fr) minmax(0,1fr) auto}
+    .setup-pane :global(.seat-row .seat-name){font-size:12px}
+    .setup-pane :global(.seat-row .seat-name .arena-avatar){width:22px; height:22px; flex-basis:22px}
+    .setup-pane :global(.seat-row select){padding-left:8px; font-size:13px}
     .setup-pane :global(.seat-strength-wrap){grid-column:2 / -1}
-    .time-grid{grid-template-columns:1fr 1fr}
-    .time-grid .field:first-child{grid-column:1 / -1}
-    .scoreboard :global(.sb-points){font-size:23px}
+    .setup-pane :global(.seat-row select), .arena-workspace select, .arena-workspace input[type=number]{min-height:44px}
+    .time-grid{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr)}
+    .time-grid label{font-size:12px}
+    .time-grid select{padding-left:8px; font-size:12px}
+    .scoreboard :global(.sb-points){font-size:28px}
+    .scoreboard :global(.sb-name strong){font-size:12px}
+    .scoreboard :global(.sb-player .arena-avatar){display:none}
     .ghost-button, .stop-button{min-height:44px}
   }
   @media (prefers-reduced-motion: reduce){
     .arena-eval-bar :global(.eval-fill){transition:none}
-    .player-strip :global(.strip-thinking)::before, .eng-grid :global(.eng-thinking-mark), .live-dot{animation:none}
+    .player-strip :global(.strip-thinking)::before, .live-dot{animation:none}
   }
 </style>

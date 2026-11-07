@@ -506,6 +506,7 @@ const thinkingSince = new Map<string, number>();
 /** Search time used by each side in the game on the board. */
 const sideTimeMs = { w: 0, b: 0 };
 let arenaClockTimer: ReturnType<typeof setInterval> | null = null;
+let arenaChartResizeObserver: ResizeObserver | null = null;
 interface ArenaGameResultChip {
   index: number;
   result: GameResultCode;
@@ -612,16 +613,11 @@ function hasBoundedArenaSearch(progress: ArenaSearchProgress): boolean {
   );
 }
 
-/** Live search line inside the thinking engine's panel (replaces the old one-line truncated ticker). */
-function arenaSearchProgressHtml(progress: ArenaSearchProgress, position: BoardState): string {
-  const parts: string[] = [];
-  if (!progress.indeterminate && progress.completed !== undefined) parts.push(`${formatCount(progress.completed)} ${progress.units}`);
-  if (progress.nps && progress.nps > 0) parts.push(`${formatCount(progress.nps)} ${progress.units === 'visits' ? 'visits/s' : 'nps'}`);
-  if (progress.best) parts.push(`best ${uciToSan(position, progress.best)}`);
-  const meter = hasBoundedArenaSearch(progress)
-    ? `<progress value="${Math.max(0, Math.floor(progress.completed!))}" max="${Math.max(1, Math.floor(progress.requested!))}"></progress>`
+/** Live activity never borrows evaluation/PV/metrics from the previous search. */
+function arenaSearchProgressHtml(progress: ArenaSearchProgress): string {
+  return hasBoundedArenaSearch(progress)
+    ? `<progress class="eng-search-meter" aria-label="Current search progress" value="${Math.max(0, Math.floor(progress.completed!))}" max="${Math.max(1, Math.floor(progress.requested!))}"></progress>`
     : '';
-  return `<div class="eng-thinking"><span class="eng-thinking-mark" aria-hidden="true"></span><span class="eng-thinking-label">Thinking</span>${parts.map((part) => `<span>${htmlEscape(part)}</span>`).join('')}</div>${meter}`;
 }
 
 function setArenaSearchProgress(engineId: string, label: string, progress: ArenaSearchProgress): void {
@@ -1221,17 +1217,16 @@ function renderEvalBars(): void {
   const whiteScore = clamp01(bar?.whiteScore ?? 0.5);
   node.classList.toggle('empty', !bar);
   node.style.setProperty('--eng', output ? engineBrushes(output.engineName).swatch : 'var(--border-input)');
-  let value = '';
   const text = output?.evalText ?? bar?.label;
-  if (text) {
-    const mate = /^#(-?\d+)$/.exec(text);
-    const pawns = Number(text);
-    value = mate ? `M${Math.abs(Number(mate[1]))}` : Number.isFinite(pawns) ? Math.abs(pawns).toFixed(Math.abs(pawns) >= 10 ? 0 : 1) : text.replace(/^[+-]/, '');
-  }
   const label = output && text ? `Evaluation ${text} from White's view, by ${displayEngineName(output.engineName)}` : 'Evaluation: none yet';
   node.title = label;
   node.setAttribute('aria-label', label);
-  node.innerHTML = `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div>${value ? `<span class="eval-bar-value ${whiteScore >= 0.5 ? 'at-white' : 'at-black'}">${htmlEscape(value)}</span>` : ''}`;
+  node.innerHTML = bar
+    ? `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div><span class="eval-bar-value ${whiteScore >= 0.5 ? 'at-white' : 'at-black'}">${htmlEscape(text ?? '—')}</span>`
+    : '<span class="eval-none">—</span>';
+  el('evalSource').innerHTML = output && bar
+    ? `<strong>${htmlEscape(text ?? '—')}</strong> · ${htmlEscape(displayEngineName(output.engineName))} · White’s view · last completed search`
+    : 'No evaluation yet';
 }
 
 /** Numbered SAN for a PV searched from `fen` ("16… Bb3 17. a5 Rfd1"), first move emphasised. */
@@ -1262,10 +1257,13 @@ function engineCardHtml(id: string): string {
   const thinking = running && thinkingEngineIds.has(id);
   const side = boardSideFor(id);
   const progress = arenaSearchProgress.get(id) ?? { label: rawName, units: 'search' as const, indeterminate: true };
-  const live = thinking ? `<div class="eng-live">${arenaSearchProgressHtml(progress, board)}</div>` : '';
-  const head = `<header class="eng-head">${engineAvatarHtml(rawName)}<span class="eng-title"><span class="eng-name">${htmlEscape(name)}</span>${side ? `<span class="eng-side">${side}</span>` : ''}</span><span class="eng-eval" title="Evaluation from White's view">${htmlEscape(snapshot?.evalText ?? '—')}</span></header>`;
+  const live = thinking ? arenaSearchProgressHtml(progress) : '';
+  const searched = snapshot ? parseFen(snapshot.fen) : null;
+  const resultLabel = searched ? `Previous move ${searched.fullmove}${searched.turn === 'b' ? '…' : '.'}` : 'No completed search';
+  const activity = thinking ? `<span class="eng-thinking-label" title="Searching move ${board.fullmove}; results below are from the previous completed search">Thinking</span>` : '';
+  const head = `<header class="eng-head">${engineAvatarHtml(rawName)}<span class="eng-title"><span class="eng-name">${htmlEscape(name)}${activity}</span><span class="eng-side">${side ? `${side} · ` : ''}${resultLabel}</span></span><span class="eng-eval" title="Previous move’s evaluation from White's view">${htmlEscape(snapshot?.evalText ?? '—')}</span></header>`;
   if (!snapshot) {
-    return `<article class="eng-card${thinking ? ' thinking' : ''}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${thinking ? '' : '<p class="eng-empty">Waiting for its first move.</p>'}</article>`;
+    return `<article class="eng-card${thinking ? ' thinking' : ''}" data-engine-id="${htmlEscape(id)}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${thinking ? '' : '<p class="eng-empty">Waiting for its first move.</p>'}</article>`;
   }
   const wdl = snapshot.wdlWhite
     ? `<div class="eng-wdl"><span class="wdl-bar" aria-hidden="true"><span class="w" style="width:${(100 * snapshot.wdlWhite[0]).toFixed(1)}%"></span><span class="d" style="width:${(100 * snapshot.wdlWhite[1]).toFixed(1)}%"></span><span class="l" style="width:${(100 * snapshot.wdlWhite[2]).toFixed(1)}%"></span></span><span class="wdl-text">W ${percent0(snapshot.wdlWhite[0])} · D ${percent0(snapshot.wdlWhite[1])} · L ${percent0(snapshot.wdlWhite[2])}</span></div>`
@@ -1273,23 +1271,23 @@ function engineCardHtml(id: string): string {
   const stats: [string, string][] = [];
   if (snapshot.kind === 'lc0') {
     if (snapshot.visits !== undefined) stats.push(['Visits', formatCount(snapshot.visits)]);
-    if (snapshot.nps != null) stats.push(['Speed', `${formatCount(snapshot.nps)}/s`]);
+    if (snapshot.nps != null) stats.push(['Visits/s', formatNps(snapshot.nps)]);
   } else {
     if (snapshot.depth != null) stats.push(['Depth', String(snapshot.depth)]);
-    if (snapshot.nps != null) stats.push(['Speed', `${formatNps(snapshot.nps)} nps`]);
+    if (snapshot.nps != null) stats.push(['Nodes/s', formatNps(snapshot.nps)]);
     if (snapshot.nodes != null) stats.push(['Nodes', formatNodes(snapshot.nodes)]);
   }
-  if (snapshot.elapsedMs != null) stats.push(['Time', formatSeconds(snapshot.elapsedMs)]);
+  if (snapshot.elapsedMs != null) stats.push(['Move time', formatSeconds(snapshot.elapsedMs)]);
   const statsHtml = stats.length
-    ? `<dl class="eng-stats">${stats.map(([label, value]) => `<div><dt>${label}</dt><dd>${htmlEscape(value)}</dd></div>`).join('')}</dl>`
+    ? `<dl class="eng-stats">${stats.map(([label, value]) => `<div${label === 'Move time' ? ' class="move-time"' : ''}><dt>${label}</dt><dd>${htmlEscape(value)}</dd></div>`).join('')}</dl>`
     : '';
   const line = snapshot.pv?.length
     ? pvSanHtml(snapshot.fen, snapshot.pv)
     : snapshot.move
       ? pvSanHtml(snapshot.fen, [snapshot.move])
       : '';
-  const lineHtml = line ? `<p class="eng-line"><span class="eng-line-label">Line</span> ${line}</p>` : '';
-  return `<article class="eng-card${thinking ? ' thinking' : ''}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${wdl}${statsHtml}${lineHtml}</article>`;
+  const lineHtml = line ? `<p class="eng-line" tabindex="0" data-fen="${htmlEscape(snapshot.fen)}" aria-label="Previous move’s principal variation"><span class="eng-line-label">PV</span> ${line}</p>` : '';
+  return `<article class="eng-card${thinking ? ' thinking' : ''}" data-engine-id="${htmlEscape(id)}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${wdl}${statsHtml}${lineHtml}</article>`;
 }
 
 /** Raw engine output (UCI PV, policy, cache counters) for the "Search details" disclosure. */
@@ -1304,10 +1302,20 @@ function renderEngineOutputs(): void {
   const ids = [...new Set(activeEngineIds)];
   const cards = ids.filter((id) => running || engineOutputs.has(id)).map(engineCardHtml);
   const grid = el('engineEvalInfo');
+  // Progress refreshes must not interrupt a spectator reading a long retained PV.
+  const pvState = new Map([...grid.querySelectorAll<HTMLElement>('.eng-line')].map((line) => [
+    line.closest<HTMLElement>('.eng-card')!.dataset.engineId,
+    { fen: line.dataset.fen, scrollLeft: line.scrollLeft, focused: document.activeElement === line },
+  ]));
   grid.innerHTML = cards.join('');
+  for (const line of grid.querySelectorAll<HTMLElement>('.eng-line')) {
+    const previous = pvState.get(line.closest<HTMLElement>('.eng-card')!.dataset.engineId);
+    if (previous?.focused) line.focus({ preventScroll: true });
+    // A newly completed result starts at its first move; ongoing searches retain the reader's place.
+    if (previous && previous.fen === line.dataset.fen) line.scrollLeft = previous.scrollLeft;
+  }
   const raw = document.getElementById('engineRaw');
   if (raw) raw.innerHTML = ids.map(engineRawHtml).join('');
-  keepMovesAtLiveEnd();
   const section = document.getElementById('engineOutputsSection');
   if (section) section.hidden = !cards.length;
 }
@@ -1339,7 +1347,6 @@ function renderStrips(): void {
   const sides = stripSides();
   const turn = board.turn;
   const now = performance.now();
-  const timed = arenaBudgetMode() === 'movetime';
   const update = (nodeId: string, color: 'w' | 'b', side: StripSide) => {
     const node = el(nodeId);
     const colorName = color === 'w' ? 'White' : 'Black';
@@ -1349,7 +1356,7 @@ function renderStrips(): void {
     const moveMs = thinking && since !== undefined ? Math.max(0, now - since) : 0;
     const usedMs = sideTimeMs[color] + moveMs;
     const meta = thinking
-      ? `<span class="strip-thinking">Thinking ${(moveMs / 1000).toFixed(1)}${timed ? ` / ${(arenaMovetimeMs() / 1000).toFixed(1)}` : ''} s</span>`
+      ? `<span class="strip-thinking">${colorName} · thinking · move ${board.fullmove}</span>`
       : `${colorName}${side.seat ? ` · ${side.seat}` : ''}`;
     const name = side.name ? displayEngineName(side.name) : 'No engine';
     const showClock = running || usedMs > 0;
@@ -1357,8 +1364,8 @@ function renderStrips(): void {
     node.innerHTML =
       `${side.name ? engineAvatarHtml(side.name) : ''}` +
       `<span class="strip-id"><strong>${htmlEscape(name)}</strong><small><span class="side-dot ${color}" aria-hidden="true"></span>${meta}</small></span>` +
-      `<span class="strip-eval" title="${output?.evalText ? `${htmlEscape(name)}'s evaluation, White's view` : ''}">${htmlEscape(output?.evalText ?? '')}</span>` +
-      (showClock ? `<span class="strip-clock" title="Search time used this game">${formatSeconds(usedMs)}</span>` : '');
+      (output?.evalText ? `<span class="strip-metric" title="${htmlEscape(name)}'s previous completed search, White's view"><small>Eval · White</small>${htmlEscape(output.evalText)}</span>` : '') +
+      (showClock ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small>${formatSeconds(usedMs)}</span>` : '');
   };
   update('blackSideLabel', 'b', sides.b);
   update('whiteSideLabel', 'w', sides.w);
@@ -1401,15 +1408,12 @@ function renderBoard() {
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 140 },
     lastMove: shownUci ? [shownUci.slice(0, 2) as Key, shownUci.slice(2, 4) as Key] : undefined,
-    // Custom brushes in the two side identity colors so the last-move arrow also
-    // shows which side just moved — a calm alternative to per-ply "to move" flashing.
+    // Last moves use square highlights only. Arrows are reserved for root candidates.
     drawable: {
       enabled: false,
       brushes: {
-        moveWhite: { key: 'moveWhite', color: '#2f6e7d', opacity: 0.9, lineWidth: 14 },
-        moveBlack: { key: 'moveBlack', color: '#b15c2b', opacity: 0.9, lineWidth: 14 },
-        candidate: { key: 'candidate', color: '#5a6e2a', opacity: 0.95, lineWidth: 14 },
-        candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.5, lineWidth: 9 },
+        candidate: { key: 'candidate', color: '#5a6e2a', opacity: 0.95, lineWidth: 15 },
+        candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.5, lineWidth: 15 },
       },
     },
   };
@@ -1418,14 +1422,7 @@ function renderBoard() {
   const cfg = config as unknown as NonNullable<Parameters<typeof Chessground>[1]>;
   if (!ground) ground = Chessground(el('ground'), cfg);
   else ground.set(cfg);
-  // The mover is the side NOT to move now; tint the arrow with their identity hue.
-  const moverBrush = fenTurn(shown.fen) === 'w' ? 'moveBlack' : 'moveWhite';
-  const shapes: DrawShape[] =
-    reviewing && reviewShapes
-      ? reviewShapes
-      : shownUci && shownUci.length >= 4
-        ? [{ orig: shownUci.slice(0, 2) as Key, dest: shownUci.slice(2, 4) as Key, brush: moverBrush }]
-        : [];
+  const shapes: DrawShape[] = reviewing && reviewShapes ? reviewShapes : [];
   ground.setAutoShapes(shapes);
   renderSideLabels();
   renderEngineOutputs();
@@ -1484,6 +1481,11 @@ function renderReviewBar(): void {
   const bar = el('reviewBar');
   bar.hidden = !reviewing || !reviewTrail;
   if (!bar.hidden && reviewTrail) el('reviewLabel').textContent = `Reviewing ${reviewTrail.label} · ply ${reviewIndex} of ${reviewTrail.entries.length - 1}`;
+  const chartPly = inputEl('chartPly');
+  chartPly.max = String(Math.max(0, (liveTrail?.entries.length ?? 1) - 1));
+  chartPly.value = String(reviewing && reviewTrail === liveTrail ? reviewIndex : Number(chartPly.max));
+  chartPly.disabled = !liveTrail || liveTrail.entries.length <= 1;
+  chartPly.setAttribute('aria-valuetext', chartPly.value === '0' ? 'Opening position' : `Ply ${chartPly.value}`);
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   const last = trail ? trail.entries.length - 1 : 0;
   const index = reviewing && reviewTrail ? reviewIndex : last;
@@ -1545,8 +1547,8 @@ function renderMoveStrip(): void {
   if (current) {
     // Scroll only the list (never the page) so the current move stays in view.
     const top = current.offsetTop;
-    if (top < strip.scrollTop) strip.scrollTop = Math.max(0, top - 8);
-    else if (top + current.offsetHeight > strip.scrollTop + strip.clientHeight) strip.scrollTop = top - strip.clientHeight + current.offsetHeight + 8;
+    if (top < strip.scrollTop) strip.scrollTop = top;
+    else if (top + current.offsetHeight > strip.scrollTop + strip.clientHeight) strip.scrollTop = top - strip.clientHeight + current.offsetHeight;
   }
 }
 
@@ -1572,15 +1574,28 @@ function reviewRootChartClick(event: MouseEvent): void {
   const rect = svg.getBoundingClientRect();
   const viewH = rootChartContext.top.length * 14 + 2;
   const row = Math.floor((((event.clientY - rect.top) / rect.height) * viewH - 1) / 14);
-  const clicked = rootChartContext.top[Math.max(0, Math.min(row, rootChartContext.top.length - 1))];
-  const shapes: DrawShape[] = rootChartContext.top.slice(0, 5).map((child) => ({
+  previewRootCandidate(Math.max(0, Math.min(row, rootChartContext.top.length - 1)), index);
+}
+
+/** Keyboard and pointer previews share the same candidate/position mapping. */
+function previewRootCandidate(row: number, knownIndex?: number): void {
+  if (!rootChartContext || !liveTrail) return;
+  const index = knownIndex ?? liveTrail.entries.findLastIndex((entry) => entry.fen === rootChartContext!.fen);
+  const clicked = rootChartContext.top[row];
+  if (index < 0 || !clicked) return;
+  selectEl('rootCandidate').value = String(row);
+  // Promotions can share a from/to pair. Keep the selected candidate, never stack arrows.
+  const seen = new Set<string>();
+  const shapes: DrawShape[] = [clicked, ...rootChartContext.top.slice(0, 5)].filter((child) => {
+    const squares = child.uci.slice(0, 4);
+    if (seen.has(squares)) return false;
+    seen.add(squares);
+    return true;
+  }).map((child) => ({
     orig: child.uci.slice(0, 2) as Key,
     dest: child.uci.slice(2, 4) as Key,
     brush: child.uci === clicked.uci ? 'candidate' : 'candidateDim',
   }));
-  if (!shapes.some((shape) => shape.brush === 'candidate')) {
-    shapes.push({ orig: clicked.uci.slice(0, 2) as Key, dest: clicked.uci.slice(2, 4) as Key, brush: 'candidate' });
-  }
   enterReview(liveTrail, index, shapes);
 }
 
@@ -1598,12 +1613,12 @@ function chartPlyFromClick(chartId: 'evalChart' | 'timeChart' | 'npsChart', targ
   if (!svg || !plies.length) return null;
   const rect = svg.getBoundingClientRect();
   if (!rect.width) return null;
-  // Mirror lineChartSvg's layout: viewBox width 360, plot area between
-  // pad.left=36 and width-pad.right=352, x spanning the actually drawn points.
-  const viewX = ((event.clientX - rect.left) / rect.width) * 360;
+  // Mirror lineChartSvg's plot padding at the responsive SVG viewBox width.
+  const width = svg.viewBox.baseVal.width;
+  const viewX = ((event.clientX - rect.left) / rect.width) * width;
   const xMin = Math.min(...plies);
   const xMax = Math.max(...plies);
-  const frac = Math.max(0, Math.min(1, (viewX - 36) / (352 - 36)));
+  const frac = Math.max(0, Math.min(1, (viewX - 36) / (width - 8 - 36)));
   return Math.round(xMin + frac * (xMax - xMin));
 }
 
@@ -1839,6 +1854,7 @@ function renderSeatSelectors(): void {
       .join('');
   reconcileActiveRuntimeFallbackWarning();
   if (!running) renderStrips();
+  renderSetupSummary();
 }
 
 function syncSeatRowsFromDom(): void {
@@ -1870,12 +1886,12 @@ let arenaMatchState: ArenaMatchState = 'none';
 
 function readyMessage(): string {
   return arenaTournamentMode() === 'match'
-    ? 'Ready. Choose two engines and press Start match.'
-    : 'Ready. Choose the engines and press Start tournament.';
+    ? 'Ready. Set up your match.'
+    : 'Ready. Set up your tournament.';
 }
 
 function isReadyMessage(text: string | null): boolean {
-  return !!text && text.startsWith('Ready. Choose ');
+  return !!text && text.startsWith('Ready. Set up ');
 }
 
 function arenaGamesPerOpening(): number {
@@ -1895,17 +1911,27 @@ function renderSetupSummary(): void {
     }
   });
   const who = mode === 'match' ? names.join(' vs ') : `${mode === 'gauntlet' ? 'Gauntlet' : 'Round robin'} · ${names.length} engines`;
-  const budget = arenaBudgetMode() === 'movetime' ? `${arenaMovetimeMs()} ms per move` : 'fixed visits / depth';
-  const perOpening = arenaGamesPerOpening();
-  const gamesText = scheduledGameCount ? `${scheduledGameCount} game${scheduledGameCount === 1 ? '' : 's'}` : `${perOpening} per opening`;
-  node.textContent = `${who} · ${budget} · ${gamesText}`;
+  const budget = arenaBudgetMode() === 'movetime' ? `${arenaMovetimeMs()} ms/move` : 'Fixed visits / depth';
+  node.textContent = budget;
+  let scheduleText: string;
+  try {
+    const openings = selectedOpenings();
+    const pairs = tournamentPairings(mode, activeSeatRows().map((_, index) => String(index)));
+    const count = openings.length * pairs.length * arenaGamesPerOpening();
+    scheduleText = `${count} game${count === 1 ? '' : 's'} · ${budget} · ${selectEl('startingPositionSelect').selectedOptions[0]?.textContent ?? 'Custom openings'}`;
+  } catch {
+    scheduleText = `${budget} · Check custom openings`;
+  }
+  el('startSummary').innerHTML = `<strong>${htmlEscape(who)}</strong>${htmlEscape(scheduleText)}`;
 }
 
 /** Setup vs running sidebar states (CSS keys off these data attributes on <main>). */
 function syncArenaPhase(): void {
   const main = document.getElementById('main');
   if (!main) return;
+  const wasRunning = main.dataset.phase === 'running';
   main.dataset.phase = running ? 'running' : 'setup';
+  if (running && !wasRunning && window.matchMedia('(max-width: 900px)').matches) main.scrollIntoView({ block: 'start' });
   main.dataset.match = arenaMatchState;
   if (!running) main.dataset.config = 'closed';
   const editButton = document.getElementById('editSetup');
@@ -3239,6 +3265,7 @@ function refreshOpeningPreview(): void {
   select.disabled = running;
   textarea.disabled = running || !custom;
   if (running) return;
+  renderSetupSummary();
   try {
     const openings = selectedOpenings();
     el('openingInfo').textContent = `${openings.length} position${openings.length === 1 ? '' : 's'} in the schedule.`;
@@ -3256,10 +3283,10 @@ function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, sco
   const side = (name: string, seat: string) =>
     `<span class="sb-player">${engineAvatarHtml(name)}<span class="sb-name"><strong>${htmlEscape(displayEngineName(name))}</strong>${sameEngine ? `<small>${seat}</small>` : ''}</span></span>`;
   const points = (value: number) => formatScoreHalf(value) || '0';
-  const played = `${score.games} of ${scheduledGameCount || score.games} game${(scheduledGameCount || score.games) === 1 ? '' : 's'} played`;
+  const record = score.games ? `<div class="sb-record">${htmlEscape(displayEngineName(nameA))} · W ${score.aWins} · D ${score.draws} · L ${score.bWins} · ${score.games}/${scheduledGameCount || score.games} finished</div>` : '';
   el('matchScore').innerHTML =
     `<div class="sb-match">${side(nameA, 'Engine 1')}<span class="sb-points" aria-label="Score ${points(score.a)} to ${points(score.b)}">${points(score.a)}<span class="sb-dash">–</span>${points(score.b)}</span>${side(nameB, 'Engine 2').replace('sb-player', 'sb-player right')}</div>` +
-    `<div class="sb-record">${htmlEscape(displayEngineName(nameA))}: ${score.aWins} won · ${score.draws} drawn · ${score.bWins} lost · ${played}</div>`;
+    record;
   renderGameResultChips();
 }
 
@@ -3391,13 +3418,33 @@ function resetGameCharts(): void {
   sideTimeMs.b = 0;
   rootChartContext = null;
   el('chartsPanel').hidden = false;
+  selectChart('evalChart');
+  el('rootChartTab').hidden = true;
   for (const id of ['evalChart', 'timeChart', 'npsChart', 'rootChart']) el(id).innerHTML = '';
   el('rootChartTitle').textContent = 'LC0 root visits';
   (el('rootChart').parentElement as HTMLElement).hidden = true;
   el('chartLegend').innerHTML = '';
 }
 
+function selectChart(id: string): void {
+  el('chartsPanel').dataset.chart = id;
+  for (const button of el('chartsPanel').querySelectorAll<HTMLButtonElement>('button[data-chart]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.chart === id));
+  }
+}
+
+/** Label generated SVGs locally; the shared chart builders also serve other pages. */
+function describeChart(id: string, summary: string): void {
+  const svg = el(id).querySelector('svg');
+  if (!svg) return;
+  svg.setAttribute('aria-label', summary);
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+  title.textContent = summary;
+  svg.prepend(title);
+}
+
 function renderGameCharts(): void {
+  const chartSize = { width: Math.max(300, el('chartsPanel').clientWidth - 24), height: 64 };
   const ids = [...new Set(gameChartSamples.map((sample) => sample.engineId))];
   const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] =>
     ids.map((id) => ({
@@ -3412,16 +3459,23 @@ function renderGameCharts(): void {
     }));
   el('evalChart').innerHTML = lineChartSvg(
     seriesFor((sample) => sample.whiteScore),
-    { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%` },
+    { ...chartSize, yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%` },
   );
   el('timeChart').innerHTML = lineChartSvg(
     seriesFor((sample) => sample.moveMs),
-    { yMin: 0, formatY: formatCompactNumber },
+    { ...chartSize, yMin: 0, formatY: formatCompactNumber },
   );
   el('npsChart').innerHTML = lineChartSvg(
     seriesFor((sample) => sample.nps),
-    { yMin: 0, formatY: formatCompactNumber },
+    { ...chartSize, yMin: 0, formatY: formatCompactNumber },
   );
+  const summaries = (value: (sample: GameChartSample) => string) => ids.map((id) => {
+    const sample = gameChartSamples.findLast((entry) => entry.engineId === id);
+    return sample ? `${displayEngineName(sample.engineName)}: ${value(sample)}` : '';
+  }).join('; ');
+  describeChart('evalChart', `White expected score by ply. Latest: ${summaries((sample) => sample.whiteScore === undefined ? 'unavailable' : percent0(sample.whiteScore))}. Use the Review game position slider to explore.`);
+  describeChart('timeChart', `Search time by ply. Latest: ${summaries((sample) => formatSeconds(sample.moveMs))}. Use the Review game position slider to explore.`);
+  describeChart('npsChart', `Search speed by ply. Latest: ${summaries((sample) => sample.nps === undefined ? 'unavailable' : `${formatNps(sample.nps)} nodes or visits per second`)}. Use the Review game position slider to explore.`);
   el('chartLegend').innerHTML = ids
     .map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(arenaChartEngineName(gameChartSamples, id))}</span>`)
     .join('');
@@ -3439,6 +3493,8 @@ function renderRootChart(engineId: string): void {
   rootChartContext = { fen: result.fen, top: top.map((child) => ({ uci: child.uci, visits: child.visits })) };
   el('rootChartTitle').textContent = `${engines.get(engineId)?.name ?? engineId} root visits (Q from side to move)`;
   (el('rootChart').parentElement as HTMLElement).hidden = false;
+  el('rootChartTab').hidden = false;
+  selectEl('rootCandidate').innerHTML = '<option value="">Choose a move…</option>' + top.map((child, index) => `<option value="${index}">${htmlEscape(uciToSan(parseFen(result.fen), child.uci))} · ${formatCount(child.visits)} ${child.visits === 1 ? 'visit' : 'visits'} · Q ${signed(child.q, 2)}</option>`).join('');
   el('rootChart').innerHTML = hBarChartSvg(
     top.map((child) => ({
       label: child.uci,
@@ -3447,6 +3503,7 @@ function renderRootChart(engineId: string): void {
       color: chartColorFor(engineId),
     })),
   );
+  describeChart('rootChart', `Root search candidates by visits. ${top.map((child) => `${child.uci}: ${child.visits} ${child.visits === 1 ? 'visit' : 'visits'}`).join('; ')}. Use Preview a root search candidate to show arrows on the board.`);
 }
 
 function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number): void {
@@ -4418,6 +4475,20 @@ function wireEvents() {
     });
   }
   el('rootChart').addEventListener('click', (event) => reviewRootChartClick(event as MouseEvent));
+  for (const button of el('chartsPanel').querySelectorAll<HTMLButtonElement>('button[data-chart]')) {
+    button.addEventListener('click', () => selectChart(button.dataset.chart!));
+  }
+  el('rootCandidate').addEventListener('change', () => {
+    const value = selectEl('rootCandidate').value;
+    if (value !== '') previewRootCandidate(Number(value));
+  });
+  el('chartPly').addEventListener('input', () => {
+    if (liveTrail) enterReview(liveTrail, Number(inputEl('chartPly').value));
+  });
+  el('chartLive').addEventListener('click', () => {
+    if (running) exitReview();
+    else if (liveTrail) enterReview(liveTrail, liveTrail.entries.length - 1);
+  });
   el('gameMoves').addEventListener('click', (event) => {
     const span = (event.target as HTMLElement).closest('.san[data-idx]') as HTMLElement | null;
     if (!span) return;
@@ -4435,6 +4506,15 @@ function wireEvents() {
     main.dataset.config = main.dataset.config === 'open' ? 'closed' : 'open';
     syncArenaPhase();
   });
+  arenaChartResizeObserver?.disconnect();
+  let previousChartWidth = 0;
+  arenaChartResizeObserver = new ResizeObserver(([entry]) => {
+    const width = Math.round(entry.contentRect.width);
+    if (width <= 0 || width === previousChartWidth) return;
+    previousChartWidth = width;
+    if (gameChartSamples.length) renderGameCharts();
+  });
+  arenaChartResizeObserver.observe(el('chartsPanel'));
   if (arenaClockTimer) clearInterval(arenaClockTimer);
   arenaClockTimer = setInterval(() => {
     if (running && thinkingSince.size) renderStrips();
@@ -4448,7 +4528,7 @@ function wireEvents() {
   arenaKeydownHandler = (event: KeyboardEvent) => {
     if (!reviewing && !(event.key === 'ArrowLeft' && liveTrail && liveTrail.entries.length > 1)) return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest?.('input,textarea,select')) return;
+    if (target?.closest?.('input,textarea,select,.eng-line')) return;
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
       stepReview(-1);
@@ -4744,6 +4824,8 @@ export function mountArenaBrowser(): () => void {
     arenaPagehideHandler = null;
     if (arenaClockTimer) clearInterval(arenaClockTimer);
     arenaClockTimer = null;
+    arenaChartResizeObserver?.disconnect();
+    arenaChartResizeObserver = null;
     (ground as { destroy?: () => void } | null)?.destroy?.();
     ground = null;
   };
