@@ -58,6 +58,7 @@ import {
 } from './moveNavigation.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
+import { playMaterial } from './playMaterial.ts';
 import { loadPlayPreferences, type PlayPreferences, type PreferenceStorage, savePlayPreferences } from './playPreferences.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
@@ -82,7 +83,7 @@ interface PlayEngineOption {
 }
 
 const ENGINE_OPTIONS: PlayEngineOption[] = [
-  { id: 'maia3', label: 'Maia3 · Elo-conditioned human model', family: 'maia3', variant: 'maia3', group: 'human' },
+  { id: 'maia3', label: 'Maia3 · Human-like opponent', family: 'maia3', variant: 'maia3', group: 'human' },
   ...enginePlayOptions().map(({ id, label, family, variant, group }) => ({ id, label, family, variant, group })),
 ];
 
@@ -391,6 +392,7 @@ function ctxRenderMaia3Controls(ctx: PlayContext): void {
   el('maia3Advanced').hidden = !isMaia3;
   const elo = ctxSelectedMaia3Elo();
   el('maia3EloValue').textContent = String(elo);
+  el('maia3Elo').setAttribute('aria-valuetext', `${elo} rating · ${maiaRatingBand(elo)}`);
   const sample = ctxSelectedMaia3Style() === 'sample';
   (el('maia3Temperature') as HTMLInputElement).disabled = !sample;
   (el('maia3TopP') as HTMLInputElement).disabled = !sample;
@@ -398,7 +400,7 @@ function ctxRenderMaia3Controls(ctx: PlayContext): void {
   (el('maia3TopPField') as HTMLElement).style.opacity = sample ? '' : '0.5';
 }
 
-/** `routine` notes (engine ready) stay in the live region but are not shown; the status line already says it. */
+/** Routine readiness stays in the live region; the player strip shows its visible label. */
 function ctxSetEngineNote(text: string, warn = false, routine = false): void {
   const note = el('engineNote');
   note.textContent = text;
@@ -1254,15 +1256,15 @@ function ctxLiveStatusText(ctx: PlayContext): string {
   if (ctx.preparingEngine) return `Preparing ${ctxSelectedEngine(ctx).label} before the first move…`;
   if (ctx.engineThinking) return `${ctxOpponentName(ctxSelectedEngine(ctx))} is thinking…`;
   if (!ctx.engineReady) return `${ctxSelectedEngine(ctx).label} is not ready. Retry the engine or choose another opponent.`;
-  if (ctxPhase(ctx) === 'setup' && ctx.board.turn === ctx.humanColor)
-    return `Your move as ${ctx.humanColor === 'w' ? 'White' : 'Black'}. Press Play, or just make your first move.`;
+  if (ctxPhase(ctx) === 'setup') return 'Press Play or make a move.';
+  if (boardCheck(ctx.board)) return ctx.board.turn === ctx.humanColor ? 'You are in check' : `${ctxOpponentName(ctxSelectedEngine(ctx))} is in check`;
   return ctx.board.turn === ctx.humanColor ? 'Your move' : `${ctxOpponentName(ctxSelectedEngine(ctx))} to move`;
 }
 
 function ctxRenderMoveList(ctx: PlayContext): void {
   const list = el('moveList');
   if (!ctx.sans.length) {
-    list.innerHTML = '<span class="placeholder">No moves yet</span>';
+    list.innerHTML = '<span class="placeholder">Your game starts here. Move a piece, or type a move below (e.g. Nf3).</span>';
     return;
   }
   const rows: string[] = [];
@@ -1376,9 +1378,9 @@ function ctxRefreshEngineOptions(ctx: PlayContext): void {
       .map(ctxEngineOptionHtml)
       .join('');
   select.innerHTML =
-    `<optgroup label="Human move prediction (Maia3)">${group('human')}</optgroup>` +
-    `<optgroup label="Odds engine (starts without its queen)">${group('odds')}</optgroup>` +
-    `<optgroup label="Engines (strong at any level)">${group('engine')}</optgroup>`;
+    `<optgroup label="Human-like · 600–2600 rating">${group('human')}</optgroup>` +
+    `<optgroup label="Handicap · plays without its queen">${group('odds')}</optgroup>` +
+    `<optgroup label="Full-strength engines">${group('engine')}</optgroup>`;
   const selectedOption = ENGINE_OPTIONS.find((option) => option.id === selected);
   if (selectedOption && !ctxEngineOptionState(selectedOption).disabled) select.value = selected;
   else select.value = 'maia3';
@@ -1437,12 +1439,6 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
 // ---------------------------------------------------------------------------
 
 const SF_LEVEL_NAMES = ['Weakest', 'Casual', 'Club', 'Strong', 'Full strength'] as const;
-const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
-const CAPTURED_GLYPHS: Record<Color, Record<string, string>> = {
-  // Pieces of this colour that the other side has captured.
-  w: { p: '♙', n: '♘', b: '♗', r: '♖', q: '♕' },
-  b: { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛' },
-};
 const ENGINE_MONOGRAMS: Partial<Record<PlayFamily, string>> = {
   maia3: 'M3',
   lc0: 'L0',
@@ -1517,31 +1513,6 @@ function playCtaLabel(): string {
   return `Play as ${choice === 'black' ? 'Black' : 'White'}`;
 }
 
-function materialCounts(board: BoardState): Record<Color, Record<string, number>> {
-  const counts: Record<Color, Record<string, number>> = { w: { p: 0, n: 0, b: 0, r: 0, q: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0 } };
-  for (const piece of board.squares) {
-    if (!piece) continue;
-    const role = piece[1];
-    if (role in PIECE_VALUES) counts[piece[0] as Color][role] += 1;
-  }
-  return counts;
-}
-
-/** Captured enemy pieces (as glyphs) and the material lead for `color`. */
-function materialHtml(start: BoardState, board: BoardState, color: Color): string {
-  const before = materialCounts(start);
-  const now = materialCounts(board);
-  const enemy: Color = color === 'w' ? 'b' : 'w';
-  let glyphs = '';
-  for (const role of ['p', 'n', 'b', 'r', 'q']) {
-    const taken = Math.max(0, before[enemy][role] - now[enemy][role]);
-    glyphs += CAPTURED_GLYPHS[enemy][role].repeat(taken);
-  }
-  const score = (side: Color) => Object.entries(now[side]).reduce((sum, [role, n]) => sum + PIECE_VALUES[role] * n, 0);
-  const lead = score(color) - score(enemy);
-  return `${glyphs ? `<span class="taken">${glyphs}</span>` : ''}${lead > 0 ? `<span class="adv">+${lead}</span>` : ''}`;
-}
-
 function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shown: BoardState, phase: PlayPhase): void {
   const strip = el(id);
   const option = ctxSelectedEngine(ctx);
@@ -1554,17 +1525,24 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shown: Board
   avatar.classList.toggle('you', isHuman);
   q('[data-name]').textContent = isHuman ? 'You' : ctxOpponentName(option);
   q('[data-meta]').textContent = isHuman ? side : `${ctxOpponentMeta(ctx)} · ${side}`;
-  q('[data-material]').innerHTML = materialHtml(parseFen(ctx.startFen), shown, color);
+  const material = playMaterial(parseFen(ctx.startFen), shown, color);
+  const materialSlot = q('[data-material]');
+  materialSlot.innerHTML = material.html;
+  materialSlot.title = material.label;
+  materialSlot.setAttribute('role', 'img');
+  materialSlot.setAttribute('aria-label', material.label);
   const state = q('[data-state]');
   let text = '';
   let kind = '';
   if (!isHuman && ctx.engineThinking) [text, kind] = ['Thinking…', 'thinking'];
   else if (!isHuman && ctx.preparingEngine) [text, kind] = ['Loading…', 'thinking'];
-  else if (isHuman && phase === 'playing' && ctx.board.turn === color && ctx.engineReady && !ctx.pendingPromotion) [text, kind] = ['Your move', 'turn'];
+  else if (!isHuman && !ctx.engineReady && !ctx.gameOver)
+    [text, kind] = buttonEl('retryEngine').hidden ? ['Loading…', 'thinking'] : ['Error · retry', 'error'];
+  else if (!isHuman && !ctx.gameOver) [text, kind] = ['Ready', 'ready'];
+  else if (isHuman && phase === 'playing' && ctx.viewPly === null && ctx.board.turn === color && ctx.engineReady && !ctx.pendingPromotion) [text, kind] = ['Your move', 'turn'];
   state.textContent = text;
   state.dataset.kind = kind;
-  q('[data-side]').dataset.color = color;
-  strip.dataset.turn = String(!ctx.gameOver && phase !== 'setup' && ctx.board.turn === color);
+  strip.dataset.turn = String(!ctx.gameOver && ctx.viewPly === null && phase !== 'setup' && ctx.board.turn === color);
   strip.setAttribute('aria-label', `${isHuman ? 'You' : ctxOpponentName(option)}, ${side}${text ? `, ${text.replace('…', '')}` : ''}`);
 }
 
@@ -1572,6 +1550,8 @@ function ctxRenderChrome(ctx: PlayContext, shownBoard: BoardState, shownPly: num
   const phase = ctxPhase(ctx);
   const main = el('main');
   main.dataset.phase = phase;
+  const hasNotice = !buttonEl('retryEngine').hidden || !el('runtimeWarning').hidden || !el('dlProgress').hidden;
+  main.dataset.quiet = String(!hasNotice && ctx.engineReady && !ctx.preparingEngine && !ctx.engineThinking && !ctx.pendingPromotion && ctx.viewPly === null && !boardCheck(ctx.board));
   main.dataset.config = ctx.configOpen && phase !== 'setup' ? 'open' : 'closed';
   const option = ctxSelectedEngine(ctx);
   const opponent = ctxOpponentName(option);
@@ -1642,7 +1622,14 @@ function ctxRender(ctx: PlayContext): void {
   if (ctx.disposed) return;
   ctx.viewPly = normalizeViewPly(ctx.viewPly, ctx.moves.length);
   const browsing = ctx.viewPly !== null;
-  el('status').textContent = ctxStatusText(ctx);
+  const statusText = ctxStatusText(ctx);
+  el('status').textContent = statusText;
+  // Keep turn/readiness announcements alive when routine sidebar chrome is visually collapsed.
+  const announcement = el('gameAnnouncement');
+  const spokenStatus = ctxPhase(ctx) === 'setup' && ctx.engineReady && !ctx.engineThinking && !ctx.preparingEngine
+    ? `${ctxOpponentName(ctxSelectedEngine(ctx))} is ready. ${statusText}`
+    : statusText;
+  if (announcement.textContent !== spokenStatus) announcement.textContent = spokenStatus;
   el('status').classList.toggle('over', !!ctx.gameOver);
   el('status').classList.toggle('browsing', browsing);
   ctxRefreshSearchProgressLabel(ctx);
@@ -1795,6 +1782,7 @@ function ctxInit(ctx: PlayContext): void {
       ctx.configOpen = false;
       if (!ctx.engineReady && !ctx.preparingEngine && !ctx.engineThinking && ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
       ctxRender(ctx);
+      if (matchMedia('(max-width: 900px)').matches) document.querySelector('.board-panel')?.scrollIntoView({ block: 'start' });
       return;
     }
     if (phase === 'playing' && ctxHumanMoveCount(ctx) > 0 && !ctx.newGameArmed) {
@@ -2084,6 +2072,7 @@ function hasPlayBrowserDom(): boolean {
     'bottomStrip',
     'keyboardBoard',
     'boardAnnouncement',
+    'gameAnnouncement',
     'opponentBlurb',
     'opponentSummary',
     'changeOpponent',

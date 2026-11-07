@@ -47,7 +47,6 @@ onMount(() => {
       <span class="player-id"><strong data-name>Maia3</strong><small data-meta>1500 rating</small></span>
       <span class="player-material" data-material></span>
       <span class="player-state" data-state></span>
-      <span class="side-dot" data-side aria-hidden="true"></span>
     </div>
     <div class="board-shell">
       <div id="ground"></div>
@@ -60,15 +59,15 @@ onMount(() => {
       <span class="player-id"><strong data-name>You</strong><small data-meta>White</small></span>
       <span class="player-material" data-material></span>
       <span class="player-state" data-state></span>
-      <span class="side-dot" data-side aria-hidden="true"></span>
       <button id="flip" class="strip-button" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
     </div>
     <div id="promoPicker" hidden></div>
   </section>
 
   <section class="panel app-sidebar play-sidebar" aria-label="Game">
+    <p id="gameAnnouncement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
     <div class="status-block">
-      <div id="status" class="game-status" aria-live="polite">Loading…</div>
+      <div id="status" class="game-status">Loading…</div>
       <div id="engineNote" role="status" aria-live="polite" hidden></div>
       <div id="runtimeWarning" class="runtime-warning small" role="status" aria-live="polite" hidden></div>
       <button id="retryEngine" type="button" hidden>Retry engine</button>
@@ -76,21 +75,21 @@ onMount(() => {
       <div id="progressAnnouncement" class="visually-hidden" role="status" aria-live="polite"></div>
     </div>
 
-    <div id="setupPane" class="setup-pane">
+    <div class="opponent-summary">
+      <span class="player-avatar small" data-summary-avatar aria-hidden="true">M3</span>
+      <div class="summary-copy"><span id="opponentSummary" class="summary-text">Maia3 · 1500</span><small>Casual · untimed</small></div>
+      <button id="changeOpponent" class="ghost-button" type="button" aria-expanded="false" aria-controls="setupPane opponentDetails">Change</button>
+    </div>
+
+    <div id="setupPane" class="setup-pane" role="group" aria-label="Opponent settings">
       <h2 class="pane-heading">Opponent</h2>
       <div class="field"><label for="engineSelect" class="visually-hidden">Opponent</label>
         <select id="engineSelect"></select></div>
       <p id="opponentBlurb" class="opponent-blurb"></p>
-      <div id="engineCaution" class="small" hidden></div>
       <div id="maia3Controls" hidden>
         <div class="rating-head">
-          <label for="maia3Elo">Rating</label>
+          <span class="field-label">Rating presets</span>
           <span class="rating-value"><strong id="maia3EloValue">1500</strong> <span id="maia3EloBand"></span></span>
-        </div>
-        <div class="range-control">
-          <span class="range-end" aria-hidden="true">600</span>
-          <input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" />
-          <span class="range-end" aria-hidden="true">2600</span>
         </div>
         <div class="rating-presets" role="group" aria-label="Rating presets">
           {#each ratingPresets as preset}
@@ -114,31 +113,6 @@ onMount(() => {
           <option value="random">Random</option>
         </select>
       </div>
-
-      <details class="settings-disclosure">
-        <summary><svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>About this opponent &amp; settings</summary>
-        <div class="settings-body">
-          <div id="maia3Advanced" class="sampling-grid">
-            <div class="field"><label for="maia3Style">Move selection</label>
-              <select id="maia3Style">
-                <option value="sample">Human sampling</option>
-                <option value="argmax">Top move</option>
-              </select></div>
-            <div class="field" id="maia3TemperatureField"><label for="maia3Temperature">Temperature</label>
-              <input id="maia3Temperature" type="number" min="0.01" max="5" step="0.05" value="1" /></div>
-            <div class="field" id="maia3TopPField"><label for="maia3TopP">Top-p</label>
-              <input id="maia3TopP" type="number" min="0.01" max="1" step="0.05" value="1" /></div>
-          </div>
-          <p id="levelCaption" class="small setup-note"></p>
-          <div class="capabilities-slot"><BrowserCapabilities /></div>
-        </div>
-      </details>
-    </div>
-
-    <div class="opponent-summary">
-      <span class="player-avatar small" data-summary-avatar aria-hidden="true">M3</span>
-      <span id="opponentSummary" class="summary-text">Maia3 · 1500</span>
-      <button id="changeOpponent" class="ghost-button" type="button" aria-expanded="false" aria-controls="setupPane">Change</button>
     </div>
 
     <div id="restartBanner" class="restart-banner" hidden>
@@ -179,7 +153,7 @@ onMount(() => {
       </div>
       <form id="moveForm" class="move-form" autocomplete="off">
         <label for="moveInput" class="visually-hidden">Type a move</label>
-        <input id="moveInput" type="text" spellcheck="false" autocapitalize="off" placeholder="Type a move" aria-describedby="boardInstructions" />
+        <input id="moveInput" type="text" spellcheck="false" autocapitalize="off" placeholder="Type a move" title="Enter SAN (Nf3) or UCI (g1f3), then press Enter. Arrow keys browse moves." aria-describedby="boardInstructions" />
       </form>
     </div>
 
@@ -187,13 +161,41 @@ onMount(() => {
       <button id="takeback" type="button" disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></svg><span class="lbl">Takeback</span>
       </button>
-      <button id="resign" type="button" disabled>
+      <button id="resign" type="button" title="Resign (asks to confirm)" disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4m0 0h11l-2 4 2 4H5" /></svg><span class="lbl">Resign</span>
       </button>
       <button id="newGame" class="primary" type="button">
         <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg><span class="lbl">Play</span>
       </button>
     </div>
+
+    <details id="opponentDetails" class="settings-disclosure">
+      <summary><svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>Fine-tune &amp; opponent details</summary>
+      <div class="settings-body">
+        <div id="maia3Advanced" class="sampling-grid">
+          <div class="custom-rating">
+            <label for="maia3Elo">Custom rating · 100-point steps</label>
+            <div class="range-control">
+              <span class="range-end" aria-hidden="true">600</span>
+              <input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" />
+              <span class="range-end" aria-hidden="true">2600</span>
+            </div>
+          </div>
+          <div class="field"><label for="maia3Style">Move selection</label>
+            <select id="maia3Style">
+              <option value="sample">Human sampling</option>
+              <option value="argmax">Top move</option>
+            </select></div>
+          <div class="field" id="maia3TemperatureField"><label for="maia3Temperature">Temperature</label>
+            <input id="maia3Temperature" type="number" min="0.01" max="5" step="0.05" value="1" /></div>
+          <div class="field" id="maia3TopPField"><label for="maia3TopP">Top-p</label>
+            <input id="maia3TopP" type="number" min="0.01" max="1" step="0.05" value="1" /></div>
+        </div>
+        <p id="levelCaption" class="small setup-note"></p>
+        <div id="engineCaution" class="small" hidden></div>
+        <div class="capabilities-slot"><BrowserCapabilities /></div>
+      </div>
+    </details>
 
     <div class="record-actions" role="group" aria-label="Game record">
       <button id="copyPgn" type="button" title="Copy the game as PGN">
@@ -213,6 +215,8 @@ onMount(() => {
   .play-workspace{
     --muted:color-mix(in srgb, var(--ink) 74%, var(--panel));
     --text-soft:var(--muted);
+    --coord-dark:#211d17;
+    --coord-light:#fff8eb;
     --strip-h:44px;
     --board-size:min(680px, calc(100dvh - 240px), calc(100vw - 500px));
     grid-template-columns:calc(var(--board-size) + 18px) minmax(330px, 400px);
@@ -240,13 +244,13 @@ onMount(() => {
   }
   .player-avatar.you{background:var(--panel-2); color:var(--ink); box-shadow:inset 0 0 0 1px var(--border-input-hover); font-size:11px}
   .player-avatar.small{flex-basis:28px; width:28px; height:28px; font-size:11px; border-radius:6px}
-  .player-id{display:flex; flex-direction:column; min-width:0; line-height:1.25}
-  .player-id strong{color:var(--ink); font:650 14px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .player-id{display:flex; flex:1 1 auto; flex-direction:column; min-width:0; line-height:1.25}
+  .player-id strong{color:var(--ink); font:650 15px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .player-id small{color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  .player-material{display:inline-flex; align-items:center; gap:0; min-width:0; color:var(--text); font-size:18px; line-height:1; white-space:nowrap; overflow:hidden}
-  .player-material :global(.taken){letter-spacing:-.18em}
-  .player-material :global(.adv){margin-left:5px; font:600 12.5px var(--sans); color:var(--muted)}
-  .player-state{margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:var(--ink); font:600 13px var(--sans); white-space:nowrap}
+  .player-material{display:inline-flex; align-items:center; gap:0; min-width:24px; max-width:120px; color:var(--ink); font-size:20px; line-height:1.2; white-space:nowrap; overflow:hidden}
+  .player-material :global(.taken){min-width:0; overflow:hidden; padding-right:3px; letter-spacing:-.18em}
+  .player-material :global(.adv){flex:0 0 auto; margin-left:5px; font:600 12.5px var(--sans); color:var(--muted)}
+  .player-state{margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:var(--ink); font:650 14px var(--sans); white-space:nowrap}
   .player-state:empty{display:none}
   .player-state:global([data-kind=thinking])::before{
     content:''; width:12px; height:12px; border-radius:50%;
@@ -254,9 +258,8 @@ onMount(() => {
     animation:play-spin .8s linear infinite;
   }
   .player-state:global([data-kind=turn]){color:var(--accent-soft-text)}
-  .side-dot{flex:0 0 12px; width:12px; height:12px; margin-left:auto; border-radius:50%; background:#f4f1e8; box-shadow:0 0 0 1.5px #0009}
-  .player-state:not(:empty) + .side-dot{margin-left:0}
-  .side-dot:global([data-color=b]){background:#1d1b18; box-shadow:0 0 0 1.5px #fffa}
+  .player-state:global([data-kind=error]){color:var(--warn)}
+  .player-state:global([data-kind=ready]){color:var(--muted); font-size:13px}
   .strip-button{display:grid; place-items:center; width:34px; height:34px; padding:0; border-radius:7px; background:transparent; color:var(--muted)}
   .strip-button:hover:not(:disabled){background:var(--panel-2); color:var(--ink)}
   .strip-button svg, .game-actions svg, .record-actions svg, .move-nav svg, .cta-link svg{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round}
@@ -265,7 +268,7 @@ onMount(() => {
   /* ── Sidebar: one column, two states (setup vs game) driven by data-phase ── */
   .play-workspace .play-sidebar{
     position:static; display:flex; flex-direction:column; min-width:0;
-    height:calc(var(--board-size) + 2 * var(--strip-h) + 26px); overflow:hidden;
+    max-height:calc(var(--board-size) + 2 * var(--strip-h) + 26px); overflow:hidden;
   }
   .play-sidebar>*{flex:0 0 auto}
   .status-block{padding:12px 14px 10px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
@@ -273,10 +276,7 @@ onMount(() => {
     display:flex; align-items:center; gap:9px; min-height:24px;
     color:var(--ink); font:600 14.5px/1.4 var(--sans);
   }
-  :global(#status.game-status)::before{content:''; flex:0 0 8px; width:8px; height:8px; border-radius:50%; background:var(--muted); opacity:.6}
-  :global(#status.game-status[aria-busy=true])::before{background:var(--accent); opacity:1}
   :global(#status.game-status.over){font-size:15px}
-  :global(#status.game-status.over)::before{background:var(--accent); opacity:1}
   :global(#status.game-status.browsing){color:var(--text-soft); font-weight:500; font-size:13.5px}
   :global(#engineNote){margin-top:6px; color:var(--muted); font:13px/1.45 var(--sans)}
   :global(#engineNote.warn){padding:7px 9px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule)); border-radius:6px; background:var(--warn-soft); color:var(--warn)}
@@ -292,61 +292,67 @@ onMount(() => {
 
   /* Setup pane */
   .setup-pane{display:flex; flex-direction:column; gap:10px; padding:14px; overflow:auto; overscroll-behavior:contain}
-  .pane-heading{margin:0; font:650 13px/1.3 var(--sans); letter-spacing:0; text-transform:none; color:var(--ink)}
+  .play-sidebar .pane-heading{margin:0; font:650 13px/1.3 var(--sans); letter-spacing:0; text-transform:none; color:var(--ink)}
   .field{margin-top:0}
-  .field-label, .field label, .rating-head label{font:500 13px var(--sans); color:var(--muted)}
-  #engineSelect{width:100%; min-height:42px; font-size:15px; font-weight:600}
+  .field-label, .field label{font:500 13px var(--sans); color:var(--muted)}
+  #engineSelect{width:100%; min-height:44px; font-size:15px; font-weight:600}
   .opponent-blurb{margin:-2px 0 0; color:var(--text); font:13.5px/1.45 var(--sans)}
   .opponent-blurb:empty{display:none}
   :global(#engineCaution){color:var(--muted); font-size:12.5px; line-height:1.45}
   .rating-head{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
   .rating-value{color:var(--muted); font-size:13px}
   .rating-value strong{color:var(--ink); font:700 15px var(--sans)}
-  .range-control{display:flex; align-items:center; gap:10px; height:34px}
+  .range-control{display:flex; align-items:center; gap:10px; min-height:44px}
   .range-end{color:var(--muted); font-size:12px}
-  .rating-presets{display:flex; gap:6px; flex-wrap:wrap}
-  .chip{flex:1 1 0; min-height:32px; padding:4px 6px; border-radius:999px; font:600 13px var(--sans); color:var(--text)}
+  .rating-presets{display:flex; gap:6px; margin-top:6px; flex-wrap:wrap}
+  .chip{flex:1 1 0; min-height:44px; padding:4px 6px; border-radius:8px; font:600 13px var(--sans); color:var(--text)}
   .chip:global([aria-pressed=true]){border-color:var(--accent); color:var(--ink); background:var(--accent-soft)}
   .strength-field select{width:100%}
   .color-field{display:grid; gap:6px}
   .color-choice{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; border:1px solid var(--border-input); border-radius:8px; overflow:hidden}
-  .color-choice button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:0 6px; border:0; border-radius:0; background:var(--panel); color:var(--text); font:600 13.5px var(--sans)}
+  .color-choice button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:44px; padding:0 6px; border:0; border-radius:0; background:var(--panel); color:var(--text); font:600 13.5px var(--sans)}
   .color-choice button+button{border-left:1px solid var(--border-input)}
   .color-choice button:global([aria-pressed=true]){background:var(--panel-2); color:var(--ink); box-shadow:inset 0 -2px var(--accent)}
   .swatch{width:14px; height:14px; flex:0 0 14px; border-radius:50%; box-shadow:0 0 0 1.5px #8e8677}
   .swatch.white{background:#f4f1e8}
   .swatch.black{background:#1d1b18}
   .swatch.random{background:linear-gradient(90deg,#f4f1e8 50%,#1d1b18 50%)}
-  .settings-disclosure{border-top:1px solid var(--rule); padding-top:8px}
-  .settings-disclosure>summary{display:flex; align-items:center; gap:6px; min-height:32px; cursor:pointer; list-style:none; color:var(--text); font:600 13px var(--sans)}
+  .settings-disclosure{flex:0 1 auto; min-height:45px; overflow:auto; border-top:1px solid var(--rule); padding:0 14px}
+  .settings-disclosure[open]{padding-bottom:12px}
+  .settings-disclosure>summary{display:flex; align-items:center; gap:6px; min-height:44px; cursor:pointer; list-style:none; color:var(--text); font:600 13px var(--sans)}
   .settings-disclosure>summary::-webkit-details-marker{display:none}
   .settings-disclosure>summary:hover{color:var(--ink)}
   .chevron{width:14px; height:14px; flex:0 0 14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
   .settings-disclosure[open] .chevron{transform:rotate(90deg)}
   .settings-body{display:grid; gap:10px; padding:6px 0 4px}
   .sampling-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:end}
-  .sampling-grid>.field:first-child{grid-column:1 / -1}
+  .sampling-grid>.custom-rating, .sampling-grid>.field:has(#maia3Style){grid-column:1 / -1}
+  .custom-rating label{font:500 13px var(--sans); color:var(--muted)}
   .sampling-grid input, .sampling-grid select{width:100%}
   .setup-note{margin:0; line-height:1.5; font-size:12.5px}
   .capabilities-slot :global(.capabilities){margin:0}
   :global(#maia3Elo){
-    -webkit-appearance:none; appearance:none; flex:1 1 auto; width:100%; height:5px; margin:0;
-    border-radius:3px; background:var(--rule-strong); outline:none;
+    -webkit-appearance:none; appearance:none; flex:1 1 auto; min-width:0; width:100%; height:44px; margin:0;
+    border-radius:3px; background:linear-gradient(var(--border-input-hover),var(--border-input-hover)) center / 100% 5px no-repeat;
+  }
+  :global(#maia3Elo:focus-visible){outline:2px solid var(--accent); outline-offset:2px
   }
   :global(#maia3Elo::-webkit-slider-thumb){
-    -webkit-appearance:none; appearance:none; width:18px; height:18px;
+    -webkit-appearance:none; appearance:none; width:24px; height:24px;
     border-radius:50%; background:#fff; border:2px solid var(--accent); cursor:pointer;
     box-shadow:0 2px 6px rgba(80,55,25,.22);
   }
   :global(#maia3Elo::-moz-range-thumb){
-    width:18px; height:18px; border-radius:50%; background:#fff;
+    width:24px; height:24px; border-radius:50%; background:#fff;
     border:2px solid var(--accent); cursor:pointer; box-shadow:0 2px 6px rgba(80,55,25,.22);
   }
 
   /* Game pane pieces */
   .opponent-summary{display:flex; align-items:center; gap:9px; min-height:48px; padding:6px 10px 6px 14px; border-bottom:1px solid var(--rule)}
-  .summary-text{flex:1 1 auto; min-width:0; color:var(--ink); font:600 13.5px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  .ghost-button{min-height:32px; padding:0 11px; border-radius:7px; background:transparent; color:var(--text); font:600 13px var(--sans)}
+  .summary-copy{display:flex; flex:1 1 auto; flex-direction:column; min-width:0; gap:2px}
+  .summary-copy small{color:var(--muted); font-size:12px}
+  .summary-text{min-width:0; color:var(--ink); font:600 13.5px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .ghost-button{min-height:44px; padding:0 11px; border-radius:7px; background:transparent; color:var(--text); font:600 13px var(--sans)}
   .ghost-button:global([aria-expanded=true]){border-color:var(--accent); color:var(--ink)}
   .restart-banner{margin:10px 12px 0; padding:10px; border:1px solid var(--accent-tint-border); border-radius:8px; background:var(--accent-soft)}
   .restart-banner :global(#restartMessage){color:var(--ink); font-size:13px}
@@ -359,14 +365,14 @@ onMount(() => {
   .game-over p{margin:2px 0 10px; color:var(--text); font-size:13.5px}
   .cta-link{display:flex; align-items:center; justify-content:center; gap:8px; min-height:40px; border-radius:7px; background:var(--accent); color:var(--on-accent); font:650 14px var(--sans); text-decoration:none}
   .cta-link:hover{background:var(--accent-hover); text-decoration:none}
-  .moves-block{display:flex; flex-direction:column; flex:1 1 120px; min-height:0}
+  .moves-block{display:flex; flex-direction:column; flex:0 1 auto; min-height:64px}
   .opening-name{flex:0 0 auto; margin:0; padding:8px 14px; border-bottom:1px solid var(--rule); color:var(--muted); font:13px/1.4 var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .opening-name :global(strong){margin-right:6px; color:var(--ink); font-weight:650}
-  :global(#moveList.move-list){flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; font:14px/1.4 var(--sans); font-variant-numeric:tabular-nums}
-  :global(#moveList .move-row){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); min-height:28px}
+  :global(#moveList.move-list){flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; font:500 16px/1.4 var(--sans); font-variant-numeric:tabular-nums}
+  :global(#moveList .move-row){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); min-height:36px}
   :global(#moveList .move-row:nth-child(even)){background:color-mix(in srgb, var(--ink) 3%, var(--panel))}
   :global(#moveList .num){display:grid; place-items:center; color:var(--muted); font-size:13px; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
-  :global(#moveList .san){display:flex; align-items:center; min-height:28px; padding:0 12px; border:0; border-radius:0; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer}
+  :global(#moveList .san){display:flex; align-items:center; min-height:36px; padding:0 12px; border:0; border-radius:0; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer}
   :global(#moveList .san:hover:not(.current)){background:var(--accent-soft); color:var(--ink)}
   :global(#moveList .san.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)); color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
   :global(#moveList .placeholder){display:block; padding:14px; color:var(--muted); font-size:13.5px}
@@ -381,13 +387,18 @@ onMount(() => {
   .move-form{flex:1 1 auto; min-width:0; margin:0}
   .move-form input{width:100%; min-height:36px; padding:6px 10px; font-size:14px}
   .move-form input:global(.invalid){border-color:var(--warn)}
-  .game-actions{display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; padding:8px 10px; border-top:1px solid var(--rule)}
+  .move-form input::placeholder{color:var(--muted); opacity:1}
+  .game-actions{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; padding:8px 10px; border-top:1px solid var(--rule)}
   .game-actions button, .record-actions :is(button, a){display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:38px; padding:0 8px; border-radius:7px; font:600 13.5px var(--sans); color:var(--ink); white-space:nowrap}
+  .game-actions button{min-width:0; white-space:normal; line-height:1.25}
+  .game-actions #newGame.primary, .game-actions #newGame.primary:hover{color:var(--on-accent)}
   .game-actions button:not(.primary){background:transparent; border-color:var(--border-input-hover)}
+  .game-actions #resign{border-color:transparent; color:var(--text)}
+  .game-actions #resign svg{display:none}
   .game-actions button:not(.primary):hover:not(:disabled){background:var(--panel-2)}
   .game-actions button:disabled{opacity:1; color:color-mix(in srgb, var(--ink) 55%, var(--panel))}
   .game-actions button:disabled svg{opacity:.6}
-  :global(.game-actions button.danger){background:var(--warn); border-color:var(--warn); color:#fff}
+  .game-actions #resign:global(.danger){background:var(--warn); border-color:var(--warn); color:var(--bg)}
   :global(.game-actions button.armed){border-color:var(--warn); color:var(--warn)}
   .play-icon{display:none}
   .record-actions{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; padding:0 10px 10px}
@@ -399,54 +410,50 @@ onMount(() => {
 
   /* Phase visibility */
   .play-workspace:global([data-phase=setup]) :is(.opponent-summary, .moves-block, .nav-row, .record-actions, #takeback, #resign){display:none}
-  .play-workspace:global([data-phase=setup]) .setup-pane{flex:1 1 auto; min-height:0}
-  .play-workspace:global([data-phase=setup]) .game-actions{grid-template-columns:1fr; padding:12px 14px 14px}
+  .play-workspace:global([data-phase=setup]) .setup-pane{flex:0 1 auto; min-height:0}
+  .play-workspace:global([data-phase=setup]) .game-actions{grid-template-columns:1fr; padding:0 14px 14px; border-top:0}
+  .play-workspace:global([data-phase=playing][data-quiet=true]) .status-block:not(:has(:global(#dlProgress:not([hidden]), #runtimeWarning:not([hidden]), #retryEngine:not([hidden]), #engineNote[data-routine=false]:not([hidden])))){display:none}
   .play-workspace:global([data-phase=setup]) #newGame{min-height:48px; font-size:16px; font-weight:700}
   .play-workspace:global([data-phase=setup]) .play-icon{display:block}
-  .play-workspace:global(:not([data-phase=setup]):not([data-config=open])) .setup-pane{display:none}
+  .play-workspace:global(:not([data-phase=setup]):not([data-config=open])) :is(.setup-pane, .settings-disclosure){display:none}
   .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{flex:0 1 auto; max-height:58%; border-bottom:1px solid var(--rule)}
   .play-workspace:global([data-phase=over]) #resign{display:none}
-  /* "Change" expands the settings directly under the summary row that holds the toggle. */
-  .play-sidebar>.status-block{order:-2}
-  .play-sidebar>.opponent-summary{order:-1}
   .play-workspace:global([data-phase=over]) .game-actions{grid-template-columns:1fr 1fr}
 
   @media (max-width:900px){
     .play-workspace{--board-size:100%; grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
-    .play-workspace .play-sidebar{height:auto; overflow:visible}
-    .play-workspace:global([data-phase=setup]) .play-sidebar{order:-1}
+    .play-workspace .play-sidebar{max-height:none; overflow:visible}
+    .board-panel{scroll-margin-top:74px}
     :global(#moveList.move-list){max-height:180px}
     .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{max-height:none}
-    /* In a game the controls sit right under the board; the record follows. */
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.status-block{order:1}
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.game-actions{order:2; border-top:0}
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.restart-banner{order:3}
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.game-over{order:3}
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.nav-row{order:4}
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.moves-block{order:5; border-top:1px solid var(--rule)}
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.record-actions{order:6; padding-top:8px; border-top:1px solid var(--rule)}
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.opponent-summary{order:7; border-top:1px solid var(--rule); border-bottom:0}
-    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.setup-pane{order:8}
+    /* DOM, visual and keyboard order all follow board → setup/game → actions. */
+    .move-nav button, .move-form input, .game-actions button, .record-actions :is(button,a){min-height:44px}
+    :global(#moveList .san){min-height:44px}
   }
   @media (max-width:600px){
-    .play-workspace{--strip-h:38px; padding:8px 6px 32px; gap:8px}
+    .play-workspace{--strip-h:44px; padding:8px 6px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent; gap:2px}
     .player-avatar{flex-basis:30px; width:30px; height:30px; font-size:11.5px}
-    .player-id strong{font-size:13.5px}
+    .player-id strong{font-size:14px}
+    .player-material{max-width:80px}
+    .player-strip{gap:7px}
+    .strip-button{width:44px; height:44px; flex:0 0 44px; margin-right:-6px}
     .player-id small{font-size:12px}
     :global(.play-workspace #ground coords){font-size:11px}
     .status-block{padding:10px 12px 8px}
-    .play-workspace:global([data-phase=setup]) .status-block{display:none}
+    .play-workspace:global([data-phase=setup]) .status-block:not(:has(:global(#dlProgress:not([hidden]), #runtimeWarning:not([hidden]), #retryEngine:not([hidden])))){display:none}
     .setup-pane{padding:12px; gap:9px}
     .play-workspace:global([data-phase=setup]) .pane-heading{display:none}
-    .opponent-blurb{font-size:13px}
-    .play-workspace:global([data-phase=setup]) :is(#engineCaution, .settings-disclosure){order:5}
+    .opponent-blurb{display:none}
+    .color-field>.field-label{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%)}
+    .settings-disclosure{padding-inline:12px}
+    .play-workspace:global([data-phase=setup]) .setup-pane{gap:8px}
     .play-workspace:global([data-phase=setup]) .game-actions{padding:0 12px 12px}
     .move-nav button{width:auto; flex:1 1 0; height:40px}
     .move-nav{flex:1 1 60%}
     .move-form{flex:1 1 40%}
     .move-form input{min-height:40px}
-    .game-actions button{min-height:42px}
+    .game-actions button{min-height:44px; gap:4px; font-size:13px}
     :global(#moveList.move-list){max-height:150px}
   }
   @media (prefers-reduced-motion: reduce){
