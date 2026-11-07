@@ -1,9 +1,9 @@
 import { Chessground } from 'chessground';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
-import { type BoardState, boardToFen, parseFen, START_FEN, squareName } from '../chess/board.ts';
+import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
-import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
+import { inCheck, legalMoves } from '../chess/movegen.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
@@ -83,7 +83,7 @@ import {
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
 import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
-import { el, htmlEscape, inputEl, maybeEl, selectEl } from './browserDom.ts';
+import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
   lc0EncoderLayers as browserLc0EncoderLayers,
@@ -118,7 +118,6 @@ import {
   ENGINE_FAMILY_PRIORITY,
   type EngineFamily,
   type EngineRow,
-  engineFamilyDefinition,
   engineFamilyOptions,
   engineResourceProfile,
   engineStrengthMeta,
@@ -1999,7 +1998,7 @@ function renderEvalSourceMenu(): void {
   patchAnalysisResults(el('evalSourceMenu'), `<p class="eval-menu-title" aria-hidden="true">Eval bar shows</p>${items}`);
 }
 
-function renderLegend(_lines: AnalysisLine[]) {
+function renderLegend() {
   // Engine names live on each result group; only the independent book needs a key.
   el('engineLegend').hidden = currentBookStats().length === 0;
   el('engineLegend').innerHTML = `<span class="key"><span class="dot" style="background:${BOOK_SWATCH}"></span>Opening book</span>`;
@@ -2008,11 +2007,6 @@ function renderLegend(_lines: AnalysisLine[]) {
 function signedPawns(value: number): string {
   const pawns = value / 100;
   return `${pawns > 0 ? '+' : pawns < 0 ? '−' : '±'}${Math.abs(pawns).toFixed(2)}`;
-}
-
-function signedCp(value: number): string {
-  const sign = value > 0 ? '+' : '';
-  return `${sign}${Math.round(value)}`;
 }
 
 /** Labelled run state beside the turn pip: running, complete, or waiting — never an unexplained glyph. */
@@ -2203,7 +2197,7 @@ const CHEVRON_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 
 function renderLines() {
   const lines = lineCache.get(tree.current.fen) ?? [];
   decorateMoveEvals();
-  renderLegend(lines);
+  renderLegend();
   // Each engine's PVs render inside its own block in the engine strip (renderEngineSummaries).
   renderEngineComparison(lines);
 }
@@ -2285,8 +2279,6 @@ function renderMoveList() {
   const markup = analysisMoveMarkup(tree.root, tree.current);
   if (list.innerHTML !== markup) list.innerHTML = markup;
   decorateMoveEvals();
-  const currentMove = tree.current.move ? `${parseFen(tree.current.parent!.fen).fullmove}${parseFen(tree.current.parent!.fen).turn === 'w' ? '.' : '…'} ${tree.current.san}` : '';
-  el('movesTab').innerHTML = currentMove ? `Moves<span class="tab-current"> · ${htmlEscape(currentMove)}</span>` : 'Moves';
   const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
   if (hadFocus) selected?.focus({ preventScroll: true });
   fitMoveList();

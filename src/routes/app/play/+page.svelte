@@ -61,7 +61,6 @@ onMount(() => {
       <span class="player-state" data-state></span>
       <button id="flip" class="strip-button" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
     </div>
-    <div id="promoPicker" hidden></div>
   </section>
 
   <section class="panel app-sidebar play-sidebar" aria-label="Game">

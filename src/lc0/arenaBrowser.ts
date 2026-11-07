@@ -117,7 +117,7 @@ import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
-import { CachedLc0Evaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import {
   checkPlentyChessVariantAsset,
@@ -1092,12 +1092,6 @@ function stmScoreToWhiteScore(fen: string, stmScore: number): number {
   return fenTurn(fen) === 'w' ? score : 1 - score;
 }
 
-function pvText(pv: string[] | undefined, maxMoves = 8): string {
-  if (!pv?.length) return 'PV —';
-  const shown = pv.slice(0, maxMoves).join(' ');
-  return `PV ${shown}${pv.length > maxMoves ? ' …' : ''}`;
-}
-
 // All engine scores are displayed from White's perspective (positive = good for
 // White), matching the eval bar and standard chess GUIs, so the sign no longer
 // flips with the side to move. Engines report from the side-to-move POV, so flip
@@ -1131,11 +1125,6 @@ function stockfishWhiteCp(info: StockfishInfoLine | undefined, fen: string): num
 
 function stockfishMateInWhitePov(info: StockfishInfoLine | undefined, fen: string): number | undefined {
   return info?.mateIn === undefined ? undefined : fenTurn(fen) === 'w' ? info.mateIn : -info.mateIn;
-}
-
-function lc0WdlText(evaluation: Lc0Evaluation): string {
-  const wdl = toWhiteWdl(evaluation.wdl, evaluation.fen);
-  return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} · Q ${signed(toWhiteQ(evaluation.q, evaluation.fen), 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
 }
 
 function lc0WdlCompact(wdl: [number, number, number], q: number, fen: string): string {
@@ -2338,26 +2327,6 @@ function recordUciTelemetry(engineId: string, engineName: string, lines: Stockfi
   }
   uciTelemetry.set(engineId, existing);
   renderSearchTelemetryInfo();
-}
-
-function recordLc0PolicyOutput(engineId: string, engineName: string, evaluation: Lc0Evaluation, move?: string): void {
-  recordEngineOutput({
-    engineId,
-    engineName,
-    kind: 'lc0',
-    fen: evaluation.fen,
-    move,
-    summary: lc0WdlText(evaluation),
-    shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q, evaluation.fen),
-    evalBar: lc0EvalBar(evaluation.fen, evaluation.wdl),
-    ...lc0EvalFields(evaluation.fen, evaluation.q, evaluation.wdl),
-    detail: `top policy ${
-      evaluation.legalPriors
-        .slice(0, 5)
-        .map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`)
-        .join(', ') || '—'
-    }`,
-  });
 }
 
 function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0SearchResult, elapsedMs?: number): void {

@@ -2,7 +2,7 @@
 // used by the arena and analysis pages. Engines load lazily on first move.
 import { Chessground } from 'chessground';
 import type { Key } from 'chessground/types';
-import { type BoardState, boardToFen, type Color, parseFen, START_FEN, squareName } from '../chess/board.ts';
+import { type BoardState, boardToFen, type Color, parseFen, START_FEN } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { gameTreeToPgn, sanToMove } from '../chess/pgn.ts';
@@ -25,7 +25,6 @@ import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromo
 import { buttonEl, el, htmlEscape, maybeEl, selectEl } from './browserDom.ts';
 import {
   BIG_NETS,
-  type BigNetConfig,
   type Bt4SearchOptions,
   bigNetAssetStatusSync,
   bigNetMemoryCaution,
@@ -1346,7 +1345,6 @@ function ctxRenderRestartBanner(ctx: PlayContext): void {
 }
 
 function ctxRenderPromotionPicker(ctx: PlayContext): void {
-  el('promoPicker').hidden = true;
   if (!ctx.pendingPromotion) {
     hidePromotionOverlay(el('ground'));
     return;
@@ -2048,7 +2046,6 @@ function hasPlayBrowserDom(): boolean {
     'restartMessage',
     'confirmRestart',
     'dismissRestart',
-    'promoPicker',
     'engineSelect',
     'levelSelect',
     'maia3Controls',
