@@ -8,8 +8,7 @@ const description = 'How to use the 0x88 browser chess workspaces, fix WebGPU an
 
 type TocLink = { id: string; label: string };
 type TocItem = TocLink & { children?: TocLink[] };
-/** `id` makes the group heading itself a link to its section; `collapsed` hides its items until that section is current. */
-type TocGroup = { label: string; id?: string; collapsed?: boolean; items: TocItem[] };
+type TocGroup = { label: string; id: string; items: TocItem[] };
 
 // The rail, the mobile contents sheet, scroll-spy and search all read this
 // outline. Its order must match the order of the sections on the page.
@@ -38,7 +37,6 @@ const toc: TocGroup[] = [
   {
     label: 'Engines',
     id: 'engines',
-    collapsed: true,
     items: [
       { id: 'engines-lc0', label: 'Leela Chess Zero' },
       { id: 'engines-lqo', label: 'Leela Queen Odds (LQO)' },
@@ -54,6 +52,7 @@ const toc: TocGroup[] = [
   },
   {
     label: 'Under the hood',
+    id: 'under-the-hood',
     items: [
       { id: 'neural-runtimes', label: 'Neural browser runtimes' },
       { id: 'cpu-wasm', label: 'CPU WASM runtimes', children: [{ id: 'cpu-wasm-relaxed-simd', label: 'Relaxed SIMD' }] },
@@ -82,7 +81,8 @@ const byId = new Map(outline.map((entry) => [entry.link.id, entry]));
 let activeId = outline[0].link.id;
 $: activeTopId = byId.get(activeId)?.top.id ?? '';
 $: activeLabel = byId.get(activeId)?.link.label ?? 'Contents';
-$: activeGroup = byId.get(activeId)?.group.label ?? '';
+$: activeGroupId = byId.get(activeId)?.group.id ?? '';
+let expandedGroups: Record<string, boolean> = { pages: true, troubleshooting: true };
 let headerHeight = 64;
 let rail: HTMLElement | null = null;
 let railList: HTMLElement | null = null;
@@ -101,6 +101,8 @@ function updateActive(): void {
   if (window.innerHeight + window.scrollY >= doc.scrollHeight - 2) current = outline[outline.length - 1].link.id;
   if (current !== activeId) {
     activeId = current;
+    const groupId = byId.get(current)?.group.id;
+    if (groupId) expandedGroups = { ...expandedGroups, [groupId]: true };
     void tick().then(keepActiveVisible);
   }
 }
@@ -118,6 +120,10 @@ function keepActiveVisible(): void {
 // ---- mobile contents sheet --------------------------------------------------
 let narrow = false;
 let tocOpen = false;
+let tocToggle: HTMLButtonElement | null = null;
+let mobileSearch: HTMLButtonElement | null = null;
+let searchShortcut = 'Ctrl K';
+let searchShortcutLabel = 'Control K';
 
 function closeSheet(): void {
   tocOpen = false;
@@ -133,7 +139,7 @@ let resultList: HTMLElement | null = null;
 $: hits = searchDocs(query, index);
 $: searching = query.trim().length > 0;
 
-const CONTAINERS = '.page-block, .engine-entry, .trouble';
+const CONTAINERS = '.page-block, .engine-entry, .trouble, .opponents, .runtime-block, .runtime-subsection, .source-links, .removal-block';
 
 function cleanText(node: Element): string {
   const clone = node.cloneNode(true) as Element;
@@ -148,7 +154,7 @@ function blockText(el: HTMLElement): string {
   if (el.tagName === 'SECTION') {
     const parts: string[] = [];
     for (const child of Array.from(el.children)) {
-      if (child.matches(`h2, ${CONTAINERS}`) || child.id) continue;
+      if (child.matches(`h2, nav, ${CONTAINERS}`) || child.id) continue;
       parts.push(cleanText(child));
     }
     return parts.join(' ');
@@ -216,7 +222,7 @@ function goTo(id: string): void {
   if (!el) return;
   history.replaceState(history.state, '', `#${id}`);
   el.scrollIntoView({ block: 'start' });
-  const heading = el.matches('h2, h3') ? el : el.querySelector<HTMLElement>('h2, h3');
+  const heading = el.matches('h2, h3, h4') ? el : el.querySelector<HTMLElement>('h2, h3, h4');
   heading?.setAttribute('tabindex', '-1');
   heading?.focus({ preventScroll: true });
 }
@@ -224,7 +230,10 @@ function goTo(id: string): void {
 function onSearchKey(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     if (query) query = '';
-    else if (narrow) closeSheet();
+    else if (narrow) {
+      closeSheet();
+      mobileSearch?.focus();
+    }
     return;
   }
   if (event.key === 'Enter' && hits.length) {
@@ -262,7 +271,10 @@ async function focusSearch(): Promise<void> {
 function onWindowKey(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null;
   const typing = !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+  if (event.key === 'Escape' && tocOpen && !typing) {
+    closeSheet();
+    tocToggle?.focus();
+  } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();
     void focusSearch();
   } else if (event.key === '/' && !typing) {
@@ -282,6 +294,10 @@ let caps: BrowserCapabilityReport | null = null;
 let capsFailed = false;
 
 onMount(() => {
+  if (/Mac|iPhone|iPad|iPod/.test(navigator.platform)) {
+    searchShortcut = '⌘K';
+    searchShortcutLabel = 'Command K';
+  }
   index = buildIndex();
   const header = document.querySelector<HTMLElement>('.site-header');
   const media = window.matchMedia('(max-width: 860px)');
@@ -326,22 +342,22 @@ onMount(() => {
 
 <header class="doc-intro">
   <h1 id="doc-h1">Using 0x88</h1>
-  <p class="intro-lede">How to analyse positions, run engine matches and play human-like opponents in your browser, what to check when WebGPU or a download fails, and where each engine’s license and corresponding source live.</p>
-  <nav class="quick-links" aria-label="Documentation sections">
-    <a href="#pages">Get started</a>
-    <a href="#troubleshooting">Troubleshooting</a>
-    <a href="#engines">Engines</a>
-    <a href="#licenses">Licenses &amp; source</a>
-  </nav>
+  <p class="intro-lede">Workspace guides, troubleshooting, engine details and source links.</p>
 </header>
 
 <!-- ===== Contents: left rail on desktop, sticky bar + sheet on phones ===== -->
 <aside class="toc" class:open={tocOpen} aria-label="Documentation contents" bind:this={rail}>
-  <button class="toc-toggle" type="button" aria-expanded={tocOpen} aria-controls="toc-panel" on:click={() => (tocOpen = !tocOpen)}>
-    <span class="toc-toggle-label">Contents</span>
-    <span class="toc-current">{activeLabel}</span>
-    <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
-  </button>
+  <div class="toc-toolbar">
+    <button class="toc-toggle" type="button" aria-expanded={tocOpen} aria-controls="toc-panel" bind:this={tocToggle} on:click={() => (tocOpen = !tocOpen)}>
+      <span class="toc-toggle-label">Contents</span>
+      <span class="toc-current">{activeLabel}</span>
+      <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+    </button>
+    <button class="mobile-search" type="button" aria-controls="toc-panel" bind:this={mobileSearch} on:click={focusSearch}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>
+      Search docs
+    </button>
+  </div>
   <div id="toc-panel" class="toc-panel">
     <div class="search" role="search">
       <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>
@@ -358,7 +374,8 @@ onMount(() => {
         bind:this={searchInput}
         on:keydown={onSearchKey}
       />
-      <kbd id="docSearchHint"><span class="visually-hidden">Press </span>/<span class="visually-hidden"> or Ctrl+K to search</span></kbd>
+      <span id="docSearchHint" class="visually-hidden">Press / or {searchShortcutLabel} to search</span>
+      <span class="search-shortcuts" aria-hidden="true"><kbd>/</kbd><kbd>{searchShortcut}</kbd></span>
     </div>
     {#if searching}
       <div id="docSearchResults" class="results" aria-live="polite">
@@ -382,15 +399,17 @@ onMount(() => {
     {:else}
       <nav class="toc-groups" aria-label="On this page" bind:this={railList}>
         {#each toc as group (group.label)}
-          <div class="toc-group" class:collapsed={group.collapsed && group.label !== activeGroup}>
-            {#if group.id}
-              <a class="toc-group-label" href={`#${group.id}`} class:active={group.id === activeId} aria-current={group.id === activeId ? 'location' : undefined} on:click={closeSheet}>{group.label}</a>
-            {:else}
-              <p class="toc-group-label">{group.label}</p>
-            {/if}
-            <ul>
+          <div class="toc-group">
+            <div class="toc-group-heading" class:current-group={group.id === activeGroupId}>
+              <a class="toc-group-label" href={`#${group.id}`} class:active={group.id === activeId} aria-current={group.id === activeId ? 'location' : group.id === activeGroupId ? 'true' : undefined} on:click={closeSheet}>{group.label}</a>
+              <button type="button" class="group-toggle" aria-label={`${expandedGroups[group.id] ? 'Hide' : 'Show'} ${group.label} topics`} aria-expanded={!!expandedGroups[group.id]} aria-controls={`toc-${group.id}`} on:click={() => (expandedGroups = { ...expandedGroups, [group.id]: !expandedGroups[group.id] })}>
+                <span aria-hidden="true">{group.items.length}</span>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+              </button>
+            </div>
+            <ul id={`toc-${group.id}`} hidden={!expandedGroups[group.id]}>
               {#each group.items as item (item.id)}
-                <li class:expanded={item.id === activeTopId}>
+                <li>
                   <a href={`#${item.id}`} class:active={item.id === activeId} class:in-active={item.id === activeTopId} aria-current={item.id === activeId ? 'location' : undefined} on:click={closeSheet}>{item.label}</a>
                   {#if item.children}
                     <ul>
@@ -409,6 +428,16 @@ onMount(() => {
   </div>
 </aside>
 
+{#snippet sectionNav(id: string)}
+  {@const position = toc.findIndex((group) => group.id === id)}
+  {@const previous = toc[position - 1]}
+  {@const next = toc[position + 1]}
+  <nav class="section-nav" aria-label={`Continue from ${toc[position].label}`}>
+    {#if previous}<a href={`#${previous.id}`}><span class="section-direction">← Previous</span><span>{previous.label}</span></a>{/if}
+    {#if next}<a class="next-section" href={`#${next.id}`}><span class="section-direction">Next →</span><span>{next.label}</span></a>{/if}
+  </nav>
+{/snippet}
+
 <div class="doc-content">
 
 <!-- ===== GET STARTED: THE WORKSPACES ===== -->
@@ -417,7 +446,10 @@ onMount(() => {
   <p class="lead">0x88 has three workspaces: Analysis, Arena and Play. Everything runs in your browser. Each engine downloads the first time you use it and is reused after that.</p>
 
   <div class="page-block">
-    <h3 id="pages-analysis"><span class="pn">Analysis</span> Analyse a position <a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
+    <div class="task-heading">
+      <h3 id="pages-analysis" aria-labelledby="analysis-title"><span id="analysis-title">Analyse a position</span><a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
+      <a class="open-link" href="/app/analysis/">Open Analysis <span aria-hidden="true">→</span></a>
+    </div>
     <p>Run several engines on the same position and compare their best moves, evaluations and lines.</p>
     <ol class="steps">
       <li>Open Analysis. It starts with Lc0 (Small net) and Stockfish Lite on the starting position.</li>
@@ -425,17 +457,22 @@ onMount(() => {
       <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to change each engine’s net or build and its search budget (visits or depth).</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
     </ol>
+    <div class="task-reference">
+    <h4>Exploring the results</h4>
     <ul>
       <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines.</li>
       <li><strong>Compare tab</strong> &mdash; every engine’s best move and evaluation in one table, with the difference between them.</li>
       <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
     </ul>
+    </div>
     <p class="not-yet"><strong>Not available yet:</strong> game review (move accuracy and critical moments) and a local opening explorer for your own PGN collections are in development and hidden in the current build.</p>
-    <p class="open-row"><a class="open-link" href="/app/analysis/">Open Analysis <span aria-hidden="true">→</span></a><code class="pg-url">/app/analysis</code></p>
   </div>
 
   <div class="page-block">
-    <h3 id="pages-arena"><span class="pn">Arena</span> Run an engine match <a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
+    <div class="task-heading">
+      <h3 id="pages-arena" aria-labelledby="arena-title"><span id="arena-title">Run an engine match</span><a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
+      <a class="open-link" href="/app/arena/">Open Arena <span aria-hidden="true">→</span></a>
+    </div>
     <p>Play engines against each other and keep score. The project also uses Arena to compare browser engine builds and Lc0 networks.</p>
     <ol class="steps">
       <li>Open Arena. Under <strong>Matchup</strong>, pick a mode: a two-engine match, a round robin, or a gauntlet of Engine 1 against the field. Use <strong>+ Add engine</strong> for more seats.</li>
@@ -443,16 +480,21 @@ onMount(() => {
       <li>Press <strong>Start match</strong>. Games play live on the board, with colours alternating between games.</li>
       <li>Read the standings: points, wins, draws, losses and an Elo estimate against the pool with a ±95% range.</li>
     </ol>
+    <div class="task-reference">
+    <h4>Following the match</h4>
     <ul>
       <li><strong>Charts</strong> &mdash; evaluation, time and speed for the current game.</li>
       <li><strong>Review</strong> &mdash; select a finished game or a move to replay it.</li>
       <li><strong>Export</strong> &mdash; <em>Export PGN</em> under <em>Game log &amp; PGN</em> lists every game as PGN.</li>
     </ul>
-    <p class="open-row"><a class="open-link" href="/app/arena/">Open Arena <span aria-hidden="true">→</span></a><code class="pg-url">/app/arena</code></p>
+    </div>
   </div>
 
   <div class="page-block">
-    <h3 id="pages-play"><span class="pn">Play</span> Play a game <a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
+    <div class="task-heading">
+      <h3 id="pages-play" aria-labelledby="play-title"><span id="play-title">Play a game</span><a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
+      <a class="open-link" href="/app/play/">Open Play <span aria-hidden="true">→</span></a>
+    </div>
     <p>Play against Maia3, Leela Queen Odds or any of the analysis engines.</p>
     <ol class="steps">
       <li>Open Play. Maia3 is the default opponent; <strong>Change</strong> picks another.</li>
@@ -461,13 +503,11 @@ onMount(() => {
       <li>Take back or resign during the game. Afterwards, copy or download the PGN, or press <strong>Analyze</strong> to open the game in Analysis.</li>
     </ol>
     <p>Your games are not sent anywhere. The engine, and its network if it has one, downloads on first use and is reused from your browser’s storage after that.</p>
-    <p class="open-row"><a class="open-link" href="/app/play/">Open Play <span aria-hidden="true">→</span></a><code class="pg-url">/app/play</code></p>
   </div>
-</section>
 
 <!-- ===== HUMAN VS COMPUTER PLAY ===== -->
-<section id="human-vs-computer">
-  <h2>Human-like opponents <a class="anchor-link" href="#human-vs-computer" aria-label="Link to this section">#</a></h2>
+<div class="opponents">
+  <h3 id="human-vs-computer">Human-like opponents <a class="anchor-link" href="#human-vs-computer" aria-label="Link to this section">#</a></h3>
   <p class="lead">Maia3 predicts a rating-conditioned human move distribution and human-game outcome. Leela Queen Odds is an Lc0-compatible network trained for games where the engine starts without its queen. The optional contempt controls belong to 0x88's search implementation and model an opponent with limited reply search.</p>
 
   <div class="callout info">
@@ -508,6 +548,8 @@ onMount(() => {
   </table>
 
   <p>Maia3's WDL output predicts the result of a human game at the selected rating; it is not an engine centipawn evaluation. The Leela Queen Odds and contempt experiments use 0x88's PUCT search. The full design note lives in <a href="https://github.com/manthedan/0x88/blob/main/docs/human_vs_computer_play.md">docs/human_vs_computer_play.md</a>.</p>
+</div>
+  {@render sectionNav('pages')}
 </section>
 
 <!-- ===== TROUBLESHOOTING ===== -->
@@ -591,6 +633,7 @@ onMount(() => {
     <h3 id="trouble-threads">Stockfish runs single-threaded <a class="anchor-link" href="#trouble-threads" aria-label="Link to this section">#</a></h3>
     <p>Multi-threaded WebAssembly needs a cross-origin-isolated page with <code>SharedArrayBuffer</code>. 0x88 sends the headers for this, and when they take effect Analysis and Arena run Stockfish’s threaded build. If the check above shows <em>Single-thread</em>, Stockfish uses its single-threaded build instead. The other CPU engines are single-threaded builds either way.</p>
   </div>
+  {@render sectionNav('troubleshooting')}
 </section>
 
 <!-- ===== ENGINES ===== -->
@@ -758,12 +801,15 @@ onMount(() => {
       <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives for the scalar, SIMD, and relaxed SIMD builds are hosted beside the binaries.</p>
     </div>
   </div>
+  {@render sectionNav('engines')}
 </section>
 
 <!-- ===== UNDER THE HOOD ===== -->
+<section id="under-the-hood">
+  <h2>Under the hood <a class="anchor-link" href="#under-the-hood" aria-label="Link to this section">#</a></h2>
 <!-- ===== NEURAL BROWSER RUNTIMES ===== -->
-<section id="neural-runtimes">
-  <h2>Neural browser runtimes <a class="anchor-link" href="#neural-runtimes" aria-label="Link to this section">#</a></h2>
+<div class="runtime-block">
+  <h3 id="neural-runtimes">Neural browser runtimes <a class="anchor-link" href="#neural-runtimes" aria-label="Link to this section">#</a></h3>
   <p class="lead">Lc0 and Maia3 are loaded as browser models rather than compiled UCI executables. 0x88 supplies input encoding, inference, and legal-move mapping. Its own PUCT implementation searches the Lc0 and Leela Queen Odds outputs, while Maia3 is used directly as a rating-conditioned move policy.</p>
 
   <div class="callout info">
@@ -810,11 +856,11 @@ onMount(() => {
 
   <p>WebNN is worth tracking because early probes show real acceleration on supported hardware, but it currently requires Chrome's <code>WebMachineLearningNeuralNetwork</code> feature flag and has model-shape/precision caveats. Likewise, QDQ should be judged on real chess positions: random tensor comparisons can overstate int8 drift compared with actual LC0/Maia activations.</p>
   <p>Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/neural_browser_runtimes.md">docs/neural_browser_runtimes.md</a>, with supporting runbooks for <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0_tvmjs_research_runbook.md">TVMJS</a>, <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0web_custom_inference_checkpoint.md">custom WGSL</a>, and <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0_t3_qdq_webnn_2026-06-10.md">QDQ/WebNN probes</a>.</p>
-</section>
+</div>
 
 <!-- ===== CPU WASM RUNTIMES ===== -->
-<section id="cpu-wasm">
-  <h2>CPU WASM runtimes <a class="anchor-link" href="#cpu-wasm" aria-label="Link to this section">#</a></h2>
+<div class="runtime-block">
+  <h3 id="cpu-wasm">CPU WASM runtimes <a class="anchor-link" href="#cpu-wasm" aria-label="Link to this section">#</a></h3>
   <p class="lead">Stockfish, Reckless, Berserk, Viridithas, PlentyChess, Stormphrax, and the Monty lab port are CPU engines compiled to WebAssembly. Browser workers provide their UCI-style control layer.</p>
 
   <div class="callout info">
@@ -854,7 +900,8 @@ onMount(() => {
     </tbody>
   </table>
 
-  <h3 id="cpu-wasm-relaxed-simd">Relaxed SIMD <a class="anchor-link" href="#cpu-wasm-relaxed-simd" aria-label="Link to this section">#</a></h3>
+  <div class="runtime-subsection">
+  <h4 id="cpu-wasm-relaxed-simd">Relaxed SIMD <a class="anchor-link" href="#cpu-wasm-relaxed-simd" aria-label="Link to this section">#</a></h4>
   <p>Relaxed SIMD is a separate WebAssembly feature from ordinary <code>simd128</code>. A relaxed build can fail to validate on a browser that supports baseline SIMD, so every relaxed artifact needs feature detection, asset fallback, and a non-relaxed path.</p>
   <p>The main win for these chess engines is the relaxed integer dot product used in NNUE layers. When the activation operand is proven to stay in <code>[0, 127]</code>, <code>i32x4_relaxed_dot_i8x16_i7x16_add</code> is value-exact and can replace slower <code>maddubs</code>/<code>dpbusd</code> emulation. Reckless, Viridithas, Berserk, PlentyChess, and Stormphrax all have this proof in their current SIMD audit lanes.</p>
   <p>The rule is still parity-first: inspect the artifact to confirm relaxed opcodes are present, then require fixed-depth equality for best move, score, node count, and PV before promoting a runtime ladder such as <code>relaxed-simd &gt; simd128 &gt; scalar</code>. Without that evidence, relaxed SIMD remains a lab or benchmark variant.</p>
@@ -907,11 +954,12 @@ onMount(() => {
   </table>
 
   <p>The promotion rule is deliberately conservative: build scripts must pin upstream source and NNUE assets, Node and browser smokes must pass, benchmarks must justify the variant, and GPL/AGPL artifacts need manifests plus matching source archives before public distribution. Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/cpu_wasm_runtimes.md">docs/cpu_wasm_runtimes.md</a> and the C/C++ porting recipe in <a href="https://github.com/manthedan/0x88/blob/main/docs/browser_c_engine_porting.md">docs/browser_c_engine_porting.md</a>.</p>
-</section>
+  </div>
+</div>
 
 <!-- ===== CDN ===== -->
-<section id="cdn">
-  <h2>Artifact CDN &amp; caching <a class="anchor-link" href="#cdn" aria-label="Link to this section">#</a></h2>
+<div class="runtime-block">
+  <h3 id="cdn">Artifact CDN &amp; caching <a class="anchor-link" href="#cdn" aria-label="Link to this section">#</a></h3>
   <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from 130 KB to 60+ MB, so caching and compression are critical for the site to function.</p>
 
   <div class="callout info">
@@ -922,6 +970,8 @@ onMount(() => {
   <p>The Worker also handles range requests (delegated to R2's native reader), sets <code>no-transform</code> on binary types to prevent CDN auto-compression of WASM, and attaches CORS/CORP headers for cross-origin isolation. Pre-compression (brotli + gzip sidecars) is done at publish time, not at the edge. Browser-side, the Cache Storage API validates responses by byte length and SHA-256, and compiled <code>WebAssembly.Module</code> objects are cached per worker session.</p>
 
   <p>Full architecture, compression pipeline details, artifact size table, and operational playbook (diagnostics, publishing, adding new engines) are in <a href="https://github.com/manthedan/0x88/blob/main/docs/cdn_artifact_caching.md">docs/cdn_artifact_caching.md</a>.</p>
+</div>
+  {@render sectionNav('under-the-hood')}
 </section>
 
 <!-- ===== LICENSES ===== -->
@@ -936,6 +986,7 @@ onMount(() => {
     <p><strong>Full policy:</strong> <a href="https://github.com/manthedan/0x88/blob/main/docs/engine_artifact_distribution.md">docs/engine_artifact_distribution.md</a> &middot; <strong>Hosted artifact index:</strong> <a href="https://github.com/manthedan/0x88/blob/main/docs/hosted_artifacts.md">docs/hosted_artifacts.md</a> &middot; <strong>This project's source:</strong> <a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a></p>
   </div>
 
+  <div class="source-links">
   <h3 id="licenses-per-engine" style="font-size:20px">Per-engine source links <a class="anchor-link" href="#licenses-per-engine" aria-label="Link to this section">#</a></h3>
   <p>Each row lists the binary we ship, its license, and the matching source offer. This is the same information as the metadata blocks above, collected in one place for quick reference.</p>
   <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
@@ -1008,16 +1059,18 @@ onMount(() => {
   <blockquote>
     <p>A note on engine names and branding: the names "Stockfish", "Leela Chess Zero", "Berserk", "Viridithas", "PlentyChess", "Stormphrax", "Reckless", and "Maia" are project trademarks of their respective owners, separate from the code licenses. We use them here solely to identify the engines (nominative use) and do not claim endorsement. Consult each project's own branding guidance if in doubt.</p>
   </blockquote>
-</section>
+  </div>
 
 <!-- ===== REMOVAL ===== -->
-<section id="removal">
-  <h2>Removal requests <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h2>
+<div class="removal-block">
+  <h3 id="removal">Removal requests <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h3>
   <p class="lead">The engines and models above belong to their respective projects. 0x88 packages them for browser use.</p>
   <p>Maintainers and rights holders can request removal by <a href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">opening an issue on GitHub</a>. The requested engine or model will be removed.</p>
   <p>
     <a class="removal-cta" href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">Request removal on GitHub <span aria-hidden="true">&rarr;</span></a>
   </p>
+</div>
+  {@render sectionNav('licenses')}
 </section>
 
 </div><!-- /doc-content -->
@@ -1040,23 +1093,17 @@ onMount(() => {
   .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
 
   /* ---- layout: contents rail | intro + content ---- */
+  .doc-body{font-size:16px}
   .doc-body .doc-grid{
     padding:36px 28px 64px;
-    display:grid; grid-template-columns:236px minmax(0,1fr);
+    display:grid; grid-template-columns:248px minmax(0,70ch);
     grid-template-areas:"toc intro" "toc content";
     column-gap:56px; align-items:start;
   }
-  .doc-intro{grid-area:intro; max-width:880px; margin-bottom:40px}
+  .doc-intro{grid-area:intro; margin-bottom:32px}
   .doc-intro h1{font-size:clamp(30px,4vw,40px); margin:0 0 10px; line-height:1.1; letter-spacing:-.015em}
   .intro-lede{margin:0; color:var(--ink-soft); font-size:16.5px; max-width:66ch; line-height:1.6}
-  .quick-links{display:flex; flex-wrap:wrap; gap:8px; margin-top:18px}
-  .quick-links a{
-    display:inline-flex; align-items:center; min-height:34px; padding:6px 13px;
-    border:1px solid var(--rule-strong); border-radius:99px; background:var(--panel);
-    color:var(--ink); font-size:13.5px; font-weight:600; text-decoration:none;
-  }
-  .quick-links a:hover{border-color:var(--border-input-hover); background:var(--panel-2)}
-  .doc-content{grid-area:content; max-width:880px; min-width:0}
+  .doc-content{grid-area:content; min-width:0}
 
   /* Wide tables scroll inside their own box instead of widening the page. */
   .doc-content :global(table){display:block; overflow-x:auto}
@@ -1066,14 +1113,14 @@ onMount(() => {
   .toc{
     grid-area:toc;
     position:sticky; top:calc(var(--hdr, 64px) + 20px);
-    font-size:13.5px;
+    font-size:14px;
   }
-  .toc-toggle{display:none}
+  .toc-toolbar{display:none}
   .toc-panel{display:flex; flex-direction:column; max-height:calc(100vh - var(--hdr, 64px) - 40px)}
   .search{position:relative; margin:0 0 14px; flex:0 0 auto}
   .search-icon{position:absolute; left:10px; top:50%; width:15px; height:15px; transform:translateY(-50%); fill:none; stroke:var(--muted); stroke-width:2; stroke-linecap:round; pointer-events:none}
   .search input{
-    width:100%; box-sizing:border-box; min-height:38px; padding:8px 34px 8px 32px;
+    width:100%; box-sizing:border-box; min-height:40px; padding:8px 86px 8px 32px;
     border:1px solid var(--border-input); border-radius:var(--radius-sm);
     background:var(--input-bg); color:var(--ink); font:inherit; font-size:14px;
   }
@@ -1081,31 +1128,35 @@ onMount(() => {
   .search input:hover{border-color:var(--border-input-hover)}
   .search input:focus{outline:none; border-color:var(--accent); box-shadow:var(--focus-ring)}
   .search input::-webkit-search-cancel-button{display:none}
+  .search-shortcuts{position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:4px; pointer-events:none}
   .search kbd{
-    position:absolute; right:8px; top:50%; transform:translateY(-50%);
-    min-width:18px; padding:1px 5px; border:1px solid var(--rule-strong); border-radius:4px;
-    background:var(--panel); color:var(--muted); font-family:var(--mono); font-size:11px; text-align:center; pointer-events:none;
+    min-width:18px; padding:1px 4px; border:1px solid var(--rule-strong); border-radius:4px;
+    background:var(--panel); color:var(--text-soft); font-family:var(--mono); font-size:10px; text-align:center;
   }
-  .search input:focus ~ kbd{display:none}
+  .search input:focus ~ .search-shortcuts{display:none}
   .toc-groups,.results{overflow-y:auto; min-height:0; padding-right:6px; margin-right:-6px}
-  .toc-group + .toc-group{margin-top:14px; padding-top:14px; border-top:1px solid var(--rule)}
-  .toc-groups .toc-group-label{
-    display:block; margin:0 0 4px; padding:5px 10px; border-radius:6px;
-    font-size:13.5px; font-weight:700; color:var(--ink); text-decoration:none;
+  .toc-group + .toc-group{margin-top:12px; padding-top:12px; border-top:1px solid var(--rule)}
+  .toc-group-heading{display:flex; align-items:center; gap:4px; margin-bottom:4px}
+  .toc-groups .toc-group-label{flex:1; font-size:14px; font-weight:700; color:var(--ink)}
+  .toc-group-heading.current-group .toc-group-label{color:var(--accent-soft-text); background:var(--accent-soft)}
+  .group-toggle{
+    display:flex; align-items:center; justify-content:center; gap:4px; min-width:42px; min-height:30px; padding:4px;
+    border:1px solid var(--rule-strong); border-radius:6px; background:var(--panel); color:var(--text); font:12px var(--sans); cursor:pointer;
   }
-  .toc-groups a.toc-group-label:hover{background:var(--rule-soft)}
-  .toc-group.collapsed > ul{display:none}
+  .group-toggle:hover{background:var(--panel-2); color:var(--ink)}
+  .group-toggle svg{width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; transition:transform .15s}
+  .group-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
+  .toc ul[hidden]{display:none}
   .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:1px}
   .toc-groups a{
     display:block; padding:5px 10px; border-radius:6px;
     color:var(--text); text-decoration:none; line-height:1.35;
   }
   .toc-groups a:hover{color:var(--ink); background:var(--rule-soft)}
-  .toc-groups a.in-active{color:var(--ink)}
-  .toc-groups a.active{color:var(--ink); font-weight:650; background:var(--accent-soft); box-shadow:inset 0 0 0 1px var(--accent-tint-border)}
-  .toc-groups a.active::after{content:""; display:inline-block; width:6px; height:6px; margin-left:8px; border-radius:50%; background:var(--accent); vertical-align:middle}
-  .toc ul ul{margin:1px 0 4px 12px; display:none}
-  .toc li.expanded > ul{display:grid}
+  .toc-groups a.in-active{color:var(--ink); font-weight:600}
+  .toc-groups a.active{color:var(--accent-soft-text); font-weight:700; background:var(--accent-soft)}
+  .toc-group > ul{padding-left:10px}
+  .toc ul ul{margin:1px 0 4px 12px}
   .toc ul ul a{font-size:13px; padding:4px 10px}
 
   /* ---- search results ---- */
@@ -1128,7 +1179,7 @@ onMount(() => {
   .doc-content section:last-child{padding-bottom:0}
   .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 20px)}
   .doc-content h2{
-    font-size:28px; margin:8px 0 14px;
+    font-size:32px; margin:8px 0 14px;
     line-height:1.2; letter-spacing:-.01em;
     display:flex; align-items:center; gap:10px;
   }
@@ -1148,17 +1199,20 @@ onMount(() => {
   .doc-content .anchor-link:focus-visible{opacity:1}
   .doc-content h2 .anchor-link:hover,
   .doc-content h3 .anchor-link:hover{color:var(--accent); opacity:1}
-  .doc-content h3{font-size:20px; margin:36px 0 10px; line-height:1.25}
-  .doc-content h3 .anchor-link{font-size:.6em; vertical-align:middle}
+  .doc-content h3{font-family:var(--sans); font-weight:650; font-size:21px; margin:36px 0 12px; line-height:1.3}
+  .doc-content h4{font-family:var(--sans); font-size:17px; margin:28px 0 12px}
+  .doc-content h3 .anchor-link,.doc-content h4 .anchor-link{font-size:.6em; vertical-align:middle}
+  .doc-content h4 .anchor-link{margin-left:8px; color:var(--muted); text-decoration:none}
+  .runtime-block + .runtime-block{padding-top:16px; margin-top:32px; border-top:1px solid var(--rule)}
   .doc-content :global(h2:focus),.doc-content :global(h3:focus){outline:none}
   .doc-content > section > p.lead{
     color:var(--ink-soft); margin:0 0 26px;
     font-size:16px; max-width:66ch; line-height:1.65;
   }
-  .doc-content p{margin:0 0 14px; line-height:1.7; color:var(--ink-soft); max-width:72ch}
+  .doc-content p{margin:0 0 14px; line-height:1.65; color:var(--ink-soft)}
   .doc-content ul,.doc-content ol{
     margin:0 0 16px; padding-left:24px;
-    line-height:1.7; color:var(--ink-soft); max-width:70ch;
+    line-height:1.65; color:var(--ink-soft);
   }
   .doc-content ul li::marker{color:var(--accent)}
   .doc-content code{
@@ -1170,16 +1224,15 @@ onMount(() => {
 
   /* ---- workspace cards ---- */
   .page-block{
-    background:var(--panel); border:1px solid var(--rule);
-    border-radius:var(--radius); padding:24px 28px; margin-bottom:20px;
+    background:var(--panel); border:1px solid color-mix(in srgb, var(--ink) 16%, var(--panel));
+    border-radius:var(--radius); padding:24px; margin-bottom:24px;
   }
-  .page-block h3{margin:0 0 8px; font-size:20px; display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px}
-  .page-block h3 .pn{
-    font-family:var(--mono); font-size:11px;
-    color:var(--accent-soft-text); background:var(--accent-soft);
-    padding:3px 10px; border-radius:99px;
-    font-weight:700; letter-spacing:.04em; text-transform:uppercase;
-  }
+  .task-heading{display:flex; align-items:center; flex-wrap:wrap; gap:12px; justify-content:space-between; margin-bottom:14px}
+  .page-block h3{margin:0; font-size:20px; flex:1 1 220px}
+  .task-reference{margin-top:24px; padding-top:18px; border-top:1px solid var(--rule-strong)}
+  .task-reference h4{font-size:15px; margin:0 0 10px; color:var(--ink)}
+  .task-reference ul{font-size:16px}
+  .task-reference li + li{margin-top:6px}
   .page-block p{margin:0 0 12px}
   .page-block ul{margin:0 0 14px}
   .doc-content .steps{counter-reset:step; list-style:none; padding-left:0; margin:4px 0 18px; display:grid; gap:8px}
@@ -1195,7 +1248,6 @@ onMount(() => {
     padding:10px 14px; border:1px dashed var(--rule-strong); border-radius:var(--radius-sm);
     font-size:14px; color:var(--text); max-width:none;
   }
-  .doc-content .open-row{display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; margin:16px 0 0}
   .doc-content .open-link{
     display:inline-flex; align-items:center; gap:8px; min-height:40px;
     padding:8px 16px; border-radius:var(--radius-sm);
@@ -1205,7 +1257,11 @@ onMount(() => {
   .doc-content .open-link:hover{background:var(--accent-hover); text-decoration:none}
   .open-link span{transition:transform .15s ease}
   .open-link:hover span{transform:translateX(3px)}
-  .doc-content .pg-url{background:none; padding:0; color:var(--text-soft); font-size:12.5px}
+  .section-nav{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:32px; padding-top:24px; border-top:1px solid var(--rule-strong)}
+  .section-nav a{display:grid; gap:4px; padding:14px 16px; border:1px solid var(--rule-strong); border-radius:var(--radius); color:var(--ink); font-size:15px; background:var(--panel); text-decoration:none}
+  .section-nav a:hover{border-color:var(--accent); background:var(--panel-2)}
+  .section-nav .next-section{grid-column:2; text-align:right}
+  .section-direction{font-size:12px; font-weight:500; color:var(--text-soft)}
 
   /* ---- troubleshooting ---- */
   .trouble{padding:4px 0 8px}
@@ -1325,7 +1381,7 @@ onMount(() => {
   .removal-cta:hover span{transform:translateX(3px)}
   .doc-content blockquote{
     margin:24px 0; padding:16px 22px;
-    border-left:3px solid var(--rule);
+    border:1px solid var(--rule); border-radius:var(--radius);
     color:var(--text); font-size:14px; line-height:1.65; max-width:68ch;
   }
   .doc-content blockquote p{margin:0; color:var(--text)}
@@ -1340,8 +1396,6 @@ onMount(() => {
     .doc-intro{margin-bottom:16px}
     .doc-intro h1{font-size:30px; margin-bottom:8px}
     .intro-lede{font-size:15.5px; line-height:1.55}
-    /* The sticky contents bar right below does this job on phones. */
-    .quick-links{display:none}
     .toc{
       top:var(--hdr, 64px); z-index:30;
       margin:0 -16px 24px; padding:8px 16px;
@@ -1349,12 +1403,15 @@ onMount(() => {
       -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
       border-bottom:1px solid var(--rule-strong);
     }
+    .toc-toolbar{display:flex; gap:8px}
     .toc-toggle{
-      width:100%; min-height:44px; padding:8px 12px;
+      min-width:0; flex:1; min-height:44px; padding:8px 10px;
       display:flex; align-items:center; gap:10px;
       border:1px solid var(--rule-strong); border-radius:var(--radius);
       background:var(--panel); color:var(--ink); font:inherit; text-align:left; cursor:pointer;
     }
+    .mobile-search{display:flex; align-items:center; justify-content:center; gap:6px; padding:8px 10px; border:1px solid var(--rule-strong); border-radius:var(--radius); background:var(--panel); color:var(--ink); font:600 13px var(--sans); cursor:pointer}
+    .mobile-search svg{width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round}
     .toc-toggle-label{flex:0 0 auto; font-size:12px; font-weight:700; color:var(--text-soft)}
     .toc-current{flex:1 1 auto; min-width:0; font-size:14.5px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .chevron{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
@@ -1366,15 +1423,28 @@ onMount(() => {
       background:var(--panel); box-shadow:var(--shadow-lg);
     }
     .toc.open .toc-panel{display:flex}
-    .search kbd{display:none}
-    .search input{min-height:44px; font-size:16px}
-    .toc ul ul,.toc-group.collapsed > ul{display:grid}
+    .search-shortcuts{display:none}
+    .search input{min-height:44px; padding-right:12px; font-size:16px}
+    .group-toggle{min-height:44px; min-width:44px}
     .toc-groups a{padding:8px 10px}
     .toc ul ul a{padding:7px 10px}
     .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 76px)}
     .doc-content h2{font-size:25px}
-    .page-block{padding:18px 18px}
+    .page-block{padding:20px 16px}
     .device-check{padding:12px 14px}
     .device-check dl > div{grid-template-columns:1fr; gap:2px}
+  }
+  @media(max-width:480px){
+    .doc-intro{margin-bottom:8px}
+    .toc{margin-bottom:20px}
+    .page-block{padding:20px 0; border:0; border-top:1px solid var(--rule-strong); border-radius:0; background:none; margin-bottom:16px}
+    .task-heading{gap:10px; margin-bottom:12px}
+    .page-block h3{flex-basis:100%; font-size:20px}
+    .doc-content .open-link{min-height:40px; padding:7px 12px}
+    .doc-content .steps{gap:10px}
+    .steps li{padding-left:32px}
+    .section-nav{gap:8px}
+    .section-nav a{padding:12px; font-size:14px}
+    .callout{padding:16px}
   }
 </style>
