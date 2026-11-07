@@ -234,13 +234,14 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 
 /* ===== Theme toggle button ===== */
 .theme-toggle{
-  width:34px; height:34px; border-radius:8px;
+  width:34px; height:34px; padding:0; border-radius:8px;
   border:1px solid var(--border-input); background:var(--panel);
-  color:var(--text-soft); font-size:15px; line-height:1;
+  color:var(--ink-soft); font-size:15px; line-height:1;
   cursor:pointer; display:flex; align-items:center; justify-content:center;
   transition:border-color .15s, color .15s;
 }
-.theme-toggle svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round}
+/* padding:0 matters: the base button padding (12px each side) squeezed the glyph to ~8px in the 34px box. */
+.theme-toggle svg{width:18px; height:18px; flex:0 0 18px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
 .theme-toggle:hover{border-color:var(--border-input-hover); color:var(--ink)}
 .board-style-select{
   font-size:13px; padding:7px 11px; border:1px solid var(--border-input);

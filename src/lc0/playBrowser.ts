@@ -400,13 +400,21 @@ function ctxRenderMaia3Controls(ctx: PlayContext): void {
   (el('maia3TopPField') as HTMLElement).style.opacity = sample ? '' : '0.5';
 }
 
-/** Routine readiness stays in the live region; the player strip shows its visible label. */
+/**
+ * Engine notes are visible detail, not a second live region: #gameAnnouncement
+ * already speaks readiness and turn changes. Only failures interrupt (role=alert);
+ * routine readiness is hidden from sight and from the accessibility tree.
+ */
 function ctxSetEngineNote(text: string, warn = false, routine = false): void {
   const note = el('engineNote');
   note.textContent = text;
   note.hidden = !text;
   note.classList.toggle('warn', warn);
   note.dataset.routine = String(routine && !warn);
+  if (warn && text) note.setAttribute('role', 'alert');
+  else note.removeAttribute('role');
+  if (routine && !warn) note.setAttribute('aria-hidden', 'true');
+  else note.removeAttribute('aria-hidden');
   if (!text) buttonEl('retryEngine').hidden = true;
 }
 
@@ -1538,7 +1546,8 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shown: Board
   else if (!isHuman && ctx.preparingEngine) [text, kind] = ['Loading…', 'thinking'];
   else if (!isHuman && !ctx.engineReady && !ctx.gameOver)
     [text, kind] = buttonEl('retryEngine').hidden ? ['Loading…', 'thinking'] : ['Error · retry', 'error'];
-  else if (!isHuman && !ctx.gameOver) [text, kind] = ['Ready', 'ready'];
+  // Readiness only matters before the first move; during play the strips carry the turn.
+  else if (!isHuman && phase === 'setup') [text, kind] = ['Ready', 'ready'];
   else if (isHuman && phase === 'playing' && ctx.viewPly === null && ctx.board.turn === color && ctx.engineReady && !ctx.pendingPromotion) [text, kind] = ['Your move', 'turn'];
   state.textContent = text;
   state.dataset.kind = kind;
@@ -1577,6 +1586,9 @@ function ctxRenderChrome(ctx: PlayContext, shownBoard: BoardState, shownPly: num
   const change = buttonEl('changeOpponent');
   change.setAttribute('aria-expanded', String(ctx.configOpen));
   change.textContent = ctx.configOpen ? 'Done' : 'Change';
+  change.title = ctx.configOpen ? '' : 'Change opponent (asks before restarting the game)';
+  const detailsLabel = maybeEl('detailsLabel');
+  if (detailsLabel) detailsLabel.textContent = option.family === 'maia3' ? 'Exact rating & opponent details' : 'Opponent details';
 
   const newGame = buttonEl('newGame');
   newGame.classList.toggle('primary', phase === 'setup');
@@ -1623,12 +1635,12 @@ function ctxRender(ctx: PlayContext): void {
   ctx.viewPly = normalizeViewPly(ctx.viewPly, ctx.moves.length);
   const browsing = ctx.viewPly !== null;
   const statusText = ctxStatusText(ctx);
-  el('status').textContent = statusText;
-  // Keep turn/readiness announcements alive when routine sidebar chrome is visually collapsed.
+  const setupReady = ctxPhase(ctx) === 'setup' && ctx.engineReady && !ctx.engineThinking && !ctx.preparingEngine && !browsing;
+  // Setup reads as a heading; the "Press Play or make a move" hint lives under the Play button.
+  el('status').textContent = setupReady ? `New game vs ${ctxOpponentName(ctxSelectedEngine(ctx))}` : statusText;
+  // The one live region: turn and readiness changes are announced here and nowhere else.
   const announcement = el('gameAnnouncement');
-  const spokenStatus = ctxPhase(ctx) === 'setup' && ctx.engineReady && !ctx.engineThinking && !ctx.preparingEngine
-    ? `${ctxOpponentName(ctxSelectedEngine(ctx))} is ready. ${statusText}`
-    : statusText;
+  const spokenStatus = setupReady ? `${ctxOpponentName(ctxSelectedEngine(ctx))} is ready. ${statusText}` : statusText;
   if (announcement.textContent !== spokenStatus) announcement.textContent = spokenStatus;
   el('status').classList.toggle('over', !!ctx.gameOver);
   el('status').classList.toggle('browsing', browsing);

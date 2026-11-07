@@ -68,7 +68,7 @@ onMount(() => {
     <p id="gameAnnouncement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
     <div class="status-block">
       <div id="status" class="game-status">Loading…</div>
-      <div id="engineNote" role="status" aria-live="polite" hidden></div>
+      <div id="engineNote" hidden></div>
       <div id="runtimeWarning" class="runtime-warning small" role="status" aria-live="polite" hidden></div>
       <button id="retryEngine" type="button" hidden>Retry engine</button>
       <div id="dlProgress" hidden><progress></progress><div class="dl-label small"></div></div>
@@ -103,9 +103,9 @@ onMount(() => {
       <div class="color-field">
         <span id="colorLabel" class="field-label">You play</span>
         <div class="color-choice" role="group" aria-labelledby="colorLabel">
-          <button type="button" data-color="white" aria-pressed="true"><span class="swatch white" aria-hidden="true"></span>White</button>
-          <button type="button" data-color="random" aria-pressed="false"><span class="swatch random" aria-hidden="true"></span>Random</button>
-          <button type="button" data-color="black" aria-pressed="false"><span class="swatch black" aria-hidden="true"></span>Black</button>
+          <button type="button" data-color="white" aria-pressed="true"><svg class="check" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" /></svg><svg class="swatch white" viewBox="4 2.5 16 19.5" aria-hidden="true"><path d="M12 3.4a3.4 3.4 0 0 0-2.2 6H8.6a1 1 0 0 0 0 2h.9c-.1 2.6-1.3 4.5-3 5.8h11c-1.7-1.3-2.9-3.2-3-5.8h.9a1 1 0 0 0 0-2h-1.2a3.4 3.4 0 0 0-2.2-6zM5.6 18.6h12.8v2.6H5.6z" /></svg>White</button>
+          <button type="button" data-color="random" aria-pressed="false"><svg class="check" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" /></svg><svg class="swatch random" viewBox="4 2.5 16 19.5" aria-hidden="true"><defs><linearGradient id="randomPawnFill" x1="0" x2="1" y1="0" y2="0"><stop offset=".5" stop-color="#f6f3ea" /><stop offset=".5" stop-color="#1d1b18" /></linearGradient></defs><path d="M12 3.4a3.4 3.4 0 0 0-2.2 6H8.6a1 1 0 0 0 0 2h.9c-.1 2.6-1.3 4.5-3 5.8h11c-1.7-1.3-2.9-3.2-3-5.8h.9a1 1 0 0 0 0-2h-1.2a3.4 3.4 0 0 0-2.2-6zM5.6 18.6h12.8v2.6H5.6z" fill="url(#randomPawnFill)" /></svg>Random</button>
+          <button type="button" data-color="black" aria-pressed="false"><svg class="check" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" /></svg><svg class="swatch black" viewBox="4 2.5 16 19.5" aria-hidden="true"><path d="M12 3.4a3.4 3.4 0 0 0-2.2 6H8.6a1 1 0 0 0 0 2h.9c-.1 2.6-1.3 4.5-3 5.8h11c-1.7-1.3-2.9-3.2-3-5.8h.9a1 1 0 0 0 0-2h-1.2a3.4 3.4 0 0 0-2.2-6zM5.6 18.6h12.8v2.6H5.6z" /></svg>Black</button>
         </div>
         <select id="colorSelect" class="visually-hidden" tabindex="-1" aria-hidden="true">
           <option value="white">White</option>
@@ -165,12 +165,13 @@ onMount(() => {
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4m0 0h11l-2 4 2 4H5" /></svg><span class="lbl">Resign</span>
       </button>
       <button id="newGame" class="primary" type="button">
-        <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg><span class="lbl">Play</span>
+        <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg><svg class="new-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg><span class="lbl">Play</span>
       </button>
+      <p class="play-hint">or just make a move on the board</p>
     </div>
 
     <details id="opponentDetails" class="settings-disclosure">
-      <summary><svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>Fine-tune &amp; opponent details</summary>
+      <summary><svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg><span id="detailsLabel">Exact rating &amp; opponent details</span></summary>
       <div class="settings-body">
         <div id="maia3Advanced" class="sampling-grid">
           <div class="custom-rating">
@@ -222,6 +223,13 @@ onMount(() => {
     grid-template-columns:calc(var(--board-size) + 18px) minmax(330px, 400px);
     gap:16px; max-width:1140px; padding:16px 24px 32px;
     font-variant-numeric:tabular-nums;
+    /* Control boundaries reach >=3:1 against the panel (page-local; shared tokens sit near 1.4:1). */
+    --border-input:#8f8470; --border-input-hover:#6f6553;
+    --selected-fill:color-mix(in srgb, var(--accent) 20%, var(--panel));
+  }
+  :global(:root[data-theme="dark"]) .play-workspace{--border-input:#766d5a; --border-input-hover:#958b77}
+  @media (prefers-color-scheme: dark){
+    :global(:root:not([data-theme])) .play-workspace{--border-input:#766d5a; --border-input-hover:#958b77}
   }
   .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
 
@@ -237,27 +245,29 @@ onMount(() => {
     display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h); padding:0 6px 0 4px;
     border-radius:8px; transition:background .15s;
   }
-  .player-strip:global([data-turn=true]){background:var(--panel-inset); box-shadow:inset 3px 0 var(--accent)}
+  .player-strip:global([data-turn=true]){background:color-mix(in srgb, var(--accent) 13%, var(--panel)); box-shadow:inset 3px 0 var(--accent)}
+  .player-strip:global([data-turn=true]) .player-avatar{box-shadow:0 0 0 2px var(--accent)}
   .player-avatar{
     display:grid; place-items:center; flex:0 0 34px; width:34px; height:34px; border-radius:7px;
-    background:#3b4a63; color:#f2f4f8; font:700 12.5px/1 var(--sans); letter-spacing:-.01em;
+    background:var(--accent-soft); color:var(--accent-soft-text); box-shadow:inset 0 0 0 1px var(--accent-tint-border);
+    font:700 12.5px/1 var(--sans); letter-spacing:-.01em;
   }
   .player-avatar.you{background:var(--panel-2); color:var(--ink); box-shadow:inset 0 0 0 1px var(--border-input-hover); font-size:11px}
   .player-avatar.small{flex-basis:28px; width:28px; height:28px; font-size:11px; border-radius:6px}
-  .player-id{display:flex; flex:1 1 auto; flex-direction:column; min-width:0; line-height:1.25}
+  .player-id{display:flex; flex:0 1 auto; flex-direction:column; min-width:0; line-height:1.25}
   .player-id strong{color:var(--ink); font:650 15px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .player-id small{color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  .player-material{display:inline-flex; align-items:center; gap:0; min-width:24px; max-width:120px; color:var(--ink); font-size:20px; line-height:1.2; white-space:nowrap; overflow:hidden}
+  .player-material{display:inline-flex; align-items:center; gap:0; min-width:24px; margin-right:auto; max-width:120px; color:var(--ink); font-size:20px; line-height:1.2; white-space:nowrap; overflow:hidden}
   .player-material :global(.taken){min-width:0; overflow:hidden; padding-right:3px; letter-spacing:-.18em}
   .player-material :global(.adv){flex:0 0 auto; margin-left:5px; font:600 12.5px var(--sans); color:var(--muted)}
-  .player-state{margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:var(--ink); font:650 14px var(--sans); white-space:nowrap}
+  .player-state{display:inline-flex; align-items:center; gap:6px; color:var(--ink); font:650 14px var(--sans); white-space:nowrap}
   .player-state:empty{display:none}
   .player-state:global([data-kind=thinking])::before{
     content:''; width:12px; height:12px; border-radius:50%;
     border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent);
     animation:play-spin .8s linear infinite;
   }
-  .player-state:global([data-kind=turn]){color:var(--accent-soft-text)}
+  .player-state:global([data-kind=turn]){color:var(--accent-soft-text); font-weight:700}
   .player-state:global([data-kind=error]){color:var(--warn)}
   .player-state:global([data-kind=ready]){color:var(--muted); font-size:13px}
   .strip-button{display:grid; place-items:center; width:34px; height:34px; padding:0; border-radius:7px; background:transparent; color:var(--muted)}
@@ -277,6 +287,7 @@ onMount(() => {
     color:var(--ink); font:600 14.5px/1.4 var(--sans);
   }
   :global(#status.game-status.over){font-size:15px}
+  .play-workspace:global([data-phase=setup] #status.game-status){font-size:16px; font-weight:700}
   :global(#status.game-status.browsing){color:var(--text-soft); font-weight:500; font-size:13.5px}
   :global(#engineNote){margin-top:6px; color:var(--muted); font:13px/1.45 var(--sans)}
   :global(#engineNote.warn){padding:7px 9px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule)); border-radius:6px; background:var(--warn-soft); color:var(--warn)}
@@ -306,17 +317,20 @@ onMount(() => {
   .range-end{color:var(--muted); font-size:12px}
   .rating-presets{display:flex; gap:6px; margin-top:6px; flex-wrap:wrap}
   .chip{flex:1 1 0; min-height:44px; padding:4px 6px; border-radius:8px; font:600 13px var(--sans); color:var(--text)}
-  .chip:global([aria-pressed=true]){border-color:var(--accent); color:var(--ink); background:var(--accent-soft)}
+  .chip:global([aria-pressed=true]), .chip:global([aria-pressed=true]:hover){border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); color:var(--ink); background:var(--selected-fill); font-weight:750}
   .strength-field select{width:100%}
   .color-field{display:grid; gap:6px}
   .color-choice{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; border:1px solid var(--border-input); border-radius:8px; overflow:hidden}
   .color-choice button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:44px; padding:0 6px; border:0; border-radius:0; background:var(--panel); color:var(--text); font:600 13.5px var(--sans)}
   .color-choice button+button{border-left:1px solid var(--border-input)}
-  .color-choice button:global([aria-pressed=true]){background:var(--panel-2); color:var(--ink); box-shadow:inset 0 -2px var(--accent)}
-  .swatch{width:14px; height:14px; flex:0 0 14px; border-radius:50%; box-shadow:0 0 0 1.5px #8e8677}
-  .swatch.white{background:#f4f1e8}
-  .swatch.black{background:#1d1b18}
-  .swatch.random{background:linear-gradient(90deg,#f4f1e8 50%,#1d1b18 50%)}
+  .color-choice button:global([aria-pressed=true]){position:relative; z-index:1; background:var(--selected-fill); color:var(--ink); font-weight:750; box-shadow:inset 0 0 0 2px var(--accent)}
+  .color-choice .check{display:none; width:14px; height:14px; flex:0 0 14px; margin-right:-2px; fill:none; stroke:var(--accent-soft-text); stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round}
+  .color-choice button:global([aria-pressed=true]) .check{display:block}
+  /* Piece-colour icons (pawns), so they never read as radio or checkbox state. */
+  .swatch{width:17px; height:20px; flex:0 0 17px; stroke:#2b261e; stroke-width:1.1; stroke-linejoin:round}
+  .swatch.white{fill:#f6f3ea}
+  .swatch.black{fill:#1d1b18; stroke:#8f8573}
+  .swatch.random{stroke:#6f6553}
   .settings-disclosure{flex:0 1 auto; min-height:45px; overflow:auto; border-top:1px solid var(--rule); padding:0 14px}
   .settings-disclosure[open]{padding-bottom:12px}
   .settings-disclosure>summary{display:flex; align-items:center; gap:6px; min-height:44px; cursor:pointer; list-style:none; color:var(--text); font:600 13px var(--sans)}
@@ -365,21 +379,30 @@ onMount(() => {
   .game-over p{margin:2px 0 10px; color:var(--text); font-size:13.5px}
   .cta-link{display:flex; align-items:center; justify-content:center; gap:8px; min-height:40px; border-radius:7px; background:var(--accent); color:var(--on-accent); font:650 14px var(--sans); text-decoration:none}
   .cta-link:hover{background:var(--accent-hover); text-decoration:none}
-  .moves-block{display:flex; flex-direction:column; flex:0 1 auto; min-height:64px}
+  .play-workspace:global(:not([data-phase=setup])) .play-sidebar{align-self:stretch}
+  .play-sidebar .moves-block{display:flex; flex-direction:column; flex:1 1 auto; min-height:96px}
   .opening-name{flex:0 0 auto; margin:0; padding:8px 14px; border-bottom:1px solid var(--rule); color:var(--muted); font:13px/1.4 var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .opening-name :global(strong){margin-right:6px; color:var(--ink); font-weight:650}
-  :global(#moveList.move-list){flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; font:500 16px/1.4 var(--sans); font-variant-numeric:tabular-nums}
-  :global(#moveList .move-row){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); min-height:36px}
+  /* Empty rows continue the scoresheet below the last move, so an early game reads as a blank sheet, not a gap. */
+  :global(#moveList.move-list){
+    --row-h:36px;
+    flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; font:500 16px/1.4 var(--sans); font-variant-numeric:tabular-nums;
+    background:
+      linear-gradient(90deg, var(--panel-inset) 43px, var(--rule-soft) 43px 44px, transparent 44px),
+      repeating-linear-gradient(180deg, transparent 0 var(--row-h), color-mix(in srgb, var(--ink) 3%, var(--panel)) var(--row-h) calc(2 * var(--row-h)));
+    background-attachment:local;
+  }
+  :global(#moveList .move-row){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); min-height:var(--row-h)}
   :global(#moveList .move-row:nth-child(even)){background:color-mix(in srgb, var(--ink) 3%, var(--panel))}
   :global(#moveList .num){display:grid; place-items:center; color:var(--muted); font-size:13px; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
-  :global(#moveList .san){display:flex; align-items:center; min-height:36px; padding:0 12px; border:0; border-radius:0; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer}
+  :global(#moveList .san){display:flex; align-items:center; min-height:var(--row-h); padding:0 12px; border:0; border-radius:0; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer}
   :global(#moveList .san:hover:not(.current)){background:var(--accent-soft); color:var(--ink)}
   :global(#moveList .san.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)); color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
-  :global(#moveList .placeholder){display:block; padding:14px; color:var(--muted); font-size:13.5px}
+  :global(#moveList .placeholder){display:block; padding:14px; background:var(--panel); color:var(--muted); font-size:13.5px}
   .nav-row{display:flex; align-items:center; gap:8px; padding:8px 10px; border-top:1px solid var(--rule)}
   .move-nav{display:flex; gap:4px; flex:0 0 auto}
-  .move-nav button{display:grid; place-items:center; width:38px; height:36px; padding:0; border-radius:7px; border:1px solid var(--border-input-hover); background:var(--panel-2); color:var(--ink)}
-  .move-nav button:disabled{opacity:1; cursor:default}
+  .move-nav button{display:grid; place-items:center; width:38px; height:36px; padding:0; border-radius:7px; border:1px solid var(--border-input); background:var(--panel-2); color:var(--ink)}
+  .move-nav button:disabled{opacity:1; cursor:default; background:transparent; border-color:var(--rule)}
   .move-nav button:disabled svg{opacity:.3}
   .move-nav svg{width:18px; height:18px; stroke-width:2.2}
   :global(.move-nav button.live-pending){background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
@@ -392,15 +415,17 @@ onMount(() => {
   .game-actions button, .record-actions :is(button, a){display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:38px; padding:0 8px; border-radius:7px; font:600 13.5px var(--sans); color:var(--ink); white-space:nowrap}
   .game-actions button{min-width:0; white-space:normal; line-height:1.25}
   .game-actions #newGame.primary, .game-actions #newGame.primary:hover{color:var(--on-accent)}
-  .game-actions button:not(.primary){background:transparent; border-color:var(--border-input-hover)}
-  .game-actions #resign{border-color:transparent; color:var(--text)}
-  .game-actions #resign svg{display:none}
+  .game-actions button:not(.primary){background:transparent; border-color:var(--border-input)}
   .game-actions button:not(.primary):hover:not(:disabled){background:var(--panel-2)}
+  .game-actions #resign:not(:disabled){color:var(--warn)}
+  .game-actions #resign:hover:not(:disabled):not(:global(.danger)){border-color:var(--warn); background:var(--warn-soft)}
   .game-actions button:disabled{opacity:1; color:color-mix(in srgb, var(--ink) 55%, var(--panel))}
   .game-actions button:disabled svg{opacity:.6}
-  .game-actions #resign:global(.danger){background:var(--warn); border-color:var(--warn); color:var(--bg)}
+  .game-actions #resign:global(.danger), .game-actions #resign:global(.danger:hover){background:var(--warn); border-color:var(--warn); color:var(--bg)}
+  .game-actions #resign:global(.danger) svg{display:none}
   :global(.game-actions button.armed){border-color:var(--warn); color:var(--warn)}
   .play-icon{display:none}
+  .play-hint{display:none; margin:0; color:var(--muted); font:13px/1.4 var(--sans); text-align:center}
   .record-actions{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; padding:0 10px 10px}
   .record-actions :is(button, a){border:1px solid transparent; background:transparent; color:var(--text); font-weight:550; font-size:13px}
   .record-actions :is(button, a):hover:not(:disabled){background:var(--panel-2); color:var(--ink); text-decoration:none}
@@ -415,6 +440,9 @@ onMount(() => {
   .play-workspace:global([data-phase=playing][data-quiet=true]) .status-block:not(:has(:global(#dlProgress:not([hidden]), #runtimeWarning:not([hidden]), #retryEngine:not([hidden]), #engineNote[data-routine=false]:not([hidden])))){display:none}
   .play-workspace:global([data-phase=setup]) #newGame{min-height:48px; font-size:16px; font-weight:700}
   .play-workspace:global([data-phase=setup]) .play-icon{display:block}
+  .play-workspace:global([data-phase=setup]) .new-icon{display:none}
+  .play-workspace:global([data-phase=setup]) .play-hint{display:block}
+  .play-workspace:global([data-phase=setup]) .game-actions{gap:8px}
   .play-workspace:global(:not([data-phase=setup]):not([data-config=open])) :is(.setup-pane, .settings-disclosure){display:none}
   .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{flex:0 1 auto; max-height:58%; border-bottom:1px solid var(--rule)}
   .play-workspace:global([data-phase=over]) #resign{display:none}
@@ -428,10 +456,10 @@ onMount(() => {
     .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{max-height:none}
     /* DOM, visual and keyboard order all follow board → setup/game → actions. */
     .move-nav button, .move-form input, .game-actions button, .record-actions :is(button,a){min-height:44px}
-    :global(#moveList .san){min-height:44px}
+    :global(#moveList.move-list){--row-h:44px}
   }
   @media (max-width:600px){
-    .play-workspace{--strip-h:44px; padding:8px 6px 32px; gap:8px}
+    .play-workspace{--strip-h:44px; padding:8px 6px 32px; gap:6px}
     .board-panel{padding:0; border:0; background:transparent; gap:2px}
     .player-avatar{flex-basis:30px; width:30px; height:30px; font-size:11.5px}
     .player-id strong{font-size:14px}
@@ -447,8 +475,9 @@ onMount(() => {
     .opponent-blurb{display:none}
     .color-field>.field-label{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%)}
     .settings-disclosure{padding-inline:12px}
-    .play-workspace:global([data-phase=setup]) .setup-pane{gap:8px}
-    .play-workspace:global([data-phase=setup]) .game-actions{padding:0 12px 12px}
+    .play-workspace:global([data-phase=setup]) .setup-pane{gap:8px; padding-top:10px}
+    .play-workspace:global([data-phase=setup]) .game-actions{padding:0 12px 10px}
+    .play-workspace:global([data-phase=setup]) .play-hint{display:none}
     .move-nav button{width:auto; flex:1 1 0; height:40px}
     .move-nav{flex:1 1 60%}
     .move-form{flex:1 1 40%}
