@@ -383,7 +383,7 @@ onMount(() => {
   :global(.eval-menu-title){margin:4px 8px 4px; font:600 13px var(--sans); color:var(--muted)}
   :global(.eval-menu-item){display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:9px; width:100%; min-height:38px; padding:0 9px; border:0; border-radius:6px; background:transparent; color:var(--ink); text-align:left; font:600 14px var(--sans)}
   :global(.eval-menu-item:hover:not(:disabled)), :global(.eval-menu-item:focus-visible){background:var(--panel-2); color:var(--ink)}
-  :global(.eval-menu-item[aria-checked=true]){background:var(--result-highlight); box-shadow:inset 3px 0 var(--engine-color, var(--accent))}
+  :global(.eval-menu-item[aria-checked=true]){background:var(--result-highlight); }
   :global(.eval-menu-item:disabled){opacity:.5}
   :global(.eval-menu-name){overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   :global(.eval-menu-score){font:700 14px var(--mono); font-variant-numeric:tabular-nums}
@@ -456,8 +456,8 @@ onMount(() => {
   :global(.review-critical li:hover){background:var(--accent-soft)}
   :global(.review-critical .mono){font-family:var(--mono)}
   :global(.compare-summary){
-    margin-top:0; padding:8px 10px; border:0; border-left:2px solid var(--accent);
-    border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+    margin-top:0; padding:8px 10px; border:0;
+    border-radius:var(--radius-sm);
     background:var(--accent-soft); font-size:14px; line-height:1.5; color:var(--ink);
   }
   :global(table.engine-compare){width:100%; border-collapse:collapse; font-size:14px; margin-top:8px}
@@ -494,7 +494,7 @@ onMount(() => {
   }
   .app-sidebar #message{
     margin:6px 12px; padding:4px 8px; max-height:44px; overflow:auto;
-    border:0; border-left:2px solid var(--accent); border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+    border:0; border-radius:var(--radius-sm);
     background:var(--panel-inset); color:var(--text-soft);
     font-size:12px; line-height:1.5;
   }
@@ -658,7 +658,7 @@ onMount(() => {
   :global(.insight-spread[data-level=apart]){color:var(--ink)}
   :global(.insight-spread[data-level=wide]){color:var(--warn); font-weight:650}
   /* One block per engine: header row, then its principal variation indented under the name. */
-  :global(.engine-card){position:relative; border-bottom:1px solid var(--rule); border-left:3px solid var(--engine-color)}
+  :global(.engine-card){position:relative; border-bottom:1px solid var(--rule)}
   :global(.engine-card.arrow-focus){background:var(--result-highlight)}
   :global(.engine-card.open){background:color-mix(in srgb, var(--engine-color) 6%, var(--panel))}
   :global(.engine-summary){display:grid; grid-template-columns:minmax(0,1fr) auto 64px 30px; align-items:center; gap:6px; min-height:34px; padding:3px 4px 0 9px}
@@ -756,7 +756,7 @@ onMount(() => {
   :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:space-between; gap:0 5px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
   /* The current move is unmistakable (Lichess-strength): tinted cell plus an edge marker. */
-  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)) !important; color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
+  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)) !important; color:var(--ink); font-weight:700}
   :global(.movelist .mv-eval){margin-left:auto; white-space:nowrap; font:13px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   :global(.movelist .var){color:var(--muted)}

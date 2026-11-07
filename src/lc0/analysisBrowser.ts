@@ -2186,10 +2186,9 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   const reference = baseline.mateIn === undefined ? baseline.scoreCp : undefined;
   patchAnalysisResults(body, bestByEngine
     .map((line) => {
-      const swatch = engineBrushes(line.engine).swatch;
       const delta = reference === undefined || line.scoreCp === undefined || line.mateIn !== undefined ? '—' : signedPawns(line.scoreCp - reference);
       return (
-        `<tr style="border-left:3px solid ${swatch}">` +
+        `<tr>` +
         `<th scope="row">${htmlEscape(analysisEngineName(line.engine))}</th>` +
         `<td><button type="button" class="compare-move" data-focus-key="${htmlEscape(`${tree.current.fen}|${line.engine}|compare`)}" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(analysisEngineName(line.engine))}">${htmlEscape(firstAnalysisMove(line))}</button></td>` +
         `<td class="mono">${htmlEscape(line.scoreText)}</td>` +

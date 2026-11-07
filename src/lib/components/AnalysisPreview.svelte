@@ -160,7 +160,7 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
   .pv-legend>span{color:var(--muted)}
   .pv-legend b{font-weight:600; font-variant-numeric:tabular-nums}
   .pv-engines{display:grid; gap:10px; margin:0; padding:0; list-style:none; min-width:0}
-  .pv-engines li{padding:10px; min-width:0; border:1px solid var(--rule-strong); border-left:3px solid var(--engine-color); border-radius:7px; background:var(--panel-inset)}
+  .pv-engines li{padding:10px; min-width:0; border:1px solid var(--rule-strong); border-radius:7px; background:var(--panel-inset)}
   .pv-result{display:grid; grid-template-columns:16px minmax(0,1fr) auto auto; gap:6px; align-items:center}
   .pv-swatch{color:var(--engine-color); font-size:22px; font-weight:750; line-height:1}
   .pv-name{color:var(--ink); font-size:14px; line-height:1.3; font-weight:650}

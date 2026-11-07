@@ -309,7 +309,7 @@ onMount(() => {
     display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h);
     padding:0 6px 0 4px; border-radius:8px;
   }
-  .player-strip:global([data-turn=true]){background:color-mix(in srgb, var(--accent) 13%, var(--panel)); box-shadow:inset 3px 0 var(--accent)}
+  .player-strip:global([data-turn=true]){background:color-mix(in srgb, var(--accent) 13%, var(--panel))}
   .arena-workspace :global(.arena-avatar){
     display:inline-grid; place-items:center; flex:0 0 32px; width:32px; height:32px; border-radius:7px;
     background:var(--eng); color:#fff; font:700 12px/1 var(--sans); letter-spacing:0;
@@ -474,7 +474,7 @@ onMount(() => {
   .eng-grid{display:grid; gap:8px}
   .eng-grid :global(.eng-card){
     display:grid; gap:6px; min-width:0; padding:8px 11px;
-    border:1px solid var(--rule-strong); border-left:4px solid var(--eng); border-radius:8px; background:var(--panel);
+    border:1px solid var(--rule-strong); border-radius:8px; background:var(--panel);
   }
   .eng-grid :global(.eng-card.thinking){background:color-mix(in srgb, var(--accent) 7%, var(--panel))}
   .eng-grid :global(.eng-head){display:flex; align-items:center; gap:9px; min-width:0}
@@ -526,7 +526,7 @@ onMount(() => {
   .move-list :global(.san.book){color:var(--muted)}
   .move-list :global(.san.empty){cursor:default; color:var(--muted)}
   .move-list :global(button.san:hover:not(.current)){background:var(--accent-soft)}
-  .move-list :global(.san.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)); color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
+  .move-list :global(.san.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)); color:var(--ink); font-weight:700}
   .move-nav{display:flex; gap:4px; padding:6px 10px; border-top:1px solid var(--rule)}
   .move-nav button{display:grid; place-items:center; width:40px; height:34px; padding:0; border-radius:7px; border:1px solid var(--border-input); background:var(--panel-2); color:var(--ink)}
   .move-nav button:disabled{background:transparent; border-color:var(--rule)}

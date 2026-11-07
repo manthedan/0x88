@@ -213,7 +213,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
   /* Device check: live WebGPU / SIMD / threads result, under the hero actions. */
   .device{
     grid-area:device; align-self:start; max-width:460px; padding:14px 16px; scroll-margin-top:84px;
-    border:1px solid var(--rule-strong); border-left:3px solid var(--muted-2); border-radius:8px;
+    border:1px solid var(--rule-strong); border-radius:8px;
     background:var(--panel);
   }
   .device[data-tone=ok]{border-left-color:var(--accent)}

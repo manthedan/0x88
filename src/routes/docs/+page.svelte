@@ -653,12 +653,11 @@ onMount(() => {
     color:var(--muted); text-decoration:none;
     display:block; padding:4px 10px; border-radius:5px;
     line-height:1.35; font-size:13px;
-    border-left:2px solid transparent; margin-left:-2px;
   }
   .toc a:hover{color:var(--ink); background:var(--rule-soft)}
   :global(.toc a.active){
     color:var(--accent); font-weight:500;
-    background:var(--accent-soft); border-left-color:var(--accent);
+    background:var(--accent-soft);
   }
   .toc ul ul{margin:2px 0 4px 12px; gap:1px}
   .toc ul ul a{font-size:12px; padding:3px 8px}
@@ -803,7 +802,6 @@ onMount(() => {
   .doc-content blockquote{
     margin:24px 0; padding:16px 22px;
     border-left:3px solid var(--rule);
-    background:var(--bg-2); border-radius:0 var(--radius-sm) var(--radius-sm) 0;
     color:var(--muted); font-size:14px; line-height:1.65; max-width:68ch;
   }
   .doc-content blockquote p{margin:0; color:var(--muted)}

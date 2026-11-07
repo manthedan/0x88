@@ -245,7 +245,7 @@ onMount(() => {
     display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h); padding:0 6px 0 4px;
     border-radius:8px; transition:background .15s;
   }
-  .player-strip:global([data-turn=true]){background:color-mix(in srgb, var(--accent) 13%, var(--panel)); box-shadow:inset 3px 0 var(--accent)}
+  .player-strip:global([data-turn=true]){background:color-mix(in srgb, var(--accent) 13%, var(--panel))}
   .player-strip:global([data-turn=true]) .player-avatar{box-shadow:0 0 0 2px var(--accent)}
   .player-avatar{
     display:grid; place-items:center; flex:0 0 34px; width:34px; height:34px; border-radius:7px;
@@ -397,7 +397,7 @@ onMount(() => {
   :global(#moveList .num){display:grid; place-items:center; color:var(--muted); font-size:13px; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
   :global(#moveList .san){display:flex; align-items:center; min-height:var(--row-h); padding:0 12px; border:0; border-radius:0; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer}
   :global(#moveList .san:hover:not(.current)){background:var(--accent-soft); color:var(--ink)}
-  :global(#moveList .san.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)); color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
+  :global(#moveList .san.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)); color:var(--ink); font-weight:700}
   :global(#moveList .placeholder){display:block; padding:14px; background:var(--panel); color:var(--muted); font-size:13.5px}
   .nav-row{display:flex; align-items:center; gap:8px; padding:8px 10px; border-top:1px solid var(--rule)}
   .move-nav{display:flex; gap:4px; flex:0 0 auto}
