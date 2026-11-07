@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, nextAnalysisEvalSource, sharedArrowMarkerSvg } from '../src/lc0/analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisSpreadText, looksLikeFen, sharedMarkerCorner, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, nextAnalysisEvalSource, sharedArrowMarkerSvg } from '../src/lc0/analysisPresentation.ts';
 import { ANALYSIS_DRAWABLE_BRUSHES } from '../src/lc0/analysisFormat.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 
@@ -20,8 +20,8 @@ test('default arrows show only engine best moves; opt-in alternatives never cove
   const third = { ...line('Lc0', 'g1f3', 'Nf3', 0), multipv: 3 };
   const failed = { ...line('Berserk', 'a2a4', 'a4', 0), error: 'Unavailable' };
   const lines = [alternative, lc0, third, sf, failed];
-  assert.deepEqual(analysisArrowCandidates(lines, false), [{ uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'green' }]);
-  assert.deepEqual(analysisArrowCandidates(lines, true), [{ uci: 'g1f3', brush: 'paleGreen' }, { uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'green' }]);
+  assert.deepEqual(analysisArrowCandidates(lines, false), [{ uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'violet' }]);
+  assert.deepEqual(analysisArrowCandidates(lines, true), [{ uci: 'g1f3', brush: 'paleViolet' }, { uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'violet' }]);
   assert.equal(lines[0], alternative, 'rendering does not reorder cached lines');
   assert.ok(Object.values(ANALYSIS_DRAWABLE_BRUSHES).every((brush) => brush.lineWidth === 10));
   assert.equal(analysisArrowCandidates([lc0, { ...sf, pvUci: ['d2d4'] }], true).length, 1);
@@ -54,28 +54,37 @@ test('a shared best move is one arrow that names every backing engine colour', (
   const berserk = line('Berserk', 'c3a4', 'Na4', 48);
   const candidates = analysisArrowCandidates([lc0, sf, berserk], false);
   assert.equal(candidates.length, 2);
-  assert.deepEqual(candidates.find((c) => c.uci === 'c3e2'), { uci: 'c3e2', brush: 'green', shared: ['Lc0', 'SF Lite'] });
+  assert.deepEqual(candidates.find((c) => c.uci === 'c3e2'), { uci: 'c3e2', brush: 'violet', shared: ['Lc0', 'SF Lite'] });
   assert.equal(candidates.find((c) => c.uci === 'c3a4').shared, undefined);
   const marker = sharedArrowMarkerSvg(['Lc0', 'SF Lite']);
-  assert.match(marker, /#15781B/);
+  assert.match(marker, /#7a4fd6/);
   assert.match(marker, /#1f5fcf/);
-  assert.match(marker, />L0<\/text>/);
-  assert.match(marker, />SF<\/text>/);
+  assert.equal((marker.match(/<circle /g) ?? []).length, 2);
   assert.match(marker, /Shared move: Lc0 Small \+ Stockfish Lite/);
-  assert.doesNotMatch(marker, />2<\/text>/);
+  assert.doesNotMatch(marker, /<text/);
   assert.equal(analysisArrowCandidates([lc0, lc0, sf], false)[0].shared.length, 2, 'duplicate results never double-count a backer');
 });
 
-test('shared arrow markers fit all eight backers and escape display names', () => {
+test('shared-move dots stay in one corner of the destination square, away from the centre', () => {
   const engines = ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess', 'Reckless', 'Viridithas', 'Stormphrax', '<unsafe&>'];
-  const marker = sharedArrowMarkerSvg(engines);
-  assert.equal((marker.match(/<text /g) ?? []).length, 8);
-  const boxes = [...marker.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="32" height="32"/g)];
-  assert.equal(boxes.length, 8);
-  assert.ok(boxes.every(([, x, y]) => Number(x) >= 0 && Number(x) + 32 <= 100 && Number(y) >= 0 && Number(y) + 32 <= 100));
-  assert.match(marker, /&lt;unsafe&amp;&gt;/);
-  assert.doesNotMatch(marker, /<unsafe/);
+  for (const corner of [[1, -1], [-1, -1]]) {
+    const marker = sharedArrowMarkerSvg(engines.slice(0, 4), corner);
+    const dots = [...marker.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="([\d.]+)"/g)].map(([, x, y, r]) => [Number(x), Number(y), Number(r)]);
+    assert.equal(dots.length, 4);
+    // Inside the square, in the requested half, and never over the arrowhead at the centre.
+    assert.ok(dots.every(([x, y, r]) => x - r >= 0 && x + r <= 100 && y - r >= 0 && y + r <= 100));
+    assert.ok(dots.every(([x]) => corner[0] > 0 ? x > 50 : x < 50));
+    assert.ok(dots.every(([, y]) => y < 50));
+  }
+  const all = sharedArrowMarkerSvg(engines);
+  assert.equal((all.match(/<circle /g) ?? []).length, 8);
+  assert.match(all, /&lt;unsafe&amp;&gt;/);
+  assert.doesNotMatch(all, /<unsafe/);
   assert.equal(sharedArrowMarkerSvg([]), '');
+  assert.deepEqual(sharedMarkerCorner('c3e2', 'white'), [1, -1]);
+  assert.deepEqual(sharedMarkerCorner('c3e2', 'black'), [-1, -1]);
+  assert.deepEqual(sharedMarkerCorner('g1e2', 'white'), [-1, -1]);
+  assert.deepEqual(sharedMarkerCorner('e2e4', 'white'), [1, -1]);
 });
 
 test('callout groups engines by move and states agreement explicitly', () => {
@@ -86,9 +95,14 @@ test('callout groups engines by move and states agreement explicitly', () => {
   const groups = analysisMoveGroups([berserk, lc0, sf, plenty]);
   assert.deepEqual(groups.map((g) => [g.san, g.engines.length]), [['Ne2', 2], ['Na4', 1], ['gxf6', 1]]);
   assert.equal(analysisAgreementHeadline(groups, 4), '2 of 4 agree on Ne2');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2), 'Engines disagree');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2), 'Different top moves: Ne2 / Na4');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2, 23), 'Different top moves: Ne2 / Na4');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2, 140), 'Engines disagree: Ne2 / Na4');
   assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf]), 2), 'Engines agree on Ne2');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, berserk, { ...plenty, pvUci: ['c3a4'] }]), 4), 'Engines split');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, berserk, { ...plenty, pvUci: ['c3a4'] }]), 4), 'Split: Ne2 / Na4');
+  assert.deepEqual(analysisSpreadText(26), { text: 'Evals within 0.26', level: 'close' });
+  assert.deepEqual(analysisSpreadText(74), { text: 'Eval spread 0.74', level: 'apart' });
+  assert.equal(analysisSpreadText(120).level, 'wide');
   assert.deepEqual([...analysisShortEngineNames(['Lc0', 'SF Lite']).values()], ['Lc0', 'Stockfish']);
   assert.deepEqual([...analysisShortEngineNames(['Lc0', 'Lc0 BT4']).values()], ['Lc0 Small', 'Lc0 BT4']);
 });
@@ -171,6 +185,10 @@ test('Black-to-move FEN history leaves the White ply empty and escapes imported 
   const empty = analysisMoveMarkup(new GameTree().root, tree.current);
   assert.match(empty, /No moves yet/);
   assert.match(empty, /<textarea[^>]+data-quick-pgn/);
-  assert.match(empty, /<button[^>]+data-quick-pgn-load>Load PGN<\/button>/);
-  assert.match(empty, /<button[^>]+data-load-game>Paste FEN instead<\/button>/);
+  assert.match(empty, /<button[^>]+data-quick-pgn-load>Load<\/button>/);
+  assert.match(empty, /PGN or FEN/);
+  assert.ok(looksLikeFen('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'));
+  assert.ok(looksLikeFen('8/8/8/8/8/8/8/K6k'));
+  assert.ok(!looksLikeFen('1. e4 c5 2. Nf3 d6'));
+  assert.ok(!looksLikeFen('[Event "x"]\n1. e4 e5'));
 });

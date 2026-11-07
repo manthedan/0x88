@@ -94,8 +94,8 @@ test('centipawnPuctAnalysisLines builds Centipawn MultiPV lines with SAN and roo
 });
 
 test('engineColorKey assigns stable per-engine color families', () => {
-  assert.equal(engineColorKey('LC0'), 'green');
-  assert.equal(engineColorKey('LC0 search 400'), 'green');
+  assert.equal(engineColorKey('LC0'), 'violet');
+  assert.equal(engineColorKey('LC0 search 400'), 'violet');
   assert.equal(engineColorKey('SF d14'), 'blue');
   assert.equal(engineColorKey('Stockfish lite'), 'blue');
   assert.equal(engineColorKey('Reckless Full SIMD'), 'red');
@@ -104,8 +104,8 @@ test('engineColorKey assigns stable per-engine color families', () => {
   assert.equal(engineColorKey('PlentyChess'), 'cyan');
   assert.equal(engineColorKey('Komodo'), 'pink');
   const lc0 = engineBrushes('LC0');
-  assert.equal(lc0.primary, 'green');
-  assert.equal(lc0.alt, 'paleGreen');
+  assert.equal(lc0.primary, 'violet');
+  assert.equal(lc0.alt, 'paleViolet');
   assert.equal(engineBrushes('SF d8').primary, 'blue');
 });
 

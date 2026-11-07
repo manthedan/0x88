@@ -38,21 +38,41 @@ export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean,
   }).reverse(); // Alternatives sit underneath best moves; width is always chessground's 10.
 }
 
-/** Named, colour-keyed backers at the shaft/head junction (`center: 'label'`).
- * The arrow itself stays ONE standard-width arrow. Unlike a count in a square's
- * corner, these tiles stay attached to the move, including on a flipped board.
- * Three columns keep even eight backers inside chessground's 100×100 SVG viewport.
+/**
+ * Backer marker for a shared best move, drawn with chessground's `center: 'dest'` (the 100×100
+ * box is exactly the destination square). The arrow stays ONE standard-width arrow; its backers
+ * become a cluster of colour dots tucked into one corner of that square, so it never covers the
+ * piece on a neighbouring square and leaves the arrowhead (square centre) clear. `corner` is the
+ * screen corner as x/y signs (-1 = left/top, 1 = right/bottom); callers pick one facing away from
+ * the incoming shaft. Names live in the <title> and in the engine rows' shared-move pills.
  */
-export function sharedArrowMarkerSvg(engines: string[]): string {
+export function sharedArrowMarkerSvg(engines: string[], corner: [number, number] = [1, -1]): string {
   if (!engines.length) return '';
-  const columns = Math.min(3, engines.length);
+  const columns = Math.min(2, engines.length);
   const rows = Math.ceil(engines.length / columns);
-  const tiles = engines.map((engine, index) => {
-    const x = 50 + (index % columns - columns / 2) * 32;
-    const y = 50 + (Math.floor(index / columns) - rows / 2) * 32;
-    return `<rect x="${x}" y="${y}" width="32" height="32" rx="4" fill="#1d1b18" stroke="#fff" stroke-width="1.5"/><rect x="${x + 2}" y="${y + 26}" width="28" height="5" rx="2" fill="${engineBrushes(engine).swatch}"/><text x="${x + 16}" y="${y + 22}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="20" font-weight="800" fill="#fff">${htmlEscape(engineMonogram(engine))}</text>`;
-  }).join('');
-  return `<title>Shared move: ${htmlEscape(engines.map(analysisEngineName).join(' + '))}</title>${tiles}`;
+  const step = 17;
+  const r = 7.5;
+  const edge = 12; // centre of the outermost dot, measured from the square's edge
+  const xs = Array.from({ length: columns }, (_, col) => corner[0] > 0 ? 100 - edge - col * step : edge + col * step);
+  const ys = Array.from({ length: rows }, (_, row) => corner[1] > 0 ? 100 - edge - row * step : edge + row * step);
+  const dots = engines.map((engine, index) =>
+    `<circle cx="${xs[index % columns]}" cy="${ys[Math.floor(index / columns)]}" r="${r}" fill="${engineBrushes(engine).swatch}"/>`).join('');
+  // A light, dark-rimmed plate keeps every engine colour legible on light and dark squares alike.
+  const pad = r + 3;
+  const x0 = Math.min(...xs) - pad;
+  const y0 = Math.min(...ys) - pad;
+  const plate = `<rect x="${x0}" y="${y0}" width="${Math.max(...xs) - Math.min(...xs) + pad * 2}" height="${Math.max(...ys) - Math.min(...ys) + pad * 2}" rx="${pad}" fill="#fbf8f1" stroke="#1d1b18" stroke-width="2"/>`;
+  return `<title>Shared move: ${htmlEscape(engines.map(analysisEngineName).join(' + '))}</title>${plate}${dots}`;
+}
+
+/**
+ * Top corner of the destination square on the side away from the incoming shaft (screen space).
+ * The chosen top corner is never on the shaft's path, and the arrowhead ends at the square centre,
+ * so the dots stay clear of the arrow; top corners are also the freest part of a captured piece.
+ */
+export function sharedMarkerCorner(uci: string, orientation: 'white' | 'black'): [number, number] {
+  const travel = Math.sign(uci.charCodeAt(2) - uci.charCodeAt(0)) * (orientation === 'black' ? -1 : 1);
+  return [travel < 0 ? -1 : 1, -1];
 }
 
 /** Cycle only through usable bar sources; a pending/failed engine must not trap the control. */
@@ -80,13 +100,34 @@ export function analysisMoveGroups(bestLines: AnalysisLine[]): AnalysisMoveGroup
   return [...groups.values()].sort((a, b) => b.engines.length - a.engines.length);
 }
 
-/** One-line verdict for the comparison callout: agreement is stated, never implied. */
-export function analysisAgreementHeadline(groups: AnalysisMoveGroup[], total: number): string {
+/** Spread (pawns) at or above which differing best moves are worth calling a real disagreement. */
+export const STRONG_DISAGREEMENT_CP = 100;
+
+/**
+ * One-line verdict for the comparison callout: agreement is stated, never implied, and the moves
+ * are named. Different top moves with close evals are not a "disagreement"; that word is kept for
+ * a large eval spread (`spreadCp`, unsigned centipawns, when every score is finite).
+ */
+export function analysisAgreementHeadline(groups: AnalysisMoveGroup[], total: number, spreadCp?: number): string {
   const [top, next] = groups;
   if (!top) return 'No best move yet';
   if (groups.length === 1) return total > 2 ? `All ${total} engines agree on ${top.san}` : `Engines agree on ${top.san}`;
   if (top.engines.length >= 2 && next.engines.length < top.engines.length) return `${top.engines.length} of ${total} agree on ${top.san}`;
-  return top.engines.length >= 2 ? 'Engines split' : 'Engines disagree';
+  const moves = groups.slice(0, 3).map((group) => group.san).join(' / ') + (groups.length > 3 ? ` +${groups.length - 3}` : '');
+  if (top.engines.length >= 2) return `Split: ${moves}`;
+  return `${spreadCp !== undefined && spreadCp >= STRONG_DISAGREEMENT_CP ? 'Engines disagree' : 'Different top moves'}: ${moves}`;
+}
+
+/** The eval-spread measure, phrased by size: small gaps read as agreement on the evaluation. */
+export function analysisSpreadText(spreadCp: number): { text: string; level: 'close' | 'apart' | 'wide' } {
+  const pawns = (spreadCp / 100).toFixed(2);
+  if (spreadCp < 50) return { text: `Evals within ${pawns}`, level: 'close' };
+  return { text: `Eval spread ${pawns}`, level: spreadCp >= STRONG_DISAGREEMENT_CP ? 'wide' : 'apart' };
+}
+
+/** A pasted position is a FEN when it has eight ranks; anything else is treated as PGN. */
+export function looksLikeFen(text: string): boolean {
+  return /^\s*([pnbrqkPNBRQK1-8]{1,8}\/){7}[pnbrqkPNBRQK1-8]{1,8}(\s|$)/.test(text);
 }
 
 /** Short, collision-free engine labels for dense chips ("Lc0", "Stockfish"). */
@@ -211,5 +252,5 @@ export function analysisMoveMarkup(root: GameNode, current: GameNode): string {
     flush();
     return html;
   };
-  return root.children[0] ? branch(root.children[0], true) : '<div class="history-empty"><p><strong>No moves yet.</strong> Play on the board or paste a game below.</p><textarea class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" aria-label="Paste a PGN" placeholder="1. e4 c5 2. Nf3 d6 3. d4 …"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load PGN</button><button type="button" class="load-game-link" data-load-game>Paste FEN instead</button></div></div>';
+  return root.children[0] ? branch(root.children[0], true) : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game or position below.</p><textarea class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" aria-label="Paste a PGN game or a FEN position" placeholder="Paste a PGN game or a FEN position"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load</button><span class="quick-pgn-hint">PGN or FEN, detected automatically</span></div></div>';
 }

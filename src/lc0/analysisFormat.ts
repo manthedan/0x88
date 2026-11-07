@@ -61,7 +61,7 @@ export function evalBarWhitePercent(scoreCp: number | undefined, mateIn: number 
   return Math.max(0, Math.min(100, 50 + 50 * whiteAdvantage));
 }
 
-export type EngineColorKey = 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'cyan' | 'pink' | 'yellow';
+export type EngineColorKey = 'violet' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'cyan' | 'pink' | 'yellow';
 
 export interface EngineBrushes {
   /** Chessground brush for the engine's best move. */
@@ -73,6 +73,9 @@ export interface EngineBrushes {
 }
 
 export const ANALYSIS_DRAWABLE_BRUSHES = {
+  // Lc0: violet, so engine identity never reads as the brand-lime actions or the last-move highlight.
+  violet: { key: 'v', color: '#7a4fd6', opacity: 1, lineWidth: 10 },
+  paleViolet: { key: 'pv', color: '#7a4fd6', opacity: 0.4, lineWidth: 10 },
   green: { key: 'g', color: '#15781B', opacity: 1, lineWidth: 10 },
   paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: 10 },
   // Brighter than lichess's #003088 so the arrow stays visible over dark pieces and squares.
@@ -93,6 +96,7 @@ export const ANALYSIS_DRAWABLE_BRUSHES = {
 } as const;
 
 const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {
+  violet: { primary: 'violet', alt: 'paleViolet', swatch: '#7a4fd6' },
   green: { primary: 'green', alt: 'paleGreen', swatch: '#15781B' },
   blue: { primary: 'blue', alt: 'paleBlue', swatch: '#1f5fcf' },
   red: { primary: 'red', alt: 'paleRed', swatch: '#882020' },
@@ -106,7 +110,7 @@ const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {
 /** Stable color family per engine/family for multi-engine analysis overlays. */
 export function engineColorKey(engine: string): EngineColorKey {
   const lower = engine.toLowerCase();
-  if (lower.startsWith('lc0')) return 'green';
+  if (lower.startsWith('lc0')) return 'violet';
   if (lower.startsWith('sf') || lower.startsWith('stockfish')) return 'blue';
   if (lower.startsWith('reckless')) return 'red';
   if (lower.startsWith('viridithas')) return 'purple';
