@@ -21,6 +21,7 @@ import {
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
+import { takeAnalysisHandoff } from './analysisHandoff.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
   type AnalysisLine,
@@ -4912,6 +4913,12 @@ async function init(mountSignal: AbortSignal) {
     }),
   );
   wireEvents();
+  // "Analyze this game" from Play: load its PGN through the normal Load PGN path.
+  const handoffPgn = takeAnalysisHandoff();
+  if (handoffPgn) {
+    inputEl('pgnInput').value = handoffPgn;
+    loadPgn();
+  }
   void loadOpeningNames(mountSignal);
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   void refreshBt4Availability();

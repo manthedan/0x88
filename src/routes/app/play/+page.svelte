@@ -11,6 +11,7 @@ afterNavigate(({ to }) => {
 const title = '0x88 Chess — play chess vs an engine in your browser';
 const description =
   'Play chess against Leela Chess Zero, Centipawn, Stockfish, Stormphrax, and other opponents running entirely in your browser. Five strength levels, takebacks, and PGN export.';
+const ratingPresets = [800, 1100, 1500, 1900, 2200];
 onMount(() => {
   mountedUrl = new URL(location.href);
   let cleanup: () => void = () => undefined;
@@ -39,204 +40,416 @@ onMount(() => {
 </svelte:head>
 
 <SiteHeader pageTitle="Play" />
-<main id="main" class="app-main">
+<main id="main" class="app-main play-workspace" data-phase="setup">
   <section class="panel board-panel" aria-label="Board">
-    <div class="board-shell"><div id="ground"></div></div>
-    <div class="status-row">
-      <div id="status" aria-live="polite">Loading...</div>
-      <button id="flip" class="board-action" type="button" title="Flip board">&#x21c5; Flip</button>
+    <div id="topStrip" class="player-strip" data-player="engine" data-turn="false">
+      <span class="player-avatar" data-avatar aria-hidden="true">M3</span>
+      <span class="player-id"><strong data-name>Maia3</strong><small data-meta>1500 rating</small></span>
+      <span class="player-material" data-material></span>
+      <span class="player-state" data-state></span>
+      <span class="side-dot" data-side aria-hidden="true"></span>
     </div>
-    <div id="restartBanner" class="restart-banner" hidden>
-      <span id="restartMessage" class="small"></span>
-      <div class="row" style="margin-top:6px">
-        <button id="confirmRestart" class="primary" type="button">Start new game</button>
-        <button id="dismissRestart" type="button">Keep current game</button>
-      </div>
+    <div class="board-shell">
+      <div id="ground"></div>
+      <div id="keyboardBoard"></div>
+    </div>
+    <p id="boardInstructions" class="visually-hidden">Arrow keys move between squares. Enter or Space picks up a piece, then a legal destination. Escape cancels. You can also type a move in the move box.</p>
+    <p id="boardAnnouncement" class="visually-hidden" aria-live="polite"></p>
+    <div id="bottomStrip" class="player-strip" data-player="you" data-turn="false">
+      <span class="player-avatar you" data-avatar aria-hidden="true">You</span>
+      <span class="player-id"><strong data-name>You</strong><small data-meta>White</small></span>
+      <span class="player-material" data-material></span>
+      <span class="player-state" data-state></span>
+      <span class="side-dot" data-side aria-hidden="true"></span>
+      <button id="flip" class="strip-button" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
     </div>
     <div id="promoPicker" hidden></div>
-    <div class="move-nav" role="group" aria-label="Browse moves">
-      <button id="navFirst" type="button" title="First move (Home / ↑)" aria-label="First move" disabled>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3v10M12 3.5 7 8l5 4.5" /></svg>
-      </button>
-      <button id="navPrev" type="button" title="Previous move (←)" aria-label="Previous move" disabled>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5 5.5 8l5 4.5" /></svg>
-      </button>
-      <button id="navNext" type="button" title="Next move (→)" aria-label="Next move" disabled>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5 10.5 8l-5 4.5" /></svg>
-      </button>
-      <button id="navLast" type="button" title="Last move (End / ↓)" aria-label="Last move" disabled>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3.5 9 8l-5 4.5M12.5 3v10" /></svg>
-      </button>
-    </div>
-    <div id="moveList" class="move-panel"></div>
   </section>
-  <section class="panel app-sidebar" aria-label="Game controls">
-    <details class="section-block" open>
-      <summary>Opponent</summary>
-      <div class="opponent-grid">
-        <div class="field"><label for="engineSelect">Engine</label>
-          <select id="engineSelect"></select></div>
-        <div class="field"><label for="levelSelect">Strength</label>
-          <select id="levelSelect"></select></div>
-      </div>
+
+  <section class="panel app-sidebar play-sidebar" aria-label="Game">
+    <div class="status-block">
+      <div id="status" class="game-status" aria-live="polite">Loading…</div>
+      <div id="engineNote" role="status" aria-live="polite" hidden></div>
+      <div id="runtimeWarning" class="runtime-warning small" role="status" aria-live="polite" hidden></div>
+      <button id="retryEngine" type="button" hidden>Retry engine</button>
+      <div id="dlProgress" hidden><progress></progress><div class="dl-label small"></div></div>
+      <div id="progressAnnouncement" class="visually-hidden" role="status" aria-live="polite"></div>
+    </div>
+
+    <div id="setupPane" class="setup-pane">
+      <h2 class="pane-heading">Opponent</h2>
+      <div class="field"><label for="engineSelect" class="visually-hidden">Opponent</label>
+        <select id="engineSelect"></select></div>
+      <p id="opponentBlurb" class="opponent-blurb"></p>
+      <div id="engineCaution" class="small" hidden></div>
       <div id="maia3Controls" hidden>
-        <div class="maia-grid">
-          <div class="field rating-field"><label for="maia3Elo">Rating <span id="maia3EloValue">1500</span></label>
-            <div class="range-control"><input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" /></div></div>
-          <div class="field"><label for="maia3Style">Move selection</label>
-            <select id="maia3Style">
-              <option value="sample">Human sampling</option>
-              <option value="argmax">Top move</option>
-            </select></div>
+        <div class="rating-head">
+          <label for="maia3Elo">Rating</label>
+          <span class="rating-value"><strong id="maia3EloValue">1500</strong> <span id="maia3EloBand"></span></span>
         </div>
-        <details class="advanced-settings">
-          <summary>Sampling settings</summary>
-          <div class="sampling-grid">
+        <div class="range-control">
+          <span class="range-end" aria-hidden="true">600</span>
+          <input id="maia3Elo" type="range" min="600" max="2600" step="100" value="1500" />
+          <span class="range-end" aria-hidden="true">2600</span>
+        </div>
+        <div class="rating-presets" role="group" aria-label="Rating presets">
+          {#each ratingPresets as preset}
+            <button type="button" class="chip" data-elo={preset} aria-pressed="false">{preset}</button>
+          {/each}
+        </div>
+      </div>
+      <div class="field strength-field"><label for="levelSelect">Strength</label>
+        <select id="levelSelect"></select></div>
+
+      <div class="color-field">
+        <span id="colorLabel" class="field-label">You play</span>
+        <div class="color-choice" role="group" aria-labelledby="colorLabel">
+          <button type="button" data-color="white" aria-pressed="true"><span class="swatch white" aria-hidden="true"></span>White</button>
+          <button type="button" data-color="random" aria-pressed="false"><span class="swatch random" aria-hidden="true"></span>Random</button>
+          <button type="button" data-color="black" aria-pressed="false"><span class="swatch black" aria-hidden="true"></span>Black</button>
+        </div>
+        <select id="colorSelect" class="visually-hidden" tabindex="-1" aria-hidden="true">
+          <option value="white">White</option>
+          <option value="black">Black</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+
+      <details class="settings-disclosure">
+        <summary><svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>About this opponent &amp; settings</summary>
+        <div class="settings-body">
+          <div id="maia3Advanced" class="sampling-grid">
+            <div class="field"><label for="maia3Style">Move selection</label>
+              <select id="maia3Style">
+                <option value="sample">Human sampling</option>
+                <option value="argmax">Top move</option>
+              </select></div>
             <div class="field" id="maia3TemperatureField"><label for="maia3Temperature">Temperature</label>
               <input id="maia3Temperature" type="number" min="0.01" max="5" step="0.05" value="1" /></div>
             <div class="field" id="maia3TopPField"><label for="maia3TopP">Top-p</label>
               <input id="maia3TopP" type="number" min="0.01" max="1" step="0.05" value="1" /></div>
           </div>
-        </details>
-      </div>
-      <div id="levelCaption" class="small setup-note"></div>
-      <div id="engineCaution" class="small" hidden></div>
-      <div id="engineNote" role="status" aria-live="polite" hidden></div>
-      <div id="runtimeWarning" class="runtime-warning small" role="status" aria-live="polite" hidden></div>
-      <button id="retryEngine" type="button" hidden>Retry engine</button>
-    </details>
+          <p id="levelCaption" class="small setup-note"></p>
+          <div class="capabilities-slot"><BrowserCapabilities /></div>
+        </div>
+      </details>
+    </div>
 
-    <section class="section-block game-section" aria-labelledby="gameHeading">
-      <h2 id="gameHeading" class="section-heading">Game</h2>
-      <div class="game-setup">
-        <div class="field"><label for="colorSelect">You play</label>
-          <select id="colorSelect">
-            <option value="white">White</option>
-            <option value="black">Black</option>
-            <option value="random">Random</option>
-          </select></div>
-        <button id="newGame" class="primary" type="button">New game</button>
-      </div>
-      <div class="game-actions" aria-label="Current game actions">
-        <button id="takeback" type="button" disabled>Takeback</button>
-        <button id="resign" type="button" disabled>Resign</button>
-      </div>
-      <div id="dlProgress" hidden><progress></progress><div class="dl-label small"></div></div>
-      <div id="progressAnnouncement" class="visually-hidden" role="status" aria-live="polite"></div>
-    </section>
+    <div class="opponent-summary">
+      <span class="player-avatar small" data-summary-avatar aria-hidden="true">M3</span>
+      <span id="opponentSummary" class="summary-text">Maia3 · 1500</span>
+      <button id="changeOpponent" class="ghost-button" type="button" aria-expanded="false" aria-controls="setupPane">Change</button>
+    </div>
 
-    <details class="section-block record-section">
-      <summary>Game record</summary>
-      <div class="record-actions">
-        <button id="exportPgn" type="button">Show PGN</button>
-        <button id="copyPgn" type="button">Copy PGN</button>
+    <div id="restartBanner" class="restart-banner" hidden>
+      <span id="restartMessage" class="small"></span>
+      <div class="banner-actions">
+        <button id="confirmRestart" class="primary" type="button">Start new game</button>
+        <button id="dismissRestart" type="button">Keep current game</button>
       </div>
-      <div id="pgnOut"></div>
-    </details>
+    </div>
 
-    <div class="capabilities-slot"><BrowserCapabilities /></div>
+    <div id="gameOverCard" class="game-over" hidden>
+      <div class="result-line"><strong id="resultHeadline">Game over</strong><span id="resultScore"></span></div>
+      <p id="resultReason"></p>
+      <a id="analyzeGameCta" class="cta-link" href="/app/analysis" data-analyze>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>Analyze this game
+      </a>
+    </div>
+
+    <div class="moves-block">
+      <p id="openingName" class="opening-name" hidden></p>
+      <div id="moveList" class="move-list" aria-label="Moves"></div>
+    </div>
+
+    <div class="nav-row">
+      <div class="move-nav" role="group" aria-label="Browse moves">
+        <button id="navFirst" type="button" title="First move (Home / ↑)" aria-label="First move" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M18 5l-8 7 8 7" /></svg>
+        </button>
+        <button id="navPrev" type="button" title="Previous move (←)" aria-label="Previous move" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-8 7 8 7" /></svg>
+        </button>
+        <button id="navNext" type="button" title="Next move (→)" aria-label="Next move" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 8 7-8 7" /></svg>
+        </button>
+        <button id="navLast" type="button" title="Last move (End / ↓)" aria-label="Last move" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg>
+        </button>
+      </div>
+      <form id="moveForm" class="move-form" autocomplete="off">
+        <label for="moveInput" class="visually-hidden">Type a move</label>
+        <input id="moveInput" type="text" spellcheck="false" autocapitalize="off" placeholder="Type a move" aria-describedby="boardInstructions" />
+      </form>
+    </div>
+
+    <div class="game-actions" aria-label="Game actions">
+      <button id="takeback" type="button" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></svg><span class="lbl">Takeback</span>
+      </button>
+      <button id="resign" type="button" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4m0 0h11l-2 4 2 4H5" /></svg><span class="lbl">Resign</span>
+      </button>
+      <button id="newGame" class="primary" type="button">
+        <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg><span class="lbl">Play</span>
+      </button>
+    </div>
+
+    <div class="record-actions" role="group" aria-label="Game record">
+      <button id="copyPgn" type="button" title="Copy the game as PGN">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></svg><span class="lbl">Copy PGN</span>
+      </button>
+      <button id="downloadPgn" type="button" title="Download the game as a .pgn file">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14" /></svg><span class="lbl">Download</span>
+      </button>
+      <a id="analyzeGame" class="record-link" href="/app/analysis" data-analyze title="Open this game on the Analysis board">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg><span class="lbl">Analyze</span>
+      </a>
+    </div>
   </section>
 </main>
 
 <style>
-  .board-panel{min-width:0; padding:12px}
-  .field{min-width:0; margin-top:0}
-  .opponent-grid{display:grid; grid-template-columns:minmax(0,1.45fr) minmax(110px,.75fr); gap:8px; align-items:end}
-  :global(.opponent-grid:has(> .field[hidden])){grid-template-columns:1fr}
-  .maia-grid{display:grid; grid-template-columns:minmax(0,1fr) minmax(142px,.8fr); gap:8px; align-items:end; margin-top:9px}
-  .maia-grid>.field{display:grid; grid-template-rows:auto 37px; align-items:stretch}
-  .range-control{
-    display:flex; align-items:center; min-width:0; height:37px; padding:0 8px;
-    border:1px solid var(--border-input); border-radius:var(--radius-input);
-    background:var(--input-bg);
+  .play-workspace{
+    --muted:color-mix(in srgb, var(--ink) 74%, var(--panel));
+    --text-soft:var(--muted);
+    --strip-h:44px;
+    --board-size:min(680px, calc(100dvh - 240px), calc(100vw - 500px));
+    grid-template-columns:calc(var(--board-size) + 18px) minmax(330px, 400px);
+    gap:16px; max-width:1140px; padding:16px 24px 32px;
+    font-variant-numeric:tabular-nums;
   }
-  .sampling-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
-  .advanced-settings{margin-top:8px; padding-top:8px; border-top:1px solid var(--rule)}
-  .advanced-settings>summary{
-    cursor:pointer; color:var(--muted); font-family:var(--mono); font-size:10px;
-    letter-spacing:.04em;
+  .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
+
+  /* ── Board column: opponent strip / board / your strip ── */
+  .board-panel{display:flex; flex-direction:column; gap:4px; min-width:0; padding:8px}
+  .board-shell{position:relative}
+  :global(.play-workspace #ground coords){font-size:12px; font-weight:700; opacity:1}
+  :global(.play-workspace #keyboardBoard){position:absolute; inset:0; z-index:5; pointer-events:none}
+  :global(.play-workspace .keyboard-row){display:contents}
+  :global(.play-workspace .keyboard-square){position:absolute; width:12.5%; height:12.5%; padding:0; min-height:0; border:0; border-radius:0; background:transparent; pointer-events:none}
+  :global(.play-workspace .keyboard-square:focus-visible){outline:3px solid #fff; outline-offset:-4px; box-shadow:inset 0 0 0 6px #225ca0; background:#fff2}
+  .player-strip{
+    display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h); padding:0 6px 0 4px;
+    border-radius:8px; transition:background .15s;
   }
-  .advanced-settings[open]>summary{margin-bottom:8px}
-  .setup-note{margin-top:8px; line-height:1.45}
-  .game-setup{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; align-items:end}
-  .game-setup>button,.game-actions button{width:100%; min-height:36px; padding:7px 8px}
-  .game-actions{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:6px}
-  .status-row{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; align-items:stretch}
-  .board-action{min-width:72px; min-height:34px; margin-top:8px; padding:6px 9px; font-size:12px}
-  .record-actions{display:flex; gap:6px}
-  .record-actions button{min-height:34px; padding:6px 9px}
-  :global(#status){
-    min-height:34px; margin-top:8px; padding:7px 10px;
-    border:1px solid var(--rule-strong); border-left:2px solid var(--accent);
-    border-radius:0 6px 6px 0; background:var(--panel-inset);
-    color:var(--text-soft); font-family:var(--mono); font-size:11px; line-height:1.45;
+  .player-strip:global([data-turn=true]){background:var(--panel-inset); box-shadow:inset 3px 0 var(--accent)}
+  .player-avatar{
+    display:grid; place-items:center; flex:0 0 34px; width:34px; height:34px; border-radius:7px;
+    background:#3b4a63; color:#f2f4f8; font:700 12.5px/1 var(--sans); letter-spacing:-.01em;
   }
-  :global(#status.over){border-color:var(--accent); color:var(--ink); font-weight:700}
-  :global(button.danger){background:var(--warn); border-color:var(--warn); color:#fff; font-weight:700}
-  :global(#engineCaution){
-    margin-top:7px; padding:7px 8px; border:1px dashed var(--rule);
-    border-radius:6px; background:var(--panel-inset); line-height:1.4;
+  .player-avatar.you{background:var(--panel-2); color:var(--ink); box-shadow:inset 0 0 0 1px var(--border-input-hover); font-size:11px}
+  .player-avatar.small{flex-basis:28px; width:28px; height:28px; font-size:11px; border-radius:6px}
+  .player-id{display:flex; flex-direction:column; min-width:0; line-height:1.25}
+  .player-id strong{color:var(--ink); font:650 14px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .player-id small{color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .player-material{display:inline-flex; align-items:center; gap:0; min-width:0; color:var(--text); font-size:18px; line-height:1; white-space:nowrap; overflow:hidden}
+  .player-material :global(.taken){letter-spacing:-.18em}
+  .player-material :global(.adv){margin-left:5px; font:600 12.5px var(--sans); color:var(--muted)}
+  .player-state{margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:var(--ink); font:600 13px var(--sans); white-space:nowrap}
+  .player-state:empty{display:none}
+  .player-state:global([data-kind=thinking])::before{
+    content:''; width:12px; height:12px; border-radius:50%;
+    border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent);
+    animation:play-spin .8s linear infinite;
   }
-  :global(#engineNote){
-    margin-top:7px; padding:7px 8px; border:1px solid var(--rule); border-radius:6px;
-    background:var(--panel-inset); font-family:var(--mono); font-size:10px; line-height:1.4;
+  .player-state:global([data-kind=turn]){color:var(--accent-soft-text)}
+  .side-dot{flex:0 0 12px; width:12px; height:12px; margin-left:auto; border-radius:50%; background:#f4f1e8; box-shadow:0 0 0 1.5px #0009}
+  .player-state:not(:empty) + .side-dot{margin-left:0}
+  .side-dot:global([data-color=b]){background:#1d1b18; box-shadow:0 0 0 1.5px #fffa}
+  .strip-button{display:grid; place-items:center; width:34px; height:34px; padding:0; border-radius:7px; background:transparent; color:var(--muted)}
+  .strip-button:hover:not(:disabled){background:var(--panel-2); color:var(--ink)}
+  .strip-button svg, .game-actions svg, .record-actions svg, .move-nav svg, .cta-link svg{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round}
+  @keyframes play-spin{to{transform:rotate(360deg)}}
+
+  /* ── Sidebar: one column, two states (setup vs game) driven by data-phase ── */
+  .play-workspace .play-sidebar{
+    position:static; display:flex; flex-direction:column; min-width:0;
+    height:calc(var(--board-size) + 2 * var(--strip-h) + 26px); overflow:hidden;
   }
-  :global(#engineNote.warn){color:var(--warn); border-color:var(--warn)}
-  :global(.runtime-warning){
-    margin-top:7px; padding:7px 8px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule));
+  .play-sidebar>*{flex:0 0 auto}
+  .status-block{padding:12px 14px 10px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
+  :global(#status.game-status){
+    display:flex; align-items:center; gap:9px; min-height:24px;
+    color:var(--ink); font:600 14.5px/1.4 var(--sans);
+  }
+  :global(#status.game-status)::before{content:''; flex:0 0 8px; width:8px; height:8px; border-radius:50%; background:var(--muted); opacity:.6}
+  :global(#status.game-status[aria-busy=true])::before{background:var(--accent); opacity:1}
+  :global(#status.game-status.over){font-size:15px}
+  :global(#status.game-status.over)::before{background:var(--accent); opacity:1}
+  :global(#status.game-status.browsing){color:var(--text-soft); font-weight:500; font-size:13.5px}
+  :global(#engineNote){margin-top:6px; color:var(--muted); font:13px/1.45 var(--sans)}
+  :global(#engineNote.warn){padding:7px 9px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule)); border-radius:6px; background:var(--warn-soft); color:var(--warn)}
+  :global(#engineNote[data-routine=true]){position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%)}
+  :global(.play-workspace .runtime-warning){
+    margin-top:7px; padding:7px 9px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--rule));
     border-radius:6px; background:var(--warn-soft); color:var(--warn); line-height:1.4;
   }
-  :global(#retryEngine){min-height:34px; margin-top:6px; padding:6px 9px}
-  :global(#dlProgress){margin-top:8px; padding:7px 8px; border:1px solid var(--rule); border-radius:6px; background:var(--panel-inset)}
+  :global(#retryEngine){min-height:34px; margin-top:6px; padding:6px 10px}
+  :global(#dlProgress){margin-top:8px}
   :global(#dlProgress progress){width:100%; height:8px; accent-color:var(--accent)}
-  :global(#dlProgress .dl-label){margin-top:2px; font-family:var(--mono); font-size:10px}
-  .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
-  :global(#promoPicker){margin-top:8px; display:flex; gap:6px; flex-wrap:wrap}
-  :global(#moveList){
-    min-height:40px; max-height:160px; margin-top:8px; padding:7px 10px; overflow:auto;
-    border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset);
-    font-family:var(--mono); font-size:12px; line-height:1.65;
-  }
-  :global(#moveList .num),:global(#moveList .placeholder){color:var(--muted)}
-  :global(#moveList .san){padding:1px 3px; border-radius:4px; cursor:pointer}
-  :global(#moveList .san:hover){background:var(--accent-soft); color:var(--accent-soft-text)}
-  :global(#moveList .san.current){background:var(--accent); color:var(--on-accent); font-weight:600}
-  .move-nav{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; margin-top:8px}
-  .move-nav button{display:flex; align-items:center; justify-content:center; min-height:36px; padding:6px 0}
-  .move-nav svg{width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
-  :global(.move-nav button.live-pending){background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
-  :global(.move-nav button.live-pending:hover:not(:disabled)){background:var(--accent-hover); color:var(--on-accent)}
-  :global(#status.browsing){border-style:dashed; border-left:2px solid var(--accent); color:var(--ink)}
-  :global(#pgnOut){
-    max-height:220px; overflow:auto; margin-top:8px;
-    font-family:var(--mono); font-size:10px; line-height:1.45;
-    white-space:pre-wrap; overflow-wrap:anywhere;
-  }
-  :global(#pgnOut:not(:empty)){padding:8px; border:1px solid var(--rule); border-radius:6px; background:var(--card)}
-  :global(.restart-banner){
-    margin-top:8px; padding:9px 10px;
-    border:1px solid var(--accent); border-radius:6px; background:var(--accent-soft);
-  }
+  :global(#dlProgress .dl-label){margin-top:2px; font-size:12px; color:var(--muted)}
+
+  /* Setup pane */
+  .setup-pane{display:flex; flex-direction:column; gap:10px; padding:14px; overflow:auto; overscroll-behavior:contain}
+  .pane-heading{margin:0; font:650 13px/1.3 var(--sans); letter-spacing:0; text-transform:none; color:var(--ink)}
+  .field{margin-top:0}
+  .field-label, .field label, .rating-head label{font:500 13px var(--sans); color:var(--muted)}
+  #engineSelect{width:100%; min-height:42px; font-size:15px; font-weight:600}
+  .opponent-blurb{margin:-2px 0 0; color:var(--text); font:13.5px/1.45 var(--sans)}
+  .opponent-blurb:empty{display:none}
+  :global(#engineCaution){color:var(--muted); font-size:12.5px; line-height:1.45}
+  .rating-head{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+  .rating-value{color:var(--muted); font-size:13px}
+  .rating-value strong{color:var(--ink); font:700 15px var(--sans)}
+  .range-control{display:flex; align-items:center; gap:10px; height:34px}
+  .range-end{color:var(--muted); font-size:12px}
+  .rating-presets{display:flex; gap:6px; flex-wrap:wrap}
+  .chip{flex:1 1 0; min-height:32px; padding:4px 6px; border-radius:999px; font:600 13px var(--sans); color:var(--text)}
+  .chip:global([aria-pressed=true]){border-color:var(--accent); color:var(--ink); background:var(--accent-soft)}
+  .strength-field select{width:100%}
+  .color-field{display:grid; gap:6px}
+  .color-choice{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; border:1px solid var(--border-input); border-radius:8px; overflow:hidden}
+  .color-choice button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:0 6px; border:0; border-radius:0; background:var(--panel); color:var(--text); font:600 13.5px var(--sans)}
+  .color-choice button+button{border-left:1px solid var(--border-input)}
+  .color-choice button:global([aria-pressed=true]){background:var(--panel-2); color:var(--ink); box-shadow:inset 0 -2px var(--accent)}
+  .swatch{width:14px; height:14px; flex:0 0 14px; border-radius:50%; box-shadow:0 0 0 1.5px #8e8677}
+  .swatch.white{background:#f4f1e8}
+  .swatch.black{background:#1d1b18}
+  .swatch.random{background:linear-gradient(90deg,#f4f1e8 50%,#1d1b18 50%)}
+  .settings-disclosure{border-top:1px solid var(--rule); padding-top:8px}
+  .settings-disclosure>summary{display:flex; align-items:center; gap:6px; min-height:32px; cursor:pointer; list-style:none; color:var(--text); font:600 13px var(--sans)}
+  .settings-disclosure>summary::-webkit-details-marker{display:none}
+  .settings-disclosure>summary:hover{color:var(--ink)}
+  .chevron{width:14px; height:14px; flex:0 0 14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
+  .settings-disclosure[open] .chevron{transform:rotate(90deg)}
+  .settings-body{display:grid; gap:10px; padding:6px 0 4px}
+  .sampling-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:end}
+  .sampling-grid>.field:first-child{grid-column:1 / -1}
+  .sampling-grid input, .sampling-grid select{width:100%}
+  .setup-note{margin:0; line-height:1.5; font-size:12.5px}
+  .capabilities-slot :global(.capabilities){margin:0}
   :global(#maia3Elo){
-    -webkit-appearance:none; appearance:none; width:100%; height:5px; margin:0;
+    -webkit-appearance:none; appearance:none; flex:1 1 auto; width:100%; height:5px; margin:0;
     border-radius:3px; background:var(--rule-strong); outline:none;
   }
   :global(#maia3Elo::-webkit-slider-thumb){
-    -webkit-appearance:none; appearance:none; width:16px; height:16px;
+    -webkit-appearance:none; appearance:none; width:18px; height:18px;
     border-radius:50%; background:#fff; border:2px solid var(--accent); cursor:pointer;
     box-shadow:0 2px 6px rgba(80,55,25,.22);
   }
   :global(#maia3Elo::-moz-range-thumb){
-    width:16px; height:16px; border-radius:50%; background:#fff;
+    width:18px; height:18px; border-radius:50%; background:#fff;
     border:2px solid var(--accent); cursor:pointer; box-shadow:0 2px 6px rgba(80,55,25,.22);
   }
-  @media (max-width:520px){
-    .board-panel{padding:8px}
-    .opponent-grid{grid-template-columns:minmax(0,1.2fr) minmax(100px,.8fr)}
-    .maia-grid,.sampling-grid{grid-template-columns:1fr}
-    .game-setup{grid-template-columns:1fr}
-    .game-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
-    .status-row{grid-template-columns:minmax(0,1fr) 68px}
-    .board-action{min-width:0; padding-inline:6px}
+
+  /* Game pane pieces */
+  .opponent-summary{display:flex; align-items:center; gap:9px; min-height:48px; padding:6px 10px 6px 14px; border-bottom:1px solid var(--rule)}
+  .summary-text{flex:1 1 auto; min-width:0; color:var(--ink); font:600 13.5px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .ghost-button{min-height:32px; padding:0 11px; border-radius:7px; background:transparent; color:var(--text); font:600 13px var(--sans)}
+  .ghost-button:global([aria-expanded=true]){border-color:var(--accent); color:var(--ink)}
+  .restart-banner{margin:10px 12px 0; padding:10px; border:1px solid var(--accent-tint-border); border-radius:8px; background:var(--accent-soft)}
+  .restart-banner :global(#restartMessage){color:var(--ink); font-size:13px}
+  .banner-actions{display:flex; gap:6px; margin-top:8px}
+  .banner-actions button{flex:1 1 0; min-height:34px}
+  .game-over{margin:10px 12px 0; padding:12px; border:1px solid var(--rule-strong); border-radius:10px; background:var(--panel-inset)}
+  .result-line{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+  .result-line strong{color:var(--ink); font:700 18px var(--sans)}
+  .result-line span{color:var(--muted); font:600 14px var(--sans)}
+  .game-over p{margin:2px 0 10px; color:var(--text); font-size:13.5px}
+  .cta-link{display:flex; align-items:center; justify-content:center; gap:8px; min-height:40px; border-radius:7px; background:var(--accent); color:var(--on-accent); font:650 14px var(--sans); text-decoration:none}
+  .cta-link:hover{background:var(--accent-hover); text-decoration:none}
+  .moves-block{display:flex; flex-direction:column; flex:1 1 120px; min-height:0}
+  .opening-name{flex:0 0 auto; margin:0; padding:8px 14px; border-bottom:1px solid var(--rule); color:var(--muted); font:13px/1.4 var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .opening-name :global(strong){margin-right:6px; color:var(--ink); font-weight:650}
+  :global(#moveList.move-list){flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; font:14px/1.4 var(--sans); font-variant-numeric:tabular-nums}
+  :global(#moveList .move-row){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); min-height:28px}
+  :global(#moveList .move-row:nth-child(even)){background:color-mix(in srgb, var(--ink) 3%, var(--panel))}
+  :global(#moveList .num){display:grid; place-items:center; color:var(--muted); font-size:13px; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
+  :global(#moveList .san){display:flex; align-items:center; min-height:28px; padding:0 12px; border:0; border-radius:0; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer}
+  :global(#moveList .san:hover:not(.current)){background:var(--accent-soft); color:var(--ink)}
+  :global(#moveList .san.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)); color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
+  :global(#moveList .placeholder){display:block; padding:14px; color:var(--muted); font-size:13.5px}
+  .nav-row{display:flex; align-items:center; gap:8px; padding:8px 10px; border-top:1px solid var(--rule)}
+  .move-nav{display:flex; gap:4px; flex:0 0 auto}
+  .move-nav button{display:grid; place-items:center; width:38px; height:36px; padding:0; border-radius:7px; border:1px solid var(--border-input-hover); background:var(--panel-2); color:var(--ink)}
+  .move-nav button:disabled{opacity:1; cursor:default}
+  .move-nav button:disabled svg{opacity:.3}
+  .move-nav svg{width:18px; height:18px; stroke-width:2.2}
+  :global(.move-nav button.live-pending){background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+  :global(.move-nav button.live-pending:hover:not(:disabled)){background:var(--accent-hover); color:var(--on-accent)}
+  .move-form{flex:1 1 auto; min-width:0; margin:0}
+  .move-form input{width:100%; min-height:36px; padding:6px 10px; font-size:14px}
+  .move-form input:global(.invalid){border-color:var(--warn)}
+  .game-actions{display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; padding:8px 10px; border-top:1px solid var(--rule)}
+  .game-actions button, .record-actions :is(button, a){display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:38px; padding:0 8px; border-radius:7px; font:600 13.5px var(--sans); color:var(--ink); white-space:nowrap}
+  .game-actions button:not(.primary){background:transparent; border-color:var(--border-input-hover)}
+  .game-actions button:not(.primary):hover:not(:disabled){background:var(--panel-2)}
+  .game-actions button:disabled{opacity:1; color:color-mix(in srgb, var(--ink) 55%, var(--panel))}
+  .game-actions button:disabled svg{opacity:.6}
+  :global(.game-actions button.danger){background:var(--warn); border-color:var(--warn); color:#fff}
+  :global(.game-actions button.armed){border-color:var(--warn); color:var(--warn)}
+  .play-icon{display:none}
+  .record-actions{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; padding:0 10px 10px}
+  .record-actions :is(button, a){border:1px solid transparent; background:transparent; color:var(--text); font-weight:550; font-size:13px}
+  .record-actions :is(button, a):hover:not(:disabled){background:var(--panel-2); color:var(--ink); text-decoration:none}
+  .record-actions button:disabled{opacity:.5}
+  .record-actions :global([data-copied=true]){color:var(--accent-soft-text)}
+  .record-actions :global(a[aria-disabled=true]){opacity:.5; pointer-events:none}
+
+  /* Phase visibility */
+  .play-workspace:global([data-phase=setup]) :is(.opponent-summary, .moves-block, .nav-row, .record-actions, #takeback, #resign){display:none}
+  .play-workspace:global([data-phase=setup]) .setup-pane{flex:1 1 auto; min-height:0}
+  .play-workspace:global([data-phase=setup]) .game-actions{grid-template-columns:1fr; padding:12px 14px 14px}
+  .play-workspace:global([data-phase=setup]) #newGame{min-height:48px; font-size:16px; font-weight:700}
+  .play-workspace:global([data-phase=setup]) .play-icon{display:block}
+  .play-workspace:global(:not([data-phase=setup]):not([data-config=open])) .setup-pane{display:none}
+  .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{flex:0 1 auto; max-height:58%; border-bottom:1px solid var(--rule)}
+  .play-workspace:global([data-phase=over]) #resign{display:none}
+  /* "Change" expands the settings directly under the summary row that holds the toggle. */
+  .play-sidebar>.status-block{order:-2}
+  .play-sidebar>.opponent-summary{order:-1}
+  .play-workspace:global([data-phase=over]) .game-actions{grid-template-columns:1fr 1fr}
+
+  @media (max-width:900px){
+    .play-workspace{--board-size:100%; grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
+    .play-workspace .play-sidebar{height:auto; overflow:visible}
+    .play-workspace:global([data-phase=setup]) .play-sidebar{order:-1}
+    :global(#moveList.move-list){max-height:180px}
+    .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{max-height:none}
+    /* In a game the controls sit right under the board; the record follows. */
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.status-block{order:1}
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.game-actions{order:2; border-top:0}
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.restart-banner{order:3}
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.game-over{order:3}
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.nav-row{order:4}
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.moves-block{order:5; border-top:1px solid var(--rule)}
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.record-actions{order:6; padding-top:8px; border-top:1px solid var(--rule)}
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.opponent-summary{order:7; border-top:1px solid var(--rule); border-bottom:0}
+    .play-workspace:global(:not([data-phase=setup])) .play-sidebar>.setup-pane{order:8}
+  }
+  @media (max-width:600px){
+    .play-workspace{--strip-h:38px; padding:8px 6px 32px; gap:8px}
+    .board-panel{padding:0; border:0; background:transparent; gap:2px}
+    .player-avatar{flex-basis:30px; width:30px; height:30px; font-size:11.5px}
+    .player-id strong{font-size:13.5px}
+    .player-id small{font-size:12px}
+    :global(.play-workspace #ground coords){font-size:11px}
+    .status-block{padding:10px 12px 8px}
+    .play-workspace:global([data-phase=setup]) .status-block{display:none}
+    .setup-pane{padding:12px; gap:9px}
+    .play-workspace:global([data-phase=setup]) .pane-heading{display:none}
+    .opponent-blurb{font-size:13px}
+    .play-workspace:global([data-phase=setup]) :is(#engineCaution, .settings-disclosure){order:5}
+    .play-workspace:global([data-phase=setup]) .game-actions{padding:0 12px 12px}
+    .move-nav button{width:auto; flex:1 1 0; height:40px}
+    .move-nav{flex:1 1 60%}
+    .move-form{flex:1 1 40%}
+    .move-form input{min-height:40px}
+    .game-actions button{min-height:42px}
+    :global(#moveList.move-list){max-height:150px}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .player-state:global([data-kind=thinking])::before{animation:none}
   }
 </style>
