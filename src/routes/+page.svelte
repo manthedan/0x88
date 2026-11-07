@@ -209,6 +209,8 @@ $: readiness = capsFailed ? 'Device check unavailable'
   .device-readiness[data-tone=ok] i{background:var(--accent)}
   .device-readiness[data-tone=warn] i{background:var(--warn)}
   .device-readiness>span{color:var(--ink); margin-left:3px}
+  /* Wide layout: the full device card sits directly below, so the one-line summary would repeat it. */
+  @media(min-width:1201px){ .device-readiness{display:none} }
 
   /* Device check: live WebGPU / SIMD / threads result, under the hero actions. */
   .device{
