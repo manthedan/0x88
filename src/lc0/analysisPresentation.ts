@@ -13,17 +13,18 @@ export function defaultAnalysisEngineRows(): EngineRow[] {
 /**
  * Best moves win collisions, including promotion variants on the same squares.
  * When several engines share a best move it is drawn once; `shared` then lists
- * every backing engine's swatch (in engine order) so the board can mark the
+ * every backing engine's identity (in engine order) so the board can mark the
  * agreement instead of letting one engine's choice vanish under another's.
  */
-export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean): { uci: string; brush: string; shared?: string[] }[] {
-  const usable = lines.filter((line) => !line.error && line.pvUci[0] && (line.multipv === 1 || showAll))
+export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean, focusedEngine: string | null = null): { uci: string; brush: string; shared?: string[] }[] {
+  const usable = lines.filter((line) => !line.error && line.pvUci[0] && (line.multipv === 1 || showAll)
+    && (!focusedEngine || analysisEngineName(line.engine) === focusedEngine))
     .sort((a, b) => a.multipv - b.multipv);
   const backers = new Map<string, string[]>();
   for (const line of usable) {
     if (line.multipv !== 1) continue;
     const key = line.pvUci[0].slice(0, 4);
-    backers.set(key, [...(backers.get(key) ?? []), engineBrushes(line.engine).swatch]);
+    backers.set(key, [...new Set([...(backers.get(key) ?? []), line.engine])]);
   }
   const seen = new Set<string>();
   return usable.flatMap((line) => {
@@ -37,21 +38,27 @@ export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean)
   }).reverse(); // Alternatives sit underneath best moves; width is always chessground's 10.
 }
 
-/**
- * Ring segments (one per backing engine) plus the vote count, for a shared best-move arrow.
- * Drawn with chessground's `center: 'dest'`, whose 1×1 box covers the destination square, so the
- * badge sits small in one of that square's corners instead of on the piece. `corner` is the screen
- * corner (x, y signs: -1 = left/top, 1 = right/bottom); callers pick the one facing away from the shaft.
+/** Named, colour-keyed backers at the shaft/head junction (`center: 'label'`).
+ * The arrow itself stays ONE standard-width arrow. Unlike a count in a square's
+ * corner, these tiles stay attached to the move, including on a flipped board.
+ * Three columns keep even eight backers inside chessground's 100×100 SVG viewport.
  */
-export function sharedArrowMarkerSvg(swatches: string[], corner: [number, number] = [1, 1]): string {
-  const cx = corner[0] < 0 ? 21 : 79;
-  const cy = corner[1] < 0 ? 21 : 79;
-  const r = 11;
-  const circumference = 2 * Math.PI * r;
-  const segment = circumference / swatches.length;
-  const ring = swatches.map((color, index) =>
-    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="5" stroke-dasharray="${segment.toFixed(2)} ${(circumference - segment).toFixed(2)}" stroke-dashoffset="${(-index * segment).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"/>`).join('');
-  return `<circle cx="${cx}" cy="${cy}" r="15" fill="#fff" fill-opacity=".95"/>${ring}<circle cx="${cx}" cy="${cy}" r="8.5" fill="#1d1b18"/><text x="${cx}" y="${cy + 4}" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11.5" font-weight="800" fill="#fff">${swatches.length}</text>`;
+export function sharedArrowMarkerSvg(engines: string[]): string {
+  if (!engines.length) return '';
+  const columns = Math.min(3, engines.length);
+  const rows = Math.ceil(engines.length / columns);
+  const tiles = engines.map((engine, index) => {
+    const x = 50 + (index % columns - columns / 2) * 32;
+    const y = 50 + (Math.floor(index / columns) - rows / 2) * 32;
+    return `<rect x="${x}" y="${y}" width="32" height="32" rx="4" fill="#1d1b18" stroke="#fff" stroke-width="1.5"/><rect x="${x + 2}" y="${y + 26}" width="28" height="5" rx="2" fill="${engineBrushes(engine).swatch}"/><text x="${x + 16}" y="${y + 22}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="20" font-weight="800" fill="#fff">${htmlEscape(engineMonogram(engine))}</text>`;
+  }).join('');
+  return `<title>Shared move: ${htmlEscape(engines.map(analysisEngineName).join(' + '))}</title>${tiles}`;
+}
+
+/** Cycle only through usable bar sources; a pending/failed engine must not trap the control. */
+export function nextAnalysisEvalSource(engines: string[], lines: AnalysisLine[], current: string | null): string | null {
+  const ready = engines.filter((name) => lines.some((line) => analysisEngineName(line.engine) === name && line.multipv === 1 && !line.error));
+  return ready[(ready.indexOf(current ?? '') + 1) % ready.length] ?? null;
 }
 
 export interface AnalysisMoveGroup {
@@ -204,5 +211,5 @@ export function analysisMoveMarkup(root: GameNode, current: GameNode): string {
     flush();
     return html;
   };
-  return root.children[0] ? branch(root.children[0], true) : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game to review it.</p><textarea class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" aria-label="Paste a PGN" placeholder="1. e4 c5 2. Nf3 d6 3. d4 …"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load PGN</button><button type="button" class="load-game-link" data-load-game>FEN and more options</button></div></div>';
+  return root.children[0] ? branch(root.children[0], true) : '<div class="history-empty"><p><strong>No moves yet.</strong> Play on the board or paste a game below.</p><textarea class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" aria-label="Paste a PGN" placeholder="1. e4 c5 2. Nf3 d6 3. d4 …"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load PGN</button><button type="button" class="load-game-link" data-load-game>Paste FEN instead</button></div></div>';
 }

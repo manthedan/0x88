@@ -130,7 +130,7 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, patchAnalysisResults, sharedArrowMarkerSvg } from './analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, nextAnalysisEvalSource, patchAnalysisResults, sharedArrowMarkerSvg } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import {
   berserkCacheKey,
@@ -1379,8 +1379,10 @@ let showAllLineArrows = false;
 let arrowPreview: { fen: string; uci: string; engine: string } | null = null;
 // Engine strip focus: the chosen engine drives the eval bar (default: first with a result).
 let evalSourceEngine: string | null = null;
-// Lines accordion: null = automatic (expand everything when it obviously fits), otherwise explicit per engine.
-let expandedEngines: Set<string> | null = null;
+// One top line everywhere; explicit expansion survives navigation and reloads.
+const EXPANDED_LINES_STORAGE_KEY = '0x88-analysis-expanded-lines-v1';
+let expandedEngines = new Set<string>();
+let arrowFocusEngine: string | null = null;
 
 function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
   const variant = String(value ?? '');
@@ -1854,22 +1856,19 @@ function bestShapes(): DrawShape[] {
     const shape = uciShape(preview.uci, engineBrushes(preview.engine).primary);
     if (shape) return [shape];
   }
-  const candidates = analysisArrowCandidates(lineCache.get(tree.current.fen) ?? [], showAllLineArrows);
+  const lines = lineCache.get(tree.current.fen) ?? [];
+  const focus = arrowFocusEngine && activeEngineNames().includes(arrowFocusEngine) ? arrowFocusEngine : null;
+  // Pending focused engines intentionally draw nothing, never another engine's recommendation.
+  const candidates = analysisArrowCandidates(lines, showAllLineArrows, focus);
   const book = currentBookStats()[0];
-  if (book && !candidates.some((candidate) => candidate.uci.slice(0, 4) === book.uci.slice(0, 4))) {
+  if (book && !focus && !candidates.some((candidate) => candidate.uci.slice(0, 4) === book.uci.slice(0, 4))) {
     candidates.unshift({ uci: book.uci, brush: BOOK_BRUSH });
   }
   return candidates.flatMap(({ uci, brush, shared }: { uci: string; brush: string; shared?: string[] }) => {
     const shape = uciShape(uci, brush);
     if (!shape) return [];
-    // One arrow per move; a small ring in every backing engine's colour marks agreement, tucked
-    // into the destination square's corner that faces away from the incoming shaft.
     if (!shared) return [shape];
-    const flip = orientation === 'black' ? -1 : 1;
-    const dx = Math.sign(uci.charCodeAt(0) - uci.charCodeAt(2)) * flip;
-    const dy = -Math.sign(Number(uci[1]) - Number(uci[3])) * flip;
-    const corner: [number, number] = [dx > 0 ? -1 : 1, dy > 0 ? -1 : dy < 0 ? 1 : -1];
-    return [{ ...shape, customSvg: { html: sharedArrowMarkerSvg(shared, corner), center: 'dest' as const } }];
+    return [{ ...shape, customSvg: { html: sharedArrowMarkerSvg(shared), center: 'label' as const } }];
   });
 }
 
@@ -1911,6 +1910,7 @@ function renderBoard() {
   keyboardBoard.render(board, orientation);
   el('sideToMove').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
   el('sideToMove').dataset.turn = board.turn;
+  el('evalTurn').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
   renderEvalBar();
   setShapes(bestShapes());
 }
@@ -1930,7 +1930,10 @@ function renderEvalBar() {
   bar?.style.setProperty('--eval-pct', `${pct}%`);
   el('evalScore').textContent = line?.scoreText ?? '—';
   el('evalScore').dataset.long = String((line?.scoreText ?? '').length > 5);
-  el('evalSource').textContent = line ? engineMonogram(line.engine) : '';
+  el('evalSource').textContent = line ? analysisEngineName(line.engine) : '';
+  el('evalSource').dataset.short = line ? engineMonogram(line.engine) : '';
+  el('evalSourceName').textContent = line ? analysisEngineName(line.engine) : 'No result';
+  el('cycleEvalSource').setAttribute('aria-label', `Eval bar: ${line ? analysisEngineName(line.engine) : 'no result'}. Switch source engine`);
   bar?.style.setProperty('--engine-color', line ? engineBrushes(line.engine).swatch : 'var(--muted)');
   bar?.setAttribute('title', line ? `Eval bar: ${analysisEngineName(line.engine)} ${line.scoreText} (White's perspective). Click another engine row to switch.` : 'Evaluation (White\'s perspective)');
   el('evalWhite').parentElement?.setAttribute('aria-label', line ? `White's evaluation: ${line.scoreText}, ${analysisEngineName(line.engine)}` : 'No evaluation yet');
@@ -1974,11 +1977,9 @@ function activeEngineNames(): string[] {
   return [...new Set(activeEngineRows().map((row) => analysisEngineName(rowLabel(row))))];
 }
 
-/** Auto mode expands every engine's multi-PV only when it plainly fits: one engine, or two with no game yet. */
+/** Selection and expansion are separate: changing the bar never opens extra lines. */
 function engineLinesExpanded(name: string): boolean {
-  if (expandedEngines) return expandedEngines.has(name);
-  const count = activeEngineNames().length;
-  return count === 1 || (count <= 2 && !tree.root.children.length);
+  return expandedEngines.has(name);
 }
 
 function toggleEngineLines(name: string): void {
@@ -1986,6 +1987,7 @@ function toggleEngineLines(name: string): void {
   if (next.has(name)) next.delete(name);
   else next.add(name);
   expandedEngines = next;
+  storageSet(EXPANDED_LINES_STORAGE_KEY, JSON.stringify([...next]));
   renderLines();
 }
 
@@ -2013,10 +2015,10 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
     const pct = progress && hasBoundedSearchProgress(progress) ? Math.min(100, Math.round((100 * (progress.completed ?? 0)) / Math.max(1, progress.requested ?? 1))) : null;
     const meter = progress ? `<span class="engine-summary-meter${pct === null ? ' indeterminate' : ''}" style="--progress:${pct ?? 100}%" aria-hidden="true"></span>` : '';
     const isSource = !!source && analysisEngineName(source.engine) === name;
-    const expanded = engineLinesExpanded(name);
+    const focused = arrowFocusEngine === name;
     const agrees = !!line && line.pvUci[0] === agreed;
-    const move = line?.pvUci[0] ? `<button type="button" class="compare-move${agrees ? ' agrees' : ''}" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}${agrees ? ' (agreed move)' : ''}" title="Play ${htmlEscape(firstAnalysisMove(line))}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span class="compare-move-empty" aria-hidden="true">—</span>';
-    return `<div class="engine-summary${progress ? ' searching' : ''}${isSource ? ' eval-source' : ''}" style="--engine-color:${swatch}"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-expanded="${expanded}" aria-pressed="${isSource}" title="${htmlEscape(`${name}: show on the eval bar and ${expanded ? 'collapse' : 'expand'} its lines`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective${isSource ? ' (shown on the eval bar)' : ''}">${htmlEscape(line?.scoreText ?? '—')}</span>${move}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button>${meter}</div>`;
+    const move = line?.pvUci[0] ? `<button type="button" class="compare-move${agrees ? ' agrees' : ''}" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}${agrees ? ' (agreed move)' : ''}" title="${htmlEscape(agrees ? `Shared recommendation: ${groups[0].engines.map(analysisEngineName).join(' + ')}. Play ${firstAnalysisMove(line)}` : `Play ${firstAnalysisMove(line)}`)}">${agrees ? '<span class="agreement-mark" aria-hidden="true">✓</span>' : ''}${htmlEscape(firstAnalysisMove(line))}</button>` : '<span class="compare-move-empty" aria-hidden="true">—</span>';
+    return `<div class="engine-summary${progress ? ' searching' : ''}${isSource ? ' eval-source' : ''}${focused ? ' arrow-focus' : ''}" style="--engine-color:${swatch}"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-pressed="${isSource}" aria-label="${htmlEscape(`${name}: ${focused ? 'show all engine arrows' : 'select for eval bar and isolate its arrow'}`)}" title="${htmlEscape(`${name}: ${focused ? 'click again to show all arrows' : 'select for eval bar and arrow focus'}`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective${isSource ? ' (shown on the eval bar)' : ''}">${isSource ? '<span class="bar-source-label">Bar</span>' : ''}${htmlEscape(line?.scoreText ?? '—')}</span>${move}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button>${meter}</div>`;
   }).join(''));
 }
 
@@ -2057,9 +2059,10 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const headline = analysisAgreementHeadline(groups, bestByEngine.length);
     const spreadCp = Number(spread?.replace(' cp spread', ''));
     // Spread in pawns, the same unit as every engine evaluation beside it.
-    const spreadMarkup = spread && Number.isFinite(spreadCp) ? `<span class="insight-spread" title="Best minus worst evaluation across engines: ${Math.round(spreadCp)} centipawns">spread <b>${(spreadCp / 100).toFixed(2)}</b></span>` : '';
+    const spreadMarkup = spread && Number.isFinite(spreadCp) ? `<span class="insight-spread">Eval spread <b>${(spreadCp / 100).toFixed(2)}</b> pawns</span>` : '';
     const dots = groups.map((group) => group.engines.map((engine) => `<span class="engine-dot" style="--engine-color:${engineBrushes(engine).swatch}" title="${htmlEscape(`${analysisEngineName(engine)}: ${group.san}`)}"></span>`).join('')).join('<span class="insight-sep" aria-hidden="true"></span>');
-    patchAnalysisResults(el('comparisonInsight'), `<span class="insight-dots" aria-hidden="true">${dots}</span><strong>${htmlEscape(headline)}</strong>${spreadMarkup}<button type="button" data-open-comparison data-focus-key="comparison-shortcut">Compare</button>`);
+    const explanation = `Agreement compares recommended moves; eval spread is the highest minus lowest evaluation, in pawns from White’s perspective. ${groups.map((group) => `${group.san}: ${group.engines.map(analysisEngineName).join(' + ')}`).join('; ')}. Open Compare for details.`;
+    patchAnalysisResults(el('comparisonInsight'), `<button type="button" class="insight-action" data-open-comparison data-focus-key="comparison-shortcut" aria-label="${htmlEscape(`${headline}. Open Compare. ${explanation}`)}" title="${htmlEscape(explanation)}"><span class="insight-headline"><span class="insight-dots" aria-hidden="true">${dots}</span><strong>${htmlEscape(headline)}</strong><span aria-hidden="true">›</span></span>${spreadMarkup}</button>`);
   }
   if (!bestByEngine.length) {
     const progressRows = [...searchProgressByEngine.values()].map(
@@ -2079,7 +2082,7 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   el('engineConsensus').textContent = bestByEngine.length === 1
     ? `${analysisEngineName(bestByEngine[0].engine)} ready${status}`
     // Pawn units, matching every evaluation on the page.
-    : analysisConsensus(bestByEngine).replace(/ · (\d+) cp spread$/, (_, cp: string) => ` · spread ${(Number(cp) / 100).toFixed(2)}`) + status;
+    : analysisConsensus(bestByEngine).replace(/ · (\d+) cp spread$/, (_, cp: string) => ` · Eval spread ${(Number(cp) / 100).toFixed(2)} pawns (White’s view)`) + status;
   const baseline = bestByEngine[0];
   el('deltaBaseline').textContent = 'Δ';
   el('deltaBaseline').title = `Pawns versus ${analysisEngineName(baseline.engine)}`;
@@ -2129,12 +2132,12 @@ function renderLines() {
       const label = `${name}, line ${line.multipv}: play ${firstAnalysisMove(line)}, evaluation ${line.scoreText}. ${pvText}`;
       const id = index === 0 ? engineAvatar(engine) : `<span class="line-rank">${line.multipv}</span>`;
       const toggle = index === 0
-        ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? '' : `+${extra}`}</span>${CHEVRON_ICON}</button>` : '<span class="line-toggle-spacer" aria-hidden="true"></span>'
+        ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Fewer' : `${extra} more`}</span>${CHEVRON_ICON}</button>` : '<span class="line-toggle-spacer" aria-hidden="true"></span>'
         : '';
       return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}" title="${htmlEscape(`Play ${firstAnalysisMove(line)} · ${pvText}`)}"><span class="line-id">${id}</span><span class="score">${htmlEscape(line.scoreText)}</span><span class="pv">${pvMoveChunks(pvText)}</span></button>${toggle}</li>`;
     });
     if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="line-id">${engineAvatar(engine)}</span><span class="pending-text">${analyzing ? 'Searching…' : 'No result for this position'}</span></li>`);
-    return `<section class="line-group${open && sorted.length > 1 ? ' open' : ''}" style="--engine-color:${engineBrushes(engine).swatch}" aria-label="${htmlEscape(name)} lines"><ol>${rows.join('')}</ol></section>`;
+    return `<section class="line-group${open && sorted.length > 1 ? ' open' : ''}${arrowFocusEngine === name ? ' arrow-focus' : ''}" style="--engine-color:${engineBrushes(engine).swatch}" aria-label="${htmlEscape(name)} lines">${open && sorted.length > 1 ? `<h3 class="line-group-heading">${htmlEscape(name)} <small>· ${usable.length} lines</small></h3>` : ''}<ol>${rows.join('')}</ol></section>`;
   }).join('') : '') || '<p class="lines-empty placeholder">Make a move or press <b>Analyze</b> to see each engine\'s line here.</p>');
   fitLinesPanel();
 }
@@ -2238,6 +2241,10 @@ function keepCurrentMoveInView(): void {
   const list = el('movelist');
   const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
   if (!selected || !list.clientHeight) return;
+  if (list.scrollHeight <= list.clientHeight) {
+    list.scrollTop = 0;
+    return;
+  }
   const viewport = list.getBoundingClientRect();
   const move = selected.getBoundingClientRect();
   const row = list.querySelector('.variation') ? 0 : moveRowHeight(list);
@@ -4179,7 +4186,11 @@ function wireEvents() {
     });
   }
   el('comparisonInsight').addEventListener('click', (event) => {
-    if ((event.target as HTMLElement).closest('[data-open-comparison]')) setView(el('comparisonTab') as HTMLButtonElement);
+    if (!(event.target as HTMLElement).closest('[data-open-comparison]')) return;
+    const tab = el('comparisonTab') as HTMLButtonElement;
+    setView(tab);
+    tab.focus({ preventScroll: true });
+    if (narrow.matches) tab.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
   // Wide layouts show the lines block permanently above the tabs, so "Lines" is a narrow-screen tab only.
   const narrow = matchMedia('(max-width: 900px)');
@@ -4202,9 +4213,20 @@ function wireEvents() {
     button.dataset.copied = 'true';
     window.setTimeout(() => { delete button.dataset.copied; }, 1400);
   };
-  el('quickCopyFen').addEventListener('click', () => { copyFen(); flashCopied(el('quickCopyFen')); });
-  el('quickCopyPgn').addEventListener('click', () => { copyPgn(); flashCopied(el('quickCopyPgn')); });
   el('copyFen').addEventListener('click', () => { copyFen(); flashCopied(el('copyFen')); });
+  try {
+    const saved: unknown = JSON.parse(storageGet(EXPANDED_LINES_STORAGE_KEY) ?? '[]');
+    expandedEngines = new Set(Array.isArray(saved) ? saved.filter((name): name is string => typeof name === 'string') : []);
+  } catch { expandedEngines = new Set(); }
+  el('cycleEvalSource').addEventListener('click', () => {
+    const lines = lineCache.get(tree.current.fen) ?? [];
+    const current = evalBarLine(lines);
+    evalSourceEngine = nextAnalysisEvalSource(activeEngineNames(), lines, current ? analysisEngineName(current.engine) : null);
+    arrowFocusEngine = null;
+    renderEvalBar();
+    renderLines();
+    setShapes(bestShapes());
+  });
   showAllLineArrows = storageGet(ALL_LINE_ARROWS_STORAGE_KEY) === 'true';
   inputEl('showAllLineArrows').checked = showAllLineArrows;
   inputEl('showAllLineArrows').addEventListener('change', () => {
@@ -4216,10 +4238,12 @@ function wireEvents() {
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-engine-settings], [data-engine-toggle], [data-uci]');
     if (target?.dataset.engineSettings !== undefined) openEngineManager(Number(target.dataset.engineSettings));
     else if (target?.dataset.engineToggle !== undefined) {
-      // One click focuses the engine: it drives the eval bar, and its multi-PV opens or closes in place.
+      // A second click restores the all-engine overview, retaining the bar source.
       evalSourceEngine = target.dataset.engineToggle;
-      toggleEngineLines(target.dataset.engineToggle);
+      arrowFocusEngine = arrowFocusEngine === evalSourceEngine ? null : evalSourceEngine;
       renderEvalBar();
+      renderLines();
+      setShapes(bestShapes());
     } else if (target?.dataset.uci && tree.addUci(target.dataset.uci)) afterNavigation();
   });
   const positionTools = el('positionTools') as HTMLDetailsElement;
@@ -4245,7 +4269,7 @@ function wireEvents() {
     }
     if (!(event.target as HTMLElement).closest('[data-load-game]')) return;
     positionTools.open = true;
-    inputEl('pgnInput').focus();
+    inputEl('fenInput').focus();
   });
   el('movelist').addEventListener('keydown', (event) => {
     const key = event as KeyboardEvent;
@@ -4866,6 +4890,9 @@ function resetAnalysisPageState(): void {
   nodeIndex.clear();
   engineRows = defaultAnalysisEngineRows();
   arrowPreview = null;
+  arrowFocusEngine = null;
+  evalSourceEngine = null;
+  expandedEngines = new Set();
   showAllLineArrows = false;
   importedGames = [];
   importedPositionIndex = null;

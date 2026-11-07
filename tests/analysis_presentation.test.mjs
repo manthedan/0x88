@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, sharedArrowMarkerSvg } from '../src/lc0/analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, nextAnalysisEvalSource, sharedArrowMarkerSvg } from '../src/lc0/analysisPresentation.ts';
 import { ANALYSIS_DRAWABLE_BRUSHES } from '../src/lc0/analysisFormat.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 
@@ -27,18 +27,55 @@ test('default arrows show only engine best moves; opt-in alternatives never cove
   assert.equal(analysisArrowCandidates([lc0, { ...sf, pvUci: ['d2d4'] }], true).length, 1);
 });
 
+test('engine focus never borrows another engine’s arrow while results are pending or failed', () => {
+  const lc0 = line('Lc0', 'd2d4', 'd4', 20);
+  const sf = line('SF Lite', 'e2e4', 'e4', 30);
+  assert.deepEqual(analysisArrowCandidates([lc0], false, 'Stockfish Lite'), []);
+  assert.deepEqual(analysisArrowCandidates([lc0, { ...sf, error: 'Unavailable' }], true, 'Stockfish Lite'), []);
+  assert.deepEqual(analysisArrowCandidates([lc0, sf], false, 'Stockfish Lite'), [{ uci: 'e2e4', brush: 'blue' }]);
+});
+
+test('eval source cycling skips unavailable engines and wraps through ready sources', () => {
+  const engines = ['Lc0 Small', 'Stockfish Lite', 'Reckless'];
+  const lc0 = line('Lc0', 'd2d4', 'd4', 20);
+  const sf = { ...line('SF Lite', 'e2e4', 'e4', 30), error: 'Unavailable' };
+  const reckless = line('Reckless', 'g1f3', 'Nf3', 10);
+  const results = [lc0, sf, reckless];
+  assert.equal(nextAnalysisEvalSource(engines, results, 'Lc0 Small'), 'Reckless');
+  assert.equal(nextAnalysisEvalSource(engines, results, 'Reckless'), 'Lc0 Small');
+  assert.equal(nextAnalysisEvalSource(engines, results, 'Stockfish Lite'), 'Lc0 Small');
+  assert.equal(nextAnalysisEvalSource(engines, [lc0], 'Lc0 Small'), 'Lc0 Small');
+  assert.equal(nextAnalysisEvalSource(engines, [], null), null);
+});
+
 test('a shared best move is one arrow that names every backing engine colour', () => {
   const lc0 = line('Lc0', 'c3e2', 'Ne2', 25);
   const sf = line('SF Lite', 'c3e2', 'Ne2', 39);
   const berserk = line('Berserk', 'c3a4', 'Na4', 48);
   const candidates = analysisArrowCandidates([lc0, sf, berserk], false);
   assert.equal(candidates.length, 2);
-  assert.deepEqual(candidates.find((c) => c.uci === 'c3e2'), { uci: 'c3e2', brush: 'green', shared: ['#15781B', '#1f5fcf'] });
+  assert.deepEqual(candidates.find((c) => c.uci === 'c3e2'), { uci: 'c3e2', brush: 'green', shared: ['Lc0', 'SF Lite'] });
   assert.equal(candidates.find((c) => c.uci === 'c3a4').shared, undefined);
-  const marker = sharedArrowMarkerSvg(['#15781B', '#1f5fcf']);
+  const marker = sharedArrowMarkerSvg(['Lc0', 'SF Lite']);
   assert.match(marker, /#15781B/);
   assert.match(marker, /#1f5fcf/);
-  assert.match(marker, />2<\/text>/);
+  assert.match(marker, />L0<\/text>/);
+  assert.match(marker, />SF<\/text>/);
+  assert.match(marker, /Shared move: Lc0 Small \+ Stockfish Lite/);
+  assert.doesNotMatch(marker, />2<\/text>/);
+  assert.equal(analysisArrowCandidates([lc0, lc0, sf], false)[0].shared.length, 2, 'duplicate results never double-count a backer');
+});
+
+test('shared arrow markers fit all eight backers and escape display names', () => {
+  const engines = ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess', 'Reckless', 'Viridithas', 'Stormphrax', '<unsafe&>'];
+  const marker = sharedArrowMarkerSvg(engines);
+  assert.equal((marker.match(/<text /g) ?? []).length, 8);
+  const boxes = [...marker.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="32" height="32"/g)];
+  assert.equal(boxes.length, 8);
+  assert.ok(boxes.every(([, x, y]) => Number(x) >= 0 && Number(x) + 32 <= 100 && Number(y) >= 0 && Number(y) + 32 <= 100));
+  assert.match(marker, /&lt;unsafe&amp;&gt;/);
+  assert.doesNotMatch(marker, /<unsafe/);
+  assert.equal(sharedArrowMarkerSvg([]), '');
 });
 
 test('callout groups engines by move and states agreement explicitly', () => {
@@ -135,5 +172,5 @@ test('Black-to-move FEN history leaves the White ply empty and escapes imported 
   assert.match(empty, /No moves yet/);
   assert.match(empty, /<textarea[^>]+data-quick-pgn/);
   assert.match(empty, /<button[^>]+data-quick-pgn-load>Load PGN<\/button>/);
-  assert.match(empty, /<button[^>]+data-load-game>FEN and more options<\/button>/);
+  assert.match(empty, /<button[^>]+data-load-game>Paste FEN instead<\/button>/);
 });

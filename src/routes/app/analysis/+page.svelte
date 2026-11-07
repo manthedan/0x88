@@ -60,7 +60,7 @@ onMount(() => {
   <div class="board-column">
   <section class="panel board-panel" aria-label="Board">
     <div class="board-wrap">
-      <div class="evalbar" title="Evaluation (White's perspective)"><div class="mid"></div><div class="white" id="evalWhite"></div><span class="eval-chip"><span id="evalSource" class="eval-source" aria-hidden="true"></span><span id="evalScore" class="eval-score">—</span></span></div>
+      <div class="evalbar" title="Evaluation (White's perspective)"><div class="mid"></div><div class="white" id="evalWhite"></div><span class="eval-chip"><span id="evalSource" class="eval-source" aria-hidden="true"></span><span id="evalScore" class="eval-score">—</span></span><span id="evalTurn" class="eval-turn">White to move</span></div>
       <div class="board-shell">
         <div id="ground"></div>
         <div id="keyboardBoard"></div>
@@ -76,6 +76,7 @@ onMount(() => {
       <button id="navEnd" type="button" title="End (Down)" aria-label="Go to last move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg></button>
       <button id="flip" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
     </div>
+    <button id="cycleEvalSource" class="eval-source-control" type="button" title="Switch eval bar source engine">Bar: <strong id="evalSourceName">Lc0 Small</strong> <span aria-hidden="true">↻</span></button>
     <button id="openPosition" class="position-toggle" type="button" aria-controls="positionTools" aria-expanded="false" title="Load or copy FEN / PGN"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z M14 3v5h5 M10 13h6 M10 17h6"/></svg>Load FEN / PGN</button>
     </div>
     <details id="positionTools" class="position-tools">
@@ -113,7 +114,7 @@ onMount(() => {
     <!-- Engine strip: consensus caption, one tight row per engine, add-engine. -->
     <div class="engine-strip">
       <div id="comparisonInsight" class="comparison-insight" aria-label="Engine comparison insight" hidden></div>
-      <div id="engineSummaries" class="engine-summaries" aria-label="Engines: click one to drive the eval bar and expand its lines"></div>
+      <div id="engineSummaries" class="engine-summaries" aria-label="Engines: select a name for the eval bar and arrow focus; select again for all arrows"></div>
       <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">more available</small></span></button>
     </div>
     <div id="message" aria-live="polite">Loading model…</div>
@@ -132,10 +133,6 @@ onMount(() => {
       <button id="movesTab" type="button" role="tab" aria-selected="false" aria-controls="historyPanel" tabindex="-1" data-view="moves">Moves</button>
       <button id="comparisonTab" type="button" role="tab" aria-selected="false" aria-controls="comparisonSection" tabindex="-1" data-view="comparison">Compare</button>
       <button id="humanTab" type="button" role="tab" aria-selected="false" aria-controls="humanPanel" tabindex="-1" data-view="human" title="What rated humans play here (Maia3)">Human<span class="tab-badge">Maia3</span></button>
-      <span class="tab-tools">
-        <button id="quickCopyFen" class="copy-chip" type="button" title="Copy this position's FEN"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><span>FEN</span></button>
-        <button id="quickCopyPgn" class="copy-chip" type="button" title="Copy the game as PGN"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><span>PGN</span></button>
-      </span>
     </div>
     <div id="historyPanel" class="history-panel" role="tabpanel" aria-labelledby="movesTab" tabindex="0">
       <div id="movelist" class="movelist move-panel" aria-label="Move history"></div>
@@ -143,6 +140,7 @@ onMount(() => {
     <div id="comparisonSection" class="section-block comparison-panel" role="tabpanel" aria-labelledby="comparisonTab" tabindex="0">
       <h2 class="sr-only">Comparison</h2>
       <div id="engineConsensus" class="compare-summary">No analysis yet.</div>
+      <p class="compare-help">Agreement means the same recommended move. Eval spread is the gap between highest and lowest evaluations, in pawns from White’s perspective. A ✓ marks the most-supported move.</p>
       <table id="engineCompare" class="engine-compare"><thead><tr><th scope="col">Engine</th><th scope="col">Best</th><th scope="col">White’s eval</th><th scope="col" id="deltaBaseline">Δ</th></tr></thead><tbody></tbody></table>
     </div>
     <div id="humanPanel" class="section-block human-panel" role="tabpanel" aria-labelledby="humanTab" tabindex="0">
@@ -296,6 +294,7 @@ onMount(() => {
     --border-input:color-mix(in srgb, var(--ink) 38%, var(--panel));
     --engine-color:var(--accent); /* overridden inline per engine row */
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
+    --result-highlight:color-mix(in srgb, var(--ink) 13%, var(--panel));
     --board-size:min(704px, calc(100dvh - 166px), calc(100vw - 536px));
     grid-template-columns:calc(var(--board-size) + 56px) minmax(0, 470px); gap:16px; align-items:start;
     max-width:1288px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
@@ -353,9 +352,13 @@ onMount(() => {
     position:absolute; left:0; right:0; bottom:0; height:var(--eval-pct);
     background:var(--eval-white); transition:height .25s, width .25s;
   }
-  /* Eval chip names its source: a monogram tile in the engine's colour above the number. */
+  .eval-source-control{display:flex; align-items:center; justify-content:center; gap:5px; min-height:0; padding:0 9px; white-space:nowrap; font:12.5px var(--sans); color:var(--ink); border-color:var(--border-input); background:var(--panel-inset)}
+  .eval-source-control strong{font-weight:600}
+  .eval-turn{display:none}
+  /* The full source name is switchable beside the board; mobile repeats it in the bar. */
   .eval-chip{position:absolute; bottom:0; left:0; right:0; display:grid; background:#f4efe4; box-shadow:0 -1px 0 #0003}
-  .eval-source{display:grid; place-items:center; height:16px; background:var(--engine-color); color:#fff; font:700 10px/1 var(--mono)}
+  .eval-source{display:grid; place-items:center; height:16px; background:var(--engine-color); color:#fff; font:700 0/1 var(--mono)}
+  .eval-source::before{content:attr(data-short); font-size:10px}
   .eval-source:empty{display:none}
   .eval-score{padding:4px 0; color:#1b160e; font:750 12px/1 var(--sans); font-variant-numeric:proportional-nums; text-align:center; letter-spacing:-.03em; white-space:nowrap}
   :global(.eval-score[data-long=true]){font-size:10.5px}
@@ -366,7 +369,7 @@ onMount(() => {
   .board-shell{min-width:0}
   .nav{display:flex; flex:1; gap:6px; min-width:0}
   .nav button{
-    flex:1 1 0; height:100%; min-height:0; border-radius:7px;
+    flex:1 1 0; height:100%; min-height:0; min-width:0; padding:0; border-radius:7px;
     border:1px solid var(--border-input-hover); background:var(--panel-2);
     color:var(--ink); font-size:14px; cursor:pointer;
     display:flex; align-items:center; justify-content:center;
@@ -608,31 +611,32 @@ onMount(() => {
 
   /* Engine strip */
   .engine-strip{flex:0 0 auto; display:flex; flex-direction:column; min-width:0}
-  .engine-summaries{max-height:calc(36px * 6); overflow:auto; overscroll-behavior:contain}
-  :global(.comparison-insight){display:flex; align-items:center; gap:8px; min-height:32px; padding:0 8px 0 14px; border-bottom:1px solid var(--rule); font-size:13px; line-height:1.3; color:var(--ink); white-space:nowrap}
+  .engine-summaries{max-height:calc(38px * 6); overflow:auto; overscroll-behavior:contain}
+  :global(.comparison-insight){border-bottom:1px solid var(--rule)}
   :global(.comparison-insight[hidden]){display:none}
-  :global(.comparison-insight strong){font-weight:650; overflow:hidden; text-overflow:ellipsis}
+  :global(.insight-action){display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:2px 12px; width:100%; min-height:48px; padding:6px 12px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left; line-height:1.3}
+  :global(.insight-action:hover:not(:disabled)){background:var(--result-highlight)}
+  :global(.insight-headline){display:flex; align-items:center; gap:7px; font:650 14px/1.3 var(--sans)}
+  :global(.insight-headline strong){font-weight:650}
   :global(.insight-dots){display:inline-flex; align-items:center; flex:0 0 auto}
   :global(.insight-dots .engine-dot + .engine-dot){margin-left:-2px}
   :global(.insight-sep){width:5px}
-  :global(.insight-spread){font-size:12.5px; color:var(--muted); cursor:help}
-  :global(.insight-spread::before){content:'· '}
-  :global(.insight-spread b){color:var(--ink); font:650 12.5px var(--mono)}
-  :global(.comparison-insight button){margin-left:auto; padding:0 8px; min-height:26px; background:transparent; border:0; border-radius:6px; color:var(--ink); font-size:12.5px; font-weight:600; text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--muted)}
-  :global(.comparison-insight button:hover:not(:disabled)){background:var(--panel-2)}
-  :global(.engine-summary){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto 60px 30px; align-items:center; gap:8px; min-height:36px; padding:0 4px 0 9px; border-bottom:1px solid var(--rule-soft); border-left:3px solid var(--engine-color)}
-  :global(.engine-summary.eval-source){background:color-mix(in srgb, var(--engine-color) 9%, var(--panel))}
-  :global(.engine-summary-name){display:flex; align-items:center; gap:8px; padding:0; min-width:0; min-height:36px; border:0; border-radius:0; background:transparent; text-align:left; color:var(--ink)}
+  :global(.insight-spread){font:13px/1.3 var(--sans); color:var(--muted); white-space:nowrap}
+  :global(.insight-spread b){color:var(--ink); font-weight:650}
+  :global(.engine-summary){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto 64px 30px; align-items:center; gap:6px; min-height:38px; padding:0 4px 0 9px; border-bottom:1px solid var(--rule-soft); border-left:3px solid var(--engine-color)}
+  :global(.engine-summary.eval-source){background:var(--result-highlight)}
+  :global(.engine-summary.arrow-focus){box-shadow:inset 0 0 0 1px var(--border-input)}
+  :global(.engine-summary-name){display:flex; align-items:center; gap:8px; padding:0; min-width:0; min-height:38px; border:0; border-radius:0; background:transparent; text-align:left; color:var(--ink)}
   :global(.engine-summary-name:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.engine-summary-name:hover strong){text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--muted)}
   :global(.engine-summary-text){display:flex; align-items:baseline; gap:8px; min-width:0}
   :global(.engine-summary-name strong){font:650 13.5px/1.2 var(--sans); white-space:nowrap}
-  :global(.engine-summary-name small){font:12.5px/1.2 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
+  :global(.engine-summary-name small){font:13px/1.2 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
   :global(.engine-summary-score){display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; min-width:62px; font:700 17px/1 var(--mono); letter-spacing:-.02em; text-align:right; color:var(--ink)}
-  /* The row driving the eval bar carries a tiny bar glyph in its colour. */
-  :global(.engine-summary.eval-source .engine-summary-score)::before{content:''; width:5px; height:15px; border-radius:2px; background:linear-gradient(#1d1b18 45%, #f4efe4 45%); box-shadow:0 0 0 1.5px var(--engine-color)}
+  :global(.bar-source-label){padding:2px 3px; border:1px solid var(--border-input); border-radius:3px; font:600 11px/1 var(--sans); letter-spacing:0; color:var(--ink)}
   :global(.engine-summary .compare-move){height:28px; min-height:0; padding:0 4px; border:1px solid var(--border-input); border-radius:6px; background:var(--panel-inset); font:650 14px var(--sans); text-align:center; color:var(--ink)}
-  :global(.engine-summary .compare-move.agrees){border-color:color-mix(in srgb, var(--accent) 70%, var(--panel)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); background:var(--accent-soft)}
+  :global(.engine-summary .compare-move.agrees){border-color:var(--muted); background:var(--result-highlight)}
+  :global(.agreement-mark){margin-right:4px; font-size:12px}
   :global(.compare-move-empty){text-align:center; color:var(--muted)}
   :global(.engine-gear){display:grid; place-items:center; width:30px; height:30px; min-height:0; padding:0; border:0; border-radius:6px; background:transparent}
   :global(.engine-gear:hover:not(:disabled)){background:var(--panel-2)}
@@ -655,12 +659,15 @@ onMount(() => {
   .analysis-workspace .lines-panel{order:0; position:relative; flex:0 0 auto; min-height:0; padding:0; border:0; overflow:auto; overscroll-behavior:contain; scroll-snap-type:y proximity; scrollbar-width:thin}
   :global(.lines){margin:0; padding:0}
   :global(.lines ol){list-style:none; margin:0; padding:0}
-  :global(.line-group){border-left:3px solid transparent}
+  :global(.line-group){border-left:3px solid var(--engine-color)}
+  :global(.line-group.arrow-focus){background:var(--result-highlight)}
+  :global(.line-group-heading){margin:0; padding:6px 10px 2px; font:650 13px/1.4 var(--sans); color:var(--ink)}
+  :global(.line-group-heading small){font:400 13px var(--sans); color:var(--muted)}
   :global(.line-group + .line-group){border-top:1px solid var(--rule-soft)}
   :global(.line-group.open){border-left-color:var(--engine-color); background:color-mix(in srgb, var(--engine-color) 5%, var(--panel))}
   :global(.result-line){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:stretch; min-height:34px; scroll-snap-align:start}
-  :global(.result-line.alt-line){grid-template-columns:minmax(0,1fr) 52px; border-top:1px dashed var(--rule-soft)}
-  :global(.result-line:has(.line-play:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--accent-soft)}
+  :global(.result-line.alt-line){grid-template-columns:minmax(0,1fr) 86px; border-top:1px dashed var(--rule-soft)}
+  :global(.result-line:has(.line-play:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--result-highlight)}
   :global(.line-play){display:grid; grid-template-columns:22px 54px minmax(0,1fr); align-items:center; gap:8px; width:100%; min-height:34px; padding:0 6px 0 8px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left}
   :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.line-id){display:inline-grid; place-items:center; width:22px}
@@ -675,11 +682,11 @@ onMount(() => {
   :global(.line-group.open .score){line-height:21px}
   :global(.lines .pv-move){white-space:nowrap}
   :global(.lines .pv-move:first-child){font-weight:700}
-  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:center; gap:2px; width:52px; min-height:0; padding:0 8px 0 4px; border:0; border-radius:0; background:transparent; color:var(--muted); font:600 12.5px var(--sans); font-variant-numeric:tabular-nums}
+  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:center; gap:2px; width:86px; min-height:0; padding:0 8px 0 4px; border:0; border-radius:0; background:transparent; color:var(--muted); font:600 12.5px var(--sans); font-variant-numeric:tabular-nums}
   :global(.line-toggle:hover:not(:disabled)){background:var(--panel-2); color:var(--ink)}
   :global(.line-toggle svg){width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
   :global(.line-toggle[aria-expanded=true] svg){transform:rotate(180deg)}
-  :global(.line-toggle-spacer){width:52px}
+  :global(.line-toggle-spacer){width:86px}
   :global(.lines .line-error), :global(.lines .pending-line){display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:8px; padding:0 10px 0 8px; font-size:13px}
   :global(.line-error-text){color:var(--warn); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   :global(.pending-text){color:var(--muted)}
@@ -703,18 +710,13 @@ onMount(() => {
   #linesTab{display:none}
   .workbench-tabs :global(.tab-current){display:none}
   .tab-badge{padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
-  .tab-tools{display:flex; gap:4px; margin-left:auto}
-  .copy-chip{display:inline-flex; align-items:center; gap:4px; height:26px; min-height:0; padding:0 8px; border:1px solid var(--border-input); border-radius:6px; background:transparent; color:var(--ink); font:600 12px var(--sans)}
-  .copy-chip:hover:not(:disabled){background:var(--panel-2)}
-  .copy-chip svg{width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
-  .copy-chip:global([data-copied=true]){border-color:var(--accent); color:var(--accent-soft-text)}
-  .copy-chip:global([data-copied=true]) span::after{content:' ✓'}
   .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{order:2; flex:1 1 0; min-height:0}
   .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
   :global(.analysis-content:is([data-view=lines], [data-view=moves])) .history-panel{display:flex}
   .analysis-workspace .comparison-panel{border:0; padding:8px 12px; overflow:auto; overscroll-behavior:contain}
   .analysis-workspace .human-panel{border:0; padding:4px 12px 10px; overflow:auto; overscroll-behavior:contain}
   :global(.analysis-content:not([data-view=comparison])) .comparison-panel, :global(.analysis-content:not([data-view=human])) .human-panel{display:none}
+  .compare-help{margin:0 0 12px; font:13px/1.5 var(--sans); color:var(--muted)}
   .human-intro{margin:6px 0 0; font-size:13px; line-height:1.45; color:var(--text-soft)}
 
   /* Move list: the column's main scroller, Lichess-style numbered pairs. */
@@ -733,10 +735,14 @@ onMount(() => {
   :global(.history-empty .load-game-link){font-size:13px; color:var(--muted)}
   :global(.movelist .mv){display:flex; align-items:center; justify-content:space-between; gap:6px; cursor:pointer; min-height:29px; padding:0 12px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
-  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 26%, var(--panel)) !important; color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
+  :global(.movelist .mv.current){background:var(--result-highlight) !important; color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--ink)}
   :global(.movelist .mv-eval){font:12px var(--mono); color:var(--muted); font-weight:400}
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   :global(.movelist .var){color:var(--muted)}
+  /* At compact desktop widths, the labelled Bar row remains the source picker. */
+  @media (min-width:901px) and (max-width:1100px){
+    .eval-source-control{display:none}
+  }
   @media (max-width:900px){
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
     .board-column{display:contents}
@@ -766,44 +772,58 @@ onMount(() => {
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
     .evalbar .mid{top:0; bottom:0; left:50%; width:1px; height:auto}
     .eval-chip{top:0; right:auto; display:flex; box-shadow:1px 0 0 #0003}
-    .eval-source{height:auto; width:24px}
+    .eval-source{height:auto; padding:0 6px; font:650 12px/1 var(--sans)}
+    .eval-source::before{display:none}
+    .eval-turn{display:block; position:absolute; right:0; top:0; bottom:0; padding:3px 6px; background:var(--panel-inset); color:var(--ink); font:600 12px/1 var(--sans)}
+    .eval-source-control{display:none}
     .eval-score{display:flex; align-items:center; padding:0 7px 0 6px}
     .board-panel :global(#ground){border-radius:3px}
     .board-toolbar{gap:4px; margin:6px 0 0}
     .nav{gap:4px}
     .nav button{min-width:0; padding:4px}
     .position-toggle{padding:0 9px; gap:5px; font-size:12.5px}
-    .analysis-overview{gap:8px; min-height:50px; padding:5px 6px 5px 10px}
-    .position-status{gap:8px}
-    .turn-indicator{font-size:13px; gap:7px}
-    /* Status collapses to its glyph; the text stays for assistive tech. */
-    .analysis-status{padding-left:8px; font-size:0; gap:0}
-    .analysis-status::before{font-size:13px}
-    .analyze-actions{gap:6px}
-    .analyze-actions button{min-height:40px; padding:0 11px}
-    .manage-label{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%)}
-    .run-action{min-width:104px}
+    /* One toolbar, including Add engine, saves an entire row before the first PV. */
+    .analysis-workspace .app-sidebar{display:grid; grid-template-columns:auto minmax(84px,1fr) auto auto; column-gap:4px}
+    .analysis-workspace .app-sidebar>*{grid-column:1 / -1}
+    .analysis-overview, .analyze-actions, .engine-strip{display:contents}
+    .engine-summaries, .comparison-insight{grid-column:1 / -1}
+    .position-status{grid-column:1; grid-row:1; padding-left:8px; min-height:48px; max-width:70px; overflow:hidden}
+    .turn-indicator{display:none}
+    .analysis-status{padding:0; border:0; gap:4px; font-size:12.5px; color:var(--ink)}
+    .analyze-actions button{grid-row:1; min-height:44px; margin-block:2px; padding:0 8px; font-size:13px; gap:5px}
+    .manage-engines{grid-column:2}
+    .manage-engines svg{display:none}
+    .manage-label{display:inline}
+    .run-action{grid-column:4; min-width:94px; margin-right:4px}
+    .engine-count{min-width:18px; height:18px; padding:0 4px}
+    .add-engine-inline{grid-column:3 !important; grid-row:1; width:auto; min-height:44px; margin:2px 0; padding:0 6px; border:0; border-radius:6px}
+    .add-engine-text strong{font-size:12.5px}
+    .add-engine-plus, #addEngineHint{display:none}
     .app-sidebar #message{margin:4px 10px}
     :global(.analysis-workspace #ground coords){font-size:11px}
-    :global(.comparison-insight){padding:0 4px 0 10px; min-height:34px}
-    :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 34px; gap:6px; min-height:40px; padding:0 2px 0 7px}
-    :global(.engine-summary-name){min-height:40px; gap:7px}
+    :global(.insight-action){min-height:44px; padding:4px 10px; gap:0}
+    :global(.insight-headline){font-size:14px}
+    :global(.insight-spread){width:100%; padding-left:0; font-size:13px}
+    :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 44px; gap:5px; min-height:44px; padding:0 0 0 7px}
+    :global(.engine-summary-name){min-height:44px; gap:7px}
     :global(.engine-summary-text){display:grid; gap:1px}
     :global(.engine-summary-name strong){font-size:13px}
-    :global(.engine-summary-name small){font-size:11.5px}
-    :global(.engine-summary-score){min-width:56px; font-size:16px}
-    :global(.engine-summary .compare-move){height:32px}
-    :global(.engine-gear){width:34px; height:36px}
-    .add-engine-inline{min-height:36px; padding-inline:10px}
+    :global(.engine-summary-name small){font-size:12.5px}
+    :global(.engine-summary-score){min-width:56px; font-size:16px; gap:4px}
+    :global(.engine-summary .compare-move){height:44px; border-radius:0; border-block:0; background:transparent}
+    :global(.engine-gear){width:44px; height:44px}
     .workbench-tabs{padding:0 2px; gap:0}
-    .workbench-tabs [role=tab]{flex:1 1 auto; justify-content:center; padding:0 6px; min-height:40px}
+    .workbench-tabs [role=tab]{flex:1 1 auto; justify-content:center; padding:0 6px; min-height:44px}
     .tab-badge{display:none}
-    .copy-chip{padding:0 6px}
-    .copy-chip svg{display:none}
-    :global(.line-play){min-height:40px; grid-template-columns:22px 50px minmax(0,1fr); gap:6px}
-    :global(.result-line){min-height:40px}
-    :global(.line-toggle){width:46px}
-    :global(.line-toggle-spacer){width:46px}
+    :global(.line-play){min-height:44px; grid-template-columns:22px 50px minmax(0,1fr); gap:6px; padding-block:6px; align-items:start}
+    :global(.lines .pv){height:auto; max-height:none; line-height:1.5}
+    :global(.line-group.open .pv){max-height:none}
+    :global(.line-id), :global(.lines .score){line-height:21px}
+    :global(.result-line){min-height:44px}
+    :global(.line-toggle){width:80px; min-height:44px; align-self:stretch; padding:0 4px}
+    :global(.result-line.alt-line){grid-template-columns:minmax(0,1fr) 80px}
+    :global(.line-toggle-spacer){width:80px}
+    .position-tools :is(button, input), .pgn-actions button{min-height:44px}
     .analysis-workspace .section-block{padding:8px 10px}
     .analysis-workspace .lines-panel{padding:0}
     :global(.analysis-workspace .engine-row){flex-wrap:wrap}
@@ -812,6 +832,15 @@ onMount(() => {
     .engine-manager{padding:14px}
     :global(table.engine-compare th), :global(table.engine-compare td){padding-inline:3px}
     :global(table.engine-compare tbody th){font-size:12px}
+  }
+  @media (max-width:360px){
+    /* Small phones trade one short status row for intact, separated 44px actions. */
+    .analysis-workspace .app-sidebar{grid-template-columns:minmax(84px,1fr) auto auto}
+    .position-status{grid-column:1 / -1; min-height:26px; max-width:none; overflow:visible}
+    .analyze-actions button, .add-engine-inline{grid-row:2}
+    .manage-engines{grid-column:1}
+    .add-engine-inline{grid-column:2 !important}
+    .run-action{grid-column:3}
   }
   @media (prefers-reduced-motion: reduce){
     .evalbar .white{transition:none}
