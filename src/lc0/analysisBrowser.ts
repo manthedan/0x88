@@ -26,7 +26,6 @@ import {
   type AnalysisLine,
   centipawnPuctAnalysisLines,
   engineBrushes,
-  engineColorKey,
   evalBarWhitePercent,
   lc0AnalysisLines,
   stockfishAnalysisLines,
@@ -130,7 +129,8 @@ import {
   stockfishEngineLabel,
   stockfishVariantOptions,
 } from './engineCatalog.ts';
-import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
+import { probeEngineLogos } from './engineLogos.ts';
+import { analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveMarkup, firstAnalysisMove, patchAnalysisResults } from './analysisPresentation.ts';
 import {
   berserkCacheKey,
   cpuEngineHashMbForSurface,
@@ -1582,12 +1582,18 @@ function renderEngineList(): void {
         .map((o) => `<option value="${o.value}"${row.variant === o.value ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${htmlEscape(o.label)}</option>`)
         .join('');
       const meta = strengthMeta(row.family);
-      const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" title="Remove engine">×</button>` : '';
-      return `<div class="engine-row">${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="row-fam" data-i="${i}">${famSel}</select><span class="arrow">→</span><select class="row-var" data-i="${i}">${varSel}</select><span class="arrow">→</span><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
+      const label = htmlEscape(analysisEngineName(rowLabel(row)));
+      const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" aria-label="Remove ${label}" title="Remove ${label}">×</button>` : '';
+      return `<div class="engine-row"><span class="engine-badge" aria-hidden="true">${i + 1}</span><select class="row-fam" data-i="${i}" aria-label="Engine ${i + 1} family">${famSel}</select><select class="row-var" data-i="${i}" aria-label="Engine ${i + 1} model or variant">${varSel}</select><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" aria-label="${label} ${meta.unit}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
     })
     .join('');
   el('comparisonSection').hidden = activeEngineRows().length < 2;
+  renderEngineSetupSummary();
   reconcileActiveRuntimeFallbackWarning();
+}
+
+function renderEngineSetupSummary(): void {
+  el('engineSetupSummary').textContent = engineRows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
 }
 
 async function workerBigNetLines(
@@ -1811,13 +1817,22 @@ function disposeUnusedEngines(): void {
 // most-played move (yellow) take priority over engines' alternative MultiPV
 // moves (pale). When two sources agree on a move, the higher-priority arrow wins.
 function bestShapes(): DrawShape[] {
+  // Result publication also resets default arrows. Keep a keyboard-focused PV
+  // authoritative after its keyed control is restored by patchAnalysisResults.
+  const active = document.activeElement as HTMLElement | null;
+  const focused = active?.dataset.focusKey?.startsWith(`${tree.current.fen}|`) ? active.closest<HTMLElement>('[data-pv]') : null;
+  if (focused) {
+    const shape = uciShape((focused.dataset.pv ?? '').split(' ')[0], engineBrushes(focused.dataset.engine ?? 'Lc0').primary);
+    if (shape) return [shape];
+  }
   const lines = lineCache.get(tree.current.fen) ?? [];
   const candidates: { uci: string; brush: string; prio: number }[] = [];
   for (const line of lines) {
     const uci = line.pvUci[0];
     if (!uci || uci.length < 4) continue;
     const brushes = engineBrushes(line.engine);
-    candidates.push({ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt, prio: line.multipv === 1 ? 0 : 2 });
+    // Alternatives are previewed on hover/focus, not drawn over pieces by default.
+    if (line.multipv === 1) candidates.push({ uci, brush: candidates.length === 0 ? brushes.primary : brushes.alt, prio: 0 });
   }
   const book = currentBookStats()[0];
   if (book && book.uci.length >= 4) candidates.push({ uci: book.uci, brush: BOOK_BRUSH, prio: 1 });
@@ -1854,7 +1869,7 @@ function renderBoard() {
       events: { after: onUserMove },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
-    drawable: { brushes: ANALYSIS_DRAWABLE_BRUSHES },
+    drawable: { brushes: Object.fromEntries(Object.entries(ANALYSIS_DRAWABLE_BRUSHES).map(([key, brush]) => [key, { ...brush, lineWidth: key.startsWith('pale') ? 5 : 7, opacity: key.startsWith('pale') ? 0.35 : 0.8 }])) },
   };
   // Cast: chessground's DrawBrushes type exposes the built-in keys, but custom
   // brush keys are supported at runtime and are needed to distinguish 3+ engines.
@@ -1870,56 +1885,22 @@ function renderEvalBar() {
   const line = (lineCache.get(tree.current.fen) ?? [])[0];
   const pct = line ? evalBarWhitePercent(line.scoreCp, line.mateIn) : 50;
   (el('evalWhite') as HTMLElement).style.height = `${pct}%`;
-  el('posEval').textContent = line ? `${line.scoreText} (${line.engine})` : '—';
+  el('posEval').textContent = line?.scoreText ?? '—';
+  el('boardEval').textContent = line?.scoreText ?? '—';
+  el('bestMove').textContent = line ? firstAnalysisMove(line) : '—';
+  el('evalEngine').textContent = line ? analysisEngineName(line.engine) : 'Awaiting analysis';
+  el('evalWhite').parentElement?.setAttribute('aria-label', line ? `White's evaluation: ${line.scoreText}, ${analysisEngineName(line.engine)}` : 'No evaluation yet');
 }
 
-function renderLegend(lines: AnalysisLine[]) {
-  const engines = [...new Set(lines.map((line) => line.engine))];
-  const hasBook = currentBookStats().length > 0;
-  el('engineLegend').hidden = engines.length < 2 && !hasBook;
-  const colorKeys = new Map<string, string[]>();
-  for (const engine of engines) {
-    const key = engineColorKey(engine);
-    const arr = colorKeys.get(key) ?? [];
-    arr.push(engine);
-    colorKeys.set(key, arr);
-  }
-  const familyLabels: Record<string, string> = {
-    green: 'Lc0',
-    blue: 'Stockfish',
-    red: 'Reckless',
-    purple: 'Viridithas',
-    orange: 'Berserk',
-    cyan: 'PlentyChess',
-    pink: 'Engine',
-    yellow: 'Engine',
-  };
-  const keys = engines.map((engine) => {
-    const key = engineColorKey(engine);
-    const label = (colorKeys.get(key)?.length ?? 1) > 1 ? engine : (familyLabels[key] ?? engine);
-    return { label, swatch: engineBrushes(engine).swatch };
-  });
-  if (hasBook) keys.push({ label: 'Book', swatch: BOOK_SWATCH });
-  el('engineLegend').innerHTML = keys
-    .map((key) => `<span class="key"><span class="dot" style="background:${key.swatch}"></span>${htmlEscape(key.label)}</span>`)
-    .join('');
-}
-
-function firstSanMove(line: AnalysisLine): string {
-  return line.pvSan.split(/\s+/).find(Boolean) ?? line.pvUci[0] ?? '—';
+function renderLegend(_lines: AnalysisLine[]) {
+  // Engine names live on each result group; only the independent book needs a key.
+  el('engineLegend').hidden = currentBookStats().length === 0;
+  el('engineLegend').innerHTML = `<span class="key"><span class="dot" style="background:${BOOK_SWATCH}"></span>Opening book</span>`;
 }
 
 function signedCp(value: number): string {
   const sign = value > 0 ? '+' : '';
   return `${sign}${Math.round(value)}`;
-}
-
-function comparisonEngineName(engine: string): string {
-  const rows = activeEngineRows();
-  const row = rows.find((candidate) => rowLabel(candidate) === engine);
-  if (!row) return engine;
-  const familyCount = rows.filter((candidate) => candidate.family === row.family).length;
-  return familyCount > 1 ? engine : engineFamilyDefinition(row.family).label;
 }
 
 function renderEngineComparison(lines: AnalysisLine[]): void {
@@ -1928,95 +1909,55 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   if (!bestByEngine.length) {
     const progressRows = [...searchProgressByEngine.values()].map(
       (progress) =>
-        `<tr><td>${engineLogoHtmlForName(progress.label)}</td><td colspan="3" class="small">searching</td><td class="pv">${searchProgressHtml(progress)}</td></tr>`,
+        `<tr><td>${htmlEscape(analysisEngineName(progress.label))}</td><td colspan="3" class="small">Searching…</td></tr>`,
     );
     el('engineConsensus').textContent = progressRows.length ? 'Analysis in progress.' : analyzing ? 'Preparing selected engines.' : 'No analysis yet.';
-    body.innerHTML = progressRows.length
+    if (lines.some((line) => line.error) && !progressRows.length) el('engineConsensus').textContent = 'No engine results available. Check engine lines for errors.';
+    patchAnalysisResults(body, progressRows.length
       ? progressRows.join('')
-      : `<tr><td colspan="5" class="small">${analyzing ? 'Preparing selected engines…' : 'Run analysis to compare selected engines.'}</td></tr>`;
+      : `<tr><td colspan="4" class="small">${analyzing ? 'Preparing selected engines…' : 'Run analysis to compare selected engines.'}</td></tr>`);
     return;
   }
-  const finiteScores = bestByEngine.map((line) => line.scoreCp).filter((score): score is number => score !== undefined);
-  const evalSpread = finiteScores.length >= 2 ? Math.max(...finiteScores) - Math.min(...finiteScores) : null;
-  const moveCounts = new Map<string, { count: number; san: string }>();
-  for (const line of bestByEngine) {
-    const uci = line.pvUci[0]!;
-    const current = moveCounts.get(uci) ?? { count: 0, san: firstSanMove(line) };
-    current.count += 1;
-    moveCounts.set(uci, current);
-  }
-  const consensus = [...moveCounts.entries()].sort((a, b) => b[1].count - a[1].count)[0];
-  const consensusUci = consensus?.[0] ?? '';
-  const consensusText = consensus ? `${consensus[1].count}/${bestByEngine.length} engines prefer ${consensus[1].san}` : 'No first-move consensus.';
-  const spreadText = evalSpread === null ? 'eval spread unavailable' : `eval spread ${signedCp(evalSpread)} cp`;
-  el('engineConsensus').textContent = `${consensusText} · ${spreadText}`;
-  const reference = finiteScores.length ? finiteScores[0] : undefined;
-  body.innerHTML = bestByEngine
+  const failed = new Set(lines.filter((line) => line.error).map((line) => line.engine)).size;
+  const { pending, unavailable } = analysisAvailability(activeEngineRows().length, bestByEngine.length, failed, analyzing);
+  const status = (pending ? ` · ${pending} pending` : '') + (unavailable ? ` · ${unavailable} unavailable` : '');
+  el('engineConsensus').textContent = bestByEngine.length === 1
+    ? `${analysisEngineName(bestByEngine[0].engine)} ready${status}`
+    : analysisConsensus(bestByEngine) + status;
+  const baseline = bestByEngine[0];
+  el('deltaBaseline').textContent = `vs ${analysisEngineName(baseline.engine)}`;
+  const reference = baseline.mateIn === undefined ? baseline.scoreCp : undefined;
+  patchAnalysisResults(body, bestByEngine
     .map((line) => {
       const swatch = engineBrushes(line.engine).swatch;
-      const delta = reference === undefined || line.scoreCp === undefined ? '—' : signedCp(line.scoreCp - reference);
-      const agreed = line.pvUci[0] === consensusUci && (consensus?.[1].count ?? 0) > 1;
-      const label = `<span class="engine-name-with-logo">${engineLogoHtmlForName(line.engine)}${htmlEscape(comparisonEngineName(line.engine))}</span>`;
+      const delta = reference === undefined || line.scoreCp === undefined || line.mateIn !== undefined ? '—' : signedCp(line.scoreCp - reference);
       return (
-        `<tr data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}; cursor:pointer">` +
-        `<td>${label}</td>` +
-        `<td class="mono ${agreed ? 'agree' : ''}">${htmlEscape(firstSanMove(line))}</td>` +
+        `<tr style="border-left:3px solid ${swatch}">` +
+        `<th scope="row">${htmlEscape(analysisEngineName(line.engine))}</th>` +
+        `<td><button type="button" class="compare-move" data-focus-key="${htmlEscape(`${tree.current.fen}|${line.engine}|compare`)}" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(analysisEngineName(line.engine))}">${htmlEscape(firstAnalysisMove(line))}</button></td>` +
         `<td class="mono">${htmlEscape(line.scoreText)}</td>` +
-        `<td class="mono">${htmlEscape(delta)}</td>` +
-        `<td class="pv">${htmlEscape(line.pvSan)}</td>` +
-        '</tr>'
+        `<td class="mono">${htmlEscape(delta)}</td></tr>`
       );
     })
-    .join('');
+    .join(''));
 }
 
 function renderLines() {
   const lines = lineCache.get(tree.current.fen) ?? [];
   renderLegend(lines);
   renderEngineComparison(lines);
-  el('lines').innerHTML =
-    lines
-      .map((line) => {
-        if (line.error) {
-          const swatch = engineBrushes(line.engine).swatch;
-          return (
-            `<li data-uci="" style="border-left:3px solid ${swatch};opacity:0.6">` +
-            `<span class="score">${engineLogoHtmlForName(line.engine)} ✗</span>` +
-            `<span class="pv small" style="color:var(--text-dim)">${htmlEscape(line.error)}</span></li>`
-          );
-        }
-        const cls = line.scoreCp === undefined ? '' : line.scoreCp > 0 ? 'pos' : line.scoreCp < 0 ? 'neg' : '';
-        const swatch = engineBrushes(line.engine).swatch;
-        return (
-          `<li data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" style="border-left:3px solid ${swatch}">` +
-          `<span class="score ${cls}">${engineLogoHtmlForName(line.engine)} ${htmlEscape(line.scoreText)}</span>` +
-          `<span class="pv">${htmlEscape(line.pvSan)}</span></li>`
-        );
-      })
-      .join('') || '<li class="small placeholder">Make a move or press Analyze to begin.</li>';
-}
-
-function moveNumberPrefix(node: GameNode, force: boolean): string {
-  const parent = parseFen(node.parent!.fen);
-  if (parent.turn === 'w') return `${parent.fullmove}. `;
-  return force ? `${parent.fullmove}… ` : '';
-}
-
-function renderVariation(node: GameNode): string {
-  let html = '';
-  let cursor: GameNode | undefined = node;
-  let force = true;
-  while (cursor) {
-    html += moveToken(cursor, force);
-    force = false;
-    cursor = cursor.children[0];
-  }
-  return html;
-}
-
-function moveToken(node: GameNode, force: boolean): string {
-  const current = node === tree.current ? ' current' : '';
-  return `<span class="mv${current}" data-node="${node.id}">${moveNumberPrefix(node, force)}${htmlEscape(node.san ?? '')}</span> `;
+  const groups = new Map<string, AnalysisLine[]>();
+  for (const line of lines) groups.set(line.engine, [...(groups.get(line.engine) ?? []), line]);
+  patchAnalysisResults(el('lines'), [...groups].map(([engine, engineLines]) => {
+    const heading = `<h3><span class="engine-badge" aria-hidden="true" style="border-color:${engineBrushes(engine).swatch}">${htmlEscape(engine.startsWith('Lc0') ? 'LC' : engine.startsWith('SF') ? 'SF' : engine.slice(0, 2).toUpperCase())}</span>${htmlEscape(analysisEngineName(engine))}</h3>`;
+    return `<section class="engine-result" aria-label="${htmlEscape(analysisEngineName(engine))} lines">${heading}<ol>${engineLines.map((line) => {
+      if (line.error) return `<li class="line-error">${htmlEscape(line.error)}</li>`;
+      const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}"`;
+      const key = htmlEscape(`${tree.current.fen}|${engine}|${line.multipv}`);
+      const label = `${analysisEngineName(engine)}, line ${line.multipv}: play ${firstAnalysisMove(line)}, evaluation ${line.scoreText}`;
+      return `<li class="result-line" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}"><span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span><span class="pv">${htmlEscape(line.pvSan)}</span></button><details class="pv-expanded" data-result-key="${key}"><summary data-focus-key="${key}|expand" aria-label="Expand ${htmlEscape(analysisEngineName(engine))} line ${line.multipv}">Full line</summary><p>${htmlEscape(line.pvSan)}</p><small>${htmlEscape(line.detail)}</small></details></li>`;
+    }).join('')}</ol></section>`;
+  }).join('') || '<p class="small placeholder">Make a move or press Analyze to begin.</p>');
 }
 
 function renderMoveList() {
@@ -2026,20 +1967,20 @@ function renderMoveList() {
     n.children.forEach(collect);
   };
   collect(tree.root);
-  let html = '';
-  let node: GameNode | undefined = tree.root.children[0];
-  let force = true;
-  while (node) {
-    html += moveToken(node, force);
-    force = false;
-    const variations = node.parent!.children.slice(1);
-    for (const variation of variations) {
-      html += `<span class="var">(${renderVariation(variation)})</span> `;
-      force = true;
-    }
-    node = node.children[0];
+  const list = el('movelist');
+  const hadFocus = list.contains(document.activeElement);
+  list.innerHTML = analysisMoveMarkup(tree.root, tree.current);
+  const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
+  if (hadFocus) selected?.focus({ preventScroll: true });
+  if (selected) {
+    // Scroll the history only, never the page/board when navigating a game.
+    const viewport = list.getBoundingClientRect();
+    const move = selected.getBoundingClientRect();
+    if (move.bottom > viewport.bottom) list.scrollTop += move.bottom - viewport.bottom;
+    else if (move.top < viewport.top) list.scrollTop -= viewport.top - move.top;
   }
-  el('movelist').innerHTML = html || '<span class="small">No moves yet. Drag a piece or load a PGN.</span>';
+  for (const id of ['navStart', 'navBack']) el(id).toggleAttribute('disabled', !tree.current.parent);
+  for (const id of ['navForward', 'navEnd']) el(id).toggleAttribute('disabled', !tree.current.children.length);
 }
 
 function renderOpening() {
@@ -3317,7 +3258,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   }
   // Snapshot after the terminal-position return, which skips the finally that clears it.
   analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
-  const selectedLabels = rows.map((row) => rowLabel(row)).join(' + ');
+  const selectedLabels = rows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
   const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
   activeAnalysisSelectionKey = selectionCacheKey;
   el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
@@ -3609,6 +3550,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       disposeUnusedEnginesAfterActiveRun = false;
       analysisRunForced = false;
       clearAnalysisSearchProgress();
+      renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
       document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
@@ -3875,6 +3817,14 @@ function hoverLine(pvUci: string[], engine: string) {
 }
 
 function wireEvents() {
+  // Keep detailed comparison available without delaying the first PV on phones.
+  (el('comparisonSection') as HTMLDetailsElement).open = !window.matchMedia('(max-width: 600px)').matches;
+  const positionTools = el('positionTools') as HTMLDetailsElement;
+  el('openPosition').addEventListener('click', () => {
+    positionTools.open = !positionTools.open;
+    if (positionTools.open) inputEl('fenInput').focus();
+  });
+  positionTools.addEventListener('toggle', () => el('openPosition').setAttribute('aria-expanded', String(positionTools.open)));
   el('maia3Enable').addEventListener('click', () => {
     void enableMaia3Panel();
   });
@@ -3959,6 +3909,7 @@ function wireEvents() {
       engineRows[i].strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(target.value) || meta.def)));
     }
     engineRows[i] = normalizeDeployEngineRow(engineRows[i], 'analysis', i);
+    renderEngineSetupSummary();
     cancelAnalysisAssetPrefetch(previousRow);
     reconcileActiveRuntimeFallbackWarning();
     persistManualEngineRows();
@@ -4066,39 +4017,40 @@ function wireEvents() {
     }
   });
   el('lines').addEventListener('click', (event) => {
-    const li = (event.target as HTMLElement).closest('li[data-uci]');
-    const uci = li?.getAttribute('data-uci');
+    const button = (event.target as HTMLElement).closest('button[data-uci]');
+    const uci = button?.getAttribute('data-uci');
     if (uci) {
       tree.addUci(uci);
       afterNavigation();
     }
   });
-  el('lines').addEventListener('mouseover', (event) => {
-    const li = (event.target as HTMLElement).closest('li[data-pv]');
-    const pv = li?.getAttribute('data-pv');
-    if (pv) hoverLine(pv.split(' ').filter(Boolean), li!.getAttribute('data-engine') ?? 'LC0');
+  const compareBody = el('engineCompare').querySelector('tbody')!;
+  compareBody.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest('button[data-uci]');
+    const uci = button?.getAttribute('data-uci');
+    if (uci && tree.addUci(uci)) afterNavigation();
   });
-  el('lines').addEventListener('mouseout', () => setShapes(bestShapes()));
-  el('engineCompare')
-    .querySelector('tbody')!
-    .addEventListener('click', (event) => {
-      const tr = (event.target as HTMLElement).closest('tr[data-uci]');
-      const uci = tr?.getAttribute('data-uci');
-      if (uci) {
-        tree.addUci(uci);
-        afterNavigation();
+  // Pointer and keyboard previews share the same arrow/highlight association.
+  for (const container of [el('lines'), compareBody]) {
+    const preview = (event: Event) => {
+      const target = (event.target as HTMLElement).closest<HTMLElement>('[data-pv]');
+      if (!target) {
+        clearPreview();
+        return;
       }
-    });
-  el('engineCompare')
-    .querySelector('tbody')!
-    .addEventListener('mouseover', (event) => {
-      const tr = (event.target as HTMLElement).closest('tr[data-pv]');
-      const pv = tr?.getAttribute('data-pv');
-      if (pv) hoverLine(pv.split(' ').filter(Boolean), tr!.getAttribute('data-engine') ?? 'LC0');
-    });
-  el('engineCompare')
-    .querySelector('tbody')!
-    .addEventListener('mouseout', () => setShapes(bestShapes()));
+      container.querySelectorAll('.previewing').forEach((node) => node.classList.remove('previewing'));
+      target.closest('.result-line, tr')?.classList.add('previewing');
+      hoverLine((target.dataset.pv ?? '').split(' ').filter(Boolean), target.dataset.engine ?? 'Lc0');
+    };
+    const clearPreview = () => {
+      container.querySelectorAll('.previewing').forEach((node) => node.classList.remove('previewing'));
+      setShapes(bestShapes());
+    };
+    container.addEventListener('mouseover', preview);
+    container.addEventListener('focusin', preview);
+    container.addEventListener('mouseleave', clearPreview);
+    container.addEventListener('focusout', clearPreview);
+  }
   el('importGames').addEventListener('click', importGames);
   el('fetchGames').addEventListener('click', () => {
     void fetchGames();
@@ -4167,7 +4119,7 @@ function wireEvents() {
   });
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = (event: KeyboardEvent) => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
     if (event.key === 'ArrowLeft') {
       tree.back();
       afterNavigation();
