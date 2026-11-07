@@ -59,25 +59,32 @@ test('a shared best move is one arrow that names every backing engine colour', (
   const marker = sharedArrowMarkerSvg(['Lc0', 'SF Lite']);
   assert.match(marker, /#7a4fd6/);
   assert.match(marker, /#1f5fcf/);
-  assert.equal((marker.match(/<circle /g) ?? []).length, 2);
+  assert.equal((marker.match(/<rect /g) ?? []).length, 2);
   assert.match(marker, /Shared move: Lc0 Small \+ Stockfish Lite/);
-  assert.doesNotMatch(marker, /<text/);
+  assert.match(marker, />L0<\/text>/);
+  assert.match(marker, />SF<\/text>/);
+  assert.doesNotMatch(marker, /translate\(/, 'Chessground custom viewBox already aligns the SVG with square bounds');
   assert.equal(analysisArrowCandidates([lc0, lc0, sf], false)[0].shared.length, 2, 'duplicate results never double-count a backer');
 });
 
-test('shared-move dots stay in one corner of the destination square, away from the centre', () => {
+test('shared-move identity badges stay inside the destination square in either orientation', () => {
   const engines = ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess', 'Reckless', 'Viridithas', 'Stormphrax', '<unsafe&>'];
   for (const corner of [[1, -1], [-1, -1]]) {
     const marker = sharedArrowMarkerSvg(engines.slice(0, 4), corner);
-    const dots = [...marker.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="([\d.]+)"/g)].map(([, x, y, r]) => [Number(x), Number(y), Number(r)]);
-    assert.equal(dots.length, 4);
-    // Inside the square, in the requested half, and never over the arrowhead at the centre.
-    assert.ok(dots.every(([x, y, r]) => x - r >= 0 && x + r <= 100 && y - r >= 0 && y + r <= 100));
-    assert.ok(dots.every(([x]) => corner[0] > 0 ? x > 50 : x < 50));
-    assert.ok(dots.every(([, y]) => y < 50));
+    const badges = [...marker.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.]+)" height="([\d.]+)"/g)].map(([, ...values]) => values.map(Number));
+    assert.equal(badges.length, 4);
+    // Include the 2px outline in the bounds; the custom viewBox makes these square-local.
+    assert.ok(badges.every(([x, y, w, h]) => x >= 1 && x + w <= 99 && y >= 1 && y + h <= 99));
+    assert.ok(badges.every(([x, , w]) => corner[0] > 0 ? x + w / 2 > 50 : x + w / 2 < 50));
+    assert.ok(badges.every(([, y, , h]) => y + h < 50));
   }
   const all = sharedArrowMarkerSvg(engines);
-  assert.equal((all.match(/<circle /g) ?? []).length, 8);
+  assert.equal((all.match(/<rect /g) ?? []).length, 4);
+  assert.match(all, />\+5<\/text>/);
+  const many = sharedArrowMarkerSvg(Array.from({ length: 20 }, (_, i) => `Engine ${i}`));
+  assert.equal((many.match(/<rect /g) ?? []).length, 4);
+  assert.match(many, />\+17<\/text>/);
+  assert.match(many, /Engine 19/, 'all contributors remain in the full title');
   assert.match(all, /&lt;unsafe&amp;&gt;/);
   assert.doesNotMatch(all, /<unsafe/);
   assert.equal(sharedArrowMarkerSvg([]), '');
@@ -100,8 +107,8 @@ test('callout groups engines by move and states agreement explicitly', () => {
   assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2, 140), 'Engines disagree: Ne2 / Na4');
   assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf]), 2), 'Engines agree on Ne2');
   assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, berserk, { ...plenty, pvUci: ['c3a4'] }]), 4), 'Split: Ne2 / Na4');
-  assert.deepEqual(analysisSpreadText(26), { text: 'Evals within 0.26', level: 'close' });
-  assert.deepEqual(analysisSpreadText(74), { text: 'Eval spread 0.74', level: 'apart' });
+  assert.deepEqual(analysisSpreadText(26), { text: 'Eval spread: 0.26 pawns', level: 'close' });
+  assert.deepEqual(analysisSpreadText(74), { text: 'Eval spread: 0.74 pawns', level: 'apart' });
   assert.equal(analysisSpreadText(120).level, 'wide');
   assert.deepEqual([...analysisShortEngineNames(['Lc0', 'SF Lite']).values()], ['Lc0', 'Stockfish']);
   assert.deepEqual([...analysisShortEngineNames(['Lc0', 'Lc0 BT4']).values()], ['Lc0 Small', 'Lc0 BT4']);

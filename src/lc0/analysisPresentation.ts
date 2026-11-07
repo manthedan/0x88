@@ -35,40 +35,40 @@ export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean,
     const brushes = engineBrushes(line.engine);
     const shared = line.multipv === 1 ? backers.get(key) ?? [] : [];
     return [{ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt, ...(shared.length > 1 ? { shared } : {}) }];
-  }).reverse(); // Alternatives sit underneath best moves; width is always chessground's 10.
+  }).reverse(); // Alternatives sit underneath best moves; all brushes retain the owner's 15px width.
 }
 
 /**
- * Backer marker for a shared best move, drawn with chessground's `center: 'dest'` (the 100×100
- * box is exactly the destination square). The arrow stays ONE standard-width arrow; its backers
- * become a cluster of colour dots tucked into one corner of that square, so it never covers the
- * piece on a neighbouring square and leaves the arrowhead (square centre) clear. `corner` is the
- * screen corner as x/y signs (-1 = left/top, 1 = right/bottom); callers pick one facing away from
- * the incoming shaft. Names live in the <title> and in the engine rows' shared-move pills.
+ * Shared-move identity badges inside the destination square, away from the shaft.
+ * Chessground's custom layer has a -3.5 -3.5 viewBox (unlike the arrow layer).
+ * It already aligns this 0–100 box to the square bounds; do not re-centre it.
+ * The move itself remains ONE arrow with the owner's uniform width.
  */
 export function sharedArrowMarkerSvg(engines: string[], corner: [number, number] = [1, -1]): string {
   if (!engines.length) return '';
-  const columns = Math.min(2, engines.length);
-  const rows = Math.ceil(engines.length / columns);
-  const step = 17;
-  const r = 7.5;
-  const edge = 12; // centre of the outermost dot, measured from the square's edge
+  // Keep the marker in the top corner even with many engine variants. Full ownership
+  // remains in the title and agreement strip; a fourth tile summarises overflow.
+  const visible: (string | null)[] = engines.length > 4 ? [...engines.slice(0, 3), null] : engines;
+  const columns = Math.min(2, visible.length);
+  const rows = Math.ceil(visible.length / columns);
+  const step = 24;
+  const edge = 14; // centre of the outermost badge, measured from the square's edge
   const xs = Array.from({ length: columns }, (_, col) => corner[0] > 0 ? 100 - edge - col * step : edge + col * step);
   const ys = Array.from({ length: rows }, (_, row) => corner[1] > 0 ? 100 - edge - row * step : edge + row * step);
-  const dots = engines.map((engine, index) =>
-    `<circle cx="${xs[index % columns]}" cy="${ys[Math.floor(index / columns)]}" r="${r}" fill="${engineBrushes(engine).swatch}"/>`).join('');
-  // A light, dark-rimmed plate keeps every engine colour legible on light and dark squares alike.
-  const pad = r + 3;
-  const x0 = Math.min(...xs) - pad;
-  const y0 = Math.min(...ys) - pad;
-  const plate = `<rect x="${x0}" y="${y0}" width="${Math.max(...xs) - Math.min(...xs) + pad * 2}" height="${Math.max(...ys) - Math.min(...ys) + pad * 2}" rx="${pad}" fill="#fbf8f1" stroke="#1d1b18" stroke-width="2"/>`;
-  return `<title>Shared move: ${htmlEscape(engines.map(analysisEngineName).join(' + '))}</title>${plate}${dots}`;
+  const badges = visible.map((engine, index) => {
+    const x = xs[index % columns];
+    const y = ys[Math.floor(index / columns)];
+    const color = engine === null ? '#393936' : engineBrushes(engine).swatch;
+    const label = engine === null ? `+${engines.length - 3}` : engineMonogram(engine);
+    return `<rect x="${x - 12}" y="${y - 10}" width="24" height="20" rx="4" fill="${color}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 4}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="12" font-weight="750">${htmlEscape(label)}</text>`;
+  }).join('');
+  return `<title>Shared move: ${htmlEscape(engines.map(analysisEngineName).join(' + '))}</title>${badges}`;
 }
 
 /**
  * Top corner of the destination square on the side away from the incoming shaft (screen space).
  * The chosen top corner is never on the shaft's path, and the arrowhead ends at the square centre,
- * so the dots stay clear of the arrow; top corners are also the freest part of a captured piece.
+ * so the badges stay clear of the arrow; top corners are also the freest part of a captured piece.
  */
 export function sharedMarkerCorner(uci: string, orientation: 'white' | 'black'): [number, number] {
   const travel = Math.sign(uci.charCodeAt(2) - uci.charCodeAt(0)) * (orientation === 'black' ? -1 : 1);
@@ -118,11 +118,10 @@ export function analysisAgreementHeadline(groups: AnalysisMoveGroup[], total: nu
   return `${spreadCp !== undefined && spreadCp >= STRONG_DISAGREEMENT_CP ? 'Engines disagree' : 'Different top moves'}: ${moves}`;
 }
 
-/** The eval-spread measure, phrased by size: small gaps read as agreement on the evaluation. */
+/** Visible units; White-perspective calculation is explained in the callout tooltip and Compare. */
 export function analysisSpreadText(spreadCp: number): { text: string; level: 'close' | 'apart' | 'wide' } {
   const pawns = (spreadCp / 100).toFixed(2);
-  if (spreadCp < 50) return { text: `Evals within ${pawns}`, level: 'close' };
-  return { text: `Eval spread ${pawns}`, level: spreadCp >= STRONG_DISAGREEMENT_CP ? 'wide' : 'apart' };
+  return { text: `Eval spread: ${pawns} pawns`, level: spreadCp < 50 ? 'close' : spreadCp >= STRONG_DISAGREEMENT_CP ? 'wide' : 'apart' };
 }
 
 /** A pasted position is a FEN when it has eight ranks; anything else is treated as PGN. */

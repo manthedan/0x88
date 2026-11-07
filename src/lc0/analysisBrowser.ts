@@ -132,6 +132,7 @@ import {
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
 import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
+import { openingNameAt, type OpeningNameIndex } from './openingNames.ts';
 import {
   berserkCacheKey,
   cpuEngineHashMbForSurface,
@@ -305,6 +306,40 @@ const LC0_WHOLE_MODEL_MANIFEST_URL = sameOriginPathParam(
   DEFAULT_LC0_WHOLE_MODEL_MANIFEST_URL,
   ['/runtimes/lc0-' + 'tvm' + 'js-webgpu/'],
 );
+
+let openingNameIndex: OpeningNameIndex | null = null;
+let openingNamesUnavailable = false;
+
+async function loadOpeningNames(signal: AbortSignal): Promise<void> {
+  if (openingNameIndex) return;
+  try {
+    const response = await fetch(resolvePublicAssetUrl('/openings/eco.json'), { signal });
+    if (!response.ok) throw new Error(`Opening names: HTTP ${response.status}`);
+    const index: unknown = await response.json();
+    if (isStaleMount(signal)) return;
+    if (!index || typeof index !== 'object' || Array.isArray(index) || !Object.values(index).every((entry) => Array.isArray(entry) && entry.length === 2 && entry.every((value) => typeof value === 'string'))) throw new Error('Invalid opening index');
+    openingNameIndex = index as OpeningNameIndex;
+    openingNamesUnavailable = false;
+    renderOpeningName();
+    fitMoveList();
+    keepCurrentMoveInView();
+  } catch (error) {
+    if (isStaleMount(signal)) return;
+    openingNamesUnavailable = true;
+    renderOpeningName();
+    console.warn('[analysis] opening names unavailable', error);
+  }
+}
+
+function renderOpeningName(): void {
+  const label = el('openingName');
+  const opening = openingNameIndex ? openingNameAt(openingNameIndex, tree.current) : null;
+  label.hidden = !opening && tree.current === tree.root;
+  label.textContent = opening ? `${opening[0]} · ${opening[1]}`
+    : openingNamesUnavailable ? 'Opening names unavailable'
+      : openingNameIndex ? 'No named opening for this position' : 'Loading opening names…';
+  label.title = opening ? `${opening[0]} ${opening[1]} · Lichess opening names (CC0)` : label.textContent;
+}
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
 let searcher: Lc0PuctSearcher | null = null;
@@ -1868,7 +1903,7 @@ function bestShapes(): DrawShape[] {
     const shape = uciShape(uci, brush);
     if (!shape) return [];
     if (!shared) return [shape];
-    // Backer dots sit in a top corner of the destination square, away from the shaft: never on a piece.
+    // Identity badges sit inside a top corner of the destination square, away from the shaft.
     return [{ ...shape, customSvg: { html: sharedArrowMarkerSvg(shared, sharedMarkerCorner(uci, orientation)), center: 'dest' as const } }];
   });
 }
@@ -1894,7 +1929,7 @@ function renderBoard() {
       events: { after: (from: Key, to: Key) => { void onUserMove(from, to); } },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
-    // Chessground/lichess defaults: full-width (10) near-opaque best-move arrows.
+    // Owner preference: one uniform 15px width, including opt-in alternatives.
     drawable: { brushes: ANALYSIS_DRAWABLE_BRUSHES },
   };
   // Cast: chessground's DrawBrushes type exposes the built-in keys, but custom
@@ -1912,6 +1947,7 @@ function renderBoard() {
   el('sideToMove').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
   el('sideToMove').dataset.turn = board.turn;
   el('evalTurn').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
+  el('evalTurn').dataset.turn = board.turn;
   renderEvalBar();
   setShapes(bestShapes());
 }
@@ -1931,10 +1967,10 @@ function renderEvalBar() {
   bar?.style.setProperty('--eval-pct', `${pct}%`);
   el('evalScore').textContent = line?.scoreText ?? '—';
   el('evalScore').dataset.long = String((line?.scoreText ?? '').length > 5);
-  el('evalSource').textContent = line ? analysisEngineName(line.engine) : '';
+  el('evalSource').textContent = line ? analysisEngineName(line.engine) : 'Choose engine';
   el('evalSource').dataset.short = line ? engineMonogram(line.engine) : '';
-  bar?.style.setProperty('--engine-color', line ? engineBrushes(line.engine).swatch : 'var(--muted)');
-  // The bar's own label is the one source switcher (desktop and mobile).
+  el('evalSourceButton').style.setProperty('--engine-color', line ? engineBrushes(line.engine).swatch : 'var(--muted)');
+  // A readable source selector above the board drives the attached bar.
   const ready = evalSourceChoices(lines).filter((choice) => choice.line).length;
   const button = el('evalSourceButton');
   button.dataset.switchable = String(ready > 1);
@@ -2024,6 +2060,7 @@ function toggleEngineLines(name: string): void {
  */
 function renderEngineSummaries(lines: AnalysisLine[]): void {
   renderAnalysisStatus();
+  el('enginesTabCount').textContent = String(activeEngineRows().length);
   const best = lines.filter((entry) => entry.multipv === 1 && !entry.error && entry.pvUci[0]);
   const groups = analysisMoveGroups(best);
   // Only a genuine plurality is marked as "agreed": the most-backed move with 2+ engines and no tie.
@@ -2068,7 +2105,7 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     // The header already carries the top line's eval; alternatives show rank + their own eval.
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
     const toggle = index === 0
-      ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Fewer' : `${extra} more`}</span>${CHEVRON_ICON}</button>` : ''
+      ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Hide lines' : `${extra} more lines`}</span>${CHEVRON_ICON}</button>` : ''
       : '';
     return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}" title="${htmlEscape(`Play ${firstAnalysisMove(line)} · ${pvText}`)}">${lead}<span class="pv">${pvMoveChunks(pvText)}</span></button>${toggle}</li>`;
   });
@@ -2119,9 +2156,9 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     // Spread in pawns, the same unit as every engine evaluation beside it; phrased by size.
     const spreadInfo = Number.isFinite(spreadCp) ? analysisSpreadText(spreadCp) : null;
     const spreadMarkup = spreadInfo ? `<span class="insight-spread" data-level="${spreadInfo.level}" title="Highest minus lowest evaluation across engines, in pawns (White’s view)">${htmlEscape(spreadInfo.text)}</span>` : '';
-    const dots = groups.map((group) => group.engines.map((engine) => `<span class="engine-dot" style="--engine-color:${engineBrushes(engine).swatch}" title="${htmlEscape(`${analysisEngineName(engine)}: ${group.san}`)}"></span>`).join('')).join('<span class="insight-sep" aria-hidden="true"></span>');
+    const identities = groups.map((group) => `<span class="insight-group"><b>${htmlEscape(group.san)}</b>${group.engines.map((engine) => engineAvatar(engine)).join('')}</span>`).join('');
     const explanation = `Agreement compares recommended moves; eval spread is the highest minus lowest evaluation, in pawns from White’s perspective. ${groups.map((group) => `${group.san}: ${group.engines.map(analysisEngineName).join(' + ')}`).join('; ')}. Open Compare for details.`;
-    patchAnalysisResults(el('comparisonInsight'), `<button type="button" class="insight-action" data-open-comparison data-focus-key="comparison-shortcut" aria-label="${htmlEscape(`${headline}. Open Compare. ${explanation}`)}" title="${htmlEscape(explanation)}"><span class="insight-headline"><span class="insight-dots" aria-hidden="true">${dots}</span><strong>${htmlEscape(headline)}</strong><span aria-hidden="true">›</span></span>${spreadMarkup}</button>`);
+    patchAnalysisResults(el('comparisonInsight'), `<button type="button" class="insight-action" data-open-comparison data-focus-key="comparison-shortcut" aria-label="${htmlEscape(`${headline}. Open Compare. ${explanation}`)}" title="${htmlEscape(explanation)}"><span class="insight-headline"><strong>${htmlEscape(headline)}</strong><span aria-hidden="true">›</span></span>${spreadMarkup}<span class="insight-groups" aria-hidden="true">${identities}</span></button>`);
   }
   if (!bestByEngine.length) {
     const progressRows = [...searchProgressByEngine.values()].map(
@@ -2208,7 +2245,8 @@ function fitMoveList(): void {
     if (list.style.maxHeight) list.style.maxHeight = '';
     return;
   }
-  const height = `${Math.max(row, Math.floor(panel.clientHeight / row) * row)}px`;
+  const available = panel.clientHeight - el('openingName').offsetHeight;
+  const height = `${Math.max(row, Math.floor(available / row) * row)}px`;
   if (list.style.maxHeight !== height) list.style.maxHeight = height;
 }
 
@@ -2234,6 +2272,7 @@ function keepCurrentMoveInView(): void {
 }
 
 function renderMoveList() {
+  renderOpeningName();
   nodeIndex.clear();
   const collect = (n: GameNode) => {
     nodeIndex.set(n.id, n);
@@ -4123,6 +4162,15 @@ function wireEvents() {
   for (const id of ['stop', 'analyze']) statusObserver.observe(el(id), { attributes: true, attributeFilter: ['disabled'] });
   mountAbort.signal.addEventListener('abort', () => statusObserver.disconnect(), { once: true });
   renderAnalysisStatus();
+  // The shared header is sticky and can resize with fonts/zoom; keep mobile tabs below it.
+  const siteHeader = document.querySelector<HTMLElement>('.site-header');
+  if (siteHeader) {
+    const syncHeaderHeight = () => document.querySelector<HTMLElement>('.analysis-workspace')?.style.setProperty('--analysis-header-height', `${siteHeader.getBoundingClientRect().height}px`);
+    const headerObserver = new ResizeObserver(syncHeaderHeight);
+    headerObserver.observe(siteHeader);
+    syncHeaderHeight();
+    mountAbort.signal.addEventListener('abort', () => headerObserver.disconnect(), { once: true });
+  }
   // The always-visible history resizes as engine results stream in; keep the current move in view.
   const historyObserver = new ResizeObserver(() => {
     fitMoveList();
@@ -4169,6 +4217,9 @@ function wireEvents() {
     if (narrow.matches) tab.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
   const narrow = matchMedia('(max-width: 900px)');
+  narrow.addEventListener('change', () => {
+    if (!narrow.matches && el('analysisContent').dataset.view === 'engines') setView(el('movesTab') as HTMLButtonElement);
+  }, { signal: mountAbort.signal });
   const flashCopied = (button: HTMLElement) => {
     button.dataset.copied = 'true';
     window.setTimeout(() => { delete button.dataset.copied; }, 1600);
@@ -4859,6 +4910,7 @@ async function init(mountSignal: AbortSignal) {
     }),
   );
   wireEvents();
+  void loadOpeningNames(mountSignal);
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   void refreshBt4Availability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();

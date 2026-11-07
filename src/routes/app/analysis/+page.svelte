@@ -59,9 +59,13 @@ onMount(() => {
 <main id="main" class="app-main analysis-workspace">
   <div class="board-column">
   <section class="panel board-panel" aria-label="Board">
-    <div class="board-wrap">
-      <div class="evalbar"><div class="mid"></div><div class="white" id="evalWhite"></div><button id="evalSourceButton" class="eval-chip" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="evalSourceMenu" data-switchable="false"><span id="evalSource" class="eval-source" aria-hidden="true"></span><span id="evalScore" class="eval-score">—</span><svg class="eval-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button><span id="evalTurn" class="eval-turn">White to move</span></div>
+    <div class="board-readout">
+      <button id="evalSourceButton" class="eval-chip" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="evalSourceMenu" data-switchable="false"><span class="eval-prefix">Eval:</span><span id="evalSource" class="eval-source" aria-hidden="true">Preparing…</span><span id="evalScore" class="eval-score">—</span><svg class="eval-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+      <span id="evalTurn" class="eval-turn" data-turn="w">White to move</span>
       <div id="evalSourceMenu" class="eval-menu" role="menu" aria-label="Engine shown on the eval bar" hidden></div>
+    </div>
+    <div class="board-wrap">
+      <div class="evalbar" aria-hidden="true"><div class="white" id="evalWhite"></div><div class="mid"></div></div>
       <div class="board-shell">
         <div id="ground"></div>
         <div id="keyboardBoard"></div>
@@ -115,24 +119,26 @@ onMount(() => {
         <button id="stop" class="primary run-action stop-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>Stop<span id="stopProgress" class="stop-progress"></span></button>
       </div>
     </header>
-    <!-- Engine strip: consensus caption, then one block per engine (header row + its principal variation), then Add engine. -->
-    <div class="engine-strip">
-      <div id="comparisonInsight" class="comparison-insight" aria-label="Engine comparison insight" hidden></div>
-      <div id="engineSummaries" class="engine-summaries" aria-label="Engines and their best lines"></div>
-      <div id="engineLegend" class="legend" hidden></div>
-      <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">more available</small></span></button>
-    </div>
     <div id="message" aria-live="polite">Loading model…</div>
     <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
     <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
     <div id="analysisContent" class="analysis-content" data-view="moves">
+    <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">more available</small></span></button>
     <div class="workbench-tabs" role="tablist" aria-label="Analysis views">
       <button id="movesTab" type="button" role="tab" aria-selected="true" aria-controls="historyPanel" data-view="moves">Moves</button>
+      <button id="enginesTab" type="button" role="tab" aria-selected="false" aria-controls="enginesPanel" tabindex="-1" data-view="engines">Engines<span id="enginesTabCount" class="engine-count">2</span></button>
       <button id="comparisonTab" type="button" role="tab" aria-selected="false" aria-controls="comparisonSection" tabindex="-1" data-view="comparison">Compare</button>
       <button id="humanTab" type="button" role="tab" aria-selected="false" aria-controls="humanPanel" tabindex="-1" data-view="human" title="What rated humans play here (Maia3)">Human<span class="tab-badge">Maia3</span></button>
     </div>
+    <!-- DOM order keeps the mobile active panel after its tab; desktop CSS retains engine-first layout. -->
+    <div id="enginesPanel" class="engine-strip" role="tabpanel" aria-labelledby="enginesTab" tabindex="-1">
+      <div id="comparisonInsight" class="comparison-insight" aria-label="Engine comparison insight" hidden></div>
+      <div id="engineSummaries" class="engine-summaries" aria-label="Engines and their best lines"></div>
+      <div id="engineLegend" class="legend" hidden></div>
+    </div>
     <div id="historyPanel" class="history-panel" role="tabpanel" aria-labelledby="movesTab" tabindex="0">
+      <p id="openingName" class="opening-name" hidden></p>
       <div id="movelist" class="movelist move-panel" aria-label="Move history"></div>
     </div>
     <div id="comparisonSection" class="section-block comparison-panel" role="tabpanel" aria-labelledby="comparisonTab" tabindex="0">
@@ -291,21 +297,22 @@ onMount(() => {
     --muted-2:var(--muted); --text-soft:var(--muted);
     --border-input:color-mix(in srgb, var(--ink) 38%, var(--panel));
     --engine-color:var(--accent); /* overridden inline per engine row */
+    --analysis-header-height:64px; /* measured locally by the page controller */
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
     --result-highlight:color-mix(in srgb, var(--ink) 13%, var(--panel));
-    --board-size:min(704px, calc(100dvh - 166px), calc(100vw - 536px));
-    grid-template-columns:calc(var(--board-size) + 56px) minmax(0, 470px); gap:16px; align-items:start;
+    --board-size:min(704px, calc(100dvh - 200px), calc(100vw - 514px));
+    grid-template-columns:calc(var(--board-size) + 34px) minmax(0, 470px); gap:16px; align-items:start;
     max-width:1288px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
   }
   .board-column{min-width:0}
   .board-panel{min-width:0; padding:8px}
-  .board-wrap{display:grid; grid-template-columns:36px 1fr; gap:4px; position:relative}
-  .board-toolbar{display:flex; align-items:stretch; gap:12px; margin:8px 0 0 40px; height:40px}
+  .board-wrap{display:grid; grid-template-columns:18px 1fr; gap:0; position:relative}
+  .board-toolbar{display:flex; align-items:stretch; gap:12px; margin:8px 0 0 18px; height:40px}
   /* Desktop: the panel shares the board column's baseline (board + toolbar), so there is no dead block under it. */
-  .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:calc(var(--board-size) + 64px); max-height:none; overflow:hidden}
+  .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:calc(var(--board-size) + 98px); max-height:none; overflow:hidden}
   .analysis-workspace .app-sidebar>*{flex:0 0 auto}
   /* Engine blocks shrink (and scroll) before the move list drops below ~5 rows. */
-  .analysis-workspace .app-sidebar>.engine-strip{flex:0 1 auto; min-height:0}
+  .analysis-workspace .engine-strip{order:0; flex:0 1 auto; min-height:0}
   :global(.analysis-workspace .sr-only){position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0}
   .board-shell{position:relative}
   :global(.analysis-workspace #ground coords){font-size:12px; font-weight:700; opacity:1}
@@ -354,23 +361,24 @@ onMount(() => {
   :global(.analysis-workspace .engine-row .row-strength){flex-basis:76px; width:76px}
   .evalbar{
     --eval-pct:50%;
-    width:36px; border:1px solid var(--border-input); border-radius:5px;
-    overflow:hidden; background:var(--eval-black); position:relative; flex:0 0 auto;
+    width:18px; border:1px solid #8a8780; border-right:0; border-radius:4px 0 0 4px;
+    overflow:hidden; background:#555550; position:relative; flex:0 0 auto;
     box-sizing:border-box;
   }
   .evalbar .white{
     position:absolute; left:0; right:0; bottom:0; height:var(--eval-pct);
     background:var(--eval-white); transition:height .25s, width .25s;
   }
-  .eval-turn{display:none}
-  /* The bar's own label (engine + score) is the single source switcher; a caret appears when there is a choice. */
-  .eval-chip{position:absolute; bottom:0; left:0; right:0; display:grid; justify-items:stretch; min-height:0; padding:0; border:0; border-radius:0; background:#f4efe4; color:#1b160e; box-shadow:0 -1px 0 #0003; cursor:default}
-  .eval-chip:global([data-switchable=true]){cursor:pointer}
-  .eval-chip:global([data-switchable=true]):hover{background:#fff; color:#1b160e}
-  .eval-chip:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
-  .eval-caret{display:none; width:12px; height:9px; margin:0 auto 3px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round}
-  .eval-chip:global([data-switchable=true]) .eval-caret{display:block}
-  .eval-menu{position:absolute; left:42px; bottom:0; z-index:20; width:min(260px, calc(100% - 48px)); padding:4px; border:1px solid var(--border-input); border-radius:9px; background:var(--panel); box-shadow:0 14px 40px #0008}
+  .board-readout{position:relative; display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:34px; padding:0 0 6px}
+  .eval-turn{display:inline-flex; align-items:center; gap:6px; color:var(--muted); font:500 13px var(--sans); white-space:nowrap}
+  .eval-turn::before{content:''; width:9px; height:9px; border:1px solid #999; border-radius:50%; background:#f4efe4}
+  .eval-turn:global([data-turn=b])::before{background:#252522}
+  /* Readable source switcher outside the fill; the bar itself stays flush to the board. */
+  .eval-chip{display:inline-flex; align-items:center; gap:7px; min-height:28px; padding:0 8px; border:1px solid var(--border-input); border-radius:6px; background:var(--panel-inset); color:var(--ink); font:600 13px var(--sans)}
+  .eval-chip:hover:not(:disabled){background:var(--panel-2); color:var(--ink); border-color:var(--accent)}
+  .eval-prefix{color:var(--muted); font-weight:400}
+  .eval-caret{width:12px; height:12px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round}
+  .eval-menu{position:absolute; left:0; top:100%; z-index:20; width:min(280px, 100%); padding:4px; border:1px solid var(--border-input); border-radius:9px; background:var(--panel); box-shadow:0 14px 40px #0008}
   .eval-menu[hidden]{display:none}
   :global(.eval-menu-title){margin:4px 8px 4px; font:600 13px var(--sans); color:var(--muted)}
   :global(.eval-menu-item){display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:9px; width:100%; min-height:38px; padding:0 9px; border:0; border-radius:6px; background:transparent; color:var(--ink); text-align:left; font:600 14px var(--sans)}
@@ -379,14 +387,12 @@ onMount(() => {
   :global(.eval-menu-item:disabled){opacity:.5}
   :global(.eval-menu-name){overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   :global(.eval-menu-score){font:700 14px var(--mono); font-variant-numeric:tabular-nums}
-  .eval-source{display:grid; place-items:center; height:16px; background:var(--engine-color); color:#fff; font:700 0/1 var(--mono)}
-  .eval-source::before{content:attr(data-short); font-size:10px}
-  .eval-source:empty{display:none}
-  .eval-score{padding:4px 0 3px; color:#1b160e; font:750 12px/1 var(--sans); font-variant-numeric:tabular-nums; text-align:center; letter-spacing:-.03em; white-space:nowrap}
-  :global(.eval-score[data-long=true]){font-size:10.5px}
+  .eval-source{display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:600 13px/22px var(--sans)}
+  .eval-source:global([data-short]:not([data-short='']))::before{content:attr(data-short); display:inline-grid; vertical-align:middle; place-items:center; width:22px; height:22px; margin-right:6px; border-radius:4px; background:var(--engine-color); color:#fff; font:700 11px var(--mono)}
+  .eval-score{color:var(--ink); font:750 14px/1 var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap}
   .evalbar .mid{
     position:absolute; left:0; right:0; top:50%;
-    height:1px; background:var(--accent); opacity:.6;
+    height:2px; background:#99978e; box-shadow:0 1px 0 #0006;
   }
   .board-shell{min-width:0}
   .nav{display:flex; flex:1 1 auto; gap:6px; min-width:0}
@@ -638,16 +644,16 @@ onMount(() => {
   /* Engine strip */
   .engine-strip{display:flex; flex-direction:column; min-width:0}
   .engine-summaries{flex:0 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin}
-  .analysis-workspace .app-sidebar>.analysis-content{min-height:208px}
+  .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel){min-height:208px}
   :global(.comparison-insight){border-bottom:1px solid var(--rule)}
   :global(.comparison-insight[hidden]){display:none}
   :global(.insight-action){display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:2px 12px; width:100%; min-height:48px; padding:6px 12px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left; line-height:1.3}
   :global(.insight-action:hover:not(:disabled)){background:var(--result-highlight)}
   :global(.insight-headline){display:flex; align-items:center; gap:7px; font:650 14px/1.3 var(--sans)}
   :global(.insight-headline strong){font-weight:650}
-  :global(.insight-dots){display:inline-flex; align-items:center; flex:0 0 auto}
-  :global(.insight-dots .engine-dot + .engine-dot){margin-left:-2px}
-  :global(.insight-sep){width:5px}
+  :global(.insight-groups){display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; width:100%; margin-top:3px}
+  :global(.insight-group){display:inline-flex; align-items:center; gap:4px; font:600 13px var(--sans)}
+  :global(.insight-group .engine-avatar){width:22px; height:20px; flex-basis:22px; font-size:11px}
   :global(.insight-spread){font:13px/1.3 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap}
   :global(.insight-spread[data-level=apart]){color:var(--ink)}
   :global(.insight-spread[data-level=wide]){color:var(--warn); font-weight:650}
@@ -663,8 +669,8 @@ onMount(() => {
   :global(.engine-summary-name strong){font:650 13.5px/1.2 var(--sans); white-space:nowrap}
   :global(.engine-summary-name small){font:13px/1.2 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
   :global(.engine-summary-score){display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; min-width:62px; font:700 17px/1 var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em; text-align:right; color:var(--ink)}
-  :global(.engine-summary .compare-move){height:28px; min-height:0; padding:0 4px; border:1px solid var(--border-input); border-radius:6px; background:var(--panel-inset); font:650 14px var(--sans); text-align:center; color:var(--ink)}
-  :global(.engine-summary .compare-move.agrees){border-color:var(--muted); background:var(--result-highlight)}
+  :global(.engine-summary .compare-move){height:28px; min-height:0; padding:0 4px; border:0; border-radius:4px; background:color-mix(in srgb, var(--engine-color) 15%, var(--panel)); font:750 15px var(--sans); text-align:center; color:var(--ink)}
+  :global(.engine-summary .compare-move:hover){background:color-mix(in srgb, var(--engine-color) 28%, var(--panel)); text-decoration:underline; text-underline-offset:3px}
   :global(.agreement-mark){margin-right:4px; font-size:12px}
   :global(.compare-move-empty){text-align:center; color:var(--muted)}
   :global(.engine-gear){display:grid; place-items:center; width:30px; height:30px; min-height:0; padding:0; border:0; border-radius:6px; background:transparent}
@@ -677,7 +683,7 @@ onMount(() => {
   @keyframes -global-analysis-pulse{50%{opacity:.15}}
   :global(.engine-avatar){display:inline-grid; place-items:center; width:22px; height:22px; flex:0 0 22px; border-radius:5px; background:var(--engine-color); color:#fff; font:700 10.5px/1 var(--mono); letter-spacing:0; box-shadow:inset 0 0 0 1px #ffffff26}
   /* A real outlined button: multi-engine comparison is the product's differentiator. */
-  .add-engine-inline{flex:0 0 auto; display:flex; align-items:center; justify-content:center; gap:8px; width:auto; min-height:36px; margin:8px 10px; padding:0 12px; border:1px solid var(--border-input); border-radius:8px; background:transparent; color:var(--ink); text-align:left}
+  .add-engine-inline{order:1; flex:0 0 auto; display:flex; align-items:center; justify-content:center; gap:8px; width:auto; min-height:36px; margin:8px 10px; padding:0 12px; border:1px solid var(--border-input); border-radius:8px; background:transparent; color:var(--ink); text-align:left}
   .add-engine-inline:hover:not(:disabled){border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
   .add-engine-plus{display:inline-grid; place-items:center; width:18px; height:18px; flex:0 0 18px; color:var(--accent); font:700 19px/1 var(--sans)}
   .add-engine-text{display:flex; align-items:baseline; gap:6px; min-width:0}
@@ -694,7 +700,7 @@ onMount(() => {
   :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.line-rank){flex:0 0 12px; font:600 13px var(--mono); color:var(--muted); text-align:center}
   :global(.engine-lines .score){flex:0 0 50px; font:700 13.5px var(--mono); font-variant-numeric:tabular-nums; color:var(--ink); text-align:right}
-  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; column-gap:.42em; height:1.5em; overflow:hidden; font:13.5px/1.5 var(--sans); color:var(--ink)}
+  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; column-gap:.42em; height:1.5em; overflow:hidden; font:14px/1.5 var(--sans); color:var(--ink)}
   :global(.engine-lines .pv-move){white-space:nowrap}
   :global(.engine-lines .pv-move:first-child){font-weight:700}
   :global(.engine-lines .pv-num){color:var(--muted); font-weight:400; font-variant-numeric:tabular-nums}
@@ -711,13 +717,14 @@ onMount(() => {
   :global(.legend .dot){width:11px; height:11px; border-radius:3px; display:inline-block}
 
   /* Tabs: Moves is the default; the lines block above is always on screen at desktop widths. */
-  .workbench-tabs{order:1; flex:0 0 auto; display:flex; align-items:center; gap:2px; min-height:38px; padding:0 6px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); background:var(--panel-inset)}
+  .workbench-tabs{order:2; flex:0 0 auto; display:flex; align-items:center; gap:2px; min-height:38px; padding:0 6px; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); background:var(--panel-inset)}
   .workbench-tabs [role=tab]{display:inline-flex; align-items:center; gap:5px; min-height:37px; padding:0 9px; border:0; border-radius:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); font-size:13px; font-weight:550; white-space:nowrap}
   .workbench-tabs [role=tab]:hover:not(:disabled){background:transparent; color:var(--ink)}
   .workbench-tabs [role=tab][aria-selected=true]{color:var(--ink); border-bottom-color:var(--accent); font-weight:650}
+  #enginesTab{display:none}
   .workbench-tabs :global(.tab-current){display:none}
   .tab-badge{padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
-  .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{order:2; flex:1 1 0; min-height:0}
+  .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{order:3; flex:1 1 0; min-height:0}
   .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
   :global(.analysis-content[data-view=moves]) .history-panel{display:flex}
   .analysis-workspace .comparison-panel{border:0; padding:8px 12px; overflow:auto; overscroll-behavior:contain}
@@ -726,10 +733,13 @@ onMount(() => {
   .compare-help{margin:0 0 12px; font:13px/1.5 var(--sans); color:var(--muted)}
   .human-intro{margin:6px 0 0; font-size:13px; line-height:1.45; color:var(--text-soft)}
 
-  /* Move list: the column's main scroller, Lichess-style numbered pairs. */
+  .opening-name{flex:0 0 auto; margin:0; padding:7px 12px; border-bottom:1px solid var(--rule); color:var(--muted); font:13px/1.4 var(--sans)}
+  .opening-name[hidden]{display:none}
+  .opening-name :global(strong){margin-right:6px; color:var(--ink); font:600 12px var(--mono)}
+  /* Move list: compact SAN columns; remaining width is quiet, not a gap between moves. */
   .history-panel :global(.movelist){flex:1 1 auto; min-height:0; max-height:none}
   :global(.movelist){font:14px/1.4 var(--sans); overflow:auto; scroll-snap-type:y proximity; background:var(--panel); scroll-padding:8px; overscroll-behavior:contain; scrollbar-width:thin; padding:0}
-  :global(.move-pair){display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,1fr); align-items:stretch; scroll-snap-align:start}
+  :global(.move-pair){display:grid; grid-template-columns:36px minmax(90px,110px) minmax(90px,110px); align-items:stretch; scroll-snap-align:start}
   :global(.move-pair:nth-child(even) .mv){background:color-mix(in srgb, var(--ink) 3%, var(--panel))}
   :global(.move-number), :global(.missing-ply){display:grid; place-items:center; color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
   :global(.missing-ply){background:transparent; border:0}
@@ -737,92 +747,99 @@ onMount(() => {
   :global(.history-empty p){margin:0}
   :global(.history-empty strong){color:var(--ink); font-weight:650}
   :global(.quick-pgn){width:100%; min-height:72px; resize:vertical; padding:8px 10px; border:1px solid var(--border-input); border-radius:7px; background:var(--panel-inset); color:var(--ink); font:13px/1.45 var(--mono)}
+  :global(.quick-pgn::placeholder){font-family:var(--sans); color:var(--muted)}
   :global(.quick-pgn-actions){display:flex; align-items:center; gap:14px}
   :global(.quick-pgn-hint){font-size:13px; color:var(--muted)}
   :global(.quick-pgn-load){min-height:32px; padding:0 14px; border:1px solid var(--border-input-hover); border-radius:7px; background:var(--panel-2); color:var(--ink); font:600 13px var(--sans)}
   :global(.history-empty .load-game-link){font-size:13px; color:var(--muted)}
-  :global(.movelist .mv){display:flex; align-items:center; justify-content:space-between; gap:6px; cursor:pointer; min-height:29px; padding:0 12px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
+  /* Rare long SAN + large eval pairs wrap the score rather than spilling into the next ply. */
+  :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:space-between; gap:0 5px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
   /* The current move is unmistakable (Lichess-strength): tinted cell plus an edge marker. */
   :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)) !important; color:var(--ink); font-weight:700; box-shadow:inset 3px 0 var(--accent)}
-  :global(.movelist .mv-eval){font:13px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
+  :global(.movelist .mv-eval){margin-left:auto; white-space:nowrap; font:13px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   :global(.movelist .var){color:var(--muted)}
   @media (max-width:900px){
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
     .board-column{display:contents}
     .board-panel, .analysis-workspace .app-sidebar{grid-column:1; grid-row:auto}
-    .analysis-workspace .app-sidebar{height:auto; max-height:none; overflow:visible}
+    .analysis-workspace .app-sidebar{display:grid; grid-template-columns:minmax(50px,1fr) auto auto auto; column-gap:5px; height:auto; max-height:none; overflow:visible}
+    .analysis-workspace .app-sidebar>*{grid-column:1 / -1}
     .board-toolbar{height:44px}
-    .workbench-tabs{order:0}
-    .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{order:1; flex:0 0 auto}
-    /* Narrow: board, engine blocks (lines included, same model as desktop), then Moves / Compare / Human. */
-    .workbench-tabs{position:static}
+    /* Full PV cards have their own mobile view; Add engine stays beside the run control. */
+    .analysis-overview, .analyze-actions, .analysis-workspace .app-sidebar>.analysis-content{display:contents}
+    .analysis-workspace .engine-strip{display:none; grid-column:1 / -1; grid-row:3}
+    .analysis-workspace :global(.analysis-content[data-view=engines] > .engine-strip){display:flex}
+    .position-status{grid-column:1; grid-row:1; min-height:44px; padding-left:7px}
+    .turn-indicator{display:none} /* Already labelled above the board. */
+    .analysis-status{padding:0; border:0}
+    .analyze-actions button{grid-row:1; align-self:center; min-height:36px; margin-block:4px}
+    .manage-engines{grid-column:2}
+    .manage-label, .manage-engines .engine-count{display:none}
+    .run-action{grid-column:4; margin-right:5px}
+    .add-engine-inline{grid-column:3 !important; grid-row:1; align-self:center; min-height:36px; margin:4px 0; padding:0 9px; gap:4px}
+    #addEngineHint{display:none}
+    .workbench-tabs{grid-column:1 / -1; grid-row:2; position:sticky; top:var(--analysis-header-height); z-index:10}
+    #enginesTab{display:inline-flex}
+    .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel){min-height:0; grid-column:1 / -1; grid-row:3; flex:0 0 auto}
+    .app-sidebar #message{grid-column:1 / -1; grid-row:4}
+    .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:5}
+    .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:6}
     .engine-summaries{max-height:none; overflow:visible}
-    .analysis-workspace .app-sidebar>.analysis-content{min-height:0}
-    .history-panel :global(.movelist){max-height:420px}
+    .history-panel :global(.movelist){max-height:260px}
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}
-    :global(.movelist .mv){min-height:34px}
+    :global(.movelist .mv){min-height:32px}
   }
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
-    /* Thin horizontal eval bar above the board so the board runs nearly edge to edge. */
-    .board-wrap{grid-template-columns:1fr; gap:3px}
-    .evalbar{width:auto; height:20px; border-radius:3px}
+    /* Labels have their own baseline; the full-width 10px fill remains unobstructed. */
+    .board-readout{min-height:32px; padding:0 0 4px; gap:4px}
+    .eval-chip{min-width:0; max-width:calc(100% - 108px); gap:5px; padding:0 5px; min-height:28px}
+    .eval-score, .eval-caret{flex-shrink:0}
+    .eval-source{font-size:12px}
+    .eval-turn{font-size:12px; gap:4px}
+    .eval-prefix{display:none}
+    .board-wrap{grid-template-columns:1fr; gap:0}
+    .evalbar{width:auto; height:10px; border:1px solid #8a8780; border-bottom:0; border-radius:3px 3px 0 0}
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
-    .evalbar .mid{top:0; bottom:0; left:50%; width:1px; height:auto}
-    .eval-chip{top:0; right:auto; display:flex; align-items:stretch; box-shadow:1px 0 0 #0003}
-    .eval-chip:global([data-switchable=true]) .eval-caret{align-self:center; margin:0 6px 0 -2px}
-    .eval-menu{top:24px; bottom:auto; left:0; width:min(280px, 100%)}
-    .eval-source{height:auto; padding:0 6px; font:650 12px/1 var(--sans)}
-    .eval-source::before{display:none}
-    .eval-turn{display:block; position:absolute; right:0; top:0; bottom:0; padding:3px 6px; background:var(--panel-inset); color:var(--ink); font:600 12px/1 var(--sans)}
-    .eval-score{display:flex; align-items:center; padding:0 7px 0 6px}
+    .evalbar .mid{top:0; bottom:0; left:50%; width:2px; height:auto}
     .board-panel :global(#ground){border-radius:3px}
-    .board-toolbar{gap:4px; margin:6px 0 0}
-    .nav{gap:4px}
+    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:4px; margin:6px 0 0}
+    .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
-    .board-toolbar{gap:6px}
-    .board-tools{gap:4px}
-    .tool-button{padding:0 8px; gap:4px; font-size:12.5px}
-    .copy-button{min-width:44px}
-    .copy-button .copy-icon{display:none}
-    .copy-button:global([data-copied=true]) .copied-icon{display:block; width:14px; height:14px; flex-basis:14px}
-    /* One toolbar, including Add engine, saves an entire row before the first PV. */
-    .analysis-workspace .app-sidebar{display:grid; grid-template-columns:auto minmax(84px,1fr) auto auto; column-gap:4px}
-    .analysis-workspace .app-sidebar>*{grid-column:1 / -1}
-    .analysis-overview, .analyze-actions, .engine-strip{display:contents}
-    .engine-summaries, .comparison-insight, .legend{grid-column:1 / -1}
-    .position-status{grid-column:1; grid-row:1; padding-left:8px; min-height:48px; max-width:76px; overflow:hidden}
-    .turn-indicator{display:none}
-    .analysis-status{padding:0; border:0; gap:4px; font-size:12.5px; color:var(--ink)}
-    /* One row of equal-height controls: status, Engines + Add (matching outlines), Analyze (the filled primary). */
-    .analyze-actions button{grid-row:1; height:44px; min-height:44px; margin-block:4px; padding:0 10px; border-radius:8px; font-size:13.5px; gap:5px}
-    .manage-engines{grid-column:2}
-    .manage-engines svg{display:none}
-    .manage-label{display:inline}
-    .run-action{grid-column:4; min-width:94px; margin-right:4px}
+    .board-tools{display:grid; grid-template-columns:repeat(4,1fr); gap:4px; height:36px}
+    .tool-button, .tool-button.icon-only{width:auto; padding:0 6px; gap:5px; font-size:12.5px}
+    .copy-button{min-width:0}
+    .copy-button svg{width:14px; height:14px; flex-basis:14px}
+    .position-status{min-width:0}
+    .analysis-status{gap:4px; font-size:12px; color:var(--muted)}
+    .analyze-actions button{min-height:36px; padding:0 8px; font-size:13px; gap:5px}
+    .run-action{min-width:90px}
     .engine-count{min-width:18px; height:18px; padding:0 4px}
-    .add-engine-inline{grid-column:3 !important; grid-row:1; align-self:center; width:auto; height:44px; min-height:44px; margin:4px 0; padding:0 10px; gap:4px; border-radius:8px}
-    .add-engine-text strong{font-size:13.5px; font-weight:600}
-    .add-engine-plus{width:14px; flex-basis:14px; font-size:18px}
-    #addEngineHint{display:none}
+    .add-engine-plus{width:14px; flex-basis:14px}
+    .add-engine-text strong{font-size:13px}
+    .opening-name{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:7px 9px}
+    .history-panel :global(.movelist){max-height:256px}
+    /* Four recent pairs fit beside the navigation without a second page scroll. */
+    .history-panel :global(.movelist:has(.move-pair)){max-height:120px}
+    :global(.movelist .mv){min-height:30px}
+    :global(.move-pair){grid-template-columns:32px minmax(90px,110px) minmax(90px,110px)}
     .app-sidebar #message{margin:4px 10px}
     :global(.analysis-workspace #ground coords){font-size:11px}
-    :global(.insight-action){min-height:44px; padding:4px 10px; gap:0}
+    :global(.insight-action){min-height:44px; padding:6px 10px; gap:3px}
     :global(.insight-headline){font-size:14px}
-    :global(.insight-spread){width:100%; padding-left:0; font-size:13px}
-    :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 44px; gap:5px; min-height:44px; padding:0 0 0 7px}
-    :global(.engine-summary-name){min-height:44px; gap:7px}
-    :global(.engine-summary-text){display:grid; gap:1px}
+    :global(.insight-spread){font-size:13px}
+    :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 36px; gap:5px; min-height:40px; padding:2px 0 0 7px}
+    :global(.engine-summary-name){min-height:38px; gap:7px}
+    :global(.engine-summary-text){display:grid; gap:2px}
     :global(.engine-summary-name strong){font-size:13px}
-    :global(.engine-summary-name small){font-size:12.5px}
+    :global(.engine-summary-name small){font-size:13px}
     :global(.engine-summary-score){min-width:56px; font-size:16px; gap:4px}
-    :global(.engine-summary .compare-move){height:44px; border-radius:0; border-block:0; background:transparent}
-    :global(.engine-gear){width:44px; height:44px}
+    :global(.engine-gear){width:36px; height:40px}
     .workbench-tabs{padding:0 2px; gap:0}
-    .workbench-tabs [role=tab]{flex:1 1 auto; justify-content:center; padding:0 6px; min-height:44px}
+    .workbench-tabs [role=tab]{flex:1 1 auto; justify-content:center; padding:0 6px; min-height:42px}
     .tab-badge{display:none}
     :global(.engine-summary){padding-top:0}
     :global(.line-play){min-height:36px; padding-left:36px}
@@ -839,13 +856,10 @@ onMount(() => {
     :global(table.engine-compare tbody th){font-size:12px}
   }
   @media (max-width:360px){
-    /* Small phones trade one short status row for intact, separated 44px actions. */
-    .analysis-workspace .app-sidebar{grid-template-columns:minmax(84px,1fr) auto auto}
-    .position-status{grid-column:1 / -1; min-height:26px; max-width:none; overflow:visible}
-    .analyze-actions button, .add-engine-inline{grid-row:2}
-    .manage-engines{grid-column:1}
-    .add-engine-inline{grid-column:2 !important}
-    .run-action{grid-column:3}
+    .eval-turn{font-size:11px}
+    .eval-source:global([data-short]:not([data-short='']))::before{display:none}
+    .analyze-actions button{padding-inline:6px}
+    .workbench-tabs [role=tab]{font-size:12px; padding-inline:4px}
   }
   @media (prefers-reduced-motion: reduce){
     .evalbar .white{transition:none}
