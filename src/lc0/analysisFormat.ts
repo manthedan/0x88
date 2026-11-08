@@ -72,29 +72,32 @@ export interface EngineBrushes {
   swatch: string;
 }
 
-// Engine arrows use 15, the width of chessground's pale engine brushes (what lichess draws for
-// its engine arrow). 10 is the hand-drawn-arrow width and reads skinny on a large board.
+// Owner choice (2026-11-08): engine arrows are 11 wide at 75% opacity, between lichess's wide
+// translucent arrow and chess.com's narrow opaque one, so the pieces under an arrow stay readable.
+// Alternatives keep the same width and a lighter opacity.
+export const ENGINE_ARROW_WIDTH = 11;
+export const ENGINE_ARROW_OPACITY = 0.75;
 export const ANALYSIS_DRAWABLE_BRUSHES = {
   // Lc0: violet, so engine identity never reads as the brand-lime actions or the last-move highlight.
-  violet: { key: 'v', color: '#7a4fd6', opacity: 1, lineWidth: 15 },
-  paleViolet: { key: 'pv', color: '#7a4fd6', opacity: 0.4, lineWidth: 15 },
-  green: { key: 'g', color: '#15781B', opacity: 1, lineWidth: 15 },
-  paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: 15 },
+  violet: { key: 'v', color: '#7a4fd6', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleViolet: { key: 'pv', color: '#7a4fd6', opacity: 0.4, lineWidth: ENGINE_ARROW_WIDTH },
+  green: { key: 'g', color: '#15781B', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: ENGINE_ARROW_WIDTH },
   // Brighter than lichess's #003088 so the arrow stays visible over dark pieces and squares.
-  blue: { key: 'b', color: '#1f5fcf', opacity: 1, lineWidth: 15 },
-  paleBlue: { key: 'pb', color: '#1f5fcf', opacity: 0.4, lineWidth: 15 },
-  red: { key: 'r', color: '#882020', opacity: 1, lineWidth: 15 },
-  paleRed: { key: 'pr', color: '#882020', opacity: 0.4, lineWidth: 15 },
-  purple: { key: 'purple', color: '#68217a', opacity: 0.85, lineWidth: 15 },
-  palePurple: { key: 'palePurple', color: '#68217a', opacity: 0.35, lineWidth: 15 },
-  orange: { key: 'orange', color: '#c45a11', opacity: 0.85, lineWidth: 15 },
-  paleOrange: { key: 'paleOrange', color: '#c45a11', opacity: 0.35, lineWidth: 15 },
-  cyan: { key: 'cyan', color: '#007a87', opacity: 0.85, lineWidth: 15 },
-  paleCyan: { key: 'paleCyan', color: '#007a87', opacity: 0.35, lineWidth: 15 },
-  pink: { key: 'pink', color: '#b02080', opacity: 0.75, lineWidth: 15 },
-  palePink: { key: 'palePink', color: '#b02080', opacity: 0.3, lineWidth: 15 },
-  yellow: { key: 'y', color: '#e68f00', opacity: 1, lineWidth: 15 },
-  paleGrey: { key: 'pgr', color: '#4a4a4a', opacity: 0.35, lineWidth: 15 },
+  blue: { key: 'b', color: '#1f5fcf', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleBlue: { key: 'pb', color: '#1f5fcf', opacity: 0.4, lineWidth: ENGINE_ARROW_WIDTH },
+  red: { key: 'r', color: '#882020', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleRed: { key: 'pr', color: '#882020', opacity: 0.4, lineWidth: ENGINE_ARROW_WIDTH },
+  purple: { key: 'purple', color: '#68217a', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  palePurple: { key: 'palePurple', color: '#68217a', opacity: 0.35, lineWidth: ENGINE_ARROW_WIDTH },
+  orange: { key: 'orange', color: '#c45a11', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleOrange: { key: 'paleOrange', color: '#c45a11', opacity: 0.35, lineWidth: ENGINE_ARROW_WIDTH },
+  cyan: { key: 'cyan', color: '#007a87', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleCyan: { key: 'paleCyan', color: '#007a87', opacity: 0.35, lineWidth: ENGINE_ARROW_WIDTH },
+  pink: { key: 'pink', color: '#b02080', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  palePink: { key: 'palePink', color: '#b02080', opacity: 0.3, lineWidth: ENGINE_ARROW_WIDTH },
+  yellow: { key: 'y', color: '#e68f00', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleGrey: { key: 'pgr', color: '#4a4a4a', opacity: 0.35, lineWidth: ENGINE_ARROW_WIDTH },
 } as const;
 
 const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {

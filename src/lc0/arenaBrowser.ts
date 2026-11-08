@@ -22,7 +22,7 @@ import {
 } from '../nn/runtimeAudit.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
+import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
 import {
   appendCpuArenaTrail,
@@ -1418,8 +1418,8 @@ function renderBoard() {
     drawable: {
       enabled: false,
       brushes: {
-        candidate: { key: 'candidate', color: '#5a6e2a', opacity: 0.95, lineWidth: 15 },
-        candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.5, lineWidth: 15 },
+        candidate: { key: 'candidate', color: '#5a6e2a', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+        candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.45, lineWidth: ENGINE_ARROW_WIDTH },
       },
     },
   };

@@ -41,7 +41,7 @@ test('home position retains its chessground board, coordinates and FEN deep link
 test('home arrows keep one best move per engine at the owner’s uniform width', () => {
   const arrows = [...html.matchAll(/<line\b[^>]+>/g)].map(m => m[0]);
   assert.equal(arrows.length, 2);
-  for (const arrow of arrows) assert.match(arrow, /stroke-width="23\.4375"/, '15 / 64 on 100-unit squares');
+  for (const arrow of arrows) assert.match(arrow, /stroke-width="17\.1875"/, '11 / 64 on 100-unit squares');
   assert.match(arrows[0], /stroke="#7a4fd6"/);
   assert.match(arrows[1], /stroke="#1f5fcf"/);
   assert.match(html, /Best-move arrows/);

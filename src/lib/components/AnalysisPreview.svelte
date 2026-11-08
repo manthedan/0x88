@@ -29,9 +29,9 @@ function xy(square: string): [number, number] {
   return [FILES.indexOf(square[0]), 8 - Number(square[1])];
 }
 
-// Match the owner's uniform chessground brush width of 15 (64-unit squares).
+// Match the owner's chessground engine arrows: width 11 (64-unit squares) at 75% opacity.
 // Only one best-move arrow per engine; arrows sit UNDER pieces, not over them.
-const STROKE = (15 / 64) * 100;
+const STROKE = (11 / 64) * 100;
 const MARGIN = (10 / 64) * 100;
 function arrow(from: string, to: string) {
   const [fx, fy] = xy(from).map((v) => v * 100 + 50);
@@ -154,7 +154,7 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
     overflow:hidden; border-radius:3px; background:var(--board-light); isolation:isolate;
   }
   .preview-board cg-board{position:absolute; inset:0; display:block; overflow:hidden}
-  .arrows{position:absolute; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; opacity:.9; filter:drop-shadow(0 0 1px #fff)}
+  .arrows{position:absolute; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; opacity:.75; filter:drop-shadow(0 0 1px #fff)}
   .pv-results{grid-area:results; min-width:0}
   .pv-legend{display:grid; gap:2px; margin:0 0 10px; color:var(--ink-soft); font-size:13px; line-height:1.5}
   .pv-legend>span{color:var(--muted)}

@@ -35,7 +35,7 @@ export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean,
     const brushes = engineBrushes(line.engine);
     const shared = line.multipv === 1 ? backers.get(key) ?? [] : [];
     return [{ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt, ...(shared.length > 1 ? { shared } : {}) }];
-  }).reverse(); // Alternatives sit underneath best moves; all brushes retain the owner's 15px width.
+  }).reverse(); // Alternatives sit underneath best moves; all brushes share the owner's arrow width.
 }
 
 /** Analysis-only chip fills: keep arrow colours intact and white monograms AA-readable. */

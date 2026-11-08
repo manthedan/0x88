@@ -2002,7 +2002,7 @@ function renderBoard() {
       events: { after: (from: Key, to: Key) => { void onUserMove(from, to); } },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
-    // Owner preference: one uniform 15px width, including opt-in alternatives.
+    // Owner preference: one uniform arrow width (ENGINE_ARROW_WIDTH), including opt-in alternatives.
     drawable: { brushes: ANALYSIS_DRAWABLE_BRUSHES, enabled: !retry },
   };
   // Cast: chessground's DrawBrushes type exposes the built-in keys, but custom

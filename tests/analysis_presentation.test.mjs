@@ -23,7 +23,12 @@ test('default arrows show only engine best moves; opt-in alternatives never cove
   assert.deepEqual(analysisArrowCandidates(lines, false), [{ uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'violet' }]);
   assert.deepEqual(analysisArrowCandidates(lines, true), [{ uci: 'g1f3', brush: 'paleViolet' }, { uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'violet' }]);
   assert.equal(lines[0], alternative, 'rendering does not reorder cached lines');
-  assert.ok(Object.values(ANALYSIS_DRAWABLE_BRUSHES).every((brush) => brush.lineWidth === 15));
+  assert.ok(Object.values(ANALYSIS_DRAWABLE_BRUSHES).every((brush) => brush.lineWidth === 11));
+  // Best-move arrows share the owner's 75% opacity; alternatives stay lighter.
+  for (const [name, brush] of Object.entries(ANALYSIS_DRAWABLE_BRUSHES)) {
+    if (/^pale/.test(name)) assert.ok(brush.opacity < 0.75, name);
+    else assert.equal(brush.opacity, 0.75, name);
+  }
   assert.equal(analysisArrowCandidates([lc0, { ...sf, pvUci: ['d2d4'] }], true).length, 1);
 });
 
