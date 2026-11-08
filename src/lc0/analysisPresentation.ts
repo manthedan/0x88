@@ -39,36 +39,25 @@ export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean,
 }
 
 /**
- * Shared-move identity badges inside the destination square, away from the shaft.
+ * One shared-move count in a free corner of the destination square, away from the shaft.
  * Chessground's custom layer has a -3.5 -3.5 viewBox (unlike the arrow layer).
  * It already aligns this 0–100 box to the square bounds; do not re-centre it.
  * The move itself remains ONE arrow with the owner's uniform width.
  */
 export function sharedArrowMarkerSvg(engines: string[], corner: [number, number] = [1, -1]): string {
   if (!engines.length) return '';
-  // Keep the marker in the top corner even with many engine variants. Full ownership
-  // remains in the title and agreement strip; a fourth tile summarises overflow.
-  const visible: (string | null)[] = engines.length > 4 ? [...engines.slice(0, 3), null] : engines;
-  const columns = Math.min(2, visible.length);
-  const rows = Math.ceil(visible.length / columns);
-  const step = 24;
-  const edge = 14; // centre of the outermost badge, measured from the square's edge
-  const xs = Array.from({ length: columns }, (_, col) => corner[0] > 0 ? 100 - edge - col * step : edge + col * step);
-  const ys = Array.from({ length: rows }, (_, row) => corner[1] > 0 ? 100 - edge - row * step : edge + row * step);
-  const badges = visible.map((engine, index) => {
-    const x = xs[index % columns];
-    const y = ys[Math.floor(index / columns)];
-    const color = engine === null ? '#393936' : engineBrushes(engine).swatch;
-    const label = engine === null ? `+${engines.length - 3}` : engineMonogram(engine);
-    return `<rect x="${x - 12}" y="${y - 10}" width="24" height="20" rx="4" fill="${color}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 4}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="12" font-weight="750">${htmlEscape(label)}</text>`;
-  }).join('');
-  return `<title>Shared move: ${htmlEscape(engines.map(analysisEngineName).join(' + '))}</title>${badges}`;
+  const x = corner[0] > 0 ? 82 : 18;
+  const y = corner[1] > 0 ? 83 : 17;
+  const label = htmlEscape(`${engines.length} engines share this move: ${engines.map(analysisEngineName).join(', ')}`);
+  // 22 square-local units remain >=10px even on the 390px board. One tile,
+  // rather than a cluster, leaves the piece and the centre arrowhead uncovered.
+  return `<g class="shared-move-marker" role="img" tabindex="0" aria-label="${label}" style="pointer-events:auto"><title>${label}</title><rect x="${x - 16}" y="${y - 15}" width="32" height="30" rx="6" fill="${engineBrushes(engines[0]).swatch}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 8}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="22" font-weight="750">${engines.length}</text></g>`;
 }
 
 /**
  * Top corner of the destination square on the side away from the incoming shaft (screen space).
  * The chosen top corner is never on the shaft's path, and the arrowhead ends at the square centre,
- * so the badges stay clear of the arrow; top corners are also the freest part of a captured piece.
+ * so the count stays clear of the arrow; top corners are also the freest part of a captured piece.
  */
 export function sharedMarkerCorner(uci: string, orientation: 'white' | 'black'): [number, number] {
   const travel = Math.sign(uci.charCodeAt(2) - uci.charCodeAt(0)) * (orientation === 'black' ? -1 : 1);
