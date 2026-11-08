@@ -1,8 +1,8 @@
 import { boardToFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
-import { ArenaSimulBroker } from './arenaSimulBroker.ts';
 import { BUILTIN_ARENA_OPENINGS } from './arenaOpenings.ts';
+import { ArenaSimulBroker } from './arenaSimulBroker.ts';
 import { gameOutcome } from './engineBattle.ts';
 import type { Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -12,8 +12,13 @@ export const SIMUL_OPENINGS = [1, 4, 7, 8].map((index) => BUILTIN_ARENA_OPENINGS
 // Deterministic Arena-style search. ScLimit/temperature/Gumbel sampling are off:
 // seeds are identity metadata, not a worker-global Math.random override (unsafe across games).
 export const SIMUL_SEARCH_OPTIONS = {
-  batchSize: 1, batchPipelineDepth: 1, temperature: 0, drawScore: 0,
-  searchContemptLimit: 0, contemptElo: 0, reuseTree: false,
+  batchSize: 1,
+  batchPipelineDepth: 1,
+  temperature: 0,
+  drawScore: 0,
+  searchContemptLimit: 0,
+  contemptElo: 0,
+  reuseTree: false,
 } as const;
 
 export interface SimulGame {
@@ -30,7 +35,12 @@ export interface SimulGame {
   finalFen: string;
 }
 
-export interface SimulProgress { game: number; ply: number; completed: number; fen: string }
+export interface SimulProgress {
+  game: number;
+  ply: number;
+  completed: number;
+  fen: string;
+}
 
 export interface SimulTrialOptions {
   concurrency: number;
@@ -43,8 +53,16 @@ export interface SimulTrialOptions {
 }
 
 export function validateSimulTrial(options: SimulTrialOptions): void {
-  if (![1, 2, 4, 8].includes(options.concurrency) || !Number.isInteger(options.visits) || options.visits < 1 || options.visits > 128 ||
-      !Number.isInteger(options.maxPlies) || options.maxPlies < 1 || options.maxPlies > 240) throw new Error('Invalid bounded simul trial');
+  if (
+    ![1, 2, 4, 8].includes(options.concurrency) ||
+    !Number.isInteger(options.visits) ||
+    options.visits < 1 ||
+    options.visits > 128 ||
+    !Number.isInteger(options.maxPlies) ||
+    options.maxPlies < 1 ||
+    options.maxPlies > 240
+  )
+    throw new Error('Invalid bounded simul trial');
   if (new Set(SIMUL_OPENINGS.map((opening) => opening.fen)).size !== 4) throw new Error('Simul needs four distinct openings');
 }
 
@@ -57,7 +75,10 @@ export async function runSimulTrial(provider: Lc0EvaluationProvider, options: Si
   const cancelled: number[] = [];
   let next = 0;
   let completed = 0;
-  const abortAll = () => { for (const controller of controllers.values()) controller.abort(); };
+  let failed = false;
+  const abortAll = () => {
+    for (const controller of controllers.values()) controller.abort();
+  };
   options.signal?.addEventListener('abort', abortAll, { once: true });
   const started = performance.now();
 
@@ -69,8 +90,17 @@ export async function runSimulTrial(provider: Lc0EvaluationProvider, options: Si
     const opening = SIMUL_OPENINGS[Math.floor(id / 2)];
     const positions = [...opening.positions!];
     const record: SimulGame = {
-      id, opening: opening.name, bookMoves: [...opening.moves!], aIsWhite: id % 2 === 0, seed: 1,
-      moves: [], visits: [], moveMs: [], result: '', reason: '', finalFen: opening.fen,
+      id,
+      opening: opening.name,
+      bookMoves: [...opening.moves!],
+      aIsWhite: id % 2 === 0,
+      seed: 1,
+      moves: [],
+      visits: [],
+      moveMs: [],
+      result: '',
+      reason: '',
+      finalFen: opening.fen,
     };
     try {
       for (let ply = 0; ; ply++) {
@@ -86,9 +116,14 @@ export async function runSimulTrial(provider: Lc0EvaluationProvider, options: Si
           return;
         }
         const start = performance.now();
-        const choice = await searcher.search({ positions }, {
-          ...SIMUL_SEARCH_OPTIONS, visits: options.visits, signal: controller.signal,
-        });
+        const choice = await searcher.search(
+          { positions },
+          {
+            ...SIMUL_SEARCH_OPTIONS,
+            visits: options.visits,
+            signal: controller.signal,
+          },
+        );
         controller.signal.throwIfAborted();
         if (choice.visits !== options.visits) throw new Error(`Game ${id}: fixed visit budget changed`);
         const move = legalMoves(board).find((candidate) => moveToUci(candidate) === choice.move);
@@ -100,7 +135,7 @@ export async function runSimulTrial(provider: Lc0EvaluationProvider, options: Si
         options.onProgress?.({ game: id, ply: ply + 1, completed, fen: boardToFen(positions.at(-1)!) });
       }
     } catch (error) {
-      if (!controller.signal.aborted || options.signal?.aborted) throw error;
+      if (!controller.signal.aborted || options.signal?.aborted || failed) throw error;
       cancelled.push(id);
     } finally {
       searcher.resetTree();
@@ -109,9 +144,15 @@ export async function runSimulTrial(provider: Lc0EvaluationProvider, options: Si
   }
 
   const lanes = Array.from({ length: options.concurrency }, async () => {
-    while (next < 8) {
+    while (!failed && next < 8) {
       const id = next++;
-      await play(id);
+      try {
+        await play(id);
+      } catch (error) {
+        failed = true;
+        abortAll();
+        throw error;
+      }
     }
   });
   try {
@@ -126,10 +167,14 @@ export async function runSimulTrial(provider: Lc0EvaluationProvider, options: Si
     const latencies = games.flatMap((game) => game.moveMs).sort((a, b) => a - b);
     const visits = games.reduce((sum, game) => sum + game.visits.reduce((a, b) => a + b, 0), 0);
     return {
-      concurrency: options.concurrency, elapsedMs, completed, games: games.filter(Boolean), cancelled,
-      gamesPerHour: completed * 3_600_000 / elapsedMs,
-      evalsPerSecond: metrics.evaluations * 1000 / elapsedMs,
-      visitsPerSecond: visits * 1000 / elapsedMs,
+      concurrency: options.concurrency,
+      elapsedMs,
+      completed,
+      games: games.filter(Boolean),
+      cancelled,
+      gamesPerHour: (completed * 3_600_000) / elapsedMs,
+      evalsPerSecond: (metrics.evaluations * 1000) / elapsedMs,
+      visitsPerSecond: (visits * 1000) / elapsedMs,
       p95MoveMs: latencies[Math.ceil(latencies.length * 0.95) - 1] ?? 0,
       broker: metrics,
     };

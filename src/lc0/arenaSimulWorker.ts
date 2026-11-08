@@ -1,13 +1,22 @@
 import '../nn/ortConsoleFilter.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { simulGeneration } from './arenaSimulGate.ts';
 import { ARENA_SIMUL_PROTOCOL, runSimulTrial, SIMUL_OPENINGS, SIMUL_SEARCH_OPTIONS, validateSimulTrial } from './arenaSimulRunner.ts';
-import { Lc0OnnxEvaluator, type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { applyOrtExecutionProvider } from './ortWorkerExecutionProvider.ts';
 import { Lc0PuctSearcher } from './search.ts';
 
-interface Start { type: 'start'; n: number; visits: number; maxPlies: number; pairs: number; allow8?: boolean }
+interface Start {
+  type: 'start';
+  n: number;
+  visits: number;
+  maxPlies: number;
+  pairs: number;
+  runId: string;
+  allow8?: boolean;
+}
 let run: AbortController | undefined;
-let generation = 0;
+let generation = '';
 const controllers = new Map<number, AbortController>();
 const post = (message: Record<string, unknown>) => self.postMessage(message);
 
@@ -30,11 +39,11 @@ function installBufferProbe() {
   if (!gpu) return;
   const requestAdapter = gpu.requestAdapter.bind(gpu);
   gpu.requestAdapter = async (...args) => {
-    const adapter = await requestAdapter(...args) as { requestDevice?: (...args: unknown[]) => Promise<unknown> } | null;
+    const adapter = (await requestAdapter(...args)) as { requestDevice?: (...args: unknown[]) => Promise<unknown> } | null;
     if (!adapter?.requestDevice) return adapter;
     const requestDevice = adapter.requestDevice.bind(adapter);
     adapter.requestDevice = async (...deviceArgs) => {
-      const device = await requestDevice(...deviceArgs) as { createBuffer: (descriptor: { size: number }) => { destroy: () => void } };
+      const device = (await requestDevice(...deviceArgs)) as { createBuffer: (descriptor: { size: number }) => { destroy: () => void } };
       if (patched.has(device)) return device;
       patched.add(device);
       const createBuffer = device.createBuffer.bind(device);
@@ -47,7 +56,10 @@ function installBufferProbe() {
         const destroy = buffer.destroy.bind(buffer);
         let destroyed = false;
         buffer.destroy = () => {
-          if (!destroyed) { stats.liveBytes -= bytes; destroyed = true; }
+          if (!destroyed) {
+            stats.liveBytes -= bytes;
+            destroyed = true;
+          }
           destroy();
         };
         return buffer;
@@ -61,8 +73,8 @@ installBufferProbe();
 
 async function benchmark(message: Start, signal: AbortSignal) {
   validateSimulTrial({ concurrency: message.n, visits: message.visits, maxPlies: message.maxPlies });
-  if (![2, 4, 8].includes(message.n) || !Number.isInteger(message.pairs) || message.pairs < 1 || message.pairs > 3 ||
-      (message.n === 8 && !message.allow8)) throw new Error('Run N=2/4 first; N=8 requires a helpful N=4 gate');
+  if (![2, 4, 8].includes(message.n) || !Number.isInteger(message.pairs) || message.pairs < 1 || message.pairs > 3 || (message.n === 8 && !message.allow8))
+    throw new Error('Run N=2/4 first; N=8 requires a helpful N=4 gate');
   applyOrtExecutionProvider('webgpu');
   const rows = [];
   let baselineProbe: Lc0Evaluation[] | undefined;
@@ -76,7 +88,7 @@ async function benchmark(message: Start, signal: AbortSignal) {
     const physical = simul || control ? (message.n <= 4 ? 4 : 8) : 1;
     const concurrency = simul ? message.n : 1;
     const modelUrl = `/models/lc0/t1-256x10-distilled-swa-2432500.batch${physical}.f16.onnx`;
-    generation++;
+    generation = simulGeneration(message.runId, index);
     buffers = { liveBytes: 0, peakBytes: 0 };
     post({ type: 'phase', phase: 'loading', generation, index, physical, concurrency, control });
     const response = await fetch(modelUrl, { signal });
@@ -84,12 +96,17 @@ async function benchmark(message: Start, signal: AbortSignal) {
     const bytes = new Uint8Array(await response.arrayBuffer());
     const evaluator = await Lc0OnnxEvaluator.create(bytes);
     try {
+      signal.throwIfAborted();
       const runtime = await collectOrtRuntimeDiagnostics();
       if (!runtime.describe.toLowerCase().includes('webgpu') || runtime.fallback) throw new Error('Gate requires strict WebGPU, no fallback');
+      signal.throwIfAborted();
       const probe = await evaluator.evaluateBatch(inputs);
       if (!baselineProbe) baselineProbe = probe;
       const padded = [];
-      for (const input of inputs) padded.push(await evaluator.evaluate(input));
+      for (const input of inputs) {
+        signal.throwIfAborted();
+        padded.push(await evaluator.evaluate(input));
+      }
       const observed = probe.map((result) => (result.timing as { ortPhysicalBatchSize?: number }).ortPhysicalBatchSize);
       if (observed.some((size) => size !== physical)) throw new Error('Export did not execute the required physical batch');
       let physicalRuns = 0;
@@ -97,19 +114,26 @@ async function benchmark(message: Start, signal: AbortSignal) {
         evaluate: (input) => evaluator.evaluate(input),
         evaluateBatch: async (batch) => {
           const results = await evaluator.evaluateBatch(batch);
-          if (results.filter((result) => (result.timing as { batchPosition?: number }).batchPosition === 0).length !== 1 ||
-              results.some((result) => (result.timing as { ortPhysicalBatchSize?: number }).ortPhysicalBatchSize !== physical)) {
+          if (
+            results.filter((result) => (result.timing as { batchPosition?: number }).batchPosition === 0).length !== 1 ||
+            results.some((result) => (result.timing as { ortPhysicalBatchSize?: number }).ortPhysicalBatchSize !== physical)
+          ) {
             throw new Error('Broker batch was split into serial physical runs');
           }
           physicalRuns++;
           return results;
         },
       };
+      signal.throwIfAborted();
       const warmup = new Lc0PuctSearcher(evaluator);
       await warmup.search(inputs[0], { ...SIMUL_SEARCH_OPTIONS, visits: message.visits, signal });
       let lastPost = 0;
       const trial = await runSimulTrial(checked, {
-        concurrency, visits: message.visits, maxPlies: message.maxPlies, signal, controllers,
+        concurrency,
+        visits: message.visits,
+        maxPlies: message.maxPlies,
+        signal,
+        controllers,
         onProgress: (progress) => {
           if (performance.now() - lastPost < 150 && progress.ply !== 0) return;
           lastPost = performance.now();
@@ -117,10 +141,18 @@ async function benchmark(message: Start, signal: AbortSignal) {
         },
       });
       const row = {
-        ...trial, index, control, physical, physicalRuns, modelUrl, modelBytes: bytes.byteLength,
-        runtime: runtime.describe, bufferBytes: { ...buffers },
+        ...trial,
+        index,
+        control,
+        physical,
+        physicalRuns,
+        modelUrl,
+        modelBytes: bytes.byteLength,
+        runtime: runtime.describe,
+        bufferBytes: { ...buffers },
         occupancy: trial.broker.evaluations / (physicalRuns * physical),
-        exportDrift: difference(probe, baselineProbe), rowDrift: difference(probe, padded),
+        exportDrift: difference(probe, baselineProbe),
+        rowDrift: difference(probe, padded),
       };
       rows.push(row);
       post({ type: 'trial', row });
@@ -130,23 +162,41 @@ async function benchmark(message: Start, signal: AbortSignal) {
       await evaluator.dispose();
     }
   }
-  post({ type: 'done', result: {
-    protocol: ARENA_SIMUL_PROTOCOL, n: message.n, visits: message.visits, maxPlies: message.maxPlies,
-    pairs: message.pairs, options: SIMUL_SEARCH_OPTIONS,
-    openings: SIMUL_OPENINGS.map(({ name, fen, moves }) => ({ name, fen, moves })), rows,
-  } });
+  post({
+    type: 'done',
+    result: {
+      protocol: ARENA_SIMUL_PROTOCOL,
+      n: message.n,
+      visits: message.visits,
+      maxPlies: message.maxPlies,
+      pairs: message.pairs,
+      options: SIMUL_SEARCH_OPTIONS,
+      openings: SIMUL_OPENINGS.map(({ name, fen, moves }) => ({ name, fen, moves })),
+      rows,
+    },
+  });
 }
 
-self.onmessage = (event: MessageEvent<Start | { type: 'stop' } | { type: 'cancelGame'; generation: number; game: number }>) => {
+self.onmessage = (event: MessageEvent<Start | { type: 'stop' } | { type: 'cancelGame'; generation: string; game: number }>) => {
   const message = event.data;
-  if (message.type === 'stop') { run?.abort(); return; }
+  if (message.type === 'stop') {
+    run?.abort();
+    return;
+  }
   if (message.type === 'cancelGame') {
     if (message.generation === generation) controllers.get(message.game)?.abort();
     return;
   }
-  if (run) { post({ type: 'error', error: 'A gate is already active' }); return; }
+  if (run) {
+    post({ type: 'error', error: 'A gate is already active' });
+    return;
+  }
   run = new AbortController();
-  void benchmark(message, run.signal).catch((error) => {
-    post({ type: 'error', error: error instanceof Error ? error.message : String(error) });
-  }).finally(() => { run = undefined; });
+  void benchmark(message, run.signal)
+    .catch((error) => {
+      post({ type: 'error', error: error instanceof Error ? error.message : String(error) });
+    })
+    .finally(() => {
+      run = undefined;
+    });
 };

@@ -37,8 +37,14 @@ export class ArenaSimulBroker {
   private running: Promise<void> | undefined;
   private closed = false;
   private state: SimulBrokerMetrics = {
-    batches: 0, evaluations: 0, batchSizes: {}, maxResident: 0,
-    maxWaitMs: 0, runMs: 0, cancelled: 0, perGame: {},
+    batches: 0,
+    evaluations: 0,
+    batchSizes: {},
+    maxResident: 0,
+    maxWaitMs: 0,
+    runMs: 0,
+    cancelled: 0,
+    perGame: {},
   };
 
   private inner: Lc0EvaluationProvider;
@@ -51,9 +57,18 @@ export class ArenaSimulBroker {
     this.batchSize = batchSize;
     this.capacity = capacity;
     this.waitMs = waitMs;
-    if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 8 ||
-        !Number.isInteger(capacity) || capacity < batchSize || capacity > 8 ||
-        !Number.isFinite(waitMs) || waitMs < 0 || waitMs > 10) throw new Error('Invalid lab broker bounds');
+    if (
+      !Number.isInteger(batchSize) ||
+      batchSize < 1 ||
+      batchSize > 8 ||
+      !Number.isInteger(capacity) ||
+      capacity < batchSize ||
+      capacity > 8 ||
+      !Number.isFinite(waitMs) ||
+      waitMs < 0 ||
+      waitMs > 10
+    )
+      throw new Error('Invalid lab broker bounds');
   }
 
   metrics(): SimulBrokerMetrics {
@@ -78,7 +93,12 @@ export class ArenaSimulBroker {
     if (this.resident.size >= this.capacity) return Promise.reject(new Error('Simul queue capacity exceeded'));
     return new Promise((resolve, reject) => {
       const request: Pending = {
-        game, input, signal, enqueued: performance.now(), resolve, reject,
+        game,
+        input,
+        signal,
+        enqueued: performance.now(),
+        resolve,
+        reject,
         abort: () => {
           this.state.cancelled++;
           reject(aborted());
@@ -112,10 +132,12 @@ export class ArenaSimulBroker {
     const delay = this.queue.length >= this.batchSize ? 0 : Math.max(0, this.waitMs - (performance.now() - this.queue[0].enqueued));
     const launch = () => {
       this.timer = undefined;
-      this.running = Promise.resolve().then(() => this.flush()).finally(() => {
-        this.running = undefined;
-        this.schedule();
-      });
+      this.running = Promise.resolve()
+        .then(() => this.flush())
+        .finally(() => {
+          this.running = undefined;
+          this.schedule();
+        });
     };
     if (delay === 0) launch();
     else this.timer = setTimeout(launch, delay);

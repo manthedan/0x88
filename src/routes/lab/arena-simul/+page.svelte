@@ -1,37 +1,38 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import type { runSimulTrial } from '../../../lc0/arenaSimulRunner.ts';
+import { simulHelps4 } from '../../../lc0/arenaSimulGate.ts';
 
 type Row = Awaited<ReturnType<typeof runSimulTrial>> & {
   index: number; control: boolean; physical: number; occupancy: number;
   bufferBytes: { liveBytes: number; peakBytes: number };
 };
-type Result = { n: number; pairs: number; rows: Row[]; [key: string]: unknown };
+type Result = { n: number; visits: number; maxPlies: number; pairs: number; rows: Row[]; [key: string]: unknown };
 let n = 2;
 let visits = 8;
 let maxPlies = 160;
 let busy = false;
 let status = 'Idle. No model is loaded until you start a gate.';
-let generation = 0;
+let generation = '';
 let rows: Row[] = [];
 let results: Result[] = [];
 let worker: Worker | undefined;
 let currentGame = 0;
 let error = '';
 
-const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
-function helps4(): boolean {
-  return results.some((result) => result.n === 4 && result.pairs === 3 &&
-    median(result.rows.filter((row) => !row.control && row.concurrency === 4).map((row) => row.gamesPerHour)) >
-    1.1 * median(result.rows.filter((row) => !row.control && row.concurrency === 1).map((row) => row.gamesPerHour)));
+function helps4(effectiveVisits = visits, effectivePlies = maxPlies): boolean {
+  return simulHelps4(results, effectiveVisits, effectivePlies);
 }
 
 function start(count = n, options: { visits?: number; maxPlies?: number; pairs?: number } = {}) {
   if (busy) throw new Error('Gate already active');
-  if (count === 8 && !helps4()) throw new Error('N=8 stays parked unless N=4 improves median throughput by 10%');
+  const effectiveVisits = options.visits ?? visits;
+  const effectivePlies = options.maxPlies ?? maxPlies;
+  if (count === 8 && !helps4(effectiveVisits, effectivePlies)) throw new Error('N=8 stays parked unless N=4 improves median throughput by 10%');
   worker?.terminate();
   worker = new Worker(new URL('../../../lc0/arenaSimulWorker.ts', import.meta.url), { type: 'module', name: 'arena-simul-lab' });
   rows = [];
+  generation = '';
   error = '';
   busy = true;
   status = 'Loading the local small-net export.';
@@ -52,7 +53,7 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
     if (message.type === 'error') { busy = false; error = message.error; status = 'Stopped. Incomplete games are not results.'; }
   };
   worker.onerror = (event) => { busy = false; error = event.message; status = 'Worker failed.'; worker?.terminate(); };
-  worker.postMessage({ type: 'start', n: count, visits: options.visits ?? visits, maxPlies: options.maxPlies ?? maxPlies, pairs: options.pairs ?? 3, allow8: helps4() });
+  worker.postMessage({ type: 'start', n: count, visits: effectiveVisits, maxPlies: effectivePlies, pairs: options.pairs ?? 3, runId: crypto.randomUUID(), allow8: helps4(effectiveVisits, effectivePlies) });
 }
 function stop() { worker?.postMessage({ type: 'stop' }); status = 'Stopping after the in-flight GPU run settles.'; }
 function cancelGame(game = currentGame, token = generation) { worker?.postMessage({ type: 'cancelGame', game, generation: token }); }
