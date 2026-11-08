@@ -123,7 +123,7 @@ test('beginner terms are defined inline without extending the quick-start list',
   const section = markup(byId('pages'));
   assert.match(section, /Small net: a neural model/);
   assert.match(section, /game record \(PGN\) or position \(FEN\)/);
-  assert.match(section, /engine-specific search budget: visits \(search iterations\) or depth/);
+  assert.match(section, /its search limit, which is visits \(search iterations\) or depth depending on the engine/);
   const following = elements.find(({ node }) => node.children?.includes(byId('following-match'))).node;
   assert.equal(descendants(following, 'ul').length, 3, 'Resume and Saved results each have short sub-bullets');
   const note = descendants(following, 'p').find((node) => /Note:/.test(markup(node)));

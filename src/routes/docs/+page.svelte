@@ -472,7 +472,7 @@ onMount(() => {
     <ol class="steps">
       <li>Open Analysis. It starts with Lc0 (Small net: a neural model) and Stockfish Lite on the starting position.</li>
       <li>Make board moves, or press <strong>Load</strong> to paste a game record (PGN) or position (FEN).</li>
-      <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to choose its net or build and engine-specific search budget: visits (search iterations) or depth.</li>
+      <li>Press <strong>Add engine</strong> to add another engine. Use <strong>Engines</strong> to pick each engine's net or build and its search limit, which is visits (search iterations) or depth depending on the engine.</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
     </ol>
   </div>
