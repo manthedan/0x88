@@ -336,7 +336,7 @@ test('simul evidence audit replays legal histories and rejects illegal moves or 
   assert.throws(() => analyzeSimulRun(wrongExport), /physical batch export/);
   const wrongModel = structuredClone(run);
   wrongModel.rows[6].modelUrl = 'not-the-same-export.onnx';
-  assert.throws(() => analyzeSimulRun(wrongModel), /model identity/);
+  assert.throws(() => analyzeSimulRun(wrongModel), /model identity|exact artifact/);
   const illegal = structuredClone(run);
   illegal.rows[0].games[0].moves[0] = 'a1a8';
   assert.throws(() => analyzeSimulRun(illegal), /illegal move/);
