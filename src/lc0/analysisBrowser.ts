@@ -21,7 +21,8 @@ import {
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
-import { takeAnalysisHandoff } from './analysisHandoff.ts';
+import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
+import { playFromHereUnavailableReason, playPositionFromTree } from './playPosition.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
   type AnalysisLine,
@@ -1946,6 +1947,12 @@ function renderBoard() {
   keyboardBoard.render(board, orientation);
   el('evalTurn').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
   el('evalTurn').dataset.turn = board.turn;
+  const playReason = playFromHereUnavailableReason(tree);
+  const playButton = el('playFromHere') as HTMLButtonElement;
+  playButton.disabled = !!playReason;
+  playButton.title = playReason ? `Cannot play from here: ${playReason}.` : 'Continue this position against Maia3 or an engine';
+  el('playFromHereReason').hidden = !playReason;
+  el('playFromHereReason').textContent = playReason ? `This position is finished (${playReason}).` : '';
   renderEvalBar();
   setShapes(bestShapes());
 }
@@ -4220,6 +4227,15 @@ function wireEvents() {
   // One-click export beside the board; feedback is on the button itself and in the live message.
   el('quickCopyFen').addEventListener('click', () => { copyFen(); flashCopied(el('quickCopyFen')); });
   el('quickCopyPgn').addEventListener('click', () => { copyPgn(); flashCopied(el('quickCopyPgn')); });
+  el('playFromHere').addEventListener('click', () => {
+    if (playFromHereUnavailableReason(tree)) return;
+    if (!writePlayHandoff(playPositionFromTree(tree))) {
+      el('message').textContent = 'Could not transfer this position. Allow local storage, then try again.';
+      return;
+    }
+    cancelActiveAnalysisRun();
+    location.assign('/app/play/?from=analysis');
+  });
   try {
     const saved: unknown = JSON.parse(storageGet(EXPANDED_LINES_STORAGE_KEY) ?? '[]');
     expandedEngines = new Set(Array.isArray(saved) ? saved.filter((name): name is string => typeof name === 'string') : []);

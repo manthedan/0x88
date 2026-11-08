@@ -81,6 +81,10 @@ onMount(() => {
     </div>
 
     <div id="setupPane" class="setup-pane" role="group" aria-label="Opponent settings">
+      <div id="positionNotice" class="setup-note small" role="status" hidden>
+        <span id="positionNoticeText"></span>
+        <button id="useStartingPosition" class="ghost-button" type="button" hidden>Use starting position</button>
+      </div>
       <h2 class="pane-heading">Opponent</h2>
       <div class="field"><label for="engineSelect" class="visually-hidden">Opponent</label>
         <select id="engineSelect"></select></div>
@@ -342,6 +346,8 @@ onMount(() => {
   .custom-rating label{font:500 13px var(--sans); color:var(--muted)}
   .sampling-grid input, .sampling-grid select{width:100%}
   .setup-note{margin:0; line-height:1.5; font-size:12.5px}
+  #positionNotice{color:var(--text); font-size:13px}
+  #useStartingPosition{display:block; min-height:36px; margin-top:4px; padding:0 8px}
   .capabilities-slot :global(.capabilities){margin:0}
   :global(#maia3Elo){
     -webkit-appearance:none; appearance:none; flex:1 1 auto; min-width:0; width:100%; height:44px; margin:0;

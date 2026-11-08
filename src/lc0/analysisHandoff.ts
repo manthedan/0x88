@@ -2,7 +2,12 @@
 // localStorage rather than sessionStorage so it also reaches a new tab; the
 // entry expires quickly and is removed as soon as Analysis reads it.
 
+import { boardToFen } from '../chess/board.ts';
+import { gameOutcome } from './engineBattle.ts';
+import { type PlayPosition, replayPlayPosition } from './playPosition.ts';
+
 const HANDOFF_KEY = '0x88-analysis-handoff-pgn-v1';
+export const PLAY_HANDOFF_KEY = '0x88-play-position-handoff-v1';
 const HANDOFF_TTL_MS = 10 * 60 * 1000;
 
 function handoffStorage(): Storage | undefined {
@@ -18,6 +23,54 @@ export function writeAnalysisHandoff(pgn: string, now = Date.now()): void {
     handoffStorage()?.setItem(HANDOFF_KEY, JSON.stringify({ pgn, at: now }));
   } catch {
     // Storage full or blocked: Analysis simply opens without the game.
+  }
+}
+
+export type PlayHandoffResult = { status: 'none' } | { status: 'invalid' } | { status: 'ready'; position: PlayPosition };
+
+/** Encode/decode are pure so malformed, expired and illegal transfers are testable. */
+export function encodePlayHandoff(position: PlayPosition, now = Date.now()): string {
+  const raw = JSON.stringify({ version: 1, position, at: now });
+  if (decodePlayHandoff(raw, now).status !== 'ready') throw new Error('This position cannot be played from');
+  return raw;
+}
+
+export function decodePlayHandoff(raw: string | null, now = Date.now()): PlayHandoffResult {
+  if (raw === null) return { status: 'none' };
+  try {
+    if (raw.length > 32_000) return { status: 'invalid' };
+    const value = JSON.parse(raw);
+    if (!value || value.version !== 1 || typeof value.at !== 'number' || !Number.isFinite(value.at)) return { status: 'invalid' };
+    if (now - value.at > HANDOFF_TTL_MS || now < value.at - 60_000) return { status: 'invalid' };
+    const replay = replayPlayPosition(value.position);
+    if (gameOutcome(replay.board, replay.positions.slice(0, -1).map(boardToFen))) return { status: 'invalid' };
+    return { status: 'ready', position: { startFen: replay.startFen, moves: [...value.position.moves] } };
+  } catch {
+    return { status: 'invalid' };
+  }
+}
+
+export function writePlayHandoff(position: PlayPosition, now = Date.now()): boolean {
+  try {
+    const storage = handoffStorage();
+    if (!storage) return false;
+    storage.setItem(PLAY_HANDOFF_KEY, encodePlayHandoff(position, now));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Consume before saved-game restore. Even an invalid explicit handoff wins over a saved game. */
+export function takePlayHandoff(now = Date.now()): PlayHandoffResult {
+  try {
+    const storage = handoffStorage();
+    if (!storage) return { status: 'none' };
+    const raw = storage.getItem(PLAY_HANDOFF_KEY);
+    if (raw !== null) storage.removeItem(PLAY_HANDOFF_KEY);
+    return decodePlayHandoff(raw, now);
+  } catch {
+    return { status: 'invalid' };
   }
 }
 

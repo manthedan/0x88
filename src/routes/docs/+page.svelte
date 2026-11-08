@@ -502,6 +502,8 @@ onMount(() => {
       <li>Choose White, Black or Random, then press <strong>Play</strong>.</li>
       <li>Take back or resign during the game. Afterwards, copy or download the PGN, or press <strong>Analyze</strong> to open the game in Analysis.</li>
     </ol>
+    <p>To practise a position, select it in Analysis and choose <strong>Play from here</strong> below the board. In Play, choose your colour (the side to move is selected) and your last-used Maia3 rating or engine, then press <strong>Play</strong>. The preceding moves stay in the game record; takebacks stop at the position you chose. Copy or download PGN to keep the full history, including a FEN/SetUp header when the game began from a custom position. <strong>Analyze</strong> opens the continued game in Analysis.</p>
+    <p>Finished positions cannot be continued. Queen-odds opponents are unavailable for imported positions because they require their own starting position. Use <strong>Use starting position</strong> to return to a normal setup.</p>
     <p>Your games are not sent anywhere. The engine, and its network if it has one, downloads on first use and is reused from your browser’s storage after that.</p>
   </div>
 
