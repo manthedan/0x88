@@ -315,7 +315,7 @@ onMount(() => {
     max-width:1288px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
   }
   .board-column{min-width:0}
-  .board-panel{min-width:0; padding:8px}
+  .board-panel{min-width:0; padding:8px; container-type:inline-size}
   .board-wrap{display:grid; grid-template-columns:18px 1fr; gap:0; position:relative}
   .board-toolbar{display:flex; align-items:stretch; gap:12px; margin:8px 0 0 18px; height:40px}
   /* Desktop: the panel shares the board column's baseline (board + toolbar), so there is no dead block under it. */
@@ -809,6 +809,15 @@ onMount(() => {
     .history-panel :global(.movelist){max-height:260px}
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}
     :global(.movelist .mv){min-height:32px}
+  }
+  /* Follow the board's actual width, including short desktop windows. */
+  @container (max-width:580px){
+    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:4px}
+    .nav{height:44px}
+    .board-tools{display:grid; grid-template-columns:36px repeat(4,minmax(0,1fr)); gap:4px; height:36px}
+    .tool-button, .tool-button.icon-only{width:auto; padding:0 6px; gap:5px; font-size:12.5px}
+    .copy-button{min-width:0}
+    .copy-link svg{display:none}
   }
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
