@@ -181,7 +181,23 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
   .pv-foot a span{margin-left:4px; color:var(--accent)}
   .sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
 
-  @container(max-width:680px){
+  /* The hero can share a row with the copy before the full-size preview fits. */
+  @container(min-width:420px) and (max-width:680px){
+    .analysis-preview{grid-template-columns:minmax(0,1fr) 190px; grid-template-areas:"caption caption" "board results" "foot foot"; grid-template-rows:auto auto auto; padding:10px; gap:12px}
+    .pv-caption{grid-template-columns:1fr; gap:2px}
+    .pv-perspective{grid-column:1; grid-row:auto; max-width:none; font-size:12px}
+    .pv-caption strong{font-size:15px}
+    .pv-engines{gap:8px}
+    .pv-engines li{padding:8px}
+    .pv-result{grid-template-columns:16px minmax(0,1fr) auto; gap:4px}
+    .pv-name{grid-column:2 / -1; white-space:nowrap}
+    .pv-eval{grid-column:2}
+    .pv-meta{margin-left:0}
+    .pv-line{font-size:12px}
+    .pv-legend{font-size:12px; margin-bottom:6px}
+    .pv-foot{padding:0; gap:6px}
+  }
+  @container(max-width:419px){
     .analysis-preview{grid-template-columns:minmax(0,1fr); grid-template-areas:"caption" "board" "results" "foot"; grid-template-rows:none; padding:10px; gap:10px}
     .pv-caption{grid-template-columns:1fr; gap:1px}
     .pv-caption strong{font-size:15px}
