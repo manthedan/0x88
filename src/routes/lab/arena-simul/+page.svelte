@@ -5,7 +5,7 @@ import { simulHelps4 } from '../../../lc0/arenaSimulGate.ts';
 
 type Row = Awaited<ReturnType<typeof runSimulTrial>> & {
   index: number; control: boolean; physical: number; occupancy: number;
-  bufferBytes: { liveBytes: number; peakBytes: number };
+  memory?: { bytes: number | null; note: string };
 };
 type Result = { n: number; visits: number; maxPlies: number; pairs: number; rows: Row[]; [key: string]: unknown };
 let n = 2;
@@ -39,7 +39,14 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
   worker.onmessage = (event) => {
     const message = event.data;
     if (message.generation) generation = message.generation;
-    if (message.type === 'phase') status = `Trial ${message.index + 1}: ${message.concurrency} game(s), physical batch ${message.physical}${message.control ? ', numerical control' : ''}. Loading and warming up.`;
+    if (message.type === 'phase') status = `Trial ${message.index + 1}: ${message.concurrency} game(s), physical batch ${message.physical}${message.control ? ', numerical control' : ''}. ${message.phase === 'memory' ? 'Sampling memory outside the timing interval.' : 'Loading and warming up.'}`;
+    if (message.type === 'memory') {
+      const target = worker;
+      const measure = (performance as Performance & { measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory;
+      const sample = measure ? measure.call(performance).then(({ bytes }) => ({ bytes, note: 'Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency' }),
+        (failure) => ({ bytes: null, note: String(failure) })) : Promise.resolve({ bytes: null, note: 'UASM unavailable' });
+      void sample.then((value) => target?.postMessage({ type: 'memory', generation: message.generation, sample: value }));
+    }
     if (message.type === 'progress') {
       currentGame = message.game;
       status = `Trial ${message.index + 1}: game ${message.game + 1}, ply ${message.ply}. ${message.completed}/8 games completed.`;
@@ -99,17 +106,17 @@ onMount(() => {
   {#if rows.length}
     <div class="table-scroll" role="region" aria-label="Trial measurements">
       <table>
-        <thead><tr><th>Trial</th><th>Games/hour</th><th>NN evals/s</th><th>Occupancy</th><th>p95 move</th><th>GPU buffer peak*</th></tr></thead>
+        <thead><tr><th>Trial</th><th>Games/hour</th><th>NN evals/s</th><th>Occupancy</th><th>p95 move</th><th>Memory*</th></tr></thead>
         <tbody>{#each rows as row}<tr>
           <td>{row.control ? 'Serial control' : row.concurrency === 1 ? 'Serial' : `Simul ${row.concurrency}`}</td>
           <td>{row.gamesPerHour.toFixed(1)}</td><td>{row.evalsPerSecond.toFixed(1)}</td>
           <td>{(row.occupancy * 100).toFixed(1)}%</td><td>{row.p95MoveMs.toFixed(1)} ms</td>
-          <td>{(row.bufferBytes.peakBytes / 1048576).toFixed(1)} MiB</td>
+          <td>{row.memory?.bytes ? `${(row.memory.bytes / 1048576).toFixed(1)} MiB` : 'Unavailable'}</td>
         </tr>{/each}</tbody>
       </table>
     </div>
   {/if}
-  <p class="note">*Requested live GPU buffer bytes, not total process memory or driver residency. Timing on this shared machine is noisy; an idle-machine re-measure is required before any promotion decision. The lab has no strength-testing claim.</p>
+  <p class="note">*Page, worker and WASM memory sampled after each trial with its session still loaded. This is not a peak and excludes GPU residency. GPU allocation volume is recorded separately, not called live memory. Timing on this shared machine is noisy; an idle-machine re-measure is required before any promotion decision. The lab has no strength-testing claim.</p>
 </main>
 
 <style>

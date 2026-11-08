@@ -261,6 +261,9 @@ test('simul stays lab-only, never autostarts, and uses distinct physical exports
   assert.doesNotMatch(page, /params\.get|autostart.*===/);
   assert.doesNotMatch(worker, /Math\.random\s*=/);
   assert.match(worker, /ortPhysicalBatchSize/);
+  assert.ok(worker.indexOf('if (trial.completed !== 8)') < worker.indexOf("post({ type: 'trial', row })"));
+  assert.doesNotMatch(worker, /liveBytes|peakBytes|buffer\.destroy/);
+  assert.match(worker, /await sampleMemory\(signal\)/);
   assert.match(worker, /for \(const input of inputs\) \{\s*signal\.throwIfAborted\(\)/);
   assert.match(worker, /signal\.throwIfAborted\(\);\s*const warmup/);
   assert.match(worker, /message\.generation === generation/);

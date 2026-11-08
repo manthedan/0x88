@@ -20,6 +20,31 @@ let run: AbortController | undefined;
 let generation = '';
 const controllers = new Map<number, AbortController>();
 const post = (message: Record<string, unknown>) => self.postMessage(message);
+type MemorySample = { bytes: number | null; note: string };
+let memoryWaiter: ((value: MemorySample) => void) | undefined;
+
+async function sampleMemory(signal: AbortSignal): Promise<MemorySample> {
+  signal.throwIfAborted();
+  return await new Promise<MemorySample>((resolve, reject) => {
+    const finish = (sample: MemorySample) => {
+      cleanup();
+      resolve(sample);
+    };
+    const abort = () => {
+      cleanup();
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => finish({ bytes: null, note: 'Memory sample timed out' }), 15000);
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      memoryWaiter = undefined;
+    };
+    memoryWaiter = finish;
+    signal.addEventListener('abort', abort, { once: true });
+    post({ type: 'memory', generation });
+  });
+}
 
 function difference(a: Lc0Evaluation[], b: Lc0Evaluation[]) {
   let wdl = 0;
@@ -32,8 +57,9 @@ function difference(a: Lc0Evaluation[], b: Lc0Evaluation[]) {
   return { maxWdl: wdl, maxPrior: prior };
 }
 
-// Request-byte telemetry, not GPU residency. Scoped to this lab worker only.
-let buffers = { liveBytes: 0, peakBytes: 0 };
+// Cumulative createBuffer request bytes, NOT live/peak memory. Native releases and
+// garbage collection need not call JS destroy(), so no residency claim is made.
+let bufferAllocationBytes = 0;
 const patched = new WeakSet<object>();
 function installBufferProbe() {
   const gpu = (navigator as unknown as { gpu: { requestAdapter: (...args: unknown[]) => Promise<unknown> } }).gpu;
@@ -44,25 +70,13 @@ function installBufferProbe() {
     if (!adapter?.requestDevice) return adapter;
     const requestDevice = adapter.requestDevice.bind(adapter);
     adapter.requestDevice = async (...deviceArgs) => {
-      const device = (await requestDevice(...deviceArgs)) as { createBuffer: (descriptor: { size: number }) => { destroy: () => void } };
+      const device = (await requestDevice(...deviceArgs)) as { createBuffer: (descriptor: { size: number }) => unknown };
       if (patched.has(device)) return device;
       patched.add(device);
       const createBuffer = device.createBuffer.bind(device);
       device.createBuffer = (descriptor) => {
         const buffer = createBuffer(descriptor);
-        const stats = buffers;
-        const bytes = Number(descriptor.size);
-        stats.liveBytes += bytes;
-        stats.peakBytes = Math.max(stats.peakBytes, stats.liveBytes);
-        const destroy = buffer.destroy.bind(buffer);
-        let destroyed = false;
-        buffer.destroy = () => {
-          if (!destroyed) {
-            stats.liveBytes -= bytes;
-            destroyed = true;
-          }
-          destroy();
-        };
+        bufferAllocationBytes += Number(descriptor.size);
         return buffer;
       };
       return device;
@@ -90,7 +104,7 @@ async function benchmark(message: Start, signal: AbortSignal) {
     const concurrency = simul ? message.n : 1;
     const modelUrl = `/models/lc0/t1-256x10-distilled-swa-2432500.batch${physical}.f16.onnx`;
     generation = simulGeneration(message.runId, index);
-    buffers = { liveBytes: 0, peakBytes: 0 };
+    bufferAllocationBytes = 0;
     post({ type: 'phase', phase: 'loading', generation, index, physical, concurrency, control });
     const response = await fetch(modelUrl, { signal });
     if (!response.ok) throw new Error(`Local model unavailable: ${response.status}`);
@@ -141,6 +155,11 @@ async function benchmark(message: Start, signal: AbortSignal) {
           post({ type: 'progress', generation, index, ...progress });
         },
       });
+      // Never publish normal-looking performance rates for an incomplete trial.
+      if (trial.completed !== 8) throw new Error('Trial cancelled; incomplete games are not scored or timed as completed games');
+      post({ type: 'phase', phase: 'memory', generation, index, physical, concurrency, control });
+      // Session stays alive; UASM is sampled only AFTER the measured interval.
+      const memory = await sampleMemory(signal);
       const row = {
         ...trial,
         index,
@@ -150,15 +169,14 @@ async function benchmark(message: Start, signal: AbortSignal) {
         modelUrl,
         modelBytes: bytes.byteLength,
         runtime: runtime.describe,
-        bufferBytes: { ...buffers },
+        memory,
+        bufferAllocationBytes,
         occupancy: trial.broker.evaluations / (physicalRuns * physical),
         exportDrift: difference(probe, baselineProbe),
         rowDrift: difference(probe, padded),
       };
       rows.push(row);
       post({ type: 'trial', row });
-      // A cancelled single game may finish its siblings, but is never a benchmark completion.
-      if (trial.completed !== 8) throw new Error('Trial cancelled; incomplete games are not scored or timed as completed games');
     } finally {
       await evaluator.dispose();
     }
@@ -178,10 +196,18 @@ async function benchmark(message: Start, signal: AbortSignal) {
   });
 }
 
-self.onmessage = (event: MessageEvent<Start | { type: 'stop' } | { type: 'cancelGame'; generation: string; game: number }>) => {
+self.onmessage = (
+  event: MessageEvent<
+    Start | { type: 'stop' } | { type: 'cancelGame'; generation: string; game: number } | { type: 'memory'; generation: string; sample: MemorySample }
+  >,
+) => {
   const message = event.data;
   if (message.type === 'stop') {
     run?.abort();
+    return;
+  }
+  if (message.type === 'memory') {
+    if (message.generation === generation) memoryWaiter?.(message.sample);
     return;
   }
   if (message.type === 'cancelGame') {
