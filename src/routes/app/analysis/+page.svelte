@@ -750,7 +750,6 @@ onMount(() => {
   :global(.engine-summary-score){display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; min-width:62px; font:700 17px/1 var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em; text-align:right; color:var(--ink)}
   :global(.engine-summary .compare-move){height:28px; min-height:0; padding:0 4px; border:0; border-radius:4px; background:color-mix(in srgb, var(--engine-color) 15%, var(--panel)); font:750 15px var(--sans); text-align:center; color:var(--ink)}
   :global(.engine-summary .compare-move:hover){background:color-mix(in srgb, var(--engine-color) 28%, var(--panel)); text-decoration:underline; text-underline-offset:3px}
-  :global(.agreement-mark){margin-right:4px; font-size:12px}
   :global(.compare-move-empty){text-align:center; color:var(--muted)}
   :global(.engine-gear){display:grid; place-items:center; width:30px; height:30px; min-height:0; padding:0; border:0; border-radius:6px; background:transparent}
   :global(.engine-gear:hover:not(:disabled)){background:var(--panel-2)}
@@ -778,10 +777,10 @@ onMount(() => {
   :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.line-rank){flex:0 0 12px; font:600 13px var(--mono); color:var(--muted); text-align:center}
   :global(.engine-lines .score){flex:0 0 50px; font:700 13.5px var(--mono); font-variant-numeric:tabular-nums; color:var(--ink); text-align:right}
-  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; align-content:flex-start; height:30px; overflow:hidden; font:13.5px/1.5 var(--sans); color:var(--ink)}
+  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; align-content:flex-start; height:32px; overflow:hidden; font:14px/1.6 var(--sans); color:var(--ink)}
   :global(.pv-ellipsis){flex:0 0 12px; visibility:hidden; color:var(--muted)}
   :global(.pv-clipped .pv-ellipsis){visibility:visible}
-  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:30px; padding:2px 2px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
+  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:32px; padding:2px 2px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
   :global(.engine-lines .pv-move:hover){background:var(--selection-bg)}
   :global(.line-actions){display:flex; align-items:center}
   :global(.line-preview){display:grid; place-items:center; width:30px; min-height:32px; padding:2px; border:0; background:transparent; color:var(--muted)}
@@ -789,7 +788,7 @@ onMount(() => {
   :global(.line-preview:hover){background:var(--panel-2); color:var(--ink)}
   :global(.engine-lines .pv-move:first-child){font-weight:700}
   :global(.engine-lines .pv-num){color:var(--muted); font-weight:400; font-variant-numeric:tabular-nums}
-  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:40px; min-height:32px; padding:0 5px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:600 13px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
+  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:40px; min-height:32px; margin:0 5px; padding:0 6px; border:1px solid var(--border-input); border-radius:5px; background:var(--panel-inset); color:var(--ink); font:600 12px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
   :global(.line-toggle:hover:not(:disabled)){background:var(--panel-2); color:var(--ink)}
   :global(.line-toggle svg){width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
   :global(.line-toggle[aria-expanded=true] svg){transform:rotate(180deg)}
