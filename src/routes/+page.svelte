@@ -67,7 +67,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
         <a class="btn btn-secondary" href="/app/play/">Play a game</a>
         <a class="btn btn-arena" href="/app/arena/"><span aria-hidden="true">♜</span> Arena · Engine tournaments <span aria-hidden="true">→</span></a>
       </div>
-      <a class="device-readiness" data-tone={summary.tone} href="#device-details" aria-live="polite"><i aria-hidden="true"></i>{readiness}<span aria-hidden="true">↓</span></a>
+      <a class="device-readiness" data-tone={summary.tone} href="/docs/#neural-runtimes" aria-live="polite"><i aria-hidden="true"></i>{readiness}<span aria-hidden="true">↓</span></a>
     </div>
 
     <div class="preview-wrap"><AnalysisPreview /></div>
@@ -171,10 +171,10 @@ $: readiness = capsFailed ? 'Device check unavailable'
   .hero{border-bottom:1px solid var(--rule); background:var(--bg-2)}
   .hero-grid{
     padding-top:44px; padding-bottom:48px;
-    display:grid; grid-template-columns:minmax(0,.68fr) minmax(740px,1.32fr);
+    display:grid; grid-template-columns:minmax(360px,.8fr) minmax(0,1.2fr);
     grid-template-areas:"copy preview" "device preview";
     grid-template-rows:auto 1fr;
-    column-gap:32px; row-gap:24px; align-items:start;
+    column-gap:24px; row-gap:24px; align-items:start;
   }
   .hero-copy{grid-area:copy; max-width:600px}
   .preview-wrap{grid-area:preview; min-width:0; align-self:start}
@@ -185,7 +185,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
   }
   .eyebrow span{width:24px; height:2px; background:var(--accent); flex:0 0 auto}
   .hero h1{
-    max-width:13ch; margin:0 0 20px; font-size:clamp(42px,4.2vw,58px);
+    max-width:none; margin:0 0 20px; font-size:clamp(40px,4vw,58px);
     line-height:1.02; letter-spacing:-.035em; font-weight:600;
   }
   .lede{max-width:54ch; margin:0; font-size:17px; line-height:1.65; color:var(--ink-soft)}
@@ -193,7 +193,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
   .btn{
     min-height:46px; padding:11px 19px; display:inline-flex; align-items:center; gap:11px;
     border:1px solid var(--border-input); border-radius:7px;
-    font-size:14px; font-weight:650; text-decoration:none;
+    font-size:14px; font-weight:650; text-decoration:none; white-space:nowrap;
     transition:background .15s,border-color .15s,color .15s,transform .15s;
   }
   .btn:hover{text-decoration:none; transform:translateY(-1px)}
@@ -201,7 +201,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
   .btn-primary:hover{background:var(--accent-hover); color:var(--on-accent)}
   .btn-secondary{background:var(--panel); color:var(--ink)}
   .btn-secondary:hover{border-color:var(--accent)}
-  .btn-arena{flex-basis:100%; justify-content:space-between; min-height:40px; padding-block:7px; background:transparent; color:var(--ink-soft); font-size:13px}
+  .btn-arena{flex:0 0 auto; justify-content:flex-start; min-height:40px; padding-block:7px; background:transparent; color:var(--ink-soft); font-size:13px}
   .btn-arena:hover{background:var(--panel); border-color:var(--accent)}
   .btn-arena span{color:var(--accent-soft-text)}
   .device-readiness{display:flex; align-items:center; gap:7px; width:fit-content; min-height:28px; margin-top:9px; color:var(--ink-soft); font-size:13px}
@@ -210,7 +210,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
   .device-readiness[data-tone=warn] i{background:var(--warn)}
   .device-readiness>span{color:var(--ink); margin-left:3px}
   /* Wide layout: the full device card sits directly below, so the one-line summary would repeat it. */
-  @media(min-width:1201px){ .device-readiness{display:none} }
+  @media(min-width:900px){ .device-readiness{display:none} }
 
   /* Device check: live WebGPU / SIMD / threads result, under the hero actions. */
   .device{
@@ -284,11 +284,14 @@ $: readiness = capsFailed ? 'Device check unavailable'
   :global(.landing-footer-wrap){justify-content:flex-end}
 
   @media(max-width:1200px){
-    .hero-grid{grid-template-columns:1fr; grid-template-areas:"copy" "preview" "device"; grid-template-rows:none; padding-top:48px; padding-bottom:52px}
+    .roster{grid-template-columns:1fr}
+  }
+  @media(max-width:899px){
+    .hero-grid{grid-template-columns:1fr; grid-template-areas:"copy" "preview"; grid-template-rows:none; padding-top:48px; padding-bottom:52px}
     .hero-copy{max-width:650px; padding-top:0}
     .hero h1{max-width:14ch}
     .preview-wrap{width:100%; max-width:820px}
-    .roster{grid-template-columns:1fr}
+    .device{display:none}
   }
   @media(max-width:820px){
     .principle-grid{grid-template-columns:1fr 1.2fr}
@@ -300,7 +303,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
     .lede{font-size:14.5px; line-height:1.5}
     .cta-row{margin-top:14px; gap:6px}
     .cta-row .btn{flex:1 1 0; justify-content:center; padding-inline:12px}
-    .cta-row .btn-arena{flex-basis:100%; min-height:34px; padding-block:4px; justify-content:space-between}
+    .cta-row .btn-arena{flex:0 0 auto; min-height:34px; padding-block:4px; justify-content:flex-start}
     .device-readiness{margin-top:5px; min-height:26px; font-size:12px}
     .device{max-width:none}
     .section-intro{margin-bottom:22px}
