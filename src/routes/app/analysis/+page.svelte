@@ -701,8 +701,8 @@ onMount(() => {
   :global(.wdlbar .d){background:#b9b3a4}
   :global(.wdlbar .b){background:#3a3a3a}
   /* ── Right column, Lichess-shaped: header → engine strip → top lines → tabs → move list (fills the rest). ── */
-  .analysis-overview{display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
-  .position-status{display:flex; align-items:center; gap:10px; min-width:0}
+  .analysis-overview{display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
+  .position-status{display:flex; flex:0 0 auto; align-items:center; gap:10px; min-width:0}
   /* Quiet, neutral run state: text + glyph, no pill competing with the primary action. */
   .analysis-status{display:inline-flex; align-items:center; gap:5px; color:var(--muted); font:500 12.5px/1 var(--sans); white-space:nowrap}
   .analysis-status::before{content:''; width:6px; height:6px; flex:0 0 auto; border-radius:50%; background:currentColor; opacity:.7}
@@ -710,7 +710,7 @@ onMount(() => {
   :global(.analysis-status[data-state=running])::before{width:8px; height:8px; border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent); background:transparent; opacity:1; animation:analysis-spin .8s linear infinite}
   :global(.analysis-status[data-state=done])::before{content:'✓'; width:auto; height:auto; background:none; opacity:1; font-size:12px; font-weight:800}
   @keyframes -global-analysis-spin{to{transform:rotate(360deg)}}
-  .analyze-actions{display:flex; align-items:stretch; gap:8px; flex:0 0 auto}
+  .analyze-actions{display:flex; align-items:stretch; gap:8px; flex:0 0 auto; margin-left:auto}
   .analysis-overview button{display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:38px; padding:0 9px; border-radius:8px; font-size:13px; white-space:nowrap}
   .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input)}
   .engine-count{display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:var(--panel-2); font:700 12px/1 var(--sans); font-variant-numeric:tabular-nums}
