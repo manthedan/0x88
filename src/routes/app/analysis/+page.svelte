@@ -756,26 +756,27 @@ onMount(() => {
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
     .board-column{display:contents}
     .board-panel, .analysis-workspace .app-sidebar{grid-column:1; grid-row:auto}
-    .analysis-workspace .app-sidebar{display:grid; grid-template-columns:minmax(50px,1fr) auto auto auto; column-gap:5px; height:auto; max-height:none; overflow:visible}
+    .analysis-workspace .app-sidebar{--restore-row:0; display:grid; grid-template-columns:minmax(50px,1fr) auto auto auto; column-gap:5px; height:auto; max-height:none; overflow:visible}
+    .analysis-workspace .app-sidebar:has(:global(#analysisRestoreNotice:not([hidden]))){--restore-row:1}
     .analysis-workspace .app-sidebar>*{grid-column:1 / -1}
     .board-toolbar{height:44px}
     /* Full PV cards have their own mobile view; Add engine stays beside the run control. */
     .analysis-overview, .analyze-actions, .analysis-workspace .app-sidebar>.analysis-content{display:contents}
-    .analysis-workspace .engine-strip{display:none; grid-column:1 / -1; grid-row:3}
+    .analysis-workspace .engine-strip{display:none; grid-column:1 / -1; grid-row:calc(3 + var(--restore-row))}
     .analysis-workspace :global(.analysis-content[data-view=engines] > .engine-strip){display:flex}
-    .position-status{grid-column:1; grid-row:1; min-height:44px; padding-left:7px}
-    .analyze-actions button{grid-row:1; align-self:center; min-height:36px; margin-block:4px}
+    .position-status{grid-column:1; grid-row:calc(1 + var(--restore-row)); min-height:44px; padding-left:7px}
+    .analyze-actions button{grid-row:calc(1 + var(--restore-row)); align-self:center; min-height:36px; margin-block:4px}
     .manage-engines{grid-column:2}
     .manage-label, .manage-engines .engine-count{display:none}
     .run-action{grid-column:4; margin-right:5px}
-    .add-engine-inline{grid-column:3 !important; grid-row:1; align-self:center; min-height:36px; margin:4px 0; padding:0 9px; gap:4px}
+    .add-engine-inline{grid-column:3 !important; grid-row:calc(1 + var(--restore-row)); align-self:center; min-height:36px; margin:4px 0; padding:0 9px; gap:4px}
     #addEngineHint{display:none}
-    .workbench-tabs{grid-column:1 / -1; grid-row:2; position:sticky; top:var(--analysis-header-height); z-index:10}
+    .workbench-tabs{grid-column:1 / -1; grid-row:calc(2 + var(--restore-row)); position:sticky; top:var(--analysis-header-height); z-index:10}
     #enginesTab{display:inline-flex}
-    .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel){min-height:0; grid-column:1 / -1; grid-row:3; flex:0 0 auto}
-    .app-sidebar #message{grid-column:1 / -1; grid-row:4}
-    .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:5}
-    .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:6}
+    .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel){min-height:0; grid-column:1 / -1; grid-row:calc(3 + var(--restore-row)); flex:0 0 auto}
+    .app-sidebar #message{grid-column:1 / -1; grid-row:calc(4 + var(--restore-row))}
+    .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:calc(5 + var(--restore-row))}
+    .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:calc(6 + var(--restore-row))}
     .engine-summaries{max-height:none; overflow:visible}
     .history-panel :global(.movelist){max-height:260px}
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}

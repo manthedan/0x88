@@ -9,7 +9,7 @@ export let area: 'analysis' | 'play';
 </div>
 
 <style>
-.restore-notice { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:10px 12px; margin-bottom:10px; border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset); color:var(--text-soft); font:13px/1.4 var(--sans); }
+.restore-notice { grid-column:1 / -1; grid-row:1; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:10px 12px; margin-bottom:10px; border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel-inset); color:var(--text-soft); font:13px/1.4 var(--sans); }
 .restore-notice[hidden] { display:none; }
 .restore-notice button { padding:4px 6px; border:0; background:transparent; color:var(--accent); text-decoration:underline; font:inherit; }
 .restore-notice .dismiss { margin-left:auto; text-decoration:none; color:var(--muted); font-size:20px; line-height:1; }

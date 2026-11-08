@@ -163,10 +163,11 @@ export function readWorkspace<T>(kind: WorkspaceKind, decode: (raw: string) => T
   } catch { return null; }
 }
 
-/** Unknown input parameters are reserved for explicit position/game handoffs. Never consume one here. */
+/** Recognize game inputs, not runtime/debug options or ordinary anchors. Never consume a handoff here. */
 export function hasExplicitWorkspaceInput(search: string, hash = ''): boolean {
-  const runtimeParams = new Set(['dev', 'model', 'perfDial']);
-  return [...new URLSearchParams(search).keys()].some((key) => !runtimeParams.has(key)) || hash.length > 1;
+  const gameParams = new Set(['fen', 'pgn', 'game', 'position', 'handoff', 'playhandoff', 'playfrom', 'fromanalysis', 'startfen', 'from', 'play']);
+  const hasGameInput = (input: string) => [...new URLSearchParams(input).keys()].some((key) => gameParams.has(key.toLowerCase()));
+  return hasGameInput(search) || hasGameInput(hash.replace(/^#/, ''));
 }
 
 /** One small local slot per surface. Only changed committed state resets the debounce. */

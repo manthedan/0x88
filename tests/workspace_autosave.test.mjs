@@ -170,5 +170,7 @@ test('explicit FEN and handoff URLs take precedence without consuming the handof
     assert.equal(hasExplicitWorkspaceInput(search, hash), true);
   }
   assert.equal(hasExplicitWorkspaceInput('?dev&model=local&perfDial=eco'), false);
+  assert.equal(hasExplicitWorkspaceInput('?ep=wasm&lc0Runtime=hybrid&pack=local&recklessVariant=simd'), false);
+  assert.equal(hasExplicitWorkspaceInput('?utm_source=docs', '#moves'), false);
   assert.equal(hasExplicitWorkspaceInput(''), false);
 });
