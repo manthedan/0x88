@@ -2314,7 +2314,7 @@ function fitMoveList(): void {
   const list = el('movelist');
   const panel = el('historyPanel');
   const row = moveRowHeight(list);
-  if (matchMedia('(max-width: 900px)').matches || !row || !panel.clientHeight || list.querySelector('.variation')) {
+  if (matchMedia('(max-width: 767px)').matches || !row || !panel.clientHeight || list.querySelector('.variation')) {
     if (list.style.maxHeight) list.style.maxHeight = '';
     return;
   }
@@ -3433,7 +3433,7 @@ async function runGameReview(): Promise<void> {
     el('reviewCopyPgn').hidden = false;
     el('reviewDownloadPgn').hidden = false;
     el('reviewStatus').textContent = `${label} · depth ${depth} · ${moves.length} ${moves.length === 1 ? 'move' : 'moves'} reviewed · ${cacheHits}/${nodes.length} positions cached.`;
-    if (matchMedia('(max-width: 900px)').matches) {
+    if (matchMedia('(max-width: 767px)').matches) {
       // Scroll only this tab, not the page: keep the board in place and bring the graph into view.
       const panel = el('reviewPanel');
       panel.scrollTop += el('reviewChart').getBoundingClientRect().top - panel.getBoundingClientRect().top - 26;
@@ -4800,7 +4800,7 @@ function wireEvents() {
     tab.focus({ preventScroll: true });
     if (narrow.matches) tab.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
-  const narrow = matchMedia('(max-width: 900px)');
+  const narrow = matchMedia('(max-width: 767px)');
   narrow.addEventListener('change', () => {
     if (!narrow.matches && el('analysisContent').dataset.view === 'engines') setView(el('movesTab') as HTMLButtonElement);
   }, { signal: mountAbort.signal });

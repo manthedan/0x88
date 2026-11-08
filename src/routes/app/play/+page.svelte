@@ -224,7 +224,7 @@ onMount(() => {
     --coord-dark:#211d17;
     --coord-light:#fff8eb;
     --strip-h:44px;
-    --board-size:min(680px, calc(100dvh - 240px), calc(100vw - 500px));
+    --board-size:min(680px, calc(100svh - 240px), calc(100vw - 432px));
     grid-template-columns:calc(var(--board-size) + 18px) minmax(330px, 400px);
     gap:16px; max-width:1140px; padding:16px 24px 32px;
     font-variant-numeric:tabular-nums;
@@ -452,7 +452,13 @@ onMount(() => {
   .play-workspace:global([data-phase=over]) #resign{display:none}
   .play-workspace:global([data-phase=over]) .game-actions{grid-template-columns:1fr 1fr}
 
-  @media (max-width:900px){
+  @media (min-width:421px) and (max-width:600px){
+    .board-panel{width:min(100%, calc(100svh - 490px)); justify-self:center}
+  }
+  @media (min-width:601px) and (max-width:767px){
+    .board-panel{width:min(100%, calc(100svh - 570px)); justify-self:center}
+  }
+  @media (max-width:767px){
     .play-workspace{--board-size:100%; grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
     .play-workspace .play-sidebar{max-height:none; overflow:visible}
     .board-panel{scroll-margin-top:74px}
