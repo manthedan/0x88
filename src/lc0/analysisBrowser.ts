@@ -388,6 +388,8 @@ function restoreAnalysisWorkspace(): void {
         const parsed = parsePgnGame(handoffPgn);
         tree = parsed.tree;
         tree.toStart();
+        // Same game identity as the restore path, so the first navigation doesn't treat it as a new game and clear its review.
+        analysisGameTree = tree;
         workspaceHeaders = parsed.tags;
         workspaceResult = parsed.result;
         inputEl('pgnInput').value = handoffPgn;
