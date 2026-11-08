@@ -13,6 +13,11 @@ export function activeDocsTopic(
   return current;
 }
 
+/** A single open topic list leaves the other group headings within reach. */
+export function toggleDocsGroup(expandedId: string | null, groupId: string): string | null {
+  return expandedId === groupId ? null : groupId;
+}
+
 export function docsSearchShortcut(platform: string): { text: string; label: string } {
   return /Mac|iPhone|iPad|iPod/.test(platform)
     ? { text: '⌘K', label: 'Command K' }

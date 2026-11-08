@@ -51,7 +51,7 @@ test('every group has an explicit controlled disclosure, including all ten engin
   assert.ok(attr(toggle, 'aria-expanded'));
   assert.ok(attr(toggle, 'aria-controls'));
   assert.match(markup(toggle), /Show/);
-  assert.match(source, /<ul id=\{`toc-\$\{group.id\}`\} hidden=\{!expandedGroups\[group.id\]\}/);
+  assert.match(source, /<ul id=\{`toc-\$\{group.id\}`\} hidden=\{expandedGroupId !== group.id\}/);
   assert.match(source, /aria-current=\{item.id === activeId \? 'location'/);
   assert.match(source, /group.id === activeGroupId \? 'true'/);
   assert.doesNotMatch(source, /group\.collapsed/);
@@ -68,8 +68,14 @@ test('scroll tracking does not depend on animation frames being delivered', () =
   assert.doesNotMatch(source, /requestAnimationFrame/);
 });
 
-test('troubleshooting opens by default and common problems are linked outside Contents', () => {
-  assert.match(source, /expandedGroups: Record<string, boolean> = \{ pages: true, troubleshooting: true \}/);
+test('one topic group opens at a time while common problems remain linked outside Contents', () => {
+  assert.match(source, /expandedGroupId: string \| null = 'pages'/);
+  assert.match(source, /expandedGroupId = toggleDocsGroup\(expandedGroupId, group.id\)/);
+  assert.match(source, /if \(groupId\) expandedGroupId = groupId/);
+  assert.match(source, /\.toc-groups\{display:flex; flex-direction:column; overflow:hidden\}/);
+  assert.match(source, /\.toc-group-heading\{flex:0 0 auto\}/);
+  assert.match(source, /\.toc-group > ul\{min-height:0; overflow-y:auto\}/);
+  assert.match(source, /link.closest<HTMLElement>\('\.toc-group > ul'\)/, 'scroll-spy reveals topics inside their own scroller');
   const intro = elements.find(({ node }) => hasClass(node, 'doc-intro')).node;
   assert.deepEqual(descendants(intro, 'a').map((node) => textAttr(node, 'href')), ['#trouble-webgpu', '#trouble-downloads', '#trouble-cache']);
   for (const link of descendants(intro, 'a')) assert.ok(byId(textAttr(link, 'href').slice(1)));
@@ -139,7 +145,24 @@ test('title hierarchy, quiet launch links and readable mobile contents are expli
   assert.match(source, /\.doc-content h2\{font-size:24px/);
   assert.match(source, /\.doc-content \.open-link\{min-height:44px/);
   assert.match(source, /\.toc-toggle-label\{[^}]*font-size:13px;[^}]*color:var\(--text\)/);
-  assert.match(source, /background:transparent; color:var\(--ink-soft\); font-weight:600/);
+  assert.match(source, /background:var\(--panel-2\); color:var\(--ink\); font-weight:600/);
+  assert.match(source, /border-color:color-mix\(in srgb, var\(--ink\) 40%, var\(--panel-2\)\)/);
+  assert.match(source, /color:var\(--docs-secondary\); font-family:var\(--mono\)/);
+  assert.match(source, /color:var\(--docs-secondary\); text-decoration:none/);
+  assert.match(source, /color:var\(--ink-body-strong\); font:650 13px/);
+});
+
+test('Analysis terminology and mobile paths match the workspace without changing anchors', () => {
+  assert.equal(toc[0].items[0].label, 'Analyze a position');
+  assert.match(markup(byId('pages-analysis')), /Analyze a position/);
+  assert.doesNotMatch(source, /\banalys(?:e|ed|ing)\b/i);
+  const gettingStarted = markup(byId('pages'));
+  assert.match(gettingStarted, /Board tools ••• → Load/);
+  assert.match(gettingStarted, /Play from here<\/strong> below the board \(on mobile, in <strong>Board tools •••/);
+  assert.match(markup(byId('analysis-in-depth')), /Board tools •••<\/strong> for <strong>Load<\/strong> and <strong>Copy/);
+  assert.match(markup(byId('analysis-in-depth')), /Rename collection…[\s\S]*Save collection name/);
+  assert.match(markup(byId('review-and-train')), /Original review/);
+  assert.doesNotMatch(source, /Baseline review|Q-mapped pawns|Best child|Human plausibility|Result provenance|Rename to name below/);
 });
 
 test('subsection search containers exclude adjacent topics', () => {

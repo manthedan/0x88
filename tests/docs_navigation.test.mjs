@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { activeDocsTopic, docsSearchShortcut } from '../src/lib/docsNavigation.ts';
+import { activeDocsTopic, docsSearchShortcut, toggleDocsGroup } from '../src/lib/docsNavigation.ts';
 
 test('search hints match Mac, Windows and Linux keyboards, including a safe unknown default', () => {
   for (const platform of ['MacIntel', 'iPad', 'iPhone']) {
@@ -9,6 +9,12 @@ test('search hints match Mac, Windows and Linux keyboards, including a safe unkn
   for (const platform of ['Win32', 'Linux x86_64', '']) {
     assert.deepEqual(docsSearchShortcut(platform), { text: 'Ctrl K', label: 'Control K' });
   }
+});
+
+test('topic disclosures switch groups, collapse the open group and reopen from all closed', () => {
+  assert.equal(toggleDocsGroup('pages', 'troubleshooting'), 'troubleshooting');
+  assert.equal(toggleDocsGroup('troubleshooting', 'troubleshooting'), null);
+  assert.equal(toggleDocsGroup(null, 'engines'), 'engines');
 });
 
 const headings = [

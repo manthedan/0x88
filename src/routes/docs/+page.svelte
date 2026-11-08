@@ -2,7 +2,7 @@
 import { onMount, tick } from 'svelte';
 import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
-import { activeDocsTopic, docsSearchShortcut } from '$lib/docsNavigation';
+import { activeDocsTopic, docsSearchShortcut, toggleDocsGroup } from '$lib/docsNavigation';
 
 const title = '0x88 Chess — documentation';
 const description = 'How to use the 0x88 browser chess workspaces, fix WebGPU and download problems, and find each engine’s license and corresponding source.';
@@ -18,7 +18,7 @@ const toc: TocGroup[] = [
     label: 'Get started',
     id: 'pages',
     items: [
-      { id: 'pages-analysis', label: 'Analyse a position' },
+      { id: 'pages-analysis', label: 'Analyze a position' },
       { id: 'pages-arena', label: 'Run an engine match', children: [{ id: 'following-match', label: 'Following the match' }] },
       { id: 'pages-play', label: 'Play a game' },
       { id: 'human-vs-computer', label: 'Human-like opponents', children: [{ id: 'model-boundaries', label: 'Model boundaries' }] },
@@ -110,7 +110,7 @@ let activeId = outline[0].link.id;
 $: activeTopId = byId.get(activeId)?.top.id ?? '';
 $: activeLabel = byId.get(activeId)?.link.label ?? 'Contents';
 $: activeGroupId = byId.get(activeId)?.group.id ?? '';
-let expandedGroups: Record<string, boolean> = { pages: true, troubleshooting: true };
+let expandedGroupId: string | null = 'pages';
 let headerHeight = 64;
 let rail: HTMLElement | null = null;
 let railList: HTMLElement | null = null;
@@ -127,7 +127,7 @@ function updateActive(): void {
   if (current !== activeId) {
     activeId = current;
     const groupId = byId.get(current)?.group.id;
-    if (groupId) expandedGroups = { ...expandedGroups, [groupId]: true };
+    if (groupId) expandedGroupId = groupId;
     void tick().then(keepActiveVisible);
   }
 }
@@ -136,10 +136,11 @@ function keepActiveVisible(): void {
   if (!railList || (narrow && !tocOpen)) return;
   const link = railList.querySelector<HTMLElement>('a[aria-current="location"]');
   if (!link) return;
-  const box = railList.getBoundingClientRect();
+  const scroller = narrow ? railList : link.closest<HTMLElement>('.toc-group > ul') ?? railList;
+  const box = scroller.getBoundingClientRect();
   const item = link.getBoundingClientRect();
-  if (item.top < box.top + 8) railList.scrollTop -= box.top + 8 - item.top;
-  else if (item.bottom > box.bottom - 8) railList.scrollTop += item.bottom - box.bottom + 8;
+  if (item.top < box.top + 8) scroller.scrollTop -= box.top + 8 - item.top;
+  else if (item.bottom > box.bottom - 8) scroller.scrollTop += item.bottom - box.bottom + 8;
 }
 
 // ---- mobile contents sheet --------------------------------------------------
@@ -418,14 +419,14 @@ onMount(() => {
     {:else}
       <nav class="toc-groups" aria-label="On this page" bind:this={railList}>
         {#each toc as group (group.label)}
-          <div class="toc-group">
+          <div class="toc-group" class:expanded={expandedGroupId === group.id}>
             <div class="toc-group-heading" class:current-group={group.id === activeGroupId}>
               <a class="toc-group-label" href={`#${group.id}`} class:active={group.id === activeId} aria-current={group.id === activeId ? 'location' : group.id === activeGroupId ? 'true' : undefined} on:click={closeSheet}>{group.label}</a>
-              <button type="button" class="group-toggle" aria-label={`${expandedGroups[group.id] ? 'Hide' : 'Show'} ${group.label} topics`} aria-expanded={!!expandedGroups[group.id]} aria-controls={`toc-${group.id}`} on:click={() => (expandedGroups = { ...expandedGroups, [group.id]: !expandedGroups[group.id] })}>
+              <button type="button" class="group-toggle" aria-label={`${expandedGroupId === group.id ? 'Hide' : 'Show'} ${group.label} topics`} aria-expanded={expandedGroupId === group.id} aria-controls={`toc-${group.id}`} on:click={() => (expandedGroupId = toggleDocsGroup(expandedGroupId, group.id))}>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
               </button>
             </div>
-            <ul id={`toc-${group.id}`} hidden={!expandedGroups[group.id]}>
+            <ul id={`toc-${group.id}`} hidden={expandedGroupId !== group.id}>
               {#each group.items as item (item.id)}
                 <li>
                   <a href={`#${item.id}`} class:active={item.id === activeId} class:in-active={item.id === activeTopId} aria-current={item.id === activeId ? 'location' : undefined} on:click={closeSheet}>{item.label}</a>
@@ -461,17 +462,17 @@ onMount(() => {
 <!-- ===== GET STARTED: THE WORKSPACES ===== -->
 <section id="pages">
   <h2>Get started <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Analysis, Arena and Play run in your browser; each engine downloads on first use and is reused afterwards.</p>
+  <p class="lead">All workspaces run locally. Engines download on first use and are reused.</p>
 
   <div class="page-block">
     <div class="task-heading">
-      <h3 id="pages-analysis" aria-labelledby="analysis-title"><span id="analysis-title">Analyse a position</span><a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
+      <h3 id="pages-analysis" aria-labelledby="analysis-title"><span id="analysis-title">Analyze a position</span><a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
       <a class="open-link" href="/app/analysis/">Open Analysis</a>
     </div>
     <p>Run several engines on the same position and compare their best moves, evaluations and lines.</p>
     <ol class="steps">
       <li>Open Analysis. It starts with Lc0 (Small net: a neural model) and Stockfish Lite on the starting position.</li>
-      <li>Make board moves, or press <strong>Load</strong> to paste a game record (PGN) or position (FEN).</li>
+      <li>Make board moves, or press <strong>Load</strong> (on mobile, <strong>Board tools ••• → Load</strong>) to paste a game record (PGN) or position (FEN).</li>
       <li>Press <strong>Add engine</strong> to add another engine. Use <strong>Engines</strong> to pick each engine's net or build and its search limit, which is visits (search iterations) or depth depending on the engine.</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
     </ol>
@@ -525,7 +526,7 @@ onMount(() => {
       <li>Choose White, Black or Random, then press <strong>Play</strong>.</li>
       <li>Take back or resign during the game. Afterwards, copy or download the PGN, or press <strong>Analyze</strong> to open the game in Analysis.</li>
     </ol>
-    <p>To practise a position, select it in Analysis and choose <strong>Play from here</strong> below the board. In Play, choose your colour (the side to move is selected) and your last-used Maia3 rating or engine, then press <strong>Play</strong>. The preceding moves stay in the game record; takebacks stop at the position you chose. Copy or download PGN to keep the full history, including a FEN/SetUp header when the game began from a custom position. <strong>Analyze</strong> opens the continued game in Analysis.</p>
+    <p>To practise a position, select it in Analysis and choose <strong>Play from here</strong> below the board (on mobile, in <strong>Board tools •••</strong>). In Play, choose your colour (the side to move is selected) and your last-used Maia3 rating or engine, then press <strong>Play</strong>. The preceding moves stay in the game record; takebacks stop at the position you chose. Copy or download PGN to keep the full history, including a FEN/SetUp header when the game began from a custom position. <strong>Analyze</strong> opens the continued game in Analysis.</p>
     <p>Finished positions cannot be continued. Queen-odds opponents are unavailable for imported positions because they require their own starting position. Before playing, choose <strong>Use starting position</strong> to return to a normal setup.</p>
     <p><strong>Continue after a reload:</strong> Play saves the current game and opponent settings separately from Analysis. Reopen Play to resume; if it is the opponent’s turn, it moves automatically. Completed games reopen as completed. <strong>Start new</strong> clears the restored game.</p>
     <p>Autosaves stay in this browser and can be lost if storage is blocked, full or cleared. Keep important games with <strong>Copy PGN</strong> or the PGN download. Opening the same workspace in several tabs shares one save slot; the last tab to save wins.</p>
@@ -606,7 +607,7 @@ onMount(() => {
 
   <div class="analysis-topic">
     <h3 id="share-restore">Share and restore your work <a class="anchor-link" href="#share-restore" aria-label="Link to this section">#</a></h3>
-    <p>Analysis automatically saves the game tree, variations, comments and selected move on this device so you can reload or reopen it to continue. <strong>Start new</strong> in the restore notice or <strong>Load → Reset</strong> clears the save; loading a PGN or FEN replaces it. Under the board’s <strong>Copy</strong> button, <strong>Copy link</strong> shares the current FEN only, without moves, variations or engine settings, and opening a position link takes priority over the saved game.</p>
+    <p>Analysis automatically saves the game tree, variations, comments and selected move on this device so you can reload or reopen it to continue. <strong>Start new</strong> in the restore notice or <strong>Load → Reset</strong> clears the save; loading a PGN or FEN replaces it. On mobile, open <strong>Board tools •••</strong> for <strong>Load</strong> and <strong>Copy</strong>. Under the board’s <strong>Copy</strong> button, <strong>Copy link</strong> shares the current FEN only, without moves, variations or engine settings, and opening a position link takes priority over the saved game.</p>
   </div>
 
   <div class="analysis-topic">
@@ -626,7 +627,7 @@ onMount(() => {
     <h3 id="manage-collections">Manage game collections <a class="anchor-link" href="#manage-collections" aria-label="Link to this section">#</a></h3>
     <p>Use <strong>Collection actions</strong> in the Opening explorer to manage and back up your imported games.</p>
     <ol>
-      <li>Rename, duplicate or delete a collection, or download its PGN.</li>
+      <li>Choose <strong>Rename collection…</strong>, edit the name and press <strong>Save collection name</strong>. You can also duplicate or delete a collection, or download its PGN.</li>
       <li>Make a JSON backup of selected collections or all collections. Restore keeps existing collections and rebuilds indexes from PGN.</li>
       <li>If storage is blocked, use <strong>Explore without saving</strong> and download your PGN.</li>
     </ol>
@@ -670,7 +671,7 @@ onMount(() => {
       <li>Follow each engine’s separate progress and failures. <strong>Cancel</strong> retains completed results.</li>
       <li>Click a moment to visit the board, or use <strong>Compare</strong>, <strong>Human</strong> or <strong>Play from here</strong>.</li>
     </ol>
-    <p><strong>Interpretation:</strong> Severity comes from the baseline review; move agreement is separate. Maia3 predicts human choices, not accuracy.</p>
+    <p><strong>Interpretation:</strong> The <strong>Original review</strong> sets severity; move agreement is separate. Maia3 predicts human choices, not accuracy.</p>
     <p><strong>Refreshing:</strong> Mainline or settings changes mark the report stale. Compare again to refresh it.</p>
   </div>
 
@@ -1222,7 +1223,7 @@ onMount(() => {
   .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
 
   /* ---- layout: contents rail | intro + content ---- */
-  .doc-body{font-size:16px}
+  .doc-body{font-size:16px; --docs-secondary:color-mix(in srgb, var(--text) 80%, var(--ink) 20%)}
   .doc-body .doc-grid{
     padding:36px 28px 64px;
     display:grid; grid-template-columns:248px minmax(0,70ch);
@@ -1233,7 +1234,7 @@ onMount(() => {
   .doc-intro h1{font-size:44px; margin:0 0 10px; line-height:1.1; letter-spacing:-.015em}
   .intro-lede{margin:0; color:var(--ink-soft); font-size:16.5px; max-width:66ch; line-height:1.6}
   .intro-help{margin:10px 0 0; color:var(--text); font-size:14px; line-height:1.55; max-width:66ch}
-  .intro-help a{text-decoration:underline; text-underline-offset:3px}
+  .intro-help a{text-decoration:underline; text-underline-offset:3px; white-space:nowrap}
   .doc-content{grid-area:content; min-width:0}
 
   /* Wide tables scroll inside their own box instead of widening the page. */
@@ -1262,7 +1263,7 @@ onMount(() => {
   .search-shortcuts{position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:4px; pointer-events:none}
   .search kbd{
     min-width:18px; padding:1px 4px; border:1px solid var(--rule-strong); border-radius:4px;
-    background:var(--panel); color:var(--text); font-family:var(--mono); font-size:12px; text-align:center;
+    background:var(--panel); color:var(--docs-secondary); font-family:var(--mono); font-size:12px; text-align:center;
   }
   .search input:focus ~ .search-shortcuts{display:none}
   .toc-groups,.results{overflow-y:auto; min-height:0; padding-right:6px; margin-right:-6px}
@@ -1284,7 +1285,7 @@ onMount(() => {
   .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:1px}
   .toc-groups a{
     display:flex; align-items:center; min-height:36px; padding:7px 10px; border-radius:6px;
-    color:var(--text); text-decoration:none; line-height:1.35;
+    color:var(--docs-secondary); text-decoration:none; line-height:1.35;
   }
   .toc-groups a:hover{color:var(--ink); background:var(--rule-soft)}
   .toc-groups a.in-active{color:var(--ink); font-weight:600}
@@ -1292,6 +1293,15 @@ onMount(() => {
   .toc-group > ul{padding-left:10px}
   .toc ul ul{margin:0 0 0 12px}
   .toc ul ul a{font-size:14px}
+
+  /* Keep every group heading visible; only a long topic list needs to scroll. */
+  @media(min-width:861px){
+    .toc-groups{display:flex; flex-direction:column; overflow:hidden}
+    .toc-group{display:flex; flex-direction:column; flex:0 0 auto; min-height:0}
+    .toc-group.expanded{flex:0 1 auto; min-height:40px}
+    .toc-group-heading{flex:0 0 auto}
+    .toc-group > ul{min-height:0; overflow-y:auto}
+  }
 
   /* ---- search results ---- */
   .results-count,.no-results{margin:0 0 8px; padding:0 4px; color:var(--text-soft); font-size:12.5px}
@@ -1380,12 +1390,14 @@ onMount(() => {
     width:24px; height:24px; border-radius:50%;
     display:inline-flex; align-items:center; justify-content:center;
     background:color-mix(in srgb, var(--ink) 7%, var(--panel)); border:1px solid color-mix(in srgb, var(--ink) 24%, var(--panel));
-    color:var(--ink-soft); font:650 13px/1 var(--sans);
+    color:var(--ink-body-strong); font:650 13px/1 var(--sans);
   }
   .doc-content .open-link{
     display:inline-flex; align-items:center; gap:8px; min-height:40px;
     padding:8px 14px; border:1px solid var(--border-input-hover); border-radius:var(--radius-sm);
-    background:transparent; color:var(--ink-soft); font-weight:600; font-size:14px;
+    /* Same neutral surface and ink as the workspace move-navigation buttons. */
+    background:var(--panel-2); color:var(--ink); font-weight:600; font-size:14px;
+    border-color:color-mix(in srgb, var(--ink) 40%, var(--panel-2));
     text-decoration:none;
   }
   .doc-content .open-link:hover{border-color:var(--accent); background:var(--panel-2); color:var(--ink); text-decoration:none}
