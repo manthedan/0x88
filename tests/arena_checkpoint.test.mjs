@@ -4,9 +4,11 @@ import { boardToFen, START_FEN } from '../src/chess/board.ts';
 import { gameTreeToPgn, parsePgnGames } from '../src/chess/pgn.ts';
 import {
   ARENA_CONTROL_IDS,
+  arenaCheckpointTokenMatches,
   arenaCompletedTree,
   arenaRemainingIndices,
   arenaRunIdentity,
+  claimArenaCheckpoint,
   commitArenaGame,
   createArenaCheckpoint,
   decodeArenaCheckpoint,
@@ -163,6 +165,29 @@ test('resume uses the completed-index set, including holes left by concurrent ga
   );
   assert.equal(checkpoint.completed.length, 12);
   assert.deepEqual(arenaRemainingIndices(decodeArenaCheckpoint(structuredClone(checkpoint))), []);
+});
+
+test('resume rotates ownership atomically without changing completed-game counts or schedule identity', () => {
+  const initial = fixture();
+  const saved = commitArenaGame(initial, completed(initial, 0));
+  const oldToken = { runId: saved.runId, revision: saved.revision };
+  const claimed = claimArenaCheckpoint(saved);
+  const token = { runId: claimed.runId, revision: claimed.revision };
+  assert.notEqual(claimed.runId, saved.runId);
+  assert.equal(claimed.revision, saved.revision);
+  assert.equal(claimed.completed, saved.completed);
+  assert.equal(claimed.identity, saved.identity);
+  assert.deepEqual(arenaRemainingIndices(claimed), [1]);
+  assert.deepEqual(decodeArenaCheckpoint(structuredClone(claimed)), claimed);
+  assert.equal(arenaCheckpointTokenMatches(saved, oldToken), true);
+  // Both replacement writes and Discard use this predicate inside their transaction.
+  assert.equal(arenaCheckpointTokenMatches(claimed, oldToken), false);
+  assert.equal(arenaCheckpointTokenMatches(claimed, token), true);
+  assert.equal(arenaCheckpointTokenMatches(claimed, null), false);
+  assert.equal(arenaCheckpointTokenMatches(undefined, null), true);
+  const finished = commitArenaGame(claimed, completed(claimed, 1));
+  assert.equal(arenaCheckpointTokenMatches(finished, token), false);
+  assert.equal(finished.runId, claimed.runId);
 });
 
 test('duplicate completion is idempotent and out-of-range completion is rejected', () => {

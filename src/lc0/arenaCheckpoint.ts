@@ -95,6 +95,7 @@ export interface ArenaCompletedGame {
 export interface ArenaCheckpoint {
   kind: '0x88-arena-run';
   version: 1;
+  /** Persistence ownership generation, rotated on resume; schedule/seat identities stay stable. */
   runId: string;
   revision: number;
   createdAt: number;
@@ -108,6 +109,18 @@ export interface ArenaCheckpoint {
 export type ArenaCheckpointToken = Pick<ArenaCheckpoint, 'runId' | 'revision'>;
 export class ArenaCheckpointConflictError extends Error {}
 export class ArenaCheckpointInvalidError extends Error {}
+
+/** Claim a new persistence generation without conflating ownership with games played. */
+export function claimArenaCheckpoint(checkpoint: ArenaCheckpoint): ArenaCheckpoint {
+  return { ...checkpoint, runId: crypto.randomUUID(), updatedAt: Date.now() };
+}
+
+export function arenaCheckpointTokenMatches(current: unknown, expected: ArenaCheckpointToken | null): boolean {
+  if (!expected) return current === undefined;
+  if (!current || typeof current !== 'object') return false;
+  const token = current as Partial<ArenaCheckpointToken>;
+  return token.runId === expected.runId && token.revision === expected.revision;
+}
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value, (_, entry) =>
@@ -351,7 +364,7 @@ export async function saveArenaCheckpoint(checkpoint: ArenaCheckpoint, expected:
       let conflict = false;
       request.onsuccess = () => {
         const current = request.result;
-        if (expected ? current?.runId !== expected.runId || current?.revision !== expected.revision : current !== undefined) {
+        if (!arenaCheckpointTokenMatches(current, expected)) {
           conflict = true;
           tx.abort();
         } else store.put(checkpoint, 'current');
@@ -378,7 +391,7 @@ export async function discardArenaCheckpoint(expected: ArenaCheckpointToken | nu
       let conflict = false;
       request.onsuccess = () => {
         const current = request.result;
-        if (expected) conflict = current?.runId !== expected.runId || current?.revision !== expected.revision;
+        if (expected) conflict = !arenaCheckpointTokenMatches(current, expected);
         else if (current !== undefined) {
           try {
             decodeArenaCheckpoint(current);

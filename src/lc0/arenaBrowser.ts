@@ -36,7 +36,7 @@ import {
 } from './arenaCpuGame.ts';
 import {
   ARENA_CONTROL_IDS, ArenaCheckpointConflictError, ArenaCheckpointInvalidError, type ArenaCheckpoint, type ArenaCheckpointToken, type ArenaChartSample,
-  type ArenaCompletedGame, type ArenaCheckpointConfig, type ArenaRootChartSample, arenaCompletedTree, arenaRemainingIndices, commitArenaGame,
+  type ArenaCompletedGame, type ArenaCheckpointConfig, type ArenaRootChartSample, arenaCompletedTree, arenaRemainingIndices, claimArenaCheckpoint, commitArenaGame,
   createArenaCheckpoint, discardArenaCheckpoint, hydrateArenaSchedule, loadArenaCheckpoint, normalizeArenaControls, saveArenaCheckpoint,
 } from './arenaCheckpoint.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
@@ -4010,7 +4010,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     return;
   }
 
-  const runCheckpoint = resume ?? createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);
+  const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);
   // Establish the slot before any games run. A stale tab must not overwrite it.
   try {
     await saveArenaCheckpoint(runCheckpoint, checkpointToken);
