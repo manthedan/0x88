@@ -5420,7 +5420,8 @@ function wireEvents() {
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = (event: KeyboardEvent) => {
     if (retry) return;
-    if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
+    // The results scroller owns arrow keys; scrolling must never change the game.
+    if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, #engineSummaries, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
     if (event.key === 'ArrowLeft') {
       tree.back();
       afterNavigation();
