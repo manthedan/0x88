@@ -4958,7 +4958,8 @@ function wireEvents() {
   // "Load" goes to the one paste box when it is on screen (empty game); otherwise it opens the full panel.
   el('openPosition').addEventListener('click', () => {
     const quick = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]');
-    if (quick && quick.getClientRects().length && !positionTools.open) {
+    if (quick && !positionTools.open) {
+      setView(el('movesTab') as HTMLButtonElement);
       quick.focus({ preventScroll: true });
       quick.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       return;

@@ -279,5 +279,5 @@ export function analysisMoveMarkup(root: GameNode, current: GameNode): string {
     flush();
     return html;
   };
-  return root.children[0] ? branch(root.children[0], true) : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game or position below.</p><textarea class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" aria-label="Paste a PGN game or a FEN position" placeholder="Paste a PGN game or a FEN position"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load</button><span class="quick-pgn-hint">PGN or FEN, detected automatically</span></div></div>';
+  return root.children[0] ? branch(root.children[0], true) : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game or position below.</p><label for="quickPgn">PGN game or FEN position</label><textarea id="quickPgn" class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" placeholder="Paste your game or position"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load</button><span class="quick-pgn-hint">PGN or FEN, detected automatically</span></div></div>';
 }

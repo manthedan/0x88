@@ -948,12 +948,16 @@ onMount(() => {
   :global(.missing-ply){background:transparent; border:0}
   :global(.history-empty){display:grid; gap:10px; margin:0; padding:18px 16px; font:13.5px/1.55 var(--sans); color:var(--muted)}
   :global(.history-empty p){margin:0}
+  :global(.history-empty label){color:var(--ink); font-weight:600}
+  .analysis-workspace .app-sidebar:has(:global(.history-empty)){height:auto}
+  .analysis-workspace .analysis-content>.history-panel:has(:global(.history-empty)){flex:0 0 auto; min-height:0}
+  .history-panel :global(.movelist:has(.history-empty)){flex:0 0 auto}
   :global(.history-empty strong){color:var(--ink); font-weight:650}
   :global(.quick-pgn){width:100%; min-height:72px; resize:vertical; padding:8px 10px; border:1px solid var(--border-input); border-radius:7px; background:var(--panel-inset); color:var(--ink); font:13px/1.45 var(--mono)}
   :global(.quick-pgn::placeholder){font-family:var(--sans); color:var(--muted)}
   :global(.quick-pgn-actions){display:flex; align-items:center; gap:14px}
   :global(.quick-pgn-hint){font-size:13px; color:var(--muted)}
-  :global(.quick-pgn-load){min-height:32px; padding:0 14px; border:1px solid var(--border-input-hover); border-radius:7px; background:var(--panel-2); color:var(--ink); font:600 13px var(--sans)}
+  :global(.quick-pgn-load){min-height:44px; padding:0 18px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:var(--accent-ink); font:650 14px var(--sans)}
   /* Rare long SAN + large eval pairs wrap the score rather than spilling into the next ply. */
   :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:space-between; gap:0 5px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}

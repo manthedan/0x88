@@ -191,7 +191,8 @@ test('Black-to-move FEN history leaves the White ply empty and escapes imported 
   assert.doesNotMatch(html, /<img/);
   const empty = analysisMoveMarkup(new GameTree().root, tree.current);
   assert.match(empty, /No moves yet/);
-  assert.match(empty, /<textarea[^>]+data-quick-pgn/);
+  assert.match(empty, /<label for="quickPgn">PGN game or FEN position<\/label>/);
+  assert.match(empty, /<textarea[^>]+id="quickPgn"[^>]+data-quick-pgn/);
   assert.match(empty, /<button[^>]+data-quick-pgn-load>Load<\/button>/);
   assert.match(empty, /PGN or FEN/);
   assert.ok(looksLikeFen('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'));
