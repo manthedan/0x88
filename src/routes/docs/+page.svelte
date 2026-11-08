@@ -459,8 +459,8 @@ onMount(() => {
   {@const previous = toc[position - 1]}
   {@const next = toc[position + 1]}
   <nav class="section-nav" aria-label={`Continue from ${toc[position].label}`}>
-    {#if previous}<a href={`#${previous.id}`}><span class="section-direction">Previous:</span><span>{previous.label}</span></a>{/if}
-    {#if next}<a class="next-section" href={`#${next.id}`}><span class="section-direction">Next:</span><span>{next.label}</span></a>{/if}
+    {#if previous}<a href={`#${previous.id}`}>Previous: {previous.label}</a>{/if}
+    {#if next}<a class="next-section" href={`#${next.id}`}>Next: {next.label}</a>{/if}
   </nav>
 {/snippet}
 
@@ -1384,11 +1384,10 @@ onMount(() => {
     text-decoration:none;
   }
   .doc-content .open-link:hover{border-color:var(--accent); background:var(--panel-2); color:var(--ink); text-decoration:none}
-  .section-nav{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:32px; padding-top:24px; border-top:1px solid var(--rule-strong)}
-  .section-nav a{display:grid; gap:4px; padding:14px 16px; border:1px solid var(--rule-strong); border-radius:var(--radius); color:var(--ink); font-size:15px; background:var(--panel); text-decoration:none}
-  .section-nav a:hover{border-color:var(--accent); background:var(--panel-2)}
-  .section-nav .next-section{grid-column:2; text-align:right}
-  .section-direction{font-size:12px; font-weight:500; color:var(--text-soft)}
+  .section-nav{display:flex; flex-wrap:wrap; gap:8px 24px; margin-top:32px; padding-top:16px; border-top:1px solid var(--rule-strong)}
+  .section-nav a{display:flex; align-items:center; min-height:44px; color:var(--accent); font-size:15px; text-decoration:underline; text-underline-offset:3px}
+  .section-nav a:hover{color:var(--ink)}
+  .section-nav .next-section{margin-left:auto}
 
   /* ---- troubleshooting ---- */
   .trouble{padding:4px 0 8px}
@@ -1571,8 +1570,8 @@ onMount(() => {
     .doc-content .open-link{min-height:44px; padding:8px 10px; font-size:13px}
     .doc-content .steps{gap:10px}
     .steps li{padding-left:32px}
-    .section-nav{gap:8px}
-    .section-nav a{padding:12px; font-size:14px}
+    .section-nav{gap:0 20px}
+    .section-nav a{font-size:14px}
     .callout{padding:16px}
   }
 </style>

@@ -146,5 +146,8 @@ test('each major section ends with sequential navigation driven by the same outl
   }
   assert.match(source, /const previous = toc\[position - 1\]/);
   assert.match(source, /const next = toc\[position \+ 1\]/);
+  assert.match(source, /Next: \{next.label\}/);
+  assert.match(source, /Previous: \{previous.label\}/);
+  assert.doesNotMatch(source, /class="section-direction"|Back to contents/, 'the existing sticky Contents bar is the mobile return path');
   assert.doesNotMatch(source, /class="quick-links"/);
 });
