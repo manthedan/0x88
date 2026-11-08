@@ -81,8 +81,10 @@ onMount(() => {
       <button id="navForward" type="button" title="Forward (Right)" aria-label="Go forward one move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 8 7-8 7" /></svg></button>
       <button id="navEnd" type="button" title="End (Down)" aria-label="Go to last move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg></button>
     </div>
-    <div class="board-tools" aria-label="Board tools">
-      <button id="flip" class="tool-button icon-only" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
+    <div id="boardToolDisclosure" class="board-tool-disclosure">
+    <button id="boardToolsButton" class="tool-button board-tools-trigger" type="button" aria-label="Board tools" title="Board tools" aria-controls="boardTools" aria-expanded="false">•••</button>
+    <div id="boardTools" class="board-tools" role="group" aria-label="Board tools">
+      <button id="flip" class="tool-button icon-only" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg><span class="mobile-tool-label">Flip board</span></button>
       <div id="copyTools" class="copy-tools">
       <button id="copyMenuButton" class="tool-button" type="button" aria-expanded="false" aria-controls="copyMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5H4v12h4"/></svg>Copy<svg class="copy-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
       <div id="copyMenu" class="copy-menu" role="group" aria-label="Copy position or game" hidden>
@@ -93,6 +95,7 @@ onMount(() => {
       </div>
       <button id="playFromHere" class="tool-button" type="button" title="Continue this position against Maia3 or an engine" aria-describedby="playFromHereReason">Play from here</button>
       <button id="openPosition" class="tool-button position-toggle" type="button" aria-controls="positionTools" aria-expanded="false" title="Load a game or position (PGN or FEN)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14"/></svg><span class="tool-label">Load</span></button>
+    </div>
     </div>
     </div>
     <p id="playFromHereReason" class="small" hidden></p>
@@ -414,6 +417,9 @@ onMount(() => {
   .analysis-workspace .section-block>summary::before{font-size:12px}
   /* Tools stay secondary to the wide move-navigation buttons. */
   .board-tools{display:flex; align-items:stretch; gap:6px; flex:0 0 auto}
+  .board-tools:global([hidden]){display:none}
+  .board-tool-disclosure{display:contents}
+  .board-tools-trigger, .mobile-tool-label{display:none}
   .tool-button{display:inline-flex; align-items:center; justify-content:center; gap:6px; height:100%; min-height:0; padding:0 11px; border-radius:7px; border:1px solid var(--border-input); background:transparent; color:var(--ink); font:600 13px var(--sans); white-space:nowrap}
   .tool-button:hover:not(:disabled){background:var(--panel-2); color:var(--ink)}
   .tool-button.icon-only{width:40px; padding:0}
@@ -1021,10 +1027,17 @@ onMount(() => {
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
     .evalbar .mid{top:0; bottom:0; left:50%; width:2px; height:auto}
     .board-panel :global(#ground){border-radius:3px}
-    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:8px; margin:6px 0 0}
+    .board-toolbar{display:grid; grid-template-columns:minmax(0,1fr) 48px; height:44px; gap:6px; margin:6px 0 0}
     .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
-    .board-tools{display:grid; grid-template-columns:44px minmax(0,1fr) auto minmax(0,1fr); gap:6px; height:44px}
+    .board-tool-disclosure{display:block; position:relative}
+    .board-tools-trigger{display:flex; width:48px!important; height:44px; font-size:18px!important; letter-spacing:1px}
+    .mobile-tool-label{display:inline}
+    .board-tools{position:absolute; z-index:25; bottom:calc(100% + 6px); right:0; display:grid; grid-template-columns:1fr; gap:3px; width:230px; height:auto; padding:6px; border:1px solid var(--border-input); border-radius:8px; background:var(--panel); box-shadow:0 8px 24px #0004}
+    .board-tools .tool-button{justify-content:flex-start; min-height:44px; width:100%; border-color:transparent; font-size:14px}
+    .board-tools .copy-tools{display:block}
+    .board-tools .copy-menu{position:static; width:auto; margin-left:14px; box-shadow:none; border:0; border-radius:0; border-top:1px solid var(--rule)}
+    .board-tools #openPosition .tool-label::after{content:' game or position'}
     .tool-button, .tool-button.icon-only{width:auto; padding:0 8px; gap:5px; font-size:12.5px}
     .copy-button{min-width:0}
     .copy-button svg{width:14px; height:14px; flex-basis:14px}
@@ -1044,7 +1057,7 @@ onMount(() => {
     .app-sidebar #message{margin:4px 10px}
     :global(.analysis-workspace #ground coords){font-size:11px}
     :global(.insight-action){min-height:44px; padding:6px 10px; gap:3px}
-    :global(.insight-headline){font-size:14px}
+    :global(.insight-headline){font-size:16px}
     :global(.insight-spread){font-size:13px}
     :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 36px; gap:5px; min-height:40px; padding:2px 0 0 7px}
     :global(.engine-summary-name){min-height:38px; gap:7px}
@@ -1054,7 +1067,8 @@ onMount(() => {
     :global(.engine-summary-score){min-width:56px; font-size:16px; gap:4px}
     :global(.engine-gear){width:36px; height:40px}
     .workbench-tabs{padding:0 2px; gap:0}
-    .workbench-tabs [role=tab]{flex:1 1 auto; justify-content:center; padding:0 6px; min-height:42px}
+    .workbench-tabs [role=tab]{flex:1 1 0; justify-content:center; padding:0 4px; min-height:44px; font-size:13px}
+    #enginesTab .engine-count{display:none}
     .review-panel{padding:10px}
     .review-settings select, .review-actions button, .review-exports button, .review-moments-heading button, :global(.review-critical button){min-height:40px}
     .tab-badge{display:none}
@@ -1080,7 +1094,9 @@ onMount(() => {
   :global(.analysis-workspace[data-retrying] #analysisRestoreNotice),
   :global(.analysis-workspace[data-retrying]) .nav{display:none!important}
   :global(.analysis-workspace[data-retrying]) .board-toolbar{display:flex; justify-content:flex-end; height:40px}
-  :global(.analysis-workspace[data-retrying]) .board-tools{display:flex; height:40px}
+  :global(.analysis-workspace[data-retrying]) .board-tool-disclosure{display:contents}
+  :global(.analysis-workspace[data-retrying]) #boardToolsButton{display:none}
+  :global(.analysis-workspace[data-retrying]) .board-tools{display:flex; position:static; width:auto; height:40px; padding:0; border:0; background:transparent; box-shadow:none}
   :global(.analysis-workspace[data-retrying]) #flip{width:40px}
   :global(.analysis-workspace[data-retrying]) .app-sidebar{display:flex; flex-direction:column}
   :global(.analysis-workspace[data-retrying]) #analysisContent{display:flex; flex-direction:column}
