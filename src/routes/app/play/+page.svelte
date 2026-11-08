@@ -156,7 +156,7 @@ onMount(() => {
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg>
         </button>
       </div>
-      <form id="moveForm" class="move-form" autocomplete="off">
+      <form id="moveForm" class="move-form" autocomplete="off" novalidate>
         <label for="moveInput" class="visually-hidden">Type a move</label>
         <input id="moveInput" type="text" spellcheck="false" autocapitalize="off" placeholder="Type a move" title="Enter SAN (Nf3) or UCI (g1f3), then press Enter. Arrow keys browse moves." aria-describedby="boardInstructions" />
       </form>
