@@ -109,7 +109,7 @@ let activeId = outline[0].link.id;
 $: activeTopId = byId.get(activeId)?.top.id ?? '';
 $: activeLabel = byId.get(activeId)?.link.label ?? 'Contents';
 $: activeGroupId = byId.get(activeId)?.group.id ?? '';
-let expandedGroups: Record<string, boolean> = { pages: true };
+let expandedGroups: Record<string, boolean> = { pages: true, troubleshooting: true };
 let headerHeight = 64;
 let rail: HTMLElement | null = null;
 let railList: HTMLElement | null = null;
@@ -370,6 +370,7 @@ onMount(() => {
 <header class="doc-intro">
   <h1 id="doc-h1">Using 0x88</h1>
   <p class="intro-lede">Workspace guides, troubleshooting, engine details and source links.</p>
+  <p class="intro-help">For help, see <a href="#trouble-webgpu">WebGPU unavailable</a>, <a href="#trouble-downloads">slow or repeated downloads</a>, or <a href="#trouble-cache">clearing downloaded models</a>.</p>
 </header>
 
 <!-- ===== Contents: left rail on desktop, sticky bar + sheet on phones ===== -->
@@ -1229,6 +1230,8 @@ onMount(() => {
   .doc-intro{grid-area:intro; margin-bottom:32px}
   .doc-intro h1{font-size:clamp(30px,4vw,40px); margin:0 0 10px; line-height:1.1; letter-spacing:-.015em}
   .intro-lede{margin:0; color:var(--ink-soft); font-size:16.5px; max-width:66ch; line-height:1.6}
+  .intro-help{margin:10px 0 0; color:var(--text); font-size:14px; line-height:1.55; max-width:66ch}
+  .intro-help a{text-decoration:underline; text-underline-offset:3px}
   .doc-content{grid-area:content; min-width:0}
 
   /* Wide tables scroll inside their own box instead of widening the page. */

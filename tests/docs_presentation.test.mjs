@@ -59,6 +59,13 @@ test('every group has an explicit controlled disclosure, including all ten engin
   assert.match(source, /\.toc ul ul a\{font-size:14px; padding:8px 10px\}/);
 });
 
+test('troubleshooting opens by default and common problems are linked outside Contents', () => {
+  assert.match(source, /expandedGroups: Record<string, boolean> = \{ pages: true, troubleshooting: true \}/);
+  const intro = elements.find(({ node }) => hasClass(node, 'doc-intro')).node;
+  assert.deepEqual(descendants(intro, 'a').map((node) => textAttr(node, 'href')), ['#trouble-webgpu', '#trouble-downloads', '#trouble-cache']);
+  for (const link of descendants(intro, 'a')) assert.ok(byId(textAttr(link, 'href').slice(1)));
+});
+
 test('mobile search is outside the collapsed panel and shares the desktop search focus action', () => {
   const trigger = elements.find(({ node }) => hasClass(node, 'mobile-search'));
   assert.ok(trigger);
