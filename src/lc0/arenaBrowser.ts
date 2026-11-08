@@ -41,7 +41,7 @@ import {
 } from './arenaCheckpoint.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { loadArenaResource } from './arenaResourceLoad.ts';
-import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
+import { arenaChartColorIndex, arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -3433,8 +3433,7 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
 }
 
 function chartColorFor(engineId: string): string {
-  const index = Math.max(0, activeEngineIds.indexOf(engineId));
-  return CHART_COLORS[index % CHART_COLORS.length];
+  return CHART_COLORS[arenaChartColorIndex(gameChartSamples, engineId) % CHART_COLORS.length];
 }
 
 function formatCompactNumber(value: number): string {

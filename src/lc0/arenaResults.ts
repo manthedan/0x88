@@ -11,6 +11,11 @@ export function arenaPointsForSeat(game: { whiteId: string }, seatId: string, re
   return result === '1/2-1/2' ? 0.5 : (game.whiteId === seatId) === (result === '1-0') ? 1 : 0;
 }
 
+/** The selected game's series own their palette; live worker identities are irrelevant on replay. */
+export function arenaChartColorIndex(samples: readonly { engineId: string }[], engineId: string): number {
+  return Math.max(0, [...new Set(samples.map((sample) => sample.engineId))].indexOf(engineId));
+}
+
 /** Capture each CPU game's own search info, even when another game owns the board. */
 export function arenaUciChartSample(
   ply: number,

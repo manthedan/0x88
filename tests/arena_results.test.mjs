@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { arenaOpeningPairs, arenaPointsForSeat, arenaUciChartSample, formatArenaPoints } from '../src/lc0/arenaResults.ts';
+import { arenaChartColorIndex, arenaOpeningPairs, arenaPointsForSeat, arenaUciChartSample, formatArenaPoints } from '../src/lc0/arenaResults.ts';
 import { buildSchedule, roundRobinPairings } from '../src/lc0/tournament.ts';
 
 test('Arena half-point notation includes zero and totals', () => {
@@ -40,6 +40,14 @@ test('duplicate suite slots, repetitions, and same-named seats stay separate', (
   );
   assert.deepEqual([...new Set(pairs.map((pair) => pair.pairingKey))], ['0|1', '0|2', '1|2']);
   assert.ok(pairs.every((pair) => pair.played === 0));
+});
+
+test('restored chart series retain distinct colors independently of live workers', () => {
+  const samples = [{ engineId: 'arena:5:w:0' }, { engineId: 'arena:5:b:1' }, { engineId: 'arena:5:w:0' }];
+  assert.equal(arenaChartColorIndex(samples, 'arena:5:w:0'), 0);
+  assert.equal(arenaChartColorIndex(samples, 'arena:5:b:1'), 1);
+  assert.equal(arenaChartColorIndex(structuredClone(samples), 'arena:5:b:1'), 1);
+  assert.equal(arenaChartColorIndex(samples, 'unknown live worker'), 0);
 });
 
 test('CPU chart metrics come from the private game, without requiring a visible engine output', () => {
