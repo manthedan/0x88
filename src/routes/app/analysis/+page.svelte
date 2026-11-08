@@ -84,12 +84,14 @@ onMount(() => {
       <button id="flip" class="tool-button icon-only" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
       <button id="quickCopyFen" class="tool-button copy-button" type="button" title="Copy this position's FEN" aria-label="Copy FEN"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">FEN</span></button>
       <button id="quickCopyPgn" class="tool-button copy-button" type="button" title="Copy the game as PGN" aria-label="Copy PGN"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">PGN</span></button>
+      <button id="copyLink" class="tool-button copy-button copy-link" type="button" title="Copy a link to this position (FEN only)" aria-label="Copy link"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-5 7-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m0 1 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">Copy link</span></button>
       <button id="openPosition" class="tool-button position-toggle" type="button" aria-controls="positionTools" aria-expanded="false" title="Load a game or position (PGN or FEN)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14"/></svg><span class="tool-label">Load</span></button>
     </div>
     </div>
     <details id="positionTools" class="position-tools">
       <summary hidden>Position input &amp; export</summary>
       <div class="position-tools-body">
+        <div id="positionShareFallback" class="field" hidden><label for="positionShareUrl">Position link (FEN only)</label><input id="positionShareUrl" type="text" readonly /></div>
         <div class="row fen-row">
           <div class="field"><label for="fenInput">FEN</label>
             <input id="fenInput" type="text" spellcheck="false" autocomplete="off" placeholder="Paste a FEN" /></div>
@@ -824,7 +826,8 @@ onMount(() => {
     .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:4px; margin:6px 0 0}
     .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
-    .board-tools{display:grid; grid-template-columns:repeat(4,1fr); gap:4px; height:36px}
+    .board-tools{display:grid; grid-template-columns:36px repeat(4,minmax(0,1fr)); gap:4px; height:36px}
+    .copy-link svg{display:none}
     .tool-button, .tool-button.icon-only{width:auto; padding:0 6px; gap:5px; font-size:12.5px}
     .copy-button{min-width:0}
     .copy-button svg{width:14px; height:14px; flex-basis:14px}

@@ -133,6 +133,7 @@ import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } fro
 import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
+import { positionShareUrl } from './analysisShare.ts';
 import { openingNameAt, type OpeningNameIndex } from './openingNames.ts';
 import {
   berserkCacheKey,
@@ -4277,6 +4278,34 @@ function wireEvents() {
   // One-click export beside the board; feedback is on the button itself and in the live message.
   el('quickCopyFen').addEventListener('click', () => { copyFen(); flashCopied(el('quickCopyFen')); });
   el('quickCopyPgn').addEventListener('click', () => { copyPgn(); flashCopied(el('quickCopyPgn')); });
+  let linkFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
+  mountAbort.signal.addEventListener('abort', () => clearTimeout(linkFeedbackTimer), { once: true });
+  el('copyLink').addEventListener('click', async () => {
+    const signal = mountAbort.signal;
+    const url = positionShareUrl(tree.current.fen, location.href);
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(url);
+      if (isStaleMount(signal)) return;
+      el('positionShareFallback').hidden = true;
+      const button = el('copyLink');
+      const label = button.querySelector('.tool-label')!;
+      clearTimeout(linkFeedbackTimer);
+      button.dataset.copied = 'true';
+      label.textContent = 'Copied';
+      el('message').textContent = 'Position link copied. It contains this position only, not the game or engine settings.';
+      linkFeedbackTimer = setTimeout(() => { delete button.dataset.copied; label.textContent = 'Copy link'; }, 1600);
+    } catch {
+      if (isStaleMount(signal)) return;
+      const input = inputEl('positionShareUrl');
+      input.value = url;
+      el('positionShareFallback').hidden = false;
+      (el('positionTools') as HTMLDetailsElement).open = true;
+      input.focus();
+      input.select();
+      el('message').textContent = 'Clipboard unavailable. Copy the selected position link.';
+    }
+  });
   try {
     const saved: unknown = JSON.parse(storageGet(EXPANDED_LINES_STORAGE_KEY) ?? '[]');
     expandedEngines = new Set(Array.isArray(saved) ? saved.filter((name): name is string => typeof name === 'string') : []);
