@@ -157,7 +157,7 @@ test('Analysis terminology and mobile paths match the workspace without changing
   assert.match(markup(byId('pages-analysis')), /Analyze a position/);
   assert.doesNotMatch(source, /\banalys(?:e|ed|ing)\b/i);
   const gettingStarted = markup(byId('pages'));
-  assert.match(gettingStarted, /Board tools ••• → Load/);
+  assert.match(gettingStarted, /Load sits in the row under the board until a game is loaded, then moves to <strong>Board tools ••• → Load/);
   assert.match(gettingStarted, /Play from here<\/strong> below the board \(on mobile, in <strong>Board tools •••/);
   assert.match(markup(byId('analysis-in-depth')), /Board tools •••<\/strong> for <strong>Load<\/strong> and <strong>Copy/);
   assert.match(markup(byId('analysis-in-depth')), /Rename collection…[\s\S]*Save collection name/);

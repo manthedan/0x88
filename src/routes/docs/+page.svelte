@@ -472,7 +472,7 @@ onMount(() => {
     <p>Run several engines on the same position and compare their best moves, evaluations and lines.</p>
     <ol class="steps">
       <li>Open Analysis. It starts with Lc0 (Small net: a neural model) and Stockfish Lite on the starting position.</li>
-      <li>Make board moves, or press <strong>Load</strong> (on mobile, <strong>Board tools ••• → Load</strong>) to paste a game record (PGN) or position (FEN).</li>
+      <li>Make board moves, or press <strong>Load</strong> to paste a game record (PGN) or position (FEN). On mobile, Load sits in the row under the board until a game is loaded, then moves to <strong>Board tools ••• → Load</strong>.</li>
       <li>Press <strong>Add engine</strong> to add another engine. Use <strong>Engines</strong> to pick each engine's net or build and its search limit, which is visits (search iterations) or depth depending on the engine.</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
     </ol>
