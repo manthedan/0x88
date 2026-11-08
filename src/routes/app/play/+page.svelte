@@ -452,6 +452,9 @@ onMount(() => {
   .play-workspace:global([data-phase=over]) #resign{display:none}
   .play-workspace:global([data-phase=over]) .game-actions{grid-template-columns:1fr 1fr}
 
+  @media (min-width:768px) and (max-width:1200px){
+    .game-actions #newGame{white-space:nowrap; gap:4px; padding-inline:4px}
+  }
   @media (min-width:421px) and (max-width:600px){
     .board-panel{width:min(100%, max(280px, calc(100svh - 490px))); justify-self:center}
   }
