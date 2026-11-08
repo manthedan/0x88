@@ -27,7 +27,7 @@ export async function runArenaSchedule<T>(options: {
   concurrency: number;
   signal: AbortSignal;
   play: (index: number, signal: AbortSignal) => Promise<T>;
-  complete: (index: number, result: T) => void;
+  complete: (index: number, result: T) => void | Promise<void>;
 }): Promise<void> {
   const children = new Set<AbortController>();
   let next = 0;
@@ -47,7 +47,7 @@ export async function runArenaSchedule<T>(options: {
           children.add(child);
           try {
             const result = await options.play(index, child.signal);
-            if (!child.signal.aborted) options.complete(index, result);
+            if (!child.signal.aborted) await options.complete(index, result);
           } catch (error) {
             if (!failed) {
               failed = true;

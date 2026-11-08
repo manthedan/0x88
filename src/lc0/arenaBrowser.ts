@@ -1,4 +1,5 @@
 import { Chessground } from 'chessground';
+import artifactChannel from '../../public/channels/stable.json';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
@@ -33,7 +34,14 @@ import {
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
+import {
+  ARENA_CONTROL_IDS, ArenaCheckpointConflictError, ArenaCheckpointInvalidError, type ArenaCheckpoint, type ArenaCheckpointToken, type ArenaChartSample,
+  type ArenaCompletedGame, type ArenaCheckpointConfig, type ArenaRootChartSample, arenaCompletedTree, arenaRemainingIndices, claimArenaCheckpoint, commitArenaGame,
+  createArenaCheckpoint, discardArenaCheckpoint, hydrateArenaSchedule, loadArenaCheckpoint, normalizeArenaControls, saveArenaCheckpoint,
+} from './arenaCheckpoint.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
+import { loadArenaResource } from './arenaResourceLoad.ts';
+import { arenaChartColorIndex, arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -193,6 +201,7 @@ interface ArenaEngine {
 interface GameRecord {
   pgn: string;
   scheduleIndex: number;
+  result: GameResultCode;
 }
 interface MatchScore {
   a: number;
@@ -402,6 +411,9 @@ interface GameTrail {
   label: string;
   entries: TrailEntry[];
   openingPlies: number;
+  charts: ArenaChartSample[];
+  rootChart?: ArenaRootChartSample;
+  sides?: { whiteName: string; blackName: string };
 }
 let liveTrail: GameTrail | null = null;
 const finishedTrails: GameTrail[] = [];
@@ -417,6 +429,7 @@ let boardBlackId: string | null = null;
 let boardWhiteName: string | null = null;
 let boardBlackName: string | null = null;
 let loadingLc0 = false;
+let lc0LoadAbort: AbortController | null = null;
 let running = false;
 let startPending = false;
 let abort: AbortController | null = null;
@@ -475,14 +488,7 @@ let cpuTournamentBroker: EngineResourceBroker | null = null;
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
-interface GameChartSample {
-  ply: number;
-  engineId: string;
-  engineName: string;
-  whiteScore?: number;
-  moveMs: number;
-  nps?: number;
-}
+type GameChartSample = ArenaChartSample;
 let gameChartSamples: GameChartSample[] = [];
 const CHART_COLORS = [
   'var(--chart-1,#4a7a2a)',
@@ -531,6 +537,15 @@ interface ArenaSearchProgress {
 const arenaSearchProgress = new Map<string, ArenaSearchProgress>();
 let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
+let resultsSchedule: ScheduledGame<ArenaOpening>[] = [];
+let resultsNames = new Map<string, string>();
+let checkpoint: ArenaCheckpoint | null = null;
+let checkpointToken: ArenaCheckpointToken | null = null;
+let checkpointWrites: Promise<void> = Promise.resolve();
+let checkpointProblem = '';
+let checkpointUnreadable = false;
+let checkpointSaving = false;
+let pendingCheckpointSaves = 0;
 const seatRows: EngineRow[] = [
   { family: 'lc0', variant: 'small', strength: 100 },
   { family: 'sf', variant: 'lite', strength: 8 },
@@ -1318,6 +1333,9 @@ interface StripSide {
 
 /** Before any game, the strips preview the selected seats (Engine 1 plays White in game 1). */
 function stripSides(): { w: StripSide; b: StripSide } {
+  if (reviewing && reviewTrail?.sides) return {
+    w: { id: null, name: reviewTrail.sides.whiteName, seat: null }, b: { id: null, name: reviewTrail.sides.blackName, seat: null },
+  };
   if (running || liveTrail || boardWhiteName || boardBlackName) {
     return { w: { id: boardWhiteId, name: boardWhiteName, seat: null }, b: { id: boardBlackId, name: boardBlackName, seat: null } };
   }
@@ -1348,7 +1366,7 @@ function renderStrips(): void {
       ? `<span class="strip-thinking">${colorName} · thinking · move ${board.fullmove}</span>`
       : `${colorName}${side.seat ? ` · ${side.seat}` : ''}`;
     const name = side.name ? displayEngineName(side.name) : 'No engine';
-    const showClock = running || usedMs > 0;
+    const showClock = !reviewing && (running || usedMs > 0);
     node.dataset.turn = String(thinking);
     node.innerHTML =
       `${side.name ? engineAvatarHtml(side.name) : ''}` +
@@ -1426,7 +1444,7 @@ function trailFromTree(tree: GameTree, label: string, openingPlies: number): Gam
   for (const node of tree.mainlineFrom(tree.root)) {
     entries.push({ fen: node.fen, uci: node.move ? moveToUci(node.move) : null, san: node.san });
   }
-  return { label, entries, openingPlies };
+  return { label, entries, openingPlies, charts: [] };
 }
 
 function enterReview(trail: GameTrail, index: number, shapes: DrawShape[] | null = null): void {
@@ -1434,6 +1452,10 @@ function enterReview(trail: GameTrail, index: number, shapes: DrawShape[] | null
   reviewIndex = Math.max(0, Math.min(index, trail.entries.length - 1));
   reviewing = true;
   reviewShapes = shapes;
+  gameChartSamples = trail.charts;
+  el('chartsPanel').hidden = false;
+  renderGameCharts();
+  renderSavedRootChart(trail.rootChart);
   renderBoard();
 }
 
@@ -1462,6 +1484,9 @@ function exitReview(): void {
   reviewing = false;
   reviewTrail = null;
   reviewShapes = null;
+  gameChartSamples = liveTrail?.charts ?? [];
+  renderGameCharts();
+  renderSavedRootChart(liveTrail?.rootChart);
   renderBoard();
 }
 
@@ -1470,9 +1495,10 @@ function renderReviewBar(): void {
   bar.hidden = !reviewing || !reviewTrail;
   if (!bar.hidden && reviewTrail) el('reviewLabel').textContent = `Reviewing ${reviewTrail.label} · ply ${reviewIndex} of ${reviewTrail.entries.length - 1}`;
   const chartPly = inputEl('chartPly');
-  chartPly.max = String(Math.max(0, (liveTrail?.entries.length ?? 1) - 1));
-  chartPly.value = String(reviewing && reviewTrail === liveTrail ? reviewIndex : Number(chartPly.max));
-  chartPly.disabled = !liveTrail || liveTrail.entries.length <= 1;
+  const shownTrail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  chartPly.max = String(Math.max(0, (shownTrail?.entries.length ?? 1) - 1));
+  chartPly.value = String(reviewing ? reviewIndex : Number(chartPly.max));
+  chartPly.disabled = !shownTrail || shownTrail.entries.length <= 1;
   chartPly.setAttribute('aria-valuetext', chartPly.value === '0' ? 'Opening position' : `Ply ${chartPly.value}`);
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   const last = trail ? trail.entries.length - 1 : 0;
@@ -1545,14 +1571,15 @@ function renderMoveStrip(): void {
  * made from and draw the candidate moves — the clicked bar bold, the rest dim.
  */
 function reviewRootChartClick(event: MouseEvent): void {
-  if (!rootChartContext || !liveTrail) return;
+  const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  if (!rootChartContext || !trail) return;
   const svg = el('rootChart').querySelector('svg');
   if (!svg) return;
   // Find the searched position in the current game's trail (latest match wins;
   // exact FEN strings, both produced by boardToFen of the same board).
   let index = -1;
-  for (let i = liveTrail.entries.length - 1; i >= 0; i--) {
-    if (liveTrail.entries[i].fen === rootChartContext.fen) {
+  for (let i = trail.entries.length - 1; i >= 0; i--) {
+    if (trail.entries[i].fen === rootChartContext.fen) {
       index = i;
       break;
     }
@@ -1567,24 +1594,15 @@ function reviewRootChartClick(event: MouseEvent): void {
 
 /** Keyboard and pointer previews share the same candidate/position mapping. */
 function previewRootCandidate(row: number, knownIndex?: number): void {
-  if (!rootChartContext || !liveTrail) return;
-  const index = knownIndex ?? liveTrail.entries.findLastIndex((entry) => entry.fen === rootChartContext!.fen);
+  const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  if (!rootChartContext || !trail) return;
+  const index = knownIndex ?? trail.entries.findLastIndex((entry) => entry.fen === rootChartContext!.fen);
   const clicked = rootChartContext.top[row];
   if (index < 0 || !clicked) return;
   selectEl('rootCandidate').value = String(row);
-  // Promotions can share a from/to pair. Keep the selected candidate, never stack arrows.
-  const seen = new Set<string>();
-  const shapes: DrawShape[] = [clicked, ...rootChartContext.top.slice(0, 5)].filter((child) => {
-    const squares = child.uci.slice(0, 4);
-    if (seen.has(squares)) return false;
-    seen.add(squares);
-    return true;
-  }).map((child) => ({
-    orig: child.uci.slice(0, 2) as Key,
-    dest: child.uci.slice(2, 4) as Key,
-    brush: child.uci === clicked.uci ? 'candidate' : 'candidateDim',
-  }));
-  enterReview(liveTrail, index, shapes);
+  const shapes: DrawShape[] = [{ orig: clicked.uci.slice(0, 2) as Key, dest: clicked.uci.slice(2, 4) as Key, brush: 'candidate' }];
+  enterReview(trail, index, shapes);
+  selectEl('rootCandidate').value = String(row);
 }
 
 function chartDrawnPlies(chartId: 'evalChart' | 'timeChart' | 'npsChart'): number[] {
@@ -1840,6 +1858,7 @@ function renderSeatSelectors(): void {
         return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${engineAvatarHtml(avatarName, 'sm')}<span>${label}</span></span><select class="seat-fam" data-seat="${index}" aria-label="${label} engine">${famSel}</select><select class="seat-var" data-seat="${index}" aria-label="${label} version">${varSel}</select><span class="seat-strength-wrap"><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength (${meta.unit})" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span></span>${remove}</div>`;
       })
       .join('');
+  el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   reconcileActiveRuntimeFallbackWarning();
   if (!running) renderStrips();
   renderSetupSummary();
@@ -1883,7 +1902,7 @@ function isReadyMessage(text: string | null): boolean {
 }
 
 function arenaGamesPerOpening(): number {
-  return Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
+  return Math.max(1, Math.min(20, Math.floor(Number(inputEl('gamesInput').value) || 2)));
 }
 
 /** One-line description of the locked setup, shown in place of the forms while a match runs. */
@@ -1900,7 +1919,7 @@ function renderSetupSummary(): void {
   });
   const who = mode === 'match' ? names.join(' vs ') : `${mode === 'gauntlet' ? 'Gauntlet' : 'Round robin'} · ${names.length} engines`;
   const budget = arenaBudgetMode() === 'movetime' ? `${arenaMovetimeMs()} ms/move` : 'Fixed visits / depth';
-  node.textContent = budget;
+  node.textContent = checkpoint ? checkpoint.config.controls.budgetModeSelect === 'movetime' ? `${checkpoint.config.controls.movetimeInput} ms/move` : 'Fixed visits / depth' : budget;
   let scheduleText: string;
   try {
     const openings = selectedOpenings();
@@ -1921,13 +1940,16 @@ function syncArenaPhase(): void {
   main.dataset.phase = running ? 'running' : 'setup';
   if (running && !wasRunning && window.matchMedia('(max-width: 900px)').matches) main.scrollIntoView({ block: 'start' });
   main.dataset.match = arenaMatchState;
+  (el('setupPane') as HTMLFieldSetElement).disabled = running || startPending;
   if (!running) main.dataset.config = 'closed';
   const editButton = document.getElementById('editSetup');
   if (editButton) editButton.setAttribute('aria-expanded', String(main.dataset.config === 'open'));
-  el('start').textContent = arenaTournamentMode() === 'match' ? 'Start match' : 'Start tournament';
+  el('start').textContent = checkpoint ? 'Start new tournament' : arenaTournamentMode() === 'match' ? 'Start match' : 'Start tournament';
   const title = document.getElementById('scoreboardTitle');
-  if (title) title.textContent = arenaTournamentMode() === 'match' ? 'Match' : arenaTournamentMode() === 'gauntlet' ? 'Gauntlet' : 'Round robin';
+  const displayedMode = checkpoint?.config.mode ?? arenaTournamentMode();
+  if (title) title.textContent = displayedMode === 'match' ? 'Match' : displayedMode === 'gauntlet' ? 'Gauntlet' : 'Round robin';
   renderSetupSummary();
+  renderCheckpointStatus();
 }
 
 function refreshSeatControls(): void {
@@ -1951,7 +1973,7 @@ function refreshSeatControls(): void {
   }
   el('arenaSeatList').dataset.fixed = String(fixedBudget);
   el('addSeat').toggleAttribute('hidden', arenaTournamentMode() === 'match');
-  el('addSeat').toggleAttribute('disabled', running);
+  el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   selectEl('tournamentModeSelect').disabled = running;
   selectEl('arenaConcurrencySelect').disabled = running;
   // Everything that shapes the schedule is locked for the whole match, so no edit silently applies mid-game.
@@ -3237,15 +3259,13 @@ function refreshOpeningPreview(): void {
   try {
     const openings = selectedOpenings();
     el('openingInfo').textContent = `${openings.length} position${openings.length === 1 ? '' : 's'} in the schedule.`;
-    setOpeningPreview(openings[0]);
+    if (!checkpoint) setOpeningPreview(openings[0]);
   } catch (error) {
     el('openingInfo').textContent = `Opening setup error: ${(error as Error).message}`;
   }
 }
 
-function formatScoreHalf(value: number): string {
-  return value % 1 ? `${Math.floor(value) || ''}½` : String(value);
-}
+const formatScoreHalf = formatArenaPoints;
 
 function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, score: MatchScore): void {
   const side = (name: string, seat: string) =>
@@ -3269,9 +3289,52 @@ function renderStandings(standings: TournamentStandings, scheduledGames: number)
     )
     .join('');
   el('matchScore').innerHTML =
-    `<table class="standings"><thead><tr><th>#</th><th>Engine</th><th title="Points">Pts</th><th title="Wins">W</th><th title="Draws">D</th><th title="Losses">L</th><th title="Elo vs the pool, ±95% approx">Elo</th></tr></thead><tbody>${body}</tbody></table>` +
+    `<div class="arena-table-scroll" tabindex="0" role="region" aria-label="Standings"><table class="standings"><thead><tr><th>#</th><th>Engine</th><th title="Points">Pts</th><th title="Wins">W</th><th title="Draws">D</th><th title="Losses">L</th><th title="Elo vs the pool, ±95% approx">Elo</th></tr></thead><tbody>${body}</tbody></table></div>` +
     `<div class="sb-record">${standings.totalGames()} of ${scheduledGames} games played · Elo vs the pool, ±95%</div>`;
   renderGameResultChips();
+  renderCrosstable(standings);
+}
+
+function renderCrosstable(standings: TournamentStandings): void {
+  const rows = standings.table();
+  const host = el('crosstableSection');
+  host.hidden = rows.length < 3;
+  const name = (row: (typeof rows)[number]) => htmlEscape(displayEngineName(row.name));
+  el('crosstable').innerHTML = `<table class="arena-detail-table"><caption>Row engine’s points / games against each opponent.</caption><thead><tr><th scope="col">Engine</th>${rows.map((row) => `<th scope="col">${name(row)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr><th scope="row">${name(row)}</th>${rows.map((opponent) => {
+    const record = row.perOpponent.get(opponent.id);
+    if (row.id === opponent.id) return '<td class="cross-self" aria-label="Same seat">—</td>';
+    if (!record) return '<td aria-label="No games played">—</td>';
+    const count = record.wins + record.draws + record.losses;
+    return `<td title="${record.wins} wins, ${record.draws} draws, ${record.losses} losses">${formatArenaPoints(record.wins + record.draws / 2)} / ${count}</td>`;
+  }).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+function renderOpeningPairs(): void {
+  const section = el('openingPairsSection');
+  section.hidden = !resultsSchedule.length;
+  const selector = selectEl('pairMatchup');
+  const previous = selector.value;
+  const pairs = arenaOpeningPairs(resultsSchedule, games);
+  const matchups = [...new Map(pairs.map((pair) => [pair.pairingKey, pair])).values()];
+  const name = (id: string) => htmlEscape(displayEngineName(resultsNames.get(id) ?? id));
+  selector.innerHTML = matchups.map((pair) => `<option value="${htmlEscape(pair.pairingKey)}">${name(pair.a)} vs ${name(pair.b)}</option>`).join('');
+  if (matchups.some((pair) => pair.pairingKey === previous)) selector.value = previous;
+  selector.hidden = matchups.length < 2;
+  const selected = pairs.filter((pair) => pair.pairingKey === selector.value);
+  const first = selected[0];
+  if (!first) return;
+  const cell = (pair: (typeof selected)[number], slot: number) => {
+    const index = pair.indices[slot];
+    const result = pair.results[slot];
+    if (index === undefined) return '<td aria-label="Not scheduled">—</td>';
+    if (!result) return `<td title="Game ${index + 1} is not finished">Pending</td>`;
+    const points = result === '1/2-1/2' ? 0.5 : (resultsSchedule[index].whiteId === pair.a) === (result === '1-0') ? 1 : 0;
+    return `<td><button type="button" data-game="${index}" title="Replay game ${index + 1}">${formatArenaPoints(points)}–${formatArenaPoints(1 - points)}</button></td>`;
+  };
+  el('openingPairs').innerHTML = `<table class="arena-detail-table"><caption>Scores in ${name(first.a)}–${name(first.b)} order. Select a game score to replay it.</caption><thead><tr><th scope="col">Opening</th><th scope="col">${name(first.a)}<br>White</th><th scope="col">${name(first.a)}<br>Black</th><th scope="col">Pair total</th></tr></thead><tbody>${selected.map((pair) => {
+    const total = pair.played === 2 ? `${formatArenaPoints(pair.points[0])}–${formatArenaPoints(pair.points[1])}` : pair.indices.length < 2 ? 'Unpaired' : `${pair.played} of 2`;
+    return `<tr><th scope="row">${htmlEscape(pair.opening.name)}${pair.round > 1 ? ` · pair ${pair.round}` : ''}</th>${cell(pair, 0)}${cell(pair, 1)}<td>${total}</td></tr>`;
+  }).join('')}</tbody></table>`;
 }
 
 /** Finished games as small chips (Engine 1's result in a match); click one to replay it. */
@@ -3370,8 +3433,7 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
 }
 
 function chartColorFor(engineId: string): string {
-  const index = Math.max(0, activeEngineIds.indexOf(engineId));
-  return CHART_COLORS[index % CHART_COLORS.length];
+  return CHART_COLORS[arenaChartColorIndex(gameChartSamples, engineId) % CHART_COLORS.length];
 }
 
 function formatCompactNumber(value: number): string {
@@ -3450,7 +3512,7 @@ function renderGameCharts(): void {
 }
 
 /** Live PUCT-root distribution from the real search tree (Lc0SearchResult.children). */
-function renderRootChart(engineId: string): void {
+function renderRootChart(engineId: string, display = true): void {
   const result = lastLc0SearchResults.get(engineId);
   if (!result?.children?.length) return;
   const top = [...result.children]
@@ -3458,33 +3520,51 @@ function renderRootChart(engineId: string): void {
     .slice(0, 8)
     .filter((child) => child.visits > 0);
   if (!top.length) return;
-  rootChartContext = { fen: result.fen, top: top.map((child) => ({ uci: child.uci, visits: child.visits })) };
-  el('rootChartTitle').textContent = `${engines.get(engineId)?.name ?? engineId} root visits (Q from side to move)`;
+  const data = { fen: result.fen, engineName: engines.get(engineId)?.name ?? engineId,
+    children: top.map((child) => ({ uci: child.uci, visits: child.visits, q: child.q, prior: child.prior })) };
+  if (liveTrail) liveTrail.rootChart = data;
+  if (display) renderSavedRootChart(data);
+}
+
+function renderSavedRootChart(data?: ArenaRootChartSample): void {
+  if (!data) {
+    rootChartContext = null;
+    el('rootChartTab').hidden = true;
+    (el('rootChart').parentElement as HTMLElement).hidden = true;
+    if (el('chartsPanel').dataset.chart === 'rootChart') selectChart('evalChart');
+    return;
+  }
+  const top = data.children;
+  rootChartContext = { fen: data.fen, top };
+  el('rootChartTitle').textContent = `${data.engineName} root visits (Q from side to move)`;
   (el('rootChart').parentElement as HTMLElement).hidden = false;
   el('rootChartTab').hidden = false;
-  selectEl('rootCandidate').innerHTML = '<option value="">Choose a move…</option>' + top.map((child, index) => `<option value="${index}">${htmlEscape(uciToSan(parseFen(result.fen), child.uci))} · ${formatCount(child.visits)} ${child.visits === 1 ? 'visit' : 'visits'} · Q ${signed(child.q, 2)}</option>`).join('');
+  selectEl('rootCandidate').innerHTML = '<option value="">Choose a move…</option>' + top.map((child, index) => `<option value="${index}">${htmlEscape(uciToSan(parseFen(data.fen), child.uci))} · ${formatCount(child.visits)} ${child.visits === 1 ? 'visit' : 'visits'} · Q ${signed(child.q, 2)}</option>`).join('');
   el('rootChart').innerHTML = hBarChartSvg(
     top.map((child) => ({
       label: child.uci,
       value: child.visits,
       detail: `Q ${signed(child.q, 2)} · P ${Math.round(child.prior * 100)}%`,
-      color: chartColorFor(engineId),
+      color: CHART_COLORS[0],
     })),
   );
   describeChart('rootChart', `Root search candidates by visits. ${top.map((child) => `${child.uci}: ${child.visits} ${child.visits === 1 ? 'visit' : 'visits'}`).join('; ')}. Use Preview a root search candidate to show arrows on the board.`);
 }
 
-function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number): void {
+function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number, samples = liveTrail?.charts ?? gameChartSamples, display = true, captured?: ArenaChartSample): void {
   const snapshot = engineOutputs.get(engine.id);
   const lc0 = lastLc0SearchResults.get(engine.id);
   const nps = snapshot?.nps ?? (lc0 && moveMs > 0 ? Math.round((lc0.visits / moveMs) * 1000) : undefined);
   // `board` is still the position the engine searched, so its side to move is the mover.
-  sideTimeMs[board.turn] += moveMs;
+  if (display) sideTimeMs[board.turn] += moveMs;
   if (snapshot && snapshot.elapsedMs == null) snapshot.elapsedMs = moveMs;
   if (snapshot && snapshot.nps == null && nps !== undefined) snapshot.nps = nps;
-  gameChartSamples.push({ ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
-  renderGameCharts();
-  renderRootChart(engine.id);
+  samples.push(captured ?? { ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
+  if (display) renderRootChart(engine.id, !reviewing);
+  if (display && !reviewing) {
+    gameChartSamples = samples;
+    renderGameCharts();
+  }
 }
 
 async function playArenaGame(
@@ -3507,7 +3587,10 @@ async function playArenaGame(
   liveTrail = trailFromTree(tree, `${white.name} vs ${black.name}`, historyBoards.length - 1);
   renderBoard();
   renderEngineOutputs();
-  resetGameCharts();
+  if (!reviewing) {
+    resetGameCharts();
+    liveTrail.charts = gameChartSamples;
+  }
   const priorFens: string[] = historyBoards.slice(0, -1).map(boardToFen);
   const delay = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
   for (let ply = 0; ply < 300; ply++) {
@@ -3580,6 +3663,7 @@ async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.si
 function clearStartPending(): void {
   startPending = false;
   if (!running) el('start').toggleAttribute('disabled', false);
+  syncArenaPhase();
 }
 
 function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
@@ -3598,9 +3682,10 @@ function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
 
 async function runIsolatedCpuTournament(
   schedule: ScheduledGame<ArenaOpening>[],
+  pendingIndices: number[],
   byPid: Map<string, { index: number; name: string }>,
   signal: AbortSignal,
-  complete: (index: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail, diagnostics: { runtime: string; search: string }) => void,
+  complete: (index: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail, diagnostics: { runtime: string; search: string }) => Promise<void>,
 ): Promise<void> {
   const concurrency = selectedArenaConcurrency();
   const broker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: concurrency, dial: resourceBroker.getDial() });
@@ -3619,13 +3704,17 @@ async function runIsolatedCpuTournament(
       el('message').textContent = '';
       activeEngineIds = [game.white.id, game.black.id];
       setBoardSideEngines(game.white.id, game.white.name, game.black.id, game.black.name);
-      resetGameCharts();
+      if (!reviewing) resetGameCharts();
     }
     const position = game.position;
     historyBoards = position.positions;
     board = historyBoards[historyBoards.length - 1];
     lastUci = position.lastUci;
     liveTrail = game.trail;
+    if (!reviewing) {
+      gameChartSamples = game.trail.charts;
+      renderGameCharts();
+    }
     el('pairing').textContent =
       `Game ${index + 1} of ${schedule.length} · ${game.white.name === game.black.name ? game.white.name : `${displayEngineName(game.white.name)} vs ${displayEngineName(game.black.name)}`}${concurrency > 1 ? ` · ${live.size} running at once` : ''}`;
     renderBoard();
@@ -3639,10 +3728,11 @@ async function runIsolatedCpuTournament(
     plentyChessEngines.disposeAll();
     stormphraxEngines.disposeAll();
     await runArenaSchedule({
-      count: schedule.length,
+      count: pendingIndices.length,
       concurrency,
       signal,
-      play: async (index, gameSignal) => {
+      play: async (pendingIndex, gameSignal) => {
+        const index = pendingIndices[pendingIndex];
         const seats: CpuArenaSeat[] = [];
         const game = schedule[index];
         try {
@@ -3675,8 +3765,10 @@ async function runIsolatedCpuTournament(
             },
             afterMove: (seat, fen, move, elapsedMs) => {
               if (signal.aborted) return;
-              recordUciOutput(seat.id, seat.name, seat.name, fen, move, seat.engine.lastInfo(), elapsedMs, displayed === index);
-              if (displayed === index) recordGameChartSample(live.get(index)!.position.ply, seat, elapsedMs);
+              const lines = seat.engine.lastInfo();
+              const ply = live.get(index)!.position.ply;
+              recordUciOutput(seat.id, seat.name, seat.name, fen, move, lines, elapsedMs, displayed === index);
+              recordGameChartSample(ply, seat, elapsedMs, trail.charts, displayed === index, arenaUciChartSample(ply, seat, fen, lines, elapsedMs));
             },
             position: (position) => {
               if (signal.aborted) return;
@@ -3701,18 +3793,135 @@ async function runIsolatedCpuTournament(
           if (live.size) show(Math.min(...live.keys()));
         }
       },
-      complete: (index, outcome) => complete(index, outcome.result, outcome.reason, outcome.tree, outcome.trail, outcome.diagnostics),
+      complete: (pendingIndex, outcome) => complete(pendingIndices[pendingIndex], outcome.result, outcome.reason, outcome.tree, outcome.trail, outcome.diagnostics),
     });
   } finally {
     if (cpuTournamentBroker === broker) cpuTournamentBroker = null;
   }
 }
 
-async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> {
+function renderCheckpointStatus(): void {
+  const host = document.getElementById('checkpointSection');
+  if (!host) return;
+  host.hidden = !checkpoint && !checkpointProblem;
+  const pending = checkpoint ? arenaRemainingIndices(checkpoint).length : 0;
+  el('checkpointText').textContent = checkpointProblem || (checkpointSaving ? 'Saving completed games on this device…' : running
+    ? 'Completed games are saved on this device.'
+    : checkpoint ? pending ? 'Saved on this device. Unfinished games restart from their opening.' : 'Finished results are saved on this device until you start a new run.' : '');
+  const resume = el('resumeTournament') as HTMLButtonElement;
+  resume.hidden = !checkpoint || !pending || running;
+  resume.disabled = startPending || checkpointSaving || checkpointUnreadable;
+  resume.textContent = checkpoint ? `Resume tournament (${checkpoint.completed.length} of ${checkpoint.schedule.length} games played)` : 'Resume tournament';
+  el('discardTournament').hidden = running || (!checkpoint && !checkpointProblem);
+  (el('discardTournament') as HTMLButtonElement).disabled = startPending || checkpointSaving;
+  el('checkpointRoster').textContent = checkpoint && !running ? checkpoint.config.seats.map((seat) => displayEngineName(seat.name)).join(' vs ') : '';
+}
+
+async function checkpointCompatibility(): Promise<string> {
+  // Metadata only; never fetch engine binaries here. The hashed controller URL also
+  // prevents combining results from different app/search builds after an update.
+  const channelUrl = resolvePublicAssetUrl('/models/arena-channel-probe').replace('/models/arena-channel-probe', '/channels/stable.json');
+  const channel = await fetch(channelUrl, { cache: 'no-cache', signal: AbortSignal.timeout(5000) })
+    .then((response) => response.ok ? response.json() : artifactChannel).catch(() => artifactChannel);
+  return JSON.stringify({ bundle: import.meta.url, release: channel.releaseId, query: location.search,
+    model: MODEL_URL, pack: PACK_URL, centipawn: CENTIPAWN_MODEL_URL, centipawnRuntime: CENTIPAWN_HYBRID_MANIFEST_URL,
+    whole: LC0_WHOLE_MODEL_MANIFEST_URL, dial: resourceBroker.getDial() });
+}
+
+function captureCheckpointConfig(participants: { pid: string; index: number; name: string }[], compatibility: string): ArenaCheckpointConfig {
+  const controls = normalizeArenaControls(Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls']);
+  return { mode: arenaTournamentMode(), seats: participants.map((participant) => ({
+    id: participant.pid, name: participant.name, ...seatRows[participant.index],
+  })), controls, compatibility };
+}
+
+function applyCheckpointConfig(saved: ArenaCheckpoint): void {
+  for (const id of ARENA_CONTROL_IDS) {
+    const control = el(id) as HTMLInputElement | HTMLSelectElement;
+    control.value = saved.config.controls[id];
+    if (control.value !== saved.config.controls[id]) throw new Error(`Saved setting ${id} is no longer supported. Export the completed PGNs and start a new run.`);
+  }
+  seatRows.splice(0, seatRows.length, ...saved.config.seats.map((seat) => ({ family: seat.family as EngineFamily, variant: seat.variant, strength: seat.strength })));
+  renderSeatSelectors();
+  if (seatRows.some((row, i) => row.variant !== saved.config.seats[i].variant)) throw new Error('A saved engine version is unavailable. Completed results are still viewable and exportable.');
+  refreshBudgetControls();
+  refreshSeatControls();
+}
+
+function showCheckpointResults(saved: ArenaCheckpoint): void {
+  resultsSchedule = hydrateArenaSchedule(saved);
+  resultsNames = new Map(saved.config.seats.map((seat) => [seat.id, seat.name]));
+  scheduledGameCount = saved.schedule.length;
+  games.length = 0;
+  finishedTrails.length = 0;
+  gameResultChips.length = 0;
+  el('log').innerHTML = '';
+  const standings = new TournamentStandings(saved.config.seats);
+  for (const game of saved.completed) {
+    const scheduled = saved.schedule[game.scheduleIndex];
+    standings.record(scheduled.whiteId, scheduled.blackId, game.result);
+    games.push({ pgn: game.pgn, scheduleIndex: game.scheduleIndex, result: game.result });
+    const whiteName = resultsNames.get(scheduled.whiteId)!;
+    const blackName = resultsNames.get(scheduled.blackId)!;
+    const trail = trailFromTree(arenaCompletedTree(game), `Game ${game.scheduleIndex + 1}: ${whiteName} vs ${blackName} (${game.result})`, scheduled.opening.moves?.length ?? 0);
+    trail.charts = game.charts;
+    trail.rootChart = game.rootChart;
+    trail.sides = { whiteName, blackName };
+    finishedTrails[game.scheduleIndex] = trail;
+    gameResultChips.push({ index: game.scheduleIndex, result: game.result, whiteName, blackName,
+      aPoints: saved.config.mode === 'match' ? game.result === '1/2-1/2' ? 0.5 : (scheduled.whiteId === '0') === (game.result === '1-0') ? 1 : 0 : null });
+    appendLog(`${game.scheduleIndex + 1}. ${whiteName} vs ${blackName} [${scheduled.opening.name}]: ${game.result} (${game.reason}) · ${game.diagnostics.runtime} · ${game.diagnostics.search}`, game.scheduleIndex);
+  }
+  if (saved.config.mode === 'match') {
+    const a = standings.table().find((row) => row.id === '0')!;
+    const b = standings.table().find((row) => row.id === '1')!;
+    renderMatchScore(a.name, b.name, a.name === b.name, { a: a.points, b: b.points, aWins: a.wins, bWins: b.wins, draws: a.draws, games: a.games });
+    el('crosstableSection').hidden = true;
+  } else renderStandings(standings, saved.schedule.length);
+  renderOpeningPairs();
+  el('pairing').textContent = `${saved.completed.length} of ${saved.schedule.length} games played`;
+}
+
+function queueCheckpointSave(saved: ArenaCheckpoint, mountSignal: AbortSignal): void {
+  if (checkpointProblem) return;
+  pendingCheckpointSaves++;
+  checkpointSaving = true;
+  renderCheckpointStatus();
+  checkpointWrites = checkpointWrites.then(async () => {
+    if (checkpointProblem) return;
+    await saveArenaCheckpoint(saved, { runId: saved.runId, revision: saved.revision - 1 });
+    checkpointToken = { runId: saved.runId, revision: saved.revision };
+  }).catch((error) => {
+    checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Export PGN before leaving.`;
+    if (error instanceof ArenaCheckpointConflictError) abort?.abort();
+  }).finally(() => {
+    pendingCheckpointSaves--;
+    if (!isStaleMount(mountSignal)) {
+      checkpointSaving = pendingCheckpointSaves > 0;
+      renderCheckpointStatus();
+    }
+  });
+}
+
+async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null): Promise<void> {
   if (running || startPending) return;
   const mountSignal = mountAbort.signal;
   startPending = true;
   el('start').toggleAttribute('disabled', true);
+  syncArenaPhase();
+  await checkpointWrites;
+  if (isStaleMount(mountSignal)) return;
+  if (checkpointUnreadable) throw new Error('Discard the unreadable saved tournament before starting a new run.');
+  const compatibility = await checkpointCompatibility();
+  if (isStaleMount(mountSignal)) return;
+  if (resume) {
+    if (resume.config.compatibility !== compatibility) throw new Error('The app build, engine assets or runtime overrides changed. Completed results are still viewable and exportable, but cannot be mixed with a new build.');
+    applyCheckpointConfig(resume);
+    // UI runtime changes while paused may have created a different evaluator.
+    disposeLc0Resources();
+  }
+  const effectiveControls = normalizeArenaControls(Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls']);
+  for (const id of ARENA_CONTROL_IDS) (el(id) as HTMLInputElement).value = effectiveControls[id];
   syncSeatRowsFromDom();
   const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
   if (isStaleMount(mountSignal)) return;
@@ -3726,6 +3935,9 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   }
   buildEngines();
   populateSeats();
+  if (resume && seatRows.some((row, i) => row.family !== resume.config.seats[i]?.family || row.variant !== resume.config.seats[i]?.variant || row.strength !== resume.config.seats[i]?.strength)) {
+    throw new Error('The saved engine configuration is no longer supported. Export the completed PGNs before starting a new run.');
+  }
   const mode = arenaTournamentMode();
   const participantIdx = mode === 'match' ? [0, 1] : seatRows.map((_, index) => index);
   const idCounts = new Map<string, number>();
@@ -3774,12 +3986,12 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   const engineB = participants[1].engine!;
   const sameEngine = mode === 'match' && participants[0].engineId === participants[1].engineId;
   const seatIds = [...new Set(participants.map((participant) => participant.engineId))];
-  const gamesPerOpening = Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
+  const gamesPerOpening = arenaGamesPerOpening();
   const standings = new TournamentStandings(participants.map((participant) => ({ id: participant.pid, name: participant.name })));
   let schedule: ScheduledGame<ArenaOpening>[];
   try {
     // Colors alternate per game index within each pairing (see tournament.ts).
-    schedule = buildSchedule(
+    schedule = resume ? hydrateArenaSchedule(resume) : buildSchedule(
       tournamentPairings(
         mode,
         participants.map((participant) => participant.pid),
@@ -3798,10 +4010,26 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     return;
   }
 
+  const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);
+  // Establish the slot before any games run. A stale tab must not overwrite it.
+  try {
+    await saveArenaCheckpoint(runCheckpoint, checkpointToken);
+    checkpointToken = { runId: runCheckpoint.runId, revision: runCheckpoint.revision };
+    checkpointProblem = '';
+  } catch (error) {
+    if (error instanceof ArenaCheckpointConflictError) throw error;
+    checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Keep this tab open and export PGN before leaving.`;
+  }
+  if (isStaleMount(mountSignal)) return;
+  checkpoint = runCheckpoint;
+  const pendingIndices = arenaRemainingIndices(runCheckpoint);
   startPending = false;
   running = true;
   arenaMatchState = 'live';
   scheduledGameCount = schedule.length;
+  resultsSchedule = schedule;
+  resultsNames = new Map(participants.map((participant) => [participant.pid, participant.name]));
+  el('crosstableSection').hidden = mode === 'match';
   gameResultChips.length = 0;
   el('pairing').textContent = `Game 1 of ${schedule.length}`;
   const matchAbort = new AbortController();
@@ -3837,9 +4065,22 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   el('start').toggleAttribute('disabled', true);
   el('stop').toggleAttribute('disabled', false);
   const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
-  if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
-  else renderStandings(standings, schedule.length);
-  const completeGame = (
+  if (resume) {
+    showCheckpointResults(resume);
+    for (const game of resume.completed) {
+      const scheduled = schedule[game.scheduleIndex];
+      standings.record(scheduled.whiteId, scheduled.blackId, game.result);
+    }
+    const first = standings.table().find((row) => row.id === participants[0].pid)!;
+    const second = standings.table().find((row) => row.id === participants[1].pid)!;
+    Object.assign(score, { a: first.points, b: second.points, aWins: first.wins, bWins: second.wins, draws: first.draws, games: resume.completed.length });
+  } else {
+    if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
+    else renderStandings(standings, schedule.length);
+    renderOpeningPairs();
+  }
+  renderCheckpointStatus();
+  const completeGame = async (
     i: number,
     result: GameResultCode,
     reason: string,
@@ -3847,7 +4088,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     trail: GameTrail | null,
     diagnostics?: { runtime: string; search: string },
   ) => {
-    if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
+    if (isStaleMount(mountSignal) || matchAbort.signal.aborted || checkpoint!.completed.some((game) => game.scheduleIndex === i)) return;
     const { whiteId, blackId, opening } = schedule[i];
     const white = byPid.get(whiteId)!;
     const black = byPid.get(blackId)!;
@@ -3868,10 +4109,24 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
       }
     }
     const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
-    games.push({ pgn: gameTreeToPgn(tree, tags, result), scheduleIndex: i });
+    const pgn = gameTreeToPgn(tree, tags, result);
+    const completed: ArenaCompletedGame = {
+      pgn, scheduleIndex: i, result, reason, rootFen: tree.root.fen,
+      moves: tree.mainlineFrom(tree.root).map((node) => moveToUci(node.move!)),
+      charts: (trail?.charts ?? []).map((sample) => ({ ...sample })),
+      ...(trail?.rootChart ? { rootChart: structuredClone(trail.rootChart) } : {}),
+      diagnostics: diagnostics ?? { runtime: engineRuntimeDiagnosticsText(), search: searchTelemetryText() },
+    };
+    checkpoint = commitArenaGame(checkpoint!, completed);
+    queueCheckpointSave(checkpoint, mountSignal);
+    // Do not show a committed score or advance this lane until its save settles.
+    await checkpointWrites;
+    if (isStaleMount(mountSignal)) return;
+    games.push({ pgn, scheduleIndex: i, result });
     games.sort((a, b) => a.scheduleIndex - b.scheduleIndex);
     if (trail) {
       trail.label = `Game ${i + 1}: ${white.name} vs ${black.name} (${result})`;
+      trail.sides = { whiteName: white.name, blackName: black.name };
       finishedTrails[i] = trail;
     }
     gameResultChips.push({
@@ -3889,19 +4144,24 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     );
     if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
     else renderStandings(standings, schedule.length);
+    renderOpeningPairs();
   };
   let enginesReady = false;
   try {
     if (isolatedCpuPool()) {
       enginesReady = true;
       el('message').textContent = 'Preparing private CPU workers…';
-      await runIsolatedCpuTournament(schedule, byPid, matchAbort.signal, completeGame);
+      await runIsolatedCpuTournament(schedule, pendingIndices, byPid, matchAbort.signal, completeGame);
     } else {
+      if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {
+        await loadLc0Evaluator(mountSignal, matchAbort.signal);
+        if (!lc0Cache) throw new Error('The saved Lc0 network could not be loaded.');
+      }
       resetLc0SearchTrees(seatIds);
       await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
       enginesReady = true;
       if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
-      for (let i = 0; i < schedule.length; i++) {
+      for (const i of pendingIndices) {
         if (matchAbort.signal.aborted) break;
         const { whiteId, blackId, opening } = schedule[i];
         const white = byPid.get(whiteId)!;
@@ -3932,7 +4192,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
         el('message').textContent = '';
         const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, matchAbort.signal);
         if (reason === 'cancelled') break;
-        completeGame(i, result, reason, tree, liveTrail);
+        await completeGame(i, result, reason, tree, liveTrail);
       }
     }
     if (!isStaleMount(mountSignal)) {
@@ -3957,6 +4217,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
       }
     }
   } finally {
+    await checkpointWrites;
     const ownsMatchState = abort === matchAbort;
     if (ownsMatchState) {
       running = false;
@@ -3981,17 +4242,18 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     }
   }
 }
-async function startMatch(minimumWarmupVisibleMs = 400): Promise<void> {
+async function startMatch(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null): Promise<void> {
   const mountSignal = mountAbort.signal;
   try {
-    await startMatchUnchecked(minimumWarmupVisibleMs);
+    await startMatchUnchecked(minimumWarmupVisibleMs, resume);
   } catch (error) {
     if (isStaleMount(mountSignal)) return;
     hideEngineWarmupStatus();
     clearStartPending();
     const detail = error instanceof Error ? error.message : String(error);
     el('message').textContent = `Match preparation failed: ${detail}`;
-    el('pairing').textContent = 'Match did not start.';
+    if (!checkpoint) el('pairing').textContent = 'Match did not start.';
+    renderCheckpointStatus();
   }
 }
 
@@ -4003,6 +4265,9 @@ function exportPgn() {
 }
 
 function disposeLc0Resources(): void {
+  lc0LoadAbort?.abort();
+  lc0LoadAbort = null;
+  loadingLc0 = false;
   void lc0Cache?.dispose();
   lc0Cache = null;
   player = null;
@@ -4047,12 +4312,13 @@ function disposeRuntimeResources(): void {
   }
 }
 
-async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
+async function createSelectedLc0Evaluator(signal: AbortSignal): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
   const runtime = selectedLc0Runtime();
   if (runtime === 'onnx') {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
       cache: true,
-      onProgress: (loaded, total) => showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'),
+      signal,
+      onProgress: (loaded, total) => { if (!signal.aborted) showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'); },
     });
     return Lc0OnnxEvaluator.create(modelLoad.model);
   }
@@ -4078,10 +4344,16 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
   });
 }
 
-async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): Promise<void> {
-  if (isStaleMount(mountSignal)) return;
+async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, matchSignal?: AbortSignal): Promise<void> {
+  if (isStaleMount(mountSignal) || matchSignal?.aborted) return;
+  lc0LoadAbort?.abort();
+  const loadAbort = new AbortController();
+  lc0LoadAbort = loadAbort;
+  const signal = AbortSignal.any([mountSignal, loadAbort.signal, ...(matchSignal ? [matchSignal] : [])]);
   const runtime = selectedLc0Runtime();
   if (!selectedSeatsNeedLc0Evaluator()) {
+    lc0LoadAbort = null;
+    loadingLc0 = false;
     el('start').toggleAttribute('disabled', false);
     refreshSeatControls();
     el('message').textContent = readyMessage();
@@ -4094,9 +4366,9 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
   el('message').textContent = 'Loading the Lc0 network…';
   showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
-    const evaluator = await createSelectedLc0Evaluator();
+    const evaluator = await loadArenaResource(() => createSelectedLc0Evaluator(signal), signal);
     const ortDiagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics({ probeAdapter: false }) : undefined;
-    if (isStaleMount(mountSignal)) {
+    if (isStaleMount(mountSignal) || signal.aborted) {
       void evaluator.dispose?.();
       return;
     }
@@ -4135,7 +4407,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
     el('start').toggleAttribute('disabled', false);
     el('message').textContent = readyMessage();
   } catch (error) {
-    if (isStaleMount(mountSignal)) return;
+    if (isStaleMount(mountSignal) || signal.aborted) return;
     hideDownloadProgress();
     if (!selectedSeatsNeedLc0Evaluator()) {
       el('start').toggleAttribute('disabled', false);
@@ -4144,8 +4416,10 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
     }
   } finally {
-    if (!isStaleMount(mountSignal)) {
+    if (!isStaleMount(mountSignal) && lc0LoadAbort === loadAbort) {
+      lc0LoadAbort = null;
       loadingLc0 = false;
+      hideDownloadProgress();
       refreshSeatControls();
     }
   }
@@ -4221,6 +4495,8 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
     const sfKind = seatRows[1].family === 'sf' && seatRows[1].variant === 'full' ? 'full' : 'lite';
     const sfId = seatRows[1].family === 'sf' ? seatEngineId(1) : 'sf:lite:8';
     const sfName = seatRows[1].family === 'sf' ? (engines.get(sfId)?.name ?? rowLabel(seatRows[1])) : 'Stockfish Lite d8';
+    if (!lc0Cache) await loadLc0Evaluator(mountAbort.signal, controller.signal);
+    if (!lc0Cache) throw new Error('LC0 evaluator could not be initialized for the fixed suite.');
     await warmUpSelectedEngines([lc0Id, sfId], controller.signal, 0);
     const sfEngine = stockfishEngineFor(sfKind);
     const timed = arenaBudgetMode() === 'movetime';
@@ -4422,6 +4698,40 @@ function wireEvents() {
   el('start').addEventListener('click', () => {
     void startMatch();
   });
+  el('resumeTournament').addEventListener('click', () => {
+    if (checkpoint) void startMatch(400, checkpoint);
+  });
+  el('discardTournament').addEventListener('click', () => {
+    void (async () => {
+      if (running || startPending) return;
+      await checkpointWrites;
+      try {
+        await discardArenaCheckpoint(checkpointToken);
+        checkpoint = null;
+        checkpointToken = null;
+        checkpointProblem = '';
+        checkpointUnreadable = false;
+        games.length = 0;
+        finishedTrails.length = 0;
+        gameResultChips.length = 0;
+        resultsSchedule = [];
+        arenaMatchState = 'none';
+        liveTrail = null;
+        exitReview();
+        resetGameCharts();
+        el('chartsPanel').hidden = true;
+        el('crosstableSection').hidden = true;
+        el('openingPairsSection').hidden = true;
+        el('message').textContent = 'Saved tournament discarded. Set up a new run.';
+        refreshOpeningPreview();
+        refreshSeatControls();
+        el('start').toggleAttribute('disabled', false);
+      } catch (error) {
+        checkpointProblem = `Could not discard: ${error instanceof Error ? error.message : String(error)}`;
+        renderCheckpointStatus();
+      }
+    })();
+  });
   el('stop').addEventListener('click', () => {
     abort?.abort();
     el('message').textContent = 'Stopping…';
@@ -4436,10 +4746,11 @@ function wireEvents() {
   el('revLive').addEventListener('click', exitReview);
   for (const id of ['evalChart', 'timeChart', 'npsChart'] as const) {
     el(id).addEventListener('click', (event) => {
-      if (!liveTrail) return;
+      const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+      if (!trail) return;
       const ply = chartPlyFromClick(id, event.target as HTMLElement, event as MouseEvent);
       if (ply === null) return;
-      enterReview(liveTrail, liveTrail.openingPlies + ply);
+      enterReview(trail, trail.openingPlies + ply);
     });
   }
   el('rootChart').addEventListener('click', (event) => reviewRootChartClick(event as MouseEvent));
@@ -4451,7 +4762,8 @@ function wireEvents() {
     if (value !== '') previewRootCandidate(Number(value));
   });
   el('chartPly').addEventListener('input', () => {
-    if (liveTrail) enterReview(liveTrail, Number(inputEl('chartPly').value));
+    const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+    if (trail) enterReview(trail, Number(inputEl('chartPly').value));
   });
   el('chartLive').addEventListener('click', () => {
     if (running) exitReview();
@@ -4466,6 +4778,12 @@ function wireEvents() {
   el('gameChips').addEventListener('click', (event) => {
     const chip = (event.target as HTMLElement).closest('[data-game]') as HTMLElement | null;
     const trail = chip ? finishedTrails[Number(chip.dataset.game)] : undefined;
+    if (trail) enterReview(trail, trail.entries.length - 1);
+  });
+  el('pairMatchup').addEventListener('change', renderOpeningPairs);
+  el('openingPairs').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>('[data-game]');
+    const trail = button ? finishedTrails[Number(button.dataset.game)] : undefined;
     if (trail) enterReview(trail, trail.entries.length - 1);
   });
   el('editSetup').addEventListener('click', () => {
@@ -4496,7 +4814,7 @@ function wireEvents() {
   arenaKeydownHandler = (event: KeyboardEvent) => {
     if (!reviewing && !(event.key === 'ArrowLeft' && liveTrail && liveTrail.entries.length > 1)) return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest?.('input,textarea,select,.eng-line')) return;
+    if (target?.closest?.('input,textarea,select,.eng-line,.arena-table-scroll')) return;
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
       stepReview(-1);
@@ -4572,7 +4890,7 @@ function wireEvents() {
     populateSeats();
   });
   el('addSeat').addEventListener('click', () => {
-    if (running) return;
+    if (running || seatRows.length >= 8) return;
     syncSeatRowsFromDom();
     seatRows.push({ family: 'sf', variant: 'lite', strength: 8 });
     persistArenaSeatRows();
@@ -4725,7 +5043,38 @@ async function init(mountSignal: AbortSignal) {
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();
-  await loadLc0Evaluator(mountSignal);
+  await checkpointWrites;
+  try {
+    const saved = await loadArenaCheckpoint();
+    if (isStaleMount(mountSignal)) return;
+    checkpoint = saved;
+    checkpointToken = saved ? { runId: saved.runId, revision: saved.revision } : null;
+    if (saved) {
+      showCheckpointResults(saved);
+      arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
+      el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
+      // Inspect results without loading engines or changing the saved configuration.
+      const last = saved.completed.at(-1);
+      if (last) {
+        const trail = finishedTrails[last.scheduleIndex];
+        liveTrail = trail;
+        historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
+        board = historyBoards[historyBoards.length - 1];
+        lastUci = trail.entries.at(-1)?.uci ?? null;
+        const scheduled = saved.schedule[last.scheduleIndex];
+        setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
+        enterReview(trail, trail.entries.length - 1);
+      }
+      el('start').toggleAttribute('disabled', false);
+      syncArenaPhase();
+    }
+  } catch (error) {
+    if (isStaleMount(mountSignal)) return;
+    checkpointUnreadable = error instanceof ArenaCheckpointInvalidError;
+    checkpointProblem = checkpointUnreadable ? `${error instanceof Error ? error.message : String(error)}. Discard it to start a new run.` : `Local saving is unavailable: ${error instanceof Error ? error.message : String(error)}. Export PGN before leaving.`;
+    renderCheckpointStatus();
+  }
+  if (!checkpoint) await loadLc0Evaluator(mountSignal);
   void renderRuntimeBadge();
   void runFixedSuiteBenchAutorun();
   void runArenaBenchAutorun();
@@ -4755,7 +5104,14 @@ function resetArenaPageState(): void {
   games.length = 0;
   gameResultChips.length = 0;
   scheduledGameCount = 0;
+  resultsSchedule = [];
+  resultsNames.clear();
   arenaMatchState = 'none';
+  checkpoint = null;
+  checkpointToken = null;
+  checkpointProblem = '';
+  checkpointUnreadable = false;
+  checkpointSaving = false;
   lastOutputEngineId = null;
   thinkingSince.clear();
   engines.clear();

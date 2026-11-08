@@ -90,6 +90,14 @@ onMount(() => {
       </div>
       <div id="downloadProgress" class="model-load-progress" hidden></div>
     </div>
+    <section id="checkpointSection" class="checkpoint-block" aria-label="Saved tournament" hidden>
+      <p id="checkpointText" role="status"></p>
+      <p id="checkpointRoster" class="field-hint"></p>
+      <div class="checkpoint-actions">
+        <button id="resumeTournament" type="button" class="primary">Resume tournament</button>
+        <button id="discardTournament" type="button">Discard</button>
+      </div>
+    </section>
     <section id="scoreboard" class="scoreboard" aria-label="Score">
       <div class="sb-head">
         <span id="scoreboardTitle" class="sb-title">Match</span>
@@ -106,7 +114,18 @@ onMount(() => {
       <div class="sb-context"><span id="setupSummaryText"></span><span id="pairing" class="sb-progress"></span></div>
       <div id="gameChips" class="sb-chips" aria-label="Finished games" hidden></div>
     </section>
-    <div id="setupPane" class="setup-pane">
+    <details id="crosstableSection" class="section-block arena-results" open hidden>
+      <summary>Crosstable</summary>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
+      <div id="crosstable" class="arena-table-scroll" tabindex="0" role="region" aria-label="Opponent crosstable"></div>
+    </details>
+    <details id="openingPairsSection" class="section-block arena-results" hidden>
+      <summary>Opening pairs</summary>
+      <select id="pairMatchup" aria-label="Opening pairs matchup"></select>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
+      <div id="openingPairs" class="arena-table-scroll" tabindex="0" role="region" aria-label="Colour-reversed opening pairs"></div>
+    </details>
+    <fieldset id="setupPane" class="setup-pane" aria-label="Tournament settings">
     <p class="locked-note">Settings are locked while games run. Stop to change them.</p>
     <details class="section-block" open>
       <summary>Matchup</summary>
@@ -219,7 +238,7 @@ onMount(() => {
       <div id="runtimeAuditInfo"></div>
     </div>
     {/if}
-    </div>
+    </fieldset>
     <div class="arena-actions">
       <div id="startSummary" class="start-summary"></div>
       <button id="start" class="primary" type="button" disabled>Start match</button>
@@ -335,7 +354,7 @@ onMount(() => {
   @keyframes arena-spin{to{transform:rotate(360deg)}}
 
   /* ── Sidebar: setup state vs running state (data-phase on <main>) ── */
-  .arena-workspace .arena-sidebar{display:flex; flex-direction:column; max-height:none; overflow:hidden; position:static}
+  .arena-workspace .arena-sidebar{display:flex; flex-direction:column; min-width:0; max-height:none; overflow:hidden; position:static}
   .arena-sidebar > *{flex:0 0 auto}
   .status-block{padding:12px 14px 11px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
   .status-block:not(:has(#message:not(:empty), #runtimeWarning:not([hidden]), #engineWarmupStatus:not([hidden]), #downloadProgress:not([hidden]))){display:none}
@@ -356,6 +375,15 @@ onMount(() => {
   .model-load-progress{margin-top:8px}
   .model-load-progress :global(progress){width:100%; height:8px; accent-color:var(--accent)}
   .model-load-progress :global(.dl-label){margin-top:2px; font-size:12px; color:var(--muted)}
+
+  .checkpoint-block{padding:12px 14px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
+  .checkpoint-block p{margin:0; color:var(--text); font-size:13px; line-height:1.5; overflow-wrap:anywhere}
+  .checkpoint-block .field-hint{margin-top:4px; color:var(--muted)}
+  .checkpoint-block .field-hint:empty{display:none}
+  .checkpoint-actions{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .checkpoint-actions:has(button:not([hidden])){margin-top:8px}
+  .checkpoint-actions:not(:has(button:not([hidden]))){display:none}
+  .checkpoint-actions button{min-height:38px; font-size:13px; padding:6px 10px; white-space:normal; text-align:left}
 
   /* Scoreboard */
   .scoreboard{display:none; padding:12px 14px; border-bottom:1px solid var(--rule)}
@@ -391,6 +419,18 @@ onMount(() => {
   .scoreboard :global(.standings th:nth-child(2)), .scoreboard :global(.standings td:nth-child(2)){text-align:left; width:99%}
   .scoreboard :global(.standings tr.leader td){background:var(--accent-soft)}
   .scoreboard :global(.sb-cell-name){display:inline-flex; align-items:center; gap:7px; color:var(--ink); font-weight:600}
+  .arena-results{min-width:0; border-bottom:1px solid var(--rule)}
+  .arena-results select{width:100%; margin-bottom:6px}
+  .arena-sidebar :global(.arena-table-scroll){max-width:100%; min-width:0; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:thin}
+  .arena-sidebar :global(.arena-table-scroll:focus-visible){outline:2px solid var(--accent); outline-offset:-2px}
+  .arena-sidebar :global(.arena-detail-table){width:100%; border-collapse:collapse; font-size:12.5px; line-height:1.4}
+  .arena-sidebar :global(.arena-detail-table caption){text-align:left; color:var(--muted); padding-bottom:8px; font-size:12px; min-width:240px}
+  .arena-sidebar :global(.arena-detail-table th), .arena-sidebar :global(.arena-detail-table td){padding:6px 8px; border-bottom:1px solid var(--rule); text-align:center; white-space:nowrap}
+  .arena-sidebar :global(.arena-detail-table th){color:var(--muted); font-weight:600}
+  .arena-sidebar :global(.arena-detail-table th:first-child){text-align:left; color:var(--ink)}
+  .arena-sidebar :global(.arena-detail-table thead th){white-space:normal; min-width:76px; max-width:160px}
+  .arena-sidebar :global(.arena-detail-table .cross-self){background:var(--panel-inset); color:var(--muted)}
+  .arena-sidebar :global(.arena-detail-table button){min-height:32px; padding:2px 8px; font-size:12.5px; background:transparent; color:var(--ink); border-color:var(--border-input)}
   .sb-chips{display:flex; flex-wrap:wrap; gap:5px; margin-top:9px}
   .sb-chips :global(.sb-chip){
     min-height:28px; padding:2px 9px; border-radius:999px; border:1px solid var(--border-input);
@@ -399,6 +439,9 @@ onMount(() => {
   .sb-chips :global(.sb-chip-n){margin-right:6px; color:var(--muted); font-weight:500}
   .sb-chips :global(.sb-chip.win){border-color:var(--accent); background:var(--accent-soft); color:var(--accent-soft-text)}
   .sb-chips :global(.sb-chip.loss){border-color:color-mix(in srgb, var(--warn) 60%, var(--rule)); color:var(--warn)}
+
+  /* Native fieldset locking also covers asynchronous run preparation. */
+  .setup-pane{border:0; margin:0; padding:0; min-width:0}
 
   /* Locked settings stay available during play. */
   .locked-note{display:none; margin:0; padding:10px 14px 0; color:var(--muted); font-size:12.5px}
@@ -589,6 +632,7 @@ onMount(() => {
   .setup-pane :global(.diag-block .diag-value){font-family:var(--mono); overflow-wrap:anywhere}
 
   @media (max-width:900px){
+    .arena-workspace{grid-template-columns:minmax(0,1fr)}
     .arena-workspace .arena-sidebar{max-height:none; overflow:visible}
     .charts-panel{grid-column:auto}
     /* Setup first before the first game; running games keep the board first. */
