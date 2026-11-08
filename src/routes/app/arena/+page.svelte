@@ -386,7 +386,7 @@ onMount(() => {
   .checkpoint-actions{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
   .checkpoint-actions:has(button:not([hidden])){margin-top:8px}
   .checkpoint-actions:not(:has(button:not([hidden]))){display:none}
-  .checkpoint-actions button{min-height:38px; font-size:13px; padding:6px 10px; white-space:normal; text-align:left}
+  .checkpoint-actions button{min-height:44px; font-size:13px; padding:8px 12px; white-space:normal; text-align:left}
 
   /* Scoreboard */
   .scoreboard{display:none; padding:12px 14px; border-bottom:1px solid var(--rule)}
@@ -463,6 +463,7 @@ onMount(() => {
   .arena-actions{padding:4px 14px 14px}
   .start-summary{display:none}
   .arena-actions #start{width:100%; min-height:46px; border-radius:8px; font:700 15px var(--sans)}
+  .arena-actions #start:not(.primary){background:transparent; border-color:var(--border-input); color:var(--ink)}
   .arena-workspace button:disabled{opacity:1; cursor:not-allowed; background:var(--panel-2); border-color:var(--rule-strong); color:color-mix(in srgb, var(--ink) 50%, var(--panel))}
 
   .arena-workspace .section-block{padding:12px 14px}
@@ -643,8 +644,10 @@ onMount(() => {
     .arena-workspace .arena-sidebar{max-height:none; overflow:visible}
     .charts-panel{grid-column:auto}
     /* Setup first before the first game; running games keep the board first. */
-    .arena-workspace:global([data-match=none]) .arena-sidebar{grid-row:1}
-    .arena-workspace:global([data-phase=setup]){padding-bottom:calc(var(--action-space) + env(safe-area-inset-bottom))}
+    .arena-workspace:global([data-match=none]) .arena-sidebar,
+    .arena-workspace:global([data-checkpoint=resumable]) .arena-sidebar{grid-row:1}
+    /* Reserve the full fixed action bar, including its summary and safe area. */
+    .arena-workspace:global(:not([data-phase=running])){padding-bottom:calc(var(--action-space) + env(safe-area-inset-bottom))}
     .arena-workspace :global(:is(input,select,textarea,button,summary)){scroll-margin-bottom:calc(var(--action-space) + env(safe-area-inset-bottom) + 16px)}
     .arena-actions{
       position:fixed; left:0; right:0; bottom:0; z-index:4; background:var(--panel);

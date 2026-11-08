@@ -3816,6 +3816,8 @@ function renderCheckpointStatus(): void {
   resume.hidden = !checkpoint || !pending || running;
   resume.disabled = startPending || checkpointSaving || checkpointUnreadable;
   resume.textContent = checkpoint ? `Resume tournament (${checkpoint.completed.length} of ${checkpoint.schedule.length} games played)` : 'Resume tournament';
+  el('main').dataset.checkpoint = resume.hidden ? 'none' : 'resumable';
+  el('start').classList.toggle('primary', resume.hidden);
   el('discardTournament').hidden = running || (!checkpoint && !checkpointProblem);
   (el('discardTournament') as HTMLButtonElement).disabled = startPending || checkpointSaving;
   el('checkpointRoster').textContent = checkpoint && !running ? checkpoint.config.seats.map((seat) => displayEngineName(seat.name)).join(' vs ') : '';
