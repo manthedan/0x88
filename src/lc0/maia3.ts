@@ -228,6 +228,8 @@ export function chooseFromMaia3Policy(policy: Maia3MovePolicyEntry[], options: M
 export interface Maia3BrowserEvaluatorOptions {
   /** Abort model loading and terminate this evaluator's worker, including pending inference. */
   signal?: AbortSignal;
+  /** Optional owner-supplied CPU reservation; ordinary Human/Play defaults are unchanged. */
+  wasmThreads?: number;
   modelUrl?: string;
   selfElo?: number;
   oppoElo?: number;
@@ -293,7 +295,7 @@ export class Maia3BrowserEvaluator {
     options.signal?.throwIfAborted();
     const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
     try {
-      const names = await Maia3BrowserEvaluator.postInit(worker, modelLoad.model, options.ep, options.signal);
+      const names = await Maia3BrowserEvaluator.postInit(worker, modelLoad.model, options.ep, options.signal, options.wasmThreads);
       options.signal?.throwIfAborted();
       const evaluator = new Maia3BrowserEvaluator(worker, modelLoad, selfElo, oppoElo, names);
       const abort = () => evaluator.terminate();
@@ -311,6 +313,7 @@ export class Maia3BrowserEvaluator {
     model: string | ArrayBuffer,
     ep?: Maia3BrowserEvaluatorOptions['ep'],
     signal?: AbortSignal,
+    wasmThreads?: number,
   ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string }> {
     return new Promise((resolve, reject) => {
       const id = 0;
@@ -343,8 +346,8 @@ export class Maia3BrowserEvaluator {
       worker.addEventListener('error', onError);
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) { onAbort(); return; }
-      if (typeof model === 'string') worker.postMessage({ type: 'init', id, model, ep });
-      else worker.postMessage({ type: 'init', id, model, ep }, [model]);
+      if (typeof model === 'string') worker.postMessage({ type: 'init', id, model, ep, wasmThreads });
+      else worker.postMessage({ type: 'init', id, model, ep, wasmThreads }, [model]);
     });
   }
 

@@ -22,6 +22,7 @@ import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
+import { criticalPositionLines } from './criticalMomentsPresentation.ts';
 import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
 import { playFromHereUnavailableReason, playPositionFromTree } from './playPosition.ts';
 import {
@@ -4025,19 +4026,20 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   if (analyzing && analysisAbort && !analysisAbort.signal.aborted && activeAnalysisSelectionKey !== selectionKey) cancelActiveAnalysisRun();
   // A transposition can have the same FEN but a different neural/repetition
   // history. A completed-key marker is not provenance for the FEN-only view.
-  const cached = options.reportLines ?? (completeAnalysisKeys.has(selectionKey)
+  const positionLines = completeAnalysisKeys.has(selectionKey)
     ? cachedAnalysisSelection(
         engineLineCache,
         rows.map((row) => engineAnalysisCacheKey(fen, row)),
       )
-    : undefined);
+    : undefined;
+  const cached = options.reportLines === undefined ? positionLines : criticalPositionLines(positionLines, options.reportLines);
   if (cached) lineCache.set(fen, cached);
   else lineCache.delete(fen);
   clearStalePgnDatabaseSearchResults();
   clearReviewIfMainlineChanged();
   renderAll();
   scheduleMaia3Panel();
-  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort) void analyzeCurrent();
+  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort && options.reportLines === undefined) void analyzeCurrent();
   else {
     // A cached position, or auto-analyze off, must not restart the search that
     // was paused on the position we just left.
@@ -4828,6 +4830,16 @@ function wireEvents() {
       criticalDeferredAnalysis = null;
       if (criticalDeferredMaia) scheduleMaia3Panel();
       if (pending) scheduleAnalyzeCurrent(pending);
+    },
+    updateView: (moment, lines) => {
+      const node = mainlineNodes()[moment.move.ply - 1];
+      if (tree.current !== node || JSON.stringify(tree.historyBoards(node).map(boardToFen)) !== JSON.stringify(moment.history)) return;
+      const merged = criticalPositionLines(lineCache.get(node.fen), lines);
+      if (!merged) return;
+      lineCache.set(node.fen, merged);
+      renderLines();
+      renderEvalBar();
+      setShapes(bestShapes());
     },
     navigate: (moment, target, lines) => {
       const node = mainlineNodes()[moment.move.ply - 1];

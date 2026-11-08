@@ -7,6 +7,7 @@ import {
   releaseOrtSession,
   setOrtRuntimeArtifactKindForCurrentThread,
   setRequestedOrtExecutionProviderForCurrentThread,
+  setRequestedOrtWasmThreadsForCurrentThread,
 } from '../nn/ortRuntime.ts';
 
 type InitMessage = {
@@ -15,6 +16,7 @@ type InitMessage = {
   model: string | ArrayBuffer;
   /** ORT execution-provider preference; default 'auto' (WebGPU first, wasm fallback). */
   ep?: OrtExecutionProviderPreference;
+  wasmThreads?: number;
 };
 
 type EvaluateMessage = {
@@ -66,6 +68,7 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
       if (message.type === 'init') {
         if (session) await releaseOrtSession(session);
         if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+        setRequestedOrtWasmThreadsForCurrentThread(message.wasmThreads ?? null);
         // Unlike searchWorker this worker never switches provider per message,
         // so an ep=wasm request is a lifetime property and can pin the runtime
         // pair. Without this a WebGPU-capable browser running Maia on WASM

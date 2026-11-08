@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { stockfishAnalysisLines, lc0AnalysisLines } from '../src/lc0/analysisFormat.ts';
-import { criticalAgreement, criticalReportMarkup } from '../src/lc0/criticalMomentsPresentation.ts';
+import { criticalAgreement, criticalPositionLines, criticalReportMarkup } from '../src/lc0/criticalMomentsPresentation.ts';
 import { createCriticalReport, criticalMomentCacheKey, criticalMoments, criticalReportIsStale, criticalReportSignature, runCriticalReport } from '../src/lc0/criticalMoments.ts';
 import { reviewGame } from '../src/lc0/gameReview.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
@@ -120,6 +120,19 @@ test('White perspective is normalized exactly once while engine scales stay dist
   assert.equal(sf.scoreCp, -120);
   assert.ok(lc0.scoreCp < 0);
   assert.match(criticalAgreement([sf, lc0]), /agree/);
+});
+
+test('pending and partial report snapshots preserve cached position lines and accept late engine results', () => {
+  const sf = line();
+  const lc0 = line('d2d4', 30, 'Lc0 Small');
+  assert.equal(criticalPositionLines(undefined, []), undefined);
+  assert.deepEqual(criticalPositionLines([sf, lc0], []), [sf, lc0], 'a pending report must not erase valid position results');
+  const freshSf = line('d2d4', 35);
+  const partial = criticalPositionLines([sf, lc0], [freshSf]);
+  assert.deepEqual(partial, [lc0, freshSf]);
+  const finished = criticalPositionLines(partial, [freshSf, { ...lc0, scoreCp: 40 }]);
+  assert.deepEqual(finished, [freshSf, { ...lc0, scoreCp: 40 }]);
+  assert.equal(finished.length, 2, 'finishing report engines replace their own snapshot, not duplicate it');
 });
 
 test('missing or unscored engine results are per-engine failures, never fabricated neutral scores', async () => {

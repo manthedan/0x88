@@ -109,12 +109,12 @@ export function createCriticalEngines(broker: EngineResourceBroker, rating: numb
     },
   ];
   if (rating !== undefined) {
-    const provenance: CriticalProvenance = { engine: 'Maia3', model: MAIA3_DEFAULT_MODEL_URL, build: 'maia3_simplified QDQ8 (fp16 fallback)', runtime: 'ORT auto', budget: '1 policy inference', options: `self ${rating}; opponent ${rating}; temperature 1` };
+    const provenance: CriticalProvenance = { engine: 'Maia3', model: MAIA3_DEFAULT_MODEL_URL, build: 'maia3_simplified QDQ8 (fp16 fallback)', runtime: 'ORT auto', budget: '1 policy inference', options: `self ${rating}; opponent ${rating}; temperature 1; WASM threads 1` };
     lanes.push({
       id: 'maia', row: { family: 'lc0', variant: 'critical-maia3', strength: rating }, provenance,
       evaluate: (moment, _signal, progress) => protectedWork('critical-maia', async (operationSignal): Promise<CriticalResult> => {
         // Initialization is shared within this job, never between cancelled jobs.
-        maiaReady ??= Maia3BrowserEvaluator.create({ signal: operationSignal, onProgress: (loaded) => progress(`Downloading ${(loaded / 1e6).toFixed(1)} MB`) }).then((evaluator) => (maia = evaluator));
+        maiaReady ??= Maia3BrowserEvaluator.create({ signal: operationSignal, wasmThreads: 1, onProgress: (loaded) => progress(`Downloading ${(loaded / 1e6).toFixed(1)} MB`) }).then((evaluator) => (maia = evaluator));
         const abort = () => maia?.terminate();
         operationSignal.addEventListener('abort', abort, { once: true });
         try {

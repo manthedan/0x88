@@ -1,8 +1,15 @@
 import { htmlEscape } from './browserDom.ts';
-import { analysisAgreementHeadline, analysisMoveGroups, firstAnalysisMove } from './analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisEngineName, analysisMoveGroups, firstAnalysisMove } from './analysisPresentation.ts';
 import { formatScore, type AnalysisLine } from './analysisFormat.ts';
 import type { CriticalReport } from './criticalMoments.ts';
 import { REVIEW_CLASS_LABEL, reviewMoveLabel } from './gameReviewPresentation.ts';
+
+/** Pending report cells must not erase valid position analysis. New results replace only their engine. */
+export function criticalPositionLines(existing: AnalysisLine[] | undefined, reportLines: AnalysisLine[]): AnalysisLine[] | undefined {
+  const engines = new Set(reportLines.map((line) => analysisEngineName(line.engine)));
+  const merged = [...(existing ?? []).filter((line) => !engines.has(analysisEngineName(line.engine))), ...reportLines];
+  return merged.length ? merged : undefined;
+}
 
 export function criticalAgreement(lines: AnalysisLine[]): string {
   const best = lines.filter((line) => !line.error && line.pvUci[0]);

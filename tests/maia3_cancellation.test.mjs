@@ -5,7 +5,7 @@ import { START_FEN } from '../src/chess/board.ts';
 
 class WorkerStub extends EventTarget {
   terminated = false;
-  postMessage() {}
+  postMessage(message) { this.lastMessage = message; }
   terminate() { this.terminated = true; }
 }
 
@@ -16,6 +16,14 @@ test('Maia worker initialization can be aborted without waiting for ready', asyn
   controller.abort();
   await assert.rejects(pending, { name: 'AbortError' });
   assert.equal(worker.terminated, true);
+});
+
+test('Maia initialization forwards the report CPU-thread reservation to its worker', async () => {
+  const worker = new WorkerStub();
+  const pending = Maia3BrowserEvaluator.postInit(worker, 'model', 'wasm', undefined, 1);
+  assert.equal(worker.lastMessage.wasmThreads, 1);
+  worker.dispatchEvent(new MessageEvent('message', { data: { type: 'ready', id: 0, inputNames: [], outputNames: [], backend: 'wasm' } }));
+  await pending;
 });
 
 test('terminating a report-owned Maia evaluator rejects in-flight and future inference', async () => {

@@ -13,6 +13,7 @@ interface PanelOptions {
   settings(): unknown;
   pauseAnalysis(): void;
   settled(): void;
+  updateView(moment: CriticalMoment, lines: AnalysisLine[]): void;
   navigate(moment: CriticalMoment, target: string, lines: AnalysisLine[]): void;
 }
 
@@ -21,6 +22,8 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
   let report: CriticalReport | undefined;
   let controller: AbortController | undefined;
   let disposed = false;
+  let viewedIndex: number | undefined;
+  let viewedLinesSignature = '';
   const cache = new Map<string, CriticalResult>();
   const listeners = new AbortController();
   const ownSettings = () => ({ engines: options.settings(), maia: inputEl('criticalMaia').checked, rating: selectEl('criticalRating').value });
@@ -44,6 +47,17 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
       el('criticalSource').textContent = `Baseline severity: ${report.baseline}. Engine move agreement and Maia probabilities are independent of this severity.`;
       el('criticalEngineProgress').innerHTML = report.lanes.map((lane) => `<div><strong>${htmlEscape(lane.provenance.engine)}</strong><span>${lane.completed}/${report!.moments.length} · ${htmlEscape(lane.progress)}</span><progress max="${report!.moments.length}" value="${lane.completed}" aria-label="${htmlEscape(lane.provenance.engine)} progress"></progress></div>`).join('');
       patchAnalysisResults(el('criticalReport'), criticalReportMarkup(report));
+      if (!report.stale && viewedIndex !== undefined) {
+        const lines = report.lanes.flatMap((lane) => {
+          const line = report!.cells[lane.id][viewedIndex!].result?.line;
+          return line ? [line] : [];
+        });
+        const next = JSON.stringify(lines);
+        if (next !== viewedLinesSignature) {
+          viewedLinesSignature = next;
+          options.updateView(report.moments[viewedIndex], lines);
+        }
+      }
     }
   };
   const invalidate = () => {
@@ -74,6 +88,8 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
     const current = new AbortController();
     controller = current;
     const engines = createCriticalEngines(options.broker, inputEl('criticalMaia').checked ? Number(selectEl('criticalRating').value) : undefined, current.signal);
+    viewedIndex = undefined;
+    viewedLinesSignature = '';
     report = createCriticalReport(signature(), baseline.source, moments, engines.lanes);
     const currentReport = report;
     options.pauseAnalysis();
@@ -98,6 +114,8 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
       const line = report!.cells[lane.id][index].result?.line;
       return line ? [line] : [];
     });
+    viewedIndex = index;
+    viewedLinesSignature = JSON.stringify(lines);
     options.navigate(moment, button.dataset.criticalTarget ?? 'board', lines);
   }, { signal: listeners.signal });
   render();
