@@ -2968,6 +2968,7 @@ async function runGameReview(): Promise<void> {
   analyzing = false;
   retireAnalysisRunCentipawnKeys();
   clearAnalysisSearchProgress();
+  el('message').textContent = 'Position analysis paused for game review.';
   el('stop').toggleAttribute('disabled', true);
   el('analyze').toggleAttribute('disabled', false);
   selectEl('lc0RuntimeSelect').disabled = false;
@@ -4235,7 +4236,7 @@ function wireEvents() {
   // Keep routine completion quiet without concealing loading, errors or import feedback.
   const message = el('message');
   const updateMessageState = () => {
-    message.dataset.routine = String(/^(Analysis complete ·|Engines (agree|disagree):|\d+\/\d+ engines prefer)/.test(message.textContent ?? ''));
+    message.dataset.routine = String(/^(Analysis complete ·|Position analysis paused for game review\.|Engines (agree|disagree):|\d+\/\d+ engines prefer)/.test(message.textContent ?? ''));
   };
   const messageObserver = new MutationObserver(updateMessageState);
   messageObserver.observe(message, { childList: true, characterData: true, subtree: true });
