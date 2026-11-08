@@ -4414,7 +4414,35 @@ function wireEvents() {
     window.setTimeout(() => { delete button.dataset.copied; }, 1600);
   };
   el('copyFen').addEventListener('click', () => { copyFen(); flashCopied(el('copyFen')); });
-  // One-click export beside the board; feedback is on the button itself and in the live message.
+  // Plain disclosure: native buttons use Tab, and Escape returns to the trigger.
+  const copyTools = el('copyTools');
+  const copyMenu = el('copyMenu');
+  const copyTrigger = el('copyMenuButton');
+  const closeCopyMenu = (restoreFocus = false) => {
+    copyMenu.hidden = true;
+    copyTrigger.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) copyTrigger.focus({ preventScroll: true });
+  };
+  copyTrigger.addEventListener('click', () => {
+    copyMenu.hidden = !copyMenu.hidden;
+    copyTrigger.setAttribute('aria-expanded', String(!copyMenu.hidden));
+  });
+  copyMenu.addEventListener('click', (event) => {
+    // A synchronous clipboard fallback may already have focused the manual URL field.
+    if ((event.target as HTMLElement).closest('button')) closeCopyMenu(copyTools.contains(document.activeElement));
+  });
+  copyTools.addEventListener('focusout', (event) => {
+    if (!copyTools.contains(event.relatedTarget as Node | null)) closeCopyMenu();
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (!copyTools.contains(event.target as Node)) closeCopyMenu();
+  }, { signal: mountAbort.signal });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || copyMenu.hidden) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeCopyMenu(true);
+  }, { capture: true, signal: mountAbort.signal });
   el('quickCopyFen').addEventListener('click', () => { copyFen(); flashCopied(el('quickCopyFen')); });
   el('quickCopyPgn').addEventListener('click', () => { copyPgn(); flashCopied(el('quickCopyPgn')); });
   el('playFromHere').addEventListener('click', () => {

@@ -83,9 +83,14 @@ onMount(() => {
     </div>
     <div class="board-tools" aria-label="Board tools">
       <button id="flip" class="tool-button icon-only" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
+      <div id="copyTools" class="copy-tools">
+      <button id="copyMenuButton" class="tool-button" type="button" aria-expanded="false" aria-controls="copyMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5H4v12h4"/></svg>Copy<svg class="copy-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+      <div id="copyMenu" class="copy-menu" role="group" aria-label="Copy position or game" hidden>
       <button id="quickCopyFen" class="tool-button copy-button" type="button" title="Copy this position's FEN" aria-label="Copy FEN"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">FEN</span></button>
       <button id="quickCopyPgn" class="tool-button copy-button" type="button" title="Copy the game as PGN" aria-label="Copy PGN"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">PGN</span></button>
       <button id="copyLink" class="tool-button copy-button copy-link" type="button" title="Copy a link to this position (FEN only)" aria-label="Copy link"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-5 7-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m0 1 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">Copy link</span></button>
+      </div>
+      </div>
       <button id="playFromHere" class="tool-button" type="button" title="Continue this position against Maia3 or an engine" aria-describedby="playFromHereReason">Play from here</button>
       <button id="openPosition" class="tool-button position-toggle" type="button" aria-controls="positionTools" aria-expanded="false" title="Load a game or position (PGN or FEN)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14"/></svg><span class="tool-label">Load</span></button>
     </div>
@@ -352,11 +357,17 @@ onMount(() => {
   :global(.analysis-workspace .keyboard-square:focus-visible){outline:3px solid #fff; outline-offset:-4px; box-shadow:inset 0 0 0 6px #225ca0; background:#fff2}
   .analysis-workspace .section-block>summary{font:650 13px/1.3 var(--sans); letter-spacing:0; text-transform:none; color:var(--ink)}
   .analysis-workspace .section-block>summary::before{font-size:12px}
-  /* Secondary, right-aligned tool group: flip, copy FEN/PGN, load. Nav keeps the wide primary buttons. */
+  /* Tools stay secondary to the wide move-navigation buttons. */
   .board-tools{display:flex; align-items:stretch; gap:6px; flex:0 0 auto}
   .tool-button{display:inline-flex; align-items:center; justify-content:center; gap:6px; height:100%; min-height:0; padding:0 11px; border-radius:7px; border:1px solid var(--border-input); background:transparent; color:var(--ink); font:600 13px var(--sans); white-space:nowrap}
   .tool-button:hover:not(:disabled){background:var(--panel-2); color:var(--ink)}
   .tool-button.icon-only{width:40px; padding:0}
+  .copy-tools{position:relative; display:flex}
+  .copy-tools>.tool-button{width:100%}
+  .copy-caret{width:12px!important; flex-basis:12px!important}
+  .copy-menu{position:absolute; bottom:calc(100% + 6px); left:0; z-index:20; width:180px; padding:5px; border:1px solid var(--border-input); border-radius:8px; background:var(--panel); box-shadow:0 8px 24px #0003}
+  .copy-menu:not([hidden]){display:grid; gap:2px}
+  .copy-menu .copy-button{justify-content:flex-start; width:100%; min-height:44px; height:auto; padding:8px 10px; border-color:transparent}
   .copy-button{min-width:72px}
   .copy-button .copied-icon{display:none}
   .copy-button:global([data-copied=true]){border-color:var(--accent); color:var(--accent-soft-text)}
@@ -860,10 +871,9 @@ onMount(() => {
   @container (max-width:700px){
     .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:4px}
     .nav{height:44px}
-    .board-tools{display:grid; grid-template-columns:36px repeat(3,minmax(0,1fr)) auto minmax(0,1fr); gap:4px; height:36px}
-    .tool-button, .tool-button.icon-only{width:auto; padding:0 6px; gap:5px; font-size:12.5px}
+    .board-tools{display:grid; grid-template-columns:44px minmax(0,1fr) auto minmax(0,1fr); gap:6px; height:44px}
+    .tool-button, .tool-button.icon-only{width:auto; padding:0 8px; gap:5px; font-size:12.5px}
     .copy-button{min-width:0}
-    .copy-link svg{display:none}
   }
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
@@ -880,12 +890,11 @@ onMount(() => {
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
     .evalbar .mid{top:0; bottom:0; left:50%; width:2px; height:auto}
     .board-panel :global(#ground){border-radius:3px}
-    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:4px; margin:6px 0 0}
+    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:8px; margin:6px 0 0}
     .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
-    .board-tools{display:grid; grid-template-columns:36px repeat(3,minmax(0,1fr)) auto minmax(0,1fr); gap:4px; height:36px}
-    .copy-link svg{display:none}
-    .tool-button, .tool-button.icon-only{width:auto; padding:0 6px; gap:5px; font-size:12.5px}
+    .board-tools{display:grid; grid-template-columns:44px minmax(0,1fr) auto minmax(0,1fr); gap:6px; height:44px}
+    .tool-button, .tool-button.icon-only{width:auto; padding:0 8px; gap:5px; font-size:12.5px}
     .copy-button{min-width:0}
     .copy-button svg{width:14px; height:14px; flex-basis:14px}
     .position-status{min-width:0}
