@@ -2,6 +2,7 @@
 import { onMount, tick } from 'svelte';
 import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
+import { activeDocsTopic } from '$lib/docsNavigation';
 
 const title = '0x88 Chess — documentation';
 const description = 'How to use the 0x88 browser chess workspaces, fix WebGPU and download problems, and find each engine’s license and corresponding source.';
@@ -117,15 +118,12 @@ let railList: HTMLElement | null = null;
 function updateActive(): void {
   // Slightly past the scroll-margin, so a heading reached by a link counts as current.
   const offset = headerHeight + (narrow ? 84 : 24) + 8;
-  let current = outline[0].link.id;
-  for (const { link } of outline) {
+  const headings = outline.flatMap(({ link }) => {
     const el = document.getElementById(link.id);
-    if (!el) continue;
-    if (el.getBoundingClientRect().top - offset <= 0) current = link.id;
-    else break;
-  }
+    return el ? [{ id: link.id, top: el.getBoundingClientRect().top }] : [];
+  });
   const doc = document.documentElement;
-  if (window.innerHeight + window.scrollY >= doc.scrollHeight - 2) current = outline[outline.length - 1].link.id;
+  const current = activeDocsTopic(headings, offset, window.innerHeight + window.scrollY >= doc.scrollHeight - 2) ?? activeId;
   if (current !== activeId) {
     activeId = current;
     const groupId = byId.get(current)?.group.id;
@@ -135,7 +133,7 @@ function updateActive(): void {
 }
 
 function keepActiveVisible(): void {
-  if (narrow || !railList) return;
+  if (!railList || (narrow && !tocOpen)) return;
   const link = railList.querySelector<HTMLElement>('a[aria-current="location"]');
   if (!link) return;
   const box = railList.getBoundingClientRect();
@@ -147,6 +145,7 @@ function keepActiveVisible(): void {
 // ---- mobile contents sheet --------------------------------------------------
 let narrow = false;
 let tocOpen = false;
+$: if (tocOpen) void tick().then(keepActiveVisible);
 let tocToggle: HTMLButtonElement | null = null;
 let mobileSearch: HTMLButtonElement | null = null;
 let searchShortcut = 'Ctrl K';
@@ -1265,29 +1264,31 @@ onMount(() => {
   .search input:focus ~ .search-shortcuts{display:none}
   .toc-groups,.results{overflow-y:auto; min-height:0; padding-right:6px; margin-right:-6px}
   .toc-group + .toc-group{margin-top:12px; padding-top:12px; border-top:1px solid var(--rule)}
-  .toc-group-heading{display:flex; align-items:center; gap:4px; margin-bottom:4px}
-  .toc-groups .toc-group-label{flex:1; font-size:14px; font-weight:700; color:var(--ink)}
+  .toc-group-heading{display:flex; align-items:center; gap:4px; margin-bottom:4px; border-radius:6px}
+  .toc-group-heading:hover{background:var(--rule-soft)}
+  .toc-groups .toc-group-heading .toc-group-label{flex:1; font-size:14px; font-weight:700; color:var(--ink); background:transparent}
   .toc-group-heading.current-group{background:var(--accent-soft); border-radius:6px; box-shadow:inset 0 0 0 1px var(--accent-tint-border)}
-  .toc-group-heading.current-group .toc-group-label{color:var(--accent-soft-text)}
+  .toc-groups .toc-group-heading.current-group .toc-group-label{color:var(--accent-soft-text)}
   .group-toggle{
     display:flex; align-items:center; justify-content:center; gap:4px; min-width:36px; min-height:36px; padding:4px;
     border:0; border-radius:6px; background:transparent; color:var(--text-soft); font:12px var(--sans); cursor:pointer;
   }
-  .group-toggle:hover{background:var(--panel-2); color:var(--ink)}
+  .group-toggle:hover{background:transparent; color:var(--ink); outline:1px solid var(--border-input-hover); outline-offset:-4px}
+  .group-toggle:focus-visible{outline:2px solid var(--accent); outline-offset:-3px}
   .group-toggle svg{width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; transition:transform .15s}
   .group-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
   .toc ul[hidden]{display:none}
   .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:1px}
   .toc-groups a{
-    display:block; padding:8px 10px; border-radius:6px;
+    display:flex; align-items:center; min-height:36px; padding:7px 10px; border-radius:6px;
     color:var(--text); text-decoration:none; line-height:1.35;
   }
   .toc-groups a:hover{color:var(--ink); background:var(--rule-soft)}
   .toc-groups a.in-active{color:var(--ink); font-weight:600}
   .toc-groups a.active{color:var(--accent-soft-text); font-weight:700; background:var(--accent-soft)}
   .toc-group > ul{padding-left:10px}
-  .toc ul ul{margin:2px 0 6px 18px}
-  .toc ul ul a{font-size:14px; padding:8px 10px}
+  .toc ul ul{margin:0 0 0 12px}
+  .toc ul ul a{font-size:14px}
 
   /* ---- search results ---- */
   .results-count,.no-results{margin:0 0 8px; padding:0 4px; color:var(--text-soft); font-size:12.5px}
@@ -1554,8 +1555,7 @@ onMount(() => {
     .search-shortcuts{display:none}
     .search input{min-height:44px; padding-right:12px; font-size:16px}
     .group-toggle{min-height:44px; min-width:44px}
-    .toc-groups a{padding:8px 10px}
-    .toc ul ul a{padding:7px 10px}
+    .toc-groups a{min-height:44px; padding:8px 10px}
     .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 76px)}
     .doc-content h2{font-size:25px}
     .page-block{padding:20px 16px}

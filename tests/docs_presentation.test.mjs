@@ -56,7 +56,10 @@ test('every group has an explicit controlled disclosure, including all ten engin
   assert.match(source, /group.id === activeGroupId \? 'true'/);
   assert.doesNotMatch(source, /group\.collapsed/);
   assert.doesNotMatch(markup(toggle), /group\.items\.length/, 'ambiguous topic counts are not shown');
-  assert.match(source, /\.toc ul ul a\{font-size:14px; padding:8px 10px\}/);
+  assert.match(source, /\.toc ul ul\{margin:0 0 0 12px\}/);
+  assert.match(source, /\.toc-groups \.toc-group-heading \.toc-group-label\{[^}]*background:transparent/);
+  assert.match(source, /\.group-toggle:hover\{background:transparent/);
+  assert.doesNotMatch(source, /border-left|inset[^;]*[34]px 0/);
 });
 
 test('troubleshooting opens by default and common problems are linked outside Contents', () => {
