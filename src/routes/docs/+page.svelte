@@ -477,9 +477,9 @@ onMount(() => {
     </div>
     <p>Run several engines on the same position and compare their best moves, evaluations and lines.</p>
     <ol class="steps">
-      <li>Open Analysis. It starts with Lc0 (Small net, a neural-network model) and Stockfish Lite on the starting position.</li>
-      <li>Make moves on the board, or press <strong>Load</strong> to paste a PGN (a game record) or FEN (a single-position notation).</li>
-      <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to change each engine’s net or build and its search budget: visits (search iterations) or depth, depending on the engine.</li>
+      <li>Open Analysis. It starts with Lc0 (Small net: a neural model) and Stockfish Lite on the starting position.</li>
+      <li>Make board moves, or press <strong>Load</strong> to paste a game record (PGN) or position (FEN).</li>
+      <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to choose its net or build and engine-specific search budget: visits (search iterations) or depth.</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
     </ol>
   </div>
@@ -1236,7 +1236,7 @@ onMount(() => {
     grid-template-areas:"toc intro" "toc content";
     column-gap:56px; align-items:start;
   }
-  .doc-intro{grid-area:intro; margin-bottom:32px}
+  .doc-intro{grid-area:intro; margin-bottom:16px}
   .doc-intro h1{font-size:44px; margin:0 0 10px; line-height:1.1; letter-spacing:-.015em}
   .intro-lede{margin:0; color:var(--ink-soft); font-size:16.5px; max-width:66ch; line-height:1.6}
   .intro-help{margin:10px 0 0; color:var(--text); font-size:14px; line-height:1.55; max-width:66ch}
@@ -1320,7 +1320,7 @@ onMount(() => {
   .doc-content section:last-child{padding-bottom:0}
   .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 20px)}
   .doc-content h2{
-    font-size:28px; margin:8px 0 14px;
+    font-size:28px; margin:8px 0 12px;
     line-height:1.2; letter-spacing:-.01em;
     display:flex; align-items:center; gap:10px;
   }
@@ -1343,7 +1343,7 @@ onMount(() => {
   .runtime-block + .runtime-block{padding-top:16px; margin-top:32px; border-top:1px solid var(--rule)}
   .doc-content :global(h2:focus),.doc-content :global(h3:focus){outline:none}
   .doc-content > section > p.lead{
-    color:var(--ink-soft); margin:0 0 26px;
+    color:var(--ink-soft); margin:0 0 14px;
     font-size:16px; max-width:66ch; line-height:1.65;
   }
   .doc-content p{margin:0 0 14px; line-height:1.65; color:var(--ink-soft)}
