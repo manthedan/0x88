@@ -111,19 +111,21 @@ onMount(() => {
         </div>
       </div>
       <div id="matchScore" aria-live="polite"></div>
-      <div class="sb-context"><span id="setupSummaryText"></span><span id="pairing" class="sb-progress"></span></div>
+      <div class="sb-context">
+        <span id="setupSummaryText"></span><span id="pairing" class="sb-progress"></span>
+        <details id="openingPairsSection" class="arena-results" hidden>
+          <summary>Opening pairs</summary>
+          <select id="pairMatchup" aria-label="Opening pairs matchup"></select>
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
+          <div id="openingPairs" class="arena-table-scroll" tabindex="0" role="region" aria-label="Colour-reversed opening pairs"></div>
+        </details>
+      </div>
       <div id="gameChips" class="sb-chips" aria-label="Finished games" hidden></div>
     </section>
     <details id="crosstableSection" class="section-block arena-results" open hidden>
       <summary>Crosstable</summary>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div id="crosstable" class="arena-table-scroll" tabindex="0" role="region" aria-label="Opponent crosstable"></div>
-    </details>
-    <details id="openingPairsSection" class="section-block arena-results" hidden>
-      <summary>Opening pairs</summary>
-      <select id="pairMatchup" aria-label="Opening pairs matchup"></select>
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
-      <div id="openingPairs" class="arena-table-scroll" tabindex="0" role="region" aria-label="Colour-reversed opening pairs"></div>
     </details>
     <fieldset id="setupPane" class="setup-pane" aria-label="Tournament settings">
     <p class="locked-note">Settings are locked while games run. Stop to change them.</p>
@@ -263,6 +265,7 @@ onMount(() => {
     <details class="eng-more search-details"><summary>Search details</summary><div id="engineRaw" class="eng-raw"></div></details>
     <details id="resultSection" class="section-block results-block">
       <summary>Game log &amp; PGN</summary>
+      <p id="checkpointStorageText" class="field-hint" hidden></p>
       <div class="log" id="log"></div>
       <pre id="benchResult" class="small" hidden></pre>
       <div class="row"><button id="exportPgn" type="button">Export PGN</button></div>
@@ -404,6 +407,10 @@ onMount(() => {
   .sb-context{display:flex; flex-wrap:wrap; gap:2px 8px; margin-top:9px; color:var(--muted); font:500 12px/1.4 var(--sans)}
   .sb-progress:not(:empty)::before{content:'·'; margin-right:8px}
   .sb-progress:empty{display:none}
+  .sb-context .arena-results{padding:0; border:0}
+  .sb-context .arena-results>summary{cursor:pointer; color:var(--text); text-decoration:underline; text-underline-offset:3px}
+  .sb-context .arena-results[open]{flex-basis:100%}
+  .sb-context .arena-results[open]>summary{margin-bottom:8px}
   .scoreboard :global(.sb-match){display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:10px; margin-top:10px}
   .scoreboard :global(.sb-player){display:flex; align-items:center; gap:8px; min-width:0}
   .scoreboard :global(.sb-player.right){flex-direction:row-reverse; text-align:right}

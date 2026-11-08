@@ -3803,7 +3803,11 @@ async function runIsolatedCpuTournament(
 function renderCheckpointStatus(): void {
   const host = document.getElementById('checkpointSection');
   if (!host) return;
-  host.hidden = !checkpoint && !checkpointProblem;
+  // Routine storage status belongs with exports, not above the live scoresheet.
+  host.hidden = running ? !checkpointProblem : !checkpoint && !checkpointProblem;
+  const storage = el('checkpointStorageText');
+  storage.hidden = !checkpoint || !!checkpointProblem;
+  storage.textContent = checkpointSaving ? 'Saving completed games on this device…' : 'Completed games are saved on this device.';
   const pending = checkpoint ? arenaRemainingIndices(checkpoint).length : 0;
   el('checkpointText').textContent = checkpointProblem || (checkpointSaving ? 'Saving completed games on this device…' : running
     ? 'Completed games are saved on this device.'
