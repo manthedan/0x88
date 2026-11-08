@@ -153,6 +153,22 @@ onMount(() => {
       <div id="movelist" class="movelist move-panel" aria-label="Move history"></div>
     </div>
     <div id="reviewPanel" class="review-panel" role="tabpanel" aria-labelledby="reviewTab" tabindex="0">
+      <section id="retryEntry" class="retry-area" aria-labelledby="retryTitle" hidden>
+        <h2 id="retryTitle">Retry your mistakes</h2>
+        <p class="review-hint">Try up to five positions without engine advice. Your game stays unchanged.</p>
+        <div class="retry-start"><div class="field"><label for="retrySide">Which side did you play?</label><select id="retrySide"><option value="">Choose a side</option><option value="w">White</option><option value="b">Black</option></select></div><button id="retryStart" type="button">Retry mistakes</button></div>
+        <p id="retryEntryStatus" class="review-hint" role="status"></p>
+      </section>
+      <section id="retryActive" class="retry-area" aria-labelledby="retryActiveTitle" hidden>
+        <div class="retry-heading"><h2 id="retryActiveTitle">Retry your mistakes</h2><button id="retryExit" type="button">Return to review</button></div>
+        <p id="retryCounts" class="retry-counts"></p>
+        <p id="retryStatus" class="retry-status" role="status"></p>
+        <p id="retrySolution" class="retry-solution"></p>
+        <div class="review-actions"><button id="retrySkip" type="button">Skip</button><button id="retryReveal" type="button">Reveal</button><button id="retryNext" class="primary" type="button" hidden>Next position</button></div>
+        <div id="retryHuman" class="retry-human" hidden><label for="retryRating">Human rating</label><select id="retryRating"><option>1100</option><option>1300</option><option selected>1500</option><option>1700</option><option>1900</option><option>2200</option></select><button id="retryHumanShow" type="button">Show human likelihood</button><p id="retryHumanStatus" class="review-hint" role="status"></p></div>
+        <details class="review-explanation"><summary>How alternatives are checked</summary><p>The review’s best move is accepted immediately. Other moves are checked locally by the same reviewer at the review depth, comparing both resulting positions. A move is accepted if its estimated score is within 2 percentage points of the best move, from your side’s perspective. Shallow checks can be uncertain. Human likelihood does not determine correctness.</p></details>
+      </section>
+      <div id="reviewStandard">
       <div class="review-settings">
         <div class="field"><label for="reviewEngine">Reviewer</label><select id="reviewEngine"><option value="sf:lite">Stockfish Lite</option></select></div>
         <div class="field"><label for="reviewDepth">Depth per position</label><select id="reviewDepth"><option value="8">8 · Quick</option><option value="12" selected>12 · Standard</option><option value="16">16 · Deeper</option></select></div>
@@ -176,6 +192,7 @@ onMount(() => {
         <ol id="reviewCritical" class="review-critical" aria-label="Largest losses, ranked by size" hidden></ol>
         <div class="review-exports"><button id="reviewCopyPgn" type="button" hidden>Copy reviewed PGN</button><button id="reviewDownloadPgn" type="button" hidden>Download PGN</button></div>
         <p class="review-hint">Exports the reviewed mainline with engine evals and error NAGs. Variations and existing notes are not included.</p>
+      </div>
       </div>
     </div>
     <div id="comparisonSection" class="section-block comparison-panel" role="tabpanel" aria-labelledby="comparisonTab" tabindex="0">
@@ -767,6 +784,20 @@ onMount(() => {
   :global(.analysis-content[data-view=review]) .review-panel{display:block}
   /* Review gets the full sidebar below the tabs, rather than competing with PV cards. */
   :global(.analysis-content[data-view=review]) .engine-strip, :global(.analysis-content[data-view=review]) .add-engine-inline{display:none}
+  .retry-area{margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--rule)}
+  .retry-area h2{font:600 15px var(--sans); margin:0 0 8px; text-transform:none; letter-spacing:0}
+  .retry-start, .retry-heading{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px}
+  .retry-start label, .retry-human label{display:block; font-size:13px; margin-bottom:4px; color:var(--muted)}
+  .retry-area button, .retry-area select{font-size:13px; min-height:40px; padding:5px 10px}
+  .retry-counts{font:13px var(--sans); color:var(--muted); margin:12px 0}
+  .retry-status{font:600 15px/1.5 var(--sans); margin:12px 0}
+  .retry-solution{font:600 14px/1.5 var(--sans)}
+  .retry-human{margin-top:16px}
+  .retry-human select{margin-right:6px}
+  :global(.analysis-workspace[data-retrying]) .analysis-overview, :global(.analysis-workspace[data-retrying]) .add-engine-inline, :global(.analysis-workspace[data-retrying]) #message{display:none}
+  :global(.analysis-workspace[data-retrying]) .evalbar, :global(.analysis-workspace[data-retrying]) #evalSourceButton{visibility:hidden}
+  :global(.analysis-workspace[data-retrying]) .board-tools>:not(#flip){display:none}
+  :global(.analysis-workspace[data-retrying]) .review-panel{max-height:none}
   .review-settings{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px}
   .review-settings select{width:100%; min-width:0; font-size:13px; min-height:36px; padding:4px 6px}
   .review-settings label{font-size:13px; color:var(--muted); margin-bottom:4px; display:block}
@@ -944,6 +975,16 @@ onMount(() => {
     :global(table.engine-compare th), :global(table.engine-compare td){padding-inline:3px}
     :global(table.engine-compare tbody th){font-size:12px}
   }
+  /* Retry overrides the mobile engine-action grid without moving its controls elsewhere. */
+  :global(.analysis-workspace[data-retrying]) #addEngine,
+  :global(.analysis-workspace[data-retrying] #analysisRestoreNotice),
+  :global(.analysis-workspace[data-retrying]) .nav{display:none!important}
+  :global(.analysis-workspace[data-retrying]) .board-toolbar{display:flex; justify-content:flex-end; height:40px}
+  :global(.analysis-workspace[data-retrying]) .board-tools{display:flex; height:40px}
+  :global(.analysis-workspace[data-retrying]) #flip{width:40px}
+  :global(.analysis-workspace[data-retrying]) .app-sidebar{display:flex; flex-direction:column}
+  :global(.analysis-workspace[data-retrying]) #analysisContent{display:flex; flex-direction:column}
+  :global(.analysis-workspace[data-retrying]) .workbench-tabs{flex:none}
   @media (max-width:360px){
     .eval-turn{font-size:11px}
     .eval-source:global([data-short]:not([data-short='']))::before{display:none}

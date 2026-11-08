@@ -37,6 +37,8 @@ import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameIm
 import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
 import { REVIEW_CLASS_GLYPH, REVIEW_CLASS_LABEL, reviewChartSvg, reviewMoveLabel, reviewPlyAtRatio, reviewSummaryHtml } from './gameReviewPresentation.ts';
 import { type GameNode, GameTree } from './gameTree.ts';
+import { MistakeRetry, retryProblems, retrySideFromTags } from './retryMistakes.ts';
+import { quarantineRetryPanels } from './retrySpoilers.ts';
 import { createWorkspaceAutosave, decodeAnalysisSnapshot, hasExplicitWorkspaceInput, readWorkspace, serializeTree } from './workspaceAutosave.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
 import { LatestOnlyTask } from './latestOnlyTask.ts';
@@ -338,6 +340,7 @@ async function loadOpeningNames(signal: AbortSignal): Promise<void> {
 }
 
 function renderOpeningName(): void {
+  if (retry) return;
   const label = el('openingName');
   const opening = openingNameIndex ? openingNameAt(openingNameIndex, tree.current) : null;
   label.hidden = !opening && tree.current === tree.root;
@@ -502,6 +505,14 @@ let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
 let lastReviewSignature = '';
 let reviewRunSignature = '';
+let retry: MistakeRetry | null = null;
+let retryReviewer: ReviewEngineChoice | null = null;
+let lastReviewReviewer: ReviewEngineChoice | null = null;
+let restoreRetryPanels: (() => void) | null = null;
+let retryOriginalOrientation: 'white' | 'black' = 'white';
+let retryOriginalAuto = false;
+let retryHumanGeneration = 0;
+let retryOriginalShapes: DrawShape[] = [];
 const reviewMetadata = new WeakMap<GameTree, { tags: Record<string, string>; result: string; signature: string }>();
 let analyzing = false;
 let activeAnalysisSelectionKey = '';
@@ -1667,6 +1678,7 @@ function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
 }
 
 function renderEngineList(): void {
+  if (retry) return;
   engineRows = engineRows.map((row, index) => {
     Object.assign(row, normalizeDeployEngineRow(row, 'analysis', index));
     const options = variantOptions(row.family);
@@ -1924,6 +1936,7 @@ function disposeUnusedEngines(): void {
 // Default: one best-move arrow per engine. Opt-in alternatives differ only in
 // opacity, never width. Pointer/keyboard previews temporarily isolate one line.
 function bestShapes(): DrawShape[] {
+  if (retry) return retry.answered ? [uciShape(retry.problem.move.bestUci!, 'green')].filter((shape): shape is DrawShape => !!shape) : [];
   // Result publication also resets default arrows. Keep a keyboard-focused PV
   // authoritative after its keyed control is restored by patchAnalysisResults.
   const active = document.activeElement as HTMLElement | null;
@@ -1952,11 +1965,13 @@ function bestShapes(): DrawShape[] {
 }
 
 function renderBoard() {
-  const board = tree.current.fen ? parseFen(tree.current.fen) : parseFen(START_FEN);
-  const lastUci = tree.current.move ? moveToUci(tree.current.move) : null;
+  const displayTree = retry?.tree ?? tree;
+  const board = displayTree.currentBoard();
+  const canMove = !retry || ['attempt', 'wrong'].includes(retry.phase);
+  const lastUci = !retry && tree.current.move ? moveToUci(tree.current.move) : null;
   const config = {
     orientation,
-    fen: tree.current.fen.split(' ')[0],
+    fen: displayTree.current.fen.split(' ')[0],
     turnColor: board.turn === 'w' ? ('white' as const) : ('black' as const),
     coordinates: true,
     // Allows synthetic pointer events so automated browser checks can move pieces.
@@ -1966,14 +1981,14 @@ function renderBoard() {
     animation: { enabled: true, duration: 160 },
     movable: {
       free: false,
-      color: board.turn === 'w' ? ('white' as const) : ('black' as const),
-      dests: legalDests(board),
+      color: canMove ? board.turn === 'w' ? ('white' as const) : ('black' as const) : undefined,
+      dests: canMove ? legalDests(board) : new Map(),
       // Chessground's third argument is move metadata, not our keyboard-origin flag.
       events: { after: (from: Key, to: Key) => { void onUserMove(from, to); } },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
     // Owner preference: one uniform 15px width, including opt-in alternatives.
-    drawable: { brushes: ANALYSIS_DRAWABLE_BRUSHES },
+    drawable: { brushes: ANALYSIS_DRAWABLE_BRUSHES, enabled: !retry },
   };
   // Cast: chessground's DrawBrushes type exposes the built-in keys, but custom
   // brush keys are supported at runtime and are needed to distinguish 3+ engines.
@@ -2007,6 +2022,17 @@ function evalBarLine(lines: AnalysisLine[]): AnalysisLine | undefined {
 }
 
 function renderEvalBar() {
+  if (retry) {
+    el('evalScore').textContent = '';
+    el('evalSource').textContent = 'Retry';
+    el('evalSourceButton').setAttribute('aria-expanded', 'false');
+    el('evalSourceButton').setAttribute('aria-label', 'Engine advice is off during retry');
+    el('evalSourceButton').title = 'Engine advice is off during retry';
+    el('evalSourceMenu').replaceChildren();
+    el('evalSourceMenu').hidden = true;
+    el('evalWhite').parentElement?.style.setProperty('--eval-pct', '50%');
+    return;
+  }
   const lines = lineCache.get(tree.current.fen) ?? [];
   const line = evalBarLine(lines);
   const pct = line ? evalBarWhitePercent(line.scoreCp, line.mateIn) : 50;
@@ -2058,6 +2084,7 @@ function signedPawns(value: number): string {
 
 /** Labelled run state beside the turn pip: running, complete, or waiting — never an unexplained glyph. */
 function renderAnalysisStatus(): void {
+  if (retry) return;
   const status = document.getElementById('analysisStatus');
   if (!status) return;
   const running = !(el('stop') as HTMLButtonElement).disabled;
@@ -2174,6 +2201,7 @@ function engineLogoFrame(logo: string, name: string): string {
 }
 
 function renderEngineComparison(lines: AnalysisLine[]): void {
+  if (retry) return;
   renderEngineSummaries(lines);
   const bestByEngine = [...new Map(lines.filter((line) => line.multipv === 1 && line.pvUci[0]).map((line) => [line.engine, line])).values()];
   const body = el('engineCompare').querySelector('tbody')!;
@@ -2231,6 +2259,7 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
 const CHEVRON_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>';
 
 function renderLines() {
+  if (retry) return;
   const lines = lineCache.get(tree.current.fen) ?? [];
   decorateMoveEvals();
   renderLegend();
@@ -2303,6 +2332,7 @@ function keepCurrentMoveInView(): void {
 }
 
 function renderMoveList() {
+  if (retry) return;
   renderOpeningName();
   nodeIndex.clear();
   const collect = (n: GameNode) => {
@@ -2325,6 +2355,7 @@ function renderMoveList() {
 }
 
 function renderOpening() {
+  if (retry) return;
   const body = el('opening').querySelector('tbody')!;
   const hasDatabasePositionStats = databasePositionKey === positionKey(tree.current.fen) && databasePositionStats.length > 0;
   if (!importedGames.length && !hasDatabasePositionStats) {
@@ -2824,6 +2855,7 @@ async function deleteSelectedPgnCollection(): Promise<void> {
 }
 
 function renderAll() {
+  if (retry) { renderBoard(); return; }
   renderBoard();
   renderLines();
   renderMoveList();
@@ -2846,6 +2878,9 @@ function reviewSignature(nodes = mainlineNodes()): string {
 }
 
 function clearReviewState(message?: string): void {
+  if (retry) exitMistakeRetry();
+  lastReviewReviewer = null;
+  el('retryEntry').hidden = true;
   lastReview = null;
   lastReviewNodes = [];
   lastReviewSignature = '';
@@ -2911,6 +2946,7 @@ function reviewEngineRows(): EngineRow[] {
 }
 
 function renderReviewEngineChoices(): void {
+  if (retry) return;
   const select = selectEl('reviewEngine');
   const previous = select.value;
   const rows = reviewEngineRows();
@@ -2961,7 +2997,7 @@ function renderReview(review: GameReview, nodes: GameNode[]): void {
 }
 
 function syncReviewNavigation(): void {
-  if (!lastReview) return;
+  if (retry || !lastReview) return;
   const ply = lastReviewNodes.indexOf(tree.current);
   const chart = el('reviewChart');
   chart.innerHTML = reviewChartSvg(lastReview, ply);
@@ -2982,14 +3018,178 @@ function syncReviewNavigation(): void {
 }
 
 function jumpReviewPly(ply: number): void {
+  if (retry) return;
   const node = lastReviewNodes[Math.max(0, Math.min(lastReviewNodes.length - 1, ply))];
   if (!lastReview || !node || reviewSignature() !== lastReviewSignature) return;
   tree.goTo(node);
   afterNavigation();
 }
 
+function startMistakeRetry(): void {
+  if (retry || !lastReview || !lastReviewReviewer || reviewSignature() !== lastReviewSignature) return;
+  const side = selectEl('retrySide').value;
+  if (side !== 'w' && side !== 'b') {
+    el('retryEntryStatus').textContent = 'Choose the side you played first.';
+    selectEl('retrySide').focus();
+    return;
+  }
+  const problems = retryProblems(lastReview, lastReviewNodes, side);
+  if (!problems.length) {
+    el('retryEntryStatus').textContent = `No mistakes or blunders to retry for ${side === 'w' ? 'White' : 'Black'} at this depth.`;
+    return;
+  }
+  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+  analysisAbort = null;
+  analyzing = false;
+  hiddenTab = cancelHiddenTabWork(cancelHiddenTabWork(hiddenTab, 'analysis'), 'maia');
+  hiddenResumeForce = false;
+  maia3PanelTask?.invalidate();
+  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  maia3PanelTimer = null;
+  closePvPreview();
+  retryOriginalOrientation = orientation;
+  retryOriginalAuto = inputEl('autoAnalyze').checked;
+  inputEl('autoAnalyze').checked = false;
+  retryReviewer = lastReviewReviewer;
+  retryOriginalShapes = ground?.state.drawable.shapes.slice() ?? [];
+  ground?.setShapes([]);
+  retry = new MistakeRetry(tree, problems);
+  orientation = side === 'w' ? 'white' : 'black';
+  arrowPreview = null;
+  clearAnalysisSearchProgress();
+  // Quarantine all answer-bearing panels, even those already hidden by the active tab.
+  restoreRetryPanels = quarantineRetryPanels([
+    ...['reviewStandard', 'enginesPanel', 'historyPanel', 'comparisonSection', 'humanPanel', 'positionTools', 'pvPreview', 'evalSourceMenu', 'pgnDbSearchResults'].map(el),
+    el('opening').querySelector('tbody')!,
+  ]);
+  el('retryEntry').hidden = true;
+  el('retryActive').hidden = false;
+  document.querySelector<HTMLElement>('.analysis-workspace')!.dataset.retrying = 'true';
+  for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd']) el(id).toggleAttribute('disabled', true);
+  el('message').textContent = '';
+  el('boardAnnouncement').textContent = '';
+  renderMistakeRetry();
+  el('reviewPanel').scrollTop = 0;
+  // Keep keyboard users on the playable board, not a now-concealed entry button.
+  keyboardBoard?.focus(side === 'w' ? 'e2' : 'e7');
+}
+
+function renderMistakeRetry(): void {
+  const session = retry;
+  if (!session) return;
+  retryHumanGeneration += 1;
+  const complete = session.phase === 'complete';
+  el('retryCounts').textContent = `${session.solved} solved · ${session.remaining} remaining · ${session.problems.length} ${session.problems.length === 1 ? 'position' : 'positions'}`;
+  const text = complete ? 'Retry complete. Return to review to continue your game.'
+    : session.phase === 'checking' ? 'Checking your move locally…'
+      : session.phase === 'solved' ? 'Success. This move is accepted.'
+        : session.phase === 'revealed' ? 'Best move revealed.'
+          : session.phase === 'wrong' ? 'Try again.' : `${session.problem.move.side === 'w' ? 'White' : 'Black'} to move. Play a better move on the board.`;
+  el('retryStatus').textContent = text;
+  el('boardAnnouncement').textContent = text;
+  el('retrySolution').textContent = '';
+  if (!complete && session.answered) {
+    const board = session.tree.currentBoard();
+    const best = legalMoves(board).find((move) => moveToUci(move) === session.problem.move.bestUci)!;
+    el('retrySolution').textContent = `Review’s best move: ${moveToSan(board, best)}.`;
+  }
+  el('retrySkip').hidden = complete || session.answered;
+  el('retryReveal').hidden = complete || session.answered;
+  el('retryNext').hidden = complete || !session.answered;
+  el('retryHuman').hidden = complete || !session.answered;
+  el('retryHumanStatus').textContent = '';
+  renderBoard();
+}
+
+async function verifyRetryPosition(positionTree: GameTree, signal: AbortSignal): Promise<number> {
+  const reviewer = retryReviewer;
+  if (!reviewer) throw new Error('Reviewer unavailable. Return to review.');
+  const { engine, row, label, depth } = reviewer;
+  const board = positionTree.currentBoard();
+  const legal = legalMoves(board).length;
+  const terminal = terminalReviewPosition(board, positionTree.lineTo().slice(0, -1).map((node) => node.fen), legal);
+  if (terminal) return terminal.winWhite;
+  const engineId = row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`;
+  const lines = await withCpuLease(engineId, signal, async (lease) => {
+    cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
+    return withEngineTimeout(label, signal, Math.max(cpuColdStartTimeoutMs(row), cpuAnalysisTimeoutMs(row)), async (searchSignal) => {
+      if (cpuSessions.needsReset(engine, positionTree)) {
+        await engine.newGame(searchSignal);
+        if (searchSignal.aborted) throw new DOMException('Retry cancelled', 'AbortError');
+        cpuSessions.prepared(engine, positionTree);
+      }
+      return analyzeCpuPosition(engine, row, positionTree.current.fen, analysisGamePosition(positionTree), { multipv: 1, depth, signal: searchSignal });
+    });
+  });
+  const scored = cachedReviewPosition(stockfishAnalysisLines(lines, positionTree.current.fen, label), legal);
+  if (!scored) throw new Error('No scored result. Try again or reveal the move.');
+  return scored.winWhite;
+}
+
+async function submitRetryMove(uci: string): Promise<void> {
+  const session = retry;
+  if (!session) return;
+  const pending = session.attempt(uci, verifyRetryPosition);
+  renderMistakeRetry();
+  try {
+    await pending;
+    if (retry === session) renderMistakeRetry();
+  } catch (error) {
+    if (retry === session) {
+      renderMistakeRetry();
+      el('retryStatus').textContent = `Could not check this move: ${(error as Error).message}`;
+    }
+  }
+}
+
+async function showRetryHumanLikelihood(): Promise<void> {
+  const session = retry;
+  if (!session?.answered) return;
+  if (!maia3PanelEvaluator) {
+    el('retryHumanStatus').textContent = 'To see human likelihood, load Maia3 in Human before starting a retry. No model is downloaded automatically.';
+    return;
+  }
+  const generation = ++retryHumanGeneration;
+  el('retryHumanStatus').textContent = 'Checking human likelihood…';
+  const board = session.tree.currentBoard();
+  const rating = Number(selectEl('retryRating').value);
+  try {
+    const [evaluation] = await maia3PanelEvaluator.evaluateConditions(board, [{ selfElo: rating, oppoElo: rating }]);
+    if (retry !== session || generation !== retryHumanGeneration || !session.answered) return;
+    const likelihood = (uci: string) => `${((evaluation.legalPriors.find((entry) => entry.uci === uci)?.prior ?? 0) * 100).toFixed(1)}%`;
+    el('retryHumanStatus').textContent = `Human likelihood at ${rating}: game move ${session.problem.move.san} ${likelihood(session.problem.move.uci)}; review’s best ${likelihood(session.problem.move.bestUci!)}.${session.attemptedUci ? ` Your attempt ${likelihood(session.attemptedUci)}.` : ''} This predicts human choices, not correctness.`;
+  } catch (error) {
+    if (retry === session && generation === retryHumanGeneration) el('retryHumanStatus').textContent = `Human likelihood unavailable: ${(error as Error).message}`;
+  }
+}
+
+function exitMistakeRetry(render = true): void {
+  if (!retry) return;
+  retry.cancel();
+  retry = null;
+  retryReviewer = null;
+  retryHumanGeneration += 1;
+  restoreRetryPanels?.();
+  restoreRetryPanels = null;
+  orientation = retryOriginalOrientation;
+  ground?.setShapes(retryOriginalShapes);
+  retryOriginalShapes = [];
+  inputEl('autoAnalyze').checked = retryOriginalAuto;
+  delete document.querySelector<HTMLElement>('.analysis-workspace')!.dataset.retrying;
+  el('retryActive').hidden = true;
+  el('retryEntry').hidden = false;
+  for (const id of ['retrySolution', 'retryHumanStatus', 'retryStatus', 'boardAnnouncement']) el(id).textContent = '';
+  for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd']) el(id).toggleAttribute('disabled', false);
+  if (render) {
+    renderAll();
+    renderAnalysisStatus();
+    scheduleMaia3Panel();
+    el('retryStart').focus({ preventScroll: true });
+  }
+}
+
 async function runGameReview(): Promise<void> {
-  if (reviewAbort) return;
+  if (retry || reviewAbort) return;
   const nodes = mainlineNodes();
   if (nodes.length < 2) {
     el('reviewStatus').textContent = 'Load a PGN or play some moves first.';
@@ -3085,6 +3285,10 @@ async function runGameReview(): Promise<void> {
     lastReview = reviewGame(positions, moves, parseFen(nodes[0].fen).turn);
     lastReviewNodes = nodes;
     lastReviewSignature = reviewSignature(nodes);
+    lastReviewReviewer = { engine, row: { ...row }, label, depth };
+    el('retryEntry').hidden = false;
+    selectEl('retrySide').value = retrySideFromTags(reviewMetadata.get(tree)?.tags ?? {}) ?? '';
+    el('retryEntryStatus').textContent = '';
     el('reviewGraphSource').textContent = `${analysisEngineName(label)} · depth ${depth}`;
     renderReview(lastReview, nodes);
     el('reviewCopyPgn').hidden = false;
@@ -3167,6 +3371,7 @@ function deferHiddenTabWork(kind: HiddenTabWork): boolean {
 }
 
 function applyHiddenTab(hidden: boolean): void {
+  if (retry) { hiddenTab = initialHiddenTabPause(hidden); return; }
   if (hidden) workspaceAutosave?.flush();
   const wasHidden = hiddenTab.hidden;
   const reloadClass = classifyHiddenReload(
@@ -3307,7 +3512,7 @@ function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolea
 }
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
-  if (reviewAbort) return;
+  if (reviewAbort || retry) return;
   if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
@@ -3604,7 +3809,7 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 }
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
-  if (mountAbort.signal.aborted || reviewAbort) return;
+  if (mountAbort.signal.aborted || reviewAbort || retry) return;
   if (deferHiddenTabWork('analysis')) {
     hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
     return;
@@ -3986,6 +4191,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
 let analysisGameTree = tree;
 
 function afterNavigation() {
+  if (retry) return;
   saveAnalysisWorkspace();
   if (pvPreview && (pvPreview.root !== tree.current || pvPreview.line.rootFen !== tree.current.fen)) closePvPreview();
   hiddenResumeForce = false;
@@ -4101,7 +4307,7 @@ function scheduleMaia3Panel(): void {
   task?.invalidate();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   maia3PanelTimer = null;
-  if (!task) return;
+  if (!task || retry) return;
   if (deferHiddenTabWork('maia')) return;
   maia3PanelTimer = setTimeout(() => {
     maia3PanelTimer = null;
@@ -4154,7 +4360,13 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
 }
 
 async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
-  const board = tree.current.fen ? parseFen(tree.current.fen) : parseFen(START_FEN);
+  const activeRetry = retry;
+  if (activeRetry && !['attempt', 'wrong'].includes(activeRetry.phase)) { renderBoard(); return; }
+  const board = (activeRetry?.tree ?? tree).currentBoard();
+  const play = (move: Move) => {
+    if (activeRetry) { if (retry === activeRetry) void submitRetryMove(moveToUci(move)); }
+    else { tree.addMove(move); afterNavigation(); }
+  };
   const matching = matchUserMoves(board, from, to);
   if (!matching.length) {
     renderBoard();
@@ -4168,8 +4380,7 @@ async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
       color: board.turn,
       choices: matching,
       onPick: (move) => {
-        tree.addMove(move);
-        afterNavigation();
+        play(move);
         // The picker removes its focused tile before renderBoard can detect grid focus.
         if (fromKeyboard) {
           keyboardBoard?.focus(to);
@@ -4186,8 +4397,7 @@ async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
     });
     return;
   }
-  tree.addMove(matching[0]);
-  afterNavigation();
+  play(matching[0]);
 }
 
 function loadFen() {
@@ -4336,6 +4546,19 @@ function hoverLine(pvUci: string[], engine: string) {
 }
 
 function wireEvents() {
+  el('retryStart').addEventListener('click', startMistakeRetry);
+  el('retryExit').addEventListener('click', () => exitMistakeRetry());
+  el('retrySkip').addEventListener('click', () => { retry?.next(); renderMistakeRetry(); });
+  el('retryNext').addEventListener('click', () => { retry?.next(); renderMistakeRetry(); });
+  el('retryReveal').addEventListener('click', () => { retry?.reveal(); renderMistakeRetry(); });
+  el('retryHumanShow').addEventListener('click', () => { void showRetryHumanLikelihood(); });
+  el('retryRating').addEventListener('change', () => { void showRetryHumanLikelihood(); });
+  // Board moves, board orientation and the retry sub-area are the only live controls.
+  document.querySelector('.analysis-workspace')?.addEventListener('click', (event) => {
+    if (retry && !(event.target as HTMLElement).closest('#retryActive, #ground, #keyboardBoard, #flip')) {
+      event.preventDefault(); event.stopImmediatePropagation();
+    }
+  }, { capture: true, signal: mountAbort.signal });
   // Keep routine completion quiet without concealing loading, errors or import feedback.
   const message = el('message');
   const updateMessageState = () => {
@@ -4376,6 +4599,7 @@ function wireEvents() {
   manager.addEventListener('close', () => el('manageEngines').focus({ preventScroll: true }));
   const tabs = [...el('analysisContent').querySelectorAll<HTMLButtonElement>('[role="tab"]')];
   const setView = (tab: HTMLButtonElement) => {
+    if (retry && tab.dataset.view !== 'review') return;
     el('analysisContent').dataset.view = tab.dataset.view;
     for (const item of tabs) {
       item.setAttribute('aria-selected', String(item === tab));
@@ -4926,6 +5150,7 @@ function wireEvents() {
   });
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = (event: KeyboardEvent) => {
+    if (retry) return;
     if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
     if (event.key === 'ArrowLeft') {
       tree.back();
@@ -4990,6 +5215,7 @@ function disposeRuntimeResources(): void {
 }
 
 function disposePageResources(): void {
+  if (retry) exitMistakeRetry(false);
   workspaceAutosave?.flush();
   workspaceAutosave = null;
   removeHiddenTabPause();
@@ -5244,6 +5470,12 @@ function resetAnalysisPageState(): void {
   lastReviewNodes = [];
   lastReviewSignature = '';
   reviewRunSignature = '';
+  retry?.cancel();
+  retry = null;
+  retryReviewer = null;
+  lastReviewReviewer = null;
+  restoreRetryPanels?.();
+  restoreRetryPanels = null;
   analyzing = false;
   lineCache.clear();
   nodeIndex.clear();

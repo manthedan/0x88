@@ -22,6 +22,7 @@ const toc: TocGroup[] = [
         { id: 'explore-engine-lines', label: 'Explore engine lines' },
         { id: 'share-restore', label: 'Share and restore your work' },
         { id: 'review-game', label: 'Review a game' },
+        { id: 'retry-mistakes', label: 'Retry your mistakes' },
         { id: 'export-review', label: 'Export a game review' },
       ] },
       { id: 'pages-arena', label: 'Run an engine match' },
@@ -497,6 +498,11 @@ onMount(() => {
       <li>Click the advantage graph or focus it and use arrow keys to visit moves, with Home/End for the ends. The move list shows classifications; <strong>Previous</strong> and <strong>Next</strong> cycle through the five largest error losses.</li>
       <li>Approximate accuracy averages estimated winning-chance loss per side, not the game score used by Lichess or Chess.com. Results depend on engine and depth, and changing the mainline clears them.</li>
     </ol>
+  </div>
+
+  <div class="page-block">
+    <h4 id="retry-mistakes">Retry your mistakes</h4>
+    <p>After reviewing a game, choose the side you played and press <strong>Retry mistakes</strong> in Review. Play a better move in up to five pre-error positions, with engine advice and human predictions concealed. The review’s best move is accepted immediately; alternatives are checked locally with the same reviewer and depth, allowing up to 2 percentage points of estimated score loss versus the best move. Use <strong>Skip</strong> or <strong>Reveal</strong>, then <strong>Return to review</strong> to restore your untouched game and selected position. After solving or revealing, you can compare human likelihood at a chosen rating if Maia3 was loaded in Human beforehand. These probabilities predict choices, not correctness.</p>
   </div>
 
   <div class="page-block">
