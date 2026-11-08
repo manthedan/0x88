@@ -162,7 +162,7 @@ onMount(() => {
     <dialog id="pvPreview" class="pv-preview engine-manager" aria-labelledby="pvPreviewTitle" aria-describedby="pvPreviewNote">
       <header class="manager-heading"><h2 id="pvPreviewTitle">Engine line</h2><button id="closePvPreview" type="button" aria-label="Close line preview">✕</button></header>
       <p id="pvPreviewDetail" class="small"></p>
-      <div id="pvPreviewBoard" aria-hidden="true"></div>
+      <div class="pv-board-shell" aria-hidden="true"><div id="pvPreviewBoard"></div></div>
       <p id="pvPreviewPosition" class="pv-position" role="status"></p>
       <div class="pv-navigation" aria-label="Line preview navigation">
         <button id="pvStart" type="button" aria-label="Preview starting position" title="Start (Home)">Start</button>
@@ -352,7 +352,8 @@ onMount(() => {
   .engine-manager{width:min(600px, calc(100vw - 24px)); max-height:85dvh; padding:20px; color:var(--ink); background:var(--panel); border:1px solid var(--border-input); border-radius:12px; box-shadow:0 20px 80px #0008}
   .engine-manager::backdrop{background:#0009}
   .pv-preview{width:min(440px, calc(100vw - 24px))}
-  #pvPreviewBoard{width:min(100%, 310px); aspect-ratio:1; margin:12px auto; position:relative; border-radius:4px; overflow:hidden}
+  .pv-board-shell{width:min(100%, 310px); aspect-ratio:1; margin:12px auto; border-radius:4px; overflow:hidden}
+  #pvPreviewBoard{position:relative; width:100%; height:100%}
   .pv-position{margin:10px 0; font-size:13px; color:var(--ink)}
   .pv-navigation{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px}
   .pv-navigation button{min-height:40px; padding:4px; font-size:13px}
