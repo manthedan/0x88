@@ -147,6 +147,8 @@ input:focus,select:focus,textarea:focus{
 }
 .brand-name{font-family:var(--mono); font-size:16px; font-weight:600; color:var(--ink); letter-spacing:-.01em}
 .page-title{font-family:var(--sans); font-size:17px; font-weight:650; letter-spacing:-.01em; margin:0; color:var(--ink)}
+/* While the nav links are visible, the highlighted link already names the page. */
+@media (min-width:601px){ .page-title{display:none} }
 nav.primary{display:flex; gap:4px; margin-left:auto}
 nav.primary a{
   color:var(--text-soft); padding:7px 13px; border-radius:8px; font-size:14px; font-weight:500;
@@ -388,7 +390,6 @@ textarea{
   .site-header .wrap{gap:10px; padding-top:10px; padding-bottom:10px}
   nav.primary{gap:0}
   nav.primary a{padding:7px 8px; font-size:13px}
-  .page-title{font-size:16px}
   .theme-toggle{width:44px; height:44px}
 }
 /* Phones: collapse the page links into the menu; the page title stays as the current-page indicator. */
@@ -396,6 +397,7 @@ textarea{
   nav.primary{display:none}
   .mobile-nav{display:block}
   .menu-toggle{display:flex; width:44px; height:44px}
+  .page-title{font-size:16px}
 }
 @media (max-width:420px){
   .site-header .wrap{gap:10px; padding-left:14px; padding-right:14px}
