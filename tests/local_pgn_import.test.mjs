@@ -30,6 +30,21 @@ test('local PGN caps reject before parsing and invalid moves cannot silently bec
   await assert.rejects(importLocalPgn('1. e4 e5 2. e4 *'), /Invalid PGN move/);
 });
 
+test('malformed comment braces and variations reject instead of hanging or truncating games', async () => {
+  await assert.rejects(importLocalPgn('1. e4 } *'), /Unmatched closing PGN comment brace/);
+  await assert.rejects(importLocalPgn('1. e4 { unfinished'), /Unclosed PGN comment/);
+  await assert.rejects(importLocalPgn('1. e4 ) *'), /Unmatched closing PGN variation/);
+  await assert.rejects(importLocalPgn('1. e4 (1. d4 *'), /Unclosed PGN variation/);
+});
+
+test('repeated-move RAVs cannot replace or extend the literal mainline', async () => {
+  const batch = await importLocalPgn('[Result "*"]\n1. e4 (1. e4 c5) e5 *\n\n[Result "*"]\n1. e4 (1. e4 c5) *');
+  const afterE4 = batch.games[0].tree.root.children[0].fen;
+  const stats = openingStatsFromIndex(batch.positionIndex, afterE4);
+  assert.deepEqual(stats.map((s) => [s.san, s.count]), [['e5', 1]]);
+  assert.equal(batch.games[1].tree.root.children[0].children.length, 0);
+});
+
 test('local import cancellation prevents publication', async () => {
   const controller = new AbortController();
   await assert.rejects(importLocalPgn(`${pgn}\n\n${pgn}`, (done) => { if (done === 1) controller.abort(); }, controller.signal), { name: 'AbortError' });

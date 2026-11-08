@@ -71,7 +71,7 @@ type Token =
 const RESULTS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
 
 /** Tokenize movetext, handling {comments}, (variations), $NAGs, move numbers, and results. */
-function tokenizeMovetext(movetext: string): Token[] {
+function tokenizeMovetext(movetext: string, strict = false): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   const n = movetext.length;
@@ -83,11 +83,13 @@ function tokenizeMovetext(movetext: string): Token[] {
     }
     if (ch === '{') {
       const end = movetext.indexOf('}', i);
+      if (end === -1 && strict) throw new Error('Unclosed PGN comment');
       const stop = end === -1 ? n : end;
       tokens.push({ type: 'comment', value: movetext.slice(i + 1, stop).trim() });
       i = stop + 1;
       continue;
     }
+    if (ch === '}') throw new Error('Unmatched closing PGN comment brace');
     if (ch === '(') {
       tokens.push({ type: 'open' });
       i++;
@@ -132,13 +134,13 @@ function tokenizeMovetext(movetext: string): Token[] {
 }
 
 /** Parse a single game's PGN text into a variation tree. */
-export function parsePgnGame(text: string, options: { strict?: boolean } = {}): PgnGame {
+export function parsePgnGame(text: string, options: { strict?: boolean; mainlineOnly?: boolean } = {}): PgnGame {
   const tags = parseTags(text);
   const startFen = tags.FEN || START_FEN;
   const tree = new GameTree(startFen);
   // Movetext is everything after the last tag line.
   const movetext = text.replace(/\[(\w+)\s+"((?:\\.|[^"\\])*)"\]\s*/g, '');
-  const tokens = tokenizeMovetext(movetext);
+  const tokens = tokenizeMovetext(movetext, options.strict);
 
   let last: GameNode = tree.root;
   const stack: GameNode[] = [];
@@ -146,13 +148,17 @@ export function parsePgnGame(text: string, options: { strict?: boolean } = {}): 
   for (const token of tokens) {
     if (token.type === 'open') {
       stack.push(last);
-      last = last.parent ?? tree.root;
+      if (!options.mainlineOnly) last = last.parent ?? tree.root;
       continue;
     }
     if (token.type === 'close') {
+      if (options.strict && !stack.length) throw new Error('Unmatched closing PGN variation');
       last = stack.pop() ?? tree.root;
       continue;
     }
+    // Aggregation must use the literal mainline, not child insertion order when
+    // a RAV shares moves with its parent line. The authoritative PGN retains RAVs.
+    if (options.mainlineOnly && stack.length) continue;
     if (token.type === 'result') {
       if (!stack.length) result = token.value;
       continue;
@@ -173,6 +179,7 @@ export function parsePgnGame(text: string, options: { strict?: boolean } = {}): 
     }
     last = tree.addMove(move);
   }
+  if (options.strict && stack.length) throw new Error('Unclosed PGN variation');
   tree.current = tree.root;
   return { tags, tree, result };
 }

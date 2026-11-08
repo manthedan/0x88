@@ -17,7 +17,7 @@ export function boundedPgnChunks(raw: string): string[] {
 
 export function parseLocalPgnGame(chunk: string, number: number): ImportedGame {
   try {
-    const game = parsePgnGame(chunk, { strict: true });
+    const game = parsePgnGame(chunk, { strict: true, mainlineOnly: true });
     if (!game.tree.root.children.length) throw new Error('No playable moves');
     return { tree: game.tree, result: game.result };
   } catch (error) {
