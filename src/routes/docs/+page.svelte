@@ -465,7 +465,11 @@ onMount(() => {
       <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
     </ul>
     </div>
-    <p class="not-yet"><strong>Not available yet:</strong> game review (move accuracy and critical moments) and a local opening explorer for your own PGN collections are in development and hidden in the current build.</p>
+    <h4>Review a game</h4>
+    <p>Load a PGN or play a line, then open the <strong>Review</strong> tab. Choose a CPU reviewer (Stockfish Lite by default) and a depth, and press <strong>Review game</strong>. Other selected CPU engines are available in the reviewer menu. You can cancel at any time and still navigate the board while it runs.</p>
+    <p>Click the advantage graph or focus it and use the arrow keys to visit a move. Home and End jump to the ends. The move list shows classifications; <strong>Previous</strong> and <strong>Next</strong> cycle through the five largest error losses. Approximate accuracy is a per-side mean based on estimated winning-chance loss, not the same game score as Lichess or Chess.com. Review depends on engine and depth. A changed mainline clears the result.</p>
+    <p><strong>Copy reviewed PGN</strong> or <strong>Download PGN</strong> exports the mainline with original engine evals and error NAGs, retaining the imported headers, result and starting FEN. This review export does not include variations or existing comments. Completed position results are reused in this session when the engine, depth and history match; nothing is uploaded.</p>
+    <p class="not-yet"><strong>Not available yet:</strong> a local opening explorer for your own PGN collections is in development and hidden in the current build.</p>
   </div>
 
   <div class="page-block">
