@@ -460,7 +460,7 @@ onMount(() => {
     <div class="task-reference">
     <h4>Exploring the results</h4>
     <ul>
-      <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines.</li>
+      <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines. Press <strong>Preview</strong> beside a line to explore the whole continuation on a separate board using Previous/Next or the arrow keys. <strong>Insert line</strong> adds it to the game; clicking a move in an engine row inserts only through that move, following existing variations when present.</li>
       <li><strong>Compare tab</strong> &mdash; every engine’s best move and evaluation in one table, with the difference between them.</li>
       <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
     </ul>

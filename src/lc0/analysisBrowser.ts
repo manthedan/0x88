@@ -130,8 +130,9 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
+import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
 import { openingNameAt, type OpeningNameIndex } from './openingNames.ts';
 import {
   berserkCacheKey,
@@ -406,6 +407,8 @@ function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4Worker
   return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
 }
 let ground: Ground | null = null;
+let pvGround: Ground | null = null;
+let pvPreview: { root: GameNode; line: PvPreview; step: number; focusKey: string } | null = null;
 let keyboardBoard: ReturnType<typeof createAnalysisKeyboardBoard> | null = null;
 let mountAbort = new AbortController();
 let analysisMountedCallbackCache = new WeakMap<() => void, () => void>();
@@ -2091,16 +2094,16 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
   const extra = usable.length - 1;
   const rows = (open ? sorted : sorted.slice(0, 1)).map((line, index) => {
     if (line.error) return `<li class="result-line line-error"><span class="line-error-text" title="${htmlEscape(line.error)}">${htmlEscape(line.error)}</span></li>`;
-    const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}"`;
+    const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" data-pv-fen="${htmlEscape(tree.current.fen)}" data-pv-root="${tree.current.id}" data-pv-score="${htmlEscape(line.scoreText)}" data-pv-detail="${htmlEscape(line.detail)}" data-pv-rank="${line.multipv}"`;
     const key = htmlEscape(`${tree.current.fen}|${engine}|${line.multipv}`);
-    const pvText = analysisPvText(tree.current.fen, line);
-    const label = `${name}, line ${line.multipv}: play ${firstAnalysisMove(line)}, evaluation ${line.scoreText}. ${pvText}`;
+    const preview = createPvPreview(tree.current.fen, line.pvUci.slice(0, 12));
+    const moves = preview.steps.map((step, ply) => `<button type="button" class="pv-move" data-pv-insert="${ply + 1}" data-focus-key="${key}|move|${ply}" aria-label="${htmlEscape(`Insert ${name} line through ${step.label}`)}" title="${htmlEscape(`Add variation through ${step.label}`)}">${htmlEscape(step.label)}</button>`).join('');
     // The header already carries the top line's eval; alternatives show rank + their own eval.
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
     const toggle = index === 0
       ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Hide lines' : `${extra} more lines`}</span>${CHEVRON_ICON}</button>` : ''
       : '';
-    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}" title="${htmlEscape(`Play ${firstAnalysisMove(line)} · ${pvText}`)}">${lead}<span class="pv">${pvMoveChunks(pvText)}</span></button>${toggle}</li>`;
+    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv">${moves}</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv}`)}"${preview.steps.length ? '' : ' disabled'}>Preview</button>${toggle}</div></li>`;
   });
   if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
@@ -2118,21 +2121,6 @@ function engineLogoFrame(logo: string, name: string): string {
   // Engines without a bundled mark (or before the logo probe resolves) get their initial in the same frame.
   const mark = logo.includes('engine-logo-placeholder') || name.startsWith('PlentyChess') ? `<span class="engine-logo-initial">${htmlEscape(name.trim().charAt(0).toUpperCase())}</span>` : logo;
   return `<span class="engine-logo-frame${name.startsWith('Lc0') ? ' wordmark' : ''}" aria-hidden="true">${mark}</span>`;
-}
-
-/** Wrap each move (with its number) so a collapsed PV clips on move boundaries, never mid-SAN. */
-function pvMoveChunks(pv: string): string {
-  const chunks: string[] = [];
-  for (const token of pv.split(' ').filter(Boolean)) {
-    const last = chunks.length - 1;
-    if (last >= 0 && /^\d+(\.|…)$/.test(chunks[last])) chunks[last] += ` ${token}`;
-    else chunks.push(token);
-  }
-  // Move numbers are muted so the moves themselves scan first (as on Lichess).
-  return chunks.map((chunk) => {
-    const numbered = /^(\d+(?:\.|…)) (.+)$/.exec(chunk);
-    return `<span class="pv-move">${numbered ? `<span class="pv-num">${htmlEscape(numbered[1])}</span> ${htmlEscape(numbered[2])}` : htmlEscape(chunk)}</span>`;
-  }).join(' ');
 }
 
 function renderEngineComparison(lines: AnalysisLine[]): void {
@@ -3884,6 +3872,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
 let analysisGameTree = tree;
 
 function afterNavigation() {
+  if (pvPreview && (pvPreview.root !== tree.current || pvPreview.line.rootFen !== tree.current.fen)) closePvPreview();
   hiddenResumeForce = false;
   if (analysisGameTree !== tree) {
     analysisGameTree = tree;
@@ -4131,6 +4120,92 @@ function copyPgn() {
   el('message').textContent = 'PGN copied to the box and clipboard.';
 }
 
+function closePvPreview(): void {
+  const previous = pvPreview;
+  pvPreview = null;
+  pvGround?.destroy();
+  pvGround = null;
+  (el('pvPreview') as HTMLDialogElement).close();
+  if (previous?.root === tree.current) {
+    el('engineSummaries').querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(previous.focusKey)}"]`)?.focus({ preventScroll: true });
+  }
+}
+
+function renderPvPreview(): void {
+  if (!pvPreview) return;
+  const { line, step } = pvPreview;
+  const position = step ? line.steps[step - 1] : null;
+  const fen = position?.fen ?? line.rootFen;
+  const board = parseFen(fen);
+  const config = {
+    fen, orientation, viewOnly: true, coordinates: true,
+    turnColor: board.turn === 'w' ? 'white' as const : 'black' as const,
+    check: boardCheck(board),
+    lastMove: position ? [position.uci.slice(0, 2) as Key, position.uci.slice(2, 4) as Key] : [],
+    drawable: { enabled: false, visible: false },
+    animation: { enabled: false },
+  };
+  if (!pvGround) pvGround = Chessground(el('pvPreviewBoard'), config);
+  else pvGround.set(config);
+  el('pvPreviewPosition').textContent = `${position ? `After ${position.label}` : 'Starting position'} · ${step} of ${line.steps.length} plies · ${board.turn === 'w' ? 'White' : 'Black'} to move`;
+  for (const id of ['pvStart', 'pvBack', 'pvInsertHere']) (el(id) as HTMLButtonElement).disabled = step === 0;
+  for (const id of ['pvForward', 'pvEnd']) (el(id) as HTMLButtonElement).disabled = step === line.steps.length;
+  for (const button of el('pvPreviewMoves').querySelectorAll<HTMLElement>('[data-pv-step]')) {
+    if (Number(button.dataset.pvStep) === step) button.setAttribute('aria-current', 'step');
+    else button.removeAttribute('aria-current');
+  }
+  el('pvPreviewMoves').querySelector('[aria-current]')?.scrollIntoView({ block: 'nearest' });
+}
+
+function openPvPreview(row: HTMLElement, trigger: HTMLElement): void {
+  if (row.dataset.pvFen !== tree.current.fen || Number(row.dataset.pvRoot) !== tree.current.id) return;
+  const line = createPvPreview(tree.current.fen, (row.dataset.pv ?? '').split(' ').filter(Boolean));
+  if (!line.steps.length) return;
+  pvPreview = { root: tree.current, line, step: 0, focusKey: trigger.dataset.focusKey ?? '' };
+  el('pvPreviewTitle').textContent = `${analysisEngineName(row.dataset.engine ?? '')} · Line ${row.dataset.pvRank}`;
+  el('pvPreviewDetail').textContent = `${row.dataset.pvScore} (White’s view) · ${row.dataset.pvDetail}`;
+  el('pvPreviewNote').textContent = line.truncated ? 'The engine line ends at its last legal move. The remaining moves were ignored.' : 'Preview only. The game and its analysis stay at the original position.';
+  el('pvPreviewMoves').innerHTML = line.steps.map((step, i) => `<button type="button" data-pv-step="${i + 1}" aria-label="${htmlEscape(`Preview after ${step.label}`)}">${htmlEscape(step.label)}</button>`).join('');
+  (el('pvPreview') as HTMLDialogElement).showModal();
+  renderPvPreview();
+}
+
+function wirePvPreview(): void {
+  const dialog = el('pvPreview');
+  el('closePvPreview').addEventListener('click', closePvPreview);
+  dialog.addEventListener('cancel', (event) => { event.preventDefault(); closePvPreview(); });
+  const stepTo = (step: number) => {
+    if (!pvPreview) return;
+    pvPreview.step = Math.max(0, Math.min(pvPreview.line.steps.length, step));
+    renderPvPreview();
+  };
+  el('pvStart').addEventListener('click', () => stepTo(0));
+  el('pvBack').addEventListener('click', () => stepTo((pvPreview?.step ?? 0) - 1));
+  el('pvForward').addEventListener('click', () => stepTo((pvPreview?.step ?? 0) + 1));
+  el('pvEnd').addEventListener('click', () => stepTo(pvPreview?.line.steps.length ?? 0));
+  el('pvPreviewMoves').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>('[data-pv-step]');
+    if (button) stepTo(Number(button.dataset.pvStep));
+  });
+  dialog.addEventListener('keydown', (event) => {
+    const key = event as KeyboardEvent;
+    if (!pvPreview || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key.key)) return;
+    key.preventDefault();
+    key.stopPropagation();
+    stepTo(key.key === 'Home' ? 0 : key.key === 'End' ? pvPreview.line.steps.length : pvPreview.step + (key.key === 'ArrowRight' ? 1 : -1));
+  });
+  const insert = (whole: boolean) => {
+    if (!pvPreview) return;
+    const { root, line, step } = pvPreview;
+    const added = insertPvPrefix(tree, root, line.steps.map((entry) => entry.uci), whole ? line.steps.length : step);
+    closePvPreview();
+    if (added) afterNavigation();
+    else el('message').textContent = 'The position changed. Open a current engine line to insert it.';
+  };
+  el('pvInsertHere').addEventListener('click', () => insert(false));
+  el('pvInsertLine').addEventListener('click', () => insert(true));
+}
+
 function hoverLine(pvUci: string[], engine: string) {
   // Only the line's first move: the rest of the PV is from future positions, so
   // drawing every ply on the current board is misleading clutter.
@@ -4279,6 +4354,13 @@ function wireEvents() {
     setShapes(bestShapes());
   });
   el('engineSummaries').addEventListener('click', (event) => {
+    const pvAction = (event.target as HTMLElement).closest<HTMLElement>('[data-pv-preview], [data-pv-insert]');
+    const pvRow = pvAction?.closest<HTMLElement>('.result-line[data-pv]');
+    if (pvAction && pvRow) {
+      if (pvAction.hasAttribute('data-pv-preview')) openPvPreview(pvRow, pvAction);
+      else if (pvRow.dataset.pvFen === tree.current.fen && Number(pvRow.dataset.pvRoot) === tree.current.id && insertPvPrefix(tree, tree.current, (pvRow.dataset.pv ?? '').split(' ').filter(Boolean), Number(pvAction.dataset.pvInsert))) afterNavigation();
+      return;
+    }
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-engine-settings], [data-engine-toggle], [data-uci]');
     const lineToggle = (event.target as HTMLElement).closest<HTMLElement>('[data-line-toggle]');
     if (lineToggle?.dataset.lineToggle) {
@@ -4295,6 +4377,7 @@ function wireEvents() {
       setShapes(bestShapes());
     } else if (target?.dataset.uci && tree.addUci(target.dataset.uci)) afterNavigation();
   });
+  wirePvPreview();
   const positionTools = el('positionTools') as HTMLDetailsElement;
   // "Load" goes to the one paste box when it is on screen (empty game); otherwise it opens the full panel.
   el('openPosition').addEventListener('click', () => {
@@ -4704,6 +4787,9 @@ function disposePageResources(): void {
   analysisPagehideHandler = null;
   if (analysisAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
   analysisAuditHandler = null;
+  pvPreview = null;
+  pvGround?.destroy();
+  pvGround = null;
   keyboardBoard?.destroy();
   keyboardBoard = null;
   (ground as { destroy?: () => void } | null)?.destroy?.();

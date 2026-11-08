@@ -157,6 +157,21 @@ onMount(() => {
       <div id="maia3Caption" class="small" hidden>What rated humans actually play here (Maia3 move predictions; score = expected points for White in a human game at that rating, not an engine eval). ✓ = matches the current best engine move.</div>
     </div>
     </div>
+    <dialog id="pvPreview" class="pv-preview engine-manager" aria-labelledby="pvPreviewTitle" aria-describedby="pvPreviewNote">
+      <header class="manager-heading"><h2 id="pvPreviewTitle">Engine line</h2><button id="closePvPreview" type="button" aria-label="Close line preview">✕</button></header>
+      <p id="pvPreviewDetail" class="small"></p>
+      <div id="pvPreviewBoard" aria-hidden="true"></div>
+      <p id="pvPreviewPosition" class="pv-position" role="status"></p>
+      <div class="pv-navigation" aria-label="Line preview navigation">
+        <button id="pvStart" type="button" aria-label="Preview starting position" title="Start (Home)">Start</button>
+        <button id="pvBack" type="button" aria-label="Preview previous move" title="Previous (Left)">Previous</button>
+        <button id="pvForward" type="button" aria-label="Preview next move" title="Next (Right)">Next</button>
+        <button id="pvEnd" type="button" aria-label="Preview last move" title="End (End)">End</button>
+      </div>
+      <div id="pvPreviewMoves" class="pv-preview-moves" role="group" aria-label="Preview a position in the line"></div>
+      <p id="pvPreviewNote" class="small"></p>
+      <div class="row pv-insert-actions"><button id="pvInsertHere" type="button">Insert to here</button><button id="pvInsertLine" class="primary" type="button">Insert line</button></div>
+    </dialog>
     <dialog id="engineManager" class="engine-manager" aria-labelledby="engineManagerTitle">
       <header class="manager-heading"><h2 id="engineManagerTitle">Manage engines</h2><button id="closeEngineManager" type="button" aria-label="Close engine settings">✕</button></header>
       <div id="engineSetup" class="engine-setup">
@@ -340,6 +355,15 @@ onMount(() => {
   .analysis-workspace .app-sidebar>.analysis-content{display:flex; flex-direction:column; flex:1 1 auto; min-width:0; min-height:0}
   .engine-manager{width:min(600px, calc(100vw - 24px)); max-height:85dvh; padding:20px; color:var(--ink); background:var(--panel); border:1px solid var(--border-input); border-radius:12px; box-shadow:0 20px 80px #0008}
   .engine-manager::backdrop{background:#0009}
+  .pv-preview{width:min(440px, calc(100vw - 24px))}
+  #pvPreviewBoard{width:min(100%, 310px); aspect-ratio:1; margin:12px auto; position:relative; border-radius:4px; overflow:hidden}
+  .pv-position{margin:10px 0; font-size:13px; color:var(--ink)}
+  .pv-navigation{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px}
+  .pv-navigation button{min-height:40px; padding:4px; font-size:13px}
+  .pv-preview-moves{display:flex; flex-wrap:wrap; gap:4px; max-height:112px; overflow:auto; margin:12px 0; padding:2px}
+  .pv-preview-moves :global(button){min-height:32px; padding:4px 8px; border-color:transparent; background:transparent; color:var(--ink); font-size:14px}
+  .pv-preview-moves :global(button[aria-current]){background:var(--selection-bg); border-color:var(--accent); font-weight:650}
+  .pv-insert-actions{justify-content:flex-end}
   .manager-heading{display:flex; align-items:center; justify-content:space-between; gap:12px}
   .manager-heading h2{font:650 20px var(--sans); color:var(--ink); text-transform:none; letter-spacing:0; margin:0}
   .engine-setup>p{margin:12px 0}
@@ -688,13 +712,17 @@ onMount(() => {
   :global(.engine-lines){list-style:none; margin:0; padding:0 0 5px}
   :global(.result-line){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; min-height:26px}
   :global(.result-line.alt-line){border-top:1px dashed var(--rule-soft)}
-  :global(.result-line:has(.line-play:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--result-highlight)}
+  :global(.result-line:has(.pv-move:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--result-highlight)}
   :global(.line-play){display:flex; align-items:center; gap:8px; width:100%; min-width:0; min-height:26px; padding:0 6px 0 39px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left}
   :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.line-rank){flex:0 0 12px; font:600 13px var(--mono); color:var(--muted); text-align:center}
   :global(.engine-lines .score){flex:0 0 50px; font:700 13.5px var(--mono); font-variant-numeric:tabular-nums; color:var(--ink); text-align:right}
-  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; column-gap:.42em; height:1.5em; overflow:hidden; font:14px/1.5 var(--sans); color:var(--ink)}
-  :global(.engine-lines .pv-move){white-space:nowrap}
+  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; gap:2px; overflow-x:auto; scrollbar-width:thin; font:14px/1.5 var(--sans); color:var(--ink)}
+  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:30px; padding:2px 4px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
+  :global(.engine-lines .pv-move:hover){background:var(--selection-bg)}
+  :global(.line-actions){display:flex; align-items:center}
+  :global(.line-preview){min-height:32px; padding:2px 7px; border:0; background:transparent; color:var(--muted); font:600 13px var(--sans)}
+  :global(.line-preview:hover){background:var(--panel-2); color:var(--ink)}
   :global(.engine-lines .pv-move:first-child){font-weight:700}
   :global(.engine-lines .pv-num){color:var(--muted); font-weight:400; font-variant-numeric:tabular-nums}
   :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:76px; min-height:26px; padding:0 8px 0 6px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:600 13px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
@@ -833,6 +861,7 @@ onMount(() => {
     :global(.line-play){min-height:36px; padding-left:36px}
     :global(.result-line){min-height:36px}
     :global(.line-toggle){min-height:36px; min-width:72px}
+    :global(.line-preview), :global(.engine-lines .pv-move){min-height:36px}
     :global(.engine-lines .line-error), :global(.engine-lines .pending-line){padding-left:36px}
     .position-tools :is(button, input), .pgn-actions button{min-height:44px}
     .analysis-workspace .section-block{padding:8px 10px}
