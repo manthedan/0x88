@@ -7,9 +7,9 @@
  * scope. See docs/arena_analysis_roadmap.md stage 3.
  */
 
-import { type BoardState } from '../chess/board.ts';
-import { insufficientMaterial, repetitionCount } from '../chess/drawRules.ts';
-import { inCheck } from '../chess/movegen.ts';
+import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
+import { insufficientMaterial } from '../chess/drawRules.ts';
+import { inCheck, legalMoves } from '../chess/movegen.ts';
 
 export type MoveClass = 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder' | 'forced';
 
@@ -157,6 +157,27 @@ export function adjacentCriticalPly(review: GameReview, current: number, directi
 }
 
 /**
+ * Review-only legal-position identity. Keep this separate from the existing
+ * engine encoder/search repetition contracts: this feature must not change
+ * engine numerics. FEN records double pushes even when no legal EP capture exists.
+ */
+export function reviewRepetitionKey(fen: string): string {
+  const fields = fen.trim().split(/\s+/).slice(0, 4);
+  if (fields[3] && fields[3] !== '-') {
+    const board = parseFen(fen);
+    const canCapture = legalMoves(board).some((move) => move.to === board.epSquare
+      && board.squares[move.from] === `${board.turn}p` && move.from % 8 !== move.to % 8);
+    if (!canCapture) fields[3] = '-';
+  }
+  return fields.join(' ');
+}
+
+export function reviewRepetitionCount(board: BoardState, historyFens: string[]): number {
+  const key = reviewRepetitionKey(boardToFen(board));
+  return 1 + historyFens.filter((fen) => reviewRepetitionKey(fen) === key).length;
+}
+
+/**
  * History excludes the current board. Checkmate takes precedence over draw rules.
  * Threefold/50-move draws require a claim: a winning player may decline it, so
  * let the engine score those positions. Only fivefold/75-move draws are automatic.
@@ -165,7 +186,7 @@ export function terminalReviewPosition(board: BoardState, historyFens: string[],
   if (legalCount === 0 && inCheck(board)) {
     return { winWhite: board.turn === 'w' ? 0 : 1, bestUci: null, legalMoves: 0, mateIn: 0 };
   }
-  if (legalCount === 0 || insufficientMaterial(board) || board.halfmove >= 150 || repetitionCount(board, historyFens) >= 5) {
+  if (legalCount === 0 || insufficientMaterial(board) || board.halfmove >= 150 || reviewRepetitionCount(board, historyFens) >= 5) {
     return { winWhite: 0.5, bestUci: null, legalMoves: legalCount, scoreCp: 0 };
   }
   return undefined;

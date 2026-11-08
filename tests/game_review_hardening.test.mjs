@@ -4,7 +4,7 @@ import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { parsePgnGame } from '../src/chess/pgn.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
-import { adjacentCriticalPly, annotatedPgn, criticalReviewPlies, reviewGame, terminalReviewPosition } from '../src/lc0/gameReview.ts';
+import { adjacentCriticalPly, annotatedPgn, criticalReviewPlies, reviewGame, reviewRepetitionCount, reviewRepetitionKey, terminalReviewPosition } from '../src/lc0/gameReview.ts';
 import { reviewChartSvg, reviewMoveLabel, reviewPlyAtRatio, reviewSummaryHtml } from '../src/lc0/gameReviewPresentation.ts';
 
 const review = () => reviewGame([
@@ -57,6 +57,25 @@ test('claimable threefold repetitions remain engine-scored when the mainline con
 test('claimable fifty-move positions do not fabricate a draw evaluation', () => {
   assert.equal(terminal(START_FEN.replace('0 1', '100 51')), undefined);
   assert.equal(terminal(START_FEN.replace('0 1', '149 75')), undefined);
+});
+
+test('review detects fivefold when the first occurrence has an uncapturable en-passant target', () => {
+  const game = new GameTree();
+  game.addUci('e2e4');
+  for (const uci of Array(4).fill(['g8f6', 'g1f3', 'f6g8', 'f3g1']).flat()) game.addUci(uci);
+  const history = game.lineTo().slice(0, -1).map((node) => node.fen);
+  assert.equal(reviewRepetitionCount(parseFen(game.current.fen), history), 5);
+  assert.equal(terminal(game.current.fen, history).scoreCp, 0);
+});
+
+test('repetition identity keeps a legal en-passant opportunity distinct', () => {
+  const fen = 'k7/8/8/3pP3/8/8/8/4K3 w - d6 0 1';
+  assert.notEqual(reviewRepetitionKey(fen), reviewRepetitionKey(fen.replace(' d6 ', ' - ')));
+});
+
+test('repetition identity ignores a pinned, illegal en-passant capture', () => {
+  const fen = 'k3r3/8/8/3pP3/8/8/8/4K3 w - d6 0 1';
+  assert.equal(reviewRepetitionKey(fen), reviewRepetitionKey(fen.replace(' d6 ', ' - ')));
 });
 
 test('critical ply hook is ranked and next/previous navigation walks game order with wrap', () => {
