@@ -1631,7 +1631,7 @@ function ctxRenderChrome(ctx: PlayContext, shownBoard: BoardState, shownPly: num
 
 function ctxRender(ctx: PlayContext): void {
   if (ctx.disposed) return;
-  ctx.autosave?.schedule(ctx.started || ctx.moves.length || ctx.gameOver ? {
+  ctx.autosave?.schedule(ctx.started || ctx.moves.length || ctx.gameOver || ctx.practicePosition ? {
     startFen: ctx.startFen,
     moves: ctx.moves.map(moveToUci),
     humanColor: ctx.humanColor,
@@ -1641,6 +1641,7 @@ function ctxRender(ctx: PlayContext): void {
     gameOver: ctx.gameOver,
     started: ctx.started,
     ...(ctx.practiceBoundary ? { practiceBoundary: ctx.practiceBoundary } : {}),
+    ...(ctx.practicePosition ? { practicePosition: ctx.practicePosition } : {}),
   } : null);
   ctx.viewPly = normalizeViewPly(ctx.viewPly, ctx.moves.length);
   const browsing = ctx.viewPly !== null;
@@ -1813,6 +1814,7 @@ function ctxInit(ctx: PlayContext): void {
   const saved = handedOff || hasExplicitWorkspaceInput(location.search, location.hash) ? null
     : readWorkspace('play', (raw) => decodePlaySnapshot(raw, validEngineIds));
   ctx.restoredGame = !!saved;
+  if (saved) ctx.practicePosition = saved.practicePosition;
   ctxRefreshEngineOptions(ctx);
   const preferences = saved?.preferences ?? loadPlayPreferences(playPreferenceStorage(), validEngineIds);
   const preferredOption = ENGINE_OPTIONS.find((option) => option.id === preferences.engineId && (!ctx.practicePosition || option.group !== 'odds'));
@@ -1822,7 +1824,7 @@ function ctxInit(ctx: PlayContext): void {
     preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' && (!isV0DeployProfile() || preferredOption.variant === 'lqo');
   ctx.pendingPreferredEngineId = !saved && preferredOption && preferredBigNetCanProbe && preferredBigNetStatus === 'unknown' ? preferredOption.id : null;
   selectEl('engineSelect').value = preferredOption && (saved || !ctxEngineOptionState(preferredOption).disabled) ? preferredOption.id : 'maia3';
-  selectEl('colorSelect').value = ctx.practicePosition
+  selectEl('colorSelect').value = ctx.practicePosition && !saved
     ? (replayPlayPosition(ctx.practicePosition).board.turn === 'w' ? 'white' : 'black')
     : preferences.color;
   (el('maia3Elo') as HTMLInputElement).value = String(preferences.maiaElo);

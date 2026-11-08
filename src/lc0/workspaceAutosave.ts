@@ -3,6 +3,7 @@ import { moveToUci } from '../chess/moveCodec.ts';
 import { gameOutcome, type GameResultCode } from './engineBattle.ts';
 import { GameTree, type GameNode } from './gameTree.ts';
 import { normalizePlayPreferences, type PlayPreferences } from './playPreferences.ts';
+import { type PlayPosition, replayPlayPosition } from './playPosition.ts';
 
 export const WORKSPACE_VERSION = 1;
 export const WORKSPACE_MAX_CHARS = 1_000_000;
@@ -37,6 +38,7 @@ export interface PlaySnapshot {
   started: boolean;
   /** Plies imported from Analysis ("Play from here"); takebacks stop here. Absent = 0. */
   practiceBoundary?: number;
+  practicePosition?: PlayPosition;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -136,9 +138,20 @@ export function decodePlaySnapshot(raw: string, validEngineIds: ReadonlySet<stri
     gameOver ??= gameOutcome(positions[positions.length - 1], positions.slice(0, -1).map(boardToFen));
     const boundary = data.practiceBoundary ?? 0;
     if (!Number.isInteger(boundary) || (boundary as number) < 0 || (boundary as number) > data.moves.length) throw new Error('Invalid practice boundary');
+    // Legacy saves identify imported history only when the boundary is nonzero.
+    const practice = data.practicePosition ?? (boundary ? { startFen: tree.root.fen, moves: data.moves.slice(0, boundary as number) } : null);
+    let practicePosition: PlayPosition | null = null;
+    if (practice !== null) {
+      const replayed = replayPlayPosition(practice);
+      const moves = replayed.moves.map(moveToUci);
+      const savedMoves = data.moves;
+      if (replayed.startFen !== tree.root.fen || moves.length !== boundary || moves.some((move, i) => move !== savedMoves[i])) throw new Error('Invalid practice position');
+      practicePosition = { startFen: replayed.startFen, moves };
+    }
     return {
       startFen: tree.root.fen,
       practiceBoundary: boundary as number,
+      practicePosition,
       positions,
       board: positions[positions.length - 1],
       moves: line.slice(1).map((node) => node.move!),

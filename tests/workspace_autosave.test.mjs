@@ -4,6 +4,7 @@ import { START_FEN, boardToFen } from '../src/chess/board.ts';
 import { parsePgnGame, gameTreeToPgn } from '../src/chess/pgn.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
+import { replayPlayPosition } from '../src/lc0/playPosition.ts';
 import {
   WORKSPACE_MAX_CHARS, WORKSPACE_VERSION, createWorkspaceAutosave, decodeAnalysisSnapshot,
   decodePlaySnapshot, hasExplicitWorkspaceInput, readWorkspace, restoreTree, serializeTree, workspaceStorageKey,
@@ -177,9 +178,35 @@ test('explicit FEN and handoff URLs take precedence without consuming the handof
 
 test('play practice boundary (Play from here) round-trips and is validated against the move count', () => {
   const data = playData({ moves: ['e2e4', 'e7e5', 'g1f3'], practiceBoundary: 2 });
-  assert.equal(decodePlaySnapshot(envelope('play', data), engineIds).practiceBoundary, 2);
+  const legacy = decodePlaySnapshot(envelope('play', data), engineIds);
+  assert.equal(legacy.practiceBoundary, 2);
+  assert.deepEqual(legacy.practicePosition, { startFen: START_FEN, moves: ['e2e4', 'e7e5'] });
   assert.equal(decodePlaySnapshot(envelope('play', playData()), engineIds).practiceBoundary, 0, 'absent means no boundary');
   for (const practiceBoundary of [-1, 4, 1.5, '2']) {
     assert.equal(decodePlaySnapshot(envelope('play', { ...data, practiceBoundary }), engineIds), null);
   }
+});
+
+test('Play from here retains its restart position with imported history or a zero-ply custom root', () => {
+  for (const practicePosition of [
+    { startFen: START_FEN, moves: ['e2e4', 'e7e5'] },
+    { startFen: 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2', moves: [] },
+  ]) {
+    for (const extraMoves of [[], ['g1f3']]) {
+      const store = storage();
+      const saver = createWorkspaceAutosave('play', store);
+      saver.schedule(playData({ startFen: practicePosition.startFen, moves: [...practicePosition.moves, ...extraMoves],
+        started: extraMoves.length > 0, practiceBoundary: practicePosition.moves.length, practicePosition }));
+      saver.flush();
+      const restored = readWorkspace('play', (raw) => decodePlaySnapshot(raw, engineIds), store);
+      assert.deepEqual(restored.practicePosition, practicePosition);
+      assert.equal(boardToFen(replayPlayPosition(restored.practicePosition).board), boardToFen(restored.positions[restored.practiceBoundary]), 'side changes and restarts replay the imported setup, not the current or normal start');
+    }
+  }
+  assert.equal(decodePlaySnapshot(envelope('play', playData()), engineIds).practicePosition, null, 'ordinary legacy games remain ordinary');
+  for (const practicePosition of [
+    { startFen: START_FEN, moves: ['d2d4'] },
+    { startFen: START_FEN, moves: ['e2e4', 'e7e5'] },
+    { startFen: 'bad', moves: [] },
+  ]) assert.equal(decodePlaySnapshot(envelope('play', playData({ practiceBoundary: 1, practicePosition })), engineIds), null);
 });
