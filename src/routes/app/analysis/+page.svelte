@@ -414,7 +414,6 @@ onMount(() => {
   :global(.analysis-workspace .sr-only){position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0}
   .board-shell{position:relative; min-width:0}
   :global(.analysis-workspace #ground coords){font-size:12px; font-weight:700; opacity:1}
-  :global(.analysis-workspace #ground .cg-shapes){filter:drop-shadow(0 0 1px #fff9)}
   :global(.analysis-workspace #keyboardBoard){position:absolute; inset:0; z-index:5; pointer-events:none}
   :global(.analysis-workspace .keyboard-row){display:contents}
   :global(.analysis-workspace .keyboard-square){position:absolute; width:12.5%; height:12.5%; padding:0; min-height:0; border:0; border-radius:0; background:transparent; pointer-events:none}
