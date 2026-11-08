@@ -486,7 +486,9 @@ onMount(() => {
       <li><strong>Charts</strong> &mdash; evaluation, time and speed for the current game.</li>
       <li><strong>Matchups</strong> &mdash; tournaments with three or more engines show a crosstable of points against each opponent. Open <em>Opening pairs</em> to compare the two colour-reversed games from each opening; select a game score to replay it. Odd games per opening leave an unpaired game.</li>
       <li><strong>Review</strong> &mdash; select a finished game or a move to replay it.</li>
-      <li><strong>Export</strong> &mdash; <em>Export PGN</em> under <em>Game log &amp; PGN</em> lists every game as PGN.</li>
+      <li><strong>Resume</strong> &mdash; completed games, settings, the schedule and charts are saved on this device after each game. After Stop or a reload, choose <em>Resume tournament</em> to continue. Unfinished games restart from their opening, including in parallel CPU runs. Leave the tab open while engines play; background completion is not guaranteed.</li>
+      <li><strong>Saved results</strong> &mdash; finished results remain viewable after a reload. <em>Start new tournament</em> replaces the saved run; <em>Discard</em> removes it. App or engine-release changes can prevent resuming an old run, but its completed results and PGNs remain available.</li>
+      <li><strong>Export</strong> &mdash; <em>Export PGN</em> under <em>Game log &amp; PGN</em> lists every completed game as PGN. If local saving is unavailable or full, export before leaving the page.</li>
     </ul>
     </div>
   </div>

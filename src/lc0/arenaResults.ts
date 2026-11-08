@@ -36,9 +36,16 @@ export function arenaOpeningPairs<T>(
     let pair = group.at(-1);
     if (!pair || pair.indices.length === 2) {
       pair = {
-        pairingKey: game.pairingKey, a: game.whiteId, b: game.blackId,
-        opening: game.opening, openingIndex: game.openingIndex, round: group.length + 1,
-        indices: [], results: [], points: [0, 0], played: 0,
+        pairingKey: game.pairingKey,
+        a: game.whiteId,
+        b: game.blackId,
+        opening: game.opening,
+        openingIndex: game.openingIndex,
+        round: group.length + 1,
+        indices: [],
+        results: [],
+        points: [0, 0],
+        played: 0,
       };
       group.push(pair);
       groups.set(key, group);

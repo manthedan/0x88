@@ -90,6 +90,14 @@ onMount(() => {
       </div>
       <div id="downloadProgress" class="model-load-progress" hidden></div>
     </div>
+    <section id="checkpointSection" class="checkpoint-block" aria-label="Saved tournament" hidden>
+      <p id="checkpointText" role="status"></p>
+      <p id="checkpointRoster" class="field-hint"></p>
+      <div class="checkpoint-actions">
+        <button id="resumeTournament" type="button" class="primary">Resume tournament</button>
+        <button id="discardTournament" type="button">Discard</button>
+      </div>
+    </section>
     <section id="scoreboard" class="scoreboard" aria-label="Score">
       <div class="sb-head">
         <span id="scoreboardTitle" class="sb-title">Match</span>
@@ -346,7 +354,7 @@ onMount(() => {
   @keyframes arena-spin{to{transform:rotate(360deg)}}
 
   /* ── Sidebar: setup state vs running state (data-phase on <main>) ── */
-  .arena-workspace .arena-sidebar{display:flex; flex-direction:column; max-height:none; overflow:hidden; position:static}
+  .arena-workspace .arena-sidebar{display:flex; flex-direction:column; min-width:0; max-height:none; overflow:hidden; position:static}
   .arena-sidebar > *{flex:0 0 auto}
   .status-block{padding:12px 14px 11px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
   .status-block:not(:has(#message:not(:empty), #runtimeWarning:not([hidden]), #engineWarmupStatus:not([hidden]), #downloadProgress:not([hidden]))){display:none}
@@ -367,6 +375,15 @@ onMount(() => {
   .model-load-progress{margin-top:8px}
   .model-load-progress :global(progress){width:100%; height:8px; accent-color:var(--accent)}
   .model-load-progress :global(.dl-label){margin-top:2px; font-size:12px; color:var(--muted)}
+
+  .checkpoint-block{padding:12px 14px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
+  .checkpoint-block p{margin:0; color:var(--text); font-size:13px; line-height:1.5; overflow-wrap:anywhere}
+  .checkpoint-block .field-hint{margin-top:4px; color:var(--muted)}
+  .checkpoint-block .field-hint:empty{display:none}
+  .checkpoint-actions{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .checkpoint-actions:has(button:not([hidden])){margin-top:8px}
+  .checkpoint-actions:not(:has(button:not([hidden]))){display:none}
+  .checkpoint-actions button{min-height:38px; font-size:13px; padding:6px 10px; white-space:normal; text-align:left}
 
   /* Scoreboard */
   .scoreboard{display:none; padding:12px 14px; border-bottom:1px solid var(--rule)}
@@ -612,6 +629,7 @@ onMount(() => {
   .setup-pane :global(.diag-block .diag-value){font-family:var(--mono); overflow-wrap:anywhere}
 
   @media (max-width:900px){
+    .arena-workspace{grid-template-columns:minmax(0,1fr)}
     .arena-workspace .arena-sidebar{max-height:none; overflow:visible}
     .charts-panel{grid-column:auto}
     /* Setup first before the first game; running games keep the board first. */

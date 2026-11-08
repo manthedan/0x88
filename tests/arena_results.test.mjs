@@ -27,16 +27,27 @@ test('duplicate suite slots, repetitions, and same-named seats stay separate', (
   const schedule = buildSchedule(roundRobinPairings(['0', '1', '2']), [opening, opening], 5);
   const pairs = arenaOpeningPairs(schedule, []);
   assert.equal(pairs.length, 18);
-  assert.deepEqual(pairs.slice(0, 6).map((pair) => [pair.openingIndex, pair.round, pair.indices]), [
-    [0, 1, [0, 2]], [1, 1, [1, 3]], [0, 2, [4, 6]], [1, 2, [5, 7]], [0, 3, [8]], [1, 3, [9]],
-  ]);
+  assert.deepEqual(
+    pairs.slice(0, 6).map((pair) => [pair.openingIndex, pair.round, pair.indices]),
+    [
+      [0, 1, [0, 2]],
+      [1, 1, [1, 3]],
+      [0, 2, [4, 6]],
+      [1, 2, [5, 7]],
+      [0, 3, [8]],
+      [1, 3, [9]],
+    ],
+  );
   assert.deepEqual([...new Set(pairs.map((pair) => pair.pairingKey))], ['0|1', '0|2', '1|2']);
   assert.ok(pairs.every((pair) => pair.played === 0));
 });
 
 test('duplicate result updates cannot double-count pair scores', () => {
   const schedule = buildSchedule([{ a: 'a', b: 'b' }], ['o'], 2);
-  const pairs = arenaOpeningPairs(schedule, [{ scheduleIndex: 0, result: '1-0' }, { scheduleIndex: 0, result: '1-0' }]);
+  const pairs = arenaOpeningPairs(schedule, [
+    { scheduleIndex: 0, result: '1-0' },
+    { scheduleIndex: 0, result: '1-0' },
+  ]);
   assert.equal(pairs[0].played, 1);
   assert.deepEqual(pairs[0].points, [1, 0]);
 });
