@@ -21,6 +21,7 @@ import {
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
+import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
 import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
 import { playFromHereUnavailableReason, playPositionFromTree } from './playPosition.ts';
 import {
@@ -497,6 +498,7 @@ let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
 let analysisReloadAbort: AbortController | null = null;
 let analysisReloadWantsSearch = false;
+let criticalPanel: ReturnType<typeof mountCriticalMomentsPanel> | null = null;
 let reviewAbort: AbortController | null = null;
 let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
@@ -2859,6 +2861,7 @@ function clearReviewState(message?: string): void {
   el('reviewCopyPgn').hidden = true;
   el('reviewDownloadPgn').hidden = true;
   if (message) el('reviewStatus').textContent = message;
+  criticalPanel?.sync();
   decorateMoveEvals();
 }
 
@@ -2878,6 +2881,7 @@ function clearReviewIfMainlineChanged(): void {
   const signature = reviewSignature();
   if (reviewAbort && signature !== reviewRunSignature) stopGameReview('Review cancelled because the mainline changed.');
   if (lastReview && signature !== lastReviewSignature) clearReviewState('Review cleared after the mainline changed.');
+  criticalPanel?.sync();
 }
 
 function decorateReviewedMove(button: HTMLButtonElement, node: GameNode | undefined): void {
@@ -2956,6 +2960,7 @@ function renderReview(review: GameReview, nodes: GameNode[]): void {
     })
     .join('');
   el('reviewMomentsEmpty').hidden = review.criticalMoves.length > 0;
+  criticalPanel?.sync();
   syncReviewNavigation();
   renderMoveList();
 }
@@ -2990,6 +2995,7 @@ function jumpReviewPly(ply: number): void {
 
 async function runGameReview(): Promise<void> {
   if (reviewAbort) return;
+  criticalPanel?.invalidate();
   const nodes = mainlineNodes();
   if (nodes.length < 2) {
     el('reviewStatus').textContent = 'Load a PGN or play some moves first.';
@@ -3252,6 +3258,7 @@ function removeHiddenTabPause(): void {
 function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): boolean {
   stopGameReview('Review cancelled after engine settings changed.');
   renderReviewEngineChoices();
+  criticalPanel?.sync();
   if (!hasActiveAnalysisRun()) return false;
   analyzeAfterActiveRun = true;
   reloadLc0AfterActiveRun ||= options.reloadLc0 === true;
@@ -3307,7 +3314,7 @@ function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolea
 }
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
-  if (reviewAbort) return;
+  if (reviewAbort || criticalPanel?.isBusy()) return;
   if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
@@ -3604,7 +3611,7 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 }
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
-  if (mountAbort.signal.aborted || reviewAbort) return;
+  if (mountAbort.signal.aborted || reviewAbort || criticalPanel?.isBusy()) return;
   if (deferHiddenTabWork('analysis')) {
     hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
     return;
@@ -3985,7 +3992,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
 
 let analysisGameTree = tree;
 
-function afterNavigation() {
+function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   saveAnalysisWorkspace();
   if (pvPreview && (pvPreview.root !== tree.current || pvPreview.line.rootFen !== tree.current.fen)) closePvPreview();
   hiddenResumeForce = false;
@@ -4008,19 +4015,19 @@ function afterNavigation() {
   if (analyzing && analysisAbort && !analysisAbort.signal.aborted && activeAnalysisSelectionKey !== selectionKey) cancelActiveAnalysisRun();
   // A transposition can have the same FEN but a different neural/repetition
   // history. A completed-key marker is not provenance for the FEN-only view.
-  const cached = completeAnalysisKeys.has(selectionKey)
+  const cached = options.reportLines ?? (completeAnalysisKeys.has(selectionKey)
     ? cachedAnalysisSelection(
         engineLineCache,
         rows.map((row) => engineAnalysisCacheKey(fen, row)),
       )
-    : undefined;
+    : undefined);
   if (cached) lineCache.set(fen, cached);
   else lineCache.delete(fen);
   clearStalePgnDatabaseSearchResults();
   clearReviewIfMainlineChanged();
   renderAll();
   scheduleMaia3Panel();
-  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort) void analyzeCurrent();
+  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort && !criticalPanel?.isBusy()) void analyzeCurrent();
   else {
     // A cached position, or auto-analyze off, must not restart the search that
     // was paused on the position we just left.
@@ -4097,6 +4104,7 @@ async function enableMaia3Panel(): Promise<void> {
 
 function scheduleMaia3Panel(): void {
   const task = maia3PanelTask;
+  if (criticalPanel?.isBusy()) { task?.invalidate(); return; }
   // Invalidate on navigation, not only when the debounce eventually dispatches.
   task?.invalidate();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
@@ -4778,6 +4786,35 @@ function wireEvents() {
     lineCache.delete(tree.current.fen);
     if (!deferAnalysisSettingsRefresh()) scheduleAnalyzeCurrent();
   });
+  criticalPanel = mountCriticalMomentsPanel({
+    broker: resourceBroker,
+    baseline: () => lastReview && lastReviewSignature === reviewSignature() ? {
+      review: lastReview, fens: lastReviewNodes.map((node) => node.fen), signature: lastReviewSignature,
+      source: el('reviewGraphSource').textContent ?? 'CPU review',
+    } : undefined,
+    settings: () => [activeEngineRows(), selectedLc0Runtime(), multiPv(), selectEl('reviewEngine').value, selectEl('reviewDepth').value, resourceBroker.getDial()],
+    pauseAnalysis: () => {
+      cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+      analysisAbort = null;
+      analyzing = false;
+      clearAnalysisSearchProgress();
+      maia3PanelTask?.invalidate();
+      if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+      maia3PanelTimer = null;
+      el('message').textContent = 'Position analysis paused for critical-moment comparison.';
+      el('stop').toggleAttribute('disabled', true);
+      el('analyze').toggleAttribute('disabled', false);
+    },
+    navigate: (moment, target, lines) => {
+      const node = mainlineNodes()[moment.move.ply - 1];
+      if (!node || node.fen !== moment.fen) return;
+      tree.goTo(node);
+      afterNavigation({ reportLines: lines });
+      if (target === 'comparison') el('comparisonTab').click();
+      if (target === 'human') el('humanTab').click();
+      if (target === 'play') el('playFromHere').click();
+    },
+  });
   el('reviewGame').addEventListener('click', () => {
     void runGameReview();
   });
@@ -4990,6 +5027,8 @@ function disposeRuntimeResources(): void {
 }
 
 function disposePageResources(): void {
+  criticalPanel?.dispose();
+  criticalPanel = null;
   workspaceAutosave?.flush();
   workspaceAutosave = null;
   removeHiddenTabPause();
@@ -5139,6 +5178,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
 async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'auto', operationSignal?: AbortSignal): Promise<boolean> {
   lineCache.clear();
   completeAnalysisKeys.clear();
+  criticalPanel?.invalidate();
   disposeRuntimeResources();
   if (operationSignal?.aborted) return false;
   reconcileActiveRuntimeFallbackWarning();
