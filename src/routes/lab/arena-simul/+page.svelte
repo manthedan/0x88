@@ -4,7 +4,7 @@ import type { runSimulTrial } from '../../../lc0/arenaSimulRunner.ts';
 import { measureSimulMemory, simulHelps4, simulMemoryPending, subscribeSimulMemory } from '../../../lc0/arenaSimulGate.ts';
 
 type Row = Awaited<ReturnType<typeof runSimulTrial>> & {
-  index: number; control: boolean; physical: number; occupancy: number;
+  index: number; control: boolean; physical: number; modelUrl: string; occupancy: number;
   memory?: { bytes: number | null; note: string };
 };
 type Result = { n: number; visits: number; maxPlies: number; pairs: number; rows: Row[]; [key: string]: unknown };

@@ -25,6 +25,10 @@ export function analyzeSimulRun(run) {
   const rows = run.rows.map((row, index) => {
     assert.equal(row.index, index);
     assert.equal(row.concurrency, index % 2 ? run.n : 1);
+    const expectedPhysical = index % 2 || index === 6 ? (run.n <= 4 ? 4 : 8) : 1;
+    assert.equal(row.physical, expectedPhysical, 'expected fixed physical batch export');
+    assert.equal(row.modelUrl, `/models/lc0/t1-256x10-distilled-swa-2432500.batch${expectedPhysical}.f16.onnx`, 'expected model identity');
+    if (index % 2) assert.equal(row.modelUrl, control.modelUrl, 'simul and control share the exact artifact');
     assert.equal(row.completed, 8);
     assert.equal(row.games.length, 8);
     assert.equal(row.physicalRuns, row.broker.batches);

@@ -228,6 +228,8 @@ test('simul generations cannot collide across gate restarts and N=8 eligibility 
     pairs: 3,
     rows: Array.from({ length: 7 }, (_, i) => ({
       control: i === 6,
+      physical: i % 2 || i === 6 ? 4 : 1,
+      modelUrl: `batch${i % 2 || i === 6 ? 4 : 1}.onnx`,
       concurrency: i % 2 ? 4 : 1,
       gamesPerHour: i % 2 ? 140 : 100,
       evalsPerSecond: i % 2 ? 140 : 100,
@@ -242,6 +244,8 @@ test('simul generations cannot collide across gate restarts and N=8 eligibility 
   assert.equal(simulHelps4([{ ...result, rows: result.rows.slice(0, 4) }], 8, 160), false);
   assert.equal(simulHelps4([{ ...result, rows: result.rows.slice(0, 6) }], 8, 160), false);
   assert.equal(simulHelps4([{ ...result, rows: result.rows.map((row) => ({ ...row, evalsPerSecond: 100 })) }], 8, 160), false);
+  assert.equal(simulHelps4([{ ...result, rows: result.rows.map((row) => (row.control ? { ...row, physical: 1 } : row)) }], 8, 160), false);
+  assert.equal(simulHelps4([{ ...result, rows: result.rows.map((row) => (row.control ? { ...row, modelUrl: 'different.onnx' } : row)) }], 8, 160), false);
   const changed = games.map((game) => ({ ...game, moves: ['b2b4'] }));
   assert.equal(simulEquivalentGames(games, changed), false);
   assert.equal(simulHelps4([{ ...result, rows: result.rows.map((row) => (row.control ? { ...row, games: changed } : row)) }], 8, 160), false);
@@ -315,10 +319,24 @@ test('simul evidence audit replays legal histories and rejects illegal moves or 
     openings: SIMUL_OPENINGS.map(({ name, fen, moves }) => ({ name, fen, moves })),
     rows: Array.from({ length: 7 }, (_, index) => {
       const trial = index % 2 ? simul : serial;
-      return { ...trial, index, physical: index % 2 ? 4 : 1, control: index === 6, physicalRuns: trial.broker.batches };
+      const physical = index % 2 || index === 6 ? 4 : 1;
+      return {
+        ...trial,
+        index,
+        physical,
+        modelUrl: `/models/lc0/t1-256x10-distilled-swa-2432500.batch${physical}.f16.onnx`,
+        control: index === 6,
+        physicalRuns: trial.broker.batches,
+      };
     }),
   };
   assert.equal(analyzeSimulRun(run).rows.length, 7);
+  const wrongExport = structuredClone(run);
+  wrongExport.rows[6].physical = 1;
+  assert.throws(() => analyzeSimulRun(wrongExport), /physical batch export/);
+  const wrongModel = structuredClone(run);
+  wrongModel.rows[6].modelUrl = 'not-the-same-export.onnx';
+  assert.throws(() => analyzeSimulRun(wrongModel), /model identity/);
   const illegal = structuredClone(run);
   illegal.rows[0].games[0].moves[0] = 'a1a8';
   assert.throws(() => analyzeSimulRun(illegal), /illegal move/);

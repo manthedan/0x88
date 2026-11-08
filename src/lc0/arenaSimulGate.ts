@@ -37,6 +37,8 @@ export interface SimulEligibilityResult {
   pairs: number;
   rows: {
     control: boolean;
+    physical: number;
+    modelUrl: string;
     concurrency: number;
     gamesPerHour: number;
     evalsPerSecond: number;
@@ -72,7 +74,15 @@ export function simulHelps4(results: SimulEligibilityResult[], visits: number, m
     const serial = measured.filter((row) => row.concurrency === 1);
     const simul = measured.filter((row) => row.concurrency === 4);
     const control = result.rows.find((row) => row.control && row.completed === 8);
-    if (serial.length !== 3 || simul.length !== 3 || !control || !simul.every((row) => simulEquivalentGames(row.games, control.games))) return false;
+    if (
+      serial.length !== 3 ||
+      simul.length !== 3 ||
+      !control ||
+      control.physical !== 4 ||
+      serial.some((row) => row.physical !== 1) ||
+      !simul.every((row) => row.physical === control.physical && row.modelUrl === control.modelUrl && simulEquivalentGames(row.games, control.games))
+    )
+      return false;
     // Export drift can shorten games. Require an inference-throughput gain too, not
     // just a games/hour improvement caused by different game lengths.
     return (
