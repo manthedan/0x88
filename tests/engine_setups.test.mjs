@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { ENGINE_PROFILE_BACKUP_KIND, engineSetupRuntime, normalizeEngineProfiles } from '../src/lc0/engineSetups.ts';
 
 const row = { family: 'sf', variant: 'lite', strength: 8 };
@@ -34,6 +35,15 @@ test('duplicate names are unambiguous and valid row policy is delegated', () => 
   assert.equal(results.length, 1);
   assert.equal(results[0].multiPv, 1);
   assert.equal(results[0].rows.length, 2);
+});
+
+test('large-net setup confirmation reads metadata without allocating an engine session', () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const guard = source.slice(source.indexOf('function profileRowsForUse('), source.indexOf('function loadEngineProfiles('));
+  assert.match(guard, /const config = BIG_NETS\[/);
+  assert.match(guard, /bigNetSelectableSync\(config\) && allowBt4Prompt && window.confirm/);
+  assert.match(guard, /if \(!allowed\) next.variant = 'small'/);
+  assert.doesNotMatch(guard, /bigNetFor\(|acquireBigNetSearcher\(/);
 });
 
 test('normal saved setups cannot activate developer-only runtimes, including on restore/import', () => {

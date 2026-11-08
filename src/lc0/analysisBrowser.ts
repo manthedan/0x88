@@ -1190,7 +1190,8 @@ function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRo
   return rows.map((row, index) => {
     const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
-      const { config } = bigNetFor(next.variant);
+      // Read metadata only: declining a saved setup must not acquire a runtime/session.
+      const config = BIG_NETS[next.variant === 't3' ? 't3' : 'bt4'];
       const allowed =
         bigNetSelectableSync(config) && allowBt4Prompt && window.confirm(`${bigNetLoadWarning(config)}\n\nLoad the saved Lc0 ${config.name} profile row?`);
       if (!allowed) next.variant = 'small';
