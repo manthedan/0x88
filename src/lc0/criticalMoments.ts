@@ -3,6 +3,27 @@ import type { AnalysisLine } from './analysisFormat.ts';
 import type { EngineRow } from './engineCatalog.ts';
 import { criticalReviewPlies, type GameReview, type ReviewedMove } from './gameReview.ts';
 
+/** A deferred interactive search belongs to one exact history/settings selection, not just a FEN. */
+export class CriticalAnalysisRefresh {
+  private pending?: { key: string; force: boolean };
+
+  defer(key: string, force = false): void {
+    this.pending = { key, force: force || (this.pending?.key === key && this.pending.force) };
+  }
+
+  navigate(key: string, hasSnapshot: boolean): void {
+    if (hasSnapshot || this.pending?.key !== key) this.clear();
+  }
+
+  take(key: string): { force: boolean } | undefined {
+    const pending = this.pending;
+    this.clear();
+    return pending?.key === key ? { force: pending.force } : undefined;
+  }
+
+  clear(): void { this.pending = undefined; }
+}
+
 export interface CriticalMoment {
   move: ReviewedMove;
   /** The position BEFORE the played error, with complete known history including it. */

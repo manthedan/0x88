@@ -3,7 +3,7 @@ import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { stockfishAnalysisLines, lc0AnalysisLines } from '../src/lc0/analysisFormat.ts';
 import { criticalAgreement, criticalPositionLines, criticalReportMarkup } from '../src/lc0/criticalMomentsPresentation.ts';
-import { createCriticalReport, criticalMomentCacheKey, criticalMoments, criticalReportIsStale, criticalReportSignature, runCriticalReport } from '../src/lc0/criticalMoments.ts';
+import { CriticalAnalysisRefresh, createCriticalReport, criticalMomentCacheKey, criticalMoments, criticalReportIsStale, criticalReportSignature, runCriticalReport } from '../src/lc0/criticalMoments.ts';
 import { reviewGame } from '../src/lc0/gameReview.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 
@@ -16,6 +16,38 @@ const run = async (lanes, moments = [moment()], cache = new Map(), signal = new 
   await runCriticalReport(report, lanes, cache, signal, () => {});
   return report;
 };
+
+test('deferred interactive refreshes merge force only for the same history/settings selection and drain once', () => {
+  const refresh = new CriticalAnalysisRefresh();
+  refresh.defer('history-A/settings-A', true);
+  refresh.defer('history-A/settings-A');
+  assert.deepEqual(refresh.take('history-A/settings-A'), { force: true });
+  assert.equal(refresh.take('history-A/settings-A'), undefined);
+  refresh.defer('history-A/settings-A', true);
+  refresh.defer('history-A/settings-B');
+  assert.deepEqual(refresh.take('history-A/settings-B'), { force: false });
+});
+
+test('opening a cached or report snapshot discards an older interactive refresh instead of overwriting it', () => {
+  const refresh = new CriticalAnalysisRefresh();
+  for (const selected of ['position-A', 'position-B']) {
+    refresh.defer('position-A', true);
+    refresh.navigate(selected, true);
+    assert.equal(refresh.take(selected), undefined);
+  }
+  refresh.defer('position-A');
+  assert.equal(refresh.take('position-B'), undefined, 'never resume on another history or setup');
+});
+
+test('normal uncached navigation can queue its own refresh but cannot inherit a previous position request', () => {
+  const refresh = new CriticalAnalysisRefresh();
+  refresh.defer('position-A', true);
+  refresh.navigate('position-B', false);
+  assert.equal(refresh.take('position-B'), undefined);
+  refresh.defer('position-B');
+  refresh.navigate('position-B', false);
+  assert.deepEqual(refresh.take('position-B'), { force: false });
+});
 
 test('same best move agrees even when engine-specific evaluations differ greatly', () => {
   assert.equal(criticalAgreement([line('e2e4', 10), line('e2e4', 900, 'Lc0 Small')]), 'Engines agree on e4');

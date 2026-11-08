@@ -23,6 +23,7 @@ import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition }
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
 import { criticalPositionLines } from './criticalMomentsPresentation.ts';
+import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
 import { playFromHereUnavailableReason, playPositionFromTree } from './playPosition.ts';
 import {
@@ -500,7 +501,7 @@ let analysisAbort: AbortController | null = null;
 let analysisReloadAbort: AbortController | null = null;
 let analysisReloadWantsSearch = false;
 let criticalPanel: ReturnType<typeof mountCriticalMomentsPanel> | null = null;
-let criticalDeferredAnalysis: { force?: boolean } | null = null;
+const criticalAnalysisRefresh = new CriticalAnalysisRefresh();
 let criticalDeferredMaia = false;
 let reviewAbort: AbortController | null = null;
 let lastReview: GameReview | null = null;
@@ -3319,7 +3320,7 @@ function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolea
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
   if (reviewAbort) return;
   if (criticalPanel?.isBusy()) {
-    criticalDeferredAnalysis = { force: criticalDeferredAnalysis?.force || options.force };
+    criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
     return;
   }
   if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
@@ -3620,7 +3621,7 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted || reviewAbort) return;
   if (criticalPanel?.isBusy()) {
-    criticalDeferredAnalysis = { force: criticalDeferredAnalysis?.force || options.force };
+    criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
     return;
   }
   if (deferHiddenTabWork('analysis')) {
@@ -4033,6 +4034,7 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
       )
     : undefined;
   const cached = options.reportLines === undefined ? positionLines : criticalPositionLines(positionLines, options.reportLines);
+  criticalAnalysisRefresh.navigate(selectionKey, !!cached || options.reportLines !== undefined);
   if (cached) lineCache.set(fen, cached);
   else lineCache.delete(fen);
   clearStalePgnDatabaseSearchResults();
@@ -4818,16 +4820,15 @@ function wireEvents() {
       analysisAbort = null;
       analyzing = false;
       clearAnalysisSearchProgress();
-      maia3PanelTask?.invalidate();
-      if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
-      maia3PanelTimer = null;
+      // Go through the busy guard so interrupted debounces/inference are hidden
+      // and replayed, even when the board does not move during the report.
+      scheduleMaia3Panel();
       el('message').textContent = 'Position analysis paused for critical-moment comparison.';
       el('stop').toggleAttribute('disabled', true);
       el('analyze').toggleAttribute('disabled', false);
     },
     settled: () => {
-      const pending = criticalDeferredAnalysis;
-      criticalDeferredAnalysis = null;
+      const pending = criticalAnalysisRefresh.take(analysisSelectionCacheKey(tree.current.fen));
       if (criticalDeferredMaia) scheduleMaia3Panel();
       if (pending) scheduleAnalyzeCurrent(pending);
     },
@@ -5065,7 +5066,7 @@ function disposeRuntimeResources(): void {
 function disposePageResources(): void {
   criticalPanel?.dispose();
   criticalPanel = null;
-  criticalDeferredAnalysis = null;
+  criticalAnalysisRefresh.clear();
   criticalDeferredMaia = false;
   workspaceAutosave?.flush();
   workspaceAutosave = null;
@@ -5322,7 +5323,7 @@ function resetAnalysisPageState(): void {
   lastReviewNodes = [];
   lastReviewSignature = '';
   reviewRunSignature = '';
-  criticalDeferredAnalysis = null;
+  criticalAnalysisRefresh.clear();
   criticalDeferredMaia = false;
   analyzing = false;
   lineCache.clear();
