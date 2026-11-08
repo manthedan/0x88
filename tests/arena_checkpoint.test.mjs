@@ -12,6 +12,7 @@ import {
   decodeArenaCheckpoint,
   hydrateArenaSchedule,
   loadArenaCheckpoint,
+  normalizeArenaControls,
   saveArenaCheckpoint,
 } from '../src/lc0/arenaCheckpoint.ts';
 import { openingFromUciMoves } from '../src/lc0/arenaOpenings.ts';
@@ -79,6 +80,49 @@ test('versioned checkpoint round-trips with immutable config and no live BoardSt
   assert.deepEqual(arenaRemainingIndices(decoded), [1]);
   assert.deepEqual(hydrateArenaSchedule(decoded)[0].opening.positions.map(boardToFen), opening.positions.map(boardToFen));
   assert.equal(arenaCompletedTree(first).current.fen, opening.fen);
+});
+
+test('effective empty/out-of-range controls create reloadable checkpoints', () => {
+  const checkpoint = fixture();
+  const raw = {
+    ...checkpoint.config.controls,
+    gamesInput: '',
+    movetimeInput: '',
+    delayInput: '99999',
+    stockfishThreadsInput: '',
+    cacheEntriesInput: '-1',
+    lc0BatchSizeInput: '1000',
+  };
+  const controls = normalizeArenaControls(raw);
+  assert.equal(controls.gamesInput, '2');
+  assert.equal(controls.movetimeInput, '500');
+  assert.equal(controls.delayInput, '3000');
+  assert.equal(controls.stockfishThreadsInput, '0');
+  assert.equal(controls.cacheEntriesInput, '0');
+  assert.equal(controls.lc0BatchSizeInput, '64');
+  assert.equal(normalizeArenaControls({ ...raw, gamesInput: '1000' }).gamesInput, '20');
+  const config = { ...checkpoint.config, controls };
+  const saved = createArenaCheckpoint(config, checkpoint.schedule);
+  assert.deepEqual(decodeArenaCheckpoint(structuredClone(saved)), saved);
+});
+
+test('unsupported rosters and schemas are rejected before creating a saved run', () => {
+  const checkpoint = fixture('round-robin');
+  const seats = Array.from({ length: 9 }, (_, i) => ({ ...checkpoint.config.seats[0], id: String(i) }));
+  const config = { ...checkpoint.config, seats };
+  const schedule = buildSchedule(
+    tournamentPairings(
+      'round-robin',
+      seats.map((seat) => seat.id),
+    ),
+    [{ name: 'Start', fen: START_FEN }],
+    2,
+  );
+  assert.throws(() => createArenaCheckpoint(config, schedule), /roster/);
+  assert.throws(
+    () => createArenaCheckpoint({ ...checkpoint.config, controls: { ...checkpoint.config.controls, gamesInput: '' } }, checkpoint.schedule),
+    /budget/,
+  );
 });
 
 test('seat ids survive same-named engines and preserve round robin/gauntlet schedules', () => {

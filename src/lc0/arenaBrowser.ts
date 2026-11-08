@@ -37,9 +37,10 @@ import {
 import {
   ARENA_CONTROL_IDS, ArenaCheckpointConflictError, ArenaCheckpointInvalidError, type ArenaCheckpoint, type ArenaCheckpointToken, type ArenaChartSample,
   type ArenaCompletedGame, type ArenaCheckpointConfig, type ArenaRootChartSample, arenaCompletedTree, arenaRemainingIndices, commitArenaGame,
-  createArenaCheckpoint, discardArenaCheckpoint, hydrateArenaSchedule, loadArenaCheckpoint, saveArenaCheckpoint,
+  createArenaCheckpoint, discardArenaCheckpoint, hydrateArenaSchedule, loadArenaCheckpoint, normalizeArenaControls, saveArenaCheckpoint,
 } from './arenaCheckpoint.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
+import { loadArenaResource } from './arenaResourceLoad.ts';
 import { arenaOpeningPairs, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -412,6 +413,7 @@ interface GameTrail {
   openingPlies: number;
   charts: ArenaChartSample[];
   rootChart?: ArenaRootChartSample;
+  sides?: { whiteName: string; blackName: string };
 }
 let liveTrail: GameTrail | null = null;
 const finishedTrails: GameTrail[] = [];
@@ -427,6 +429,7 @@ let boardBlackId: string | null = null;
 let boardWhiteName: string | null = null;
 let boardBlackName: string | null = null;
 let loadingLc0 = false;
+let lc0LoadAbort: AbortController | null = null;
 let running = false;
 let startPending = false;
 let abort: AbortController | null = null;
@@ -1330,6 +1333,9 @@ interface StripSide {
 
 /** Before any game, the strips preview the selected seats (Engine 1 plays White in game 1). */
 function stripSides(): { w: StripSide; b: StripSide } {
+  if (reviewing && reviewTrail?.sides) return {
+    w: { id: null, name: reviewTrail.sides.whiteName, seat: null }, b: { id: null, name: reviewTrail.sides.blackName, seat: null },
+  };
   if (running || liveTrail || boardWhiteName || boardBlackName) {
     return { w: { id: boardWhiteId, name: boardWhiteName, seat: null }, b: { id: boardBlackId, name: boardBlackName, seat: null } };
   }
@@ -1360,7 +1366,7 @@ function renderStrips(): void {
       ? `<span class="strip-thinking">${colorName} · thinking · move ${board.fullmove}</span>`
       : `${colorName}${side.seat ? ` · ${side.seat}` : ''}`;
     const name = side.name ? displayEngineName(side.name) : 'No engine';
-    const showClock = running || usedMs > 0;
+    const showClock = !reviewing && (running || usedMs > 0);
     node.dataset.turn = String(thinking);
     node.innerHTML =
       `${side.name ? engineAvatarHtml(side.name) : ''}` +
@@ -1895,7 +1901,7 @@ function isReadyMessage(text: string | null): boolean {
 }
 
 function arenaGamesPerOpening(): number {
-  return Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
+  return Math.max(1, Math.min(20, Math.floor(Number(inputEl('gamesInput').value) || 2)));
 }
 
 /** One-line description of the locked setup, shown in place of the forms while a match runs. */
@@ -1965,7 +1971,7 @@ function refreshSeatControls(): void {
   }
   el('arenaSeatList').dataset.fixed = String(fixedBudget);
   el('addSeat').toggleAttribute('hidden', arenaTournamentMode() === 'match');
-  el('addSeat').toggleAttribute('disabled', running);
+  el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   selectEl('tournamentModeSelect').disabled = running;
   selectEl('arenaConcurrencySelect').disabled = running;
   // Everything that shapes the schedule is locked for the whole match, so no edit silently applies mid-game.
@@ -3505,7 +3511,7 @@ function renderGameCharts(): void {
 }
 
 /** Live PUCT-root distribution from the real search tree (Lc0SearchResult.children). */
-function renderRootChart(engineId: string): void {
+function renderRootChart(engineId: string, display = true): void {
   const result = lastLc0SearchResults.get(engineId);
   if (!result?.children?.length) return;
   const top = [...result.children]
@@ -3516,7 +3522,7 @@ function renderRootChart(engineId: string): void {
   const data = { fen: result.fen, engineName: engines.get(engineId)?.name ?? engineId,
     children: top.map((child) => ({ uci: child.uci, visits: child.visits, q: child.q, prior: child.prior })) };
   if (liveTrail) liveTrail.rootChart = data;
-  renderSavedRootChart(data);
+  if (display) renderSavedRootChart(data);
 }
 
 function renderSavedRootChart(data?: ArenaRootChartSample): void {
@@ -3553,10 +3559,10 @@ function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'na
   if (snapshot && snapshot.elapsedMs == null) snapshot.elapsedMs = moveMs;
   if (snapshot && snapshot.nps == null && nps !== undefined) snapshot.nps = nps;
   samples.push({ ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
+  if (display) renderRootChart(engine.id, !reviewing);
   if (display && !reviewing) {
     gameChartSamples = samples;
     renderGameCharts();
-    renderRootChart(engine.id);
   }
 }
 
@@ -3580,8 +3586,10 @@ async function playArenaGame(
   liveTrail = trailFromTree(tree, `${white.name} vs ${black.name}`, historyBoards.length - 1);
   renderBoard();
   renderEngineOutputs();
-  resetGameCharts();
-  liveTrail.charts = gameChartSamples;
+  if (!reviewing) {
+    resetGameCharts();
+    liveTrail.charts = gameChartSamples;
+  }
   const priorFens: string[] = historyBoards.slice(0, -1).map(boardToFen);
   const delay = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
   for (let ply = 0; ply < 300; ply++) {
@@ -3695,7 +3703,7 @@ async function runIsolatedCpuTournament(
       el('message').textContent = '';
       activeEngineIds = [game.white.id, game.black.id];
       setBoardSideEngines(game.white.id, game.white.name, game.black.id, game.black.name);
-      resetGameCharts();
+      if (!reviewing) resetGameCharts();
     }
     const position = game.position;
     historyBoards = position.positions;
@@ -3818,7 +3826,7 @@ async function checkpointCompatibility(): Promise<string> {
 }
 
 function captureCheckpointConfig(participants: { pid: string; index: number; name: string }[], compatibility: string): ArenaCheckpointConfig {
-  const controls = Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls'];
+  const controls = normalizeArenaControls(Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls']);
   return { mode: arenaTournamentMode(), seats: participants.map((participant) => ({
     id: participant.pid, name: participant.name, ...seatRows[participant.index],
   })), controls, compatibility };
@@ -3855,6 +3863,7 @@ function showCheckpointResults(saved: ArenaCheckpoint): void {
     const trail = trailFromTree(arenaCompletedTree(game), `Game ${game.scheduleIndex + 1}: ${whiteName} vs ${blackName} (${game.result})`, scheduled.opening.moves?.length ?? 0);
     trail.charts = game.charts;
     trail.rootChart = game.rootChart;
+    trail.sides = { whiteName, blackName };
     finishedTrails[game.scheduleIndex] = trail;
     gameResultChips.push({ index: game.scheduleIndex, result: game.result, whiteName, blackName,
       aPoints: saved.config.mode === 'match' ? game.result === '1/2-1/2' ? 0.5 : (scheduled.whiteId === '0') === (game.result === '1-0') ? 1 : 0 : null });
@@ -3905,7 +3914,11 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   if (resume) {
     if (resume.config.compatibility !== compatibility) throw new Error('The app build, engine assets or runtime overrides changed. Completed results are still viewable and exportable, but cannot be mixed with a new build.');
     applyCheckpointConfig(resume);
+    // UI runtime changes while paused may have created a different evaluator.
+    disposeLc0Resources();
   }
+  const effectiveControls = normalizeArenaControls(Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls']);
+  for (const id of ARENA_CONTROL_IDS) (el(id) as HTMLInputElement).value = effectiveControls[id];
   syncSeatRowsFromDom();
   const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
   if (isStaleMount(mountSignal)) return;
@@ -3970,7 +3983,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   const engineB = participants[1].engine!;
   const sameEngine = mode === 'match' && participants[0].engineId === participants[1].engineId;
   const seatIds = [...new Set(participants.map((participant) => participant.engineId))];
-  const gamesPerOpening = Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
+  const gamesPerOpening = arenaGamesPerOpening();
   const standings = new TournamentStandings(participants.map((participant) => ({ id: participant.pid, name: participant.name })));
   let schedule: ScheduledGame<ArenaOpening>[];
   try {
@@ -4110,6 +4123,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     games.sort((a, b) => a.scheduleIndex - b.scheduleIndex);
     if (trail) {
       trail.label = `Game ${i + 1}: ${white.name} vs ${black.name} (${result})`;
+      trail.sides = { whiteName: white.name, blackName: black.name };
       finishedTrails[i] = trail;
     }
     gameResultChips.push({
@@ -4137,7 +4151,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       await runIsolatedCpuTournament(schedule, pendingIndices, byPid, matchAbort.signal, completeGame);
     } else {
       if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {
-        await loadLc0Evaluator(mountSignal);
+        await loadLc0Evaluator(mountSignal, matchAbort.signal);
         if (!lc0Cache) throw new Error('The saved Lc0 network could not be loaded.');
       }
       resetLc0SearchTrees(seatIds);
@@ -4248,6 +4262,9 @@ function exportPgn() {
 }
 
 function disposeLc0Resources(): void {
+  lc0LoadAbort?.abort();
+  lc0LoadAbort = null;
+  loadingLc0 = false;
   void lc0Cache?.dispose();
   lc0Cache = null;
   player = null;
@@ -4292,12 +4309,13 @@ function disposeRuntimeResources(): void {
   }
 }
 
-async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
+async function createSelectedLc0Evaluator(signal: AbortSignal): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
   const runtime = selectedLc0Runtime();
   if (runtime === 'onnx') {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
       cache: true,
-      onProgress: (loaded, total) => showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'),
+      signal,
+      onProgress: (loaded, total) => { if (!signal.aborted) showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'); },
     });
     return Lc0OnnxEvaluator.create(modelLoad.model);
   }
@@ -4323,10 +4341,16 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
   });
 }
 
-async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): Promise<void> {
-  if (isStaleMount(mountSignal)) return;
+async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, matchSignal?: AbortSignal): Promise<void> {
+  if (isStaleMount(mountSignal) || matchSignal?.aborted) return;
+  lc0LoadAbort?.abort();
+  const loadAbort = new AbortController();
+  lc0LoadAbort = loadAbort;
+  const signal = AbortSignal.any([mountSignal, loadAbort.signal, ...(matchSignal ? [matchSignal] : [])]);
   const runtime = selectedLc0Runtime();
   if (!selectedSeatsNeedLc0Evaluator()) {
+    lc0LoadAbort = null;
+    loadingLc0 = false;
     el('start').toggleAttribute('disabled', false);
     refreshSeatControls();
     el('message').textContent = readyMessage();
@@ -4339,9 +4363,9 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
   el('message').textContent = 'Loading the Lc0 network…';
   showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
-    const evaluator = await createSelectedLc0Evaluator();
+    const evaluator = await loadArenaResource(() => createSelectedLc0Evaluator(signal), signal);
     const ortDiagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics({ probeAdapter: false }) : undefined;
-    if (isStaleMount(mountSignal)) {
+    if (isStaleMount(mountSignal) || signal.aborted) {
       void evaluator.dispose?.();
       return;
     }
@@ -4380,7 +4404,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
     el('start').toggleAttribute('disabled', false);
     el('message').textContent = readyMessage();
   } catch (error) {
-    if (isStaleMount(mountSignal)) return;
+    if (isStaleMount(mountSignal) || signal.aborted) return;
     hideDownloadProgress();
     if (!selectedSeatsNeedLc0Evaluator()) {
       el('start').toggleAttribute('disabled', false);
@@ -4389,8 +4413,10 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
     }
   } finally {
-    if (!isStaleMount(mountSignal)) {
+    if (!isStaleMount(mountSignal) && lc0LoadAbort === loadAbort) {
+      lc0LoadAbort = null;
       loadingLc0 = false;
+      hideDownloadProgress();
       refreshSeatControls();
     }
   }
@@ -4466,6 +4492,8 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
     const sfKind = seatRows[1].family === 'sf' && seatRows[1].variant === 'full' ? 'full' : 'lite';
     const sfId = seatRows[1].family === 'sf' ? seatEngineId(1) : 'sf:lite:8';
     const sfName = seatRows[1].family === 'sf' ? (engines.get(sfId)?.name ?? rowLabel(seatRows[1])) : 'Stockfish Lite d8';
+    if (!lc0Cache) await loadLc0Evaluator(mountAbort.signal, controller.signal);
+    if (!lc0Cache) throw new Error('LC0 evaluator could not be initialized for the fixed suite.');
     await warmUpSelectedEngines([lc0Id, sfId], controller.signal, 0);
     const sfEngine = stockfishEngineFor(sfKind);
     const timed = arenaBudgetMode() === 'movetime';
@@ -4859,7 +4887,7 @@ function wireEvents() {
     populateSeats();
   });
   el('addSeat').addEventListener('click', () => {
-    if (running) return;
+    if (running || seatRows.length >= 8) return;
     syncSeatRowsFromDom();
     seatRows.push({ family: 'sf', variant: 'lite', strength: 8 });
     persistArenaSeatRows();

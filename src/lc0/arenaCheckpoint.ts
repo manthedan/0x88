@@ -29,6 +29,25 @@ export const ARENA_CONTROL_IDS = [
   'lc0LegalPriorsSelect',
 ] as const;
 export type ArenaControls = Record<(typeof ARENA_CONTROL_IDS)[number], string>;
+
+/** Persist the effective numeric settings, not empty/out-of-range form strings. */
+export function normalizeArenaControls(raw: ArenaControls): ArenaControls {
+  const controls = { ...raw };
+  const numeric = {
+    gamesInput: [2, 1, 20],
+    movetimeInput: [500, 10, 60000],
+    delayInput: [0, 0, 3000],
+    cacheEntriesInput: [0, 0, 100000],
+    stockfishThreadsInput: [0, 0, 32],
+    lc0BatchSizeInput: [1, 1, 64],
+    lc0BatchPipelineDepthInput: [1, 1, 16],
+  } as const;
+  for (const [id, [fallback, min, max]] of Object.entries(numeric)) {
+    const key = id as keyof typeof numeric;
+    controls[key] = String(Math.max(min, Math.min(max, Math.floor(Number(raw[key]) || fallback))));
+  }
+  return controls;
+}
 export interface ArenaCheckpointSeat {
   id: string;
   name: string;
@@ -115,7 +134,7 @@ export function createArenaCheckpoint(config: ArenaCheckpointConfig, schedule: r
     },
   }));
   const copy = JSON.parse(JSON.stringify(config)) as ArenaCheckpointConfig;
-  return {
+  const checkpoint: ArenaCheckpoint = {
     kind: '0x88-arena-run',
     version: ARENA_CHECKPOINT_VERSION,
     runId: crypto.randomUUID(),
@@ -127,6 +146,8 @@ export function createArenaCheckpoint(config: ArenaCheckpointConfig, schedule: r
     identity: arenaRunIdentity(copy, saved),
     completed: [],
   };
+  // Reject unsupported setups before replacing a previously recoverable run.
+  return decodeArenaCheckpoint(checkpoint);
 }
 
 export function arenaRemainingIndices(checkpoint: Pick<ArenaCheckpoint, 'schedule' | 'completed'>): number[] {
