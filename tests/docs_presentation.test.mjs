@@ -56,7 +56,23 @@ test('every group has an explicit controlled disclosure, including all ten engin
   assert.match(source, /group.id === activeGroupId \? 'true'/);
   assert.doesNotMatch(source, /group\.collapsed/);
   assert.doesNotMatch(markup(toggle), /group\.items\.length/, 'ambiguous topic counts are not shown');
-  assert.match(source, /\.toc ul ul a\{font-size:14px; padding:8px 10px\}/);
+  assert.match(source, /\.toc ul ul\{margin:0 0 0 12px\}/);
+  assert.match(source, /\.toc-groups \.toc-group-heading \.toc-group-label\{[^}]*background:transparent/);
+  assert.match(source, /\.group-toggle:hover\{background:transparent/);
+  assert.doesNotMatch(source, /border-left|inset[^;]*[34]px 0/);
+});
+
+test('scroll tracking does not depend on animation frames being delivered', () => {
+  assert.match(source, /addEventListener\('scroll', updateActive, \{ passive: true \}\)/);
+  assert.match(source, /removeEventListener\('scroll', updateActive\)/);
+  assert.doesNotMatch(source, /requestAnimationFrame/);
+});
+
+test('troubleshooting opens by default and common problems are linked outside Contents', () => {
+  assert.match(source, /expandedGroups: Record<string, boolean> = \{ pages: true, troubleshooting: true \}/);
+  const intro = elements.find(({ node }) => hasClass(node, 'doc-intro')).node;
+  assert.deepEqual(descendants(intro, 'a').map((node) => textAttr(node, 'href')), ['#trouble-webgpu', '#trouble-downloads', '#trouble-cache']);
+  for (const link of descendants(intro, 'a')) assert.ok(byId(textAttr(link, 'href').slice(1)));
 });
 
 test('mobile search is outside the collapsed panel and shares the desktop search focus action', () => {
@@ -66,7 +82,9 @@ test('mobile search is outside the collapsed panel and shares the desktop search
   assert.match(markup(trigger.node), /Search docs/);
   assert.match(markup(trigger.node), /on:click=\{focusSearch\}/);
   assert.match(source, /if \(narrow\) tocOpen = true;\s+await tick\(\);\s+searchInput\?\.focus\(\)/);
-  assert.match(source, /searchShortcut = '⌘K'/);
+  assert.match(source, /docsSearchShortcut\(navigator.platform\)/);
+  assert.match(source, /event.key === '\/' && !typing/);
+  assert.match(source, /event.metaKey \|\| event.ctrlKey/);
   assert.match(source, /let searchShortcut = 'Ctrl K'/);
 });
 
@@ -77,6 +95,7 @@ test('all workspace launch links are with the title, ahead of the four-step proc
     const launch = descendants(card, 'a').find((node) => textAttr(node, 'href') === `/app/${workspace}/`);
     const steps = descendants(card, 'ol')[0];
     assert.ok(launch.end < steps.start);
+    assert.doesNotMatch(markup(launch), /→/);
     assert.equal(steps.children.filter((node) => node.name === 'li').length, 4);
     assert.ok(elements.find(({ node, ancestors }) => node === launch && ancestors.some((parent) => hasClass(parent, 'task-heading'))));
     assert.ok(attr(heading, 'aria-labelledby'), 'the heading name excludes its permalink');
@@ -98,6 +117,29 @@ test('all workspace launch links are with the title, ahead of the four-step proc
   assert.equal(links.length, 76, 'all external link instances are retained');
   assert.equal(new Set(links).size, 41, 'all unique external destinations are retained');
   assert.ok(!elements.some(({ node }) => hasClass(node, 'not-yet')), 'obsolete availability note is removed');
+});
+
+test('beginner terms are defined inline without extending the quick-start list', () => {
+  const section = markup(byId('pages'));
+  assert.match(section, /Small net: a neural model/);
+  assert.match(section, /game record \(PGN\) or position \(FEN\)/);
+  assert.match(section, /engine-specific search budget: visits \(search iterations\) or depth/);
+  const following = elements.find(({ node }) => node.children?.includes(byId('following-match'))).node;
+  assert.equal(descendants(following, 'ul').length, 3, 'Resume and Saved results each have short sub-bullets');
+  const note = descendants(following, 'p').find((node) => /Note:/.test(markup(node)));
+  assert.match(markup(note), /parallel CPU runs/);
+  assert.match(markup(note), /background completion is not guaranteed/);
+  assert.match(markup(note), /App or engine-release changes/);
+});
+
+test('title hierarchy, quiet launch links and readable mobile contents are explicit', () => {
+  assert.match(source, /\.doc-intro h1\{font-size:44px/);
+  assert.match(source, /\.doc-content h2\{\s*font-size:28px/);
+  assert.match(source, /\.doc-intro h1\{font-size:36px/);
+  assert.match(source, /\.doc-content h2\{font-size:24px/);
+  assert.match(source, /\.doc-content \.open-link\{min-height:44px/);
+  assert.match(source, /\.toc-toggle-label\{[^}]*font-size:13px;[^}]*color:var\(--text\)/);
+  assert.match(source, /background:transparent; color:var\(--ink-soft\); font-weight:600/);
 });
 
 test('subsection search containers exclude adjacent topics', () => {
@@ -125,5 +167,8 @@ test('each major section ends with sequential navigation driven by the same outl
   }
   assert.match(source, /const previous = toc\[position - 1\]/);
   assert.match(source, /const next = toc\[position \+ 1\]/);
+  assert.match(source, /Next: \{next.label\}/);
+  assert.match(source, /Previous: \{previous.label\}/);
+  assert.doesNotMatch(source, /class="section-direction"|Back to contents/, 'the existing sticky Contents bar is the mobile return path');
   assert.doesNotMatch(source, /class="quick-links"/);
 });
