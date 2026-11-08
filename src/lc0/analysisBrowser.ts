@@ -142,7 +142,7 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, fitAnalysisPvRows, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisChipColor, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, fitAnalysisPvRows, isEmptyAnalysisGame, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerPosition } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
 import { positionShareUrl } from './analysisShare.ts';
@@ -1972,8 +1972,8 @@ function bestShapes(): DrawShape[] {
     const shape = uciShape(uci, brush);
     if (!shape) return [];
     if (!shared) return [shape];
-    // Identity badges sit inside a top corner of the destination square, away from the shaft.
-    return [{ ...shape, customSvg: { html: sharedArrowMarkerSvg(shared, sharedMarkerCorner(uci, orientation)), center: 'dest' as const } }];
+    // Keep attribution beside the tail/midpoint, clear of the destination piece and arrowhead.
+    return [{ ...shape, customSvg: { html: sharedArrowMarkerSvg(shared, sharedMarkerPosition(uci, orientation, tree.current.fen, shared)), center: 'orig' as const } }];
   });
 }
 
@@ -2056,7 +2056,7 @@ function renderEvalBar() {
   el('evalScore').dataset.long = String((line?.scoreText ?? '').length > 5);
   el('evalSource').textContent = line ? analysisEngineName(line.engine) : 'Choose engine';
   el('evalSource').dataset.short = line ? engineMonogram(line.engine) : '';
-  el('evalSourceButton').style.setProperty('--engine-color', line ? engineBrushes(line.engine).swatch : 'var(--muted)');
+  el('evalSourceButton').style.setProperty('--engine-color', line ? analysisChipColor(line.engine) : 'var(--muted)');
   // A readable source selector above the board drives the attached bar.
   const ready = evalSourceChoices(lines).filter((choice) => choice.line).length;
   const button = el('evalSourceButton');
@@ -2139,7 +2139,7 @@ function toggleEngineLines(name: string): void {
 
 /**
  * One block per engine: a header row (identity, stats, eval, best-move pill, settings) with that
- * engine's principal variation directly beneath it. Alternatives open in place from the PV row.
+ * engine's principal variation directly beneath it. Alternatives open in place from the header.
  */
 function renderEngineSummaries(lines: AnalysisLine[]): void {
   renderAnalysisStatus();
@@ -2169,7 +2169,9 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
     const agrees = !!line && line.pvUci[0] === agreed;
     const move = line?.pvUci[0] ? `<button type="button" class="compare-move${agrees ? ' agrees' : ''}" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}${agrees ? ` (shared with ${groups[0].engines.length - 1} other engine${groups[0].engines.length > 2 ? 's' : ''})` : ''}" title="${htmlEscape(agrees ? `Shared best move: ${groups[0].engines.map(analysisEngineName).join(' + ')}. Play ${firstAnalysisMove(line)}` : `Play ${firstAnalysisMove(line)}`)}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span class="compare-move-empty" aria-hidden="true">—</span>';
     const open = engineLinesExpanded(name);
-    const header = `<div class="engine-summary"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-pressed="${focused}" aria-label="${htmlEscape(`${name}: ${focused ? 'show every engine\'s arrow' : 'show only this engine\'s arrow and use it for the eval bar'}`)}" title="${htmlEscape(`${name}: ${focused ? 'click again to show every engine\'s arrow' : 'show only its arrow (and use it for the eval bar)'}`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${move}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button></div>`;
+    const extra = Math.max(0, engineLines.filter((entry) => !entry.error).length - 1);
+    const toggle = extra ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="lines|${htmlEscape(name)}" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${extra + 1} lines`}">${open ? 'Hide lines' : `${extra} more line${extra > 1 ? 's' : ''}`}</button>` : '';
+    const header = `<div class="engine-summary"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-pressed="${focused}" aria-label="${htmlEscape(`${name}: ${focused ? 'show every engine\'s arrow' : 'show only this engine\'s arrow and use it for the eval bar'}`)}" title="${htmlEscape(`${name}: ${focused ? 'click again to show every engine\'s arrow' : 'show only its arrow (and use it for the eval bar)'}`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${move}${toggle}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button></div>`;
     return `<section class="engine-card${progress ? ' searching' : ''}${focused ? ' arrow-focus' : ''}${open ? ' open' : ''}" style="--engine-color:${swatch}" aria-label="${htmlEscape(name)}">${header}${engineLinesMarkup(engine, name, engineLines, open)}${meter}</section>`;
   }).join(''));
 }
@@ -2177,8 +2179,6 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
 /** The engine's PV rows: the top line always, its alternatives when opened. */
 function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLine[], open: boolean): string {
   const sorted = [...engineLines].sort((x, y) => x.multipv - y.multipv);
-  const usable = sorted.filter((line) => !line.error);
-  const extra = usable.length - 1;
   const rows = (open ? sorted : sorted.slice(0, 1)).map((line, index) => {
     if (line.error) return `<li class="result-line line-error"><span class="line-error-text" title="${htmlEscape(line.error)}">${htmlEscape(line.error)}</span></li>`;
     const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" data-pv-fen="${htmlEscape(tree.current.fen)}" data-pv-root="${tree.current.id}" data-pv-score="${htmlEscape(line.scoreText)}" data-pv-detail="${htmlEscape(line.detail)}" data-pv-rank="${line.multipv}"`;
@@ -2191,10 +2191,7 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     }).join('');
     // The header already carries the top line's eval; alternatives show rank + their own eval.
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
-    const toggle = index === 0
-      ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Hide' : extra} ${open ? 'extra lines' : `more line${extra > 1 ? 's' : ''}`}</span>${CHEVRON_ICON}</button>` : ''
-      : '';
-    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv} on the board`)}"${preview.steps.length ? '' : ' disabled'} title="Preview this line on the board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button>${toggle}</div></li>`;
+    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv} on the board`)}"${preview.steps.length ? '' : ' disabled'} title="Preview this line on the board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button></div></li>`;
   });
   if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
@@ -2202,9 +2199,9 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
 
 const GEAR_ICON = '<svg class="engine-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
 
-/** Dense surfaces identify engines by a monogram tile in the engine colour (matches stripe, dot and arrow). */
+/** Analysis monograms use darker, hue-matched fills without changing board arrow colours. */
 function engineAvatar(engine: string): string {
-  return `<span class="engine-avatar" style="--engine-color:${engineBrushes(engine).swatch}" aria-hidden="true">${htmlEscape(engineMonogram(engine))}</span>`;
+  return `<span class="engine-avatar" style="--engine-chip-color:${analysisChipColor(engine)}" aria-hidden="true">${htmlEscape(engineMonogram(engine))}</span>`;
 }
 
 /** Manage-engines dialog only: every logo sits in the same framed box so mixed SVG/PNG assets read as one set. */
@@ -2226,13 +2223,13 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const [, spread] = consensus.split(' · ');
     const groups = analysisMoveGroups(bestByEngine);
     const spreadCp = spread ? Number(spread.replace(' cp spread', '')) : Number.NaN;
-    const headline = analysisAgreementHeadline(groups, bestByEngine.length, Number.isFinite(spreadCp) ? spreadCp : undefined);
+    const headline = analysisAgreementHeadline(groups, bestByEngine.length);
     // Spread in pawns, the same unit as every engine evaluation beside it; phrased by size.
     const spreadInfo = Number.isFinite(spreadCp) ? analysisSpreadText(spreadCp) : null;
     const spreadMarkup = spreadInfo ? `<span class="insight-spread" data-level="${spreadInfo.level}" title="Highest minus lowest evaluation across engines, in pawns (White’s view)">${htmlEscape(spreadInfo.text)}</span>` : '';
     const identities = groups.map((group) => `<span class="insight-group"><b>${htmlEscape(group.san)}</b>${group.engines.map((engine) => engineAvatar(engine)).join('')}</span>`).join('');
     const explanation = `Agreement compares recommended moves; eval spread is the highest minus lowest evaluation, in pawns from White’s perspective. ${groups.map((group) => `${group.san}: ${group.engines.map(analysisEngineName).join(' + ')}`).join('; ')}. Open Compare for details.`;
-    patchAnalysisResults(el('comparisonInsight'), `<button type="button" class="insight-action" data-open-comparison data-focus-key="comparison-shortcut" aria-label="${htmlEscape(`${headline}. Open Compare. ${explanation}`)}" title="${htmlEscape(explanation)}"><span class="insight-headline"><strong>${htmlEscape(headline)}</strong><span aria-hidden="true">›</span></span>${spreadMarkup}<span class="insight-groups" aria-hidden="true">${identities}</span></button>`);
+    patchAnalysisResults(el('comparisonInsight'), `<button type="button" class="insight-action" data-open-comparison data-focus-key="comparison-shortcut" aria-label="${htmlEscape(`${headline}. Open Compare. ${explanation}`)}" title="${htmlEscape(explanation)}"><span class="insight-headline"><strong>${htmlEscape(headline)}</strong><span class="insight-compare" title="Open Compare for engine details">Compare <span aria-hidden="true">›</span></span></span>${spreadMarkup}<span class="insight-groups" aria-hidden="true">${identities}</span></button>`);
   }
   if (!bestByEngine.length) {
     const progressRows = [...searchProgressByEngine.values()].map(
@@ -2271,7 +2268,6 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     .join(''));
 }
 
-const CHEVRON_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>';
 
 function renderLines() {
   if (retry) return;
@@ -2355,6 +2351,7 @@ function renderMoveList() {
     n.children.forEach(collect);
   };
   collect(tree.root);
+  el('main').toggleAttribute('data-empty-game', isEmptyAnalysisGame(tree.root));
   const list = el('movelist');
   const hadFocus = list.contains(document.activeElement);
   // Unchanged markup is left alone so a half-typed PGN in the empty-state box survives re-renders.
@@ -4832,7 +4829,7 @@ function wireEvents() {
     copyDisclosure.close();
     toolsDisclosure.close(mobileTools.matches && el('boardTools').contains(document.activeElement));
   }, { signal: mountAbort.signal });
-  // Count markers remain pointer-transparent so every part of a chess square
+  // Attribution pills remain pointer-transparent so every part of a chess square
   // stays playable. The board supplies the same native hover tooltip beneath them.
   el('ground').addEventListener('pointermove', (event) => {
     const marker = retry ? undefined : [...el('ground').querySelectorAll<SVGElement>('.shared-move-marker')].find((node) => {
@@ -4969,7 +4966,7 @@ function wireEvents() {
   wirePvPreview();
   const positionTools = el('positionTools') as HTMLDetailsElement;
   // "Load" goes to the one paste box when it is on screen (empty game); otherwise it opens the full panel.
-  el('openPosition').addEventListener('click', () => {
+  const openLoadForm = () => {
     const quick = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]');
     if (quick && !positionTools.open) {
       // Explorer is a Moves subview that conceals the list, even on an empty game.
@@ -4981,7 +4978,9 @@ function wireEvents() {
     }
     positionTools.open = !positionTools.open;
     if (positionTools.open) inputEl('fenInput').focus();
-  });
+  };
+  el('openPosition').addEventListener('click', openLoadForm);
+  el('emptyLoadGame').addEventListener('click', openLoadForm);
   positionTools.addEventListener('toggle', () => el('openPosition').setAttribute('aria-expanded', String(positionTools.open)));
   // The empty move list doubles as a paste box; FEN or PGN is detected and fed to the same load paths.
   const loadQuickPgn = () => {

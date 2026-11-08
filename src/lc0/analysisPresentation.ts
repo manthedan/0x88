@@ -1,4 +1,4 @@
-import { parseFen } from '../chess/board.ts';
+import { parseFen, START_FEN } from '../chess/board.ts';
 import { uciLineToSan } from '../chess/san.ts';
 import { type AnalysisLine, engineBrushes } from './analysisFormat.ts';
 import type { EngineRow } from './engineCatalog.ts';
@@ -38,30 +38,57 @@ export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean,
   }).reverse(); // Alternatives sit underneath best moves; all brushes retain the owner's 15px width.
 }
 
-/**
- * One shared-move count in a free corner of the destination square, away from the shaft.
- * Chessground's custom layer has a -3.5 -3.5 viewBox (unlike the arrow layer).
- * It already aligns this 0–100 box to the square bounds; do not re-centre it.
- * The move itself remains ONE arrow with the owner's uniform width.
- */
-export function sharedArrowMarkerSvg(engines: string[], corner: [number, number] = [1, -1]): string {
+/** Analysis-only chip fills: keep arrow colours intact and white monograms AA-readable. */
+export function analysisChipColor(engine: string): string {
+  const swatch = engineBrushes(engine).swatch;
+  return ({ '#7a4fd6': '#6941b8', '#c45a11': '#a84b0a', '#007a87': '#006975' } as Record<string, string>)[swatch] ?? swatch;
+}
+
+export function sharedArrowMarkerText(engines: string[]): string {
+  const initials = engines.map(engineMonogram).join(' ');
+  return engines.length >= 4 && initials.length * 13.2 + 16 > 100 ? String(engines.length) : initials;
+}
+
+/** A single, pointer-transparent pill, in square-local units relative to the arrow's origin. */
+export function sharedArrowMarkerSvg(engines: string[], position: [number, number] = [50, 50]): string {
   if (!engines.length) return '';
-  const x = corner[0] > 0 ? 82 : 18;
-  const y = corner[1] > 0 ? 83 : 17;
+  const [x, y] = position;
+  const text = sharedArrowMarkerText(engines);
+  const width = text.length * 13.2 + 16;
   const label = htmlEscape(`${engines.length} engines share this move: ${engines.map(analysisEngineName).join(', ')}`);
-  // 22 square-local units remain >=10px even on the 390px board. One tile,
-  // rather than a cluster, leaves the piece and the centre arrowhead uncovered.
-  return `<g class="shared-move-marker" role="img" tabindex="0" aria-label="${label}" style="pointer-events:none"><title>${label}</title><rect x="${x - 16}" y="${y - 15}" width="32" height="30" rx="6" fill="${engineBrushes(engines[0]).swatch}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 8}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="22" font-weight="750">${engines.length}</text></g>`;
+  // 22 square-local units are 10.5px on the 382px mobile board, including three-engine pills.
+  return `<g class="shared-move-marker" role="img" tabindex="0" aria-label="${label}" style="pointer-events:none"><title>${label}</title><rect x="${x - width / 2}" y="${y - 15}" width="${width}" height="30" rx="8" fill="${analysisChipColor(engines[0])}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 8}" text-anchor="middle" fill="#fff" font-family="ui-monospace,monospace" font-size="22" font-weight="750">${htmlEscape(text)}</text></g>`;
 }
 
 /**
- * Top corner of the destination square on the side away from the incoming shaft (screen space).
- * The chosen top corner is never on the shaft's path, and the arrowhead ends at the square centre,
- * so the count stays clear of the arrow; top corners are also the freest part of a captured piece.
+ * Prefer empty space beside the tail/midpoint, never the destination piece or arrowhead.
+ * Score the pill's full bounds against occupied piece centres, not just its anchor point.
+ * Return origin-square coordinates for Chessground's customSvg center='orig'.
  */
-export function sharedMarkerCorner(uci: string, orientation: 'white' | 'black'): [number, number] {
-  const travel = Math.sign(uci.charCodeAt(2) - uci.charCodeAt(0)) * (orientation === 'black' ? -1 : 1);
-  return [travel < 0 ? -1 : 1, -1];
+export function sharedMarkerPosition(uci: string, orientation: 'white' | 'black', fen: string, engines: string[]): [number, number] {
+  const screen = (file: number, rank: number): [number, number] => orientation === 'white' ? [file + .5, 7.5 - rank] : [7.5 - file, rank + .5];
+  const from = screen(uci.charCodeAt(0) - 97, Number(uci[1]) - 1);
+  const to = screen(uci.charCodeAt(2) - 97, Number(uci[3]) - 1);
+  const dx = to[0] - from[0], dy = to[1] - from[1], length = Math.hypot(dx, dy) || 1;
+  const halfWidth = (sharedArrowMarkerText(engines).length * 13.2 + 18) / 200;
+  const halfHeight = .16;
+  const pieces = parseFen(fen).squares.flatMap((piece, index) => piece ? [screen(index % 8, Math.floor(index / 8))] : []);
+  const overlap = (x: number, y: number, piece: [number, number], radius: number) =>
+    Math.max(0, Math.min(x + halfWidth, piece[0] + radius) - Math.max(x - halfWidth, piece[0] - radius))
+    * Math.max(0, Math.min(y + halfHeight, piece[1] + radius) - Math.max(y - halfHeight, piece[1] - radius));
+  const candidates = [.35, .5, .15].flatMap((fraction) => [.55, -.55, .8, -.8, 1.05, -1.05].map((offset) => {
+    const x = Math.max(halfWidth + .02, Math.min(8 - halfWidth - .02, from[0] + dx * fraction - dy / length * offset));
+    const y = Math.max(halfHeight + .02, Math.min(8 - halfHeight - .02, from[1] + dy * fraction + dx / length * offset));
+    const score = overlap(x, y, to, .6) * 1000 + pieces.reduce((sum, piece) => sum + overlap(x, y, piece, .43), 0) * 100
+      + Math.abs(offset) + Math.abs(fraction - .35);
+    return { x, y, score };
+  })).sort((a, b) => a.score - b.score);
+  return [50 + (candidates[0].x - from[0]) * 100, 50 + (candidates[0].y - from[1]) * 100];
+}
+
+/** Only the untouched standard board needs the first-visit mobile shortcut. */
+export function isEmptyAnalysisGame(root: GameNode): boolean {
+  return root.fen === START_FEN && root.children.length === 0;
 }
 
 /** Cycle only through usable bar sources; a pending/failed engine must not trap the control. */
@@ -92,19 +119,10 @@ export function analysisMoveGroups(bestLines: AnalysisLine[]): AnalysisMoveGroup
 /** Spread (pawns) at or above which differing best moves are worth calling a real disagreement. */
 export const STRONG_DISAGREEMENT_CP = 100;
 
-/**
- * One-line verdict for the comparison callout: agreement is stated, never implied, and the moves
- * are named. Different top moves with close evals are not a "disagreement"; that word is kept for
- * a large eval spread (`spreadCp`, unsigned centipawns, when every score is finite).
- */
-export function analysisAgreementHeadline(groups: AnalysisMoveGroup[], total: number, spreadCp?: number): string {
-  const [top, next] = groups;
-  if (!top) return 'No best move yet';
-  if (groups.length === 1) return total > 2 ? `All ${total} engines agree on ${top.san}` : `Engines agree on ${top.san}`;
-  if (top.engines.length >= 2 && next.engines.length < top.engines.length) return `${top.engines.length} of ${total} agree on ${top.san}`;
-  const moves = groups.slice(0, 3).map((group) => group.san).join(' / ') + (groups.length > 3 ? ` +${groups.length - 3}` : '');
-  if (top.engines.length >= 2) return `Split: ${moves}`;
-  return `${spreadCp !== undefined && spreadCp >= STRONG_DISAGREEMENT_CP ? 'Engines disagree' : 'Different top moves'}: ${moves}`;
+/** One move-first template for unanimity, plurality and ties; alternatives keep their own engine keys. */
+export function analysisAgreementHeadline(groups: AnalysisMoveGroup[], total: number): string {
+  const top = groups[0];
+  return top ? `${top.san} · ${top.engines.length} of ${total} engines` : 'No best move yet';
 }
 
 /** Visible units; White-perspective calculation is explained in the callout tooltip and Compare. */

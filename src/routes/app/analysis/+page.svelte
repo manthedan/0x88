@@ -81,6 +81,7 @@ onMount(() => {
       <button id="navForward" type="button" title="Forward (Right)" aria-label="Go forward one move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 8 7-8 7" /></svg></button>
       <button id="navEnd" type="button" title="End (Down)" aria-label="Go to last move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg></button>
     </div>
+    <button id="emptyLoadGame" class="tool-button empty-load-game" type="button" title="Load a game (PGN or FEN)" aria-label="Load a game (PGN or FEN)">Load</button>
     <div id="boardToolDisclosure" class="board-tool-disclosure">
     <button id="boardToolsButton" class="tool-button board-tools-trigger" type="button" aria-label="Board tools" title="Board tools" aria-controls="boardTools" aria-expanded="false">•••</button>
     <div id="boardTools" class="board-tools" role="group" aria-label="Board tools">
@@ -389,6 +390,7 @@ onMount(() => {
     --border-input:color-mix(in srgb, var(--ink) 52%, var(--panel));
     --border-input-hover:var(--border-input);
     --engine-color:var(--accent); /* overridden inline per engine row */
+    --engine-chip-color:var(--engine-color); /* darker Analysis-only avatar fills are set inline */
     --analysis-header-height:64px; /* measured locally by the page controller */
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
     --result-highlight:color-mix(in srgb, var(--ink) 13%, var(--panel));
@@ -403,7 +405,7 @@ onMount(() => {
   /* Desktop: the panel shares the board column's baseline (board + toolbar), so there is no dead block under it. */
   .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:calc(var(--board-size) + 98px); max-height:none; overflow:hidden}
   .analysis-workspace .app-sidebar>*{flex:0 0 auto}
-  /* Engine results scroll independently before the game loses its twelve visible rows. */
+  /* Compact headers and PVs fit four engines; expanded lines and larger sets may scroll. */
   .analysis-workspace .engine-strip{order:0; flex:0 1 auto; min-height:0}
   :global(.analysis-workspace .sr-only){position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0}
   .board-shell{position:relative; min-width:0}
@@ -419,7 +421,7 @@ onMount(() => {
   .board-tools{display:flex; align-items:stretch; gap:6px; flex:0 0 auto}
   .board-tools:global([hidden]){display:none}
   .board-tool-disclosure{display:contents}
-  .tool-button.board-tools-trigger, .mobile-tool-label{display:none}
+  .tool-button.board-tools-trigger, .mobile-tool-label, .tool-button.empty-load-game{display:none}
   .tool-button{display:inline-flex; align-items:center; justify-content:center; gap:6px; height:100%; min-height:0; padding:0 11px; border-radius:7px; border:1px solid var(--border-input); background:transparent; color:var(--ink); font:600 13px var(--sans); white-space:nowrap}
   .tool-button:hover:not(:disabled){background:var(--panel-2); color:var(--ink)}
   .tool-button.icon-only{width:40px; padding:0}
@@ -473,13 +475,13 @@ onMount(() => {
   :global(.analysis-workspace .engine-row .row-strength){flex-basis:76px; width:76px}
   .evalbar{
     --eval-pct:50%;
-    width:18px; border:1px solid #8a8780; border-right:0; border-radius:4px 0 0 4px;
+    width:18px; border:1px solid #68655e; border-radius:4px 0 0 4px;
     overflow:hidden; background:#555550; position:relative; flex:0 0 auto;
     box-sizing:border-box;
   }
   .evalbar .white{
     position:absolute; left:0; right:0; bottom:0; height:var(--eval-pct);
-    background:var(--eval-white); transition:height .25s, width .25s;
+    background:#e9e4d8; transition:height .25s, width .25s;
   }
   .board-readout{position:relative; display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:34px; padding:0 0 6px}
   .eval-turn{display:inline-flex; align-items:center; gap:6px; color:var(--muted); font:500 13px var(--sans); white-space:nowrap}
@@ -739,6 +741,7 @@ onMount(() => {
   :global(.insight-action:hover:not(:disabled)){background:var(--result-highlight)}
   :global(.insight-headline){display:flex; align-items:center; gap:7px; width:100%; font:650 17px/1.3 var(--sans)}
   :global(.insight-headline strong){font-weight:650}
+  :global(.insight-compare){margin-left:auto; color:var(--muted); font:500 12px var(--sans); white-space:nowrap}
   :global(.insight-groups){display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; width:100%; margin-top:3px}
   :global(.insight-group){display:inline-flex; align-items:center; gap:4px; font:600 13px var(--sans)}
   :global(.insight-group .engine-avatar){width:22px; height:20px; flex-basis:22px; font-size:11px}
@@ -748,7 +751,7 @@ onMount(() => {
   :global(.engine-card){position:relative; border-bottom:1px solid var(--rule)}
   :global(.engine-card.arrow-focus){background:var(--result-highlight)}
   :global(.engine-card.open){background:color-mix(in srgb, var(--engine-color) 6%, var(--panel))}
-  :global(.engine-summary){display:grid; grid-template-columns:minmax(0,1fr) auto 64px 30px; align-items:center; gap:6px; min-height:34px; padding:3px 4px 0 9px}
+  :global(.engine-summary){display:grid; grid-template-columns:minmax(0,1fr) auto 52px auto 30px; align-items:center; gap:4px; min-height:32px; padding:0 4px 0 9px}
   :global(.engine-summary-name){display:flex; align-items:center; gap:8px; padding:0; min-width:0; min-height:32px; border:0; border-radius:0; background:transparent; text-align:left; color:var(--ink)}
   :global(.engine-summary-name:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.engine-summary-name:hover strong){text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--muted)}
@@ -759,14 +762,14 @@ onMount(() => {
   :global(.engine-summary .compare-move){height:28px; min-height:0; padding:0 4px; border:0; border-radius:4px; background:color-mix(in srgb, var(--engine-color) 15%, var(--panel)); font:750 15px var(--sans); text-align:center; color:var(--ink)}
   :global(.engine-summary .compare-move:hover){background:color-mix(in srgb, var(--engine-color) 28%, var(--panel)); text-decoration:underline; text-underline-offset:3px}
   :global(.compare-move-empty){text-align:center; color:var(--muted)}
-  :global(.engine-gear){display:grid; place-items:center; width:30px; height:30px; min-height:0; padding:0; border:0; border-radius:6px; background:transparent}
+  :global(.engine-gear){grid-column:5; display:grid; place-items:center; width:30px; height:30px; min-height:0; padding:0; border:0; border-radius:6px; background:transparent}
   :global(.engine-gear:hover:not(:disabled)){background:var(--panel-2)}
   :global(.engine-settings-icon){width:16px; height:16px; fill:none; stroke:var(--muted); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
   :global(.engine-gear:hover .engine-settings-icon), :global(.engine-gear:focus-visible .engine-settings-icon){stroke:var(--ink)}
   :global(.engine-summary-meter){position:absolute; left:0; bottom:-1px; height:2px; width:var(--progress); background:var(--engine-color); transition:width .2s}
   :global(.engine-summary-meter.indeterminate){width:100%; opacity:.55; animation:analysis-pulse 1.4s ease-in-out infinite}
   @keyframes -global-analysis-pulse{50%{opacity:.15}}
-  :global(.engine-avatar){display:inline-grid; place-items:center; width:22px; height:22px; flex:0 0 22px; border-radius:5px; background:var(--engine-color); color:#fff; font:700 10.5px/1 var(--mono); letter-spacing:0; box-shadow:inset 0 0 0 1px #ffffff26}
+  :global(.engine-avatar){display:inline-grid; place-items:center; width:22px; height:22px; flex:0 0 22px; border-radius:5px; background:var(--engine-chip-color); color:#fff; font:700 10.5px/1 var(--mono); letter-spacing:0; box-shadow:inset 0 0 0 1px #ffffff26}
   /* The engine entry point belongs at the header, not between results and the game. */
   .analysis-overview .add-engine-inline{flex:0 0 auto; gap:5px; border:1px solid var(--accent); background:var(--accent-soft); color:var(--ink); text-align:left}
   #addEngineHint{display:none}
@@ -778,7 +781,7 @@ onMount(() => {
   .add-engine-text small::before{content:'· '}
 
   /* Compact controls leave the row for whole-move PV tokens; Preview retains the full line. */
-  :global(.engine-lines){list-style:none; margin:0; padding:0 0 5px}
+  :global(.engine-lines){list-style:none; margin:0; padding:0 0 2px}
   :global(.result-line){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; min-height:26px}
   :global(.result-line.alt-line){border-top:1px dashed var(--rule-soft)}
   :global(.result-line:has(.pv-move:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--result-highlight)}
@@ -786,21 +789,19 @@ onMount(() => {
   :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.line-rank){flex:0 0 12px; font:600 13px var(--mono); color:var(--muted); text-align:center}
   :global(.engine-lines .score){flex:0 0 50px; font:700 13.5px var(--mono); font-variant-numeric:tabular-nums; color:var(--ink); text-align:right}
-  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; align-content:flex-start; height:32px; overflow:hidden; font:14px/1.6 var(--sans); color:var(--ink)}
+  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; align-content:flex-start; height:28px; overflow:hidden; font:14px/1.6 var(--sans); color:var(--ink)}
   :global(.pv-ellipsis){flex:0 0 12px; visibility:hidden; color:var(--muted)}
   :global(.pv-clipped .pv-ellipsis){visibility:visible}
-  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:32px; padding:2px 2px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
+  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:28px; padding:2px 2px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
   :global(.engine-lines .pv-move:hover){background:var(--selection-bg)}
   :global(.line-actions){display:flex; align-items:center}
-  :global(.line-preview){display:grid; place-items:center; width:30px; min-height:32px; padding:2px; border:0; background:transparent; color:var(--muted)}
+  :global(.line-preview){display:grid; place-items:center; width:30px; min-height:28px; padding:2px; border:0; background:transparent; color:var(--muted)}
   :global(.line-preview svg){width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linejoin:round}
   :global(.line-preview:hover){background:var(--panel-2); color:var(--ink)}
   :global(.engine-lines .pv-move:first-child){font-weight:700}
   :global(.engine-lines .pv-num){color:var(--muted); font-weight:400; font-variant-numeric:tabular-nums}
-  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:40px; min-height:32px; margin:0 5px; padding:0 6px; border:1px solid var(--border-input); border-radius:5px; background:var(--panel-inset); color:var(--ink); font:600 12px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
+  :global(.line-toggle){grid-column:4; display:inline-flex; align-items:center; justify-content:center; min-width:70px; min-height:30px; margin:0; padding:0 2px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:500 12px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
   :global(.line-toggle:hover:not(:disabled)){background:var(--panel-2); color:var(--ink)}
-  :global(.line-toggle svg){width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
-  :global(.line-toggle[aria-expanded=true] svg){transform:rotate(180deg)}
   :global(.engine-lines .line-error), :global(.engine-lines .pending-line){display:block; min-height:24px; padding:2px 10px 0 39px; font-size:13px}
   :global(.line-error-text){display:block; color:var(--warn); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   :global(.pending-text){color:var(--muted)}
@@ -819,7 +820,7 @@ onMount(() => {
   .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel, .analysis-workspace .review-panel{order:3; flex:1 1 0; min-height:0}
   .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
   @media (min-width:901px){
-    .analysis-workspace .analysis-content>.history-panel:has(:global(.move-pair)){flex-shrink:0; min-height:clamp(144px, calc(var(--board-size) - 326px), 374px)}
+    .analysis-workspace .analysis-content>.history-panel:has(:global(.move-pair)){flex-shrink:0; min-height:clamp(144px, calc(var(--board-size) - 362px), 338px)}
     .history-panel:has(.opening-explorer[open]){min-height:0!important}
   }
   .opening-explorer{flex:0 0 auto; border-top:1px solid var(--rule); min-height:0}
@@ -949,10 +950,10 @@ onMount(() => {
   .opening-name{flex:0 0 auto; margin:0; padding:7px 12px; border-bottom:1px solid var(--rule); color:var(--muted); font:13px/1.4 var(--sans)}
   .opening-name[hidden]{display:none}
   .opening-name :global(strong){margin-right:6px; color:var(--ink); font:600 12px var(--mono)}
-  /* Narrow numbers, then two equal SAN columns across the entire panel. */
+  /* Full-width row states, with paired SAN columns kept close enough to scan. */
   .history-panel :global(.movelist){flex:1 1 auto; min-height:0; max-height:none}
   :global(.movelist){font:14px/1.4 var(--sans); overflow:auto; scroll-snap-type:y proximity; background:var(--panel); scroll-padding:8px; overscroll-behavior:contain; scrollbar-width:thin; padding:0}
-  :global(.move-pair){display:grid; grid-template-columns:36px repeat(2,minmax(0,1fr)); align-items:stretch; scroll-snap-align:start}
+  :global(.move-pair){display:grid; grid-template-columns:36px repeat(2,minmax(0,130px)); align-items:stretch; scroll-snap-align:start}
   :global(.move-pair:nth-child(even)){background:color-mix(in srgb, var(--ink) 6%, var(--panel))}
   :global(.move-pair:has(.mv.current)){background:color-mix(in srgb, var(--accent) 14%, var(--panel))}
   :global(.move-number), :global(.missing-ply){display:grid; place-items:center; color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
@@ -969,12 +970,13 @@ onMount(() => {
   :global(.quick-pgn-actions){display:flex; align-items:center; gap:14px}
   :global(.quick-pgn-hint){font-size:13px; color:var(--muted)}
   :global(.quick-pgn-load){min-height:44px; padding:0 18px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:var(--on-accent); font:650 14px var(--sans)}
+  .app-sidebar:has(.analysis-overview:not(:global([data-status=done]))) :global(.quick-pgn-load){background:var(--panel-inset); border-color:var(--border-input); color:var(--ink)}
   /* Rare long SAN + large eval pairs wrap the score rather than spilling into the next ply. */
-  :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:space-between; gap:0 5px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
+  :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:flex-start; gap:0 9px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
   /* Fill plus a complete inset outline: selection never depends on hue or a left stripe. */
   :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 42%, var(--panel)) !important; box-shadow:inset 0 0 0 2px var(--border-input); color:var(--ink); font-weight:700}
-  :global(.movelist .mv-eval){margin-left:auto; white-space:nowrap; font:13px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
+  :global(.movelist .mv-eval){margin-left:0; white-space:nowrap; font:13px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   @media (max-width:900px){
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
@@ -1033,6 +1035,8 @@ onMount(() => {
     .evalbar .mid{top:0; bottom:0; left:50%; width:2px; height:auto}
     .board-panel :global(#ground){border-radius:3px}
     .board-toolbar{display:grid; grid-template-columns:minmax(0,1fr) 48px; height:44px; gap:6px; margin:6px 0 0}
+    :global(.analysis-workspace[data-empty-game]) .board-toolbar{grid-template-columns:minmax(0,1fr) 54px 48px}
+    :global(.analysis-workspace[data-empty-game]:not([data-retrying])) .empty-load-game{display:flex; min-height:44px; justify-content:center}
     .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
     .board-tool-disclosure{display:block; position:relative}
@@ -1061,18 +1065,18 @@ onMount(() => {
     :global(.move-pair){grid-template-columns:32px repeat(2,minmax(0,1fr))}
     .app-sidebar #message{margin:4px 10px}
     :global(.analysis-workspace #ground coords){font-size:11px}
-    :global(.insight-action){min-height:44px; padding:6px 10px; gap:3px}
+    :global(.insight-action){min-height:44px; padding:2px 10px; gap:0}
     :global(.insight-headline){font-size:16px}
     :global(.insight-spread){font-size:13px}
     /* The following engine rows already identify each move's supporters. */
     :global(.insight-groups){display:none}
-    :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 36px; gap:5px; min-height:40px; padding:2px 0 0 7px}
+    :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 44px auto 36px; gap:3px; min-height:44px; padding:0 0 0 7px}
     :global(.engine-summary-name){min-height:38px; gap:7px}
     :global(.engine-summary-text){display:grid; gap:2px}
     :global(.engine-summary-name strong){font-size:13px}
     :global(.engine-summary-name small){font-size:13px}
     :global(.engine-summary-score){min-width:56px; font-size:16px; gap:4px}
-    :global(.engine-gear){width:36px; height:40px}
+    :global(.engine-gear){width:36px; height:44px}
     .workbench-tabs{padding:0 2px; gap:0}
     .workbench-tabs [role=tab]{flex:1 1 0; justify-content:center; padding:0 4px; min-height:44px; font-size:13px}
     #enginesTab .engine-count{display:none}
@@ -1080,12 +1084,13 @@ onMount(() => {
     .review-settings select, .review-actions button, .review-exports button, .review-moments-heading button, :global(.review-critical button){min-height:40px}
     .tab-badge{display:none}
     :global(.engine-summary){padding-top:0}
-    :global(.line-play){min-height:36px; padding-left:8px}
-    :global(.result-line){min-height:36px}
-    :global(.line-toggle){min-height:36px; min-width:44px}
+    :global(.engine-lines){padding-bottom:0}
+    :global(.line-play){min-height:26px; padding-left:8px}
+    :global(.result-line){min-height:26px}
+    :global(.line-toggle){min-height:44px; min-width:68px; font-size:11.5px}
     :global(.line-preview){width:36px}
-    :global(.engine-lines .pv){height:36px}
-    :global(.line-preview), :global(.engine-lines .pv-move){min-height:36px}
+    :global(.engine-lines .pv){height:26px}
+    :global(.line-preview), :global(.engine-lines .pv-move){min-height:26px; padding-block:1px}
     :global(.engine-lines .line-error), :global(.engine-lines .pending-line){padding-left:36px}
     .position-tools :is(button, input), .pgn-actions button{min-height:44px}
     .analysis-workspace .section-block{padding:8px 10px}

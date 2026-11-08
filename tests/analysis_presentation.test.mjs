@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisSpreadText, looksLikeFen, sharedMarkerCorner, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, nextAnalysisEvalSource, sharedArrowMarkerSvg } from '../src/lc0/analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisChipColor, analysisSpreadText, isEmptyAnalysisGame, looksLikeFen, sharedMarkerPosition, sharedArrowMarkerText, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, nextAnalysisEvalSource, sharedArrowMarkerSvg } from '../src/lc0/analysisPresentation.ts';
 import { ANALYSIS_DRAWABLE_BRUSHES } from '../src/lc0/analysisFormat.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 
@@ -57,11 +57,11 @@ test('a shared best move is one arrow that names every backing engine colour', (
   assert.deepEqual(candidates.find((c) => c.uci === 'c3e2'), { uci: 'c3e2', brush: 'violet', shared: ['Lc0', 'SF Lite'] });
   assert.equal(candidates.find((c) => c.uci === 'c3a4').shared, undefined);
   const marker = sharedArrowMarkerSvg(['Lc0', 'SF Lite']);
-  assert.match(marker, /#7a4fd6/);
+  assert.match(marker, /#6941b8/);
   assert.equal((marker.match(/<rect /g) ?? []).length, 1);
   assert.match(marker, /aria-label="2 engines share this move: Lc0 Small, Stockfish Lite"/);
   assert.match(marker, /<title>2 engines share this move: Lc0 Small, Stockfish Lite<\/title>/);
-  assert.match(marker, />2<\/text>/);
+  assert.match(marker, />L0 SF<\/text>/);
   assert.match(marker, /font-size="22"/);
   assert.match(marker, /pointer-events:none/, 'markers must not intercept chess-square taps');
   assert.match(marker, /tabindex="0"/, 'engine attribution is still available to keyboard users');
@@ -69,31 +69,61 @@ test('a shared best move is one arrow that names every backing engine colour', (
   assert.equal(analysisArrowCandidates([lc0, lc0, sf], false)[0].shared.length, 2, 'duplicate results never double-count a backer');
 });
 
-test('a single shared-move count stays clear of the piece centre in either orientation', () => {
+test('shared pills show two or three monograms and use a count only for a wide 4+ group', () => {
+  assert.equal(sharedArrowMarkerText(['Lc0', 'PlentyChess']), 'L0 PC');
+  assert.equal(sharedArrowMarkerText(['Lc0', 'SF Lite', 'PlentyChess']), 'L0 SF PC');
   const engines = ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess', 'Reckless', 'Viridithas', 'Stormphrax', '<unsafe&>'];
-  for (const corner of [[1, -1], [-1, -1]]) {
-    const marker = sharedArrowMarkerSvg(engines.slice(0, 4), corner);
-    const badges = [...marker.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.]+)" height="([\d.]+)"/g)].map(([, ...values]) => values.map(Number));
-    assert.equal(badges.length, 1);
-    // Include the 2px outline in the bounds; the custom viewBox makes these square-local.
-    assert.ok(badges.every(([x, y, w, h]) => x >= 1 && x + w <= 99 && y >= 1 && y + h <= 99));
-    assert.ok(badges.every(([x, , w]) => corner[0] > 0 ? x + w / 2 > 50 : x + w / 2 < 50));
-    assert.ok(badges.every(([, y, , h]) => y + h < 50));
-  }
+  assert.equal(sharedArrowMarkerText(engines.slice(0, 4)), '4');
   const all = sharedArrowMarkerSvg(engines);
   assert.equal((all.match(/<rect /g) ?? []).length, 1);
   assert.match(all, />8<\/text>/);
-  const many = sharedArrowMarkerSvg(Array.from({ length: 20 }, (_, i) => `Engine ${i}`));
-  assert.equal((many.match(/<rect /g) ?? []).length, 1);
-  assert.match(many, />20<\/text>/);
-  assert.match(many, /Engine 19/, 'all contributors remain in the full title');
   assert.match(all, /&lt;unsafe&amp;&gt;/);
   assert.doesNotMatch(all, /<unsafe/);
   assert.equal(sharedArrowMarkerSvg([]), '');
-  assert.deepEqual(sharedMarkerCorner('c3e2', 'white'), [1, -1]);
-  assert.deepEqual(sharedMarkerCorner('c3e2', 'black'), [-1, -1]);
-  assert.deepEqual(sharedMarkerCorner('g1e2', 'white'), [-1, -1]);
-  assert.deepEqual(sharedMarkerCorner('e2e4', 'white'), [1, -1]);
+});
+
+test('pills stay on board and clear the destination square in both orientations, including captures', () => {
+  const fen = 'r2q1rk1/3nbppp/p2pbn2/4p1P1/1p2P3/1NN1BP2/PPPQ3P/2KR1B1R w - - 0 13';
+  for (const uci of ['c3e2', 'g5f6', 'e4e5', 'a2a3', 'h2h3']) {
+    for (const orientation of ['white', 'black']) {
+      for (const engines of [['Lc0', 'PlentyChess'], ['Lc0', 'SF Lite', 'PlentyChess'], ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess']]) {
+        const [x, y] = sharedMarkerPosition(uci, orientation, fen, engines);
+        const sign = orientation === 'white' ? 1 : -1;
+        const fromX = orientation === 'white' ? uci.charCodeAt(0) - 97 : 104 - uci.charCodeAt(0);
+        const fromY = orientation === 'white' ? 8 - Number(uci[1]) : Number(uci[1]) - 1;
+        const width = sharedArrowMarkerText(engines).length * 13.2 + 16;
+        assert.ok(fromX * 100 + x - width / 2 >= 0);
+        assert.ok(fromX * 100 + x + width / 2 <= 800);
+        assert.ok(fromY * 100 + y - 16 >= 0 && fromY * 100 + y + 16 <= 800);
+        const destX = 50 + (uci.charCodeAt(2) - uci.charCodeAt(0)) * sign * 100;
+        const destY = 50 - (Number(uci[3]) - Number(uci[1])) * sign * 100;
+        assert.ok(Math.abs(x - destX) >= width / 2 + 50 || Math.abs(y - destY) >= 66, `${uci}/${orientation}: pill must clear destination`);
+      }
+    }
+  }
+});
+
+test('Analysis monogram fills have at least 4.5:1 contrast with white without changing arrows', () => {
+  const luminance = (hex) => {
+    const channels = hex.slice(1).match(/../g).map((x) => parseInt(x, 16) / 255).map((x) => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4);
+    return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+  };
+  for (const engine of ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess', 'Viridithas', 'Reckless', 'Stormphrax']) {
+    assert.ok(1.05 / (luminance(analysisChipColor(engine)) + .05) >= 4.5, engine);
+  }
+  assert.equal(ANALYSIS_DRAWABLE_BRUSHES.orange.color, '#c45a11');
+  assert.equal(ANALYSIS_DRAWABLE_BRUSHES.cyan.color, '#007a87');
+});
+
+test('mobile Load shortcut belongs only to a standard empty game, including after Reset', () => {
+  const tree = new GameTree();
+  assert.ok(isEmptyAnalysisGame(tree.root));
+  tree.addUci('e2e4');
+  assert.ok(!isEmptyAnalysisGame(tree.root));
+  tree.toStart();
+  assert.ok(!isEmptyAnalysisGame(tree.root), 'navigating to start does not make a loaded game empty');
+  assert.ok(!isEmptyAnalysisGame(new GameTree('8/8/8/8/8/8/8/K6k w - - 0 1').root));
+  assert.ok(isEmptyAnalysisGame(new GameTree().root));
 });
 
 test('callout groups engines by move and states agreement explicitly', () => {
@@ -103,12 +133,11 @@ test('callout groups engines by move and states agreement explicitly', () => {
   const plenty = line('PlentyChess', 'g5f6', 'gxf6', 9);
   const groups = analysisMoveGroups([berserk, lc0, sf, plenty]);
   assert.deepEqual(groups.map((g) => [g.san, g.engines.length]), [['Ne2', 2], ['Na4', 1], ['gxf6', 1]]);
-  assert.equal(analysisAgreementHeadline(groups, 4), '2 of 4 agree on Ne2');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2), 'Different top moves: Ne2 / Na4');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2, 23), 'Different top moves: Ne2 / Na4');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2, 140), 'Engines disagree: Ne2 / Na4');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf]), 2), 'Engines agree on Ne2');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, berserk, { ...plenty, pvUci: ['c3a4'] }]), 4), 'Split: Ne2 / Na4');
+  assert.equal(analysisAgreementHeadline(groups, 4), 'Ne2 · 2 of 4 engines');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2), 'Ne2 · 1 of 2 engines');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf]), 2), 'Ne2 · 2 of 2 engines');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, berserk, { ...plenty, pvUci: ['c3a4'] }]), 4), 'Ne2 · 2 of 4 engines');
+  assert.equal(analysisAgreementHeadline([], 0), 'No best move yet');
   assert.deepEqual(analysisSpreadText(26), { text: 'Eval spread: 0.26 pawns', level: 'close' });
   assert.deepEqual(analysisSpreadText(74), { text: 'Eval spread: 0.74 pawns', level: 'apart' });
   assert.equal(analysisSpreadText(120).level, 'wide');
