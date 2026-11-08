@@ -282,7 +282,8 @@ onMount(() => {
   /* ── Sidebar: one column, two states (setup vs game) driven by data-phase ── */
   .play-workspace .play-sidebar{
     position:static; display:flex; flex-direction:column; min-width:0;
-    max-height:calc(var(--board-size) + 2 * var(--strip-h) + 26px); overflow:hidden;
+    /* Short tablet boards must not clip setup, confirmations or the game-over actions. */
+    max-height:max(620px, calc(var(--board-size) + 2 * var(--strip-h) + 26px)); overflow:auto;
   }
   .play-sidebar>*{flex:0 0 auto}
   .status-block{padding:12px 14px 10px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
@@ -454,6 +455,8 @@ onMount(() => {
 
   @media (min-width:768px) and (max-width:1200px){
     .game-actions #newGame{white-space:nowrap; gap:4px; padding-inline:4px}
+    .game-actions:has(:global(#newGame.armed)){grid-template-columns:repeat(2,minmax(0,1fr))}
+    .game-actions #newGame:global(.armed){grid-column:1 / -1}
   }
   @media (min-width:421px) and (max-width:600px){
     .board-panel{width:min(100%, max(280px, calc(100svh - 490px))); justify-self:center}
