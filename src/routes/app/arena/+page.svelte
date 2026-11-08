@@ -106,6 +106,17 @@ onMount(() => {
       <div class="sb-context"><span id="setupSummaryText"></span><span id="pairing" class="sb-progress"></span></div>
       <div id="gameChips" class="sb-chips" aria-label="Finished games" hidden></div>
     </section>
+    <details id="crosstableSection" class="section-block arena-results" open hidden>
+      <summary>Crosstable</summary>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
+      <div id="crosstable" class="arena-table-scroll" tabindex="0" role="region" aria-label="Opponent crosstable"></div>
+    </details>
+    <details id="openingPairsSection" class="section-block arena-results" hidden>
+      <summary>Opening pairs</summary>
+      <select id="pairMatchup" aria-label="Opening pairs matchup"></select>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
+      <div id="openingPairs" class="arena-table-scroll" tabindex="0" role="region" aria-label="Colour-reversed opening pairs"></div>
+    </details>
     <div id="setupPane" class="setup-pane">
     <p class="locked-note">Settings are locked while games run. Stop to change them.</p>
     <details class="section-block" open>
@@ -391,6 +402,18 @@ onMount(() => {
   .scoreboard :global(.standings th:nth-child(2)), .scoreboard :global(.standings td:nth-child(2)){text-align:left; width:99%}
   .scoreboard :global(.standings tr.leader td){background:var(--accent-soft)}
   .scoreboard :global(.sb-cell-name){display:inline-flex; align-items:center; gap:7px; color:var(--ink); font-weight:600}
+  .arena-results{min-width:0; border-bottom:1px solid var(--rule)}
+  .arena-results select{width:100%; margin-bottom:6px}
+  .arena-sidebar :global(.arena-table-scroll){max-width:100%; min-width:0; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:thin}
+  .arena-sidebar :global(.arena-table-scroll:focus-visible){outline:2px solid var(--accent); outline-offset:-2px}
+  .arena-sidebar :global(.arena-detail-table){width:100%; border-collapse:collapse; font-size:12.5px; line-height:1.4}
+  .arena-sidebar :global(.arena-detail-table caption){text-align:left; color:var(--muted); padding-bottom:8px; font-size:12px; min-width:240px}
+  .arena-sidebar :global(.arena-detail-table th), .arena-sidebar :global(.arena-detail-table td){padding:6px 8px; border-bottom:1px solid var(--rule); text-align:center; white-space:nowrap}
+  .arena-sidebar :global(.arena-detail-table th){color:var(--muted); font-weight:600}
+  .arena-sidebar :global(.arena-detail-table th:first-child){text-align:left; color:var(--ink)}
+  .arena-sidebar :global(.arena-detail-table thead th){white-space:normal; min-width:76px; max-width:160px}
+  .arena-sidebar :global(.arena-detail-table .cross-self){background:var(--panel-inset); color:var(--muted)}
+  .arena-sidebar :global(.arena-detail-table button){min-height:32px; padding:2px 8px; font-size:12.5px; background:transparent; color:var(--ink); border-color:var(--border-input)}
   .sb-chips{display:flex; flex-wrap:wrap; gap:5px; margin-top:9px}
   .sb-chips :global(.sb-chip){
     min-height:28px; padding:2px 9px; border-radius:999px; border:1px solid var(--border-input);

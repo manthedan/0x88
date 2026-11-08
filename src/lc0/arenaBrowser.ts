@@ -34,6 +34,7 @@ import {
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
+import { arenaOpeningPairs, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -193,6 +194,7 @@ interface ArenaEngine {
 interface GameRecord {
   pgn: string;
   scheduleIndex: number;
+  result: GameResultCode;
 }
 interface MatchScore {
   a: number;
@@ -531,6 +533,8 @@ interface ArenaSearchProgress {
 const arenaSearchProgress = new Map<string, ArenaSearchProgress>();
 let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
+let resultsSchedule: ScheduledGame<ArenaOpening>[] = [];
+let resultsNames = new Map<string, string>();
 const seatRows: EngineRow[] = [
   { family: 'lc0', variant: 'small', strength: 100 },
   { family: 'sf', variant: 'lite', strength: 8 },
@@ -3243,9 +3247,7 @@ function refreshOpeningPreview(): void {
   }
 }
 
-function formatScoreHalf(value: number): string {
-  return value % 1 ? `${Math.floor(value) || ''}½` : String(value);
-}
+const formatScoreHalf = formatArenaPoints;
 
 function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, score: MatchScore): void {
   const side = (name: string, seat: string) =>
@@ -3269,9 +3271,52 @@ function renderStandings(standings: TournamentStandings, scheduledGames: number)
     )
     .join('');
   el('matchScore').innerHTML =
-    `<table class="standings"><thead><tr><th>#</th><th>Engine</th><th title="Points">Pts</th><th title="Wins">W</th><th title="Draws">D</th><th title="Losses">L</th><th title="Elo vs the pool, ±95% approx">Elo</th></tr></thead><tbody>${body}</tbody></table>` +
+    `<div class="arena-table-scroll" tabindex="0" role="region" aria-label="Standings"><table class="standings"><thead><tr><th>#</th><th>Engine</th><th title="Points">Pts</th><th title="Wins">W</th><th title="Draws">D</th><th title="Losses">L</th><th title="Elo vs the pool, ±95% approx">Elo</th></tr></thead><tbody>${body}</tbody></table></div>` +
     `<div class="sb-record">${standings.totalGames()} of ${scheduledGames} games played · Elo vs the pool, ±95%</div>`;
   renderGameResultChips();
+  renderCrosstable(standings);
+}
+
+function renderCrosstable(standings: TournamentStandings): void {
+  const rows = standings.table();
+  const host = el('crosstableSection');
+  host.hidden = rows.length < 3;
+  const name = (row: (typeof rows)[number]) => htmlEscape(displayEngineName(row.name));
+  el('crosstable').innerHTML = `<table class="arena-detail-table"><caption>Row engine’s points / games against each opponent.</caption><thead><tr><th scope="col">Engine</th>${rows.map((row) => `<th scope="col">${name(row)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr><th scope="row">${name(row)}</th>${rows.map((opponent) => {
+    const record = row.perOpponent.get(opponent.id);
+    if (row.id === opponent.id) return '<td class="cross-self" aria-label="Same seat">—</td>';
+    if (!record) return '<td aria-label="No games played">—</td>';
+    const count = record.wins + record.draws + record.losses;
+    return `<td title="${record.wins} wins, ${record.draws} draws, ${record.losses} losses">${formatArenaPoints(record.wins + record.draws / 2)} / ${count}</td>`;
+  }).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+function renderOpeningPairs(): void {
+  const section = el('openingPairsSection');
+  section.hidden = !resultsSchedule.length;
+  const selector = selectEl('pairMatchup');
+  const previous = selector.value;
+  const pairs = arenaOpeningPairs(resultsSchedule, games);
+  const matchups = [...new Map(pairs.map((pair) => [pair.pairingKey, pair])).values()];
+  const name = (id: string) => htmlEscape(displayEngineName(resultsNames.get(id) ?? id));
+  selector.innerHTML = matchups.map((pair) => `<option value="${htmlEscape(pair.pairingKey)}">${name(pair.a)} vs ${name(pair.b)}</option>`).join('');
+  if (matchups.some((pair) => pair.pairingKey === previous)) selector.value = previous;
+  selector.hidden = matchups.length < 2;
+  const selected = pairs.filter((pair) => pair.pairingKey === selector.value);
+  const first = selected[0];
+  if (!first) return;
+  const cell = (pair: (typeof selected)[number], slot: number) => {
+    const index = pair.indices[slot];
+    const result = pair.results[slot];
+    if (index === undefined) return '<td aria-label="Not scheduled">—</td>';
+    if (!result) return `<td title="Game ${index + 1} is not finished">Pending</td>`;
+    const points = result === '1/2-1/2' ? 0.5 : (resultsSchedule[index].whiteId === pair.a) === (result === '1-0') ? 1 : 0;
+    return `<td><button type="button" data-game="${index}" title="Replay game ${index + 1}">${formatArenaPoints(points)}–${formatArenaPoints(1 - points)}</button></td>`;
+  };
+  el('openingPairs').innerHTML = `<table class="arena-detail-table"><caption>Scores in ${name(first.a)}–${name(first.b)} order. Select a game score to replay it.</caption><thead><tr><th scope="col">Opening</th><th scope="col">${name(first.a)}<br>White</th><th scope="col">${name(first.a)}<br>Black</th><th scope="col">Pair total</th></tr></thead><tbody>${selected.map((pair) => {
+    const total = pair.played === 2 ? `${formatArenaPoints(pair.points[0])}–${formatArenaPoints(pair.points[1])}` : pair.indices.length < 2 ? 'Unpaired' : `${pair.played} of 2`;
+    return `<tr><th scope="row">${htmlEscape(pair.opening.name)}${pair.round > 1 ? ` · pair ${pair.round}` : ''}</th>${cell(pair, 0)}${cell(pair, 1)}<td>${total}</td></tr>`;
+  }).join('')}</tbody></table>`;
 }
 
 /** Finished games as small chips (Engine 1's result in a match); click one to replay it. */
@@ -3802,6 +3847,9 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   running = true;
   arenaMatchState = 'live';
   scheduledGameCount = schedule.length;
+  resultsSchedule = schedule;
+  resultsNames = new Map(participants.map((participant) => [participant.pid, participant.name]));
+  el('crosstableSection').hidden = mode === 'match';
   gameResultChips.length = 0;
   el('pairing').textContent = `Game 1 of ${schedule.length}`;
   const matchAbort = new AbortController();
@@ -3839,6 +3887,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
   if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
   else renderStandings(standings, schedule.length);
+  renderOpeningPairs();
   const completeGame = (
     i: number,
     result: GameResultCode,
@@ -3868,7 +3917,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
       }
     }
     const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
-    games.push({ pgn: gameTreeToPgn(tree, tags, result), scheduleIndex: i });
+    games.push({ pgn: gameTreeToPgn(tree, tags, result), scheduleIndex: i, result });
     games.sort((a, b) => a.scheduleIndex - b.scheduleIndex);
     if (trail) {
       trail.label = `Game ${i + 1}: ${white.name} vs ${black.name} (${result})`;
@@ -3889,6 +3938,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     );
     if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
     else renderStandings(standings, schedule.length);
+    renderOpeningPairs();
   };
   let enginesReady = false;
   try {
@@ -4468,6 +4518,12 @@ function wireEvents() {
     const trail = chip ? finishedTrails[Number(chip.dataset.game)] : undefined;
     if (trail) enterReview(trail, trail.entries.length - 1);
   });
+  el('pairMatchup').addEventListener('change', renderOpeningPairs);
+  el('openingPairs').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>('[data-game]');
+    const trail = button ? finishedTrails[Number(button.dataset.game)] : undefined;
+    if (trail) enterReview(trail, trail.entries.length - 1);
+  });
   el('editSetup').addEventListener('click', () => {
     const main = document.getElementById('main');
     if (!main) return;
@@ -4755,6 +4811,8 @@ function resetArenaPageState(): void {
   games.length = 0;
   gameResultChips.length = 0;
   scheduledGameCount = 0;
+  resultsSchedule = [];
+  resultsNames.clear();
   arenaMatchState = 'none';
   lastOutputEngineId = null;
   thinkingSince.clear();

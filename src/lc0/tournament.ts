@@ -19,6 +19,8 @@ export interface ScheduledGame<TOpening> {
   whiteId: string;
   blackId: string;
   opening: TOpening;
+  /** Suite slot, not the name/FEN: duplicate openings remain distinct. */
+  openingIndex: number;
   /** Stable key identifying the pairing this game belongs to. */
   pairingKey: string;
 }
@@ -59,12 +61,13 @@ export function buildSchedule<TOpening>(
   for (const pairing of pairings) {
     const pairingKey = `${pairing.a}|${pairing.b}`;
     for (let g = 0; g < perPairing; g++) {
-      for (const opening of openings) {
+      for (const [openingIndex, opening] of openings.entries()) {
         const aIsWhite = g % 2 === 0;
         games.push({
           whiteId: aIsWhite ? pairing.a : pairing.b,
           blackId: aIsWhite ? pairing.b : pairing.a,
           opening,
+          openingIndex,
           pairingKey,
         });
       }

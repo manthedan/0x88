@@ -484,6 +484,7 @@ onMount(() => {
     <h4>Following the match</h4>
     <ul>
       <li><strong>Charts</strong> &mdash; evaluation, time and speed for the current game.</li>
+      <li><strong>Matchups</strong> &mdash; tournaments with three or more engines show a crosstable of points against each opponent. Open <em>Opening pairs</em> to compare the two colour-reversed games from each opening; select a game score to replay it. Odd games per opening leave an unpaired game.</li>
       <li><strong>Review</strong> &mdash; select a finished game or a move to replay it.</li>
       <li><strong>Export</strong> &mdash; <em>Export PGN</em> under <em>Game log &amp; PGN</em> lists every game as PGN.</li>
     </ul>
