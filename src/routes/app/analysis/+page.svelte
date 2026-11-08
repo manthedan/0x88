@@ -381,7 +381,8 @@ onMount(() => {
   .analysis-workspace{
     --muted:color-mix(in srgb, var(--ink) 78%, var(--panel));
     --muted-2:var(--muted); --text-soft:var(--muted);
-    --border-input:color-mix(in srgb, var(--ink) 38%, var(--panel));
+    --border-input:color-mix(in srgb, var(--ink) 52%, var(--panel));
+    --border-input-hover:var(--border-input);
     --engine-color:var(--accent); /* overridden inline per engine row */
     --analysis-header-height:64px; /* measured locally by the page controller */
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
@@ -932,11 +933,12 @@ onMount(() => {
   .opening-name{flex:0 0 auto; margin:0; padding:7px 12px; border-bottom:1px solid var(--rule); color:var(--muted); font:13px/1.4 var(--sans)}
   .opening-name[hidden]{display:none}
   .opening-name :global(strong){margin-right:6px; color:var(--ink); font:600 12px var(--mono)}
-  /* Move list: compact SAN columns; remaining width is quiet, not a gap between moves. */
+  /* Narrow numbers, then two equal SAN columns across the entire panel. */
   .history-panel :global(.movelist){flex:1 1 auto; min-height:0; max-height:none}
   :global(.movelist){font:14px/1.4 var(--sans); overflow:auto; scroll-snap-type:y proximity; background:var(--panel); scroll-padding:8px; overscroll-behavior:contain; scrollbar-width:thin; padding:0}
-  :global(.move-pair){display:grid; grid-template-columns:36px minmax(90px,110px) minmax(90px,110px); align-items:stretch; scroll-snap-align:start}
-  :global(.move-pair:nth-child(even) .mv){background:color-mix(in srgb, var(--ink) 3%, var(--panel))}
+  :global(.move-pair){display:grid; grid-template-columns:36px repeat(2,minmax(0,1fr)); align-items:stretch; scroll-snap-align:start}
+  :global(.move-pair:nth-child(even)){background:color-mix(in srgb, var(--ink) 6%, var(--panel))}
+  :global(.move-pair:has(.mv.current)){background:color-mix(in srgb, var(--accent) 14%, var(--panel))}
   :global(.move-number), :global(.missing-ply){display:grid; place-items:center; color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
   :global(.missing-ply){background:transparent; border:0}
   :global(.history-empty){display:grid; gap:10px; margin:0; padding:18px 16px; font:13.5px/1.55 var(--sans); color:var(--muted)}
@@ -950,8 +952,8 @@ onMount(() => {
   /* Rare long SAN + large eval pairs wrap the score rather than spilling into the next ply. */
   :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:space-between; gap:0 5px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
-  /* The current move is unmistakable (Lichess-strength): tinted cell plus an edge marker. */
-  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)) !important; color:var(--ink); font-weight:700}
+  /* Fill plus a complete inset outline: selection never depends on hue or a left stripe. */
+  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 42%, var(--panel)) !important; box-shadow:inset 0 0 0 2px var(--border-input); color:var(--ink); font-weight:700}
   :global(.movelist .mv-eval){margin-left:auto; white-space:nowrap; font:13px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   @media (max-width:900px){
@@ -1029,7 +1031,7 @@ onMount(() => {
     /* Four recent pairs fit beside the navigation without a second page scroll. */
     .history-panel :global(.movelist:has(.move-pair)){max-height:120px}
     :global(.movelist .mv){min-height:30px}
-    :global(.move-pair){grid-template-columns:32px minmax(90px,110px) minmax(90px,110px)}
+    :global(.move-pair){grid-template-columns:32px repeat(2,minmax(0,1fr))}
     .app-sidebar #message{margin:4px 10px}
     :global(.analysis-workspace #ground coords){font-size:11px}
     :global(.insight-action){min-height:44px; padding:6px 10px; gap:3px}
