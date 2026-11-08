@@ -1535,6 +1535,7 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shown: Board
   let kind = '';
   if (!isHuman && ctx.engineThinking) [text, kind] = ['Thinking…', 'thinking'];
   else if (!isHuman && ctx.preparingEngine) [text, kind] = ['Loading…', 'thinking'];
+  else if (!isHuman && ctx.practicePosition && !ctx.started && !ctx.engineReady) [text, kind] = ['Loads on Play', 'ready'];
   else if (!isHuman && !ctx.engineReady && !ctx.gameOver)
     [text, kind] = buttonEl('retryEngine').hidden ? ['Loading…', 'thinking'] : ['Error · retry', 'error'];
   // Readiness only matters before the first move; during play the strips carry the turn.
@@ -1690,7 +1691,8 @@ function ctxRender(ctx: PlayContext): void {
   el('positionNoticeText').textContent = ctx.practicePosition
     ? 'Continue this position. Queen-odds opponents are unavailable because they need their own starting position.'
     : ctx.handoffNotice;
-  buttonEl('useStartingPosition').hidden = !ctx.practicePosition;
+  // Switching roots is only offered before play or after the game is finished.
+  buttonEl('useStartingPosition').hidden = !ctx.practicePosition || (ctx.started && !ctx.gameOver);
   ctxRenderChrome(ctx, shownBoard, shownPly);
 }
 
@@ -1764,7 +1766,7 @@ function ctxResetStartPosition(ctx: PlayContext): void {
 function ctxPrepareOrStartEngine(ctx: PlayContext): void {
   if (ctx.practicePosition && !ctx.started) return;
   if (ctx.board.turn !== ctx.humanColor) void ctxEngineTurn(ctx);
-  else void ctxVerifySelectedEngineReady(ctx);
+  else if (!ctx.engineReady) void ctxVerifySelectedEngineReady(ctx);
 }
 
 function ctxResetGameStateForMount(ctx: PlayContext): void {

@@ -1,6 +1,6 @@
-// One-shot PGN handoff from Play ("Analyze this game") to the Analysis board.
-// localStorage rather than sessionStorage so it also reaches a new tab; the
-// entry expires quickly and is removed as soon as Analysis reads it.
+// Independent one-shot handoffs: Play → Analysis PGN and Analysis → Play position/history.
+// localStorage rather than sessionStorage also reaches a new tab. Both entries
+// expire quickly and are removed as soon as the destination reads them.
 
 import { boardToFen } from '../chess/board.ts';
 import { gameOutcome } from './engineBattle.ts';
