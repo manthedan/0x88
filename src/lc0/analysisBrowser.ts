@@ -499,6 +499,8 @@ let analysisAbort: AbortController | null = null;
 let analysisReloadAbort: AbortController | null = null;
 let analysisReloadWantsSearch = false;
 let criticalPanel: ReturnType<typeof mountCriticalMomentsPanel> | null = null;
+let criticalDeferredAnalysis: { force?: boolean } | null = null;
+let criticalDeferredMaia = false;
 let reviewAbort: AbortController | null = null;
 let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
@@ -3314,7 +3316,11 @@ function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolea
 }
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
-  if (reviewAbort || criticalPanel?.isBusy()) return;
+  if (reviewAbort) return;
+  if (criticalPanel?.isBusy()) {
+    criticalDeferredAnalysis = { force: criticalDeferredAnalysis?.force || options.force };
+    return;
+  }
   if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
@@ -3611,7 +3617,11 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 }
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
-  if (mountAbort.signal.aborted || reviewAbort || criticalPanel?.isBusy()) return;
+  if (mountAbort.signal.aborted || reviewAbort) return;
+  if (criticalPanel?.isBusy()) {
+    criticalDeferredAnalysis = { force: criticalDeferredAnalysis?.force || options.force };
+    return;
+  }
   if (deferHiddenTabWork('analysis')) {
     hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
     return;
@@ -4027,7 +4037,7 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   clearReviewIfMainlineChanged();
   renderAll();
   scheduleMaia3Panel();
-  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort && !criticalPanel?.isBusy()) void analyzeCurrent();
+  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort) void analyzeCurrent();
   else {
     // A cached position, or auto-analyze off, must not restart the search that
     // was paused on the position we just left.
@@ -4104,12 +4114,18 @@ async function enableMaia3Panel(): Promise<void> {
 
 function scheduleMaia3Panel(): void {
   const task = maia3PanelTask;
-  if (criticalPanel?.isBusy()) { task?.invalidate(); return; }
   // Invalidate on navigation, not only when the debounce eventually dispatches.
   task?.invalidate();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   maia3PanelTimer = null;
   if (!task) return;
+  if (criticalPanel?.isBusy()) {
+    criticalDeferredMaia = true;
+    el('maia3Grid').hidden = true;
+    maia3PanelStatus('Human predictions are paused during critical-moment comparison.');
+    return;
+  }
+  criticalDeferredMaia = false;
   if (deferHiddenTabWork('maia')) return;
   maia3PanelTimer = setTimeout(() => {
     maia3PanelTimer = null;
@@ -4132,6 +4148,7 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
     if (!legalMoves(board).length) {
       maia3PanelStatus('');
       el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>';
+      el('maia3Grid').hidden = false;
       return;
     }
     const evaluations = await evaluator.evaluateConditions(
@@ -4156,6 +4173,7 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
       return `<div class="maia3-row"><span class="maia3-elo">${MAIA3_PANEL_RATINGS[i]}</span><span class="maia3-score" title="Expected points for White in a human game at this rating">${score.toFixed(2)}</span>${top}</div>`;
     });
     el('maia3Grid').innerHTML = rows.join('');
+    el('maia3Grid').hidden = false;
   } finally {
     maia3PanelEvaluating = false;
   }
@@ -4805,6 +4823,12 @@ function wireEvents() {
       el('stop').toggleAttribute('disabled', true);
       el('analyze').toggleAttribute('disabled', false);
     },
+    settled: () => {
+      const pending = criticalDeferredAnalysis;
+      criticalDeferredAnalysis = null;
+      if (criticalDeferredMaia) scheduleMaia3Panel();
+      if (pending) scheduleAnalyzeCurrent(pending);
+    },
     navigate: (moment, target, lines) => {
       const node = mainlineNodes()[moment.move.ply - 1];
       if (!node || node.fen !== moment.fen) return;
@@ -5029,6 +5053,8 @@ function disposeRuntimeResources(): void {
 function disposePageResources(): void {
   criticalPanel?.dispose();
   criticalPanel = null;
+  criticalDeferredAnalysis = null;
+  criticalDeferredMaia = false;
   workspaceAutosave?.flush();
   workspaceAutosave = null;
   removeHiddenTabPause();
@@ -5284,6 +5310,8 @@ function resetAnalysisPageState(): void {
   lastReviewNodes = [];
   lastReviewSignature = '';
   reviewRunSignature = '';
+  criticalDeferredAnalysis = null;
+  criticalDeferredMaia = false;
   analyzing = false;
   lineCache.clear();
   nodeIndex.clear();

@@ -12,6 +12,7 @@ interface PanelOptions {
   baseline(): { review: GameReview; fens: string[]; signature: string; source: string } | undefined;
   settings(): unknown;
   pauseAnalysis(): void;
+  settled(): void;
   navigate(moment: CriticalMoment, target: string, lines: AnalysisLine[]): void;
 }
 
@@ -83,6 +84,7 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
       engines.dispose();
       if (controller === current) controller = undefined;
       render();
+      if (!disposed) options.settled();
     }
   })(); });
   el('criticalReport').addEventListener('click', (event) => {
