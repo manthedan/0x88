@@ -2,7 +2,7 @@
 import { onMount, tick } from 'svelte';
 import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
-import { activeDocsTopic } from '$lib/docsNavigation';
+import { activeDocsTopic, docsSearchShortcut } from '$lib/docsNavigation';
 
 const title = '0x88 Chess — documentation';
 const description = 'How to use the 0x88 browser chess workspaces, fix WebGPU and download problems, and find each engine’s license and corresponding source.';
@@ -320,10 +320,9 @@ let caps: BrowserCapabilityReport | null = null;
 let capsFailed = false;
 
 onMount(() => {
-  if (/Mac|iPhone|iPad|iPod/.test(navigator.platform)) {
-    searchShortcut = '⌘K';
-    searchShortcutLabel = 'Command K';
-  }
+  const shortcut = docsSearchShortcut(navigator.platform);
+  searchShortcut = shortcut.text;
+  searchShortcutLabel = shortcut.label;
   index = buildIndex();
   const header = document.querySelector<HTMLElement>('.site-header');
   const media = window.matchMedia('(max-width: 860px)');
@@ -388,7 +387,7 @@ onMount(() => {
   <div id="toc-panel" class="toc-panel">
     <div class="search" role="search">
       <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>
-      <label class="visually-hidden" for="docSearch">Search the docs</label>
+      <label class="visually-hidden" for="docSearch">Search docs</label>
       <input
         id="docSearch"
         type="search"
@@ -478,9 +477,9 @@ onMount(() => {
     </div>
     <p>Run several engines on the same position and compare their best moves, evaluations and lines.</p>
     <ol class="steps">
-      <li>Open Analysis. It starts with Lc0 (Small net) and Stockfish Lite on the starting position.</li>
-      <li>Make moves on the board, or press <strong>Load</strong> to paste a PGN or FEN.</li>
-      <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to change each engine’s net or build and its search budget (visits or depth).</li>
+      <li>Open Analysis. It starts with Lc0 (Small net, a neural-network model) and Stockfish Lite on the starting position.</li>
+      <li>Make moves on the board, or press <strong>Load</strong> to paste a PGN (a game record) or FEN (a single-position notation).</li>
+      <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to change each engine’s net or build and its search budget: visits (search iterations) or depth, depending on the engine.</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
     </ol>
   </div>
@@ -503,10 +502,21 @@ onMount(() => {
       <li><strong>Charts</strong> &mdash; evaluation, time and speed for the current game.</li>
       <li><strong>Matchups</strong> &mdash; tournaments with three or more engines show a crosstable of points against each opponent. Open <em>Opening pairs</em> to compare the two colour-reversed games from each opening; select a game score to replay it. Odd games per opening leave an unpaired game.</li>
       <li><strong>Review</strong> &mdash; select a finished game or a move to replay it.</li>
-      <li><strong>Resume</strong> &mdash; completed games, settings, the schedule and charts are saved on this device after each game. After Stop or a reload, choose <em>Resume tournament</em> to continue. Unfinished games restart from their opening, including in parallel CPU runs. Leave the tab open while engines play; background completion is not guaranteed.</li>
-      <li><strong>Saved results</strong> &mdash; finished results remain viewable after a reload. <em>Start new tournament</em> replaces the saved run; <em>Discard</em> removes it. App or engine-release changes can prevent resuming an old run, but its completed results and PGNs remain available.</li>
+      <li><strong>Resume</strong>
+        <ul>
+          <li>After Stop or a reload, choose <em>Resume tournament</em> to continue.</li>
+          <li>Completed games, settings, the schedule and charts are saved on this device after each game.</li>
+        </ul>
+      </li>
+      <li><strong>Saved results</strong>
+        <ul>
+          <li>Finished results remain viewable after a reload.</li>
+          <li><em>Start new tournament</em> replaces the saved run; <em>Discard</em> removes it.</li>
+        </ul>
+      </li>
       <li><strong>Export</strong> &mdash; <em>Export PGN</em> under <em>Game log &amp; PGN</em> lists every completed game as PGN. If local saving is unavailable or full, export before leaving the page.</li>
     </ul>
+    <p><strong>Note:</strong> Unfinished games restart from their opening, including in parallel CPU runs. Leave the tab open while engines play; background completion is not guaranteed. App or engine-release changes can prevent resuming an old run, but its completed results and PGNs remain available.</p>
     </div>
   </div>
 
@@ -1248,7 +1258,7 @@ onMount(() => {
   .search{position:relative; margin:0 0 14px; flex:0 0 auto}
   .search-icon{position:absolute; left:10px; top:50%; width:15px; height:15px; transform:translateY(-50%); fill:none; stroke:var(--muted); stroke-width:2; stroke-linecap:round; pointer-events:none}
   .search input{
-    width:100%; box-sizing:border-box; min-height:40px; padding:8px 86px 8px 32px;
+    width:100%; box-sizing:border-box; min-height:40px; padding:8px 96px 8px 32px;
     border:1px solid var(--border-input); border-radius:var(--radius-sm);
     background:var(--input-bg); color:var(--ink); font:inherit; font-size:14px;
   }
@@ -1259,7 +1269,7 @@ onMount(() => {
   .search-shortcuts{position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:4px; pointer-events:none}
   .search kbd{
     min-width:18px; padding:1px 4px; border:1px solid var(--rule-strong); border-radius:4px;
-    background:var(--panel); color:var(--text-soft); font-family:var(--mono); font-size:10px; text-align:center;
+    background:var(--panel); color:var(--text); font-family:var(--mono); font-size:12px; text-align:center;
   }
   .search input:focus ~ .search-shortcuts{display:none}
   .toc-groups,.results{overflow-y:auto; min-height:0; padding-right:6px; margin-right:-6px}
@@ -1366,6 +1376,8 @@ onMount(() => {
   .task-reference h4{font-size:15px; margin:0 0 10px; color:var(--ink)}
   .task-reference ul{font-size:16px}
   .task-reference li + li{margin-top:6px}
+  .task-reference li ul{margin:4px 0 10px}
+  .task-reference > p{font-size:14px; color:var(--text)}
   .page-block p{margin:0 0 12px}
   .page-block ul{margin:0 0 14px}
   .doc-content .steps{counter-reset:step; list-style:none; padding-left:0; margin:4px 0 18px; display:grid; gap:8px}
@@ -1374,8 +1386,8 @@ onMount(() => {
     content:counter(step); position:absolute; left:0; top:1px;
     width:24px; height:24px; border-radius:50%;
     display:inline-flex; align-items:center; justify-content:center;
-    background:var(--panel-2); border:1px solid var(--rule-strong);
-    color:var(--ink); font:700 12px/1 var(--sans);
+    background:color-mix(in srgb, var(--ink) 7%, var(--panel)); border:1px solid color-mix(in srgb, var(--ink) 24%, var(--panel));
+    color:var(--ink-soft); font:650 13px/1 var(--sans);
   }
   .doc-content .open-link{
     display:inline-flex; align-items:center; gap:8px; min-height:40px;

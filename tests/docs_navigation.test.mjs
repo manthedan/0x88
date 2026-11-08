@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { activeDocsTopic } from '../src/lib/docsNavigation.ts';
+import { activeDocsTopic, docsSearchShortcut } from '../src/lib/docsNavigation.ts';
+
+test('search hints match Mac, Windows and Linux keyboards, including a safe unknown default', () => {
+  for (const platform of ['MacIntel', 'iPad', 'iPhone']) {
+    assert.deepEqual(docsSearchShortcut(platform), { text: '⌘K', label: 'Command K' });
+  }
+  for (const platform of ['Win32', 'Linux x86_64', '']) {
+    assert.deepEqual(docsSearchShortcut(platform), { text: 'Ctrl K', label: 'Control K' });
+  }
+});
 
 const headings = [
   { id: 'pages', top: -800 },

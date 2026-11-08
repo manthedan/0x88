@@ -76,7 +76,9 @@ test('mobile search is outside the collapsed panel and shares the desktop search
   assert.match(markup(trigger.node), /Search docs/);
   assert.match(markup(trigger.node), /on:click=\{focusSearch\}/);
   assert.match(source, /if \(narrow\) tocOpen = true;\s+await tick\(\);\s+searchInput\?\.focus\(\)/);
-  assert.match(source, /searchShortcut = '⌘K'/);
+  assert.match(source, /docsSearchShortcut\(navigator.platform\)/);
+  assert.match(source, /event.key === '\/' && !typing/);
+  assert.match(source, /event.metaKey \|\| event.ctrlKey/);
   assert.match(source, /let searchShortcut = 'Ctrl K'/);
 });
 
@@ -109,6 +111,19 @@ test('all workspace launch links are with the title, ahead of the four-step proc
   assert.equal(links.length, 76, 'all external link instances are retained');
   assert.equal(new Set(links).size, 41, 'all unique external destinations are retained');
   assert.ok(!elements.some(({ node }) => hasClass(node, 'not-yet')), 'obsolete availability note is removed');
+});
+
+test('beginner terms are defined inline without extending the quick-start list', () => {
+  const section = markup(byId('pages'));
+  assert.match(section, /Small net, a neural-network model/);
+  assert.match(section, /PGN \(a game record\) or FEN \(a single-position notation\)/);
+  assert.match(section, /visits \(search iterations\) or depth, depending on the engine/);
+  const following = elements.find(({ node }) => node.children?.includes(byId('following-match'))).node;
+  assert.equal(descendants(following, 'ul').length, 3, 'Resume and Saved results each have short sub-bullets');
+  const note = descendants(following, 'p').find((node) => /Note:/.test(markup(node)));
+  assert.match(markup(note), /parallel CPU runs/);
+  assert.match(markup(note), /background completion is not guaranteed/);
+  assert.match(markup(note), /App or engine-release changes/);
 });
 
 test('title hierarchy, quiet launch links and readable mobile contents are explicit', () => {

@@ -12,3 +12,9 @@ export function activeDocsTopic(
   }
   return current;
 }
+
+export function docsSearchShortcut(platform: string): { text: string; label: string } {
+  return /Mac|iPhone|iPad|iPod/.test(platform)
+    ? { text: '⌘K', label: 'Command K' }
+    : { text: 'Ctrl K', label: 'Control K' };
+}
