@@ -13,6 +13,16 @@ test('position links keep the origin and discard queries, fragments and private 
   assert.equal(url.searchParams.get('fen'), START_FEN);
 });
 
+test('position links never inherit URL credentials from the sender', () => {
+  const url = new URL(positionShareUrl(START_FEN, 'https://alice:private-password@example.test/app/analysis/?dev'));
+  assert.equal(url.username, '');
+  assert.equal(url.password, '');
+  assert.equal(url.origin, 'https://example.test');
+  assert.equal(url.pathname, '/app/analysis/');
+  assert.equal(url.searchParams.get('fen'), START_FEN);
+  assert.doesNotMatch(url.href, /alice|private-password/);
+});
+
 test('a copied current position round-trips independently from the game tree', () => {
   const tree = new GameTree();
   tree.addUci('e2e4');
