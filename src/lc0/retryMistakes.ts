@@ -67,6 +67,7 @@ export class MistakeRetry {
     this.tree = retryTreeAt(source, problems[0].before);
   }
   get problem(): RetryProblem { return this.problems[this.index]; }
+  get isLast(): boolean { return this.index === this.problems.length - 1; }
   get answered(): boolean { return this.phase === 'solved' || this.phase === 'revealed'; }
   get remaining(): number { return Math.max(0, this.problems.length - this.index - (this.answered ? 1 : 0)); }
   cancel(): void { this.controller?.abort(); this.controller = null; }

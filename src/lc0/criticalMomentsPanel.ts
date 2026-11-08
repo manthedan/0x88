@@ -41,13 +41,13 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
     el('criticalCompare').toggleAttribute('disabled', isBusy() || !baseline || !criticalMoments(baseline.review, baseline.fens).length);
     el('criticalCancel').hidden = !isBusy();
     el('criticalCancel').toggleAttribute('disabled', !isBusy());
-    const status = !report ? 'Compare up to five of the largest baseline errors. No extra engine work starts until you confirm.'
+    const status = !report ? 'Compare up to five of the largest errors in the original review. No extra engine work starts until you confirm.'
       : report.stale ? 'Stale report. The mainline or settings changed. Run a fresh review if needed, then compare again. Old results are shown below with navigation disabled.'
       : isBusy() ? 'Comparing critical moments. You can cancel without losing completed results.'
       : report.state === 'cancelled' ? 'Comparison cancelled. Completed results are retained.' : 'Comparison finished. Any engine failures are listed separately.';
-    el('criticalStatus').textContent = baseline && !criticalMoments(baseline.review, baseline.fens).length && !report ? 'No baseline errors to compare at this review depth.' : status;
+    el('criticalStatus').textContent = baseline && !criticalMoments(baseline.review, baseline.fens).length && !report ? 'No errors to compare at this review depth.' : status;
     if (report) {
-      el('criticalSource').textContent = `Baseline severity: ${report.baseline}. Engine move agreement and Maia probabilities are independent of this severity.`;
+      el('criticalSource').textContent = `Error labels come from ${report.baseline}. Engine agreement and human-move predictions do not change those labels.`;
       el('criticalEngineProgress').innerHTML = report.lanes.map((lane) => `<div><strong>${htmlEscape(lane.provenance.engine)}</strong><span>${lane.completed}/${report!.moments.length} · ${htmlEscape(lane.progress)}</span><progress max="${report!.moments.length}" value="${lane.completed}" aria-label="${htmlEscape(lane.provenance.engine)} progress"></progress></div>`).join('');
       patchAnalysisResults(el('criticalReport'), criticalReportMarkup(report));
       if (!report.stale && viewedIndex !== undefined) {

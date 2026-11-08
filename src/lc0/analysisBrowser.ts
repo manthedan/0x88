@@ -2381,8 +2381,8 @@ function renderOpening() {
   const stats = currentBookStats();
   const summary = openingSummary(stats);
   if (hasDatabasePositionStats && !importedGames.length)
-    el('openingSummary').textContent = `Local search · ${databasePositionCollectionCount} collections · ${summary.total} games with a continuation`;
-  else el('openingSummary').textContent = `${importedGames.length} games loaded · ${summary.total} with a continuation here`;
+    el('openingSummary').textContent = `${summary.total} games here · ${databasePositionCollectionCount} collections`;
+  else el('openingSummary').textContent = `${summary.total} of ${importedGames.length} games continue here`;
   renderExplorerComparison();
   if (!stats.length) {
     body.innerHTML = '<tr><td colspan="3" class="small">No mainline continuations here. Move back or load another collection.</td></tr>';
@@ -2790,7 +2790,10 @@ async function renameSelectedPgnCollection(): Promise<void> {
     if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
     inputEl('pgnDbName').value = record.name;
     await refreshPgnDatabaseCollections(record.id, mountSignal);
-    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Renamed collection to “${record.name}”.`;
+    if (!isStaleMount(mountSignal)) {
+      el('pgnDbInfo').textContent = `Renamed collection to “${record.name}”.`;
+      (el('collectionImport') as HTMLDetailsElement).open = false;
+    }
   } catch (error) {
     if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Rename failed: ${(error as Error).message}`;
   }
@@ -3215,6 +3218,7 @@ function renderMistakeRetry(): void {
   el('retrySkip').hidden = complete || session.answered;
   el('retryReveal').hidden = complete || session.answered;
   el('retryNext').hidden = complete || !session.answered;
+  el('retryNext').textContent = session.isLast ? 'Finish retry' : 'Next position';
   el('retryHuman').hidden = complete || !session.answered;
   el('retryHumanStatus').textContent = '';
   renderBoard();
@@ -5280,7 +5284,11 @@ function wireEvents() {
   el('openingComparison').addEventListener('toggle', renderExplorerComparison);
   el('explorerRating').addEventListener('change', renderExplorerComparison);
   el('importGames').addEventListener('click', () => { void runPgnTask(importGames); });
+  el('collectionImport').addEventListener('toggle', () => {
+    if (!(el('collectionImport') as HTMLDetailsElement).open) el('confirmPgnDbName').hidden = true;
+  });
   el('newPgnCollection').addEventListener('click', () => {
+    el('confirmPgnDbName').hidden = true;
     activePgnCollectionId = '';
     renderPgnDatabaseCollections('');
     inputEl('pgnDbName').value = '';
@@ -5334,8 +5342,15 @@ function wireEvents() {
     void runPgnTask(deleteSelectedPgnCollection);
   });
   el('renamePgnDb').addEventListener('click', () => {
-    void runPgnTask(renameSelectedPgnCollection);
+    if (!selectedPgnCollectionId()) {
+      el('pgnDbInfo').textContent = 'Choose a saved PGN collection to rename.';
+      return;
+    }
+    (el('collectionImport') as HTMLDetailsElement).open = true;
+    el('confirmPgnDbName').hidden = false;
+    inputEl('pgnDbName').focus();
   });
+  el('confirmPgnDbName').addEventListener('click', () => { void runPgnTask(renameSelectedPgnCollection); });
   el('duplicatePgnDb').addEventListener('click', () => {
     void runPgnTask(duplicateSelectedPgnCollection);
   });
@@ -5356,7 +5371,7 @@ function wireEvents() {
     void searchCurrentPositionInPgnDatabase();
   });
   inputEl('pgnDbName').addEventListener('keydown', (event) => {
-    if ((event as KeyboardEvent).key === 'Enter') void runPgnTask(saveCurrentPgnCollection);
+    if ((event as KeyboardEvent).key === 'Enter') void runPgnTask(el('confirmPgnDbName').hidden ? saveCurrentPgnCollection : renameSelectedPgnCollection);
   });
   inputEl('importGamesInput').addEventListener('input', () => {
     activePgnCollectionId = '';

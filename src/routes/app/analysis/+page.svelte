@@ -165,7 +165,7 @@ onMount(() => {
               <div class="collection-actions" role="group" aria-label="Collection actions">
                 <button id="loadPgnDb" type="button">Load selected collection</button>
                 <button id="newPgnCollection" type="button">New collection</button>
-                <button id="renamePgnDb" type="button">Rename to name below</button>
+                <button id="renamePgnDb" type="button">Rename collection…</button>
                 <button id="duplicatePgnDb" type="button">Duplicate collection</button>
                 <button id="exportPgnDbCollection" type="button">Download selected PGN</button>
                 <button id="exportPgnDbSelected" type="button">Back up selected collection (JSON)</button>
@@ -175,7 +175,7 @@ onMount(() => {
               </div>
             </details>
           </div>
-          <div class="field collection-name"><label for="pgnDbName">Collection name</label><input id="pgnDbName" type="text" maxlength="80" autocomplete="off" placeholder="My games" /></div>
+          <div class="field collection-name"><label for="pgnDbName">Collection name</label><input id="pgnDbName" type="text" maxlength="80" autocomplete="off" placeholder="My games" /><button id="confirmPgnDbName" type="button" hidden>Save collection name</button></div>
           <p id="pgnDbInfo" class="small" role="status">Checking local storage…</p>
           <p id="openingSummary" class="small">Import a PGN batch to explore it from the board position.</p>
           <table id="opening" class="opening"><thead><tr><th scope="col">Move</th><th scope="col" class="num">Games</th><th scope="col">Results</th></tr></thead><tbody></tbody></table>
@@ -256,7 +256,7 @@ onMount(() => {
           </div>
           <div id="criticalEngineProgress" class="critical-engine-progress"></div>
           <p id="criticalSource" class="review-hint"></p>
-          <p class="review-hint">Engine evaluations favor White when positive. Stockfish pawns and Lc0’s Q-mapped pawns use different scales. Different top moves do not by themselves establish an error. Maia predicts human choices, not accuracy.</p>
+          <p class="review-hint">Engine evaluations favor White when positive. Lc0 converts its expected score to pawns; that scale differs from Stockfish’s evaluation. Different top moves do not by themselves establish an error. Maia predicts human choices, not accuracy.</p>
           <div id="criticalReport"></div>
         </section>
       </div>
@@ -838,7 +838,9 @@ onMount(() => {
   .collection-menu[open]{flex-basis:100%}
   .collection-actions{display:grid; grid-template-columns:1fr 1fr; gap:4px; padding-top:6px}
   .collection-actions button{font-size:13px; min-height:40px; text-align:left; padding:6px 8px}
-  .collection-name{margin-top:10px}
+  .collection-name{display:none; margin-top:10px}
+  .explorer-body:has(#collectionImport[open]) .collection-name{display:block}
+  #confirmPgnDbName{margin-top:8px}
   .collection-import, .explorer-comparison{margin-top:12px; border-top:1px solid var(--rule); padding-top:10px}
   .collection-import>summary, .explorer-comparison>summary{cursor:pointer; font-weight:600; color:var(--ink)}
   .collection-import textarea{width:100%; min-height:100px; margin:6px 0}
@@ -873,7 +875,9 @@ onMount(() => {
   :global(.analysis-workspace[data-retrying]) .analysis-overview, :global(.analysis-workspace[data-retrying]) .add-engine-inline, :global(.analysis-workspace[data-retrying]) #message{display:none}
   :global(.analysis-workspace[data-retrying]) .evalbar, :global(.analysis-workspace[data-retrying]) #evalSourceButton{visibility:hidden}
   :global(.analysis-workspace[data-retrying]) .board-tools>:not(#flip){display:none}
-  :global(.analysis-workspace[data-retrying]) .review-panel{max-height:none}
+  :global(.analysis-workspace[data-retrying]) .review-panel{flex:0 0 auto; min-height:0; max-height:none}
+  :global(.analysis-workspace[data-retrying]) .app-sidebar{height:auto}
+  :global(.analysis-workspace[data-retrying]) #retryActive{margin-bottom:0; padding-bottom:0; border-bottom:0}
   .review-settings{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px}
   .review-settings select{width:100%; min-width:0; font-size:13px; min-height:36px; padding:4px 6px}
   .review-settings label{font-size:13px; color:var(--muted); margin-bottom:4px; display:block}

@@ -137,9 +137,11 @@ test('human plausibility reports played and unique engine-move probabilities wit
   const report = await run(lanes);
   const markup = criticalReportMarkup(report);
   assert.match(markup, /Played d4: 12.0% · e4: 35.0%/);
-  assert.match(markup, /Baseline review: <strong>Mistake<\/strong>/);
+  assert.match(markup, /Original review: <strong>Mistake<\/strong>/);
   assert.match(markup, /Stockfish pawns/);
-  assert.match(markup, /Lc0 Q-mapped pawns/);
+  assert.match(markup, /Lc0 score converted to pawns/);
+  assert.doesNotMatch(markup, /Q-mapped|Best child|Baseline review/);
+  assert.match(markup, /Recommended move searched:/);
   assert.doesNotMatch(markup, /expected points|accuracy/i);
   report.stale = true;
   assert.match(criticalReportMarkup(report), /data-critical-target="board"[^>]* disabled/);
