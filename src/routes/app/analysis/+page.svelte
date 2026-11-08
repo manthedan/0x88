@@ -3,6 +3,7 @@ import { onMount } from 'svelte';
 import { afterNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
+import RestoreNotice from '$lib/components/RestoreNotice.svelte';
 
 let mountedUrl: URL | null = null;
 afterNavigate(({ to }) => {
@@ -108,6 +109,7 @@ onMount(() => {
   </section>
   </div>
   <section class="panel app-sidebar" aria-label="Analysis">
+    <RestoreNotice area="analysis" />
     <header class="analysis-overview">
       <div class="position-status">
         <span id="analysisStatus" class="analysis-status" data-state="loading" role="status">Loading…</span>

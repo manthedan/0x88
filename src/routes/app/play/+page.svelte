@@ -3,6 +3,7 @@ import { onMount } from 'svelte';
 import { afterNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
+import RestoreNotice from '$lib/components/RestoreNotice.svelte';
 
 let mountedUrl: URL | null = null;
 afterNavigate(({ to }) => {
@@ -65,6 +66,7 @@ onMount(() => {
 
   <section class="panel app-sidebar play-sidebar" aria-label="Game">
     <p id="gameAnnouncement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+    <RestoreNotice area="play" />
     <div class="status-block">
       <div id="status" class="game-status">Loading…</div>
       <div id="engineNote" hidden></div>

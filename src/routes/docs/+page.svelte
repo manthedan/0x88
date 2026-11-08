@@ -465,6 +465,7 @@ onMount(() => {
       <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
     </ul>
     </div>
+    <p><strong>Return to your analysis:</strong> the game tree, variations, comments and selected move are saved automatically on this device. Reload or reopen Analysis to continue. Use <strong>Start new</strong> in the restore notice, or <strong>Load → Reset</strong>, to clear it; loading a PGN or FEN replaces it. A position link takes priority over the saved game.</p>
     <p class="not-yet"><strong>Not available yet:</strong> game review (move accuracy and critical moments) and a local opening explorer for your own PGN collections are in development and hidden in the current build.</p>
   </div>
 
@@ -502,6 +503,8 @@ onMount(() => {
       <li>Choose White, Black or Random, then press <strong>Play</strong>.</li>
       <li>Take back or resign during the game. Afterwards, copy or download the PGN, or press <strong>Analyze</strong> to open the game in Analysis.</li>
     </ol>
+    <p><strong>Continue after a reload:</strong> Play saves the current game and opponent settings separately from Analysis. Reopen Play to resume; if it is the opponent’s turn, it moves automatically. Completed games reopen as completed. <strong>Start new</strong> clears the restored game.</p>
+    <p>Autosaves stay in this browser and can be lost if storage is blocked, full or cleared. Keep important games with <strong>Copy PGN</strong> or the PGN download. Opening the same workspace in several tabs shares one save slot; the last tab to save wins.</p>
     <p>Your games are not sent anywhere. The engine, and its network if it has one, downloads on first use and is reused from your browser’s storage after that.</p>
   </div>
 

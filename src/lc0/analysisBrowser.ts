@@ -36,6 +36,7 @@ import { lineChartSvg } from './charts.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { annotatedPgn, type GameReview, type ReviewedMove, type ReviewPosition, reviewGame } from './gameReview.ts';
 import { type GameNode, GameTree } from './gameTree.ts';
+import { createWorkspaceAutosave, decodeAnalysisSnapshot, hasExplicitWorkspaceInput, readWorkspace, serializeTree } from './workspaceAutosave.ts';
 import { LatestOnlyTask } from './latestOnlyTask.ts';
 import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import {
@@ -342,6 +343,53 @@ function renderOpeningName(): void {
 }
 
 let tree = new GameTree(params.get('fen') ?? START_FEN);
+let workspaceHeaders: Record<string, string> = {};
+let workspaceResult = '*';
+let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
+
+function saveAnalysisWorkspace(): void {
+  try {
+    workspaceAutosave?.schedule(tree.root.children.length || tree.root.fen !== START_FEN || tree.root.comment || Object.keys(workspaceHeaders).length
+      ? { tree: serializeTree(tree), headers: workspaceHeaders, result: workspaceResult }
+      : null);
+  } catch {
+    workspaceAutosave?.clear();
+  }
+}
+
+function clearAnalysisWorkspace(): void {
+  workspaceAutosave?.clear();
+  workspaceHeaders = {};
+  workspaceResult = '*';
+  el('analysisRestoreNotice').hidden = true;
+}
+
+function restoreAnalysisWorkspace(): void {
+  const handoffPgn = takeAnalysisHandoff();
+  if (hasExplicitWorkspaceInput(location.search, location.hash) || handoffPgn) {
+    clearAnalysisWorkspace();
+    if (!params.has('fen') && handoffPgn) {
+      try {
+        const parsed = parsePgnGame(handoffPgn);
+        tree = parsed.tree;
+        tree.toStart();
+        workspaceHeaders = parsed.tags;
+        workspaceResult = parsed.result;
+        inputEl('pgnInput').value = handoffPgn;
+      } catch { /* Invalid handoffs leave the explicit starting position alone. */ }
+    }
+    saveAnalysisWorkspace();
+    return;
+  }
+  const saved = readWorkspace('analysis', decodeAnalysisSnapshot);
+  if (!saved) return;
+  tree = saved.tree;
+  analysisGameTree = tree;
+  workspaceHeaders = saved.headers;
+  workspaceResult = saved.result;
+  inputEl('pgnInput').value = gameTreeToPgn(tree, workspaceHeaders, workspaceResult);
+  el('analysisRestoreNotice').hidden = false;
+}
 let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0EvaluationProvider | null = null;
 let stockfishLite: StockfishEngine | null = null;
@@ -3038,6 +3086,7 @@ function deferHiddenTabWork(kind: HiddenTabWork): boolean {
 }
 
 function applyHiddenTab(hidden: boolean): void {
+  if (hidden) workspaceAutosave?.flush();
   const wasHidden = hiddenTab.hidden;
   const reloadClass = classifyHiddenReload(
     analyzing && analysisAbort !== null && !analysisAbort.signal.aborted,
@@ -3884,6 +3933,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
 let analysisGameTree = tree;
 
 function afterNavigation() {
+  saveAnalysisWorkspace();
   hiddenResumeForce = false;
   if (analysisGameTree !== tree) {
     analysisGameTree = tree;
@@ -4095,6 +4145,7 @@ function loadFen() {
     el('message').textContent = (error as Error).message;
     return;
   }
+  clearAnalysisWorkspace();
   lineCache.clear();
   completeAnalysisKeys.clear();
   el('message').textContent = 'Loaded FEN.';
@@ -4105,7 +4156,10 @@ function loadPgn() {
   const raw = inputEl('pgnInput').value.trim();
   if (!raw) return;
   try {
-    const { tree: parsed, tags } = parsePgnGame(raw);
+    const { tree: parsed, tags, result } = parsePgnGame(raw);
+    clearAnalysisWorkspace();
+    workspaceHeaders = tags;
+    workspaceResult = result;
     tree = parsed;
     tree.toStart();
     lineCache.clear();
@@ -4125,7 +4179,7 @@ function copyFen() {
 }
 
 function copyPgn() {
-  const pgn = gameTreeToPgn(tree, {}, tree.root.children.length ? '*' : '*');
+  const pgn = gameTreeToPgn(tree, workspaceHeaders, workspaceResult);
   inputEl('pgnInput').value = pgn;
   void navigator.clipboard?.writeText(pgn).catch(() => undefined);
   el('message').textContent = 'PGN copied to the box and clipboard.';
@@ -4360,7 +4414,11 @@ function wireEvents() {
   inputEl('fenInput').addEventListener('keydown', (event) => {
     if ((event as KeyboardEvent).key === 'Enter') loadFen();
   });
+  el('analysisRestoreDismiss').addEventListener('click', () => { el('analysisRestoreNotice').hidden = true; });
+  el('analysisRestoreNew').addEventListener('click', () => el('reset').click());
   el('reset').addEventListener('click', () => {
+    clearAnalysisWorkspace();
+    inputEl('pgnInput').value = '';
     tree = new GameTree();
     lineCache.clear();
     completeAnalysisKeys.clear();
@@ -4684,6 +4742,8 @@ function disposeRuntimeResources(): void {
 }
 
 function disposePageResources(): void {
+  workspaceAutosave?.flush();
+  workspaceAutosave = null;
   removeHiddenTabPause();
   analysisReloadAbort?.abort();
   analysisReloadAbort = null;
@@ -4840,6 +4900,7 @@ async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'a
 }
 
 async function init(mountSignal: AbortSignal) {
+  restoreAnalysisWorkspace();
   if (!isV0DeployProfile()) {
     REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(
       REQUESTED_RECKLESS_VARIANT,
@@ -4870,6 +4931,7 @@ async function init(mountSignal: AbortSignal) {
   if (isStaleMount(mountSignal)) return;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
   analysisPagehideHandler = (event: PageTransitionEvent) => {
+    workspaceAutosave?.flush();
     if (!event.persisted) {
       for (const key of ANALYSIS_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
       disposeRuntimeResources();
@@ -4902,12 +4964,6 @@ async function init(mountSignal: AbortSignal) {
     }),
   );
   wireEvents();
-  // "Analyze this game" from Play: load its PGN through the normal Load PGN path.
-  const handoffPgn = takeAnalysisHandoff();
-  if (handoffPgn) {
-    inputEl('pgnInput').value = handoffPgn;
-    loadPgn();
-  }
   void loadOpeningNames(mountSignal);
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   void refreshBt4Availability();
@@ -4919,6 +4975,8 @@ let lastAnalysisMountHref: string | null = null;
 
 function resetAnalysisPageState(): void {
   tree = new GameTree(params.get('fen') ?? START_FEN);
+  workspaceHeaders = {};
+  workspaceResult = '*';
   analysisGameTree = tree;
   engineLineCache.clear();
   completeAnalysisKeys.clear();
@@ -4962,6 +5020,7 @@ export function mountAnalysisBrowser(): () => void {
   }
   lastAnalysisMountHref = href;
   resetAnalysisPageState();
+  workspaceAutosave = createWorkspaceAutosave('analysis');
   analysisWorkerProgressMessages = 0;
   analysisUiProgressSamples = 0;
   installHiddenTabPause();

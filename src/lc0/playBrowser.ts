@@ -40,6 +40,7 @@ import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
 import { GameTree } from './gameTree.ts';
+import { createWorkspaceAutosave, decodePlaySnapshot, hasExplicitWorkspaceInput, readWorkspace } from './workspaceAutosave.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, Maia3BrowserEvaluator, type Maia3MoveStyle } from './maia3.ts';
@@ -177,6 +178,8 @@ function startFenFor(option: PlayEngineOption, human: Color): string {
 // stale-write guard for async engine callbacks.
 // ---------------------------------------------------------------------------
 interface PlayContext {
+  autosave: ReturnType<typeof createWorkspaceAutosave> | null;
+  restoredGame: boolean;
   abort: AbortController;
   disposed: boolean;
   ground: ReturnType<typeof Chessground> | null;
@@ -227,6 +230,8 @@ interface PlayContext {
 
 function createPlayContext(): PlayContext {
   return {
+    autosave: null,
+    restoredGame: false,
     abort: new AbortController(),
     disposed: false,
     ground: null,
@@ -1110,6 +1115,9 @@ function ctxSubmitTypedMove(ctx: PlayContext): void {
 }
 
 function ctxNewGame(ctx: PlayContext): void {
+  ctx.autosave?.clear();
+  ctx.restoredGame = false;
+  el('playRestoreNotice').hidden = true;
   ctxCancelEngineTurn(ctx);
   ctx.engineReady = false;
   const colorChoice = selectEl('colorSelect').value;
@@ -1388,7 +1396,8 @@ function ctxRefreshEngineOptions(ctx: PlayContext): void {
     `<optgroup label="Handicap · plays without its queen">${group('odds')}</optgroup>` +
     `<optgroup label="Full-strength engines">${group('engine')}</optgroup>`;
   const selectedOption = ENGINE_OPTIONS.find((option) => option.id === selected);
-  if (selectedOption && !ctxEngineOptionState(selectedOption).disabled) select.value = selected;
+  // A restored game must not silently switch opponents when an asset probe refreshes the options.
+  if (selectedOption && (ctx.restoredGame || !ctxEngineOptionState(selectedOption).disabled)) select.value = selected;
   else select.value = 'maia3';
   ctxRenderEngineCaution(ctx);
 }
@@ -1627,6 +1636,16 @@ function ctxRenderChrome(ctx: PlayContext, shownBoard: BoardState, shownPly: num
 
 function ctxRender(ctx: PlayContext): void {
   if (ctx.disposed) return;
+  ctx.autosave?.schedule(ctx.started || ctx.moves.length || ctx.gameOver ? {
+    startFen: ctx.startFen,
+    moves: ctx.moves.map(moveToUci),
+    humanColor: ctx.humanColor,
+    orientation: ctx.orientation,
+    // Queued opponent/colour changes are not the opponent of this game until confirmed.
+    preferences: { ...ctxCurrentPlayPreferences(ctx), engineId: ctx.activeEngineId, color: ctx.activeColor },
+    gameOver: ctx.gameOver,
+    started: ctx.started,
+  } : null);
   ctx.viewPly = normalizeViewPly(ctx.viewPly, ctx.moves.length);
   const browsing = ctx.viewPly !== null;
   const statusText = ctxStatusText(ctx);
@@ -1754,15 +1773,21 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 }
 
 function ctxInit(ctx: PlayContext): void {
+  // Keep restore before normal setup/engine startup. Explicit URLs (including the Analysis→Play
+  // handoff) win; their consumer should apply its position after ctxResetGameStateForMount below.
+  const validEngineIds = new Set(ENGINE_OPTIONS.map((option) => option.id));
+  const saved = hasExplicitWorkspaceInput(location.search, location.hash) ? null
+    : readWorkspace('play', (raw) => decodePlaySnapshot(raw, validEngineIds));
+  ctx.restoredGame = !!saved;
   ctxRefreshEngineOptions(ctx);
-  const preferences = loadPlayPreferences(playPreferenceStorage(), new Set(ENGINE_OPTIONS.map((option) => option.id)));
+  const preferences = saved?.preferences ?? loadPlayPreferences(playPreferenceStorage(), validEngineIds);
   const preferredOption = ENGINE_OPTIONS.find((option) => option.id === preferences.engineId);
   const preferredBigNetStatus =
     preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' ? bigNetAssetStatusSync(BIG_NETS[preferredOption.variant as BigNetKey]) : null;
   const preferredBigNetCanProbe =
     preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' && (!isV0DeployProfile() || preferredOption.variant === 'lqo');
-  ctx.pendingPreferredEngineId = preferredOption && preferredBigNetCanProbe && preferredBigNetStatus === 'unknown' ? preferredOption.id : null;
-  selectEl('engineSelect').value = preferredOption && !ctxEngineOptionState(preferredOption).disabled ? preferredOption.id : 'maia3';
+  ctx.pendingPreferredEngineId = !saved && preferredOption && preferredBigNetCanProbe && preferredBigNetStatus === 'unknown' ? preferredOption.id : null;
+  selectEl('engineSelect').value = preferredOption && (saved || !ctxEngineOptionState(preferredOption).disabled) ? preferredOption.id : 'maia3';
   selectEl('colorSelect').value = preferences.color;
   (el('maia3Elo') as HTMLInputElement).value = String(preferences.maiaElo);
   selectEl('maia3Style').value = preferences.maiaStyle;
@@ -1774,6 +1799,21 @@ function ctxInit(ctx: PlayContext): void {
   ctx.lastEngineId = ctx.activeEngineId;
   ctx.activeColor = preferences.color;
   ctxResetGameStateForMount(ctx);
+  if (saved) {
+    const { preferences: _preferences, ...game } = saved;
+    Object.assign(ctx, game);
+    el('playRestoreNotice').hidden = false;
+  }
+  ctx.autosave = createWorkspaceAutosave('play');
+  if (hasExplicitWorkspaceInput(location.search, location.hash)) ctx.autosave.clear();
+  trackListener(ctx, window, 'pagehide', () => ctx.autosave?.flush());
+  trackListener(ctx, document, 'visibilitychange', () => { if (document.hidden) ctx.autosave?.flush(); });
+  trackListener(ctx, el('playRestoreDismiss'), 'click', () => { el('playRestoreNotice').hidden = true; });
+  trackListener(ctx, el('playRestoreNew'), 'click', () => {
+    ctx.started = false;
+    ctx.configOpen = false;
+    ctxNewGame(ctx);
+  });
 
   trackListener(ctx, el('newGame'), 'click', () => {
     const resolvingSavedEngine = !!ctx.pendingPreferredEngineId;
@@ -2031,8 +2071,10 @@ function ctxInit(ctx: PlayContext): void {
       if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
       else void ctxVerifySelectedEngineReady(ctx);
     }, 10_000);
-  } else if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
-  else void ctxVerifySelectedEngineReady(ctx);
+  } else if (!ctx.gameOver) {
+    if (ctx.board.turn !== ctx.humanColor) void ctxEngineTurn(ctx);
+    else void ctxVerifySelectedEngineReady(ctx);
+  }
 }
 
 function hasPlayBrowserDom(): boolean {
@@ -2116,6 +2158,8 @@ export function mountPlayBrowser(): () => void {
   (globalThis as unknown as { __playUserMove?: (from: string, to: string) => void }).__playUserMove = hook;
 
   return () => {
+    ctx.autosave?.flush();
+    ctx.autosave = null;
     ctx.disposed = true;
     ctxCancelEngineTurn(ctx);
     ctx.abort.abort();
