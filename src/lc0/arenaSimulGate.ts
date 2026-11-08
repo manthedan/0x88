@@ -1,4 +1,28 @@
 // Browser-safe lab identity/eligibility rules. Does not import a neural runtime.
+// Module lifetime survives client-side route unmounts; a pending GC-backed memory
+// measurement must block ALL later gates until its real promise settles.
+let pendingMemory = 0;
+const memoryListeners = new Set<(pending: boolean) => void>();
+export function simulMemoryPending(): boolean {
+  return pendingMemory > 0;
+}
+export function subscribeSimulMemory(listener: (pending: boolean) => void): () => void {
+  memoryListeners.add(listener);
+  listener(simulMemoryPending());
+  return () => {
+    memoryListeners.delete(listener);
+  };
+}
+export async function measureSimulMemory<T>(measure: () => Promise<T>): Promise<T> {
+  pendingMemory++;
+  for (const listener of memoryListeners) listener(true);
+  try {
+    return await measure();
+  } finally {
+    pendingMemory--;
+    for (const listener of memoryListeners) listener(simulMemoryPending());
+  }
+}
 interface EquivalenceGame {
   id: number;
   moves: string[];

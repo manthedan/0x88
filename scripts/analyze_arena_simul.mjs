@@ -124,9 +124,11 @@ export function analyzeSimulRun(run) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [output, ...inputs] = process.argv.slice(2);
   assert.ok(output && inputs.length, 'usage: node --experimental-strip-types scripts/analyze_arena_simul.mjs OUTPUT INPUT...');
-  const runs = inputs.map((path) => {
+  const runs = inputs.flatMap((path) => {
     const raw = readFileSync(path);
-    return { rawPath: path, rawSha256: hash(raw), ...analyzeSimulRun(JSON.parse(raw)) };
+    const parsed = JSON.parse(raw);
+    const exported = Array.isArray(parsed) ? parsed : [parsed];
+    return exported.map((run, rawRunIndex) => ({ rawPath: path, rawSha256: hash(raw), rawRunIndex, ...analyzeSimulRun(run) }));
   });
   writeFileSync(output, `${JSON.stringify({ schemaVersion: 1, runs }, null, 2)}\n`);
   for (const run of runs)

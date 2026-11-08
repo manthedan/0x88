@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import type { runSimulTrial } from '../../../lc0/arenaSimulRunner.ts';
-import { simulHelps4 } from '../../../lc0/arenaSimulGate.ts';
+import { measureSimulMemory, simulHelps4, simulMemoryPending, subscribeSimulMemory } from '../../../lc0/arenaSimulGate.ts';
 
 type Row = Awaited<ReturnType<typeof runSimulTrial>> & {
   index: number; control: boolean; physical: number; occupancy: number;
@@ -26,7 +26,7 @@ function helps4(effectiveVisits = visits, effectivePlies = maxPlies): boolean {
 }
 
 function start(count = n, options: { visits?: number; maxPlies?: number; pairs?: number } = {}) {
-  if (busy || memoryPending) throw new Error('Gate or memory sample already active');
+  if (busy || simulMemoryPending()) throw new Error('Gate or memory sample already active');
   const effectiveVisits = options.visits ?? visits;
   const effectivePlies = options.maxPlies ?? maxPlies;
   if (count === 8 && !helps4(effectiveVisits, effectivePlies)) throw new Error('N=8 stays parked unless N=4 improves median throughput by 10%');
@@ -43,11 +43,10 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
     if (message.type === 'phase') status = `Trial ${message.index + 1}: ${message.concurrency} game(s), physical batch ${message.physical}${message.control ? ', numerical control' : ''}. ${message.phase === 'memory' ? 'Sampling memory outside the timing interval.' : 'Loading and warming up.'}`;
     if (message.type === 'memory') {
       const target = worker;
-      memoryPending = true;
       const measure = (performance as Performance & { measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory;
-      const sample = measure ? measure.call(performance).then(({ bytes }) => ({ bytes, note: 'Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency' }),
+      const sample = measure ? measureSimulMemory(() => measure.call(performance)).then(({ bytes }) => ({ bytes, note: 'Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency' }),
         (failure) => ({ bytes: null, note: String(failure) })) : Promise.resolve({ bytes: null, note: 'UASM unavailable' });
-      void sample.then((value) => target?.postMessage({ type: 'memory', generation: message.generation, sample: value })).finally(() => { memoryPending = false; });
+      void sample.then((value) => target?.postMessage({ type: 'memory', generation: message.generation, sample: value }));
     }
     if (message.type === 'progress') {
       currentGame = message.game;
@@ -76,10 +75,11 @@ function download() {
 }
 
 onMount(() => {
+  const unsubscribeMemory = subscribeSimulMemory((pending) => { memoryPending = pending; });
   // Explicit lab automation only. No autostart query, product import or persisted setting.
   const api = { start, stop, cancelGame, snapshot: () => ({ busy, memoryPending, status, error, generation, currentGame, rows, results, helps4: helps4() }) };
   Object.assign(window, { __arenaSimul: api });
-  return () => { worker?.terminate(); delete (window as unknown as Record<string, unknown>).__arenaSimul; };
+  return () => { unsubscribeMemory(); worker?.terminate(); delete (window as unknown as Record<string, unknown>).__arenaSimul; };
 });
 </script>
 

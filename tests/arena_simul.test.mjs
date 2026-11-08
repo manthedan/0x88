@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { analyzeSimulRun } from '../scripts/analyze_arena_simul.mjs';
 import { boardToFen } from '../src/chess/board.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { ArenaSimulBroker } from '../src/lc0/arenaSimulBroker.ts';
-import { simulCancelGame, simulEquivalentGames, simulGeneration, simulHelps4 } from '../src/lc0/arenaSimulGate.ts';
+import {
+  measureSimulMemory,
+  simulCancelGame,
+  simulEquivalentGames,
+  simulGeneration,
+  simulHelps4,
+  simulMemoryPending,
+  subscribeSimulMemory,
+} from '../src/lc0/arenaSimulGate.ts';
 import { simulProbe } from '../src/lc0/arenaSimulProbe.ts';
 import { runSimulTrial, SIMUL_OPENINGS, SIMUL_SEARCH_OPTIONS } from '../src/lc0/arenaSimulRunner.ts';
 
@@ -250,6 +261,28 @@ test('simul cancellation button selects a live controller, not stale last-progre
   simulCancelGame(new Map());
 });
 
+test('simul pending memory guard survives route-style unsubscribe and remount', async () => {
+  let finish;
+  const oldView = [];
+  const unmount = subscribeSimulMemory((pending) => oldView.push(pending));
+  const measurement = measureSimulMemory(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  unmount();
+  const newView = [];
+  const cleanup = subscribeSimulMemory((pending) => newView.push(pending));
+  assert.equal(simulMemoryPending(), true);
+  finish({ bytes: 123 });
+  await measurement;
+  assert.equal(simulMemoryPending(), false);
+  assert.deepEqual(oldView, [false, true]);
+  assert.deepEqual(newView, [true, false]);
+  cleanup();
+});
+
 test('simul probe checks Stop between actual physical calls, including batch-1 logical batches', async () => {
   const controller = signal();
   const calls = [];
@@ -292,6 +325,20 @@ test('simul evidence audit replays legal histories and rejects illegal moves or 
   const incomplete = structuredClone(run);
   incomplete.rows[0].completed = 7;
   assert.throws(() => analyzeSimulRun(incomplete));
+  const directory = mkdtempSync(join(tmpdir(), 'arena-simul-export-'));
+  try {
+    const input = join(directory, 'browser-export.json');
+    const output = join(directory, 'summary.json');
+    writeFileSync(input, JSON.stringify([run, run]));
+    const cli = spawnSync(process.execPath, ['--experimental-strip-types', 'scripts/analyze_arena_simul.mjs', output, input], { encoding: 'utf8' });
+    assert.equal(cli.status, 0, cli.stderr);
+    const audited = JSON.parse(readFileSync(output, 'utf8'));
+    assert.equal(audited.runs.length, 2);
+    assert.equal(audited.runs[0].rawSha256, audited.runs[1].rawSha256);
+    assert.equal(audited.runs[1].rawRunIndex, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('simul stays lab-only, never autostarts, and uses distinct physical exports without a global RNG override', () => {
