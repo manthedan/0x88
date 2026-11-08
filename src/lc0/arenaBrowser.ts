@@ -1498,7 +1498,7 @@ function renderReviewBar(): void {
   const shownTrail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   chartPly.max = String(Math.max(0, (shownTrail?.entries.length ?? 1) - 1));
   chartPly.value = String(reviewing ? reviewIndex : Number(chartPly.max));
-  chartPly.disabled = !liveTrail || liveTrail.entries.length <= 1;
+  chartPly.disabled = !shownTrail || shownTrail.entries.length <= 1;
   chartPly.setAttribute('aria-valuetext', chartPly.value === '0' ? 'Opening position' : `Ply ${chartPly.value}`);
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   const last = trail ? trail.entries.length - 1 : 0;
