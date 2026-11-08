@@ -5,7 +5,8 @@ import { boardToFen } from '../src/chess/board.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { ArenaSimulBroker } from '../src/lc0/arenaSimulBroker.ts';
-import { simulGeneration, simulHelps4 } from '../src/lc0/arenaSimulGate.ts';
+import { simulEquivalentGames, simulGeneration, simulHelps4 } from '../src/lc0/arenaSimulGate.ts';
+import { simulProbe } from '../src/lc0/arenaSimulProbe.ts';
 import { runSimulTrial, SIMUL_OPENINGS, SIMUL_SEARCH_OPTIONS } from '../src/lc0/arenaSimulRunner.ts';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -207,16 +208,19 @@ test('simul trial failure prevents admission of fresh games while siblings cance
 test('simul generations cannot collide across gate restarts and N=8 eligibility matches the workload', () => {
   assert.notEqual(simulGeneration('run-a', 0), simulGeneration('run-b', 0));
   assert.notEqual(simulGeneration('run-a', 0), simulGeneration('run-a', 1));
+  const games = Array.from({ length: 8 }, (_, id) => ({ id, moves: ['a2a4'], visits: [8], result: '1/2-1/2', reason: 'max plies' }));
   const result = {
     n: 4,
     visits: 8,
     maxPlies: 160,
     pairs: 3,
-    rows: Array.from({ length: 6 }, (_, i) => ({
-      control: false,
+    rows: Array.from({ length: 7 }, (_, i) => ({
+      control: i === 6,
       concurrency: i % 2 ? 4 : 1,
       gamesPerHour: i % 2 ? 140 : 100,
+      evalsPerSecond: i % 2 ? 140 : 100,
       completed: 8,
+      games,
     })),
   };
   assert.equal(simulHelps4([result], 8, 160), true);
@@ -224,6 +228,31 @@ test('simul generations cannot collide across gate restarts and N=8 eligibility 
   assert.equal(simulHelps4([result], 8, 240), false);
   assert.equal(simulHelps4([{ ...result, pairs: 1 }], 8, 160), false);
   assert.equal(simulHelps4([{ ...result, rows: result.rows.slice(0, 4) }], 8, 160), false);
+  assert.equal(simulHelps4([{ ...result, rows: result.rows.slice(0, 6) }], 8, 160), false);
+  assert.equal(simulHelps4([{ ...result, rows: result.rows.map((row) => ({ ...row, evalsPerSecond: 100 })) }], 8, 160), false);
+  const changed = games.map((game) => ({ ...game, moves: ['b2b4'] }));
+  assert.equal(simulEquivalentGames(games, changed), false);
+  assert.equal(simulHelps4([{ ...result, rows: result.rows.map((row) => (row.control ? { ...row, games: changed } : row)) }], 8, 160), false);
+});
+
+test('simul probe checks Stop between actual physical calls, including batch-1 logical batches', async () => {
+  const controller = signal();
+  const calls = [];
+  const provider = {
+    evaluate: async (input) => {
+      calls.push(input);
+      controller.abort();
+      return value(input);
+    },
+    evaluateBatch: () => {
+      throw new Error('Serial probes may not hide multiple physical runs');
+    },
+  };
+  await assert.rejects(simulProbe(provider, ['a', 'b', 'c', 'd'], 1, controller.signal), { name: 'AbortError' });
+  assert.deepEqual(calls, ['a']);
+  const batched = fakeProvider();
+  assert.equal((await simulProbe(batched, ['a', 'b', 'c', 'd'], 4, signal().signal)).length, 4);
+  assert.deepEqual(batched.calls, [['a', 'b', 'c', 'd']]);
 });
 
 test('simul stays lab-only, never autostarts, and uses distinct physical exports without a global RNG override', () => {

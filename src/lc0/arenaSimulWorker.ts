@@ -1,6 +1,7 @@
 import '../nn/ortConsoleFilter.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { simulGeneration } from './arenaSimulGate.ts';
+import { simulProbe } from './arenaSimulProbe.ts';
 import { ARENA_SIMUL_PROTOCOL, runSimulTrial, SIMUL_OPENINGS, SIMUL_SEARCH_OPTIONS, validateSimulTrial } from './arenaSimulRunner.ts';
 import { type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { applyOrtExecutionProvider } from './ortWorkerExecutionProvider.ts';
@@ -100,7 +101,7 @@ async function benchmark(message: Start, signal: AbortSignal) {
       const runtime = await collectOrtRuntimeDiagnostics();
       if (!runtime.describe.toLowerCase().includes('webgpu') || runtime.fallback) throw new Error('Gate requires strict WebGPU, no fallback');
       signal.throwIfAborted();
-      const probe = await evaluator.evaluateBatch(inputs);
+      const probe = await simulProbe(evaluator, inputs, physical, signal);
       if (!baselineProbe) baselineProbe = probe;
       const padded = [];
       for (const input of inputs) {
