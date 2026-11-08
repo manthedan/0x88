@@ -58,6 +58,22 @@ test('oversized backups are rejected before download with a selected-collection 
   assert.equal(JSON.parse(serializePgnDatabaseBackup(backup)).collections[0].pgn, pgn);
 });
 
+test('headerless games split on top-level results before the game-count cap', async () => {
+  const batch = await importLocalPgn('1. e4 e5 1-0\n\n1. d4 d5 0-1');
+  assert.equal(batch.games.length, 2);
+  const stats = openingStatsFromIndex(batch.positionIndex, START_FEN);
+  assert.equal(stats.find((s) => s.san === 'e4').whiteWins, 1);
+  assert.equal(stats.find((s) => s.san === 'd4').blackWins, 1);
+  assert.throws(() => boundedPgnChunks(Array(201).fill('1. e4 e5 *').join('\n')), /200 games/);
+  const annotated = await importLocalPgn('1. e4 {1-0} (1. d4 d5 0-1) e5 * {trailing comment}\n1. d4 d5 *');
+  assert.equal(annotated.games.length, 2, 'only top-level results split games');
+});
+
+test('adjacent numeric annotation glyphs do not change strict-import moves', async () => {
+  const batch = await importLocalPgn('[Result "*"]\n\n1.e4$1 e5$2 2.Nf3$10 Nc6 *');
+  assert.deepEqual(batch.games[0].tree.mainlineFrom().map((node) => node.san), ['e4', 'e5', 'Nf3', 'Nc6']);
+});
+
 test('local import cancellation prevents publication', async () => {
   const controller = new AbortController();
   await assert.rejects(importLocalPgn(`${pgn}\n\n${pgn}`, (done) => { if (done === 1) controller.abort(); }, controller.signal), { name: 'AbortError' });

@@ -30,33 +30,59 @@ export function sanToMove(board: BoardState, san: string): Move | null {
 
 /** Split a multi-game PGN string into per-game chunks (tags + movetext). */
 export function splitPgnGames(text: string): string[] {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const games: string[] = [];
-  let current: string[] = [];
+  let start = 0;
+  let i = 0;
+  let depth = 0;
   let sawMovetext = false;
-  let inComment = false;
-  for (const line of lines) {
-    const isTag = !inComment && /^\s*\[/.test(line);
-    // A tag line that starts a new game after we've already seen movetext closes the previous game.
-    if (isTag && sawMovetext) {
-      games.push(current.join('\n').trim());
-      current = [];
-      sawMovetext = false;
+  let ended = false;
+  const finish = (at: number) => {
+    const game = text.slice(start, at).trim();
+    if (game) games.push(game);
+    start = at;
+    sawMovetext = false;
+    ended = false;
+  };
+  while (i < text.length) {
+    const ch = text[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (ch === '{') {
+      const end = text.indexOf('}', i + 1);
+      i = end === -1 ? text.length : end + 1;
+      continue;
     }
-    if (!isTag) {
-      let visible = '';
-      for (const ch of line) {
-        if (inComment) { if (ch === '}') inComment = false; }
-        else if (ch === ';') break;
-        else if (ch === '{') inComment = true;
-        else visible += ch;
+    if (ch === ';') {
+      const end = text.indexOf('\n', i + 1);
+      i = end === -1 ? text.length : end + 1;
+      continue;
+    }
+    // A top-level result terminates a game even when the next game has no tags.
+    // Leave trailing comments with the preceding game rather than making empty games.
+    if (!depth && (ended || (ch === '[' && sawMovetext))) finish(i);
+    if (ch === '[') {
+      i++;
+      let quoted = false;
+      while (i < text.length) {
+        const next = text[i++];
+        if (next === '\\' && quoted) i++;
+        else if (next === '"') quoted = !quoted;
+        else if (next === ']' && !quoted) break;
       }
-      if (visible.trim()) sawMovetext = true;
+      continue;
     }
-    current.push(line);
+    if (ch === '(') { depth++; i++; continue; }
+    if (ch === ')') { depth = Math.max(0, depth - 1); i++; continue; }
+    if (ch === '$') { i++; while (/\d/.test(text[i] ?? '')) i++; continue; }
+    let j = i;
+    while (j < text.length && !/[\s(){};$\[]/.test(text[j])) j++;
+    if (j === i) { i++; continue; } // Malformed punctuation is rejected by the parser, never a loop.
+    const word = text.slice(i, j).replace(/^\d+\.(\.\.)?/, '');
+    sawMovetext = true;
+    if (!depth && RESULTS.has(word)) ended = true;
+    i = j;
   }
-  if (current.join('').trim()) games.push(current.join('\n').trim());
-  return games.filter(Boolean);
+  finish(text.length);
+  return games;
 }
 
 function parseTags(text: string): Record<string, string> {
@@ -124,7 +150,7 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
     }
     // A whitespace/paren/comment-delimited word: move number, SAN, or result.
     let j = i;
-    while (j < n && !/[\s(){};]/.test(movetext[j])) j++;
+    while (j < n && !/[\s(){};$]/.test(movetext[j])) j++;
     let word = movetext.slice(i, j);
     i = j;
     if (RESULTS.has(word)) {
