@@ -500,6 +500,11 @@ onMount(() => {
   </div>
 
   <div class="page-block">
+    <h4 id="compare-critical-moments">Compare critical moments</h4>
+    <p>After reviewing a game, find <strong>Compare critical moments</strong> below the Review results. Confirm the extra compute and download estimate to compare Stockfish Lite (depth 12) and Lc0 Small (400 visits) on up to five pre-error positions. Optionally include Maia3’s played-move and engine-move probabilities at one rating. Each engine has separate progress and failures; Cancel retains completed results. Severity comes from the baseline review, move agreement is separate, and Maia likelihood is not accuracy. Click a moment to visit the board, or use Compare, Human or Play from here. Mainline or settings changes mark the report stale; compare again to refresh it.</p>
+  </div>
+
+  <div class="page-block">
     <h4 id="export-review">Export a game review</h4>
     <p><strong>Copy reviewed PGN</strong> or <strong>Download PGN</strong> exports the mainline with original engine evals and error NAGs, retaining imported headers, result and starting FEN. Variations and existing comments are not included in this export. Completed position results are reused during this session when engine, depth and history match; nothing is uploaded.</p>
   </div>
