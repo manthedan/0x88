@@ -304,6 +304,7 @@ onMount(() => {
   .arena-eval-bar :global(.eval-none){position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:18px}
   .eval-source{min-height:18px; color:var(--muted); text-align:right; font-size:12px; line-height:18px}
   .eval-source :global(strong){color:var(--ink)}
+  .eval-source :global(.eval-source-value){display:none}
 
   .player-strip{
     display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h);
@@ -612,6 +613,7 @@ onMount(() => {
     .board-with-eval{grid-template-columns:12px minmax(0,1fr); gap:5px}
     .arena-eval-bar{border-width:1.5px; border-radius:4px}
     .arena-eval-bar :global(.eval-bar-value){display:none}
+    .eval-source :global(.eval-source-value){display:inline}
     .arena-workspace :global(#ground coords){font-size:11px}
     .player-strip{gap:8px}
     .arena-workspace :global(.player-strip .arena-avatar){flex-basis:30px; width:30px; height:30px; font-size:11.5px}

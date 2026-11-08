@@ -1213,8 +1213,9 @@ function renderEvalBars(): void {
   node.innerHTML = bar
     ? `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div><span class="eval-bar-value ${whiteScore >= 0.5 ? 'at-white' : 'at-black'}">${htmlEscape(text ?? '—')}</span>`
     : '<span class="eval-none">—</span>';
+  // The bar prints its own value; the caption repeats it only on phones, where the bar is too narrow to.
   el('evalSource').innerHTML = output && bar
-    ? `<strong>${htmlEscape(text ?? '—')}</strong> · ${htmlEscape(displayEngineName(output.engineName))} · White’s view · last completed search`
+    ? `<span class="eval-source-value"><strong>${htmlEscape(text ?? '—')}</strong> · </span>${htmlEscape(displayEngineName(output.engineName))} · White’s view · last completed search`
     : 'No evaluation yet';
 }
 
@@ -1339,7 +1340,6 @@ function renderStrips(): void {
   const update = (nodeId: string, color: 'w' | 'b', side: StripSide) => {
     const node = el(nodeId);
     const colorName = color === 'w' ? 'White' : 'Black';
-    const output = side.id ? engineOutputs.get(side.id) : undefined;
     const thinking = running && !reviewing && turn === color && !!side.id && thinkingEngineIds.has(side.id);
     const since = side.id ? thinkingSince.get(side.id) : undefined;
     const moveMs = thinking && since !== undefined ? Math.max(0, now - since) : 0;
@@ -1353,7 +1353,6 @@ function renderStrips(): void {
     node.innerHTML =
       `${side.name ? engineAvatarHtml(side.name) : ''}` +
       `<span class="strip-id"><strong>${htmlEscape(name)}</strong><small><span class="side-dot ${color}" aria-hidden="true"></span>${meta}</small></span>` +
-      (output?.evalText ? `<span class="strip-metric" title="${htmlEscape(name)}'s previous completed search, White's view"><small>Eval · White</small>${htmlEscape(output.evalText)}</span>` : '') +
       (showClock ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small>${formatSeconds(usedMs)}</span>` : '');
   };
   update('blackSideLabel', 'b', sides.b);
