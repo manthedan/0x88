@@ -12,6 +12,7 @@ let n = 2;
 let visits = 8;
 let maxPlies = 160;
 let busy = false;
+let memoryPending = false;
 let status = 'Idle. No model is loaded until you start a gate.';
 let generation = '';
 let rows: Row[] = [];
@@ -25,7 +26,7 @@ function helps4(effectiveVisits = visits, effectivePlies = maxPlies): boolean {
 }
 
 function start(count = n, options: { visits?: number; maxPlies?: number; pairs?: number } = {}) {
-  if (busy) throw new Error('Gate already active');
+  if (busy || memoryPending) throw new Error('Gate or memory sample already active');
   const effectiveVisits = options.visits ?? visits;
   const effectivePlies = options.maxPlies ?? maxPlies;
   if (count === 8 && !helps4(effectiveVisits, effectivePlies)) throw new Error('N=8 stays parked unless N=4 improves median throughput by 10%');
@@ -42,10 +43,11 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
     if (message.type === 'phase') status = `Trial ${message.index + 1}: ${message.concurrency} game(s), physical batch ${message.physical}${message.control ? ', numerical control' : ''}. ${message.phase === 'memory' ? 'Sampling memory outside the timing interval.' : 'Loading and warming up.'}`;
     if (message.type === 'memory') {
       const target = worker;
+      memoryPending = true;
       const measure = (performance as Performance & { measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory;
       const sample = measure ? measure.call(performance).then(({ bytes }) => ({ bytes, note: 'Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency' }),
         (failure) => ({ bytes: null, note: String(failure) })) : Promise.resolve({ bytes: null, note: 'UASM unavailable' });
-      void sample.then((value) => target?.postMessage({ type: 'memory', generation: message.generation, sample: value }));
+      void sample.then((value) => target?.postMessage({ type: 'memory', generation: message.generation, sample: value })).finally(() => { memoryPending = false; });
     }
     if (message.type === 'progress') {
       currentGame = message.game;
@@ -63,7 +65,7 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
   worker.postMessage({ type: 'start', n: count, visits: effectiveVisits, maxPlies: effectivePlies, pairs: options.pairs ?? 3, runId: crypto.randomUUID(), allow8: helps4(effectiveVisits, effectivePlies) });
 }
 function stop() { worker?.postMessage({ type: 'stop' }); status = 'Stopping after the in-flight GPU run settles.'; }
-function cancelGame(game = currentGame, token = generation) { worker?.postMessage({ type: 'cancelGame', game, generation: token }); }
+function cancelGame(game?: number, token = generation) { worker?.postMessage({ type: 'cancelGame', game, generation: token }); }
 function download() {
   const url = URL.createObjectURL(new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' }));
   const anchor = document.createElement('a');
@@ -75,7 +77,7 @@ function download() {
 
 onMount(() => {
   // Explicit lab automation only. No autostart query, product import or persisted setting.
-  const api = { start, stop, cancelGame, snapshot: () => ({ busy, status, error, generation, currentGame, rows, results, helps4: helps4() }) };
+  const api = { start, stop, cancelGame, snapshot: () => ({ busy, memoryPending, status, error, generation, currentGame, rows, results, helps4: helps4() }) };
   Object.assign(window, { __arenaSimul: api });
   return () => { worker?.terminate(); delete (window as unknown as Record<string, unknown>).__arenaSimul; };
 });
@@ -95,9 +97,9 @@ onMount(() => {
     </div>
     <p>Four distinct openings, each with reversed engine colours. Three serial/simul pairs run in ABAB order, followed by a same-export serial control. Each game keeps search batch 1, full history and a fresh tree per move. Capped games count as draws.</p>
     <div class="actions">
-      <button class="primary" disabled={busy} onclick={() => start()}>Run gate</button>
+      <button class="primary" disabled={busy || memoryPending} onclick={() => start()}>Run gate</button>
       <button disabled={!busy} onclick={stop}>Stop</button>
-      <button disabled={!busy} onclick={() => cancelGame()}>Cancel current game</button>
+      <button disabled={!busy} onclick={() => cancelGame()}>Cancel an active game</button>
       <button disabled={!results.length || busy} onclick={download}>Export evidence</button>
     </div>
   </section>
@@ -116,7 +118,7 @@ onMount(() => {
       </table>
     </div>
   {/if}
-  <p class="note">*Page, worker and WASM memory sampled after each trial with its session still loaded. This is not a peak and excludes GPU residency. GPU allocation volume is recorded separately, not called live memory. Timing on this shared machine is noisy; an idle-machine re-measure is required before any promotion decision. The lab has no strength-testing claim.</p>
+  <p class="note">*Page, worker and WASM memory sampled in a separate pass after all timed trials, with the same-export control session still loaded. This is not a peak and excludes GPU residency. GPU allocation volume is recorded separately, not called live memory. Timing on this shared machine is noisy; an idle-machine re-measure is required before any promotion decision. The lab has no strength-testing claim.</p>
 </main>
 
 <style>

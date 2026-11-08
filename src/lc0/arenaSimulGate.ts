@@ -58,6 +58,11 @@ export function simulHelps4(results: SimulEligibilityResult[], visits: number, m
   });
 }
 
+export function simulCancelGame(controllers: Map<number, AbortController>, game?: number): void {
+  const target = game ?? controllers.keys().next().value;
+  if (target !== undefined) controllers.get(target)?.abort();
+}
+
 export function simulGeneration(runId: string, trial: number): string {
   return `${runId}:${trial}`;
 }

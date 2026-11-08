@@ -1,6 +1,6 @@
 import '../nn/ortConsoleFilter.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { simulGeneration } from './arenaSimulGate.ts';
+import { simulCancelGame, simulGeneration } from './arenaSimulGate.ts';
 import { simulProbe } from './arenaSimulProbe.ts';
 import { ARENA_SIMUL_PROTOCOL, runSimulTrial, SIMUL_OPENINGS, SIMUL_SEARCH_OPTIONS, validateSimulTrial } from './arenaSimulRunner.ts';
 import { type Lc0Evaluation, type Lc0EvaluationProvider, type Lc0EvaluatorInput, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
@@ -34,7 +34,10 @@ async function sampleMemory(signal: AbortSignal): Promise<MemorySample> {
       cleanup();
       reject(signal.reason);
     };
-    const timer = setTimeout(() => finish({ bytes: null, note: 'Memory sample timed out' }), 15000);
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Memory sample timed out; reload before another gate'));
+    }, 60000);
     const cleanup = () => {
       clearTimeout(timer);
       signal.removeEventListener('abort', abort);
@@ -157,9 +160,11 @@ async function benchmark(message: Start, signal: AbortSignal) {
       });
       // Never publish normal-looking performance rates for an incomplete trial.
       if (trial.completed !== 8) throw new Error('Trial cancelled; incomplete games are not scored or timed as completed games');
-      post({ type: 'phase', phase: 'memory', generation, index, physical, concurrency, control });
-      // Session stays alive; UASM is sampled only AFTER the measured interval.
-      const memory = await sampleMemory(signal);
+      // Memory is a SEPARATE pass after ALL timed rows, never between A/B trials:
+      // UASM can trigger GC long after its caller's timeout. No subsequent timing
+      // work may run while that promise is pending, including after Stop/restart.
+      if (control) post({ type: 'phase', phase: 'memory', generation, index, physical, concurrency, control });
+      const memory = control ? await sampleMemory(signal) : { bytes: null, note: 'Memory sampled after all timed trials on the same-export control' };
       const row = {
         ...trial,
         index,
@@ -198,7 +203,7 @@ async function benchmark(message: Start, signal: AbortSignal) {
 
 self.onmessage = (
   event: MessageEvent<
-    Start | { type: 'stop' } | { type: 'cancelGame'; generation: string; game: number } | { type: 'memory'; generation: string; sample: MemorySample }
+    Start | { type: 'stop' } | { type: 'cancelGame'; generation: string; game?: number } | { type: 'memory'; generation: string; sample: MemorySample }
   >,
 ) => {
   const message = event.data;
@@ -211,7 +216,7 @@ self.onmessage = (
     return;
   }
   if (message.type === 'cancelGame') {
-    if (message.generation === generation) controllers.get(message.game)?.abort();
+    if (message.generation === generation) simulCancelGame(controllers, message.game);
     return;
   }
   if (run) {

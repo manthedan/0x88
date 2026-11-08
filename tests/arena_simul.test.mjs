@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { analyzeSimulRun } from '../scripts/analyze_arena_simul.mjs';
 import { boardToFen } from '../src/chess/board.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { ArenaSimulBroker } from '../src/lc0/arenaSimulBroker.ts';
-import { simulEquivalentGames, simulGeneration, simulHelps4 } from '../src/lc0/arenaSimulGate.ts';
+import { simulCancelGame, simulEquivalentGames, simulGeneration, simulHelps4 } from '../src/lc0/arenaSimulGate.ts';
 import { simulProbe } from '../src/lc0/arenaSimulProbe.ts';
 import { runSimulTrial, SIMUL_OPENINGS, SIMUL_SEARCH_OPTIONS } from '../src/lc0/arenaSimulRunner.ts';
 
@@ -235,6 +236,20 @@ test('simul generations cannot collide across gate restarts and N=8 eligibility 
   assert.equal(simulHelps4([{ ...result, rows: result.rows.map((row) => (row.control ? { ...row, games: changed } : row)) }], 8, 160), false);
 });
 
+test('simul cancellation button selects a live controller, not stale last-progress metadata', () => {
+  const finished = signal();
+  const live = signal();
+  const controllers = new Map([
+    [0, finished],
+    [4, live],
+  ]);
+  controllers.delete(0);
+  simulCancelGame(controllers);
+  assert.equal(live.signal.aborted, true);
+  assert.equal(finished.signal.aborted, false);
+  simulCancelGame(new Map());
+});
+
 test('simul probe checks Stop between actual physical calls, including batch-1 logical batches', async () => {
   const controller = signal();
   const calls = [];
@@ -255,6 +270,30 @@ test('simul probe checks Stop between actual physical calls, including batch-1 l
   assert.deepEqual(batched.calls, [['a', 'b', 'c', 'd']]);
 });
 
+test('simul evidence audit replays legal histories and rejects illegal moves or incomplete trials', async () => {
+  const serial = await runSimulTrial(deterministicProvider(), { concurrency: 1, visits: 4, maxPlies: 2 });
+  const simul = await runSimulTrial(deterministicProvider(), { concurrency: 4, visits: 4, maxPlies: 2 });
+  const run = {
+    protocol: 'arena-simul-1',
+    n: 4,
+    visits: 4,
+    maxPlies: 2,
+    pairs: 3,
+    openings: SIMUL_OPENINGS.map(({ name, fen, moves }) => ({ name, fen, moves })),
+    rows: Array.from({ length: 7 }, (_, index) => {
+      const trial = index % 2 ? simul : serial;
+      return { ...trial, index, physical: index % 2 ? 4 : 1, control: index === 6, physicalRuns: trial.broker.batches };
+    }),
+  };
+  assert.equal(analyzeSimulRun(run).rows.length, 7);
+  const illegal = structuredClone(run);
+  illegal.rows[0].games[0].moves[0] = 'a1a8';
+  assert.throws(() => analyzeSimulRun(illegal), /illegal move/);
+  const incomplete = structuredClone(run);
+  incomplete.rows[0].completed = 7;
+  assert.throws(() => analyzeSimulRun(incomplete));
+});
+
 test('simul stays lab-only, never autostarts, and uses distinct physical exports without a global RNG override', () => {
   const page = readFileSync(new URL('../src/routes/lab/arena-simul/+page.svelte', import.meta.url), 'utf8');
   const worker = readFileSync(new URL('../src/lc0/arenaSimulWorker.ts', import.meta.url), 'utf8');
@@ -263,7 +302,8 @@ test('simul stays lab-only, never autostarts, and uses distinct physical exports
   assert.match(worker, /ortPhysicalBatchSize/);
   assert.ok(worker.indexOf('if (trial.completed !== 8)') < worker.indexOf("post({ type: 'trial', row })"));
   assert.doesNotMatch(worker, /liveBytes|peakBytes|buffer\.destroy/);
-  assert.match(worker, /await sampleMemory\(signal\)/);
+  assert.match(worker, /control \? await sampleMemory\(signal\)/);
+  assert.match(page, /busy \|\| memoryPending/);
   assert.match(worker, /for \(const input of inputs\) \{\s*signal\.throwIfAborted\(\)/);
   assert.match(worker, /signal\.throwIfAborted\(\);\s*const warmup/);
   assert.match(worker, /message\.generation === generation/);
