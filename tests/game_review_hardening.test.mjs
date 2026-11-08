@@ -34,18 +34,29 @@ test('terminal review detects both colors of mate and stalemate without asking t
   assert.equal(terminal('7k/5Q2/6K1/8/8/8/8/8 b - - 0 25').scoreCp, 0);
 });
 
-test('terminal review accounts for fifty-move and insufficient-material draws', () => {
-  assert.equal(terminal(START_FEN.replace('0 1', '100 51')).winWhite, .5);
+test('terminal review accounts for automatic 75-move and insufficient-material draws', () => {
+  assert.equal(terminal(START_FEN.replace('0 1', '150 76')).winWhite, .5);
   assert.equal(terminal('7k/8/6K1/8/8/8/8/8 w - - 0 25').scoreCp, 0);
   assert.equal(terminal(START_FEN), undefined);
 });
 
 test('review draw uses the supplied history, not only the final FEN', () => {
   const game = new GameTree();
-  for (const uci of ['g1f3', 'g8f6', 'f3g1', 'f6g8', 'g1f3', 'g8f6', 'f3g1', 'f6g8']) game.addUci(uci);
+  for (const uci of Array(4).fill(['g1f3', 'g8f6', 'f3g1', 'f6g8']).flat()) game.addUci(uci);
   const fens = game.lineTo().map((node) => node.fen);
   assert.equal(terminal(game.current.fen, fens.slice(0, -1)).winWhite, .5);
   assert.equal(terminal(game.current.fen, []), undefined);
+});
+
+test('claimable threefold repetitions remain engine-scored when the mainline continues', () => {
+  const game = new GameTree();
+  for (const uci of Array(2).fill(['g1f3', 'g8f6', 'f3g1', 'f6g8']).flat()) game.addUci(uci);
+  assert.equal(terminal(game.current.fen, game.lineTo().slice(0, -1).map((node) => node.fen)), undefined);
+});
+
+test('claimable fifty-move positions do not fabricate a draw evaluation', () => {
+  assert.equal(terminal(START_FEN.replace('0 1', '100 51')), undefined);
+  assert.equal(terminal(START_FEN.replace('0 1', '149 75')), undefined);
 });
 
 test('critical ply hook is ranked and next/previous navigation walks game order with wrap', () => {

@@ -156,7 +156,7 @@ onMount(() => {
         <p class="review-metric-label">Approximate accuracy</p>
         <div id="reviewSummary" hidden></div>
         <details class="review-explanation"><summary>How this review is measured</summary><p>Accuracy is a simple mean of move scores from estimated winning-chance loss, excluding forced moves. It is not a calibrated result prediction or the same game score as Lichess or Chess.com. Inaccuracies lose at least 5 percentage points, mistakes 10, and blunders 20. Shallow searches can change these labels.</p></details>
-        <p class="review-metric-label">White advantage</p>
+        <p class="review-metric-label review-graph-heading">White advantage <span id="reviewGraphSource"></span></p>
         <div id="reviewChart" class="review-chart" role="slider" tabindex="0" aria-label="Game evaluation graph" aria-describedby="reviewGraphHint" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" hidden></div>
         <p id="reviewSelection" class="review-selection"></p>
         <p id="reviewGraphHint" class="review-hint">Click the graph or use arrow keys to explore. Home and End jump to either end.</p>
@@ -733,6 +733,8 @@ onMount(() => {
   :global(.review-side strong){font:600 13px var(--sans)}
   :global(.review-accuracy){font:650 24px/1.15 var(--sans); letter-spacing:-.02em; color:var(--ink)}
   :global(.review-counts){font:12px/1.6 var(--sans); color:var(--muted)}
+  .review-graph-heading{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px}
+  #reviewGraphSource{font:400 12px var(--sans); color:var(--muted)}
   .review-explanation{margin-top:8px; font:12px/1.5 var(--sans); color:var(--muted)}
   .review-explanation summary{cursor:pointer}
   .review-explanation p{margin:6px 0}

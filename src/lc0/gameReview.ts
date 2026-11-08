@@ -8,7 +8,7 @@
  */
 
 import { type BoardState } from '../chess/board.ts';
-import { automaticDrawReason } from '../chess/drawRules.ts';
+import { insufficientMaterial, repetitionCount } from '../chess/drawRules.ts';
 import { inCheck } from '../chess/movegen.ts';
 
 export type MoveClass = 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder' | 'forced';
@@ -156,12 +156,16 @@ export function adjacentCriticalPly(review: GameReview, current: number, directi
     : plies.slice().reverse().find((ply) => ply < current) ?? plies.at(-1);
 }
 
-/** History excludes the current board. Checkmate takes precedence over draw rules. */
+/**
+ * History excludes the current board. Checkmate takes precedence over draw rules.
+ * Threefold/50-move draws require a claim: a winning player may decline it, so
+ * let the engine score those positions. Only fivefold/75-move draws are automatic.
+ */
 export function terminalReviewPosition(board: BoardState, historyFens: string[], legalCount: number): ReviewPosition | undefined {
   if (legalCount === 0 && inCheck(board)) {
     return { winWhite: board.turn === 'w' ? 0 : 1, bestUci: null, legalMoves: 0, mateIn: 0 };
   }
-  if (legalCount === 0 || automaticDrawReason(board, historyFens)) {
+  if (legalCount === 0 || insufficientMaterial(board) || board.halfmove >= 150 || repetitionCount(board, historyFens) >= 5) {
     return { winWhite: 0.5, bestUci: null, legalMoves: legalCount, scoreCp: 0 };
   }
   return undefined;

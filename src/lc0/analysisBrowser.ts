@@ -2960,7 +2960,17 @@ async function runGameReview(): Promise<void> {
     el('reviewStatus').textContent = 'Load a PGN or play some moves first.';
     return;
   }
-  cancelActiveAnalysisRun();
+  // Hand off ownership from the cancelled position search. Its finally must
+  // not consume queued maintenance and reload/dispose the reviewer's runtime.
+  // The next interactive analysis applies these flags before taking cache keys.
+  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+  analysisAbort = null;
+  analyzing = false;
+  retireAnalysisRunCentipawnKeys();
+  clearAnalysisSearchProgress();
+  el('stop').toggleAttribute('disabled', true);
+  el('analyze').toggleAttribute('disabled', false);
+  selectEl('lc0RuntimeSelect').disabled = false;
   hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
   const { engine, row, label, depth } = reviewEngineChoice();
   clearReviewState();
@@ -3036,10 +3046,11 @@ async function runGameReview(): Promise<void> {
     lastReview = reviewGame(positions, moves, parseFen(nodes[0].fen).turn);
     lastReviewNodes = nodes;
     lastReviewSignature = reviewSignature(nodes);
+    el('reviewGraphSource').textContent = `${analysisEngineName(label)} · depth ${depth}`;
     renderReview(lastReview, nodes);
     el('reviewCopyPgn').hidden = false;
     el('reviewDownloadPgn').hidden = false;
-    el('reviewStatus').textContent = `${label} · depth ${depth} · ${moves.length} moves reviewed · ${cacheHits}/${nodes.length} positions cached.`;
+    el('reviewStatus').textContent = `${label} · depth ${depth} · ${moves.length} ${moves.length === 1 ? 'move' : 'moves'} reviewed · ${cacheHits}/${nodes.length} positions cached.`;
     if (matchMedia('(max-width: 900px)').matches) {
       // Scroll only this tab, not the page: keep the board in place and bring the graph into view.
       const panel = el('reviewPanel');
@@ -3970,7 +3981,7 @@ function afterNavigation() {
     analysisGameTree = tree;
     stopGameReview('Review cancelled for the new game.');
     clearReviewState('Load a PGN or play moves, then review the mainline.');
-    cancelActiveAnalysisRun();
+    cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     searcher?.resetTree();
     (mainEvaluator as CachedLc0Evaluator | null)?.clearCache?.();
     // Queued behind any cancelled search, so that search cannot repopulate the
@@ -5091,6 +5102,10 @@ export function mountAnalysisBrowser(): () => void {
     analyzing,
     searchActive: analysisAbort !== null && !analysisAbort.signal.aborted,
     reloadActive: analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
+    reloadQueued: reloadLc0AfterActiveRun,
+    disposeQueued: disposeUnusedEnginesAfterActiveRun,
+    runtime: selectedLc0Runtime(),
+    workerRuntime,
     hidden: hiddenTab.hidden,
     suspended: hiddenTab.suspended.join(','),
     fen: tree.current.fen,
