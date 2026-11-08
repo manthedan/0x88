@@ -241,3 +241,19 @@ test('Play from here retains its restart position with imported history or a zer
     { startFen: 'bad', moves: [] },
   ]) assert.equal(decodePlaySnapshot(envelope('play', playData({ practiceBoundary: 1, practicePosition })), engineIds), null);
 });
+
+test('Copy PGN drops an imported result once the mainline no longer owns it', async () => {
+  const { pgnResultForExport } = await import('../src/lc0/workspaceAutosave.ts');
+  const headers = { White: 'A', Result: '1-0' };
+  assert.deepEqual(pgnResultForExport(headers, '1-0', true), { headers, result: '1-0' });
+  const edited = pgnResultForExport(headers, '1-0', false);
+  assert.equal(edited.result, '*');
+  assert.equal(edited.headers.Result, '*');
+  assert.equal(headers.Result, '1-0', 'workspace headers are not mutated');
+  const parsed = parsePgnGame('[Result "1-0"]\n\n1. e4 1-0');
+  parsed.tree.toStart();
+  const pgn = gameTreeToPgn(parsed.tree, edited.headers, edited.result);
+  assert.match(pgn, /\[Result "\*"\]/);
+  assert.match(pgn, /\*$/);
+  assert.equal(pgnResultForExport({ White: 'A' }, '1-0', false).headers.Result, undefined);
+});

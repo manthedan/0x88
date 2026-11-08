@@ -43,7 +43,7 @@ import { REVIEW_CLASS_GLYPH, REVIEW_CLASS_LABEL, reviewChartSvg, reviewMoveLabel
 import { type GameNode, GameTree } from './gameTree.ts';
 import { MistakeRetry, retryProblems, retrySideFromTags } from './retryMistakes.ts';
 import { quarantineRetryPanels } from './retrySpoilers.ts';
-import { createWorkspaceAutosave, decodeAnalysisSnapshot, hasExplicitWorkspaceInput, readWorkspace, serializeTree } from './workspaceAutosave.ts';
+import { createWorkspaceAutosave, decodeAnalysisSnapshot, hasExplicitWorkspaceInput, pgnResultForExport, readWorkspace, serializeTree } from './workspaceAutosave.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
 import { LatestOnlyTask } from './latestOnlyTask.ts';
 import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
@@ -4617,7 +4617,8 @@ function copyFen() {
 }
 
 function copyPgn() {
-  const pgn = gameTreeToPgn(tree, workspaceHeaders, workspaceResult);
+  const exported = pgnResultForExport(workspaceHeaders, workspaceResult, reviewMetadata.get(tree)?.signature === reviewSignature());
+  const pgn = gameTreeToPgn(tree, exported.headers, exported.result);
   inputEl('pgnInput').value = pgn;
   void navigator.clipboard?.writeText(pgn).catch(() => undefined);
   el('message').textContent = 'PGN copied to the box and clipboard.';

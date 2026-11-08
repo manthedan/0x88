@@ -105,6 +105,12 @@ function decodeEnvelope(raw: string, kind: WorkspaceKind): Record<string, unknow
   return object(envelope.data);
 }
 
+/** An imported result belongs only to the mainline it was imported with; an edited line exports as unfinished. */
+export function pgnResultForExport(headers: Record<string, string>, result: string, owned: boolean): { headers: Record<string, string>; result: string } {
+  if (owned) return { headers, result };
+  return { headers: 'Result' in headers ? { ...headers, Result: '*' } : headers, result: '*' };
+}
+
 export function decodeAnalysisSnapshot(raw: string): { tree: GameTree; headers: Record<string, string>; result: string } | null {
   try {
     const data = decodeEnvelope(raw, 'analysis');
