@@ -419,7 +419,7 @@ onMount(() => {
   .board-tools{display:flex; align-items:stretch; gap:6px; flex:0 0 auto}
   .board-tools:global([hidden]){display:none}
   .board-tool-disclosure{display:contents}
-  .board-tools-trigger, .mobile-tool-label{display:none}
+  .tool-button.board-tools-trigger, .mobile-tool-label{display:none}
   .tool-button{display:inline-flex; align-items:center; justify-content:center; gap:6px; height:100%; min-height:0; padding:0 11px; border-radius:7px; border:1px solid var(--border-input); background:transparent; color:var(--ink); font:600 13px var(--sans); white-space:nowrap}
   .tool-button:hover:not(:disabled){background:var(--panel-2); color:var(--ink)}
   .tool-button.icon-only{width:40px; padding:0}
@@ -584,6 +584,7 @@ onMount(() => {
     background:var(--panel-inset); color:var(--text-soft);
     font-size:12px; line-height:1.5;
   }
+  .app-sidebar #message:empty{display:none}
   .app-sidebar :global(#message[data-routine=true]){position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%)}
   .app-sidebar :global(.model-load-progress){margin:6px 12px 0}
   /* Per-engine progress lives in the summary rows (meter + stats) and on the Stop button. */
@@ -818,7 +819,7 @@ onMount(() => {
   .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel, .analysis-workspace .review-panel{order:3; flex:1 1 0; min-height:0}
   .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
   @media (min-width:901px){
-    .analysis-workspace .analysis-content>.history-panel:has(:global(.move-pair)){flex-shrink:0; min-height:374px}
+    .analysis-workspace .analysis-content>.history-panel:has(:global(.move-pair)){flex-shrink:0; min-height:clamp(144px, calc(var(--board-size) - 326px), 374px)}
     .history-panel:has(.opening-explorer[open]){min-height:0!important}
   }
   .opening-explorer{flex:0 0 auto; border-top:1px solid var(--rule); min-height:0}
@@ -967,7 +968,7 @@ onMount(() => {
   :global(.quick-pgn::placeholder){font-family:var(--sans); color:var(--muted)}
   :global(.quick-pgn-actions){display:flex; align-items:center; gap:14px}
   :global(.quick-pgn-hint){font-size:13px; color:var(--muted)}
-  :global(.quick-pgn-load){min-height:44px; padding:0 18px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:var(--accent-ink); font:650 14px var(--sans)}
+  :global(.quick-pgn-load){min-height:44px; padding:0 18px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:var(--on-accent); font:650 14px var(--sans)}
   /* Rare long SAN + large eval pairs wrap the score rather than spilling into the next ply. */
   :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:space-between; gap:0 5px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
@@ -1035,7 +1036,7 @@ onMount(() => {
     .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
     .board-tool-disclosure{display:block; position:relative}
-    .board-tools-trigger{display:flex; width:48px!important; height:44px; font-size:18px!important; letter-spacing:1px}
+    .tool-button.board-tools-trigger{display:flex; width:48px!important; height:44px; font-size:18px!important; letter-spacing:1px}
     .mobile-tool-label{display:inline}
     .board-tools{position:absolute; z-index:25; bottom:calc(100% + 6px); right:0; display:grid; grid-template-columns:1fr; gap:3px; width:230px; height:auto; padding:6px; border:1px solid var(--border-input); border-radius:8px; background:var(--panel); box-shadow:0 8px 24px #0004}
     .board-tools .tool-button{justify-content:flex-start; min-height:44px; width:100%; border-color:transparent; font-size:14px}
@@ -1063,6 +1064,8 @@ onMount(() => {
     :global(.insight-action){min-height:44px; padding:6px 10px; gap:3px}
     :global(.insight-headline){font-size:16px}
     :global(.insight-spread){font-size:13px}
+    /* The following engine rows already identify each move's supporters. */
+    :global(.insight-groups){display:none}
     :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 36px; gap:5px; min-height:40px; padding:2px 0 0 7px}
     :global(.engine-summary-name){min-height:38px; gap:7px}
     :global(.engine-summary-text){display:grid; gap:2px}

@@ -2358,7 +2358,10 @@ function renderMoveList() {
   const hadFocus = list.contains(document.activeElement);
   // Unchanged markup is left alone so a half-typed PGN in the empty-state box survives re-renders.
   const markup = analysisMoveMarkup(tree.root, tree.current);
-  if (list.innerHTML !== markup) list.innerHTML = markup;
+  // HTML serialization normalizes valueless data attributes, so string equality
+  // alone cannot preserve the live empty-state textarea and its selection.
+  const livePasteBox = !tree.root.children.length && list.querySelector('[data-quick-pgn]');
+  if (!livePasteBox && list.innerHTML !== markup) list.innerHTML = markup;
   decorateMoveEvals();
   const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
   if (hadFocus) selected?.focus({ preventScroll: true });
@@ -2382,7 +2385,7 @@ function renderOpening() {
   const summary = openingSummary(stats);
   if (hasDatabasePositionStats && !importedGames.length)
     el('openingSummary').textContent = `${summary.total} games here · ${databasePositionCollectionCount} collections`;
-  else el('openingSummary').textContent = `${summary.total} of ${importedGames.length} games continue here`;
+  else el('openingSummary').textContent = `${summary.total} game${summary.total === 1 ? '' : 's'} continue${summary.total === 1 ? 's' : ''} here`;
   renderExplorerComparison();
   if (!stats.length) {
     body.innerHTML = '<tr><td colspan="3" class="small">No mainline continuations here. Move back or load another collection.</td></tr>';
