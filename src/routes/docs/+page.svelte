@@ -368,8 +368,8 @@ onMount(() => {
 
 <header class="doc-intro">
   <h1 id="doc-h1">Using 0x88</h1>
-  <p class="intro-lede">Workspace guides, troubleshooting, engine details and source links.</p>
-  <p class="intro-help">For help, see <a href="#trouble-webgpu">WebGPU unavailable</a>, <a href="#trouble-downloads">slow or repeated downloads</a>, or <a href="#trouble-cache">clearing downloaded models</a>.</p>
+  <p class="intro-lede">Workspace guides, engine details and source links.</p>
+  <p class="intro-help">Fix <a href="#trouble-webgpu">WebGPU problems</a> or <a href="#trouble-downloads">slow downloads</a>, or <a href="#trouble-cache">clear downloaded models</a>.</p>
 </header>
 
 <!-- ===== Contents: left rail on desktop, sticky bar + sheet on phones ===== -->
@@ -469,12 +469,12 @@ onMount(() => {
 <!-- ===== GET STARTED: THE WORKSPACES ===== -->
 <section id="pages">
   <h2>Get started <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
-  <p class="lead">0x88 has three workspaces: Analysis, Arena and Play. Everything runs in your browser. Each engine downloads the first time you use it and is reused after that.</p>
+  <p class="lead">Analysis, Arena and Play run in your browser; each engine downloads on first use and is reused afterwards.</p>
 
   <div class="page-block">
     <div class="task-heading">
       <h3 id="pages-analysis" aria-labelledby="analysis-title"><span id="analysis-title">Analyse a position</span><a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
-      <a class="open-link" href="/app/analysis/">Open Analysis <span aria-hidden="true">→</span></a>
+      <a class="open-link" href="/app/analysis/">Open Analysis</a>
     </div>
     <p>Run several engines on the same position and compare their best moves, evaluations and lines.</p>
     <ol class="steps">
@@ -488,7 +488,7 @@ onMount(() => {
   <div class="page-block">
     <div class="task-heading">
       <h3 id="pages-arena" aria-labelledby="arena-title"><span id="arena-title">Run an engine match</span><a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
-      <a class="open-link" href="/app/arena/">Open Arena <span aria-hidden="true">→</span></a>
+      <a class="open-link" href="/app/arena/">Open Arena</a>
     </div>
     <p>Play engines against each other and keep score. The project also uses Arena to compare browser engine builds and Lc0 networks.</p>
     <ol class="steps">
@@ -513,7 +513,7 @@ onMount(() => {
   <div class="page-block">
     <div class="task-heading">
       <h3 id="pages-play" aria-labelledby="play-title"><span id="play-title">Play a game</span><a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
-      <a class="open-link" href="/app/play/">Open Play <span aria-hidden="true">→</span></a>
+      <a class="open-link" href="/app/play/">Open Play</a>
     </div>
     <p>Play against Maia3, Leela Queen Odds or any of the analysis engines.</p>
     <ol class="steps">
@@ -1227,7 +1227,7 @@ onMount(() => {
     column-gap:56px; align-items:start;
   }
   .doc-intro{grid-area:intro; margin-bottom:32px}
-  .doc-intro h1{font-size:clamp(30px,4vw,40px); margin:0 0 10px; line-height:1.1; letter-spacing:-.015em}
+  .doc-intro h1{font-size:44px; margin:0 0 10px; line-height:1.1; letter-spacing:-.015em}
   .intro-lede{margin:0; color:var(--ink-soft); font-size:16.5px; max-width:66ch; line-height:1.6}
   .intro-help{margin:10px 0 0; color:var(--text); font-size:14px; line-height:1.55; max-width:66ch}
   .intro-help a{text-decoration:underline; text-underline-offset:3px}
@@ -1310,7 +1310,7 @@ onMount(() => {
   .doc-content section:last-child{padding-bottom:0}
   .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 20px)}
   .doc-content h2{
-    font-size:32px; margin:8px 0 14px;
+    font-size:28px; margin:8px 0 14px;
     line-height:1.2; letter-spacing:-.01em;
     display:flex; align-items:center; gap:10px;
   }
@@ -1379,13 +1379,11 @@ onMount(() => {
   }
   .doc-content .open-link{
     display:inline-flex; align-items:center; gap:8px; min-height:40px;
-    padding:8px 16px; border-radius:var(--radius-sm);
-    background:var(--accent); color:var(--on-accent); font-weight:650; font-size:14px;
+    padding:8px 14px; border:1px solid var(--border-input-hover); border-radius:var(--radius-sm);
+    background:transparent; color:var(--ink-soft); font-weight:600; font-size:14px;
     text-decoration:none;
   }
-  .doc-content .open-link:hover{background:var(--accent-hover); text-decoration:none}
-  .open-link span{transition:transform .15s ease}
-  .open-link:hover span{transform:translateX(3px)}
+  .doc-content .open-link:hover{border-color:var(--accent); background:var(--panel-2); color:var(--ink); text-decoration:none}
   .section-nav{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:32px; padding-top:24px; border-top:1px solid var(--rule-strong)}
   .section-nav a{display:grid; gap:4px; padding:14px 16px; border:1px solid var(--rule-strong); border-radius:var(--radius); color:var(--ink); font-size:15px; background:var(--panel); text-decoration:none}
   .section-nav a:hover{border-color:var(--accent); background:var(--panel-2)}
@@ -1520,14 +1518,15 @@ onMount(() => {
     .doc-body .doc-grid{
       grid-template-columns:minmax(0,1fr);
       grid-template-areas:"intro" "toc" "content";
-      padding:20px 16px 56px;
+      padding:16px 16px 56px;
     }
-    .doc-intro{margin-bottom:16px}
-    .doc-intro h1{font-size:30px; margin-bottom:8px}
-    .intro-lede{font-size:15.5px; line-height:1.55}
+    .doc-intro{margin-bottom:8px}
+    .doc-intro h1{font-size:36px; margin-bottom:6px}
+    .intro-lede{font-size:15px; line-height:1.5}
+    .intro-help{margin-top:6px; line-height:1.5}
     .toc{
       top:var(--hdr, 64px); z-index:30;
-      margin:0 -16px 24px; padding:8px 16px;
+      margin:0 -16px 12px; padding:8px 16px;
       background:color-mix(in srgb, var(--bg) 92%, transparent);
       -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
       border-bottom:1px solid var(--rule-strong);
@@ -1541,7 +1540,7 @@ onMount(() => {
     }
     .mobile-search{display:flex; align-items:center; justify-content:center; gap:6px; padding:8px 10px; border:1px solid var(--rule-strong); border-radius:var(--radius); background:var(--panel); color:var(--ink); font:600 13px var(--sans); cursor:pointer}
     .mobile-search svg{width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round}
-    .toc-toggle-label{flex:0 0 auto; font-size:12px; font-weight:700; color:var(--text-soft)}
+    .toc-toggle-label{flex:0 0 auto; font-size:13px; font-weight:700; color:var(--text)}
     .toc-current{flex:1 1 auto; min-width:0; font-size:14.5px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .chevron{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
     .toc.open .chevron{transform:rotate(180deg)}
@@ -1557,18 +1556,19 @@ onMount(() => {
     .group-toggle{min-height:44px; min-width:44px}
     .toc-groups a{min-height:44px; padding:8px 10px}
     .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 76px)}
-    .doc-content h2{font-size:25px}
+    .doc-content h2{font-size:24px; margin-bottom:10px}
+    .doc-content > section > p.lead{margin-bottom:16px}
     .page-block{padding:20px 16px}
     .device-check{padding:12px 14px}
     .device-check dl > div{grid-template-columns:1fr; gap:2px}
   }
   @media(max-width:480px){
     .doc-intro{margin-bottom:8px}
-    .toc{margin-bottom:20px}
-    .page-block{padding:20px 0; border:0; border-top:1px solid var(--rule-strong); border-radius:0; background:none; margin-bottom:16px}
-    .task-heading{gap:10px; margin-bottom:12px}
-    .page-block h3{flex-basis:100%; font-size:20px}
-    .doc-content .open-link{min-height:40px; padding:7px 12px}
+    .toc{margin-bottom:12px}
+    .page-block{padding:16px 0; border:0; border-top:1px solid var(--rule-strong); border-radius:0; background:none; margin-bottom:16px}
+    .task-heading{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; margin-bottom:12px}
+    .page-block h3{font-size:20px}
+    .doc-content .open-link{min-height:44px; padding:8px 10px; font-size:13px}
     .doc-content .steps{gap:10px}
     .steps li{padding-left:32px}
     .section-nav{gap:8px}

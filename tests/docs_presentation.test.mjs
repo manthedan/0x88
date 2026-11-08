@@ -87,6 +87,7 @@ test('all workspace launch links are with the title, ahead of the four-step proc
     const launch = descendants(card, 'a').find((node) => textAttr(node, 'href') === `/app/${workspace}/`);
     const steps = descendants(card, 'ol')[0];
     assert.ok(launch.end < steps.start);
+    assert.doesNotMatch(markup(launch), /→/);
     assert.equal(steps.children.filter((node) => node.name === 'li').length, 4);
     assert.ok(elements.find(({ node, ancestors }) => node === launch && ancestors.some((parent) => hasClass(parent, 'task-heading'))));
     assert.ok(attr(heading, 'aria-labelledby'), 'the heading name excludes its permalink');
@@ -108,6 +109,16 @@ test('all workspace launch links are with the title, ahead of the four-step proc
   assert.equal(links.length, 76, 'all external link instances are retained');
   assert.equal(new Set(links).size, 41, 'all unique external destinations are retained');
   assert.ok(!elements.some(({ node }) => hasClass(node, 'not-yet')), 'obsolete availability note is removed');
+});
+
+test('title hierarchy, quiet launch links and readable mobile contents are explicit', () => {
+  assert.match(source, /\.doc-intro h1\{font-size:44px/);
+  assert.match(source, /\.doc-content h2\{\s*font-size:28px/);
+  assert.match(source, /\.doc-intro h1\{font-size:36px/);
+  assert.match(source, /\.doc-content h2\{font-size:24px/);
+  assert.match(source, /\.doc-content \.open-link\{min-height:44px/);
+  assert.match(source, /\.toc-toggle-label\{[^}]*font-size:13px;[^}]*color:var\(--text\)/);
+  assert.match(source, /background:transparent; color:var\(--ink-soft\); font-weight:600/);
 });
 
 test('subsection search containers exclude adjacent topics', () => {
