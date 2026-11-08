@@ -17,7 +17,13 @@ const toc: TocGroup[] = [
     label: 'Get started',
     id: 'pages',
     items: [
-      { id: 'pages-analysis', label: 'Analyse a position' },
+      { id: 'pages-analysis', label: 'Analyse a position', children: [
+        { id: 'save-engine-setups', label: 'Save engine setups' },
+        { id: 'explore-engine-lines', label: 'Explore engine lines' },
+        { id: 'share-restore', label: 'Share and restore your work' },
+        { id: 'review-game', label: 'Review a game' },
+        { id: 'export-review', label: 'Export a game review' },
+      ] },
       { id: 'pages-arena', label: 'Run an engine match' },
       { id: 'pages-play', label: 'Play a game' },
       { id: 'human-vs-computer', label: 'Human-like opponents' },
@@ -460,19 +466,42 @@ onMount(() => {
     <div class="task-reference">
     <h4>Exploring the results</h4>
     <ul>
-      <li>In <strong>Engines</strong>, open <strong>Saved engine setups</strong> to name and save the current engines, budgets and number of lines. Select a setup to load it, or delete it when no longer needed. Setups stay on this device; use <strong>Export setups</strong> and <strong>Import setups</strong> for JSON backups. Large networks still require confirmation before loading.</li>
-      <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines. Press <strong>Preview</strong> beside a line to explore the whole continuation on a separate board using Previous/Next or the arrow keys. <strong>Insert line</strong> adds it to the game; clicking a move in an engine row inserts only through that move, following existing variations when present.</li>
-      <li><strong>Copy link</strong> beside the board copies a URL for the current position. Opening it restores that FEN only, without the game’s moves, variations or engine settings.</li>
+      <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines.</li>
+      <li><strong>Review tab</strong> &mdash; whole-game accuracy and move classifications.</li>
       <li><strong>Compare tab</strong> &mdash; every engine’s best move and evaluation in one table, with the difference between them.</li>
       <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
     </ul>
     </div>
-    <p><strong>Return to your analysis:</strong> the game tree, variations, comments and selected move are saved automatically on this device. Reload or reopen Analysis to continue. Use <strong>Start new</strong> in the restore notice, or <strong>Load → Reset</strong>, to clear it; loading a PGN or FEN replaces it. A position link takes priority over the saved game.</p>
-    <h4>Review a game</h4>
-    <p>Load a PGN or play a line, then open the <strong>Review</strong> tab. Choose a CPU reviewer (Stockfish Lite by default) and a depth, and press <strong>Review game</strong>. Other selected CPU engines are available in the reviewer menu. You can cancel at any time and still navigate the board while it runs.</p>
-    <p>Click the advantage graph or focus it and use the arrow keys to visit a move. Home and End jump to the ends. The move list shows classifications; <strong>Previous</strong> and <strong>Next</strong> cycle through the five largest error losses. Approximate accuracy is a per-side mean based on estimated winning-chance loss, not the same game score as Lichess or Chess.com. Review depends on engine and depth. A changed mainline clears the result.</p>
-    <p><strong>Copy reviewed PGN</strong> or <strong>Download PGN</strong> exports the mainline with original engine evals and error NAGs, retaining the imported headers, result and starting FEN. This review export does not include variations or existing comments. Completed position results are reused in this session when the engine, depth and history match; nothing is uploaded.</p>
     <p class="not-yet"><strong>Not available yet:</strong> a local opening explorer for your own PGN collections is in development and hidden in the current build.</p>
+  </div>
+
+  <div class="page-block">
+    <h4 id="save-engine-setups">Save engine setups</h4>
+    <p>In <strong>Engines → Saved engine setups</strong>, name and save the current engines, budgets and number of lines. Select a setup to load it or delete one you no longer need; setups stay on this device, with <strong>Export setups</strong> and <strong>Import setups</strong> providing JSON backups. Large networks still require confirmation before loading.</p>
+  </div>
+
+  <div class="page-block">
+    <h4 id="explore-engine-lines">Explore engine lines</h4>
+    <p>Use the <strong>Preview</strong> button beside an engine line to explore its full continuation on a separate board with Previous/Next or the arrow keys. <strong>Insert line</strong> adds the continuation to the game; clicking a move in an engine row inserts only through that move, following existing variations when present.</p>
+  </div>
+
+  <div class="page-block">
+    <h4 id="share-restore">Share and restore your work</h4>
+    <p>Analysis automatically saves the game tree, variations, comments and selected move on this device so you can reload or reopen it to continue. <strong>Start new</strong> in the restore notice or <strong>Load → Reset</strong> clears the save; loading a PGN or FEN replaces it. Under the board’s <strong>Copy</strong> button, <strong>Copy link</strong> shares the current FEN only, without moves, variations or engine settings, and opening a position link takes priority over the saved game.</p>
+  </div>
+
+  <div class="page-block">
+    <h4 id="review-game">Review a game</h4>
+    <ol>
+      <li>Load a PGN or play a line, then open <strong>Review</strong>, choose a CPU reviewer and depth, and press <strong>Review game</strong>. Stockfish Lite is the default; other selected CPU engines appear in the reviewer menu. You can cancel or navigate the board while it runs.</li>
+      <li>Click the advantage graph or focus it and use arrow keys to visit moves, with Home/End for the ends. The move list shows classifications; <strong>Previous</strong> and <strong>Next</strong> cycle through the five largest error losses.</li>
+      <li>Approximate accuracy averages estimated winning-chance loss per side, not the game score used by Lichess or Chess.com. Results depend on engine and depth, and changing the mainline clears them.</li>
+    </ol>
+  </div>
+
+  <div class="page-block">
+    <h4 id="export-review">Export a game review</h4>
+    <p><strong>Copy reviewed PGN</strong> or <strong>Download PGN</strong> exports the mainline with original engine evals and error NAGs, retaining imported headers, result and starting FEN. Variations and existing comments are not included in this export. Completed position results are reused during this session when engine, depth and history match; nothing is uploaded.</p>
   </div>
 
   <div class="page-block">
