@@ -151,6 +151,47 @@ onMount(() => {
     <div id="historyPanel" class="history-panel" role="tabpanel" aria-labelledby="movesTab" tabindex="0">
       <p id="openingName" class="opening-name" hidden></p>
       <div id="movelist" class="movelist move-panel" aria-label="Move history"></div>
+      <details id="openingExplorer" class="opening-explorer">
+        <summary>Opening explorer <span>Local PGN collections</span></summary>
+        <div class="explorer-body">
+          <div class="collection-toolbar">
+            <div class="field"><label for="pgnDbSelect">Collection to explore</label><select id="pgnDbSelect"><option value="">New collection</option></select></div>
+            <details id="collectionMenu" class="collection-menu"><summary>Collection actions</summary>
+              <div class="collection-actions" role="group" aria-label="Collection actions">
+                <button id="loadPgnDb" type="button">Load selected collection</button>
+                <button id="newPgnCollection" type="button">New collection</button>
+                <button id="renamePgnDb" type="button">Rename to name below</button>
+                <button id="duplicatePgnDb" type="button">Duplicate collection</button>
+                <button id="exportPgnDbCollection" type="button">Download selected PGN</button>
+                <button id="exportPgnDb" type="button">Back up all collections (JSON)</button>
+                <button id="importPgnDb" type="button">Restore JSON backup</button>
+                <button id="deletePgnDb" type="button">Delete selected collection…</button>
+              </div>
+            </details>
+          </div>
+          <div class="field collection-name"><label for="pgnDbName">Collection name</label><input id="pgnDbName" type="text" maxlength="80" autocomplete="off" placeholder="My games" /></div>
+          <p id="pgnDbInfo" class="small" role="status">Checking local storage…</p>
+          <p id="openingSummary" class="small">Import a PGN batch to explore it from the board position.</p>
+          <table id="opening" class="opening"><thead><tr><th scope="col">Move</th><th scope="col" class="num">Games</th><th scope="col">Results</th></tr></thead><tbody></tbody></table>
+          <details id="openingComparison" class="explorer-comparison"><summary>Compare with predictions</summary>
+            <div class="row"><label for="explorerRating">Maia3 rating</label><select id="explorerRating"><option>1100</option><option>1300</option><option selected>1500</option><option>1700</option><option>1900</option><option>2200</option></select></div>
+            <p class="small">Observed frequency is from this collection. Maia3 predicts human moves, not the best move. Engine recommendations use the current analysis.</p>
+            <p id="explorerComparisonInfo" class="small">Load Maia3 in the Human tab to add model probabilities.</p>
+            <div id="explorerComparisonRows"></div>
+          </details>
+          <details id="collectionImport" class="collection-import"><summary>Import PGN</summary>
+            <p class="small">Paste games or choose a .pgn file. Up to 200 games, 1 MiB per batch and 32 KiB per game. Nothing is uploaded.</p>
+            <label for="importGamesFile">PGN file</label><input id="importGamesFile" type="file" accept=".pgn,application/x-chess-pgn,text/plain" />
+            <label for="importGamesInput">PGN batch</label><textarea id="importGamesInput" spellcheck="false" placeholder="Paste PGN games, including their headers"></textarea>
+            <div class="row"><button id="savePgnDb" type="button">Import and save</button><button id="importGames" type="button">Explore without saving</button><button id="downloadPgn" type="button">Download PGN</button></div>
+          </details>
+          <progress id="importProgress" aria-label="PGN import progress" hidden></progress>
+          <p id="importInfo" class="small" role="status"></p>
+          <p class="explorer-note small">Games are counted once per mainline position, using the first continuation if it repeats. Results show White / draw / Black / unknown. Collections stay in this browser; back them up before clearing site data.</p>
+          <input id="importPgnDbFile" type="file" accept="application/json,.json" hidden />
+          <div hidden><button id="searchPgnDbPosition" type="button">Search position</button><div id="pgnDbList"></div><div id="pgnDbSearchResults"></div></div>
+        </div>
+      </details>
     </div>
     <div id="reviewPanel" class="review-panel" role="tabpanel" aria-labelledby="reviewTab" tabindex="0">
       <div class="review-settings">
@@ -281,7 +322,7 @@ onMount(() => {
       <div class="capabilities-slot"><BrowserCapabilities /></div>
       </div>
     </dialog>
-    <!-- Parked: features below are intentionally hidden. Remove hidden to re-enable. -->
+    <!-- Online history import remains parked; local PGN import is in Moves. -->
     <details class="section-block" hidden>
       <summary>Opening explorer</summary>
       <div class="row">
@@ -295,32 +336,6 @@ onMount(() => {
           <select id="importColor"><option value="">both</option><option value="white">white</option><option value="black">black</option></select></div>
         <button id="fetchGames" type="button">Fetch games</button>
       </div>
-      <textarea id="importGamesInput" spellcheck="false" placeholder="fetch by username above, or paste many games (PGN) here, then Import"></textarea>
-      <div class="row">
-        <button id="importGames" type="button">Import games</button>
-        <button id="downloadPgn" type="button">Download PGN</button>
-        <span id="importInfo" class="small"></span>
-      </div>
-      <div class="row database-row">
-        <div class="field"><label for="pgnDbSelect">Local database</label>
-          <select id="pgnDbSelect"><option value="">no saved collections</option></select></div>
-        <div class="field" style="flex:1 1 180px"><label for="pgnDbName">Collection name</label>
-          <input id="pgnDbName" type="text" spellcheck="false" autocomplete="off" placeholder="saved PGN collection" /></div>
-        <button id="savePgnDb" type="button">Save to DB</button>
-        <button id="loadPgnDb" type="button">Load</button>
-        <button id="renamePgnDb" type="button">Rename</button>
-        <button id="duplicatePgnDb" type="button">Duplicate</button>
-        <button id="deletePgnDb" type="button">Delete</button>
-        <button id="exportPgnDbCollection" type="button">Export PGN</button>
-        <button id="exportPgnDb" type="button">Export DB</button>
-        <button id="importPgnDb" type="button">Import DB</button>
-        <input id="importPgnDbFile" type="file" accept="application/json,.json" style="display:none" />
-        <button id="searchPgnDbPosition" type="button">Search position</button>
-      </div>
-      <div id="pgnDbInfo" class="small">Local PGN database: checking IndexedDB…</div>
-      <div id="pgnDbList" class="pgn-db-list small"></div>
-      <div id="pgnDbSearchResults" class="pgn-db-results small"></div>
-      <table id="opening" class="opening"><thead><tr><th>Move</th><th class="num">Games</th><th>White / Draw / Black</th></tr></thead><tbody></tbody></table>
     </details>
   </section>
 </main>
@@ -628,7 +643,7 @@ onMount(() => {
   :global(.pgn-db-hit .moves){font-family:var(--mono); color:var(--ink); margin-top:3px; overflow-wrap:anywhere}
   :global(table.opening){width:100%; border-collapse:collapse; font-size:13px; margin-top:8px}
   :global(table.opening th), :global(table.opening td){text-align:left; padding:5px 8px; border-bottom:1px solid var(--rule)}
-  :global(table.opening th){color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase}
+  :global(table.opening th){color:var(--muted); font-weight:600; font-size:13px}
   :global(table.opening td.num), :global(table.opening th.num){text-align:right; font-family:var(--mono)}
   :global(table.opening tr.mv){cursor:pointer}
   :global(table.opening tr.mv:hover td){background:var(--accent-soft)}
@@ -759,6 +774,37 @@ onMount(() => {
   .tab-badge{padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
   .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel, .analysis-workspace .review-panel{order:3; flex:1 1 0; min-height:0}
   .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
+  .opening-explorer{flex:0 0 auto; border-top:1px solid var(--rule); min-height:0}
+  .opening-explorer>summary{padding:10px 12px; color:var(--ink); font-weight:600; cursor:pointer}
+  .opening-explorer>summary span{font-weight:400; font-size:12px; color:var(--muted); margin-left:8px}
+  .opening-explorer[open]{flex:1 1 auto; overflow:auto}
+  /* Explorer is a Moves subview: give it the panel without altering the default layout. */
+  :global(.analysis-content[data-view=moves]:has(#openingExplorer[open])) :is(.engine-strip, .add-engine-inline){display:none}
+  .history-panel:has(.opening-explorer[open]) :is(#movelist, #openingName){display:none}
+  .explorer-body{padding:0 12px 12px}
+  .explorer-body .small{font-size:13px; line-height:1.5; margin:8px 0; overflow-wrap:anywhere}
+  .collection-toolbar{display:flex; align-items:end; gap:8px; flex-wrap:wrap}
+  .collection-toolbar>.field{flex:1 1 170px; min-width:0}
+  .collection-toolbar select{width:100%; min-width:0}
+  .collection-menu{flex:1 1 130px}
+  .collection-menu>summary{padding:8px; border:1px solid var(--border-input); border-radius:6px; cursor:pointer; font-size:13px}
+  .collection-menu[open]{flex-basis:100%}
+  .collection-actions{display:grid; grid-template-columns:1fr 1fr; gap:4px; padding-top:6px}
+  .collection-actions button{font-size:13px; min-height:40px; text-align:left; padding:6px 8px}
+  .collection-name{margin-top:10px}
+  .collection-import, .explorer-comparison{margin-top:12px; border-top:1px solid var(--rule); padding-top:10px}
+  .collection-import>summary, .explorer-comparison>summary{cursor:pointer; font-weight:600; color:var(--ink)}
+  .collection-import textarea{width:100%; min-height:100px; margin:6px 0}
+  .collection-import input[type=file]{width:100%; margin:6px 0 12px; font-size:13px}
+  .collection-import .row{gap:6px; flex-wrap:wrap}
+  .collection-import button{font-size:13px; min-height:40px; padding:6px 10px}
+  .explorer-comparison .row{margin-top:10px}
+  .explorer-comparison :global(.prediction-row){padding:8px 0; border-bottom:1px solid var(--rule); font-size:13px; line-height:1.6}
+  :global(table.opening .continuation){min-height:40px; padding:4px 8px; font:650 14px var(--mono); background:transparent; color:var(--ink)}
+  :global(table.opening .result-counts){display:block; margin-top:3px; font-size:12px; color:var(--muted); white-space:nowrap}
+  :global(table.opening .wdlbar){min-width:80px; height:10px}
+  :global(.wdlbar .u){background:repeating-linear-gradient(45deg,var(--panel) 0 3px,var(--muted) 3px 4px)}
+  #importProgress{width:100%; margin-top:10px}
   :global(.analysis-content[data-view=moves]) .history-panel{display:flex}
   .analysis-workspace .comparison-panel{border:0; padding:8px 12px; overflow:auto; overscroll-behavior:contain}
   .analysis-workspace .human-panel{border:0; padding:4px 12px 10px; overflow:auto; overscroll-behavior:contain}

@@ -80,8 +80,9 @@ test('all workspace launch links are with the title, ahead of the four-step proc
   }
   const reference = elements.find(({ node }) => hasClass(node, 'task-reference')).node;
   assert.match(markup(reference), /<h4>Exploring the results<\/h4>/);
-  const note = elements.find(({ node }) => hasClass(node, 'not-yet')).node;
-  assert.ok(note.start > reference.end, 'the unchanged availability note stays separate');
+  const explorer = byId('explore-own-games');
+  assert.ok(explorer.start > reference.end, 'the explorer task stays separate from getting started');
+  assert.ok(!elements.some(({ node }) => hasClass(node, 'not-yet')), 'obsolete availability note is removed');
 });
 
 test('subsection search containers exclude adjacent topics', () => {

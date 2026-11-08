@@ -4,7 +4,7 @@ import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
+import { gameTreeToPgn, parsePgnGame } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
@@ -42,7 +42,7 @@ import { withEngineTimeout } from './engineTimeout.ts';
 import { LatestOnlyTask } from './latestOnlyTask.ts';
 import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import {
-  buildOpeningPositionIndex,
+  OPENING_INDEX_VERSION,
   type ImportedGame,
   mergeOpeningMoveStats,
   type OpeningMoveStat,
@@ -70,6 +70,8 @@ import {
   searchPgnCollectionsByPosition,
   updatePgnCollectionPositionIndex,
 } from './pgnDatabase.ts';
+
+import { importLocalPgn, MAX_BACKUP_BYTES, MAX_PGN_BYTES } from './localPgnImport.ts';
 
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
@@ -598,6 +600,8 @@ let activePgnCollectionId = '';
 let lastImportSource: PgnCollectionSource = 'manual';
 let lastImportUsername = '';
 let lastImportColor = '';
+let pgnTaskBusy = false;
+let explorerMaia: { fen: string; policies: Map<string, number>[] } | null = null;
 const bookCache = new Map<string, OpeningMoveStat[]>();
 // Distinct brush for the opening-book most-played move (not LC0 green / SF blue).
 const BOOK_BRUSH = 'yellow';
@@ -2048,7 +2052,7 @@ function renderEvalSourceMenu(): void {
 function renderLegend() {
   // Engine names live on each result group; only the independent book needs a key.
   el('engineLegend').hidden = currentBookStats().length === 0;
-  el('engineLegend').innerHTML = `<span class="key"><span class="dot" style="background:${BOOK_SWATCH}"></span>Opening book</span>`;
+  el('engineLegend').innerHTML = `<span class="key"><span class="dot" style="background:${BOOK_SWATCH}"></span>Collection frequency</span>`;
 }
 
 function signedPawns(value: number): string {
@@ -2175,6 +2179,7 @@ function engineLogoFrame(logo: string, name: string): string {
 
 function renderEngineComparison(lines: AnalysisLine[]): void {
   renderEngineSummaries(lines);
+  renderExplorerComparison();
   const bestByEngine = [...new Map(lines.filter((line) => line.multipv === 1 && line.pvUci[0]).map((line) => [line.engine, line])).values()];
   const body = el('engineCompare').querySelector('tbody')!;
   el('comparisonInsight').hidden = bestByEngine.length < 2;
@@ -2276,7 +2281,7 @@ function fitMoveList(): void {
     if (list.style.maxHeight) list.style.maxHeight = '';
     return;
   }
-  const available = panel.clientHeight - el('openingName').offsetHeight;
+  const available = panel.clientHeight - el('openingName').offsetHeight - el('openingExplorer').offsetHeight;
   const height = `${Math.max(row, Math.floor(available / row) * row)}px`;
   if (list.style.maxHeight !== height) list.style.maxHeight = height;
 }
@@ -2328,35 +2333,93 @@ function renderOpening() {
   const body = el('opening').querySelector('tbody')!;
   const hasDatabasePositionStats = databasePositionKey === positionKey(tree.current.fen) && databasePositionStats.length > 0;
   if (!importedGames.length && !hasDatabasePositionStats) {
-    body.innerHTML = '<tr><td colspan="3" class="small">import games or search the local DB to see opening stats</td></tr>';
+    body.innerHTML = '<tr><td colspan="3" class="small">Choose a collection or open Import PGN below.</td></tr>';
+    el('openingSummary').textContent = 'Explore your own games from the current board position.';
+    renderExplorerComparison();
     return;
   }
   const stats = currentBookStats();
   const summary = openingSummary(stats);
   if (hasDatabasePositionStats && !importedGames.length)
-    el('importInfo').textContent = `local DB search · ${databasePositionCollectionCount} collections · ${summary.total} from here`;
-  else el('importInfo').textContent = `${importedGames.length} games · ${summary.total} from here`;
+    el('openingSummary').textContent = `Local search · ${databasePositionCollectionCount} collections · ${summary.total} games with a continuation`;
+  else el('openingSummary').textContent = `${importedGames.length} games loaded · ${summary.total} with a continuation here`;
+  renderExplorerComparison();
   if (!stats.length) {
-    body.innerHTML = '<tr><td colspan="3" class="small">no games reached this position</td></tr>';
+    body.innerHTML = '<tr><td colspan="3" class="small">No mainline continuations here. Move back or load another collection.</td></tr>';
     return;
   }
   body.innerHTML = stats
     .map((stat) => {
       const pct = (n: number) => (stat.count ? (n / stat.count) * 100 : 0).toFixed(0);
       return (
-        `<tr class="mv" data-uci="${htmlEscape(stat.uci)}"><td class="san">${htmlEscape(stat.san)}</td>` +
+        `<tr><td class="san"><button type="button" class="continuation" data-uci="${htmlEscape(stat.uci)}" aria-label="Play ${htmlEscape(stat.san)}">${htmlEscape(stat.san)}</button></td>` +
         `<td class="num">${stat.count}</td>` +
-        `<td><div class="wdlbar" title="W ${stat.whiteWins} / D ${stat.draws} / B ${stat.blackWins}">` +
-        `<div class="w" style="width:${pct(stat.whiteWins)}%"></div><div class="d" style="width:${pct(stat.draws)}%"></div><div class="b" style="width:${pct(stat.blackWins)}%"></div></div></td></tr>`
+        `<td><div class="wdlbar" aria-hidden="true">` +
+        `<div class="w" style="width:${pct(stat.whiteWins)}%"></div><div class="d" style="width:${pct(stat.draws)}%"></div><div class="b" style="width:${pct(stat.blackWins)}%"></div><div class="u" style="width:${pct(stat.unknown)}%"></div></div>` +
+        `<span class="result-counts">${stat.whiteWins} / ${stat.draws} / ${stat.blackWins} / ${stat.unknown} unknown</span></td></tr>`
       );
     })
     .join('');
 }
 
-function setImportedPgn(raw: string, messagePrefix = 'imported'): number {
-  const games = parsePgnGames(raw).map((game) => ({ tree: game.tree, result: game.result }));
+function renderExplorerComparison(): void {
+  if (!(el('openingComparison') as HTMLDetailsElement).open) return;
+  const fen = tree.current.fen;
+  const rating = Number(selectEl('explorerRating').value);
+  const policy = explorerMaia?.fen === fen ? explorerMaia.policies[MAIA3_PANEL_RATINGS.indexOf(rating)] : undefined;
+  const lines = (lineCache.get(fen) ?? []).filter((line) => line.multipv === 1 && !line.error && line.pvUci[0]);
+  const stats = currentBookStats();
+  const total = openingSummary(stats).total;
+  el('explorerComparisonInfo').textContent = policy ? `Maia3 model at ${rating}; both players conditioned at this rating.`
+    : maia3PanelEvaluator ? 'Waiting for Maia3 predictions for this position.' : 'Load Maia3 in the Human tab to add model probabilities. No model is downloaded by this comparison.';
+  el('explorerComparisonRows').innerHTML = stats.map((stat) => {
+    const engines = lines.filter((line) => line.pvUci[0] === stat.uci).map((line) => line.engine);
+    return `<div class="prediction-row"><strong>${htmlEscape(stat.san)}</strong> · Observed ${(100 * stat.count / total).toFixed(1)}% (${stat.count}/${total})<br>` +
+      `Maia3 ${rating}: ${policy ? `${((policy.get(stat.uci) ?? 0) * 100).toFixed(1)}%` : 'not loaded'}<br>` +
+      `Engine best: ${engines.length ? htmlEscape(engines.join(', ')) : lines.length ? 'not selected by analyzed engines' : 'no analysis yet'}</div>`;
+  }).join('');
+}
+
+async function runPgnTask(action: () => void | Promise<void>): Promise<void> {
+  if (pgnTaskBusy) return;
+  pgnTaskBusy = true;
+  const signal = mountAbort.signal;
+  const root = el('openingExplorer');
+  root.setAttribute('aria-busy', 'true');
+  const controls = [...root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('button,input,select,textarea')];
+  const disabled = controls.map((node) => node.disabled);
+  controls.forEach((node) => node.disabled = true);
+  try { await action(); }
+  catch (error) { if (!isStaleMount(signal)) el('importInfo').textContent = `Import failed: ${(error as Error).message}`; }
+  finally {
+    if (!isStaleMount(signal)) {
+      pgnTaskBusy = false;
+      controls.forEach((node, i) => node.disabled = disabled[i]);
+      const info = el('pgnDbInfo').textContent;
+      const name = inputEl('pgnDbName').value;
+      renderPgnDatabaseCollections(activePgnCollectionId);
+      inputEl('pgnDbName').value = name;
+      el('pgnDbInfo').textContent = info;
+      root.removeAttribute('aria-busy');
+      el('importProgress').hidden = true;
+    }
+  }
+}
+
+async function setImportedPgn(raw: string, messagePrefix = 'Imported'): Promise<number> {
+  const signal = mountAbort.signal;
+  const progress = el('importProgress') as HTMLProgressElement;
+  progress.hidden = false;
+  const batch = await importLocalPgn(raw, (done, total) => {
+    if (isStaleMount(signal)) return;
+    progress.max = total;
+    progress.value = done;
+    el('importInfo').textContent = `Indexing mainlines: ${done} of ${total} games…`;
+  }, signal);
+  if (isStaleMount(signal)) throw new DOMException('Page closed', 'AbortError');
+  const games = batch.games;
   importedGames = games;
-  importedPositionIndex = buildOpeningPositionIndex(games);
+  importedPositionIndex = batch.positionIndex;
   databasePositionStats = [];
   databasePositionKey = '';
   databasePositionCollectionCount = 0;
@@ -2498,7 +2561,10 @@ async function refreshPgnDatabaseCollections(selected = activePgnCollectionId, m
     activePgnCollectionId = pgnCollections.some((entry) => entry.id === selected) ? selected : '';
     renderPgnDatabaseCollections(activePgnCollectionId);
   } catch (error) {
-    if (!mountSignal || !isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Local PGN database failed: ${(error as Error).message}`;
+    if (!mountSignal || !isStaleMount(mountSignal)) {
+      renderPgnDatabaseCollections('');
+      el('pgnDbInfo').textContent = `Local storage unavailable: ${(error as Error).message}. You can still explore without saving and download PGN.`;
+    }
   }
 }
 
@@ -2507,7 +2573,7 @@ function suggestPgnDatabaseName(): void {
   inputEl('pgnDbName').value = defaultPgnCollectionName(lastImportSource, lastImportUsername);
 }
 
-function importGames() {
+async function importGames(): Promise<void> {
   const raw = inputEl('importGamesInput').value.trim();
   if (!raw) {
     el('importInfo').textContent = 'paste or fetch PGN first';
@@ -2518,9 +2584,11 @@ function importGames() {
     lastImportUsername = '';
     lastImportColor = '';
     activePgnCollectionId = '';
-    setImportedPgn(raw);
+    await setImportedPgn(raw);
     suggestPgnDatabaseName();
     renderPgnDatabaseCollections('');
+    (el('collectionImport') as HTMLDetailsElement).open = false;
+    el('openingExplorer').scrollTop = 0;
   } catch (error) {
     el('importInfo').textContent = `import failed: ${(error as Error).message}`;
   }
@@ -2548,7 +2616,7 @@ async function fetchGames() {
     lastImportColor = opts.color;
     activePgnCollectionId = '';
     inputEl('pgnDbName').value = defaultPgnCollectionName(site, username);
-    setImportedPgn(pgn, `fetched ${username}:`);
+    await setImportedPgn(pgn, `fetched ${username}:`);
     renderPgnDatabaseCollections('');
   } catch (error) {
     // A network/CORS failure surfaces as a TypeError with no status.
@@ -2597,7 +2665,7 @@ async function saveCurrentPgnCollection(): Promise<void> {
   try {
     // Always parse the textarea at save time: users can edit PGN after an
     // import/load, and the persisted metadata must describe the saved text.
-    gameCount = setImportedPgn(raw);
+    gameCount = await setImportedPgn(raw);
   } catch (error) {
     el('pgnDbInfo').textContent = `Cannot save invalid PGN: ${(error as Error).message}`;
     return;
@@ -2619,7 +2687,11 @@ async function saveCurrentPgnCollection(): Promise<void> {
     activePgnCollectionId = record.id;
     inputEl('pgnDbName').value = record.name;
     await refreshPgnDatabaseCollections(record.id, mountSignal);
-    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Saved “${record.name}” (${record.gameCount} games) to local IndexedDB.`;
+    if (!isStaleMount(mountSignal)) {
+      el('pgnDbInfo').textContent = `Saved “${record.name}” (${record.gameCount} games) to local IndexedDB.`;
+      (el('collectionImport') as HTMLDetailsElement).open = false;
+      el('openingExplorer').scrollTop = 0;
+    }
   } catch (error) {
     if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Save failed: ${(error as Error).message}`;
   } finally {
@@ -2648,8 +2720,10 @@ async function loadSelectedPgnCollection(): Promise<void> {
     lastImportColor = record.color ?? '';
     inputEl('pgnDbName').value = record.name;
     inputEl('importGamesInput').value = record.pgn;
-    setImportedPgn(record.pgn, `loaded “${record.name}”:`);
-    if (!record.positionIndex && importedPositionIndex) {
+    await setImportedPgn(record.pgn, `Loaded “${record.name}”:`);
+    (el('collectionImport') as HTMLDetailsElement).open = false;
+    el('openingExplorer').scrollTop = 0;
+    if (record.indexVersion !== OPENING_INDEX_VERSION && importedPositionIndex) {
       await updatePgnCollectionPositionIndex(record.id, importedPositionIndex);
       if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
       await refreshPgnDatabaseCollections(record.id, mountSignal);
@@ -2745,12 +2819,24 @@ async function importPgnDatabaseFile(file: File | undefined): Promise<void> {
   if (!file) return;
   const mountSignal = mountAbort.signal;
   try {
+    if (file.size > MAX_BACKUP_BYTES) throw new Error('Backup exceeds 16 MiB.');
+    el('importInfo').textContent = 'Reading backup…';
     const backup = JSON.parse(await file.text()) as unknown;
     if (isStaleMount(mountSignal)) return;
-    const count = await importPgnDatabaseBackup(backup);
+    const count = await importPgnDatabaseBackup(backup, (done, total) => {
+      if (isStaleMount(mountSignal)) return;
+      const progress = el('importProgress') as HTMLProgressElement;
+      progress.hidden = false;
+      progress.max = total || 1;
+      progress.value = done;
+      el('importInfo').textContent = `Rebuilding backup: ${done} of ${total} collections…`;
+    }, mountSignal);
     if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
     await refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
-    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Imported ${count} PGN collections from ${file.name}; position indexes rebuilt from raw PGN.`;
+    if (!isStaleMount(mountSignal)) {
+      el('pgnDbInfo').textContent = `Restored ${count} collections. Select one to explore. Existing collections were kept.`;
+      el('importInfo').textContent = `Restored ${count} collections from ${file.name}; indexes rebuilt from raw PGN.`;
+    }
   } catch (error) {
     if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Database import failed: ${(error as Error).message}`;
   } finally {
@@ -4148,6 +4234,8 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
       return `<div class="maia3-row"><span class="maia3-elo">${MAIA3_PANEL_RATINGS[i]}</span><span class="maia3-score" title="Expected points for White in a human game at this rating">${score.toFixed(2)}</span>${top}</div>`;
     });
     el('maia3Grid').innerHTML = rows.join('');
+    explorerMaia = { fen, policies: evaluations.map((evaluation) => new Map(evaluation.legalPriors.map((entry) => [entry.uci, entry.prior]))) };
+    renderExplorerComparison();
   } finally {
     maia3PanelEvaluating = false;
   }
@@ -4858,7 +4946,36 @@ function wireEvents() {
     container.addEventListener('mouseleave', clearPreview);
     container.addEventListener('focusout', clearPreview);
   }
-  el('importGames').addEventListener('click', importGames);
+  el('openingExplorer').addEventListener('toggle', () => { fitMoveList(); keepCurrentMoveInView(); });
+  el('openingComparison').addEventListener('toggle', renderExplorerComparison);
+  el('explorerRating').addEventListener('change', renderExplorerComparison);
+  el('importGames').addEventListener('click', () => { void runPgnTask(importGames); });
+  el('newPgnCollection').addEventListener('click', () => {
+    activePgnCollectionId = '';
+    renderPgnDatabaseCollections('');
+    inputEl('pgnDbName').value = '';
+    (el('collectionImport') as HTMLDetailsElement).open = true;
+    inputEl('pgnDbName').focus();
+  });
+  el('collectionMenu').addEventListener('click', (event) => {
+    if ((event.target as HTMLElement).closest('button')) (el('collectionMenu') as HTMLDetailsElement).open = false;
+  });
+  el('importGamesFile').addEventListener('change', () => {
+    const file = inputEl('importGamesFile').files?.[0];
+    if (!file) return;
+    void runPgnTask(async () => {
+      if (file.size > MAX_PGN_BYTES) throw new Error('PGN batch exceeds 1 MiB.');
+      const signal = mountAbort.signal;
+      const raw = await file.text();
+      if (isStaleMount(signal)) return;
+      inputEl('importGamesInput').value = raw;
+      activePgnCollectionId = '';
+      renderPgnDatabaseCollections('');
+      inputEl('pgnDbName').value = file.name.replace(/\.pgn$/i, '');
+      el('importInfo').textContent = `Read ${file.name}. Choose Import and save, or Explore without saving.`;
+      inputEl('importGamesFile').value = '';
+    });
+  });
   el('fetchGames').addEventListener('click', () => {
     void fetchGames();
   });
@@ -4866,6 +4983,8 @@ function wireEvents() {
   el('pgnDbSelect').addEventListener('change', () => {
     activePgnCollectionId = selectedPgnCollectionId();
     renderPgnDatabaseCollections(activePgnCollectionId);
+    if (activePgnCollectionId) void runPgnTask(loadSelectedPgnCollection);
+    else (el('collectionImport') as HTMLDetailsElement).open = true;
   });
   el('pgnDbList').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.pgn-db-card');
@@ -4876,35 +4995,35 @@ function wireEvents() {
     renderPgnDatabaseCollections(id);
   });
   el('savePgnDb').addEventListener('click', () => {
-    void saveCurrentPgnCollection();
+    void runPgnTask(saveCurrentPgnCollection);
   });
   el('loadPgnDb').addEventListener('click', () => {
-    void loadSelectedPgnCollection();
+    void runPgnTask(loadSelectedPgnCollection);
   });
   el('deletePgnDb').addEventListener('click', () => {
-    void deleteSelectedPgnCollection();
+    void runPgnTask(deleteSelectedPgnCollection);
   });
   el('renamePgnDb').addEventListener('click', () => {
-    void renameSelectedPgnCollection();
+    void runPgnTask(renameSelectedPgnCollection);
   });
   el('duplicatePgnDb').addEventListener('click', () => {
-    void duplicateSelectedPgnCollection();
+    void runPgnTask(duplicateSelectedPgnCollection);
   });
   el('exportPgnDbCollection').addEventListener('click', () => {
-    void exportSelectedPgnCollection();
+    void runPgnTask(exportSelectedPgnCollection);
   });
   el('exportPgnDb').addEventListener('click', () => {
-    void exportPgnDatabase();
+    void runPgnTask(exportPgnDatabase);
   });
   el('importPgnDb').addEventListener('click', () => inputEl('importPgnDbFile').click());
   el('importPgnDbFile').addEventListener('change', () => {
-    void importPgnDatabaseFile(inputEl('importPgnDbFile').files?.[0]);
+    void runPgnTask(() => importPgnDatabaseFile(inputEl('importPgnDbFile').files?.[0]));
   });
   el('searchPgnDbPosition').addEventListener('click', () => {
     void searchCurrentPositionInPgnDatabase();
   });
   inputEl('pgnDbName').addEventListener('keydown', (event) => {
-    if ((event as KeyboardEvent).key === 'Enter') void saveCurrentPgnCollection();
+    if ((event as KeyboardEvent).key === 'Enter') void runPgnTask(saveCurrentPgnCollection);
   });
   inputEl('importGamesInput').addEventListener('input', () => {
     activePgnCollectionId = '';
@@ -4920,7 +5039,7 @@ function wireEvents() {
     if ((event as KeyboardEvent).key === 'Enter') void fetchGames();
   });
   el('opening').addEventListener('click', (event) => {
-    const row = (event.target as HTMLElement).closest('tr[data-uci]');
+    const row = (event.target as HTMLElement).closest('button[data-uci]');
     const uci = row?.getAttribute('data-uci');
     if (uci && tree.addUci(uci)) afterNavigation();
   });
@@ -5253,6 +5372,8 @@ function resetAnalysisPageState(): void {
   evalSourceEngine = null;
   expandedEngines = new Set();
   showAllLineArrows = false;
+  pgnTaskBusy = false;
+  explorerMaia = null;
   importedGames = [];
   importedPositionIndex = null;
   databasePositionStats = [];
