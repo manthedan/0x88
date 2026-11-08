@@ -390,6 +390,7 @@ onMount(() => {
     --border-input:color-mix(in srgb, var(--ink) 52%, var(--panel));
     --border-input-hover:var(--border-input);
     --engine-color:var(--accent); /* overridden inline per engine row */
+    --engine-chip-color:var(--engine-color); /* darker Analysis-only avatar fills are set inline */
     --analysis-header-height:64px; /* measured locally by the page controller */
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
     --result-highlight:color-mix(in srgb, var(--ink) 13%, var(--panel));
