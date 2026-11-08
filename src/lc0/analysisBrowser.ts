@@ -4971,6 +4971,8 @@ function wireEvents() {
   el('openPosition').addEventListener('click', () => {
     const quick = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]');
     if (quick && !positionTools.open) {
+      // Explorer is a Moves subview that conceals the list, even on an empty game.
+      (el('openingExplorer') as HTMLDetailsElement).open = false;
       setView(el('movesTab') as HTMLButtonElement);
       quick.focus({ preventScroll: true });
       quick.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
