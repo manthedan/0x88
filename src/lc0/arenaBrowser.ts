@@ -4814,7 +4814,7 @@ function wireEvents() {
   arenaKeydownHandler = (event: KeyboardEvent) => {
     if (!reviewing && !(event.key === 'ArrowLeft' && liveTrail && liveTrail.entries.length > 1)) return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest?.('input,textarea,select,.eng-line')) return;
+    if (target?.closest?.('input,textarea,select,.eng-line,.arena-table-scroll')) return;
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
       stepReview(-1);
