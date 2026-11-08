@@ -32,7 +32,7 @@ import {
   lc0AnalysisLines,
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
-import { boardCheck, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
+import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
 import { REVIEW_CLASS_GLYPH, REVIEW_CLASS_LABEL, reviewChartSvg, reviewMoveLabel, reviewPlyAtRatio, reviewSummaryHtml } from './gameReviewPresentation.ts';
@@ -513,6 +513,7 @@ let retryOriginalOrientation: 'white' | 'black' = 'white';
 let retryOriginalAuto = false;
 let retryHumanGeneration = 0;
 let retryOriginalShapes: DrawShape[] = [];
+let retryModeGeneration = 0;
 const reviewMetadata = new WeakMap<GameTree, { tags: Record<string, string>; result: string; signature: string }>();
 let analyzing = false;
 let activeAnalysisSelectionKey = '';
@@ -3047,10 +3048,20 @@ function startMistakeRetry(): void {
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   maia3PanelTimer = null;
   closePvPreview();
+  hidePromotionOverlay(el('ground'));
+  retryModeGeneration += 1;
+  // We took ownership from the cancelled run, so its identity-guarded finally
+  // will not restore these controls or retire its search bookkeeping.
+  retireAnalysisRunCentipawnKeys();
+  el('stop').toggleAttribute('disabled', true);
+  el('analyze').toggleAttribute('disabled', false);
+  selectEl('lc0RuntimeSelect').disabled = false;
+  // Interactive analysis may have unregistered the fallback reviewer since review.
+  syncBrokerParticipants([...activeEngineRows(), lastReviewReviewer.row]);
   retryOriginalOrientation = orientation;
   retryOriginalAuto = inputEl('autoAnalyze').checked;
   inputEl('autoAnalyze').checked = false;
-  retryReviewer = lastReviewReviewer;
+  retryReviewer = { ...lastReviewReviewer, engine: reviewEngineChoice().engine };
   retryOriginalShapes = ground?.state.drawable.shapes.slice() ?? [];
   ground?.setShapes([]);
   retry = new MistakeRetry(tree, problems);
@@ -3166,13 +3177,15 @@ async function showRetryHumanLikelihood(): Promise<void> {
 function exitMistakeRetry(render = true): void {
   if (!retry) return;
   retry.cancel();
+  hidePromotionOverlay(el('ground'));
+  retryModeGeneration += 1;
   retry = null;
   retryReviewer = null;
   retryHumanGeneration += 1;
   restoreRetryPanels?.();
   restoreRetryPanels = null;
   orientation = retryOriginalOrientation;
-  ground?.setShapes(retryOriginalShapes);
+  const savedShapes = retryOriginalShapes;
   retryOriginalShapes = [];
   inputEl('autoAnalyze').checked = retryOriginalAuto;
   delete document.querySelector<HTMLElement>('.analysis-workspace')!.dataset.retrying;
@@ -3182,6 +3195,8 @@ function exitMistakeRetry(render = true): void {
   for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd']) el(id).toggleAttribute('disabled', false);
   if (render) {
     renderAll();
+    // Chessground clears manual shapes when renderBoard supplies a FEN.
+    ground?.setShapes(savedShapes);
     renderAnalysisStatus();
     scheduleMaia3Panel();
     el('retryStart').focus({ preventScroll: true });
@@ -4362,10 +4377,18 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
 async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
   const activeRetry = retry;
   if (activeRetry && !['attempt', 'wrong'].includes(activeRetry.phase)) { renderBoard(); return; }
-  const board = (activeRetry?.tree ?? tree).currentBoard();
-  const play = (move: Move) => {
-    if (activeRetry) { if (retry === activeRetry) void submitRetryMove(moveToUci(move)); }
+  const inputTree = activeRetry?.tree ?? tree;
+  const inputNode = inputTree.current;
+  const modeGeneration = retryModeGeneration;
+  const board = inputTree.currentBoard();
+  const inputIsCurrent = () => retryModeGeneration === modeGeneration && retry === activeRetry
+    && (retry?.tree ?? tree) === inputTree && inputTree.current === inputNode;
+  const play = (move: Move): boolean => {
+    // Promotion callbacks can outlive navigation or a retry-mode transition.
+    if (!inputIsCurrent()) return false;
+    if (activeRetry) void submitRetryMove(moveToUci(move));
     else { tree.addMove(move); afterNavigation(); }
+    return true;
   };
   const matching = matchUserMoves(board, from, to);
   if (!matching.length) {
@@ -4380,7 +4403,7 @@ async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
       color: board.turn,
       choices: matching,
       onPick: (move) => {
-        play(move);
+        if (!play(move)) return;
         // The picker removes its focused tile before renderBoard can detect grid focus.
         if (fromKeyboard) {
           keyboardBoard?.focus(to);
@@ -4388,6 +4411,7 @@ async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
         }
       },
       onCancel: () => {
+        if (!inputIsCurrent()) return;
         renderBoard();
         if (fromKeyboard) {
           keyboardBoard?.focus(from);
