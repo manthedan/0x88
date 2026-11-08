@@ -332,24 +332,17 @@ onMount(() => {
     if (!narrow) tocOpen = false;
     updateActive();
   };
-  let frame = 0;
-  const onScroll = () => {
-    if (frame) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      updateActive();
-    });
-  };
   measure();
-  window.addEventListener('scroll', onScroll, { passive: true });
+  // Scroll events are already coalesced by the browser. Updating directly also
+  // keeps anchor jumps current when animation frames are paused in a background tab.
+  window.addEventListener('scroll', updateActive, { passive: true });
   window.addEventListener('resize', measure);
   detectBrowserCapabilities()
     .then((report) => (caps = report))
     .catch(() => (capsFailed = true));
   return () => {
-    window.removeEventListener('scroll', onScroll);
+    window.removeEventListener('scroll', updateActive);
     window.removeEventListener('resize', measure);
-    if (frame) cancelAnimationFrame(frame);
   };
 });
 </script>

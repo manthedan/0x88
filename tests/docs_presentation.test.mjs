@@ -62,6 +62,12 @@ test('every group has an explicit controlled disclosure, including all ten engin
   assert.doesNotMatch(source, /border-left|inset[^;]*[34]px 0/);
 });
 
+test('scroll tracking does not depend on animation frames being delivered', () => {
+  assert.match(source, /addEventListener\('scroll', updateActive, \{ passive: true \}\)/);
+  assert.match(source, /removeEventListener\('scroll', updateActive\)/);
+  assert.doesNotMatch(source, /requestAnimationFrame/);
+});
+
 test('troubleshooting opens by default and common problems are linked outside Contents', () => {
   assert.match(source, /expandedGroups: Record<string, boolean> = \{ pages: true, troubleshooting: true \}/);
   const intro = elements.find(({ node }) => hasClass(node, 'doc-intro')).node;
