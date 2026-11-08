@@ -1141,7 +1141,7 @@ onMount(() => {
   .toc-group-heading.current-group .toc-group-label{color:var(--accent-soft-text); background:var(--accent-soft)}
   .group-toggle{
     display:flex; align-items:center; justify-content:center; gap:4px; min-width:42px; min-height:30px; padding:4px;
-    border:1px solid var(--rule-strong); border-radius:6px; background:var(--panel); color:var(--text); font:12px var(--sans); cursor:pointer;
+    border:0; border-radius:6px; background:transparent; color:var(--text-soft); font:12px var(--sans); cursor:pointer;
   }
   .group-toggle:hover{background:var(--panel-2); color:var(--ink)}
   .group-toggle svg{width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; transition:transform .15s}
