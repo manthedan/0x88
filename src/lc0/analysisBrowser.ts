@@ -3088,6 +3088,9 @@ function startMistakeRetry(): void {
 function renderMistakeRetry(): void {
   const session = retry;
   if (!session) return;
+  // Chessground retains DOM overlays across FEN updates. A skipped/revealed
+  // position must not leave its promotion controls over the next problem.
+  hidePromotionOverlay(el('ground'));
   retryHumanGeneration += 1;
   const complete = session.phase === 'complete';
   el('retryCounts').textContent = `${session.solved} solved · ${session.remaining} remaining · ${session.problems.length} ${session.problems.length === 1 ? 'position' : 'positions'}`;
@@ -3198,6 +3201,13 @@ function exitMistakeRetry(render = true): void {
     // Chessground clears manual shapes when renderBoard supplies a FEN.
     ground?.setShapes(savedShapes);
     renderAnalysisStatus();
+    // A pending Maia load may have completed (or failed) into the empty vault
+    // hosts. Reconcile real controls with current state instead of stale nodes.
+    el('maia3Enable').hidden = !!maia3PanelEvaluator;
+    (el('maia3Enable') as HTMLButtonElement).disabled = maia3PanelLoading;
+    el('maia3Grid').hidden = !maia3PanelEvaluator;
+    el('maia3Caption').hidden = !maia3PanelEvaluator;
+    el('maia3PanelStatus').textContent = maia3PanelStatusText;
     scheduleMaia3Panel();
     el('retryStart').focus({ preventScroll: true });
   }
@@ -4266,8 +4276,10 @@ let maia3PanelLoadGeneration = 0;
 let maia3PanelTask: LatestOnlyTask<string> | null = null;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
 let maia3PanelEvaluating = false;
+let maia3PanelStatusText = '';
 
 function maia3PanelStatus(text: string): void {
+  maia3PanelStatusText = text;
   el('maia3PanelStatus').textContent = text;
 }
 
@@ -5256,6 +5268,7 @@ function disposePageResources(): void {
   maia3PanelTask = null;
   maia3PanelTimer = null;
   maia3PanelEvaluating = false;
+  maia3PanelStatusText = '';
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = null;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
