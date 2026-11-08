@@ -50,11 +50,11 @@ test('normal uncached navigation can queue its own refresh but cannot inherit a 
 });
 
 test('same best move agrees even when engine-specific evaluations differ greatly', () => {
-  assert.equal(criticalAgreement([line('e2e4', 10), line('e2e4', 900, 'Lc0 Small')]), 'e4 · 2 of 2 engines');
+  assert.equal(criticalAgreement([line('e2e4', 10), line('e2e4', 900, 'Lc0 Small')]), 'Both engines pick e4');
 });
 
 test('different best moves with similar evals are not called a tactical error', () => {
-  assert.equal(criticalAgreement([line('e2e4', 10), line('d2d4', 11, 'Lc0 Small')]), 'e4 · 1 of 2 engines');
+  assert.equal(criticalAgreement([line('e2e4', 10), line('d2d4', 11, 'Lc0 Small')]), 'Engines split: e4 / d4');
   assert.equal(criticalAgreement([line()]), 'Not enough engine results to compare moves.');
 });
 
@@ -153,7 +153,7 @@ test('White perspective is normalized exactly once while engine scales stay dist
   const lc0 = lc0AnalysisLines({ visits: 400, value: 0.2, children: [{ uci: 'e7e5', visits: 400, q: 0.2 }], pv: ['e7e5'] }, fen)[0];
   assert.equal(sf.scoreCp, -120);
   assert.ok(lc0.scoreCp < 0);
-  assert.equal(criticalAgreement([sf, lc0]), 'e5 · 2 of 2 engines');
+  assert.equal(criticalAgreement([sf, lc0]), 'Both engines pick e5');
 });
 
 test('pending and partial report snapshots preserve cached position lines and accept late engine results', () => {

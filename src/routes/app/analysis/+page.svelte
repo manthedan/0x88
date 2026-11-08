@@ -757,7 +757,7 @@ onMount(() => {
   :global(.engine-summary-name:hover strong){text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--muted)}
   :global(.engine-summary-text){display:flex; align-items:baseline; gap:8px; min-width:0}
   :global(.engine-summary-name strong){font:650 13.5px/1.2 var(--sans); white-space:nowrap}
-  :global(.engine-summary-name small){font:13px/1.2 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
+  :global(.engine-summary-name small){font:12px/1.2 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
   :global(.engine-summary-score){display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; min-width:62px; font:700 17px/1 var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em; text-align:right; color:var(--ink)}
   :global(.engine-summary .compare-move){height:28px; min-height:0; padding:0 4px; border:0; border-radius:4px; background:color-mix(in srgb, var(--engine-color) 15%, var(--panel)); font:750 15px var(--sans); text-align:center; color:var(--ink)}
   :global(.engine-summary .compare-move:hover){background:color-mix(in srgb, var(--engine-color) 28%, var(--panel)); text-decoration:underline; text-underline-offset:3px}
@@ -800,7 +800,7 @@ onMount(() => {
   :global(.line-preview:hover){background:var(--panel-2); color:var(--ink)}
   :global(.engine-lines .pv-move:first-child){font-weight:700}
   :global(.engine-lines .pv-num){color:var(--muted); font-weight:400; font-variant-numeric:tabular-nums}
-  :global(.line-toggle){grid-column:4; display:inline-flex; align-items:center; justify-content:center; min-width:70px; min-height:30px; margin:0; padding:0 2px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:500 12px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
+  :global(.line-toggle){grid-column:4; display:inline-flex; align-items:center; justify-content:center; min-width:0; min-height:30px; margin:0; padding:0 4px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:500 12px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
   :global(.line-toggle:hover:not(:disabled)){background:var(--panel-2); color:var(--ink)}
   :global(.engine-lines .line-error), :global(.engine-lines .pending-line){display:block; min-height:24px; padding:2px 10px 0 39px; font-size:13px}
   :global(.line-error-text){display:block; color:var(--warn); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}

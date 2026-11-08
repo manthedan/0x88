@@ -133,11 +133,13 @@ test('callout groups engines by move and states agreement explicitly', () => {
   const plenty = line('PlentyChess', 'g5f6', 'gxf6', 9);
   const groups = analysisMoveGroups([berserk, lc0, sf, plenty]);
   assert.deepEqual(groups.map((g) => [g.san, g.engines.length]), [['Ne2', 2], ['Na4', 1], ['gxf6', 1]]);
-  assert.equal(analysisAgreementHeadline(groups, 4), 'Ne2 · 2 of 4 engines');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2), 'Ne2 · 1 of 2 engines');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf]), 2), 'Ne2 · 2 of 2 engines');
-  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, berserk, { ...plenty, pvUci: ['c3a4'] }]), 4), 'Ne2 · 2 of 4 engines');
+  assert.equal(analysisAgreementHeadline(groups, 4), '2 of 4 engines pick Ne2');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2), 'Engines split: Ne2 / Na4');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf]), 2), 'Both engines pick Ne2');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, berserk, { ...plenty, pvUci: ['c3a4'] }]), 4), 'Engines split: Ne2 / Na4');
   assert.equal(analysisAgreementHeadline([], 0), 'No best move yet');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0]), 1), 'Best move: Ne2');
+  assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf, { ...berserk, pvUci: ['c3e2'] }]), 3), 'All 3 engines pick Ne2');
   assert.deepEqual(analysisSpreadText(26), { text: 'Eval spread: 0.26 pawns', level: 'close' });
   assert.deepEqual(analysisSpreadText(74), { text: 'Eval spread: 0.74 pawns', level: 'apart' });
   assert.equal(analysisSpreadText(120).level, 'wide');

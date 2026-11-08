@@ -2159,8 +2159,8 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
     // Budget is explicitly labeled; do not present a requested depth/visit count as achieved work.
     const raw = progress ? searchProgressText(progress).replace(`${progress.label}: `, '')
       : line ? line.detail : failure ? 'Unavailable' : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
-    // Two units at most in the strip (depth + nodes, or visits); the full string stays in the tooltip.
-    const stats = raw.split(' · ').slice(0, 2).join(' · ');
+    // One unit in the strip (depth or visits) so it never clips beside the eval; the full string stays in the tooltip.
+    const stats = raw.startsWith('Budget · ') ? raw : raw.split(' · ')[0];
     const engine = line?.engine ?? engineLines[0]?.engine ?? rowLabel(row);
     const swatch = engineBrushes(engine).swatch;
     const pct = progress && hasBoundedSearchProgress(progress) ? Math.min(100, Math.round((100 * (progress.completed ?? 0)) / Math.max(1, progress.requested ?? 1))) : null;

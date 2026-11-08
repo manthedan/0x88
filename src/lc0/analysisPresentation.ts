@@ -119,10 +119,15 @@ export function analysisMoveGroups(bestLines: AnalysisLine[]): AnalysisMoveGroup
 /** Spread (pawns) at or above which differing best moves are worth calling a real disagreement. */
 export const STRONG_DISAGREEMENT_CP = 100;
 
-/** One move-first template for unanimity, plurality and ties; alternatives keep their own engine keys. */
+/** Verdict first: a tie at the top is a split, never a winner; otherwise say how many engines back the move. */
 export function analysisAgreementHeadline(groups: AnalysisMoveGroup[], total: number): string {
   const top = groups[0];
-  return top ? `${top.san} · ${top.engines.length} of ${total} engines` : 'No best move yet';
+  if (!top) return 'No best move yet';
+  if (total <= 1) return `Best move: ${top.san}`;
+  const tied = groups.filter((group) => group.engines.length === top.engines.length);
+  if (tied.length > 1) return `Engines split: ${tied.map((group) => group.san).join(' / ')}`;
+  if (top.engines.length === total) return total === 2 ? `Both engines pick ${top.san}` : `All ${total} engines pick ${top.san}`;
+  return `${top.engines.length} of ${total} engines pick ${top.san}`;
 }
 
 /** Visible units; White-perspective calculation is explained in the callout tooltip and Compare. */
