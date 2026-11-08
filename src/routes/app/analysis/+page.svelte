@@ -85,6 +85,7 @@ onMount(() => {
       <button id="flip" class="tool-button icon-only" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
       <button id="quickCopyFen" class="tool-button copy-button" type="button" title="Copy this position's FEN" aria-label="Copy FEN"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">FEN</span></button>
       <button id="quickCopyPgn" class="tool-button copy-button" type="button" title="Copy the game as PGN" aria-label="Copy PGN"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">PGN</span></button>
+      <button id="copyLink" class="tool-button copy-button copy-link" type="button" title="Copy a link to this position (FEN only)" aria-label="Copy link"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-5 7-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m0 1 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">Copy link</span></button>
       <button id="playFromHere" class="tool-button" type="button" title="Continue this position against Maia3 or an engine" aria-describedby="playFromHereReason">Play from here</button>
       <button id="openPosition" class="tool-button position-toggle" type="button" aria-controls="positionTools" aria-expanded="false" title="Load a game or position (PGN or FEN)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14"/></svg><span class="tool-label">Load</span></button>
     </div>
@@ -93,6 +94,7 @@ onMount(() => {
     <details id="positionTools" class="position-tools">
       <summary hidden>Position input &amp; export</summary>
       <div class="position-tools-body">
+        <div id="positionShareFallback" class="field" hidden><label for="positionShareUrl">Position link (FEN only)</label><input id="positionShareUrl" type="text" readonly /></div>
         <div class="row fen-row">
           <div class="field"><label for="fenInput">FEN</label>
             <input id="fenInput" type="text" spellcheck="false" autocomplete="off" placeholder="Paste a FEN" /></div>
@@ -161,6 +163,21 @@ onMount(() => {
       <div id="maia3Caption" class="small" hidden>What rated humans actually play here (Maia3 move predictions; score = expected points for White in a human game at that rating, not an engine eval). ✓ = matches the current best engine move.</div>
     </div>
     </div>
+    <dialog id="pvPreview" class="pv-preview engine-manager" aria-labelledby="pvPreviewTitle" aria-describedby="pvPreviewNote">
+      <header class="manager-heading"><h2 id="pvPreviewTitle">Engine line</h2><button id="closePvPreview" type="button" aria-label="Close line preview">✕</button></header>
+      <p id="pvPreviewDetail" class="small"></p>
+      <div class="pv-board-shell" aria-hidden="true"><div id="pvPreviewBoard"></div></div>
+      <p id="pvPreviewPosition" class="pv-position" role="status"></p>
+      <div class="pv-navigation" aria-label="Line preview navigation">
+        <button id="pvStart" type="button" aria-label="Preview starting position" title="Start (Home)">Start</button>
+        <button id="pvBack" type="button" aria-label="Preview previous move" title="Previous (Left)">Previous</button>
+        <button id="pvForward" type="button" aria-label="Preview next move" title="Next (Right)">Next</button>
+        <button id="pvEnd" type="button" aria-label="Preview last move" title="End (End)">End</button>
+      </div>
+      <div id="pvPreviewMoves" class="pv-preview-moves" role="group" aria-label="Preview a position in the line"></div>
+      <p id="pvPreviewNote" class="small"></p>
+      <div class="row pv-insert-actions"><button id="pvInsertHere" type="button">Insert to here</button><button id="pvInsertLine" class="primary" type="button">Insert line</button></div>
+    </dialog>
     <dialog id="engineManager" class="engine-manager" aria-labelledby="engineManagerTitle">
       <header class="manager-heading"><h2 id="engineManagerTitle">Manage engines</h2><button id="closeEngineManager" type="button" aria-label="Close engine settings">✕</button></header>
       <div id="engineSetup" class="engine-setup">
@@ -187,25 +204,27 @@ onMount(() => {
       </div>
       <div class="row add-engine-row">
         <button id="addEngineInManager" type="button">+ Add engine</button>
-        {#if devMode}
-        <div class="field"><label for="engineProfileSelect">Profile</label>
-          <select id="engineProfileSelect"><option value="">default</option></select></div>
-        {/if}
       </div>
-
-    {#if devMode}
-    <details class="advanced-settings">
-      <summary>Profiles &amp; engine settings</summary>
+      <details class="advanced-settings saved-setups">
+        <summary>Saved engine setups</summary>
+        <p class="small">Keep named engine choices and search budgets on this device. Selecting a setup loads it.</p>
+        <div class="field"><label for="engineProfileSelect">Load setup</label>
+          <select id="engineProfileSelect"><option value="">manual / default</option></select></div>
       <div class="row profile-row">
-        <div class="field"><label for="engineProfileName">Name</label>
-          <input id="engineProfileName" type="text" spellcheck="false" autocomplete="off" placeholder="analysis profile" /></div>
-        <button id="saveEngineProfile" type="button">Save profile</button>
-        <button id="deleteEngineProfile" type="button">Delete</button>
-        <button id="exportEngineProfiles" type="button">Export profiles</button>
-        <button id="importEngineProfiles" type="button">Import profiles</button>
+        <div class="field"><label for="engineProfileName">Setup name</label>
+          <input id="engineProfileName" type="text" spellcheck="false" autocomplete="off" placeholder="My comparison setup" /></div>
+        <button id="saveEngineProfile" type="button">Save setup</button>
+        <button id="deleteEngineProfile" type="button">Delete setup</button>
+        <button id="exportEngineProfiles" type="button">Export setups</button>
+        <button id="importEngineProfiles" type="button">Import setups</button>
         <input id="importEngineProfilesFile" type="file" accept="application/json,.json" style="display:none" />
       </div>
       <div id="engineProfileSummary" class="profile-summary small">Manual engine setup.</div>
+      <p id="engineProfileFeedback" class="small" role="status"></p>
+      </details>
+    {#if devMode}
+    <details class="advanced-settings">
+      <summary>Developer engine settings</summary>
       <div class="row">
         <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
           <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
@@ -221,14 +240,6 @@ onMount(() => {
     {:else}
     <!-- Hidden but in DOM so analysisBrowser.ts can find them when dev mode is off -->
     <div hidden>
-      <select id="engineProfileSelect"><option value="">default</option></select>
-      <input id="engineProfileName" type="text" />
-      <button id="saveEngineProfile" type="button">Save</button>
-      <button id="deleteEngineProfile" type="button">Delete</button>
-      <button id="exportEngineProfiles" type="button">Export</button>
-      <button id="importEngineProfiles" type="button">Import</button>
-      <input id="importEngineProfilesFile" type="file" />
-      <div id="engineProfileSummary"></div>
       <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select>
       <span id="backend"></span>
       <span id="runtimeAudit"></span>
@@ -308,7 +319,7 @@ onMount(() => {
     max-width:1288px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
   }
   .board-column{min-width:0}
-  .board-panel{min-width:0; padding:8px}
+  .board-panel{min-width:0; padding:8px; container-type:inline-size}
   .board-wrap{display:grid; grid-template-columns:18px 1fr; gap:0; position:relative}
   .board-toolbar{display:flex; align-items:stretch; gap:12px; margin:8px 0 0 18px; height:40px}
   /* Desktop: the panel shares the board column's baseline (board + toolbar), so there is no dead block under it. */
@@ -344,6 +355,17 @@ onMount(() => {
   .analysis-workspace .app-sidebar>.analysis-content{display:flex; flex-direction:column; flex:1 1 auto; min-width:0; min-height:0}
   .engine-manager{width:min(600px, calc(100vw - 24px)); max-height:85dvh; padding:20px; color:var(--ink); background:var(--panel); border:1px solid var(--border-input); border-radius:12px; box-shadow:0 20px 80px #0008}
   .engine-manager::backdrop{background:#0009}
+  .pv-preview{width:min(440px, calc(100vw - 24px))}
+  .pv-board-shell{width:min(100%, 310px); aspect-ratio:1; margin:12px auto; border-radius:4px; overflow:hidden}
+  #pvPreviewBoard{position:relative; width:100%; height:100%}
+  .pv-position{margin:10px 0; font-size:13px; color:var(--ink)}
+  .pv-navigation{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px}
+  .pv-navigation button{min-height:40px; padding:4px; font-size:13px}
+  .pv-preview :global(button[aria-disabled=true]){opacity:.45; cursor:default}
+  .pv-preview-moves{display:flex; flex-wrap:wrap; gap:4px; max-height:112px; overflow:auto; margin:12px 0; padding:2px}
+  .pv-preview-moves :global(button){min-height:32px; padding:4px 8px; border-color:transparent; background:transparent; color:var(--ink); font-size:14px}
+  .pv-preview-moves :global(button[aria-current]){background:var(--selection-bg); border-color:var(--accent); font-weight:650}
+  .pv-insert-actions{justify-content:flex-end}
   .manager-heading{display:flex; align-items:center; justify-content:space-between; gap:12px}
   .manager-heading h2{font:650 20px var(--sans); color:var(--ink); text-transform:none; letter-spacing:0; margin:0}
   .engine-setup>p{margin:12px 0}
@@ -551,7 +573,12 @@ onMount(() => {
   .stepper-field input::-webkit-inner-spin-button,
   .stepper-field input::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0 }
   .stepper-field input:focus{box-shadow:none; outline:none}
-  .profile-row{align-items:end}
+  .saved-setups{margin-top:16px}
+  .saved-setups>summary{font-weight:650}
+  .saved-setups .field select{width:100%}
+  .profile-row{align-items:end; margin-top:12px}
+  .profile-row .field{flex:1 1 100%}
+  #engineProfileFeedback:empty{display:none}
   .profile-row input[type=text]{min-width:130px}
   :global(.profile-summary){
     margin-top:6px; padding:7px 8px;
@@ -692,13 +719,17 @@ onMount(() => {
   :global(.engine-lines){list-style:none; margin:0; padding:0 0 5px}
   :global(.result-line){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; min-height:26px}
   :global(.result-line.alt-line){border-top:1px dashed var(--rule-soft)}
-  :global(.result-line:has(.line-play:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--result-highlight)}
+  :global(.result-line:has(.pv-move:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--result-highlight)}
   :global(.line-play){display:flex; align-items:center; gap:8px; width:100%; min-width:0; min-height:26px; padding:0 6px 0 39px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left}
   :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.line-rank){flex:0 0 12px; font:600 13px var(--mono); color:var(--muted); text-align:center}
   :global(.engine-lines .score){flex:0 0 50px; font:700 13.5px var(--mono); font-variant-numeric:tabular-nums; color:var(--ink); text-align:right}
-  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; column-gap:.42em; height:1.5em; overflow:hidden; font:14px/1.5 var(--sans); color:var(--ink)}
-  :global(.engine-lines .pv-move){white-space:nowrap}
+  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; gap:2px; overflow-x:auto; scrollbar-width:thin; font:14px/1.5 var(--sans); color:var(--ink)}
+  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:30px; padding:2px 4px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
+  :global(.engine-lines .pv-move:hover){background:var(--selection-bg)}
+  :global(.line-actions){display:flex; align-items:center}
+  :global(.line-preview){min-height:32px; padding:2px 7px; border:0; background:transparent; color:var(--muted); font:600 13px var(--sans)}
+  :global(.line-preview:hover){background:var(--panel-2); color:var(--ink)}
   :global(.engine-lines .pv-move:first-child){font-weight:700}
   :global(.engine-lines .pv-num){color:var(--muted); font-weight:400; font-variant-numeric:tabular-nums}
   :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:76px; min-height:26px; padding:0 8px 0 6px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:600 13px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
@@ -784,13 +815,14 @@ onMount(() => {
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}
     :global(.movelist .mv){min-height:32px}
   }
-  /* Narrow two-column boards need the same separate nav/tool groups as phones. */
-  @media (min-width:601px) and (max-width:1200px){
-    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:6px}
+  /* Follow the board's actual width, including short desktop windows. */
+  @container (max-width:700px){
+    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:4px}
     .nav{height:44px}
-    .board-tools{display:grid; grid-template-columns:40px 1fr 1fr auto 1fr; height:40px}
-    .tool-button{padding:0 6px}
+    .board-tools{display:grid; grid-template-columns:36px repeat(3,minmax(0,1fr)) auto minmax(0,1fr); gap:4px; height:36px}
+    .tool-button, .tool-button.icon-only{width:auto; padding:0 6px; gap:5px; font-size:12.5px}
     .copy-button{min-width:0}
+    .copy-link svg{display:none}
   }
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
@@ -810,7 +842,8 @@ onMount(() => {
     .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:4px; margin:6px 0 0}
     .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
-    .board-tools{display:grid; grid-template-columns:32px 1fr 1fr auto 1fr; gap:4px; height:36px}
+    .board-tools{display:grid; grid-template-columns:36px repeat(3,minmax(0,1fr)) auto minmax(0,1fr); gap:4px; height:36px}
+    .copy-link svg{display:none}
     .tool-button, .tool-button.icon-only{width:auto; padding:0 6px; gap:5px; font-size:12.5px}
     .copy-button{min-width:0}
     .copy-button svg{width:14px; height:14px; flex-basis:14px}
@@ -846,6 +879,7 @@ onMount(() => {
     :global(.line-play){min-height:36px; padding-left:36px}
     :global(.result-line){min-height:36px}
     :global(.line-toggle){min-height:36px; min-width:72px}
+    :global(.line-preview), :global(.engine-lines .pv-move){min-height:36px}
     :global(.engine-lines .line-error), :global(.engine-lines .pending-line){padding-left:36px}
     .position-tools :is(button, input), .pgn-actions button{min-height:44px}
     .analysis-workspace .section-block{padding:8px 10px}

@@ -132,8 +132,10 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
+import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
+import { positionShareUrl } from './analysisShare.ts';
 import { openingNameAt, type OpeningNameIndex } from './openingNames.ts';
 import {
   berserkCacheKey,
@@ -149,6 +151,7 @@ import {
   viridithasCacheKey,
 } from './engineProvision.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
+import { BUILT_IN_PROFILE_VALUE_PREFIX, ENGINE_PROFILE_BACKUP_KIND, type EngineAnalysisProfile, engineSetupRuntime, normalizeEngineProfiles } from './engineSetups.ts';
 import {
   cancelHiddenTabWork,
   classifyHiddenReload,
@@ -455,6 +458,8 @@ function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4Worker
   return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
 }
 let ground: Ground | null = null;
+let pvGround: Ground | null = null;
+let pvPreview: { root: GameNode; line: PvPreview; step: number; focusKey: string } | null = null;
 let keyboardBoard: ReturnType<typeof createAnalysisKeyboardBoard> | null = null;
 let mountAbort = new AbortController();
 let analysisMountedCallbackCache = new WeakMap<() => void, () => void>();
@@ -519,15 +524,6 @@ const nodeIndex = new Map<number, GameNode>();
 const ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-engine-profiles-v1';
 const LAST_ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-last-engine-profile-v1';
 const MANUAL_ENGINE_ROWS_STORAGE_KEY = '0x88-analysis-engine-rows-v1';
-const ENGINE_PROFILE_BACKUP_KIND = 'lc0-analysis-engine-profile-backup';
-const BUILT_IN_PROFILE_VALUE_PREFIX = 'builtin:';
-
-interface EngineAnalysisProfile {
-  name: string;
-  rows: EngineRow[];
-  multiPv: number;
-  lc0Runtime: Lc0AnalysisRuntime;
-}
 interface BuiltInEngineAnalysisProfile extends EngineAnalysisProfile {
   id: string;
   note: string;
@@ -579,8 +575,10 @@ const BUILT_IN_ENGINE_PROFILES: BuiltInEngineAnalysisProfile[] = [
   },
 ];
 function builtInEngineProfiles(): BuiltInEngineAnalysisProfile[] {
-  if (!isV0DeployProfile()) return BUILT_IN_ENGINE_PROFILES;
-  return BUILT_IN_ENGINE_PROFILES.filter((profile) => profile.lc0Runtime === 'onnx' && !profileHasBt4(profile.rows));
+  return BUILT_IN_ENGINE_PROFILES.filter((profile) =>
+    (params.has('dev') || profile.lc0Runtime === 'onnx') &&
+    (!isV0DeployProfile() || (profile.lc0Runtime === 'onnx' && !profileHasBt4(profile.rows))),
+  );
 }
 let engineProfiles: EngineAnalysisProfile[] = [];
 let importedGames: ImportedGame[] = [];
@@ -1241,7 +1239,8 @@ function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRo
   return rows.map((row, index) => {
     const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
-      const { config } = bigNetFor(next.variant);
+      // Read metadata only: declining a saved setup must not acquire a runtime/session.
+      const config = BIG_NETS[next.variant === 't3' ? 't3' : 'bt4'];
       const allowed =
         bigNetSelectableSync(config) && allowBt4Prompt && window.confirm(`${bigNetLoadWarning(config)}\n\nLoad the saved Lc0 ${config.name} profile row?`);
       if (!allowed) next.variant = 'small';
@@ -1249,42 +1248,28 @@ function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRo
     return next;
   });
 }
-function normalizeEngineProfiles(parsed: unknown): EngineAnalysisProfile[] {
-  const entries = Array.isArray(parsed)
-    ? parsed
-    : parsed &&
-        typeof parsed === 'object' &&
-        (parsed as { kind?: unknown }).kind === ENGINE_PROFILE_BACKUP_KIND &&
-        Array.isArray((parsed as { profiles?: unknown }).profiles)
-      ? (parsed as { profiles: unknown[] }).profiles
-      : [];
-  return entries
-    .flatMap((entry) => {
-      if (!entry || typeof entry !== 'object') return [];
-      const raw = entry as Partial<EngineAnalysisProfile>;
-      const name = String(raw.name ?? '').trim();
-      if (!name || name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX) || !Array.isArray(raw.rows)) return [];
-      const rows = raw.rows.map((row, index) => sanitizeEngineRow(row, index)).filter((row): row is EngineRow => !!row);
-      if (!rows.length) return [];
-      return [
-        { name, rows, multiPv: Math.max(1, Math.min(10, Math.floor(Number(raw.multiPv) || 3))), lc0Runtime: normalizeLc0Runtime(raw.lc0Runtime ?? 'onnx') },
-      ];
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
 function loadEngineProfiles(): EngineAnalysisProfile[] {
   try {
-    return normalizeEngineProfiles(JSON.parse(storageGet(ENGINE_PROFILE_STORAGE_KEY) ?? '[]') as unknown);
+    return normalizeEngineProfiles(JSON.parse(storageGet(ENGINE_PROFILE_STORAGE_KEY) ?? '[]') as unknown, sanitizeEngineRow);
   } catch {
     return [];
   }
 }
-function persistEngineProfiles(): void {
-  storageSet(ENGINE_PROFILE_STORAGE_KEY, JSON.stringify(engineProfiles));
+function persistEngineProfiles(): boolean {
+  try {
+    localStorage.setItem(ENGINE_PROFILE_STORAGE_KEY, JSON.stringify(engineProfiles));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function engineProfileMessage(text: string): void {
+  el('engineProfileFeedback').textContent = text;
+  el('message').textContent = text;
 }
 function profileSummary(profile: EngineAnalysisProfile, note = ''): string {
   const rows = profile.rows.map((row) => `${rowLabel(row)} ${clampStrengthForRow(row)} ${strengthMeta(row.family).unit}`).join(' · ');
-  return `${note ? `${note} ` : ''}${rows || 'no engines'} · MultiPV ${profile.multiPv} · LC0 ${lc0RuntimeLabel(profile.lc0Runtime)}`;
+  return `${note ? `${note} ` : ''}${rows || 'no engines'} · ${profile.multiPv} lines${params.has('dev') ? ` · LC0 ${lc0RuntimeLabel(profile.lc0Runtime)}` : ''}`;
 }
 function builtInProfileValue(id: string): string {
   return `${BUILT_IN_PROFILE_VALUE_PREFIX}${id}`;
@@ -1299,10 +1284,10 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
   );
   selectEl('engineProfileSelect').innerHTML = [
     '<option value="">manual / default</option>',
-    '<optgroup label="Built-in profiles">',
+    '<optgroup label="Built-in setups">',
     ...builtInOptions,
     '</optgroup>',
-    '<optgroup label="Saved profiles">',
+    '<optgroup label="Saved setups">',
     ...savedOptions,
     '</optgroup>',
   ].join('');
@@ -1310,12 +1295,13 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
   const saved = engineProfiles.find((profile) => profile.name === selected);
   const profile = builtIn ?? saved;
   inputEl('engineProfileName').value = saved?.name ?? '';
+  (el('deleteEngineProfile') as HTMLButtonElement).disabled = !saved;
   el('engineProfileSummary').textContent = profile
     ? profileSummary(profile, builtIn?.note)
-    : 'Manual engine setup. Choose a built-in profile or save the current engine rows.';
+    : 'Manual engine setup. Choose a saved setup or save the current engines.';
 }
 function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): void {
-  const runtime = normalizeLc0Runtime(profile.lc0Runtime);
+  const runtime = engineSetupRuntime(profile.lc0Runtime, params.has('dev'));
   const runtimeChanged = selectedLc0Runtime() !== runtime;
   cancelAllAnalysisAssetPrefetches();
   engineRows = profileRowsForUse(profile.rows, true);
@@ -1324,7 +1310,8 @@ function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?
   if (options.persistLast !== false) storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, profile.name);
   renderEngineList();
   renderEngineProfiles(options.selected ?? profile.name);
-  el('engineProfileSummary').textContent = profileSummary(profile, options.note);
+  el('engineProfileSummary').textContent = profileSummary(currentEngineProfile(profile.name), options.note);
+  engineProfileMessage(`Loaded engine setup “${profile.name}”.`);
   lineCache.clear();
   completeAnalysisKeys.clear();
   if (deferAnalysisSettingsRefresh({ reloadLc0: runtimeChanged, disposeUnusedEngines: true })) {
@@ -1338,42 +1325,42 @@ function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?
 function saveCurrentEngineProfile(): void {
   const name = inputEl('engineProfileName').value.trim();
   if (!name) {
-    el('message').textContent = 'Name the engine profile before saving.';
+    engineProfileMessage('Name the engine setup before saving.');
     return;
   }
   if (name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX)) {
-    el('message').textContent = `Saved profile names cannot start with “${BUILT_IN_PROFILE_VALUE_PREFIX}”.`;
+    engineProfileMessage(`Saved setup names cannot start with “${BUILT_IN_PROFILE_VALUE_PREFIX}”.`);
     return;
   }
   if (activeEngineRows().some((row) => row.variant === 'custom')) {
-    el('message').textContent = 'Custom URL variants are not saved in profiles yet; choose a built-in variant first.';
+    engineProfileMessage('Custom URL variants are not saved in setups yet; choose a built-in variant first.');
     return;
   }
   const profile = currentEngineProfile(name);
   engineProfiles = [...engineProfiles.filter((entry) => entry.name !== name), profile].sort((a, b) => a.name.localeCompare(b.name));
-  persistEngineProfiles();
+  const persisted = persistEngineProfiles();
   storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, name);
   renderEngineProfiles(name);
-  el('message').textContent = `Saved engine profile “${name}”.`;
+  engineProfileMessage(persisted ? `Saved engine setup “${name}” on this device.` : `Setup “${name}” is available for this visit only. Browser storage is unavailable; export a backup to keep it.`);
 }
 function exportEngineProfiles(): void {
   const backup = { kind: ENGINE_PROFILE_BACKUP_KIND, version: 1, exportedAt: new Date().toISOString(), profiles: engineProfiles };
   downloadTextFile('lc0-analysis-engine-profiles.json', JSON.stringify(backup, null, 2), 'application/json');
-  el('message').textContent = `Exported ${engineProfiles.length} saved engine profiles. Custom URL variants are excluded by design.`;
+  engineProfileMessage(`Exported ${engineProfiles.length} saved engine setups. Custom URL variants are excluded.`);
 }
 async function importEngineProfilesFile(file: File | undefined): Promise<void> {
   if (!file) return;
   try {
-    const incoming = normalizeEngineProfiles(JSON.parse(await file.text()) as unknown);
+    const incoming = normalizeEngineProfiles(JSON.parse(await file.text()) as unknown, sanitizeEngineRow);
     if (!incoming.length) throw new Error('No valid engine profiles found');
     engineProfiles = [...incoming, ...engineProfiles.filter((profile) => !incoming.some((entry) => entry.name === profile.name))].sort((a, b) =>
       a.name.localeCompare(b.name),
     );
-    persistEngineProfiles();
+    const persisted = persistEngineProfiles();
     applyEngineProfile(incoming[0], { selected: incoming[0].name });
-    el('message').textContent = `Imported ${incoming.length} engine profiles and applied “${incoming[0].name}”. Custom URL variants were ignored.`;
+    engineProfileMessage(`Imported ${incoming.length} engine setups and loaded “${incoming[0].name}”.${persisted ? '' : ' Browser storage is unavailable; export a backup to keep them.'}`);
   } catch (error) {
-    el('message').textContent = `Engine profile import failed: ${(error as Error).message}`;
+    engineProfileMessage(`Engine setup import failed: ${(error as Error).message}`);
   } finally {
     inputEl('importEngineProfilesFile').value = '';
   }
@@ -1381,20 +1368,20 @@ async function importEngineProfilesFile(file: File | undefined): Promise<void> {
 function deleteSelectedEngineProfile(): void {
   const selected = selectEl('engineProfileSelect').value;
   if (selected.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX)) {
-    el('message').textContent = 'Built-in engine profiles cannot be deleted.';
+    engineProfileMessage('Built-in engine setups cannot be deleted.');
     return;
   }
   const name = selected || inputEl('engineProfileName').value.trim();
   if (!name) return;
   if (!engineProfiles.some((entry) => entry.name === name)) {
-    el('message').textContent = `No saved engine profile named “${name}”.`;
+    engineProfileMessage(`No saved engine setup named “${name}”.`);
     return;
   }
   engineProfiles = engineProfiles.filter((entry) => entry.name !== name);
-  persistEngineProfiles();
+  const persisted = persistEngineProfiles();
   storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY);
   renderEngineProfiles('');
-  el('message').textContent = `Deleted engine profile “${name}”.`;
+  engineProfileMessage(persisted ? `Deleted engine setup “${name}”. The active engines are unchanged.` : `Removed “${name}” for this visit only. Browser storage is unavailable, so it may return on reload.`);
 }
 
 // Engines to analyze are chosen as an add/remove list of cascading selects:
@@ -2146,16 +2133,16 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
   const extra = usable.length - 1;
   const rows = (open ? sorted : sorted.slice(0, 1)).map((line, index) => {
     if (line.error) return `<li class="result-line line-error"><span class="line-error-text" title="${htmlEscape(line.error)}">${htmlEscape(line.error)}</span></li>`;
-    const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}"`;
+    const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" data-pv-fen="${htmlEscape(tree.current.fen)}" data-pv-root="${tree.current.id}" data-pv-score="${htmlEscape(line.scoreText)}" data-pv-detail="${htmlEscape(line.detail)}" data-pv-rank="${line.multipv}"`;
     const key = htmlEscape(`${tree.current.fen}|${engine}|${line.multipv}`);
-    const pvText = analysisPvText(tree.current.fen, line);
-    const label = `${name}, line ${line.multipv}: play ${firstAnalysisMove(line)}, evaluation ${line.scoreText}. ${pvText}`;
+    const preview = createPvPreview(tree.current.fen, line.pvUci.slice(0, 12));
+    const moves = preview.steps.map((step, ply) => `<button type="button" class="pv-move" data-pv-insert="${ply + 1}" data-focus-key="${key}|move|${ply}" aria-label="${htmlEscape(`Insert ${name} line through ${step.label}`)}" title="${htmlEscape(`Add variation through ${step.label}`)}">${htmlEscape(step.label)}</button>`).join('');
     // The header already carries the top line's eval; alternatives show rank + their own eval.
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
     const toggle = index === 0
       ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Hide lines' : `${extra} more lines`}</span>${CHEVRON_ICON}</button>` : ''
       : '';
-    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><button type="button" class="line-play" data-focus-key="${key}|play" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" ${attrs} aria-label="${htmlEscape(label)}" title="${htmlEscape(`Play ${firstAnalysisMove(line)} · ${pvText}`)}">${lead}<span class="pv">${pvMoveChunks(pvText)}</span></button>${toggle}</li>`;
+    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv}`)}"${preview.steps.length ? '' : ' disabled'}>Preview</button>${toggle}</div></li>`;
   });
   if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
@@ -2173,21 +2160,6 @@ function engineLogoFrame(logo: string, name: string): string {
   // Engines without a bundled mark (or before the logo probe resolves) get their initial in the same frame.
   const mark = logo.includes('engine-logo-placeholder') || name.startsWith('PlentyChess') ? `<span class="engine-logo-initial">${htmlEscape(name.trim().charAt(0).toUpperCase())}</span>` : logo;
   return `<span class="engine-logo-frame${name.startsWith('Lc0') ? ' wordmark' : ''}" aria-hidden="true">${mark}</span>`;
-}
-
-/** Wrap each move (with its number) so a collapsed PV clips on move boundaries, never mid-SAN. */
-function pvMoveChunks(pv: string): string {
-  const chunks: string[] = [];
-  for (const token of pv.split(' ').filter(Boolean)) {
-    const last = chunks.length - 1;
-    if (last >= 0 && /^\d+(\.|…)$/.test(chunks[last])) chunks[last] += ` ${token}`;
-    else chunks.push(token);
-  }
-  // Move numbers are muted so the moves themselves scan first (as on Lichess).
-  return chunks.map((chunk) => {
-    const numbered = /^(\d+(?:\.|…)) (.+)$/.exec(chunk);
-    return `<span class="pv-move">${numbered ? `<span class="pv-num">${htmlEscape(numbered[1])}</span> ${htmlEscape(numbered[2])}` : htmlEscape(chunk)}</span>`;
-  }).join(' ');
 }
 
 function renderEngineComparison(lines: AnalysisLine[]): void {
@@ -3941,6 +3913,7 @@ let analysisGameTree = tree;
 
 function afterNavigation() {
   saveAnalysisWorkspace();
+  if (pvPreview && (pvPreview.root !== tree.current || pvPreview.line.rootFen !== tree.current.fen)) closePvPreview();
   hiddenResumeForce = false;
   if (analysisGameTree !== tree) {
     analysisGameTree = tree;
@@ -4192,6 +4165,94 @@ function copyPgn() {
   el('message').textContent = 'PGN copied to the box and clipboard.';
 }
 
+function closePvPreview(): void {
+  const previous = pvPreview;
+  pvPreview = null;
+  // Reuse the read-only board until page teardown. Chessground 9's destroy()
+  // does not disconnect its ResizeObserver, so recreating it per open leaks observers.
+  (el('pvPreview') as HTMLDialogElement).close();
+  if (previous?.root === tree.current) {
+    el('engineSummaries').querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(previous.focusKey)}"]`)?.focus({ preventScroll: true });
+  }
+}
+
+function renderPvPreview(): void {
+  if (!pvPreview) return;
+  const { line, step } = pvPreview;
+  const position = step ? line.steps[step - 1] : null;
+  const fen = position?.fen ?? line.rootFen;
+  const board = parseFen(fen);
+  const config = {
+    fen, orientation, viewOnly: true, coordinates: true,
+    turnColor: board.turn === 'w' ? 'white' as const : 'black' as const,
+    check: boardCheck(board),
+    lastMove: position ? [position.uci.slice(0, 2) as Key, position.uci.slice(2, 4) as Key] : [],
+    drawable: { enabled: false, visible: false },
+    animation: { enabled: false },
+  };
+  if (!pvGround) pvGround = Chessground(el('pvPreviewBoard'), config);
+  else pvGround.set(config);
+  el('pvPreviewPosition').textContent = `${position ? `After ${position.label}` : 'Starting position'} · ${step} of ${line.steps.length} plies · ${board.turn === 'w' ? 'White' : 'Black'} to move`;
+  // Keep endpoint controls focusable so arrow-key stepping still works after reaching either end.
+  for (const id of ['pvStart', 'pvBack', 'pvInsertHere']) el(id).setAttribute('aria-disabled', String(step === 0));
+  for (const id of ['pvForward', 'pvEnd']) el(id).setAttribute('aria-disabled', String(step === line.steps.length));
+  for (const button of el('pvPreviewMoves').querySelectorAll<HTMLElement>('[data-pv-step]')) {
+    if (Number(button.dataset.pvStep) === step) button.setAttribute('aria-current', 'step');
+    else button.removeAttribute('aria-current');
+  }
+  el('pvPreviewMoves').querySelector('[aria-current]')?.scrollIntoView({ block: 'nearest' });
+}
+
+function openPvPreview(row: HTMLElement, trigger: HTMLElement): void {
+  if (row.dataset.pvFen !== tree.current.fen || Number(row.dataset.pvRoot) !== tree.current.id) return;
+  const line = createPvPreview(tree.current.fen, (row.dataset.pv ?? '').split(' ').filter(Boolean));
+  if (!line.steps.length) return;
+  pvPreview = { root: tree.current, line, step: 0, focusKey: trigger.dataset.focusKey ?? '' };
+  el('pvPreviewTitle').textContent = `${analysisEngineName(row.dataset.engine ?? '')} · Line ${row.dataset.pvRank}`;
+  el('pvPreviewDetail').textContent = `${row.dataset.pvScore} (White’s view) · ${row.dataset.pvDetail}`;
+  el('pvPreviewNote').textContent = line.truncated ? 'The engine line ends at its last legal move. The remaining moves were ignored.' : 'Preview only. The game and its analysis stay at the original position.';
+  el('pvPreviewMoves').innerHTML = line.steps.map((step, i) => `<button type="button" data-pv-step="${i + 1}" aria-label="${htmlEscape(`Preview after ${step.label}`)}">${htmlEscape(step.label)}</button>`).join('');
+  (el('pvPreview') as HTMLDialogElement).showModal();
+  renderPvPreview();
+}
+
+function wirePvPreview(): void {
+  const dialog = el('pvPreview');
+  el('closePvPreview').addEventListener('click', closePvPreview);
+  dialog.addEventListener('cancel', (event) => { event.preventDefault(); closePvPreview(); });
+  const stepTo = (step: number) => {
+    if (!pvPreview) return;
+    pvPreview.step = Math.max(0, Math.min(pvPreview.line.steps.length, step));
+    renderPvPreview();
+  };
+  el('pvStart').addEventListener('click', () => stepTo(0));
+  el('pvBack').addEventListener('click', () => stepTo((pvPreview?.step ?? 0) - 1));
+  el('pvForward').addEventListener('click', () => stepTo((pvPreview?.step ?? 0) + 1));
+  el('pvEnd').addEventListener('click', () => stepTo(pvPreview?.line.steps.length ?? 0));
+  el('pvPreviewMoves').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>('[data-pv-step]');
+    if (button) stepTo(Number(button.dataset.pvStep));
+  });
+  dialog.addEventListener('keydown', (event) => {
+    const key = event as KeyboardEvent;
+    if (!pvPreview || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key.key)) return;
+    key.preventDefault();
+    key.stopPropagation();
+    stepTo(key.key === 'Home' ? 0 : key.key === 'End' ? pvPreview.line.steps.length : pvPreview.step + (key.key === 'ArrowRight' ? 1 : -1));
+  });
+  const insert = (whole: boolean) => {
+    if (!pvPreview) return;
+    const { root, line, step } = pvPreview;
+    if (!whole && step === 0) return;
+    const added = insertPvPrefix(tree, root, line.steps.map((entry) => entry.uci), whole ? line.steps.length : step);
+    closePvPreview();
+    if (added) afterNavigation();
+    else el('message').textContent = 'The position changed. Open a current engine line to insert it.';
+  };
+  el('pvInsertHere').addEventListener('click', () => insert(false));
+  el('pvInsertLine').addEventListener('click', () => insert(true));
+}
+
 function hoverLine(pvUci: string[], engine: string) {
   // Only the line's first move: the rest of the PV is from future positions, so
   // drawing every ply on the current board is misleading clutter.
@@ -4291,6 +4352,34 @@ function wireEvents() {
     // No persistent URL marker: a later reload must be eligible for saved-game restore.
     location.assign('/app/play/');
   });
+  let linkFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
+  mountAbort.signal.addEventListener('abort', () => clearTimeout(linkFeedbackTimer), { once: true });
+  el('copyLink').addEventListener('click', async () => {
+    const signal = mountAbort.signal;
+    const url = positionShareUrl(tree.current.fen, location.href);
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(url);
+      if (isStaleMount(signal)) return;
+      el('positionShareFallback').hidden = true;
+      const button = el('copyLink');
+      const label = button.querySelector('.tool-label')!;
+      clearTimeout(linkFeedbackTimer);
+      button.dataset.copied = 'true';
+      label.textContent = 'Copied';
+      el('message').textContent = 'Position link copied. It contains this position only, not the game or engine settings.';
+      linkFeedbackTimer = setTimeout(() => { delete button.dataset.copied; label.textContent = 'Copy link'; }, 1600);
+    } catch {
+      if (isStaleMount(signal)) return;
+      const input = inputEl('positionShareUrl');
+      input.value = url;
+      el('positionShareFallback').hidden = false;
+      (el('positionTools') as HTMLDetailsElement).open = true;
+      input.focus();
+      input.select();
+      el('message').textContent = 'Clipboard unavailable. Copy the selected position link.';
+    }
+  });
   try {
     const saved: unknown = JSON.parse(storageGet(EXPANDED_LINES_STORAGE_KEY) ?? '[]');
     expandedEngines = new Set(Array.isArray(saved) ? saved.filter((name): name is string => typeof name === 'string') : []);
@@ -4350,6 +4439,13 @@ function wireEvents() {
     setShapes(bestShapes());
   });
   el('engineSummaries').addEventListener('click', (event) => {
+    const pvAction = (event.target as HTMLElement).closest<HTMLElement>('[data-pv-preview], [data-pv-insert]');
+    const pvRow = pvAction?.closest<HTMLElement>('.result-line[data-pv]');
+    if (pvAction && pvRow) {
+      if (pvAction.hasAttribute('data-pv-preview')) openPvPreview(pvRow, pvAction);
+      else if (pvRow.dataset.pvFen === tree.current.fen && Number(pvRow.dataset.pvRoot) === tree.current.id && insertPvPrefix(tree, tree.current, (pvRow.dataset.pv ?? '').split(' ').filter(Boolean), Number(pvAction.dataset.pvInsert))) afterNavigation();
+      return;
+    }
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-engine-settings], [data-engine-toggle], [data-uci]');
     const lineToggle = (event.target as HTMLElement).closest<HTMLElement>('[data-line-toggle]');
     if (lineToggle?.dataset.lineToggle) {
@@ -4366,6 +4462,7 @@ function wireEvents() {
       setShapes(bestShapes());
     } else if (target?.dataset.uci && tree.addUci(target.dataset.uci)) afterNavigation();
   });
+  wirePvPreview();
   const positionTools = el('positionTools') as HTMLDetailsElement;
   // "Load" goes to the one paste box when it is on screen (empty game); otherwise it opens the full panel.
   el('openPosition').addEventListener('click', () => {
@@ -4781,6 +4878,9 @@ function disposePageResources(): void {
   analysisPagehideHandler = null;
   if (analysisAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, analysisAuditHandler);
   analysisAuditHandler = null;
+  pvPreview = null;
+  pvGround?.destroy();
+  pvGround = null;
   keyboardBoard?.destroy();
   keyboardBoard = null;
   (ground as { destroy?: () => void } | null)?.destroy?.();
@@ -4965,7 +5065,7 @@ async function init(mountSignal: AbortSignal) {
   if (lastProfile) {
     engineRows = profileRowsForUse(lastProfile.rows, false);
     inputEl('multiPvInput').value = String(lastProfile.multiPv);
-    selectEl('lc0RuntimeSelect').value = lastProfile.lc0Runtime;
+    selectEl('lc0RuntimeSelect').value = engineSetupRuntime(lastProfile.lc0Runtime, params.has('dev'));
   } else {
     engineRows = loadManualEngineRows() ?? engineRows;
   }
