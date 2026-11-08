@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { START_FEN } from '../src/chess/board.ts';
 import { createPvPreview, insertPvPrefix } from '../src/lc0/analysisPv.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
@@ -81,6 +82,15 @@ test('illegal prefixes and invalid counts are atomic', () => {
   assert.equal(tree.root.children.length, 0);
   assert.equal(tree.current, tree.root);
   assert.ok(insertPvPrefix(tree, tree.root, ['e2e4', 'e7e5', 'a1a8'], 2));
+});
+
+test('closing a preview retains its Chessground instance until page teardown', () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const close = source.slice(source.indexOf('function closePvPreview()'), source.indexOf('function renderPvPreview()'));
+  assert.doesNotMatch(close, /pvGround\?\.destroy\(|pvGround = null/);
+  const dispose = source.slice(source.indexOf('function disposePageResources()'), source.indexOf('async function loadLc0Backend('));
+  assert.match(dispose, /pvGround\?\.destroy\(\)/);
+  assert.match(dispose, /pvGround = null/);
 });
 
 test('a changed root, equal-FEN replacement tree, or detached branch rejects stale insertions', () => {

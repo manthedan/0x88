@@ -4107,8 +4107,8 @@ function copyPgn() {
 function closePvPreview(): void {
   const previous = pvPreview;
   pvPreview = null;
-  pvGround?.destroy();
-  pvGround = null;
+  // Reuse the read-only board until page teardown. Chessground 9's destroy()
+  // does not disconnect its ResizeObserver, so recreating it per open leaks observers.
   (el('pvPreview') as HTMLDialogElement).close();
   if (previous?.root === tree.current) {
     el('engineSummaries').querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(previous.focusKey)}"]`)?.focus({ preventScroll: true });
