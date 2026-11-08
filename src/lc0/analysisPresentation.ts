@@ -198,6 +198,21 @@ export function analysisConsensus(lines: AnalysisLine[]): string {
   return agreement + spread;
 }
 
+/** Wrapped moves are clipped as whole buttons; the complete PV remains in Preview. */
+export function fitAnalysisPvRows(container: HTMLElement): void {
+  for (const pv of container.querySelectorAll<HTMLElement>('.engine-lines .pv')) {
+    const top = pv.getBoundingClientRect().top;
+    let clipped = false;
+    for (const move of pv.querySelectorAll<HTMLButtonElement>('.pv-move')) {
+      const outside = move.getBoundingClientRect().top >= top + pv.clientHeight;
+      move.inert = outside;
+      move.setAttribute('aria-hidden', String(outside));
+      clipped ||= outside;
+    }
+    pv.parentElement?.classList.toggle('pv-clipped', clipped);
+  }
+}
+
 /** Preserve keyboard position and full-line disclosures while other engines finish. */
 export function patchAnalysisResults(container: HTMLElement, markup: string): void {
   if (container.innerHTML === markup) return;
@@ -207,6 +222,7 @@ export function patchAnalysisResults(container: HTMLElement, markup: string): vo
     .map((node) => [node.dataset.resultScrollKey, node.scrollLeft]));
   const expanded = new Set([...container.querySelectorAll<HTMLDetailsElement>('details[open][data-result-key]')].map((node) => node.dataset.resultKey));
   container.innerHTML = markup;
+  fitAnalysisPvRows(container);
   for (const detail of container.querySelectorAll<HTMLDetailsElement>('details[data-result-key]')) {
     detail.open = expanded.has(detail.dataset.resultKey);
   }

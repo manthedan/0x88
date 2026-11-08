@@ -707,24 +707,27 @@ onMount(() => {
   .add-engine-text small{font:13px/1.35 var(--sans); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .add-engine-text small::before{content:'· '}
 
-  /* PV rows inside each engine block; the top line hangs under the engine name (39px = pad + avatar + gap). */
+  /* Compact controls leave the row for whole-move PV tokens; Preview retains the full line. */
   :global(.engine-lines){list-style:none; margin:0; padding:0 0 5px}
   :global(.result-line){position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; min-height:26px}
   :global(.result-line.alt-line){border-top:1px dashed var(--rule-soft)}
   :global(.result-line:has(.pv-move:hover)), :global(.result-line:focus-within), :global(.result-line.previewing){background:var(--result-highlight)}
-  :global(.line-play){display:flex; align-items:center; gap:8px; width:100%; min-width:0; min-height:26px; padding:0 6px 0 39px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left}
+  :global(.line-play){display:flex; align-items:center; gap:2px; width:100%; min-width:0; min-height:26px; padding:0 2px 0 10px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left}
   :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.line-rank){flex:0 0 12px; font:600 13px var(--mono); color:var(--muted); text-align:center}
   :global(.engine-lines .score){flex:0 0 50px; font:700 13.5px var(--mono); font-variant-numeric:tabular-nums; color:var(--ink); text-align:right}
-  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; gap:2px; overflow-x:auto; scrollbar-width:thin; font:14px/1.5 var(--sans); color:var(--ink)}
-  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:30px; padding:2px 4px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
+  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; align-content:flex-start; height:30px; overflow:hidden; font:13.5px/1.5 var(--sans); color:var(--ink)}
+  :global(.pv-ellipsis){flex:0 0 12px; visibility:hidden; color:var(--muted)}
+  :global(.pv-clipped .pv-ellipsis){visibility:visible}
+  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:30px; padding:2px 2px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
   :global(.engine-lines .pv-move:hover){background:var(--selection-bg)}
   :global(.line-actions){display:flex; align-items:center}
-  :global(.line-preview){min-height:32px; padding:2px 7px; border:0; background:transparent; color:var(--muted); font:600 13px var(--sans)}
+  :global(.line-preview){display:grid; place-items:center; width:30px; min-height:32px; padding:2px; border:0; background:transparent; color:var(--muted)}
+  :global(.line-preview svg){width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linejoin:round}
   :global(.line-preview:hover){background:var(--panel-2); color:var(--ink)}
   :global(.engine-lines .pv-move:first-child){font-weight:700}
   :global(.engine-lines .pv-num){color:var(--muted); font-weight:400; font-variant-numeric:tabular-nums}
-  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:76px; min-height:26px; padding:0 8px 0 6px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:600 13px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
+  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:40px; min-height:32px; padding:0 5px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:600 13px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
   :global(.line-toggle:hover:not(:disabled)){background:var(--panel-2); color:var(--ink)}
   :global(.line-toggle svg){width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
   :global(.line-toggle[aria-expanded=true] svg){transform:rotate(180deg)}
@@ -916,9 +919,11 @@ onMount(() => {
     .review-settings select, .review-actions button, .review-exports button, .review-moments-heading button, :global(.review-critical button){min-height:40px}
     .tab-badge{display:none}
     :global(.engine-summary){padding-top:0}
-    :global(.line-play){min-height:36px; padding-left:36px}
+    :global(.line-play){min-height:36px; padding-left:8px}
     :global(.result-line){min-height:36px}
-    :global(.line-toggle){min-height:36px; min-width:72px}
+    :global(.line-toggle){min-height:36px; min-width:44px}
+    :global(.line-preview){width:36px}
+    :global(.engine-lines .pv){height:36px}
     :global(.line-preview), :global(.engine-lines .pv-move){min-height:36px}
     :global(.engine-lines .line-error), :global(.engine-lines .pending-line){padding-left:36px}
     .position-tools :is(button, input), .pgn-actions button{min-height:44px}

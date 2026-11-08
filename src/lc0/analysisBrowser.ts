@@ -133,7 +133,7 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
+import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, fitAnalysisPvRows, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerCorner } from './analysisPresentation.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
 import { positionShareUrl } from './analysisShare.ts';
@@ -2143,13 +2143,17 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" data-pv-fen="${htmlEscape(tree.current.fen)}" data-pv-root="${tree.current.id}" data-pv-score="${htmlEscape(line.scoreText)}" data-pv-detail="${htmlEscape(line.detail)}" data-pv-rank="${line.multipv}"`;
     const key = htmlEscape(`${tree.current.fen}|${engine}|${line.multipv}`);
     const preview = createPvPreview(tree.current.fen, line.pvUci.slice(0, 12));
-    const moves = preview.steps.map((step, ply) => `<button type="button" class="pv-move" data-pv-insert="${ply + 1}" data-focus-key="${key}|move|${ply}" aria-label="${htmlEscape(`Insert ${name} line through ${step.label}`)}" title="${htmlEscape(`Add variation through ${step.label}`)}">${htmlEscape(step.label)}</button>`).join('');
+    const moves = preview.steps.map((step, ply) => {
+      // Standalone preview/accessibility labels keep their number; inline Black moves do not.
+      const text = ply > 0 ? step.label.replace(/^\d+… /, '') : step.label;
+      return `<button type="button" class="pv-move" data-pv-insert="${ply + 1}" data-focus-key="${key}|move|${ply}" aria-label="${htmlEscape(`Insert ${name} line through ${step.label}`)}" title="${htmlEscape(`Add variation through ${step.label}`)}">${htmlEscape(text)}</button>`;
+    }).join('');
     // The header already carries the top line's eval; alternatives show rank + their own eval.
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
     const toggle = index === 0
-      ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Hide lines' : `${extra} more lines`}</span>${CHEVRON_ICON}</button>` : ''
+      ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? '−' : '+'}${extra}</span>${CHEVRON_ICON}</button>` : ''
       : '';
-    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv}`)}"${preview.steps.length ? '' : ' disabled'}>Preview</button>${toggle}</div></li>`;
+    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv}`)}"${preview.steps.length ? '' : ' disabled'} title="Preview line on a board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button>${toggle}</div></li>`;
   });
   if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
@@ -5277,8 +5281,11 @@ export function mountAnalysisBrowser(): () => void {
   smokeGlobal.__analysisUserMove = hook;
   smokeGlobal.__analysisSchedulingState = schedulingStateHook;
   smokeGlobal.__analysisSetHidden = setHiddenHook;
+  const pvResize = new ResizeObserver(() => fitAnalysisPvRows(el('engineSummaries')));
+  pvResize.observe(el('engineSummaries'));
   void init(controller.signal);
   return () => {
+    pvResize.disconnect();
     controller.abort();
     if (mountAbort === controller) disposePageResources();
     // Only clear the test hook if it is still ours (a newer mount may have
