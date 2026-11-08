@@ -56,6 +56,8 @@ test('cached review scores preserve White perspective on Black-to-move boards', 
       winWhite: evalBarWhitePercent(score.scoreCp === undefined ? undefined : -score.scoreCp, score.mateIn === undefined ? undefined : -score.mateIn) / 100,
       bestUci: 'e7e5',
       legalMoves: 20,
+      ...(score.scoreCp === undefined ? {} : { scoreCp: -score.scoreCp }),
+      ...(score.mateIn === undefined ? {} : { mateIn: -score.mateIn }),
     });
   }
 });
@@ -65,4 +67,14 @@ test('review ignores errors, missing top lines and unscored cache entries', () =
   assert.equal(cachedReviewPosition([{ multipv: 2, scoreCp: 10 }], 20), undefined);
   assert.equal(cachedReviewPosition([{ multipv: 1, error: 'failed', scoreCp: 10 }], 20), undefined);
   assert.equal(cachedReviewPosition([{ multipv: 1 }], 20), undefined);
+  assert.equal(cachedReviewPosition([{ multipv: 1, scoreCp: NaN }], 20), undefined);
+  assert.equal(cachedReviewPosition([{ multipv: 1, mateIn: Infinity }], 20), undefined);
+});
+
+test('review retains original finite evals for export and ignores a corrupt mate field', () => {
+  const position = cachedReviewPosition([{ multipv: 1, scoreCp: 25, mateIn: NaN, pvUci: [] }], 12);
+  assert.equal(position.winWhite, evalBarWhitePercent(25, undefined) / 100);
+  assert.equal(position.scoreCp, 25);
+  assert.equal(position.bestUci, null);
+  assert.equal(position.mateIn, undefined);
 });

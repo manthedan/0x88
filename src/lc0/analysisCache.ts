@@ -16,6 +16,14 @@ export function cachedAnalysisSelection(cache: ReadonlyMap<string, AnalysisLine[
 /** Analysis lines are already White-relative; do not flip Black scores twice. */
 export function cachedReviewPosition(lines: AnalysisLine[] | undefined, legalMoves: number): ReviewPosition | undefined {
   const first = lines?.find((line) => line.multipv === 1 && !line.error);
-  if (!first || (first.scoreCp === undefined && first.mateIn === undefined)) return undefined;
-  return { winWhite: evalBarWhitePercent(first.scoreCp, first.mateIn) / 100, bestUci: first.pvUci[0] ?? null, legalMoves };
+  if (!first || (!Number.isFinite(first.scoreCp) && !Number.isFinite(first.mateIn))) return undefined;
+  const scoreCp = Number.isFinite(first.scoreCp) ? first.scoreCp : undefined;
+  const mateIn = Number.isFinite(first.mateIn) ? first.mateIn : undefined;
+  return {
+    winWhite: evalBarWhitePercent(scoreCp, mateIn) / 100,
+    bestUci: first.pvUci?.[0] ?? null,
+    legalMoves,
+    ...(Number.isFinite(first.scoreCp) ? { scoreCp: first.scoreCp } : {}),
+    ...(Number.isFinite(first.mateIn) ? { mateIn: first.mateIn } : {}),
+  };
 }

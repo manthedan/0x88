@@ -7,6 +7,10 @@
  * scope. See docs/arena_analysis_roadmap.md stage 3.
  */
 
+import { type BoardState } from '../chess/board.ts';
+import { automaticDrawReason } from '../chess/drawRules.ts';
+import { inCheck } from '../chess/movegen.ts';
+
 export type MoveClass = 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder' | 'forced';
 
 export interface ReviewPosition {
@@ -14,6 +18,9 @@ export interface ReviewPosition {
   winWhite: number;
   /** Engine best move (UCI) in this position; null when unavailable. */
   bestUci: string | null;
+  /** Original White-relative engine scores, retained for portable PGN evals. */
+  scoreCp?: number;
+  mateIn?: number;
   /** Number of legal moves; 1 marks the played move as forced. */
   legalMoves?: number;
 }
@@ -30,6 +37,9 @@ export interface ReviewedMove {
   moverLoss: number;
   class: MoveClass;
   bestUci: string | null;
+  /** Original White-relative score after this move (never inferred from win %). */
+  scoreCpAfter?: number;
+  mateInAfter?: number;
   /** Lichess-style per-move accuracy 0..100. */
   accuracy: number;
 }
@@ -83,6 +93,9 @@ export function reviewGame(positions: readonly ReviewPosition[], moves: readonly
   if (positions.length !== moves.length + 1) {
     throw new Error(`review needs one position per move plus the final position (got ${positions.length} positions for ${moves.length} moves)`);
   }
+  if (positions.some((position) => !Number.isFinite(position.winWhite) || position.winWhite < 0 || position.winWhite > 1)) {
+    throw new Error('Review requires a finite score for every position.');
+  }
   const reviewed: ReviewedMove[] = moves.map((move, index) => {
     const side: 'w' | 'b' = index % 2 === 0 ? startTurn : startTurn === 'w' ? 'b' : 'w';
     const winBefore = positions[index].winWhite;
@@ -100,7 +113,9 @@ export function reviewGame(positions: readonly ReviewPosition[], moves: readonly
       moverLoss,
       class: classifyMoverLoss(moverLoss, playedBest, forced),
       bestUci: positions[index].bestUci,
-      accuracy: moveAccuracy(moverLoss),
+      ...(positions[index + 1].scoreCp === undefined ? {} : { scoreCpAfter: positions[index + 1].scoreCp }),
+      ...(positions[index + 1].mateIn === undefined ? {} : { mateInAfter: positions[index + 1].mateIn }),
+      accuracy: moveAccuracy(playedBest || forced ? 0 : moverLoss),
     };
   });
 
@@ -125,16 +140,37 @@ export function reviewGame(positions: readonly ReviewPosition[], moves: readonly
   return { moves: reviewed, accuracy, counts, criticalMoves };
 }
 
+/** Pure hook for later practice/report workflows. Ranked by loss, limited to real errors. */
+export function criticalReviewPlies(review: GameReview, limit = 5): number[] {
+  return review.moves
+    .filter((move) => ['inaccuracy', 'mistake', 'blunder'].includes(move.class))
+    .sort((a, b) => b.moverLoss - a.moverLoss || a.ply - b.ply)
+    .slice(0, Math.max(0, limit))
+    .map((move) => move.ply);
+}
+
+/** Walk the selected largest swings in game order, wrapping at either end. */
+export function adjacentCriticalPly(review: GameReview, current: number, direction: -1 | 1): number | undefined {
+  const plies = criticalReviewPlies(review).sort((a, b) => a - b);
+  return direction === 1 ? plies.find((ply) => ply > current) ?? plies[0]
+    : plies.slice().reverse().find((ply) => ply < current) ?? plies.at(-1);
+}
+
+/** History excludes the current board. Checkmate takes precedence over draw rules. */
+export function terminalReviewPosition(board: BoardState, historyFens: string[], legalCount: number): ReviewPosition | undefined {
+  if (legalCount === 0 && inCheck(board)) {
+    return { winWhite: board.turn === 'w' ? 0 : 1, bestUci: null, legalMoves: 0, mateIn: 0 };
+  }
+  if (legalCount === 0 || automaticDrawReason(board, historyFens)) {
+    return { winWhite: 0.5, bestUci: null, legalMoves: legalCount, scoreCp: 0 };
+  }
+  return undefined;
+}
+
 const CLASS_NAG: Partial<Record<MoveClass, string>> = {
   inaccuracy: '$6',
   mistake: '$2',
   blunder: '$4',
-};
-
-const CLASS_SUFFIX: Partial<Record<MoveClass, string>> = {
-  inaccuracy: '?!',
-  mistake: '?',
-  blunder: '??',
 };
 
 export interface AnnotatedPgnOptions {
@@ -146,13 +182,16 @@ export interface AnnotatedPgnOptions {
 
 /**
  * Standalone annotated PGN for a reviewed mainline: NAGs for inaccuracies/
- * mistakes/blunders plus eval comments (white win %) on every move, and the
+ * mistakes/blunders plus portable [%eval] comments only for original engine scores, and the
  * engine best move noted where the played move lost meaningful ground.
  */
 export function annotatedPgn(review: GameReview, options: AnnotatedPgnOptions = {}): string {
-  const tags = { Event: 'Game review', ...options.tags };
+  const result = ['1-0', '0-1', '1/2-1/2', '*'].includes(options.result ?? '') ? options.result! : '*';
+  const tags = { Event: 'Game review', ...options.tags, Result: result };
+  const escapeTag = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]/g, ' ');
   const header = Object.entries(tags)
-    .map(([key, value]) => `[${key} "${value}"]`)
+    .filter(([key]) => /^\w+$/.test(key))
+    .map(([key, value]) => `[${key} "${escapeTag(value)}"]`)
     .join('\n');
   const startTurn = options.startTurn ?? 'w';
   let fullmove = options.startFullmove ?? 1;
@@ -160,16 +199,19 @@ export function annotatedPgn(review: GameReview, options: AnnotatedPgnOptions = 
   review.moves.forEach((move, index) => {
     if (move.side === 'w') tokens.push(`${fullmove}.`);
     else if (index === 0 && startTurn === 'b') tokens.push(`${fullmove}...`);
-    tokens.push(`${move.san}${CLASS_SUFFIX[move.class] ?? ''}`);
+    tokens.push(move.san);
     const nag = CLASS_NAG[move.class];
     if (nag) tokens.push(nag);
-    const parts = [`[%win ${Math.round(move.winAfter * 100)}%]`];
+    // A probability-only score is not a centipawn eval. Do not manufacture one.
+    const parts: string[] = [];
+    if (Number.isFinite(move.mateInAfter)) parts.push(`[%eval #${move.mateInAfter}]`);
+    else if (Number.isFinite(move.scoreCpAfter)) parts.push(`[%eval ${(move.scoreCpAfter! / 100).toFixed(2)}]`);
     if (move.bestUci && move.class !== 'best' && move.class !== 'forced' && move.moverLoss >= INACCURACY) {
       parts.push(`best ${move.bestUci}`);
     }
-    tokens.push(`{ ${parts.join(' ')} }`);
+    if (parts.length) tokens.push(`{ ${parts.join(' ')} }`);
     if (move.side === 'b') fullmove += 1;
   });
-  if (options.result) tokens.push(options.result);
+  tokens.push(result);
   return `${header}\n\n${tokens.join(' ')}\n`;
 }
