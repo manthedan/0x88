@@ -970,6 +970,7 @@ onMount(() => {
   :global(.quick-pgn-actions){display:flex; align-items:center; gap:14px}
   :global(.quick-pgn-hint){font-size:13px; color:var(--muted)}
   :global(.quick-pgn-load){min-height:44px; padding:0 18px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:var(--on-accent); font:650 14px var(--sans)}
+  .app-sidebar:has(.analysis-overview:not(:global([data-status=done]))) :global(.quick-pgn-load){background:var(--panel-inset); border-color:var(--border-input); color:var(--ink)}
   /* Rare long SAN + large eval pairs wrap the score rather than spilling into the next ply. */
   :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:flex-start; gap:0 9px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
