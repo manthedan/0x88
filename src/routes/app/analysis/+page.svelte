@@ -1039,7 +1039,7 @@ onMount(() => {
     .tool-button.board-tools-trigger{display:flex; width:48px!important; height:44px; font-size:18px!important; letter-spacing:1px}
     .mobile-tool-label{display:inline}
     .board-tools{position:absolute; z-index:25; bottom:calc(100% + 6px); right:0; display:grid; grid-template-columns:1fr; gap:3px; width:230px; height:auto; padding:6px; border:1px solid var(--border-input); border-radius:8px; background:var(--panel); box-shadow:0 8px 24px #0004}
-    .board-tools .tool-button{justify-content:flex-start; min-height:44px; width:100%; border-color:transparent; font-size:14px}
+    .board-tools .tool-button{justify-content:flex-start; height:auto; min-height:44px; width:100%; border-color:transparent; font-size:14px}
     .board-tools .copy-tools{display:block}
     .board-tools .copy-menu{position:static; width:auto; margin-left:14px; box-shadow:none; border:0; border-radius:0; border-top:1px solid var(--rule)}
     .board-tools #openPosition .tool-label::after{content:' game or position'}
