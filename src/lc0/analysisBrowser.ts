@@ -36,6 +36,7 @@ import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameIm
 import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
 import { REVIEW_CLASS_GLYPH, REVIEW_CLASS_LABEL, reviewChartSvg, reviewMoveLabel, reviewPlyAtRatio, reviewSummaryHtml } from './gameReviewPresentation.ts';
 import { type GameNode, GameTree } from './gameTree.ts';
+import { withEngineTimeout } from './engineTimeout.ts';
 import { LatestOnlyTask } from './latestOnlyTask.ts';
 import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import {
@@ -3018,13 +3019,16 @@ async function runGameReview(): Promise<void> {
       const engineId = row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`;
       const lines = await withCpuLease(engineId, controller.signal, async (lease) => {
         cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
-        if (cpuSessions.needsReset(engine, reviewTree)) {
-          await engine.newGame(controller.signal);
-          cpuSessions.prepared(engine, reviewTree);
-        }
-        return withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-          analyzeCpuPosition(engine, row, fen, analysisGamePosition(reviewTree, nodes[i]), { multipv: reviewMultiPv, depth, signal }),
-        );
+        // Include startup in the abort race: Stockfish's cold init itself is
+        // not abortable, but must not retain a CPU lease after Cancel.
+        return withEngineTimeout(label, controller.signal, Math.max(cpuColdStartTimeoutMs(row), cpuAnalysisTimeoutMs(row)), async (signal) => {
+          if (cpuSessions.needsReset(engine, reviewTree)) {
+            await engine.newGame(signal);
+            if (signal.aborted) throw new DOMException('Review aborted', 'AbortError');
+            cpuSessions.prepared(engine, reviewTree);
+          }
+          return analyzeCpuPosition(engine, row, fen, analysisGamePosition(reviewTree, nodes[i]), { multipv: reviewMultiPv, depth, signal });
+        });
       });
       if (reviewAbort !== controller) return;
       if (controller.signal.aborted) break;
@@ -3289,36 +3293,6 @@ async function withCpuLease<T>(engineId: string, signal: AbortSignal, task: (lea
     return await task(lease);
   } finally {
     lease.release();
-  }
-}
-
-async function withEngineTimeout<T>(label: string, parentSignal: AbortSignal, timeoutMs: number, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  if (parentSignal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
-  const controller = new AbortController();
-  const timeoutMessage = `${label} timed out after ${Math.round(timeoutMs / 1000)}s`;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let abortReject: ((error: DOMException) => void) | null = null;
-  const abortPromise = new Promise<never>((_, reject) => {
-    abortReject = reject;
-  });
-  const onAbort = () => {
-    controller.abort();
-    abortReject?.(new DOMException('Analysis aborted', 'AbortError'));
-  };
-  parentSignal.addEventListener('abort', onAbort, { once: true });
-  try {
-    const taskPromise = task(controller.signal);
-    taskPromise.catch(() => undefined);
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new Error(timeoutMessage));
-      }, timeoutMs);
-    });
-    return await Promise.race([taskPromise, timeoutPromise, abortPromise]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    parentSignal.removeEventListener('abort', onAbort);
   }
 }
 
