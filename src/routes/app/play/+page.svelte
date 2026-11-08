@@ -74,10 +74,10 @@ onMount(() => {
       <div id="progressAnnouncement" class="visually-hidden" role="status" aria-live="polite"></div>
     </div>
 
+    <!-- The opponent's name and level live on the board strip; this row only offers the change. -->
     <div class="opponent-summary">
-      <span class="player-avatar small" data-summary-avatar aria-hidden="true">M3</span>
-      <div class="summary-copy"><span id="opponentSummary" class="summary-text">Maia3 · 1500</span><small>Casual · untimed</small></div>
-      <button id="changeOpponent" class="ghost-button" type="button" aria-expanded="false" aria-controls="setupPane opponentDetails">Change</button>
+      <span class="summary-copy">Casual · untimed</span>
+      <button id="changeOpponent" class="ghost-button" type="button" aria-expanded="false" aria-controls="setupPane opponentDetails">Change opponent</button>
     </div>
 
     <div id="setupPane" class="setup-pane" role="group" aria-label="Opponent settings">
@@ -252,7 +252,6 @@ onMount(() => {
     font:700 12.5px/1 var(--sans); letter-spacing:-.01em;
   }
   .player-avatar.you{background:var(--panel-2); color:var(--ink); box-shadow:inset 0 0 0 1px var(--border-input-hover); font-size:11px}
-  .player-avatar.small{flex-basis:28px; width:28px; height:28px; font-size:11px; border-radius:6px}
   .player-id{display:flex; flex:0 1 auto; flex-direction:column; min-width:0; line-height:1.25}
   .player-id strong{color:var(--ink); font:650 15px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .player-id small{color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
@@ -362,9 +361,7 @@ onMount(() => {
 
   /* Game pane pieces */
   .opponent-summary{display:flex; align-items:center; gap:9px; min-height:48px; padding:6px 10px 6px 14px; border-bottom:1px solid var(--rule)}
-  .summary-copy{display:flex; flex:1 1 auto; flex-direction:column; min-width:0; gap:2px}
-  .summary-copy small{color:var(--muted); font-size:12px}
-  .summary-text{min-width:0; color:var(--ink); font:600 13.5px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .summary-copy{flex:1 1 auto; min-width:0; color:var(--muted); font-size:12px}
   .ghost-button{min-height:44px; padding:0 11px; border-radius:7px; background:transparent; color:var(--text); font:600 13px var(--sans)}
   .ghost-button:global([aria-expanded=true]){border-color:var(--accent); color:var(--ink)}
   .restart-banner{margin:10px 12px 0; padding:10px; border:1px solid var(--accent-tint-border); border-radius:8px; background:var(--accent-soft)}

@@ -1578,12 +1578,9 @@ function ctxRenderChrome(ctx: PlayContext, shownBoard: BoardState, shownPly: num
   }
   el('opponentBlurb').textContent = ctxOpponentBlurb(ctx);
 
-  const summaryAvatar = document.querySelector<HTMLElement>('[data-summary-avatar]');
-  if (summaryAvatar) summaryAvatar.textContent = ENGINE_MONOGRAMS[option.family] ?? option.label.slice(0, 2);
-  el('opponentSummary').textContent = `${opponent} · ${ctxOpponentMeta(ctx)}`;
   const change = buttonEl('changeOpponent');
   change.setAttribute('aria-expanded', String(ctx.configOpen));
-  change.textContent = ctx.configOpen ? 'Done' : 'Change';
+  change.textContent = ctx.configOpen ? 'Done' : 'Change opponent';
   change.title = ctx.configOpen ? '' : 'Change opponent (asks before restarting the game)';
   const detailsLabel = maybeEl('detailsLabel');
   if (detailsLabel) detailsLabel.textContent = option.family === 'maia3' ? 'Exact rating & opponent details' : 'Opponent details';
@@ -2083,7 +2080,6 @@ function hasPlayBrowserDom(): boolean {
     'boardAnnouncement',
     'gameAnnouncement',
     'opponentBlurb',
-    'opponentSummary',
     'changeOpponent',
     'maia3EloBand',
     'maia3Advanced',
