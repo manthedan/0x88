@@ -21,6 +21,9 @@ import {
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
+import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
+import { criticalPositionLines } from './criticalMomentsPresentation.ts';
+import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
 import { playFromHereUnavailableReason, playPositionFromTree } from './playPosition.ts';
 import {
@@ -503,6 +506,9 @@ let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
 let analysisReloadAbort: AbortController | null = null;
 let analysisReloadWantsSearch = false;
+let criticalPanel: ReturnType<typeof mountCriticalMomentsPanel> | null = null;
+const criticalAnalysisRefresh = new CriticalAnalysisRefresh();
+let criticalDeferredMaia = false;
 let reviewAbort: AbortController | null = null;
 let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
@@ -2986,6 +2992,7 @@ function clearReviewState(message?: string): void {
   el('reviewCopyPgn').hidden = true;
   el('reviewDownloadPgn').hidden = true;
   if (message) el('reviewStatus').textContent = message;
+  criticalPanel?.sync();
   decorateMoveEvals();
 }
 
@@ -3005,6 +3012,7 @@ function clearReviewIfMainlineChanged(): void {
   const signature = reviewSignature();
   if (reviewAbort && signature !== reviewRunSignature) stopGameReview('Review cancelled because the mainline changed.');
   if (lastReview && signature !== lastReviewSignature) clearReviewState('Review cleared after the mainline changed.');
+  criticalPanel?.sync();
 }
 
 function decorateReviewedMove(button: HTMLButtonElement, node: GameNode | undefined): void {
@@ -3084,6 +3092,7 @@ function renderReview(review: GameReview, nodes: GameNode[]): void {
     })
     .join('');
   el('reviewMomentsEmpty').hidden = review.criticalMoves.length > 0;
+  criticalPanel?.sync();
   syncReviewNavigation();
   renderMoveList();
 }
@@ -3123,6 +3132,10 @@ function startMistakeRetry(): void {
   if (side !== 'w' && side !== 'b') {
     el('retryEntryStatus').textContent = 'Choose the side you played first.';
     selectEl('retrySide').focus();
+    return;
+  }
+  if (criticalPanel?.isBusy()) {
+    el('retryEntryStatus').textContent = 'Cancel the critical-moment comparison before retrying mistakes.';
     return;
   }
   const problems = retryProblems(lastReview, lastReviewNodes, side);
@@ -3278,6 +3291,7 @@ function exitMistakeRetry(render = true): void {
   retryHumanGeneration += 1;
   restoreRetryPanels?.();
   restoreRetryPanels = null;
+  criticalPanel?.sync();
   orientation = retryOriginalOrientation;
   const savedShapes = retryOriginalShapes;
   retryOriginalShapes = [];
@@ -3306,6 +3320,7 @@ function exitMistakeRetry(render = true): void {
 
 async function runGameReview(): Promise<void> {
   if (retry || reviewAbort) return;
+  criticalPanel?.invalidate();
   const nodes = mainlineNodes();
   if (nodes.length < 2) {
     el('reviewStatus').textContent = 'Load a PGN or play some moves first.';
@@ -3573,6 +3588,7 @@ function removeHiddenTabPause(): void {
 function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): boolean {
   stopGameReview('Review cancelled after engine settings changed.');
   renderReviewEngineChoices();
+  criticalPanel?.sync();
   if (!hasActiveAnalysisRun()) return false;
   analyzeAfterActiveRun = true;
   reloadLc0AfterActiveRun ||= options.reloadLc0 === true;
@@ -3629,6 +3645,10 @@ function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolea
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
   if (reviewAbort || retry) return;
+  if (criticalPanel?.isBusy()) {
+    criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
+    return;
+  }
   if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
@@ -3926,6 +3946,10 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
   if (mountAbort.signal.aborted || reviewAbort || retry) return;
+  if (criticalPanel?.isBusy()) {
+    criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
+    return;
+  }
   if (deferHiddenTabWork('analysis')) {
     hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
     return;
@@ -4306,7 +4330,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
 
 let analysisGameTree = tree;
 
-function afterNavigation() {
+function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   if (retry) return;
   saveAnalysisWorkspace();
   if (pvPreview && (pvPreview.root !== tree.current || pvPreview.line.rootFen !== tree.current.fen)) closePvPreview();
@@ -4330,19 +4354,21 @@ function afterNavigation() {
   if (analyzing && analysisAbort && !analysisAbort.signal.aborted && activeAnalysisSelectionKey !== selectionKey) cancelActiveAnalysisRun();
   // A transposition can have the same FEN but a different neural/repetition
   // history. A completed-key marker is not provenance for the FEN-only view.
-  const cached = completeAnalysisKeys.has(selectionKey)
+  const positionLines = completeAnalysisKeys.has(selectionKey)
     ? cachedAnalysisSelection(
         engineLineCache,
         rows.map((row) => engineAnalysisCacheKey(fen, row)),
       )
     : undefined;
+  const cached = options.reportLines === undefined ? positionLines : criticalPositionLines(positionLines, options.reportLines);
+  criticalAnalysisRefresh.navigate(selectionKey, !!cached || options.reportLines !== undefined);
   if (cached) lineCache.set(fen, cached);
   else lineCache.delete(fen);
   clearStalePgnDatabaseSearchResults();
   clearReviewIfMainlineChanged();
   renderAll();
   scheduleMaia3Panel();
-  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort) void analyzeCurrent();
+  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort && options.reportLines === undefined) void analyzeCurrent();
   else {
     // A cached position, or auto-analyze off, must not restart the search that
     // was paused on the position we just left.
@@ -4426,6 +4452,13 @@ function scheduleMaia3Panel(): void {
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   maia3PanelTimer = null;
   if (!task || retry) return;
+  if (criticalPanel?.isBusy()) {
+    criticalDeferredMaia = true;
+    el('maia3Grid').hidden = true;
+    maia3PanelStatus('Human predictions are paused during critical-moment comparison.');
+    return;
+  }
+  criticalDeferredMaia = false;
   if (deferHiddenTabWork('maia')) return;
   maia3PanelTimer = setTimeout(() => {
     maia3PanelTimer = null;
@@ -4448,6 +4481,7 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
     if (!legalMoves(board).length) {
       maia3PanelStatus('');
       el('maia3Grid').innerHTML = '<div class="small">The game is over. Maia3 has no move to predict.</div>';
+      el('maia3Grid').hidden = false;
       return;
     }
     const evaluations = await evaluator.evaluateConditions(
@@ -4472,6 +4506,7 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
       return `<div class="maia3-row"><span class="maia3-elo">${MAIA3_PANEL_RATINGS[i]}</span><span class="maia3-score" title="Expected points for White in a human game at this rating">${score.toFixed(2)}</span>${top}</div>`;
     });
     el('maia3Grid').innerHTML = rows.join('');
+    el('maia3Grid').hidden = false;
     explorerMaia = { fen, policies: evaluations.map((evaluation) => new Map(evaluation.legalPriors.map((entry) => [entry.uci, entry.prior]))) };
     renderExplorerComparison();
   } finally {
@@ -5131,6 +5166,51 @@ function wireEvents() {
     lineCache.delete(tree.current.fen);
     if (!deferAnalysisSettingsRefresh()) scheduleAnalyzeCurrent();
   });
+  criticalPanel = mountCriticalMomentsPanel({
+    broker: resourceBroker,
+    suspended: () => !!retry,
+    baseline: () => lastReview && lastReviewSignature === reviewSignature() ? {
+      review: lastReview, fens: lastReviewNodes.map((node) => node.fen), signature: lastReviewSignature,
+      source: el('reviewGraphSource').textContent ?? 'CPU review',
+    } : undefined,
+    settings: () => [activeEngineRows(), selectedLc0Runtime(), multiPv(), selectEl('reviewEngine').value, selectEl('reviewDepth').value, resourceBroker.getDial()],
+    pauseAnalysis: () => {
+      cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+      analysisAbort = null;
+      analyzing = false;
+      clearAnalysisSearchProgress();
+      // Go through the busy guard so interrupted debounces/inference are hidden
+      // and replayed, even when the board does not move during the report.
+      scheduleMaia3Panel();
+      el('message').textContent = 'Position analysis paused for critical-moment comparison.';
+      el('stop').toggleAttribute('disabled', true);
+      el('analyze').toggleAttribute('disabled', false);
+    },
+    settled: () => {
+      const pending = criticalAnalysisRefresh.take(analysisSelectionCacheKey(tree.current.fen));
+      if (criticalDeferredMaia) scheduleMaia3Panel();
+      if (pending) scheduleAnalyzeCurrent(pending);
+    },
+    updateView: (moment, lines) => {
+      const node = mainlineNodes()[moment.move.ply - 1];
+      if (tree.current !== node || JSON.stringify(tree.historyBoards(node).map(boardToFen)) !== JSON.stringify(moment.history)) return;
+      const merged = criticalPositionLines(lineCache.get(node.fen), lines);
+      if (!merged) return;
+      lineCache.set(node.fen, merged);
+      renderLines();
+      renderEvalBar();
+      setShapes(bestShapes());
+    },
+    navigate: (moment, target, lines) => {
+      const node = mainlineNodes()[moment.move.ply - 1];
+      if (!node || node.fen !== moment.fen) return;
+      tree.goTo(node);
+      afterNavigation({ reportLines: lines });
+      if (target === 'comparison') el('comparisonTab').click();
+      if (target === 'human') el('humanTab').click();
+      if (target === 'play') el('playFromHere').click();
+    },
+  });
   el('reviewGame').addEventListener('click', () => {
     void runGameReview();
   });
@@ -5379,6 +5459,10 @@ function disposeRuntimeResources(): void {
 
 function disposePageResources(): void {
   if (retry) exitMistakeRetry(false);
+  criticalPanel?.dispose();
+  criticalPanel = null;
+  criticalAnalysisRefresh.clear();
+  criticalDeferredMaia = false;
   workspaceAutosave?.flush();
   workspaceAutosave = null;
   removeHiddenTabPause();
@@ -5529,6 +5613,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
 async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'auto', operationSignal?: AbortSignal): Promise<boolean> {
   lineCache.clear();
   completeAnalysisKeys.clear();
+  criticalPanel?.invalidate();
   disposeRuntimeResources();
   if (operationSignal?.aborted) return false;
   reconcileActiveRuntimeFallbackWarning();
@@ -5640,6 +5725,8 @@ function resetAnalysisPageState(): void {
   lastReviewReviewer = null;
   restoreRetryPanels?.();
   restoreRetryPanels = null;
+  criticalAnalysisRefresh.clear();
+  criticalDeferredMaia = false;
   analyzing = false;
   lineCache.clear();
   nodeIndex.clear();

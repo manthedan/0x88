@@ -509,6 +509,8 @@ onMount(() => {
   <div class="page-block">
     <h4 id="retry-mistakes">Retry your mistakes</h4>
     <p>After reviewing a game, choose the side you played and press <strong>Retry mistakes</strong> in Review. Play a better move in up to five pre-error positions, with engine advice and human predictions concealed. The review’s best move is accepted immediately; alternatives are checked locally with the same reviewer and depth, allowing up to 2 percentage points of estimated score loss versus the best move. Use <strong>Skip</strong> or <strong>Reveal</strong>, then <strong>Return to review</strong> to restore your untouched game and selected position. After solving or revealing, you can compare human likelihood at a chosen rating if Maia3 was loaded in Human beforehand. These probabilities predict choices, not correctness.</p>
+    <h4 id="compare-critical-moments">Compare critical moments</h4>
+    <p>After reviewing a game, find <strong>Compare critical moments</strong> below the Review results. Confirm the extra compute and download estimate to compare Stockfish Lite (depth 12) and Lc0 Small (400 visits) on up to five pre-error positions. Optionally include Maia3’s played-move and engine-move probabilities at one rating. Each engine has separate progress and failures; Cancel retains completed results. Severity comes from the baseline review, move agreement is separate, and Maia likelihood is not accuracy. Click a moment to visit the board, or use Compare, Human or Play from here. Mainline or settings changes mark the report stale; compare again to refresh it.</p>
   </div>
 
   <div class="page-block">

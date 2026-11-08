@@ -235,6 +235,25 @@ onMount(() => {
         <div class="review-exports"><button id="reviewCopyPgn" type="button" hidden>Copy reviewed PGN</button><button id="reviewDownloadPgn" type="button" hidden>Download PGN</button></div>
         <p class="review-hint">Exports the reviewed mainline with engine evals and error NAGs. Variations and existing notes are not included.</p>
       </div>
+        <section id="criticalMomentsArea" class="critical-moments-area" aria-labelledby="criticalMomentsTitle" hidden>
+          <h2 id="criticalMomentsTitle">Compare critical moments</h2>
+          <p id="criticalStatus" class="review-hint" role="status"></p>
+          <div class="review-actions">
+            <button id="criticalCompare" type="button">Compare critical moments</button>
+            <button id="criticalCancel" type="button" hidden>Cancel comparison</button>
+          </div>
+          <div id="criticalConsent" class="critical-consent" hidden>
+            <h3>Allow extra engine work?</h3>
+            <label class="critical-maia-option"><input id="criticalMaia" type="checkbox" /> Include Maia3 human-move probabilities</label>
+            <div class="field"><label for="criticalRating">Maia rating for both players</label><select id="criticalRating"><option value="600">600</option><option value="1100">1100</option><option value="1500" selected>1500</option><option value="1900">1900</option><option value="2200">2200</option><option value="2600">2600</option></select></div>
+            <p id="criticalConsentText"></p>
+            <div class="review-actions"><button id="criticalStart" type="button">Allow and compare</button><button id="criticalDecline" type="button">Not now</button></div>
+          </div>
+          <div id="criticalEngineProgress" class="critical-engine-progress"></div>
+          <p id="criticalSource" class="review-hint"></p>
+          <p class="review-hint">Engine evaluations favor White when positive. Stockfish pawns and Lc0’s Q-mapped pawns use different scales. Different top moves do not by themselves establish an error. Maia predicts human choices, not accuracy.</p>
+          <div id="criticalReport"></div>
+        </section>
       </div>
     </div>
     <div id="comparisonSection" class="section-block comparison-panel" role="tabpanel" aria-labelledby="comparisonTab" tabindex="0">
@@ -884,6 +903,31 @@ onMount(() => {
   :global(.mv-class.blunder), :global(.review-badge.blunder){color:var(--warn)}
   :global(.mv-class.mistake), :global(.review-badge.mistake){color:var(--warn)}
   :global(.mv-class.inaccuracy), :global(.review-badge.inaccuracy){color:var(--accent-soft-text)}
+  .critical-moments-area{margin-top:18px; padding-top:16px; border-top:1px solid var(--rule)}
+  .critical-moments-area h2{font:600 15px var(--sans); margin:0 0 8px; text-transform:none; letter-spacing:0}
+  .critical-consent{margin:12px 0; padding:12px; border:1px solid var(--rule); border-radius:8px; background:var(--panel-inset); font:13px/1.5 var(--sans)}
+  .critical-consent h3{font:600 14px var(--sans); margin:0 0 10px}
+  .critical-consent p{margin:10px 0}
+  .critical-maia-option{display:flex; align-items:center; gap:8px; margin-bottom:10px}
+  .critical-consent .field{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+  .critical-consent select{min-height:34px; padding:4px 8px}
+  .critical-engine-progress :global(>div){display:grid; gap:4px; margin:12px 0; font:12px/1.5 var(--sans)}
+  .critical-engine-progress :global(span){color:var(--muted)}
+  .critical-engine-progress :global(progress){width:100%; height:5px; accent-color:var(--accent)}
+  #criticalReport :global(.critical-moment){padding:14px 0; border-top:1px solid var(--rule); font:13px/1.5 var(--sans)}
+  #criticalReport :global(h3){margin:0 0 6px; font:600 15px var(--sans)}
+  #criticalReport :global(h3 button){font:inherit; padding:4px 8px; min-height:36px; text-align:left}
+  #criticalReport :global(p){margin:6px 0}
+  #criticalReport :global(.critical-baseline){color:var(--muted); font-size:12px}
+  #criticalReport :global(.critical-agreement){font-weight:600; margin:10px 0}
+  #criticalReport :global(.critical-engine){display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:3px 8px; margin:10px 0}
+  #criticalReport :global(.critical-engine small){grid-column:1/-1; color:var(--muted); font-size:12px}
+  #criticalReport :global(.critical-human){margin:12px 0; font-size:12px}
+  #criticalReport :global(.critical-links){display:flex; flex-wrap:wrap; gap:6px; margin:10px 0}
+  #criticalReport :global(.critical-links button){min-height:36px; padding:5px 10px; font-size:12px}
+  #criticalReport :global(.critical-provenance){font-size:12px; color:var(--muted); overflow-wrap:anywhere}
+  #criticalReport :global(.critical-provenance summary){cursor:pointer}
+  #criticalReport :global(.critical-provenance ul){padding-left:18px}
   .compare-help{margin:0 0 12px; font:13px/1.5 var(--sans); color:var(--muted)}
   .human-intro{margin:6px 0 0; font-size:13px; line-height:1.45; color:var(--text-soft)}
 
