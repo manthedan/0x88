@@ -1485,7 +1485,7 @@ function exitReview(): void {
   reviewTrail = null;
   reviewShapes = null;
   gameChartSamples = liveTrail?.charts ?? [];
-  if (gameChartSamples.length) renderGameCharts();
+  renderGameCharts();
   renderSavedRootChart(liveTrail?.rootChart);
   renderBoard();
 }
@@ -1940,6 +1940,7 @@ function syncArenaPhase(): void {
   main.dataset.phase = running ? 'running' : 'setup';
   if (running && !wasRunning && window.matchMedia('(max-width: 900px)').matches) main.scrollIntoView({ block: 'start' });
   main.dataset.match = arenaMatchState;
+  (el('setupPane') as HTMLFieldSetElement).disabled = running || startPending;
   if (!running) main.dataset.config = 'closed';
   const editButton = document.getElementById('editSetup');
   if (editButton) editButton.setAttribute('aria-expanded', String(main.dataset.config === 'open'));
@@ -3663,7 +3664,7 @@ async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.si
 function clearStartPending(): void {
   startPending = false;
   if (!running) el('start').toggleAttribute('disabled', false);
-  renderCheckpointStatus();
+  syncArenaPhase();
 }
 
 function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
@@ -3908,7 +3909,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   const mountSignal = mountAbort.signal;
   startPending = true;
   el('start').toggleAttribute('disabled', true);
-  renderCheckpointStatus();
+  syncArenaPhase();
   await checkpointWrites;
   if (isStaleMount(mountSignal)) return;
   if (checkpointUnreadable) throw new Error('Discard the unreadable saved tournament before starting a new run.');
@@ -5058,6 +5059,9 @@ async function init(mountSignal: AbortSignal) {
       if (last) {
         const trail = finishedTrails[last.scheduleIndex];
         liveTrail = trail;
+        historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
+        board = historyBoards[historyBoards.length - 1];
+        lastUci = trail.entries.at(-1)?.uci ?? null;
         const scheduled = saved.schedule[last.scheduleIndex];
         setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
         enterReview(trail, trail.entries.length - 1);

@@ -125,7 +125,7 @@ onMount(() => {
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div id="openingPairs" class="arena-table-scroll" tabindex="0" role="region" aria-label="Colour-reversed opening pairs"></div>
     </details>
-    <div id="setupPane" class="setup-pane">
+    <fieldset id="setupPane" class="setup-pane" aria-label="Tournament settings">
     <p class="locked-note">Settings are locked while games run. Stop to change them.</p>
     <details class="section-block" open>
       <summary>Matchup</summary>
@@ -238,7 +238,7 @@ onMount(() => {
       <div id="runtimeAuditInfo"></div>
     </div>
     {/if}
-    </div>
+    </fieldset>
     <div class="arena-actions">
       <div id="startSummary" class="start-summary"></div>
       <button id="start" class="primary" type="button" disabled>Start match</button>
@@ -439,6 +439,9 @@ onMount(() => {
   .sb-chips :global(.sb-chip-n){margin-right:6px; color:var(--muted); font-weight:500}
   .sb-chips :global(.sb-chip.win){border-color:var(--accent); background:var(--accent-soft); color:var(--accent-soft-text)}
   .sb-chips :global(.sb-chip.loss){border-color:color-mix(in srgb, var(--warn) 60%, var(--rule)); color:var(--warn)}
+
+  /* Native fieldset locking also covers asynchronous run preparation. */
+  .setup-pane{border:0; margin:0; padding:0; min-width:0}
 
   /* Locked settings stay available during play. */
   .locked-note{display:none; margin:0; padding:10px 14px 0; color:var(--muted); font-size:12.5px}
