@@ -203,14 +203,26 @@ export function patchAnalysisResults(container: HTMLElement, markup: string): vo
   if (container.innerHTML === markup) return;
   const active = container.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
   const focusKey = active?.dataset.focusKey;
+  const scrollPositions = new Map([...container.querySelectorAll<HTMLElement>('[data-result-scroll-key]')]
+    .map((node) => [node.dataset.resultScrollKey, node.scrollLeft]));
   const expanded = new Set([...container.querySelectorAll<HTMLDetailsElement>('details[open][data-result-key]')].map((node) => node.dataset.resultKey));
   container.innerHTML = markup;
   for (const detail of container.querySelectorAll<HTMLDetailsElement>('details[data-result-key]')) {
     detail.open = expanded.has(detail.dataset.resultKey);
   }
+  for (const node of container.querySelectorAll<HTMLElement>('[data-result-scroll-key]')) {
+    node.scrollLeft = scrollPositions.get(node.dataset.resultScrollKey) ?? 0;
+  }
   if (focusKey) {
     const target = [...container.querySelectorAll<HTMLElement>('[data-focus-key]')].find((node) => node.dataset.focusKey === focusKey);
     target?.focus({ preventScroll: true });
+    const scroller = target?.closest<HTMLElement>('[data-result-scroll-key]');
+    if (target && scroller) {
+      const item = target.getBoundingClientRect();
+      const view = scroller.getBoundingClientRect();
+      if (item.left < view.left) scroller.scrollLeft += item.left - view.left;
+      else if (item.right > view.right) scroller.scrollLeft += item.right - view.right;
+    }
   }
 }
 

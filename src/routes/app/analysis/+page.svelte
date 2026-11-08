@@ -356,6 +356,7 @@ onMount(() => {
   .pv-position{margin:10px 0; font-size:13px; color:var(--ink)}
   .pv-navigation{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px}
   .pv-navigation button{min-height:40px; padding:4px; font-size:13px}
+  .pv-preview :global(button[aria-disabled=true]){opacity:.45; cursor:default}
   .pv-preview-moves{display:flex; flex-wrap:wrap; gap:4px; max-height:112px; overflow:auto; margin:12px 0; padding:2px}
   .pv-preview-moves :global(button){min-height:32px; padding:4px 8px; border-color:transparent; background:transparent; color:var(--ink); font-size:14px}
   .pv-preview-moves :global(button[aria-current]){background:var(--selection-bg); border-color:var(--accent); font-weight:650}

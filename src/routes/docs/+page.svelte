@@ -456,11 +456,11 @@ onMount(() => {
       <li>Make moves on the board, or press <strong>Load</strong> to paste a PGN or FEN.</li>
       <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to change each engine’s net or build and its search budget (visits or depth).</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
-      <li>In <strong>Engines → Saved engine setups</strong>, name and save the current engines, budgets and number of lines. Select a setup to load it, or delete it when no longer needed. Setups stay on this device; use <strong>Export setups</strong> and <strong>Import setups</strong> for JSON backups. Large networks still require confirmation before loading.</li>
     </ol>
     <div class="task-reference">
     <h4>Exploring the results</h4>
     <ul>
+      <li>In <strong>Engines</strong>, open <strong>Saved engine setups</strong> to name and save the current engines, budgets and number of lines. Select a setup to load it, or delete it when no longer needed. Setups stay on this device; use <strong>Export setups</strong> and <strong>Import setups</strong> for JSON backups. Large networks still require confirmation before loading.</li>
       <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines. Press <strong>Preview</strong> beside a line to explore the whole continuation on a separate board using Previous/Next or the arrow keys. <strong>Insert line</strong> adds it to the game; clicking a move in an engine row inserts only through that move, following existing variations when present.</li>
       <li><strong>Copy link</strong> beside the board copies a URL for the current position. Opening it restores that FEN only, without the game’s moves, variations or engine settings.</li>
       <li><strong>Compare tab</strong> &mdash; every engine’s best move and evaluation in one table, with the difference between them.</li>

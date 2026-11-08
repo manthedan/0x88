@@ -2086,7 +2086,7 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     const toggle = index === 0
       ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Hide lines' : `${extra} more lines`}</span>${CHEVRON_ICON}</button>` : ''
       : '';
-    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv">${moves}</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv}`)}"${preview.steps.length ? '' : ' disabled'}>Preview</button>${toggle}</div></li>`;
+    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv}`)}"${preview.steps.length ? '' : ' disabled'}>Preview</button>${toggle}</div></li>`;
   });
   if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
@@ -4131,8 +4131,9 @@ function renderPvPreview(): void {
   if (!pvGround) pvGround = Chessground(el('pvPreviewBoard'), config);
   else pvGround.set(config);
   el('pvPreviewPosition').textContent = `${position ? `After ${position.label}` : 'Starting position'} · ${step} of ${line.steps.length} plies · ${board.turn === 'w' ? 'White' : 'Black'} to move`;
-  for (const id of ['pvStart', 'pvBack', 'pvInsertHere']) (el(id) as HTMLButtonElement).disabled = step === 0;
-  for (const id of ['pvForward', 'pvEnd']) (el(id) as HTMLButtonElement).disabled = step === line.steps.length;
+  // Keep endpoint controls focusable so arrow-key stepping still works after reaching either end.
+  for (const id of ['pvStart', 'pvBack', 'pvInsertHere']) el(id).setAttribute('aria-disabled', String(step === 0));
+  for (const id of ['pvForward', 'pvEnd']) el(id).setAttribute('aria-disabled', String(step === line.steps.length));
   for (const button of el('pvPreviewMoves').querySelectorAll<HTMLElement>('[data-pv-step]')) {
     if (Number(button.dataset.pvStep) === step) button.setAttribute('aria-current', 'step');
     else button.removeAttribute('aria-current');
@@ -4180,6 +4181,7 @@ function wirePvPreview(): void {
   const insert = (whole: boolean) => {
     if (!pvPreview) return;
     const { root, line, step } = pvPreview;
+    if (!whole && step === 0) return;
     const added = insertPvPrefix(tree, root, line.steps.map((entry) => entry.uci), whole ? line.steps.length : step);
     closePvPreview();
     if (added) afterNavigation();
