@@ -31,16 +31,17 @@ function literal(node) {
 const tocDeclaration = ast.instance.content.body.flatMap((n) => n.declarations ?? []).find((n) => n.id.name === 'toc');
 const toc = literal(tocDeclaration.init);
 
-test('the outline and article agree on five peer sections and every topic has a heading', () => {
+test('the outline and article agree on seven peer sections and every topic is navigable in page order', () => {
   const sectionIds = elements.filter(({ node }) => node.name === 'section').map(({ node }) => textAttr(node, 'id'));
-  assert.deepEqual(sectionIds, ['pages', 'troubleshooting', 'engines', 'under-the-hood', 'licenses']);
+  assert.deepEqual(sectionIds, ['pages', 'analysis-in-depth', 'review-and-train', 'troubleshooting', 'engines', 'under-the-hood', 'licenses']);
   assert.deepEqual(toc.map((group) => group.id), sectionIds);
+  const ids = elements.map(({ node }) => textAttr(node, 'id')).filter(Boolean);
+  assert.equal(new Set(ids).size, ids.length, 'anchor IDs must be unique');
   for (const group of toc) {
-    assert.equal(byId(group.id).children.find((node) => node.name === 'h2')?.name, 'h2');
-    for (const item of group.items) {
-      assert.equal(byId(item.id)?.name, 'h3', item.id);
-      for (const child of item.children ?? []) assert.equal(byId(child.id)?.name, 'h4', child.id);
-    }
+    const section = byId(group.id);
+    assert.equal(section.children.find((node) => node.name === 'h2')?.name, 'h2');
+    const headingIds = descendants(section).filter((node) => /^h[34]$/.test(node.name)).map((node) => textAttr(node, 'id'));
+    assert.deepEqual(group.items.flatMap((item) => [item.id, ...(item.children ?? []).map((child) => child.id)]), headingIds);
   }
 });
 
@@ -54,6 +55,8 @@ test('every group has an explicit controlled disclosure, including all ten engin
   assert.match(source, /aria-current=\{item.id === activeId \? 'location'/);
   assert.match(source, /group.id === activeGroupId \? 'true'/);
   assert.doesNotMatch(source, /group\.collapsed/);
+  assert.doesNotMatch(markup(toggle), /group\.items\.length/, 'ambiguous topic counts are not shown');
+  assert.match(source, /\.toc ul ul a\{font-size:14px; padding:8px 10px\}/);
 });
 
 test('mobile search is outside the collapsed panel and shares the desktop search focus action', () => {
@@ -78,10 +81,22 @@ test('all workspace launch links are with the title, ahead of the four-step proc
     assert.ok(elements.find(({ node, ancestors }) => node === launch && ancestors.some((parent) => hasClass(parent, 'task-heading'))));
     assert.ok(attr(heading, 'aria-labelledby'), 'the heading name excludes its permalink');
   }
-  const reference = elements.find(({ node }) => hasClass(node, 'task-reference')).node;
-  assert.match(markup(reference), /<h4>Exploring the results<\/h4>/);
-  const explorer = byId('explore-own-games');
-  assert.ok(explorer.start > reference.end, 'the explorer task stays separate from getting started');
+  const analysisCard = elements.find(({ node }) => hasClass(node, 'page-block')).node;
+  assert.equal(descendants(analysisCard, 'h4').length, 0, 'Analysis quick-start contains only its procedure');
+  for (const id of ['exploring-results', 'explore-engine-lines', 'save-engine-setups', 'share-restore', 'explore-own-games', 'manage-collections']) {
+    assert.ok(descendants(byId('analysis-in-depth')).includes(byId(id)), id);
+  }
+  for (const id of ['review-game', 'retry-mistakes', 'compare-critical-moments', 'export-review']) {
+    assert.ok(descendants(byId('review-and-train')).includes(byId(id)), id);
+  }
+  for (const id of ['explore-own-games', 'compare-critical-moments']) {
+    const topic = elements.find(({ node }) => node.children?.includes(byId(id))).node;
+    assert.deepEqual(topic.children.filter((node) => node.type === 'Element').map((node) => node.name), ['h3', 'p', 'ol', 'p', 'p'], 'purpose, steps and two notes');
+    assert.equal(descendants(topic, 'li').length, 4);
+  }
+  const links = elements.filter(({ node }) => node.name === 'a').map(({ node }) => textAttr(node, 'href')).filter((href) => /^https?:/.test(href));
+  assert.equal(links.length, 76, 'all external link instances are retained');
+  assert.equal(new Set(links).size, 41, 'all unique external destinations are retained');
   assert.ok(!elements.some(({ node }) => hasClass(node, 'not-yet')), 'obsolete availability note is removed');
 });
 
@@ -90,6 +105,9 @@ test('subsection search containers exclude adjacent topics', () => {
   for (const [id, className, excluded, included] of [
     ['cpu-wasm-relaxed-simd', 'runtime-subsection', /wasm32-wasip1/, /i32x4_relaxed_dot_i8x16_i7x16_add/],
     ['licenses-per-engine', 'source-links', /rights holders/, /corresponding-source\.tar\.gz/],
+    ['explore-own-games', 'analysis-topic', /16 MiB|JSON backup/, /200 games/],
+    ['compare-critical-moments', 'analysis-topic', /2 percentage points/, /400 visits/],
+    ['maia-source-offer', 'callout', /Chessformer/, /derivation recipe/],
   ]) {
     const heading = byId(id);
     const ancestors = elements.find(({ node }) => node === heading).ancestors;

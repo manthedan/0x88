@@ -17,17 +17,32 @@ const toc: TocGroup[] = [
     label: 'Get started',
     id: 'pages',
     items: [
-      { id: 'pages-analysis', label: 'Analyse a position', children: [
-        { id: 'save-engine-setups', label: 'Save engine setups' },
-        { id: 'explore-engine-lines', label: 'Explore engine lines' },
-        { id: 'share-restore', label: 'Share and restore your work' },
-        { id: 'review-game', label: 'Review a game' },
-        { id: 'retry-mistakes', label: 'Retry your mistakes' },
-        { id: 'export-review', label: 'Export a game review' },
-      ] },
-      { id: 'pages-arena', label: 'Run an engine match' },
+      { id: 'pages-analysis', label: 'Analyse a position' },
+      { id: 'pages-arena', label: 'Run an engine match', children: [{ id: 'following-match', label: 'Following the match' }] },
       { id: 'pages-play', label: 'Play a game' },
-      { id: 'human-vs-computer', label: 'Human-like opponents' },
+      { id: 'human-vs-computer', label: 'Human-like opponents', children: [{ id: 'model-boundaries', label: 'Model boundaries' }] },
+    ],
+  },
+  {
+    label: 'Analysis in depth',
+    id: 'analysis-in-depth',
+    items: [
+      { id: 'exploring-results', label: 'Exploring the results' },
+      { id: 'explore-engine-lines', label: 'Explore engine lines' },
+      { id: 'save-engine-setups', label: 'Save engine setups' },
+      { id: 'share-restore', label: 'Share and restore your work' },
+      { id: 'explore-own-games', label: 'Opening explorer' },
+      { id: 'manage-collections', label: 'Manage game collections' },
+    ],
+  },
+  {
+    label: 'Review and train',
+    id: 'review-and-train',
+    items: [
+      { id: 'review-game', label: 'Review a game' },
+      { id: 'retry-mistakes', label: 'Retry your mistakes' },
+      { id: 'compare-critical-moments', label: 'Compare critical moments' },
+      { id: 'export-review', label: 'Export a game review' },
     ],
   },
   {
@@ -47,29 +62,34 @@ const toc: TocGroup[] = [
     items: [
       { id: 'engines-lc0', label: 'Leela Chess Zero' },
       { id: 'engines-lqo', label: 'Leela Queen Odds (LQO)' },
-      { id: 'engines-maia3', label: 'Maia3' },
+      { id: 'engines-maia3', label: 'Maia3', children: [{ id: 'maia-source-offer', label: 'AGPL source offer' }] },
       { id: 'engines-centipawn', label: 'Centipawn' },
-      { id: 'engines-stockfish', label: 'Stockfish 19' },
+      { id: 'engines-stockfish', label: 'Stockfish 19', children: [{ id: 'stockfish-relaxed-candidate', label: 'Relaxed SIMD candidate' }] },
       { id: 'engines-berserk', label: 'Berserk' },
       { id: 'engines-viridithas', label: 'Viridithas' },
       { id: 'engines-plentychess', label: 'PlentyChess' },
       { id: 'engines-stormphrax', label: 'Stormphrax' },
-      { id: 'engines-reckless', label: 'Reckless' },
+      { id: 'engines-reckless', label: 'Reckless', children: [{ id: 'reckless-public-engine', label: 'Public v0 engine' }] },
     ],
   },
   {
     label: 'Under the hood',
     id: 'under-the-hood',
     items: [
-      { id: 'neural-runtimes', label: 'Neural browser runtimes' },
-      { id: 'cpu-wasm', label: 'CPU WASM runtimes', children: [{ id: 'cpu-wasm-relaxed-simd', label: 'Relaxed SIMD' }] },
-      { id: 'cdn', label: 'Artifact CDN & caching' },
+      { id: 'neural-runtimes', label: 'Neural browser runtimes', children: [{ id: 'neural-stable-baseline', label: 'Stable baseline' }] },
+      { id: 'cpu-wasm', label: 'CPU WASM runtimes', children: [
+        { id: 'cpu-build-lanes', label: 'Two build lanes' },
+        { id: 'cpu-wasm-relaxed-simd', label: 'Relaxed SIMD' },
+        { id: 'simd-benchmark-context', label: 'Benchmark context' },
+      ] },
+      { id: 'cdn', label: 'Artifact CDN & caching', children: [{ id: 'cdn-two-planes', label: 'Two-plane model' }] },
     ],
   },
   {
     label: 'Licenses & source',
     id: 'licenses',
     items: [
+      { id: 'license-summary', label: 'The short version' },
       { id: 'licenses-per-engine', label: 'Per-engine source links' },
       { id: 'removal', label: 'Removal requests' },
     ],
@@ -89,7 +109,7 @@ let activeId = outline[0].link.id;
 $: activeTopId = byId.get(activeId)?.top.id ?? '';
 $: activeLabel = byId.get(activeId)?.link.label ?? 'Contents';
 $: activeGroupId = byId.get(activeId)?.group.id ?? '';
-let expandedGroups: Record<string, boolean> = { pages: true, troubleshooting: true };
+let expandedGroups: Record<string, boolean> = { pages: true };
 let headerHeight = 64;
 let rail: HTMLElement | null = null;
 let railList: HTMLElement | null = null;
@@ -146,12 +166,12 @@ let resultList: HTMLElement | null = null;
 $: hits = searchDocs(query, index);
 $: searching = query.trim().length > 0;
 
-const CONTAINERS = '.page-block, .engine-entry, .trouble, .opponents, .runtime-block, .runtime-subsection, .source-links, .removal-block';
+const CONTAINERS = '.page-block, .analysis-topic, .task-reference, .callout, .engine-entry, .trouble, .opponents, .runtime-block, .runtime-subsection, .source-links, .removal-block';
 
 function cleanText(node: Element): string {
   const clone = node.cloneNode(true) as Element;
   // Headings are indexed as titles; the live device check is not documentation.
-  clone.querySelectorAll('.anchor-link, .device-check, h2, h3, script, style').forEach((el) => el.remove());
+  clone.querySelectorAll('.anchor-link, .device-check, h2, h3, h4, script, style').forEach((el) => el.remove());
   // Keep table cells and list items from running together ("PlayAGPL").
   clone.querySelectorAll('td, th, li, dt, dd, p, h4, caption, .sub').forEach((el) => el.append(' '));
   return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -410,7 +430,6 @@ onMount(() => {
             <div class="toc-group-heading" class:current-group={group.id === activeGroupId}>
               <a class="toc-group-label" href={`#${group.id}`} class:active={group.id === activeId} aria-current={group.id === activeId ? 'location' : group.id === activeGroupId ? 'true' : undefined} on:click={closeSheet}>{group.label}</a>
               <button type="button" class="group-toggle" aria-label={`${expandedGroups[group.id] ? 'Hide' : 'Show'} ${group.label} topics`} aria-expanded={!!expandedGroups[group.id]} aria-controls={`toc-${group.id}`} on:click={() => (expandedGroups = { ...expandedGroups, [group.id]: !expandedGroups[group.id] })}>
-                <span aria-hidden="true">{group.items.length}</span>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
               </button>
             </div>
@@ -440,8 +459,8 @@ onMount(() => {
   {@const previous = toc[position - 1]}
   {@const next = toc[position + 1]}
   <nav class="section-nav" aria-label={`Continue from ${toc[position].label}`}>
-    {#if previous}<a href={`#${previous.id}`}><span class="section-direction">← Previous</span><span>{previous.label}</span></a>{/if}
-    {#if next}<a class="next-section" href={`#${next.id}`}><span class="section-direction">Next →</span><span>{next.label}</span></a>{/if}
+    {#if previous}<a href={`#${previous.id}`}><span class="section-direction">Previous:</span><span>{previous.label}</span></a>{/if}
+    {#if next}<a class="next-section" href={`#${next.id}`}><span class="section-direction">Next:</span><span>{next.label}</span></a>{/if}
   </nav>
 {/snippet}
 
@@ -464,58 +483,6 @@ onMount(() => {
       <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to change each engine’s net or build and its search budget (visits or depth).</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
     </ol>
-    <div class="task-reference">
-    <h4>Exploring the results</h4>
-    <ul>
-      <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines.</li>
-      <li><strong>Review tab</strong> &mdash; whole-game accuracy and move classifications.</li>
-      <li><strong>Compare tab</strong> &mdash; every engine’s best move and evaluation in one table, with the difference between them.</li>
-      <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
-    </ul>
-    </div>
-
-  </div>
-
-  <div class="page-block">
-    <h4 id="explore-own-games">Explore your own opening games</h4>
-    <p>In Analysis’s <strong>Moves → Opening explorer</strong>, open <strong>Import PGN</strong>, paste a batch or choose a .pgn file, name it and select <strong>Import and save</strong>. Each batch is limited to 200 games and 1 MiB (32 KiB per game). Select a collection to load it; click a continuation to advance the board. Counts use mainlines only, counting each game’s first continuation at a repeated position. Results include unknown outcomes.</p>
-    <p><strong>Collection actions</strong> includes rename, duplicate, delete, PGN download and JSON backup/restore. Restore keeps existing collections and rebuilds indexes from PGN; backups are limited to 16 MiB, so back up selected collections separately if the full backup exceeds that limit. Collections stay in this browser, not an account or online database. If storage is blocked, use <strong>Explore without saving</strong> and download your PGN. <strong>Compare with predictions</strong> separates observed frequency from Maia3’s probability at a chosen rating and the analyzed engines’ best moves; load Maia3 explicitly in Human first.</p>
-  </div>
-
-  <div class="page-block">
-    <h4 id="save-engine-setups">Save engine setups</h4>
-    <p>In <strong>Engines → Saved engine setups</strong>, name and save the current engines, budgets and number of lines. Select a setup to load it or delete one you no longer need; setups stay on this device, with <strong>Export setups</strong> and <strong>Import setups</strong> providing JSON backups. Large networks still require confirmation before loading.</p>
-  </div>
-
-  <div class="page-block">
-    <h4 id="explore-engine-lines">Explore engine lines</h4>
-    <p>Use the <strong>Preview</strong> button beside an engine line to explore its full continuation on a separate board with Previous/Next or the arrow keys. <strong>Insert line</strong> adds the continuation to the game; clicking a move in an engine row inserts only through that move, following existing variations when present.</p>
-  </div>
-
-  <div class="page-block">
-    <h4 id="share-restore">Share and restore your work</h4>
-    <p>Analysis automatically saves the game tree, variations, comments and selected move on this device so you can reload or reopen it to continue. <strong>Start new</strong> in the restore notice or <strong>Load → Reset</strong> clears the save; loading a PGN or FEN replaces it. Under the board’s <strong>Copy</strong> button, <strong>Copy link</strong> shares the current FEN only, without moves, variations or engine settings, and opening a position link takes priority over the saved game.</p>
-  </div>
-
-  <div class="page-block">
-    <h4 id="review-game">Review a game</h4>
-    <ol>
-      <li>Load a PGN or play a line, then open <strong>Review</strong>, choose a CPU reviewer and depth, and press <strong>Review game</strong>. Stockfish Lite is the default; other selected CPU engines appear in the reviewer menu. You can cancel or navigate the board while it runs.</li>
-      <li>Click the advantage graph or focus it and use arrow keys to visit moves, with Home/End for the ends. The move list shows classifications; <strong>Previous</strong> and <strong>Next</strong> cycle through the five largest error losses.</li>
-      <li>Approximate accuracy averages estimated winning-chance loss per side, not the game score used by Lichess or Chess.com. Results depend on engine and depth, and changing the mainline clears them.</li>
-    </ol>
-  </div>
-
-  <div class="page-block">
-    <h4 id="retry-mistakes">Retry your mistakes</h4>
-    <p>After reviewing a game, choose the side you played and press <strong>Retry mistakes</strong> in Review. Play a better move in up to five pre-error positions, with engine advice and human predictions concealed. The review’s best move is accepted immediately; alternatives are checked locally with the same reviewer and depth, allowing up to 2 percentage points of estimated score loss versus the best move. Use <strong>Skip</strong> or <strong>Reveal</strong>, then <strong>Return to review</strong> to restore your untouched game and selected position. After solving or revealing, you can compare human likelihood at a chosen rating if Maia3 was loaded in Human beforehand. These probabilities predict choices, not correctness.</p>
-    <h4 id="compare-critical-moments">Compare critical moments</h4>
-    <p>After reviewing a game, find <strong>Compare critical moments</strong> below the Review results. Confirm the extra compute and download estimate to compare Stockfish Lite (depth 12) and Lc0 Small (400 visits) on up to five pre-error positions. Optionally include Maia3’s played-move and engine-move probabilities at one rating. Each engine has separate progress and failures; Cancel retains completed results. Severity comes from the baseline review, move agreement is separate, and Maia likelihood is not accuracy. Click a moment to visit the board, or use Compare, Human or Play from here. Mainline or settings changes mark the report stale; compare again to refresh it.</p>
-  </div>
-
-  <div class="page-block">
-    <h4 id="export-review">Export a game review</h4>
-    <p><strong>Copy reviewed PGN</strong> or <strong>Download PGN</strong> exports the mainline with original engine evals and error NAGs, retaining imported headers, result and starting FEN. Variations and existing comments are not included in this export. Completed position results are reused during this session when engine, depth and history match; nothing is uploaded.</p>
   </div>
 
   <div class="page-block">
@@ -531,7 +498,7 @@ onMount(() => {
       <li>Read the standings: points, wins, draws, losses and an Elo estimate against the pool with a ±95% range.</li>
     </ol>
     <div class="task-reference">
-    <h4>Following the match</h4>
+    <h4 id="following-match">Following the match <a class="anchor-link" href="#following-match" aria-label="Link to this section">#</a></h4>
     <ul>
       <li><strong>Charts</strong> &mdash; evaluation, time and speed for the current game.</li>
       <li><strong>Matchups</strong> &mdash; tournaments with three or more engines show a crosstable of points against each opponent. Open <em>Opening pairs</em> to compare the two colour-reversed games from each opening; select a game score to replay it. Odd games per opening leave an unpaired game.</li>
@@ -568,7 +535,7 @@ onMount(() => {
   <p class="lead">Maia3 predicts a rating-conditioned human move distribution and human-game outcome. Leela Queen Odds is an Lc0-compatible network trained for games where the engine starts without its queen. The optional contempt controls belong to 0x88's search implementation and model an opponent with limited reply search.</p>
 
   <div class="callout info">
-    <h4>Model boundaries</h4>
+    <h4 id="model-boundaries">Model boundaries</h4>
     <p>Maia3 is used directly as a move policy. Leela Queen Odds runs through 0x88's PUCT search from its specialized starting position. Contempt search does not make a conventional engine human-like or give it a personality.</p>
   </div>
 
@@ -607,6 +574,108 @@ onMount(() => {
   <p>Maia3's WDL output predicts the result of a human game at the selected rating; it is not an engine centipawn evaluation. The Leela Queen Odds and contempt experiments use 0x88's PUCT search. The full design note lives in <a href="https://github.com/manthedan/0x88/blob/main/docs/human_vs_computer_play.md">docs/human_vs_computer_play.md</a>.</p>
 </div>
   {@render sectionNav('pages')}
+</section>
+
+<!-- ===== ADVANCED ANALYSIS ===== -->
+<section id="analysis-in-depth">
+  <h2>Analysis in depth <a class="anchor-link" href="#analysis-in-depth" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Use Analysis to explore engine results and your own games, save engine setups and return to work you have saved.</p>
+
+  <div class="analysis-topic">
+    <h3 id="exploring-results">Exploring the results <a class="anchor-link" href="#exploring-results" aria-label="Link to this section">#</a></h3>
+    <ul>
+      <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines.</li>
+      <li><strong>Review tab</strong> &mdash; whole-game accuracy and move classifications.</li>
+      <li><strong>Compare tab</strong> &mdash; every engine’s best move and evaluation in one table, with the difference between them.</li>
+      <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
+    </ul>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="explore-engine-lines">Explore engine lines <a class="anchor-link" href="#explore-engine-lines" aria-label="Link to this section">#</a></h3>
+    <p>Use the <strong>Preview</strong> button beside an engine line to explore its full continuation on a separate board with Previous/Next or the arrow keys. <strong>Insert line</strong> adds the continuation to the game; clicking a move in an engine row inserts only through that move, following existing variations when present.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="save-engine-setups">Save engine setups <a class="anchor-link" href="#save-engine-setups" aria-label="Link to this section">#</a></h3>
+    <p>In <strong>Engines → Saved engine setups</strong>, name and save the current engines, budgets and number of lines. Select a setup to load it or delete one you no longer need; setups stay on this device, with <strong>Export setups</strong> and <strong>Import setups</strong> providing JSON backups. Large networks still require confirmation before loading.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="share-restore">Share and restore your work <a class="anchor-link" href="#share-restore" aria-label="Link to this section">#</a></h3>
+    <p>Analysis automatically saves the game tree, variations, comments and selected move on this device so you can reload or reopen it to continue. <strong>Start new</strong> in the restore notice or <strong>Load → Reset</strong> clears the save; loading a PGN or FEN replaces it. Under the board’s <strong>Copy</strong> button, <strong>Copy link</strong> shares the current FEN only, without moves, variations or engine settings, and opening a position link takes priority over the saved game.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="explore-own-games">Opening explorer <a class="anchor-link" href="#explore-own-games" aria-label="Link to this section">#</a></h3>
+    <p>Explore opening continuations from your own games and compare their frequency with human predictions and engine recommendations.</p>
+    <ol>
+      <li>In Analysis, open <strong>Moves → Opening explorer → Import PGN</strong>.</li>
+      <li>Paste a batch or choose a .pgn file, name the collection and select <strong>Import and save</strong>.</li>
+      <li>Select a collection to load it, then click a continuation to advance the board.</li>
+      <li>For human probabilities, explicitly load Maia3 in <strong>Human</strong> first, then open <strong>Compare with predictions</strong>. Choose a rating to compare Maia3’s probabilities with observed frequency and the analyzed engines’ best moves.</li>
+    </ol>
+    <p><strong>Import limits:</strong> Each batch can contain up to 200 games and 1 MiB, with 32 KiB per game.</p>
+    <p><strong>Reading the results:</strong> Counts use mainlines only and each game’s first continuation at a repeated position; outcomes include unknown results. Maia3 predicts human choices, not accuracy.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="manage-collections">Manage game collections <a class="anchor-link" href="#manage-collections" aria-label="Link to this section">#</a></h3>
+    <p>Use <strong>Collection actions</strong> in the Opening explorer to manage and back up your imported games.</p>
+    <ol>
+      <li>Rename, duplicate or delete a collection, or download its PGN.</li>
+      <li>Make a JSON backup of selected collections or all collections. Restore keeps existing collections and rebuilds indexes from PGN.</li>
+      <li>If storage is blocked, use <strong>Explore without saving</strong> and download your PGN.</li>
+    </ol>
+    <p><strong>Backup limit:</strong> JSON backups are limited to 16 MiB. Back up selected collections separately if the full backup exceeds that limit.</p>
+    <p><strong>Storage:</strong> Collections stay in this browser, not an account or online database.</p>
+  </div>
+  {@render sectionNav('analysis-in-depth')}
+</section>
+
+<section id="review-and-train">
+  <h2>Review and train <a class="anchor-link" href="#review-and-train" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Review a game in Analysis, practise the positions where you lost the most, and compare engines at those moments.</p>
+
+  <div class="analysis-topic">
+    <h3 id="review-game">Review a game <a class="anchor-link" href="#review-game" aria-label="Link to this section">#</a></h3>
+    <ol>
+      <li>Load a PGN or play a line, then open <strong>Review</strong>, choose a CPU reviewer and depth, and press <strong>Review game</strong>. Stockfish Lite is the default; other selected CPU engines appear in the reviewer menu. You can cancel or navigate the board while it runs.</li>
+      <li>Click the advantage graph or focus it and use arrow keys to visit moves, with Home/End for the ends. The move list shows classifications; <strong>Previous</strong> and <strong>Next</strong> cycle through the five largest error losses.</li>
+    </ol>
+    <p>Approximate accuracy averages estimated winning-chance loss per side, not the game score used by Lichess or Chess.com. Results depend on engine and depth, and changing the mainline clears them.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="retry-mistakes">Retry your mistakes <a class="anchor-link" href="#retry-mistakes" aria-label="Link to this section">#</a></h3>
+    <p>Practise a better move in up to five pre-error positions without engine advice or human predictions.</p>
+    <ol>
+      <li>After reviewing a game, choose the side you played and press <strong>Retry mistakes</strong> in Review.</li>
+      <li>Play a better move, or use <strong>Skip</strong> or <strong>Reveal</strong>. The review’s best move is accepted immediately; alternatives are checked locally with the same reviewer and depth, allowing up to 2 percentage points of estimated score loss versus the best move.</li>
+      <li>After solving or revealing, compare human likelihood at a chosen rating if Maia3 was loaded in <strong>Human</strong> beforehand.</li>
+      <li>Press <strong>Return to review</strong> to restore your untouched game and selected position.</li>
+    </ol>
+    <p>Human probabilities predict choices, not correctness.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="compare-critical-moments">Compare critical moments <a class="anchor-link" href="#compare-critical-moments" aria-label="Link to this section">#</a></h3>
+    <p>Compare Stockfish Lite (depth 12) and Lc0 Small (400 visits) on up to five pre-error positions from your reviewed game.</p>
+    <ol>
+      <li>After reviewing a game, select <strong>Compare critical moments</strong> below the Review results.</li>
+      <li>Check the extra compute and download estimate, optionally include Maia3’s played-move and engine-move probabilities at one rating, then confirm.</li>
+      <li>Follow each engine’s separate progress and failures. <strong>Cancel</strong> retains completed results.</li>
+      <li>Click a moment to visit the board, or use <strong>Compare</strong>, <strong>Human</strong> or <strong>Play from here</strong>.</li>
+    </ol>
+    <p><strong>Interpretation:</strong> Severity comes from the baseline review; move agreement is separate. Maia3 predicts human choices, not accuracy.</p>
+    <p><strong>Refreshing:</strong> Mainline or settings changes mark the report stale. Compare again to refresh it.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="export-review">Export a game review <a class="anchor-link" href="#export-review" aria-label="Link to this section">#</a></h3>
+    <p><strong>Copy reviewed PGN</strong> or <strong>Download PGN</strong> exports the mainline with original engine evals and error NAGs, retaining imported headers, result and starting FEN. Variations and existing comments are not included in this export. Completed position results are reused during this session when engine, depth and history match; nothing is uploaded.</p>
+  </div>
+  {@render sectionNav('review-and-train')}
 </section>
 
 <!-- ===== TROUBLESHOOTING ===== -->
@@ -765,7 +834,7 @@ onMount(() => {
     </dl>
     <p>Maia-3 is a family of Chessformer models for predicting human moves across skill levels. The browser model returns rating-conditioned move probabilities and human-game WDL predictions rather than a searched centipawn evaluation. The Play page can sample from that policy or choose its highest-probability move.</p>
     <div class="callout info">
-      <h4>AGPL source offer</h4>
+      <h4 id="maia-source-offer">AGPL source offer</h4>
       <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. The AGPL source offer includes the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> for that artifact.</p>
     </div>
   </div>
@@ -788,7 +857,7 @@ onMount(() => {
     </dl>
     <p>Stockfish is a community-developed UCI engine derived from Glaurung 2.1. It combines alpha-beta search with NNUE evaluation, and proposed changes are tested through the distributed Fishtest system. Stockfish 18 led the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and Stockfish finished first in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 ships the Stockfish.js 19.0.1 package in Lite and full-network forms; SF19 uses new networks for both variants.</p>
     <div class="callout info">
-      <h4>Relaxed SIMD candidate</h4>
+      <h4 id="stockfish-relaxed-candidate">Relaxed SIMD candidate</h4>
       <p>The Lite single-thread build has a feature-detected relaxed-SIMD candidate, with the baseline kept as a fallback. SF19 validation compares each WASM variant against its same-network native build using exact node-count bench signatures and fixed-depth best move, score, nodes, and PV. The Lite network has a different feature architecture from full Stockfish. Full single-threaded, Lite pthread, and full pthread relaxed builds remain local candidates, not default release artifacts. Historical SF18 relaxed-SIMD speedups do not describe the new SF19 networks.</p>
     </div>
     <details>
@@ -854,7 +923,7 @@ onMount(() => {
     </dl>
     <p>Reckless is a competitive Rust UCI engine using alpha-beta search and NNUE evaluation. Native Reckless 0.9.0 placed second on the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and a development build finished second in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 pins development commit <a href="https://github.com/codedeliveryservice/Reckless/commit/0010617448bdef4c8cd7d4f4825b7e42c8bc262a" rel="noopener"><code>0010617</code></a> and serves scalar, WebAssembly SIMD, and relaxed-SIMD WASI builds.</p>
     <div class="callout info">
-      <h4>Public v0 engine</h4>
+      <h4 id="reckless-public-engine">Public v0 engine</h4>
       <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives for the scalar, SIMD, and relaxed SIMD builds are hosted beside the binaries.</p>
     </div>
   </div>
@@ -870,7 +939,7 @@ onMount(() => {
   <p class="lead">Lc0 and Maia3 are loaded as browser models rather than compiled UCI executables. 0x88 supplies input encoding, inference, and legal-move mapping. Its own PUCT implementation searches the Lc0 and Leela Queen Odds outputs, while Maia3 is used directly as a rating-conditioned move policy.</p>
 
   <div class="callout info">
-    <h4>Stable baseline</h4>
+    <h4 id="neural-stable-baseline">Stable baseline</h4>
     <p><strong>ONNX Runtime WebGPU</strong> is the stable neural baseline and rollback path. TVMJS, custom WGSL, WebNN, and QDQ artifacts all need to prove themselves against ORT WebGPU with fixture drift and search-move gates before they can become product defaults. The TVMJS lane has cleared those gates for Centipawn, where it is the promoted primary runtime with automatic ORT fallback; everywhere else the rule still applies.</p>
   </div>
 
@@ -921,7 +990,7 @@ onMount(() => {
   <p class="lead">Stockfish, Reckless, Berserk, Viridithas, PlentyChess, Stormphrax, and the Monty lab port are CPU engines compiled to WebAssembly. Browser workers provide their UCI-style control layer.</p>
 
   <div class="callout info">
-    <h4>Two build lanes</h4>
+    <h4 id="cpu-build-lanes">Two build lanes</h4>
     <p><strong>Emscripten</strong> is the preferred intake path for C/C++ engines: it gives us Stockfish.js-style JS glue, a worker-loadable <code>.wasm</code>, and optional <code>.data</code> sidecars for NNUE files. <strong>Rust WASI</strong> is the preferred path for Rust engines: compile to <code>wasm32-wasip1</code>, then run through the browser WASI shim in one-shot, batch, or persistent-worker mode.</p>
   </div>
 
@@ -964,7 +1033,7 @@ onMount(() => {
   <p>The rule is still parity-first: inspect the artifact to confirm relaxed opcodes are present, then require fixed-depth equality for best move, score, node count, and PV before promoting a runtime ladder such as <code>relaxed-simd &gt; simd128 &gt; scalar</code>. Without that evidence, relaxed SIMD remains a lab or benchmark variant.</p>
 
   <div class="callout info">
-    <h4>Benchmark context</h4>
+    <h4 id="simd-benchmark-context">Benchmark context</h4>
     <p>The current relaxed-SIMD snapshot is measured in a Chromium browser on macOS with an Apple M4 chip. Treat the NPS deltas as device/runtime-specific engineering evidence, not universal engine-speed claims; the exact fixed-depth parity result is the stronger promotion signal.</p>
   </div>
 
@@ -1020,7 +1089,7 @@ onMount(() => {
   <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from 130 KB to 60+ MB, so caching and compression are critical for the site to function.</p>
 
   <div class="callout info">
-    <h4>Two-plane model</h4>
+    <h4 id="cdn-two-planes">Two-plane model</h4>
     <p><strong>Control plane</strong> &mdash; channel and release manifests (mutable, short TTL). <strong>Data plane</strong> &mdash; content-addressed blobs under <code>/artifacts/sha256/</code> (immutable, 1-year edge cache). The Worker maps friendly URLs like <code>/viridithas/viridithas-relaxed-simd128.wasm</code> to the correct blob by reading the channel manifest.</p>
   </div>
 
@@ -1037,7 +1106,7 @@ onMount(() => {
   <p class="lead">Most engines on this site use GPL or AGPL licenses. This section identifies each redistributed artifact, its upstream project, and its corresponding-source archive.</p>
 
   <div class="callout info">
-    <h4>The short version</h4>
+    <h4 id="license-summary">The short version</h4>
     <p>Every GPL- or AGPL-licensed engine we redistribute ships with a matching <strong>corresponding-source archive</strong> from the same deployment as the binary. The archive contains the exact upstream source at the pinned commit, our local patches, the build script that produced the browser artifact, and the toolchain used. This is what the GPL means by "the scripts used to control compilation and installation of the executable."</p>
     <p>Upstream GitHub links are <em>not</em> a sufficient corresponding-source offer on their own &mdash; the FSF position and our own policy agree on this &mdash; so each engine has a real <code>*-corresponding-source.tar.gz</code> sitting next to its <code>.wasm</code>. The Maia3 model is under AGPL-3.0, and the default browser artifact is a local int8 quantization of the upstream fp16 file, so the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> is part of the source offer.</p>
     <p><strong>Full policy:</strong> <a href="https://github.com/manthedan/0x88/blob/main/docs/engine_artifact_distribution.md">docs/engine_artifact_distribution.md</a> &middot; <strong>Hosted artifact index:</strong> <a href="https://github.com/manthedan/0x88/blob/main/docs/hosted_artifacts.md">docs/hosted_artifacts.md</a> &middot; <strong>This project's source:</strong> <a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a></p>
@@ -1195,9 +1264,10 @@ onMount(() => {
   .toc-group + .toc-group{margin-top:12px; padding-top:12px; border-top:1px solid var(--rule)}
   .toc-group-heading{display:flex; align-items:center; gap:4px; margin-bottom:4px}
   .toc-groups .toc-group-label{flex:1; font-size:14px; font-weight:700; color:var(--ink)}
-  .toc-group-heading.current-group .toc-group-label{color:var(--accent-soft-text); background:var(--accent-soft)}
+  .toc-group-heading.current-group{background:var(--accent-soft); border-radius:6px; box-shadow:inset 0 0 0 1px var(--accent-tint-border)}
+  .toc-group-heading.current-group .toc-group-label{color:var(--accent-soft-text)}
   .group-toggle{
-    display:flex; align-items:center; justify-content:center; gap:4px; min-width:42px; min-height:30px; padding:4px;
+    display:flex; align-items:center; justify-content:center; gap:4px; min-width:36px; min-height:36px; padding:4px;
     border:0; border-radius:6px; background:transparent; color:var(--text-soft); font:12px var(--sans); cursor:pointer;
   }
   .group-toggle:hover{background:var(--panel-2); color:var(--ink)}
@@ -1206,15 +1276,15 @@ onMount(() => {
   .toc ul[hidden]{display:none}
   .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:1px}
   .toc-groups a{
-    display:block; padding:5px 10px; border-radius:6px;
+    display:block; padding:8px 10px; border-radius:6px;
     color:var(--text); text-decoration:none; line-height:1.35;
   }
   .toc-groups a:hover{color:var(--ink); background:var(--rule-soft)}
   .toc-groups a.in-active{color:var(--ink); font-weight:600}
   .toc-groups a.active{color:var(--accent-soft-text); font-weight:700; background:var(--accent-soft)}
   .toc-group > ul{padding-left:10px}
-  .toc ul ul{margin:1px 0 4px 12px}
-  .toc ul ul a{font-size:13px; padding:4px 10px}
+  .toc ul ul{margin:2px 0 6px 18px}
+  .toc ul ul a{font-size:14px; padding:8px 10px}
 
   /* ---- search results ---- */
   .results-count,.no-results{margin:0 0 8px; padding:0 4px; color:var(--text-soft); font-size:12.5px}
@@ -1239,10 +1309,6 @@ onMount(() => {
     font-size:32px; margin:8px 0 14px;
     line-height:1.2; letter-spacing:-.01em;
     display:flex; align-items:center; gap:10px;
-  }
-  .doc-content h2::before{
-    content:""; display:block; width:28px; height:3px; flex:0 0 28px;
-    background:var(--accent); border-radius:2px;
   }
   .doc-content h2 .anchor-link,
   .doc-content h3 .anchor-link{
@@ -1278,6 +1344,12 @@ onMount(() => {
     border-radius:4px; color:var(--ink);
   }
   .doc-content a{font-weight:500}
+
+  /* Advanced topics are document sections, not nested workspace cards. */
+  .analysis-topic{padding:22px 0 8px; border-top:1px solid var(--rule-strong)}
+  .analysis-topic + .analysis-topic{margin-top:18px}
+  .analysis-topic h3{margin:0 0 14px}
+  .analysis-topic li + li{margin-top:8px}
 
   /* ---- workspace cards ---- */
   .page-block{
