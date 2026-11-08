@@ -132,7 +132,7 @@ function tokenizeMovetext(movetext: string): Token[] {
 }
 
 /** Parse a single game's PGN text into a variation tree. */
-export function parsePgnGame(text: string): PgnGame {
+export function parsePgnGame(text: string, options: { strict?: boolean } = {}): PgnGame {
   const tags = parseTags(text);
   const startFen = tags.FEN || START_FEN;
   const tree = new GameTree(startFen);
@@ -154,7 +154,7 @@ export function parsePgnGame(text: string): PgnGame {
       continue;
     }
     if (token.type === 'result') {
-      result = token.value;
+      if (!stack.length) result = token.value;
       continue;
     }
     if (token.type === 'nag') {
@@ -167,7 +167,10 @@ export function parsePgnGame(text: string): PgnGame {
     // move
     tree.current = last;
     const move = sanToMove(parseFen(last.fen), token.value);
-    if (!move) continue; // skip unparseable tokens rather than abort the whole game
+    if (!move) {
+      if (options.strict) throw new Error(`Invalid PGN move: ${token.value}`);
+      continue; // Interactive single-game loading remains tolerant.
+    }
     last = tree.addMove(move);
   }
   tree.current = tree.root;
@@ -176,7 +179,7 @@ export function parsePgnGame(text: string): PgnGame {
 
 /** Parse every game in a multi-game PGN string. */
 export function parsePgnGames(text: string): PgnGame[] {
-  return splitPgnGames(text).map(parsePgnGame);
+  return splitPgnGames(text).map((text) => parsePgnGame(text));
 }
 
 function serializeNode(node: GameNode, withNumber: boolean): string {
