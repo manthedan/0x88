@@ -74,6 +74,16 @@ test('adjacent numeric annotation glyphs do not change strict-import moves', asy
   assert.deepEqual(batch.games[0].tree.mainlineFrom().map((node) => node.san), ['e4', 'e5', 'Nf3', 'Nc6']);
 });
 
+test('CR-only and CRLF PGN line endings preserve semicolon-comment boundaries and games', async () => {
+  for (const newline of ['\r', '\r\n']) {
+    const raw = ['[Result "1-0"]', '1. e4 ; comment', 'e5 1-0', '[Result "0-1"]', '1. d4 ; another', 'd5 0-1'].join(newline);
+    const batch = await importLocalPgn(raw);
+    assert.equal(batch.games.length, 2);
+    assert.deepEqual(batch.games.map((game) => game.tree.mainlineFrom().map((node) => node.san)), [['e4', 'e5'], ['d4', 'd5']]);
+    assert.deepEqual(batch.games.map((game) => game.result), ['1-0', '0-1']);
+  }
+});
+
 test('local import cancellation prevents publication', async () => {
   const controller = new AbortController();
   await assert.rejects(importLocalPgn(`${pgn}\n\n${pgn}`, (done) => { if (done === 1) controller.abort(); }, controller.signal), { name: 'AbortError' });

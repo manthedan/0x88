@@ -30,6 +30,7 @@ export function sanToMove(board: BoardState, san: string): Move | null {
 
 /** Split a multi-game PGN string into per-game chunks (tags + movetext). */
 export function splitPgnGames(text: string): string[] {
+  text = text.replace(/\r\n?/g, '\n');
   const games: string[] = [];
   let start = 0;
   let i = 0;
@@ -171,6 +172,7 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
 
 /** Parse a single game's PGN text into a variation tree. */
 export function parsePgnGame(text: string, options: { strict?: boolean; mainlineOnly?: boolean } = {}): PgnGame {
+  text = text.replace(/\r\n?/g, '\n');
   const tags = parseTags(text);
   const startFen = tags.FEN || START_FEN;
   const tree = new GameTree(startFen);
