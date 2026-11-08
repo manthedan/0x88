@@ -30,23 +30,60 @@ export function sanToMove(board: BoardState, san: string): Move | null {
 
 /** Split a multi-game PGN string into per-game chunks (tags + movetext). */
 export function splitPgnGames(text: string): string[] {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  text = text.replace(/\r\n?/g, '\n');
   const games: string[] = [];
-  let current: string[] = [];
+  let start = 0;
+  let i = 0;
+  let depth = 0;
   let sawMovetext = false;
-  for (const line of lines) {
-    const isTag = /^\s*\[/.test(line);
-    // A tag line that starts a new game after we've already seen movetext closes the previous game.
-    if (isTag && sawMovetext) {
-      games.push(current.join('\n').trim());
-      current = [];
-      sawMovetext = false;
+  let ended = false;
+  const finish = (at: number) => {
+    const game = text.slice(start, at).trim();
+    if (game) games.push(game);
+    start = at;
+    sawMovetext = false;
+    ended = false;
+  };
+  while (i < text.length) {
+    const ch = text[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (ch === '{') {
+      const end = text.indexOf('}', i + 1);
+      i = end === -1 ? text.length : end + 1;
+      continue;
     }
-    if (!isTag && line.trim()) sawMovetext = true;
-    current.push(line);
+    if (ch === ';') {
+      const end = text.indexOf('\n', i + 1);
+      i = end === -1 ? text.length : end + 1;
+      continue;
+    }
+    // A top-level result terminates a game even when the next game has no tags.
+    // Leave trailing comments with the preceding game rather than making empty games.
+    if (!depth && (ended || (ch === '[' && sawMovetext))) finish(i);
+    if (ch === '[') {
+      i++;
+      let quoted = false;
+      while (i < text.length) {
+        const next = text[i++];
+        if (next === '\\' && quoted) i++;
+        else if (next === '"') quoted = !quoted;
+        else if (next === ']' && !quoted) break;
+      }
+      continue;
+    }
+    if (ch === '(') { depth++; i++; continue; }
+    if (ch === ')') { depth = Math.max(0, depth - 1); i++; continue; }
+    if (ch === '$') { i++; while (/\d/.test(text[i] ?? '')) i++; continue; }
+    let j = i;
+    while (j < text.length && !/[\s(){};$\[]/.test(text[j])) j++;
+    if (j === i) { i++; continue; } // Malformed punctuation is rejected by the parser, never a loop.
+    const word = text.slice(i, j).replace(/^\d+\.(\.\.)?/, '');
+    sawMovetext = true;
+    if (!depth && RESULTS.has(word)) ended = true;
+    i = j;
   }
-  if (current.join('').trim()) games.push(current.join('\n').trim());
-  return games.filter(Boolean);
+  finish(text.length);
+  return games;
 }
 
 function parseTags(text: string): Record<string, string> {
@@ -71,7 +108,7 @@ type Token =
 const RESULTS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
 
 /** Tokenize movetext, handling {comments}, (variations), $NAGs, move numbers, and results. */
-function tokenizeMovetext(movetext: string): Token[] {
+function tokenizeMovetext(movetext: string, strict = false): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   const n = movetext.length;
@@ -83,11 +120,13 @@ function tokenizeMovetext(movetext: string): Token[] {
     }
     if (ch === '{') {
       const end = movetext.indexOf('}', i);
+      if (end === -1 && strict) throw new Error('Unclosed PGN comment');
       const stop = end === -1 ? n : end;
       tokens.push({ type: 'comment', value: movetext.slice(i + 1, stop).trim() });
       i = stop + 1;
       continue;
     }
+    if (ch === '}') throw new Error('Unmatched closing PGN comment brace');
     if (ch === '(') {
       tokens.push({ type: 'open' });
       i++;
@@ -112,7 +151,7 @@ function tokenizeMovetext(movetext: string): Token[] {
     }
     // A whitespace/paren/comment-delimited word: move number, SAN, or result.
     let j = i;
-    while (j < n && !/[\s(){};]/.test(movetext[j])) j++;
+    while (j < n && !/[\s(){};$]/.test(movetext[j])) j++;
     let word = movetext.slice(i, j);
     i = j;
     if (RESULTS.has(word)) {
@@ -132,13 +171,14 @@ function tokenizeMovetext(movetext: string): Token[] {
 }
 
 /** Parse a single game's PGN text into a variation tree. */
-export function parsePgnGame(text: string): PgnGame {
+export function parsePgnGame(text: string, options: { strict?: boolean; mainlineOnly?: boolean } = {}): PgnGame {
+  text = text.replace(/\r\n?/g, '\n');
   const tags = parseTags(text);
   const startFen = tags.FEN || START_FEN;
   const tree = new GameTree(startFen);
   // Movetext is everything after the last tag line.
   const movetext = text.replace(/\[(\w+)\s+"((?:\\.|[^"\\])*)"\]\s*/g, '');
-  const tokens = tokenizeMovetext(movetext);
+  const tokens = tokenizeMovetext(movetext, options.strict);
 
   let last: GameNode = tree.root;
   const stack: GameNode[] = [];
@@ -146,15 +186,19 @@ export function parsePgnGame(text: string): PgnGame {
   for (const token of tokens) {
     if (token.type === 'open') {
       stack.push(last);
-      last = last.parent ?? tree.root;
+      if (!options.mainlineOnly) last = last.parent ?? tree.root;
       continue;
     }
     if (token.type === 'close') {
+      if (options.strict && !stack.length) throw new Error('Unmatched closing PGN variation');
       last = stack.pop() ?? tree.root;
       continue;
     }
+    // Aggregation must use the literal mainline, not child insertion order when
+    // a RAV shares moves with its parent line. The authoritative PGN retains RAVs.
+    if (options.mainlineOnly && stack.length) continue;
     if (token.type === 'result') {
-      result = token.value;
+      if (!stack.length) result = token.value;
       continue;
     }
     if (token.type === 'nag') {
@@ -167,16 +211,20 @@ export function parsePgnGame(text: string): PgnGame {
     // move
     tree.current = last;
     const move = sanToMove(parseFen(last.fen), token.value);
-    if (!move) continue; // skip unparseable tokens rather than abort the whole game
+    if (!move) {
+      if (options.strict) throw new Error(`Invalid PGN move: ${token.value}`);
+      continue; // Interactive single-game loading remains tolerant.
+    }
     last = tree.addMove(move);
   }
+  if (options.strict && stack.length) throw new Error('Unclosed PGN variation');
   tree.current = tree.root;
   return { tags, tree, result };
 }
 
 /** Parse every game in a multi-game PGN string. */
 export function parsePgnGames(text: string): PgnGame[] {
-  return splitPgnGames(text).map(parsePgnGame);
+  return splitPgnGames(text).map((text) => parsePgnGame(text));
 }
 
 function serializeNode(node: GameNode, withNumber: boolean): string {

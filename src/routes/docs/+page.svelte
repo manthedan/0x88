@@ -473,7 +473,13 @@ onMount(() => {
       <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
     </ul>
     </div>
-    <p class="not-yet"><strong>Not available yet:</strong> a local opening explorer for your own PGN collections is in development and hidden in the current build.</p>
+
+  </div>
+
+  <div class="page-block">
+    <h4 id="explore-own-games">Explore your own opening games</h4>
+    <p>In Analysis’s <strong>Moves → Opening explorer</strong>, open <strong>Import PGN</strong>, paste a batch or choose a .pgn file, name it and select <strong>Import and save</strong>. Each batch is limited to 200 games and 1 MiB (32 KiB per game). Select a collection to load it; click a continuation to advance the board. Counts use mainlines only, counting each game’s first continuation at a repeated position. Results include unknown outcomes.</p>
+    <p><strong>Collection actions</strong> includes rename, duplicate, delete, PGN download and JSON backup/restore. Restore keeps existing collections and rebuilds indexes from PGN; backups are limited to 16 MiB, so back up selected collections separately if the full backup exceeds that limit. Collections stay in this browser, not an account or online database. If storage is blocked, use <strong>Explore without saving</strong> and download your PGN. <strong>Compare with predictions</strong> separates observed frequency from Maia3’s probability at a chosen rating and the analyzed engines’ best moves; load Maia3 explicitly in Human first.</p>
   </div>
 
   <div class="page-block">
@@ -1292,10 +1298,6 @@ onMount(() => {
     display:inline-flex; align-items:center; justify-content:center;
     background:var(--panel-2); border:1px solid var(--rule-strong);
     color:var(--ink); font:700 12px/1 var(--sans);
-  }
-  .doc-content .not-yet{
-    padding:10px 14px; border:1px dashed var(--rule-strong); border-radius:var(--radius-sm);
-    font-size:14px; color:var(--text); max-width:none;
   }
   .doc-content .open-link{
     display:inline-flex; align-items:center; gap:8px; min-height:40px;

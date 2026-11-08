@@ -65,12 +65,12 @@ test('PGN database backup import normalizes collection records', () => {
   assert.equal(collections[0].source, 'lichess');
   assert.equal(collections[0].username, 'dan');
   assert.equal(collections[0].gameCount, 3);
-  assert.equal(collections[0].indexedPositionCount, 1);
+  assert.equal(collections[0].indexedPositionCount, 0, 'untrusted derived indexes are discarded');
 });
 
 test('PGN database backup import rejects invalid backups', () => {
   assert.throws(() => normalizePgnDatabaseBackup({}), /collections array/);
-  assert.throws(() => normalizePgnDatabaseBackup({ collections: [{ name: 'empty', pgn: '' }] }), /has no PGN/);
+  assert.throws(() => normalizePgnDatabaseBackup({ kind: 'lc0-analysis-pgn-database-backup', version: 1, collections: [{ name: 'empty', pgn: '' }] }), /has no PGN/);
 });
 
 test('PGN database import rebuilds position indexes from raw PGN', () => {
