@@ -1741,7 +1741,7 @@ function ctxApplyPlayHandoffForMount(ctx: PlayContext): boolean {
     ctx.practicePosition = handoff.position;
     return true;
   }
-  if (handoff.status === 'invalid' || params.get('from') === 'analysis') {
+  if (handoff.status === 'invalid') {
     ctx.handoffNotice = 'That position could not be loaded or is finished. Set up a normal game instead.';
     return true;
   }

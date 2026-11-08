@@ -4234,7 +4234,8 @@ function wireEvents() {
       return;
     }
     cancelActiveAnalysisRun();
-    location.assign('/app/play/?from=analysis');
+    // No persistent URL marker: a later reload must be eligible for saved-game restore.
+    location.assign('/app/play/');
   });
   try {
     const saved: unknown = JSON.parse(storageGet(EXPANDED_LINES_STORAGE_KEY) ?? '[]');
