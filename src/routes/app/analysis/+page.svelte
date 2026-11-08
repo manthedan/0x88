@@ -729,7 +729,7 @@ onMount(() => {
   #reviewProgress{width:100%; height:6px; accent-color:var(--accent)}
   .review-metric-label{font:600 13px var(--sans); margin:14px 0 8px}
   :global(.review-summary){display:grid; grid-template-columns:1fr 1fr; gap:12px; padding-bottom:10px; border-bottom:1px solid var(--rule)}
-  :global(.review-side){display:grid; gap:4px}
+  :global(.review-side){display:grid; align-content:start; gap:4px}
   :global(.review-side strong){font:600 13px var(--sans)}
   :global(.review-accuracy){font:650 24px/1.15 var(--sans); letter-spacing:-.02em; color:var(--ink)}
   :global(.review-counts){font:12px/1.6 var(--sans); color:var(--muted)}
