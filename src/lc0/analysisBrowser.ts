@@ -1944,8 +1944,6 @@ function renderBoard() {
     announce: (text) => { el('boardAnnouncement').textContent = text; },
   });
   keyboardBoard.render(board, orientation);
-  el('sideToMove').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
-  el('sideToMove').dataset.turn = board.turn;
   el('evalTurn').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
   el('evalTurn').dataset.turn = board.turn;
   renderEvalBar();

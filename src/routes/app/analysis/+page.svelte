@@ -110,7 +110,6 @@ onMount(() => {
   <section class="panel app-sidebar" aria-label="Analysis">
     <header class="analysis-overview">
       <div class="position-status">
-        <span id="sideToMove" class="turn-indicator" data-turn="w">White to move</span>
         <span id="analysisStatus" class="analysis-status" data-state="loading" role="status">Loading…</span>
       </div>
       <div class="analyze-actions">
@@ -390,6 +389,8 @@ onMount(() => {
   .eval-source{display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:600 13px/22px var(--sans)}
   .eval-source:global([data-short]:not([data-short='']))::before{content:attr(data-short); display:inline-grid; vertical-align:middle; place-items:center; width:22px; height:22px; margin-right:6px; border-radius:4px; background:var(--engine-color); color:#fff; font:700 11px var(--mono)}
   .eval-score{color:var(--ink); font:750 14px/1 var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+  /* Two-column layout: the engine cards beside the board print this value; the button's label still carries it. */
+  @media (min-width:901px){ .eval-score{display:none} }
   .evalbar .mid{
     position:absolute; left:0; right:0; top:50%;
     height:2px; background:#99978e; box-shadow:0 1px 0 #0006;
@@ -608,11 +609,8 @@ onMount(() => {
   /* ── Right column, Lichess-shaped: header → engine strip → top lines → tabs → move list (fills the rest). ── */
   .analysis-overview{display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
   .position-status{display:flex; align-items:center; gap:10px; min-width:0}
-  .turn-indicator{display:inline-flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600; color:var(--ink); white-space:nowrap}
-  .turn-indicator::before{content:''; width:12px; height:12px; border-radius:50%; background:#f4f1e8; box-shadow:0 0 0 1.5px #0009}
-  :global(.analysis-workspace .turn-indicator[data-turn=b]::before){background:#1d1b18; box-shadow:0 0 0 1.5px #fffa}
   /* Quiet, neutral run state: text + glyph, no pill competing with the primary action. */
-  .analysis-status{display:inline-flex; align-items:center; gap:5px; padding-left:10px; border-left:1px solid var(--rule); color:var(--muted); font:500 12.5px/1 var(--sans); white-space:nowrap}
+  .analysis-status{display:inline-flex; align-items:center; gap:5px; color:var(--muted); font:500 12.5px/1 var(--sans); white-space:nowrap}
   .analysis-status::before{content:''; width:6px; height:6px; flex:0 0 auto; border-radius:50%; background:currentColor; opacity:.7}
   :global(.analysis-status[data-state=running]){color:var(--ink)}
   :global(.analysis-status[data-state=running])::before{width:8px; height:8px; border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent); background:transparent; opacity:1; animation:analysis-spin .8s linear infinite}
@@ -764,8 +762,6 @@ onMount(() => {
     .analysis-workspace .engine-strip{display:none; grid-column:1 / -1; grid-row:3}
     .analysis-workspace :global(.analysis-content[data-view=engines] > .engine-strip){display:flex}
     .position-status{grid-column:1; grid-row:1; min-height:44px; padding-left:7px}
-    .turn-indicator{display:none} /* Already labelled above the board. */
-    .analysis-status{padding:0; border:0}
     .analyze-actions button{grid-row:1; align-self:center; min-height:36px; margin-block:4px}
     .manage-engines{grid-column:2}
     .manage-label, .manage-engines .engine-count{display:none}
