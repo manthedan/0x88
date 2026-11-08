@@ -174,3 +174,12 @@ test('explicit FEN and handoff URLs take precedence without consuming the handof
   assert.equal(hasExplicitWorkspaceInput('?utm_source=docs', '#moves'), false);
   assert.equal(hasExplicitWorkspaceInput(''), false);
 });
+
+test('play practice boundary (Play from here) round-trips and is validated against the move count', () => {
+  const data = playData({ moves: ['e2e4', 'e7e5', 'g1f3'], practiceBoundary: 2 });
+  assert.equal(decodePlaySnapshot(envelope('play', data), engineIds).practiceBoundary, 2);
+  assert.equal(decodePlaySnapshot(envelope('play', playData()), engineIds).practiceBoundary, 0, 'absent means no boundary');
+  for (const practiceBoundary of [-1, 4, 1.5, '2']) {
+    assert.equal(decodePlaySnapshot(envelope('play', { ...data, practiceBoundary }), engineIds), null);
+  }
+});

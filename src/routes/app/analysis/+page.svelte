@@ -85,9 +85,11 @@ onMount(() => {
       <button id="flip" class="tool-button icon-only" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
       <button id="quickCopyFen" class="tool-button copy-button" type="button" title="Copy this position's FEN" aria-label="Copy FEN"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">FEN</span></button>
       <button id="quickCopyPgn" class="tool-button copy-button" type="button" title="Copy the game as PGN" aria-label="Copy PGN"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="tool-label">PGN</span></button>
+      <button id="playFromHere" class="tool-button" type="button" title="Continue this position against Maia3 or an engine" aria-describedby="playFromHereReason">Play from here</button>
       <button id="openPosition" class="tool-button position-toggle" type="button" aria-controls="positionTools" aria-expanded="false" title="Load a game or position (PGN or FEN)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14"/></svg><span class="tool-label">Load</span></button>
     </div>
     </div>
+    <p id="playFromHereReason" class="small" hidden></p>
     <details id="positionTools" class="position-tools">
       <summary hidden>Position input &amp; export</summary>
       <div class="position-tools-body">
@@ -782,6 +784,14 @@ onMount(() => {
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}
     :global(.movelist .mv){min-height:32px}
   }
+  /* Narrow two-column boards need the same separate nav/tool groups as phones. */
+  @media (min-width:601px) and (max-width:1200px){
+    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:6px}
+    .nav{height:44px}
+    .board-tools{display:grid; grid-template-columns:40px 1fr 1fr auto 1fr; height:40px}
+    .tool-button{padding:0 6px}
+    .copy-button{min-width:0}
+  }
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
@@ -800,7 +810,7 @@ onMount(() => {
     .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:4px; margin:6px 0 0}
     .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
-    .board-tools{display:grid; grid-template-columns:repeat(4,1fr); gap:4px; height:36px}
+    .board-tools{display:grid; grid-template-columns:32px 1fr 1fr auto 1fr; gap:4px; height:36px}
     .tool-button, .tool-button.icon-only{width:auto; padding:0 6px; gap:5px; font-size:12.5px}
     .copy-button{min-width:0}
     .copy-button svg{width:14px; height:14px; flex-basis:14px}

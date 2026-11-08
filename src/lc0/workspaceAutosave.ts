@@ -35,6 +35,8 @@ export interface PlaySnapshot {
   preferences: PlayPreferences;
   gameOver: { result: GameResultCode; reason: string } | null;
   started: boolean;
+  /** Plies imported from Analysis ("Play from here"); takebacks stop here. Absent = 0. */
+  practiceBoundary?: number;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -132,8 +134,11 @@ export function decodePlaySnapshot(raw: string, validEngineIds: ReadonlySet<stri
     }
     // A terminal position is never resumed as an active game, even if a save was interrupted.
     gameOver ??= gameOutcome(positions[positions.length - 1], positions.slice(0, -1).map(boardToFen));
+    const boundary = data.practiceBoundary ?? 0;
+    if (!Number.isInteger(boundary) || (boundary as number) < 0 || (boundary as number) > data.moves.length) throw new Error('Invalid practice boundary');
     return {
       startFen: tree.root.fen,
+      practiceBoundary: boundary as number,
       positions,
       board: positions[positions.length - 1],
       moves: line.slice(1).map((node) => node.move!),
