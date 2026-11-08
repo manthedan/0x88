@@ -456,6 +456,7 @@ onMount(() => {
       <li>Make moves on the board, or press <strong>Load</strong> to paste a PGN or FEN.</li>
       <li>Press <strong>Add engine</strong> for another engine, or <strong>Engines</strong> to change each engine’s net or build and its search budget (visits or depth).</li>
       <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
+      <li>In <strong>Engines → Saved engine setups</strong>, name and save the current engines, budgets and number of lines. Select a setup to load it, or delete it when no longer needed. Setups stay on this device; use <strong>Export setups</strong> and <strong>Import setups</strong> for JSON backups. Large networks still require confirmation before loading.</li>
     </ol>
     <div class="task-reference">
     <h4>Exploring the results</h4>

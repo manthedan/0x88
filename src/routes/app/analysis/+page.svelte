@@ -198,25 +198,27 @@ onMount(() => {
       </div>
       <div class="row add-engine-row">
         <button id="addEngineInManager" type="button">+ Add engine</button>
-        {#if devMode}
-        <div class="field"><label for="engineProfileSelect">Profile</label>
-          <select id="engineProfileSelect"><option value="">default</option></select></div>
-        {/if}
       </div>
-
-    {#if devMode}
-    <details class="advanced-settings">
-      <summary>Profiles &amp; engine settings</summary>
+      <details class="advanced-settings saved-setups">
+        <summary>Saved engine setups</summary>
+        <p class="small">Keep named engine choices and search budgets on this device. Selecting a setup loads it.</p>
+        <div class="field"><label for="engineProfileSelect">Load setup</label>
+          <select id="engineProfileSelect"><option value="">manual / default</option></select></div>
       <div class="row profile-row">
-        <div class="field"><label for="engineProfileName">Name</label>
-          <input id="engineProfileName" type="text" spellcheck="false" autocomplete="off" placeholder="analysis profile" /></div>
-        <button id="saveEngineProfile" type="button">Save profile</button>
-        <button id="deleteEngineProfile" type="button">Delete</button>
-        <button id="exportEngineProfiles" type="button">Export profiles</button>
-        <button id="importEngineProfiles" type="button">Import profiles</button>
+        <div class="field"><label for="engineProfileName">Setup name</label>
+          <input id="engineProfileName" type="text" spellcheck="false" autocomplete="off" placeholder="My comparison setup" /></div>
+        <button id="saveEngineProfile" type="button">Save setup</button>
+        <button id="deleteEngineProfile" type="button">Delete setup</button>
+        <button id="exportEngineProfiles" type="button">Export setups</button>
+        <button id="importEngineProfiles" type="button">Import setups</button>
         <input id="importEngineProfilesFile" type="file" accept="application/json,.json" style="display:none" />
       </div>
       <div id="engineProfileSummary" class="profile-summary small">Manual engine setup.</div>
+      <p id="engineProfileFeedback" class="small" role="status"></p>
+      </details>
+    {#if devMode}
+    <details class="advanced-settings">
+      <summary>Developer engine settings</summary>
       <div class="row">
         <div class="field"><label for="lc0RuntimeSelect">LC0 backend</label>
           <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select></div>
@@ -232,14 +234,6 @@ onMount(() => {
     {:else}
     <!-- Hidden but in DOM so analysisBrowser.ts can find them when dev mode is off -->
     <div hidden>
-      <select id="engineProfileSelect"><option value="">default</option></select>
-      <input id="engineProfileName" type="text" />
-      <button id="saveEngineProfile" type="button">Save</button>
-      <button id="deleteEngineProfile" type="button">Delete</button>
-      <button id="exportEngineProfiles" type="button">Export</button>
-      <button id="importEngineProfiles" type="button">Import</button>
-      <input id="importEngineProfilesFile" type="file" />
-      <div id="engineProfileSummary"></div>
       <select id="lc0RuntimeSelect"><option value="onnx">ORT ONNX</option><option value="hybrid-ort-heads">WGSL encoder + ORT heads</option><option value="hybrid-wgsl-heads">WGSL encoder + WGSL heads (experimental)</option></select>
       <span id="backend"></span>
       <span id="runtimeAudit"></span>
@@ -571,7 +565,12 @@ onMount(() => {
   .stepper-field input::-webkit-inner-spin-button,
   .stepper-field input::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0 }
   .stepper-field input:focus{box-shadow:none; outline:none}
-  .profile-row{align-items:end}
+  .saved-setups{margin-top:16px}
+  .saved-setups>summary{font-weight:650}
+  .saved-setups .field select{width:100%}
+  .profile-row{align-items:end; margin-top:12px}
+  .profile-row .field{flex:1 1 100%}
+  #engineProfileFeedback:empty{display:none}
   .profile-row input[type=text]{min-width:130px}
   :global(.profile-summary){
     margin-top:6px; padding:7px 8px;

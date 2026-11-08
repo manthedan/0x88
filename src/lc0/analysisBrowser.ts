@@ -148,6 +148,7 @@ import {
   viridithasCacheKey,
 } from './engineProvision.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
+import { BUILT_IN_PROFILE_VALUE_PREFIX, ENGINE_PROFILE_BACKUP_KIND, type EngineAnalysisProfile, engineSetupRuntime, normalizeEngineProfiles } from './engineSetups.ts';
 import {
   cancelHiddenTabWork,
   classifyHiddenReload,
@@ -473,15 +474,6 @@ const nodeIndex = new Map<number, GameNode>();
 const ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-engine-profiles-v1';
 const LAST_ENGINE_PROFILE_STORAGE_KEY = 'lc0-analysis-last-engine-profile-v1';
 const MANUAL_ENGINE_ROWS_STORAGE_KEY = '0x88-analysis-engine-rows-v1';
-const ENGINE_PROFILE_BACKUP_KIND = 'lc0-analysis-engine-profile-backup';
-const BUILT_IN_PROFILE_VALUE_PREFIX = 'builtin:';
-
-interface EngineAnalysisProfile {
-  name: string;
-  rows: EngineRow[];
-  multiPv: number;
-  lc0Runtime: Lc0AnalysisRuntime;
-}
 interface BuiltInEngineAnalysisProfile extends EngineAnalysisProfile {
   id: string;
   note: string;
@@ -533,8 +525,10 @@ const BUILT_IN_ENGINE_PROFILES: BuiltInEngineAnalysisProfile[] = [
   },
 ];
 function builtInEngineProfiles(): BuiltInEngineAnalysisProfile[] {
-  if (!isV0DeployProfile()) return BUILT_IN_ENGINE_PROFILES;
-  return BUILT_IN_ENGINE_PROFILES.filter((profile) => profile.lc0Runtime === 'onnx' && !profileHasBt4(profile.rows));
+  return BUILT_IN_ENGINE_PROFILES.filter((profile) =>
+    (params.has('dev') || profile.lc0Runtime === 'onnx') &&
+    (!isV0DeployProfile() || (profile.lc0Runtime === 'onnx' && !profileHasBt4(profile.rows))),
+  );
 }
 let engineProfiles: EngineAnalysisProfile[] = [];
 let importedGames: ImportedGame[] = [];
@@ -1203,42 +1197,28 @@ function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRo
     return next;
   });
 }
-function normalizeEngineProfiles(parsed: unknown): EngineAnalysisProfile[] {
-  const entries = Array.isArray(parsed)
-    ? parsed
-    : parsed &&
-        typeof parsed === 'object' &&
-        (parsed as { kind?: unknown }).kind === ENGINE_PROFILE_BACKUP_KIND &&
-        Array.isArray((parsed as { profiles?: unknown }).profiles)
-      ? (parsed as { profiles: unknown[] }).profiles
-      : [];
-  return entries
-    .flatMap((entry) => {
-      if (!entry || typeof entry !== 'object') return [];
-      const raw = entry as Partial<EngineAnalysisProfile>;
-      const name = String(raw.name ?? '').trim();
-      if (!name || name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX) || !Array.isArray(raw.rows)) return [];
-      const rows = raw.rows.map((row, index) => sanitizeEngineRow(row, index)).filter((row): row is EngineRow => !!row);
-      if (!rows.length) return [];
-      return [
-        { name, rows, multiPv: Math.max(1, Math.min(10, Math.floor(Number(raw.multiPv) || 3))), lc0Runtime: normalizeLc0Runtime(raw.lc0Runtime ?? 'onnx') },
-      ];
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
 function loadEngineProfiles(): EngineAnalysisProfile[] {
   try {
-    return normalizeEngineProfiles(JSON.parse(storageGet(ENGINE_PROFILE_STORAGE_KEY) ?? '[]') as unknown);
+    return normalizeEngineProfiles(JSON.parse(storageGet(ENGINE_PROFILE_STORAGE_KEY) ?? '[]') as unknown, sanitizeEngineRow);
   } catch {
     return [];
   }
 }
-function persistEngineProfiles(): void {
-  storageSet(ENGINE_PROFILE_STORAGE_KEY, JSON.stringify(engineProfiles));
+function persistEngineProfiles(): boolean {
+  try {
+    localStorage.setItem(ENGINE_PROFILE_STORAGE_KEY, JSON.stringify(engineProfiles));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function engineProfileMessage(text: string): void {
+  el('engineProfileFeedback').textContent = text;
+  el('message').textContent = text;
 }
 function profileSummary(profile: EngineAnalysisProfile, note = ''): string {
   const rows = profile.rows.map((row) => `${rowLabel(row)} ${clampStrengthForRow(row)} ${strengthMeta(row.family).unit}`).join(' · ');
-  return `${note ? `${note} ` : ''}${rows || 'no engines'} · MultiPV ${profile.multiPv} · LC0 ${lc0RuntimeLabel(profile.lc0Runtime)}`;
+  return `${note ? `${note} ` : ''}${rows || 'no engines'} · ${profile.multiPv} lines${params.has('dev') ? ` · LC0 ${lc0RuntimeLabel(profile.lc0Runtime)}` : ''}`;
 }
 function builtInProfileValue(id: string): string {
   return `${BUILT_IN_PROFILE_VALUE_PREFIX}${id}`;
@@ -1253,10 +1233,10 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
   );
   selectEl('engineProfileSelect').innerHTML = [
     '<option value="">manual / default</option>',
-    '<optgroup label="Built-in profiles">',
+    '<optgroup label="Built-in setups">',
     ...builtInOptions,
     '</optgroup>',
-    '<optgroup label="Saved profiles">',
+    '<optgroup label="Saved setups">',
     ...savedOptions,
     '</optgroup>',
   ].join('');
@@ -1264,12 +1244,13 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
   const saved = engineProfiles.find((profile) => profile.name === selected);
   const profile = builtIn ?? saved;
   inputEl('engineProfileName').value = saved?.name ?? '';
+  (el('deleteEngineProfile') as HTMLButtonElement).disabled = !saved;
   el('engineProfileSummary').textContent = profile
     ? profileSummary(profile, builtIn?.note)
-    : 'Manual engine setup. Choose a built-in profile or save the current engine rows.';
+    : 'Manual engine setup. Choose a saved setup or save the current engines.';
 }
 function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): void {
-  const runtime = normalizeLc0Runtime(profile.lc0Runtime);
+  const runtime = engineSetupRuntime(profile.lc0Runtime, params.has('dev'));
   const runtimeChanged = selectedLc0Runtime() !== runtime;
   cancelAllAnalysisAssetPrefetches();
   engineRows = profileRowsForUse(profile.rows, true);
@@ -1278,7 +1259,8 @@ function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?
   if (options.persistLast !== false) storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, profile.name);
   renderEngineList();
   renderEngineProfiles(options.selected ?? profile.name);
-  el('engineProfileSummary').textContent = profileSummary(profile, options.note);
+  el('engineProfileSummary').textContent = profileSummary(currentEngineProfile(profile.name), options.note);
+  engineProfileMessage(`Loaded engine setup “${profile.name}”.`);
   lineCache.clear();
   completeAnalysisKeys.clear();
   if (deferAnalysisSettingsRefresh({ reloadLc0: runtimeChanged, disposeUnusedEngines: true })) {
@@ -1292,42 +1274,42 @@ function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?
 function saveCurrentEngineProfile(): void {
   const name = inputEl('engineProfileName').value.trim();
   if (!name) {
-    el('message').textContent = 'Name the engine profile before saving.';
+    engineProfileMessage('Name the engine setup before saving.');
     return;
   }
   if (name.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX)) {
-    el('message').textContent = `Saved profile names cannot start with “${BUILT_IN_PROFILE_VALUE_PREFIX}”.`;
+    engineProfileMessage(`Saved setup names cannot start with “${BUILT_IN_PROFILE_VALUE_PREFIX}”.`);
     return;
   }
   if (activeEngineRows().some((row) => row.variant === 'custom')) {
-    el('message').textContent = 'Custom URL variants are not saved in profiles yet; choose a built-in variant first.';
+    engineProfileMessage('Custom URL variants are not saved in setups yet; choose a built-in variant first.');
     return;
   }
   const profile = currentEngineProfile(name);
   engineProfiles = [...engineProfiles.filter((entry) => entry.name !== name), profile].sort((a, b) => a.name.localeCompare(b.name));
-  persistEngineProfiles();
+  const persisted = persistEngineProfiles();
   storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, name);
   renderEngineProfiles(name);
-  el('message').textContent = `Saved engine profile “${name}”.`;
+  engineProfileMessage(persisted ? `Saved engine setup “${name}” on this device.` : `Setup “${name}” is available for this visit only. Browser storage is unavailable; export a backup to keep it.`);
 }
 function exportEngineProfiles(): void {
   const backup = { kind: ENGINE_PROFILE_BACKUP_KIND, version: 1, exportedAt: new Date().toISOString(), profiles: engineProfiles };
   downloadTextFile('lc0-analysis-engine-profiles.json', JSON.stringify(backup, null, 2), 'application/json');
-  el('message').textContent = `Exported ${engineProfiles.length} saved engine profiles. Custom URL variants are excluded by design.`;
+  engineProfileMessage(`Exported ${engineProfiles.length} saved engine setups. Custom URL variants are excluded.`);
 }
 async function importEngineProfilesFile(file: File | undefined): Promise<void> {
   if (!file) return;
   try {
-    const incoming = normalizeEngineProfiles(JSON.parse(await file.text()) as unknown);
+    const incoming = normalizeEngineProfiles(JSON.parse(await file.text()) as unknown, sanitizeEngineRow);
     if (!incoming.length) throw new Error('No valid engine profiles found');
     engineProfiles = [...incoming, ...engineProfiles.filter((profile) => !incoming.some((entry) => entry.name === profile.name))].sort((a, b) =>
       a.name.localeCompare(b.name),
     );
-    persistEngineProfiles();
+    const persisted = persistEngineProfiles();
     applyEngineProfile(incoming[0], { selected: incoming[0].name });
-    el('message').textContent = `Imported ${incoming.length} engine profiles and applied “${incoming[0].name}”. Custom URL variants were ignored.`;
+    engineProfileMessage(`Imported ${incoming.length} engine setups and loaded “${incoming[0].name}”.${persisted ? '' : ' Browser storage is unavailable; export a backup to keep them.'}`);
   } catch (error) {
-    el('message').textContent = `Engine profile import failed: ${(error as Error).message}`;
+    engineProfileMessage(`Engine setup import failed: ${(error as Error).message}`);
   } finally {
     inputEl('importEngineProfilesFile').value = '';
   }
@@ -1335,20 +1317,20 @@ async function importEngineProfilesFile(file: File | undefined): Promise<void> {
 function deleteSelectedEngineProfile(): void {
   const selected = selectEl('engineProfileSelect').value;
   if (selected.startsWith(BUILT_IN_PROFILE_VALUE_PREFIX)) {
-    el('message').textContent = 'Built-in engine profiles cannot be deleted.';
+    engineProfileMessage('Built-in engine setups cannot be deleted.');
     return;
   }
   const name = selected || inputEl('engineProfileName').value.trim();
   if (!name) return;
   if (!engineProfiles.some((entry) => entry.name === name)) {
-    el('message').textContent = `No saved engine profile named “${name}”.`;
+    engineProfileMessage(`No saved engine setup named “${name}”.`);
     return;
   }
   engineProfiles = engineProfiles.filter((entry) => entry.name !== name);
-  persistEngineProfiles();
+  const persisted = persistEngineProfiles();
   storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY);
   renderEngineProfiles('');
-  el('message').textContent = `Deleted engine profile “${name}”.`;
+  engineProfileMessage(persisted ? `Deleted engine setup “${name}”. The active engines are unchanged.` : `Removed “${name}” for this visit only. Browser storage is unavailable, so it may return on reload.`);
 }
 
 // Engines to analyze are chosen as an add/remove list of cascading selects:
@@ -4972,7 +4954,7 @@ async function init(mountSignal: AbortSignal) {
   if (lastProfile) {
     engineRows = profileRowsForUse(lastProfile.rows, false);
     inputEl('multiPvInput').value = String(lastProfile.multiPv);
-    selectEl('lc0RuntimeSelect').value = lastProfile.lc0Runtime;
+    selectEl('lc0RuntimeSelect').value = engineSetupRuntime(lastProfile.lc0Runtime, params.has('dev'));
   } else {
     engineRows = loadManualEngineRows() ?? engineRows;
   }
