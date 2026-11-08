@@ -493,8 +493,6 @@ onMount(() => {
   .eval-source{display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:600 13px/22px var(--sans)}
   .eval-source:global([data-short]:not([data-short='']))::before{content:attr(data-short); display:inline-grid; vertical-align:middle; place-items:center; width:22px; height:22px; margin-right:6px; border-radius:4px; background:var(--engine-color); color:#fff; font:700 11px var(--mono)}
   .eval-score{color:var(--ink); font:750 14px/1 var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap}
-  /* Two-column layout: the engine cards beside the board print this value; the button's label still carries it. */
-  @media (min-width:901px){ .eval-score{display:none} }
   .evalbar .mid{
     position:absolute; left:0; right:0; top:50%;
     height:2px; background:#99978e; box-shadow:0 1px 0 #0006;
