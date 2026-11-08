@@ -298,13 +298,27 @@ export async function deletePgnCollection(id: string): Promise<void> {
   }
 }
 
-export async function exportPgnDatabaseBackup(now = new Date()): Promise<PgnDatabaseBackup> {
+export function serializePgnDatabaseBackup(backup: PgnDatabaseBackup): string {
+  const json = JSON.stringify(backup);
+  if (new TextEncoder().encode(json).length > MAX_BACKUP_BYTES) {
+    throw new Error('Backup exceeds the 16 MiB restore limit. Use “Back up selected collection” for each collection instead.');
+  }
+  return json;
+}
+
+export async function exportPgnDatabaseBackup(now = new Date(), collectionId?: string): Promise<PgnDatabaseBackup> {
   const db = await openDatabase();
   try {
-    const collections = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
+    const store = db.transaction(STORE, 'readonly').objectStore(STORE);
+    const collections = collectionId
+      ? [await requestToPromise<PgnCollectionRecord | undefined>(store.get(collectionId))].filter((record): record is PgnCollectionRecord => !!record)
+      : await requestToPromise<PgnCollectionRecord[]>(store.getAll());
+    if (collectionId && !collections.length) throw new Error('Saved PGN collection not found');
     // Omit derived indexes: smaller portable backups, rebuilt using current semantics on restore.
     const rawCollections = collections.map(({ positionIndex: _index, ...record }) => record);
-    return { kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: now.toISOString(), collections: rawCollections };
+    const backup: PgnDatabaseBackup = { kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: now.toISOString(), collections: rawCollections };
+    serializePgnDatabaseBackup(backup); // Never report success for a file that restore would reject.
+    return backup;
   } finally {
     db.close();
   }

@@ -163,6 +163,7 @@ onMount(() => {
                 <button id="renamePgnDb" type="button">Rename to name below</button>
                 <button id="duplicatePgnDb" type="button">Duplicate collection</button>
                 <button id="exportPgnDbCollection" type="button">Download selected PGN</button>
+                <button id="exportPgnDbSelected" type="button">Back up selected collection (JSON)</button>
                 <button id="exportPgnDb" type="button">Back up all collections (JSON)</button>
                 <button id="importPgnDb" type="button">Restore JSON backup</button>
                 <button id="deletePgnDb" type="button">Delete selected collection…</button>

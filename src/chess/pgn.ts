@@ -34,15 +34,25 @@ export function splitPgnGames(text: string): string[] {
   const games: string[] = [];
   let current: string[] = [];
   let sawMovetext = false;
+  let inComment = false;
   for (const line of lines) {
-    const isTag = /^\s*\[/.test(line);
+    const isTag = !inComment && /^\s*\[/.test(line);
     // A tag line that starts a new game after we've already seen movetext closes the previous game.
     if (isTag && sawMovetext) {
       games.push(current.join('\n').trim());
       current = [];
       sawMovetext = false;
     }
-    if (!isTag && line.trim()) sawMovetext = true;
+    if (!isTag) {
+      let visible = '';
+      for (const ch of line) {
+        if (inComment) { if (ch === '}') inComment = false; }
+        else if (ch === ';') break;
+        else if (ch === '{') inComment = true;
+        else visible += ch;
+      }
+      if (visible.trim()) sawMovetext = true;
+    }
     current.push(line);
   }
   if (current.join('').trim()) games.push(current.join('\n').trim());

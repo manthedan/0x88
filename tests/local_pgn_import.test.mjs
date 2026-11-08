@@ -7,9 +7,9 @@ afterEach(() => {
   else delete globalThis.indexedDB;
 });
 import { START_FEN } from '../src/chess/board.ts';
-import { boundedPgnChunks, importLocalPgn, MAX_PGN_BYTES } from '../src/lc0/localPgnImport.ts';
+import { boundedPgnChunks, importLocalPgn, MAX_PGN_BYTES, MAX_BACKUP_BYTES } from '../src/lc0/localPgnImport.ts';
 import { openingStatsFromIndex, OPENING_INDEX_VERSION } from '../src/lc0/openingStats.ts';
-import { deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition } from '../src/lc0/pgnDatabase.ts';
+import { deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, serializePgnDatabaseBackup } from '../src/lc0/pgnDatabase.ts';
 
 const pgn = '[Result "*"]\n\n1. Nf3 (1. d4 d5) Nf6 2. Ng1 Ng8 3. e4 *';
 
@@ -43,6 +43,19 @@ test('repeated-move RAVs cannot replace or extend the literal mainline', async (
   const stats = openingStatsFromIndex(batch.positionIndex, afterE4);
   assert.deepEqual(stats.map((s) => [s.san, s.count]), [['e5', 1]]);
   assert.equal(batch.games[1].tree.root.children[0].children.length, 0);
+});
+
+test('multiline brace comments containing PGN annotation directives stay in the same game', async () => {
+  const batch = await importLocalPgn('[Result "*"]\n\n1. e4 {\n[%eval 0.2]\n[%clk 0:05:00]\n} e5 *\n\n[Result "1-0"]\n\n1. d4 d5 1-0');
+  assert.equal(batch.games.length, 2);
+  assert.deepEqual(batch.games[0].tree.mainlineFrom().map((node) => node.san), ['e4', 'e5']);
+});
+
+test('oversized backups are rejected before download with a selected-collection fallback', () => {
+  const backup = { kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: '', collections: [{ pgn: 'x'.repeat(MAX_BACKUP_BYTES) }] };
+  assert.throws(() => serializePgnDatabaseBackup(backup), /Back up selected collection/);
+  backup.collections = [{ pgn }];
+  assert.equal(JSON.parse(serializePgnDatabaseBackup(backup)).collections[0].pgn, pgn);
 });
 
 test('local import cancellation prevents publication', async () => {
@@ -116,6 +129,7 @@ test('backup round trip rebuilds poisoned indexes and collection CRUD stays loca
   await renamePgnCollection(copy.id, 'Renamed');
   assert.equal((await loadPgnCollection(copy.id)).name, 'Renamed');
   await deletePgnCollection(copy.id);
+  assert.equal((await exportPgnDatabaseBackup(new Date(), record.id)).collections.length, 1);
   const backup = JSON.parse(JSON.stringify(await exportPgnDatabaseBackup()));
   assert.equal(backup.collections.length, 1);
   assert.equal(backup.collections[0].positionIndex, undefined, 'portable backup omits derived indexes');

@@ -68,6 +68,7 @@ import {
   renamePgnCollection,
   savePgnCollection,
   searchPgnCollectionsByPosition,
+  serializePgnDatabaseBackup,
   updatePgnCollectionPositionIndex,
 } from './pgnDatabase.ts';
 
@@ -2504,6 +2505,7 @@ function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
     el('renamePgnDb').toggleAttribute('disabled', true);
     el('duplicatePgnDb').toggleAttribute('disabled', true);
     el('exportPgnDbCollection').toggleAttribute('disabled', true);
+    el('exportPgnDbSelected').toggleAttribute('disabled', true);
     el('exportPgnDb').toggleAttribute('disabled', true);
     el('importPgnDb').toggleAttribute('disabled', true);
     el('searchPgnDbPosition').toggleAttribute('disabled', true);
@@ -2529,6 +2531,7 @@ function renderPgnDatabaseCollections(selected = activePgnCollectionId): void {
   el('renamePgnDb').toggleAttribute('disabled', !current);
   el('duplicatePgnDb').toggleAttribute('disabled', !current);
   el('exportPgnDbCollection').toggleAttribute('disabled', !current);
+  el('exportPgnDbSelected').toggleAttribute('disabled', !current);
   if (current) {
     const summary = pgnCollections.find((entry) => entry.id === current)!;
     inputEl('pgnDbName').value = summary.name;
@@ -2799,15 +2802,17 @@ async function exportSelectedPgnCollection(): Promise<void> {
   }
 }
 
-async function exportPgnDatabase(): Promise<void> {
+async function exportPgnDatabase(selectedOnly = false): Promise<void> {
   if (!pgnDatabaseAvailable()) {
     el('pgnDbInfo').textContent = 'Local PGN database unavailable in this browser context.';
     return;
   }
   try {
-    const backup = await exportPgnDatabaseBackup();
-    const filename = pgnDatabaseBackupFilename(new Date(backup.exportedAt));
-    downloadTextFile(filename, JSON.stringify(backup, null, 2), 'application/json');
+    const id = selectedOnly ? selectedPgnCollectionId() : undefined;
+    if (selectedOnly && !id) throw new Error('Choose a saved collection first.');
+    const backup = await exportPgnDatabaseBackup(new Date(), id);
+    const filename = selectedOnly ? `${safeFilename(backup.collections[0].name)}.json` : pgnDatabaseBackupFilename(new Date(backup.exportedAt));
+    downloadTextFile(filename, serializePgnDatabaseBackup(backup), 'application/json');
     el('pgnDbInfo').textContent =
       `Exported ${backup.collections.length} PGN collections as ${filename}. Raw PGN is included; position indexes are rebuildable.`;
   } catch (error) {
@@ -5014,6 +5019,9 @@ function wireEvents() {
   });
   el('exportPgnDb').addEventListener('click', () => {
     void runPgnTask(exportPgnDatabase);
+  });
+  el('exportPgnDbSelected').addEventListener('click', () => {
+    void runPgnTask(() => exportPgnDatabase(true));
   });
   el('importPgnDb').addEventListener('click', () => inputEl('importPgnDbFile').click());
   el('importPgnDbFile').addEventListener('change', () => {
