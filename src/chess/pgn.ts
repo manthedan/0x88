@@ -51,10 +51,10 @@ export function splitPgnGames(text: string): string[] {
 
 function parseTags(text: string): Record<string, string> {
   const tags: Record<string, string> = {};
-  const re = /\[(\w+)\s+"([^"]*)"\]/g;
+  const re = /\[(\w+)\s+"((?:\\.|[^"\\])*)"\]/g;
   let match = re.exec(text);
   while (match) {
-    tags[match[1]] = match[2];
+    tags[match[1]] = match[2].replace(/\\(["\\])/g, '$1');
     match = re.exec(text);
   }
   return tags;
@@ -137,7 +137,7 @@ export function parsePgnGame(text: string): PgnGame {
   const startFen = tags.FEN || START_FEN;
   const tree = new GameTree(startFen);
   // Movetext is everything after the last tag line.
-  const movetext = text.replace(/\[(\w+)\s+"([^"]*)"\]\s*/g, '');
+  const movetext = text.replace(/\[(\w+)\s+"((?:\\.|[^"\\])*)"\]\s*/g, '');
   const tokens = tokenizeMovetext(movetext);
 
   let last: GameNode = tree.root;
@@ -217,7 +217,7 @@ export function serializeMovetext(tree: GameTree): string {
 export function gameTreeToPgn(tree: GameTree, tags: Record<string, string> = {}, result = '*'): string {
   const tagPairs = { Event: '?', Site: '?', Date: '????.??.??', Round: '?', White: '?', Black: '?', Result: result, ...tags };
   const header = Object.entries(tagPairs)
-    .map(([k, v]) => `[${k} "${v}"]`)
+    .map(([k, v]) => `[${k} "${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"]`)
     .join('\n');
   const movetext = serializeMovetext(tree);
   return `${header}\n\n${movetext} ${result}`.trim();

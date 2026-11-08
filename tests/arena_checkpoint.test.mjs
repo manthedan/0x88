@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { boardToFen, START_FEN } from '../src/chess/board.ts';
-import { gameTreeToPgn } from '../src/chess/pgn.ts';
+import { gameTreeToPgn, parsePgnGames } from '../src/chess/pgn.ts';
 import {
   ARENA_CONTROL_IDS,
   arenaCompletedTree,
@@ -251,6 +251,23 @@ test('corrupt or mismatched opening history is rejected even with a new fingerpr
     for (const game of c.schedule) Object.assign(game.opening, { startFen: START_FEN, moves });
     assert.throws(() => decodeArenaCheckpoint(reidentify(c)));
   }
+});
+
+test('quoted and backslash opening names round-trip as PGN tags, never as exposed moves', () => {
+  const opening = openingFromUciMoves('Test " d4 d5 " \\ opening', ['e2e4']);
+  const checkpoint = fixture('match', [opening]);
+  const game = completed(checkpoint, 0);
+  const tree = arenaCompletedTree(game);
+  const tags = { Event: 'A "quoted" event', Opening: opening.name, White: 'Back\\slash', Result: game.result };
+  game.pgn = gameTreeToPgn(tree, tags, game.result);
+  const parsed = parsePgnGames(game.pgn);
+  assert.deepEqual(parsed[0].tags.Opening, opening.name);
+  assert.equal(parsed[0].tags.White, tags.White);
+  assert.equal(parsed[0].tags.Event, tags.Event);
+  assert.equal(parsed[0].tree.mainlineFrom(parsed[0].tree.root).at(-1).fen, tree.current.fen);
+  const saved = commitArenaGame(checkpoint, game);
+  assert.deepEqual(decodeArenaCheckpoint(structuredClone(saved)), saved);
+  assert.equal(parsePgnGames(gameTreeToPgn(tree, { Opening: 'Line one\nLine two' }, '*'))[0].tags.Opening, 'Line one Line two');
 });
 
 test('duplicate completed indices, invalid results and unfinished PGNs cannot inflate standings', () => {

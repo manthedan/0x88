@@ -41,7 +41,7 @@ import {
 } from './arenaCheckpoint.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { loadArenaResource } from './arenaResourceLoad.ts';
-import { arenaOpeningPairs, formatArenaPoints } from './arenaResults.ts';
+import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -1858,6 +1858,7 @@ function renderSeatSelectors(): void {
         return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${engineAvatarHtml(avatarName, 'sm')}<span>${label}</span></span><select class="seat-fam" data-seat="${index}" aria-label="${label} engine">${famSel}</select><select class="seat-var" data-seat="${index}" aria-label="${label} version">${varSel}</select><span class="seat-strength-wrap"><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength (${meta.unit})" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span></span>${remove}</div>`;
       })
       .join('');
+  el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   reconcileActiveRuntimeFallbackWarning();
   if (!running) renderStrips();
   renderSetupSummary();
@@ -3550,7 +3551,7 @@ function renderSavedRootChart(data?: ArenaRootChartSample): void {
   describeChart('rootChart', `Root search candidates by visits. ${top.map((child) => `${child.uci}: ${child.visits} ${child.visits === 1 ? 'visit' : 'visits'}`).join('; ')}. Use Preview a root search candidate to show arrows on the board.`);
 }
 
-function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number, samples = liveTrail?.charts ?? gameChartSamples, display = true): void {
+function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number, samples = liveTrail?.charts ?? gameChartSamples, display = true, captured?: ArenaChartSample): void {
   const snapshot = engineOutputs.get(engine.id);
   const lc0 = lastLc0SearchResults.get(engine.id);
   const nps = snapshot?.nps ?? (lc0 && moveMs > 0 ? Math.round((lc0.visits / moveMs) * 1000) : undefined);
@@ -3558,7 +3559,7 @@ function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'na
   if (display) sideTimeMs[board.turn] += moveMs;
   if (snapshot && snapshot.elapsedMs == null) snapshot.elapsedMs = moveMs;
   if (snapshot && snapshot.nps == null && nps !== undefined) snapshot.nps = nps;
-  samples.push({ ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
+  samples.push(captured ?? { ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
   if (display) renderRootChart(engine.id, !reviewing);
   if (display && !reviewing) {
     gameChartSamples = samples;
@@ -3764,8 +3765,10 @@ async function runIsolatedCpuTournament(
             },
             afterMove: (seat, fen, move, elapsedMs) => {
               if (signal.aborted) return;
-              recordUciOutput(seat.id, seat.name, seat.name, fen, move, seat.engine.lastInfo(), elapsedMs, displayed === index);
-              recordGameChartSample(live.get(index)!.position.ply, seat, elapsedMs, trail.charts, displayed === index);
+              const lines = seat.engine.lastInfo();
+              const ply = live.get(index)!.position.ply;
+              recordUciOutput(seat.id, seat.name, seat.name, fen, move, lines, elapsedMs, displayed === index);
+              recordGameChartSample(ply, seat, elapsedMs, trail.charts, displayed === index, arenaUciChartSample(ply, seat, fen, lines, elapsedMs));
             },
             position: (position) => {
               if (signal.aborted) return;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { arenaOpeningPairs, arenaPointsForSeat, formatArenaPoints } from '../src/lc0/arenaResults.ts';
+import { arenaOpeningPairs, arenaPointsForSeat, arenaUciChartSample, formatArenaPoints } from '../src/lc0/arenaResults.ts';
 import { buildSchedule, roundRobinPairings } from '../src/lc0/tournament.ts';
 
 test('Arena half-point notation includes zero and totals', () => {
@@ -40,6 +40,25 @@ test('duplicate suite slots, repetitions, and same-named seats stay separate', (
   );
   assert.deepEqual([...new Set(pairs.map((pair) => pair.pairingKey))], ['0|1', '0|2', '1|2']);
   assert.ok(pairs.every((pair) => pair.played === 0));
+});
+
+test('CPU chart metrics come from the private game, without requiring a visible engine output', () => {
+  const engine = { id: 'arena:1:b:0', name: 'Background engine' };
+  const white = '8/8/8/8/8/8/8/8 w - - 0 1';
+  const black = white.replace(' w ', ' b ');
+  const info = [{ scoreCp: 200, nps: 12345 }];
+  const sample = arenaUciChartSample(2, engine, black, info, 12.4);
+  assert.equal(sample.engineId, 'arena:1:b:0');
+  assert.equal(sample.engineName, 'Background engine');
+  assert.equal(sample.moveMs, 12);
+  assert.equal(sample.nps, 12345);
+  assert.ok(sample.whiteScore < 0.5);
+  assert.ok(arenaUciChartSample(2, engine, white, info, 1).whiteScore > 0.5);
+  assert.equal(arenaUciChartSample(2, engine, black, [{ mateIn: 2, nps: 99 }], 1).whiteScore, 0);
+  assert.equal(arenaUciChartSample(2, engine, black, [{ mateIn: -2 }], 1).whiteScore, 1);
+  const missing = arenaUciChartSample(2, engine, black, [], 1);
+  assert.equal(missing.whiteScore, undefined);
+  assert.equal(missing.nps, undefined);
 });
 
 test('duplicate result updates cannot double-count pair scores', () => {

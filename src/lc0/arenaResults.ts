@@ -1,3 +1,6 @@
+import { evalBarWhitePercent } from './analysisFormat.ts';
+import type { ArenaChartSample } from './arenaCheckpoint.ts';
+import type { StockfishInfoLine } from './stockfishEngine.ts';
 import type { GameResultText, ScheduledGame } from './tournament.ts';
 
 export function formatArenaPoints(value: number): string {
@@ -6,6 +9,22 @@ export function formatArenaPoints(value: number): string {
 
 export function arenaPointsForSeat(game: { whiteId: string }, seatId: string, result: GameResultText): number {
   return result === '1/2-1/2' ? 0.5 : (game.whiteId === seatId) === (result === '1-0') ? 1 : 0;
+}
+
+/** Capture each CPU game's own search info, even when another game owns the board. */
+export function arenaUciChartSample(
+  ply: number,
+  engine: { id: string; name: string },
+  fen: string,
+  lines: readonly StockfishInfoLine[],
+  moveMs: number,
+): ArenaChartSample {
+  const info = lines[0];
+  const sign = fen.split(' ')[1] === 'b' ? -1 : 1;
+  const cp = info?.scoreCp === undefined ? undefined : sign * info.scoreCp;
+  const mate = info?.mateIn === undefined ? undefined : sign * info.mateIn;
+  const whiteScore = mate !== undefined ? (mate > 0 ? 1 : 0) : cp !== undefined ? evalBarWhitePercent(cp, undefined) / 100 : undefined;
+  return { ply, engineId: engine.id, engineName: engine.name, whiteScore, moveMs: Math.round(moveMs), nps: info?.nps };
 }
 
 export interface ArenaOpeningPair<T> {
