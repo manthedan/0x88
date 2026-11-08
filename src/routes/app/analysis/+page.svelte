@@ -133,6 +133,7 @@ onMount(() => {
     <div class="workbench-tabs" role="tablist" aria-label="Analysis views">
       <button id="movesTab" type="button" role="tab" aria-selected="true" aria-controls="historyPanel" data-view="moves">Moves</button>
       <button id="enginesTab" type="button" role="tab" aria-selected="false" aria-controls="enginesPanel" tabindex="-1" data-view="engines">Engines<span id="enginesTabCount" class="engine-count">2</span></button>
+      <button id="reviewTab" type="button" role="tab" aria-selected="false" aria-controls="reviewPanel" tabindex="-1" data-view="review">Review</button>
       <button id="comparisonTab" type="button" role="tab" aria-selected="false" aria-controls="comparisonSection" tabindex="-1" data-view="comparison">Compare</button>
       <button id="humanTab" type="button" role="tab" aria-selected="false" aria-controls="humanPanel" tabindex="-1" data-view="human" title="What rated humans play here (Maia3)">Human<span class="tab-badge">Maia3</span></button>
     </div>
@@ -145,6 +146,32 @@ onMount(() => {
     <div id="historyPanel" class="history-panel" role="tabpanel" aria-labelledby="movesTab" tabindex="0">
       <p id="openingName" class="opening-name" hidden></p>
       <div id="movelist" class="movelist move-panel" aria-label="Move history"></div>
+    </div>
+    <div id="reviewPanel" class="review-panel" role="tabpanel" aria-labelledby="reviewTab" tabindex="0">
+      <div class="review-settings">
+        <div class="field"><label for="reviewEngine">Reviewer</label><select id="reviewEngine"><option value="sf:lite">Stockfish Lite</option></select></div>
+        <div class="field"><label for="reviewDepth">Depth per position</label><select id="reviewDepth"><option value="8">8 · Quick</option><option value="12" selected>12 · Standard</option><option value="16">16 · Deeper</option></select></div>
+      </div>
+      <div class="review-actions">
+        <button id="reviewGame" class="primary" type="button">Review game</button>
+        <button id="reviewStop" type="button" disabled>Cancel review</button>
+      </div>
+      <p id="reviewStatus" class="review-status" role="status">Load a PGN or play moves, then review the mainline. Choose a CPU reviewer here; add other engines in Engines.</p>
+      <progress id="reviewProgress" aria-label="Game review progress" hidden></progress>
+      <div id="reviewResults" hidden>
+        <p class="review-metric-label">Approximate accuracy</p>
+        <div id="reviewSummary" hidden></div>
+        <details class="review-explanation"><summary>How this review is measured</summary><p>Accuracy is a simple mean of move scores from estimated winning-chance loss, excluding forced moves. It is not a calibrated result prediction or the same game score as Lichess or Chess.com. Inaccuracies lose at least 5 percentage points, mistakes 10, and blunders 20. Shallow searches can change these labels.</p></details>
+        <p class="review-metric-label review-graph-heading">White advantage <span id="reviewGraphSource"></span></p>
+        <div id="reviewChart" class="review-chart" role="slider" tabindex="0" aria-label="Game evaluation graph" aria-describedby="reviewGraphHint" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" hidden></div>
+        <p id="reviewSelection" class="review-selection"></p>
+        <p id="reviewGraphHint" class="review-hint">Click the graph or use arrow keys to explore. Home and End jump to either end.</p>
+        <div class="review-moments-heading"><h2>Key moments</h2><nav aria-label="Key moments"><button id="reviewPrevious" type="button" aria-label="Previous key moment" disabled>Previous</button><button id="reviewNext" type="button" aria-label="Next key moment" disabled>Next</button></nav></div>
+        <p id="reviewMomentsEmpty" class="review-hint" hidden>No inaccuracies, mistakes or blunders found at this depth.</p>
+        <ol id="reviewCritical" class="review-critical" aria-label="Largest losses, ranked by size" hidden></ol>
+        <div class="review-exports"><button id="reviewCopyPgn" type="button" hidden>Copy reviewed PGN</button><button id="reviewDownloadPgn" type="button" hidden>Download PGN</button></div>
+        <p class="review-hint">Exports the reviewed mainline with engine evals and error NAGs. Variations and existing notes are not included.</p>
+      </div>
     </div>
     <div id="comparisonSection" class="section-block comparison-panel" role="tabpanel" aria-labelledby="comparisonTab" tabindex="0">
       <h2 class="sr-only">Comparison</h2>
@@ -250,18 +277,6 @@ onMount(() => {
       </div>
     </dialog>
     <!-- Parked: features below are intentionally hidden. Remove hidden to re-enable. -->
-    <details class="section-block" hidden>
-      <summary>Game review</summary>
-      <div class="row">
-        <button id="reviewGame" type="button">Review game</button>
-        <button id="reviewStop" type="button" disabled>Stop</button>
-        <button id="reviewCopyPgn" type="button" hidden>Copy annotated PGN</button>
-      </div>
-      <div id="reviewStatus" class="small">Load a PGN or play moves, then review the mainline with the first selected UCI engine.</div>
-      <div id="reviewSummary" hidden></div>
-      <div id="reviewChart" class="review-chart" hidden></div>
-      <ol id="reviewCritical" class="review-critical" hidden></ol>
-    </details>
     <details class="section-block" hidden>
       <summary>Opening explorer</summary>
       <div class="row">
@@ -458,29 +473,6 @@ onMount(() => {
   .pgn-heading small{color:var(--muted); font-size:12px}
   .pgn-actions{margin-top:8px}
   input[type=number]:not(.stepper-field input){width:80px}
-  :global(.review-chart svg){
-    display:block; width:100%; height:auto;
-    border:1px solid var(--rule); border-radius:6px; background:var(--card); margin-top:6px;
-  }
-  :global(.review-summary){display:flex; gap:18px; margin:6px 0; font-size:12px}
-  :global(.review-summary .acc){font-size:16px; font-weight:700; font-family:var(--mono)}
-  :global(.review-badge){
-    display:inline-block; border-radius:3px; padding:0 5px;
-    font-size:10px; font-weight:700; color:#fff; vertical-align:1px;
-  }
-  :global(.review-badge.best){background:#4a7a2a}
-  :global(.review-badge.good){background:#7a9a4a}
-  :global(.review-badge.inaccuracy){background:#c08a00}
-  :global(.review-badge.mistake){background:#d2691e}
-  :global(.review-badge.blunder){background:#a5461b}
-  :global(.review-badge.forced){background:#999}
-  :global(.review-critical){list-style:none; margin:6px 0 0; padding:0}
-  :global(.review-critical li){
-    padding:4px 6px; border-top:1px solid var(--rule);
-    cursor:pointer; font-size:12px;
-  }
-  :global(.review-critical li:hover){background:var(--accent-soft)}
-  :global(.review-critical .mono){font-family:var(--mono)}
   :global(.compare-summary){
     margin-top:0; padding:8px 10px; border:0;
     border-radius:var(--radius-sm);
@@ -669,7 +661,7 @@ onMount(() => {
   /* Engine strip */
   .engine-strip{display:flex; flex-direction:column; min-width:0}
   .engine-summaries{flex:0 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin}
-  .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel){min-height:208px}
+  .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel, .review-panel){min-height:208px}
   :global(.comparison-insight){border-bottom:1px solid var(--rule)}
   :global(.comparison-insight[hidden]){display:none}
   :global(.insight-action){display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:2px 12px; width:100%; min-height:48px; padding:6px 12px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left; line-height:1.3}
@@ -751,12 +743,55 @@ onMount(() => {
   .workbench-tabs [role=tab][aria-selected=true]{color:var(--ink); border-bottom-color:var(--accent); font-weight:650}
   #enginesTab{display:none}
   .tab-badge{padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
-  .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{order:3; flex:1 1 0; min-height:0}
+  .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel, .analysis-workspace .review-panel{order:3; flex:1 1 0; min-height:0}
   .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
   :global(.analysis-content[data-view=moves]) .history-panel{display:flex}
   .analysis-workspace .comparison-panel{border:0; padding:8px 12px; overflow:auto; overscroll-behavior:contain}
   .analysis-workspace .human-panel{border:0; padding:4px 12px 10px; overflow:auto; overscroll-behavior:contain}
   :global(.analysis-content:not([data-view=comparison])) .comparison-panel, :global(.analysis-content:not([data-view=human])) .human-panel{display:none}
+  .review-panel{display:none; min-width:0; padding:12px; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin}
+  :global(.analysis-content[data-view=review]) .review-panel{display:block}
+  /* Review gets the full sidebar below the tabs, rather than competing with PV cards. */
+  :global(.analysis-content[data-view=review]) .engine-strip, :global(.analysis-content[data-view=review]) .add-engine-inline{display:none}
+  .review-settings{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px}
+  .review-settings select{width:100%; min-width:0; font-size:13px; min-height:36px; padding:4px 6px}
+  .review-settings label{font-size:13px; color:var(--muted); margin-bottom:4px; display:block}
+  .review-actions, .review-exports{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px}
+  .review-actions button, .review-exports button{min-height:36px; padding:5px 12px; font-size:13px}
+  #reviewStop:disabled{display:none}
+  .review-actions:has(#reviewStop:not(:disabled)) #reviewGame{display:none}
+  .review-status{font:13px/1.5 var(--sans); color:var(--muted); margin:10px 0}
+  #reviewProgress{width:100%; height:6px; accent-color:var(--accent)}
+  .review-metric-label{font:600 13px var(--sans); margin:14px 0 8px}
+  :global(.review-summary){display:grid; grid-template-columns:1fr 1fr; gap:12px; padding-bottom:10px; border-bottom:1px solid var(--rule)}
+  :global(.review-side){display:grid; align-content:start; gap:4px}
+  :global(.review-side strong){font:600 13px var(--sans)}
+  :global(.review-accuracy){font:650 24px/1.15 var(--sans); letter-spacing:-.02em; color:var(--ink)}
+  :global(.review-counts){font:12px/1.6 var(--sans); color:var(--muted)}
+  .review-graph-heading{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px}
+  #reviewGraphSource{font:400 12px var(--sans); color:var(--muted)}
+  .review-explanation{margin-top:8px; font:12px/1.5 var(--sans); color:var(--muted)}
+  .review-explanation summary{cursor:pointer}
+  .review-explanation p{margin:6px 0}
+  .review-chart{width:100%; min-width:0; cursor:crosshair; border-radius:4px; background:var(--panel-inset)}
+  .review-chart:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .review-chart :global(svg){display:block; width:100%; height:auto}
+  .review-selection{min-height:2.8em; margin:6px 0 2px; font:600 12px/1.4 var(--sans)}
+  .review-hint{margin:4px 0 8px; color:var(--muted); font:12px/1.5 var(--sans)}
+  .review-moments-heading{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:14px}
+  .review-moments-heading h2{font:600 14px var(--sans); margin:0; text-transform:none; letter-spacing:0}
+  .review-moments-heading nav{display:flex; gap:4px}
+  .review-moments-heading button{font-size:12px; padding:4px 8px; min-height:32px}
+  :global(.review-critical){padding:0; margin:8px 0; list-style:none}
+  :global(.review-critical button){display:flex; align-items:center; gap:8px; width:100%; min-height:38px; padding:6px 8px; border:0; border-bottom:1px solid var(--rule); border-radius:0; background:transparent; text-align:left; font:13px var(--sans); color:var(--ink)}
+  :global(.review-critical button:hover), :global(.review-critical button[aria-current=step]){background:var(--selection-bg)}
+  :global(.review-critical strong){font-weight:650; margin-right:auto}
+  :global(.review-loss){font-size:12px; color:var(--muted); white-space:nowrap}
+  :global(.review-badge){font-size:12px; font-weight:600}
+  :global(.mv-class){font:700 12px var(--sans); margin-left:3px}
+  :global(.mv-class.blunder), :global(.review-badge.blunder){color:var(--warn)}
+  :global(.mv-class.mistake), :global(.review-badge.mistake){color:var(--warn)}
+  :global(.mv-class.inaccuracy), :global(.review-badge.inaccuracy){color:var(--accent-soft-text)}
   .compare-help{margin:0 0 12px; font:13px/1.5 var(--sans); color:var(--muted)}
   .human-intro{margin:6px 0 0; font-size:13px; line-height:1.45; color:var(--text-soft)}
 
@@ -806,7 +841,10 @@ onMount(() => {
     #addEngineHint{display:none}
     .workbench-tabs{grid-column:1 / -1; grid-row:calc(2 + var(--restore-row)); position:sticky; top:var(--analysis-header-height); z-index:10}
     #enginesTab{display:inline-flex}
-    .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel){min-height:0; grid-column:1 / -1; grid-row:calc(3 + var(--restore-row)); flex:0 0 auto}
+    .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel, .review-panel){min-height:0; grid-column:1 / -1; grid-row:calc(3 + var(--restore-row)); flex:0 0 auto}
+    .analysis-workspace .review-panel{max-height:340px}
+    /* Keep the existing mobile engine actions in their first row while Review is open. */
+    :global(.analysis-content[data-view=review]) .add-engine-inline{display:flex}
     .app-sidebar #message{grid-column:1 / -1; grid-row:calc(4 + var(--restore-row))}
     .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:calc(5 + var(--restore-row))}
     .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:calc(6 + var(--restore-row))}
@@ -874,6 +912,8 @@ onMount(() => {
     :global(.engine-gear){width:36px; height:40px}
     .workbench-tabs{padding:0 2px; gap:0}
     .workbench-tabs [role=tab]{flex:1 1 auto; justify-content:center; padding:0 6px; min-height:42px}
+    .review-panel{padding:10px}
+    .review-settings select, .review-actions button, .review-exports button, .review-moments-heading button, :global(.review-critical button){min-height:40px}
     .tab-badge{display:none}
     :global(.engine-summary){padding-top:0}
     :global(.line-play){min-height:36px; padding-left:36px}

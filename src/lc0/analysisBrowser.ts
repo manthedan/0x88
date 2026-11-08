@@ -3,7 +3,7 @@ import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
-import { inCheck, legalMoves } from '../chess/movegen.ts';
+import { legalMoves } from '../chess/movegen.ts';
 import { gameTreeToPgn, parsePgnGame, parsePgnGames } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
@@ -33,11 +33,12 @@ import {
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
 import { boardCheck, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
-import { lineChartSvg } from './charts.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
-import { annotatedPgn, type GameReview, type ReviewedMove, type ReviewPosition, reviewGame } from './gameReview.ts';
+import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
+import { REVIEW_CLASS_GLYPH, REVIEW_CLASS_LABEL, reviewChartSvg, reviewMoveLabel, reviewPlyAtRatio, reviewSummaryHtml } from './gameReviewPresentation.ts';
 import { type GameNode, GameTree } from './gameTree.ts';
 import { createWorkspaceAutosave, decodeAnalysisSnapshot, hasExplicitWorkspaceInput, readWorkspace, serializeTree } from './workspaceAutosave.ts';
+import { withEngineTimeout } from './engineTimeout.ts';
 import { LatestOnlyTask } from './latestOnlyTask.ts';
 import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import {
@@ -380,6 +381,7 @@ function restoreAnalysisWorkspace(): void {
         workspaceHeaders = parsed.tags;
         workspaceResult = parsed.result;
         inputEl('pgnInput').value = handoffPgn;
+        reviewMetadata.set(tree, { tags: parsed.tags, result: parsed.result, signature: reviewSignature() });
       } catch { /* Invalid handoffs leave the explicit starting position alone. */ }
     }
     saveAnalysisWorkspace();
@@ -392,6 +394,8 @@ function restoreAnalysisWorkspace(): void {
   workspaceHeaders = saved.headers;
   workspaceResult = saved.result;
   inputEl('pgnInput').value = gameTreeToPgn(tree, workspaceHeaders, workspaceResult);
+  // Review export keeps the restored game's headers; the signature still guards its result tag.
+  reviewMetadata.set(tree, { tags: workspaceHeaders, result: workspaceResult, signature: reviewSignature() });
   el('analysisRestoreNotice').hidden = false;
 }
 let searcher: Lc0PuctSearcher | null = null;
@@ -497,6 +501,8 @@ let reviewAbort: AbortController | null = null;
 let lastReview: GameReview | null = null;
 let lastReviewNodes: GameNode[] = [];
 let lastReviewSignature = '';
+let reviewRunSignature = '';
+const reviewMetadata = new WeakMap<GameTree, { tags: Record<string, string>; result: string; signature: string }>();
 let analyzing = false;
 let activeAnalysisSelectionKey = '';
 const lineCache = new Map<string, AnalysisLine[]>();
@@ -1684,6 +1690,7 @@ function renderEngineList(): void {
     })
     .join('');
   renderEngineSetupSummary();
+  renderReviewEngineChoices();
   reconcileActiveRuntimeFallbackWarning();
 }
 
@@ -2233,6 +2240,7 @@ function decorateMoveEvals(): void {
     const node = nodeIndex.get(Number(button.dataset.node));
     const line = node ? (lineCache.get(node.fen) ?? []).find((entry) => entry.multipv === 1 && !entry.error) : undefined;
     let badge = button.querySelector<HTMLElement>('.mv-eval');
+    decorateReviewedMove(button, node);
     if (!line) {
       badge?.remove();
       continue;
@@ -2816,6 +2824,7 @@ function renderAll() {
   renderLines();
   renderMoveList();
   renderOpening();
+  syncReviewNavigation();
 }
 
 function mainlineNodes(): GameNode[] {
@@ -2842,12 +2851,45 @@ function clearReviewState(message?: string): void {
   el('reviewChart').innerHTML = '';
   el('reviewCritical').hidden = true;
   el('reviewCritical').innerHTML = '';
+  el('reviewResults').hidden = true;
   el('reviewCopyPgn').hidden = true;
+  el('reviewDownloadPgn').hidden = true;
   if (message) el('reviewStatus').textContent = message;
+  decorateMoveEvals();
+}
+
+function stopGameReview(message = 'Review cancelled. Completed positions are cached.'): void {
+  const controller = reviewAbort;
+  if (!controller) return;
+  reviewAbort = null;
+  reviewRunSignature = '';
+  controller.abort();
+  el('reviewGame').toggleAttribute('disabled', false);
+  el('reviewStop').toggleAttribute('disabled', true);
+  el('reviewProgress').hidden = true;
+  el('reviewStatus').textContent = message;
 }
 
 function clearReviewIfMainlineChanged(): void {
-  if (lastReview && reviewSignature() !== lastReviewSignature) clearReviewState('Review cleared after game changed.');
+  const signature = reviewSignature();
+  if (reviewAbort && signature !== reviewRunSignature) stopGameReview('Review cancelled because the mainline changed.');
+  if (lastReview && signature !== lastReviewSignature) clearReviewState('Review cleared after the mainline changed.');
+}
+
+function decorateReviewedMove(button: HTMLButtonElement, node: GameNode | undefined): void {
+  button.querySelector('.mv-class')?.remove();
+  button.removeAttribute('title');
+  const before = node?.parent ? parseFen(node.parent.fen) : null;
+  if (before) button.setAttribute('aria-label', `${before.fullmove}${before.turn === 'w' ? '.' : '...'} ${node?.san}`);
+  const move = node && lastReviewNodes[node.ply] === node ? lastReview?.moves[node.ply - 1] : undefined;
+  if (!move) return;
+  const badge = document.createElement('span');
+  badge.className = `mv-class ${move.class}`;
+  badge.textContent = REVIEW_CLASS_GLYPH[move.class];
+  badge.setAttribute('aria-hidden', 'true');
+  button.title = REVIEW_CLASS_LABEL[move.class];
+  button.setAttribute('aria-label', `${button.getAttribute('aria-label')}, ${REVIEW_CLASS_LABEL[move.class]}`);
+  button.append(badge);
 }
 
 interface ReviewEngineChoice {
@@ -2857,9 +2899,30 @@ interface ReviewEngineChoice {
   depth: number;
 }
 
-/** First selected UCI-family engine reviews the game; SF Lite d12 is the fallback. */
+/** This first review slice supports explicit CPU reviewers, not neural/ human-policy nets. */
+function reviewEngineRows(): EngineRow[] {
+  const rows = activeEngineRows().filter((row) => ['sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'stormphrax'].includes(row.family));
+  if (!rows.some((row) => row.family === 'sf' && row.variant === 'lite')) rows.unshift({ family: 'sf', variant: 'lite', strength: 12 });
+  return rows;
+}
+
+function renderReviewEngineChoices(): void {
+  const select = selectEl('reviewEngine');
+  const previous = select.value;
+  const rows = reviewEngineRows();
+  select.innerHTML = rows.map((row) => `<option value="${row.family}:${htmlEscape(row.variant)}">${htmlEscape(analysisEngineName(rowLabel(row)))}</option>`).join('');
+  select.value = rows.some((row) => `${row.family}:${row.variant}` === previous) ? previous : 'sf:lite';
+  if (previous && previous !== select.value) {
+    stopGameReview('Review cancelled because the reviewer changed.');
+    clearReviewState('Choose a reviewer and review the mainline again.');
+  }
+}
+
 function reviewEngineChoice(): ReviewEngineChoice {
-  for (const row of activeEngineRows()) {
+  const selected = reviewEngineRows().find((row) => `${row.family}:${row.variant}` === selectEl('reviewEngine').value);
+  if (!selected) throw new Error('Choose a supported CPU reviewer.');
+  const row = { ...selected, strength: Math.max(1, Math.min(20, Number(selectEl('reviewDepth').value) || 12)) };
+  {
     if (row.family === 'sf')
       return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), row, label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
     if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), row, label: recklessVariantForKey(row.variant).label, depth: row.strength };
@@ -2871,60 +2934,54 @@ function reviewEngineChoice(): ReviewEngineChoice {
     if (row.family === 'stormphrax')
       return { engine: getStormphraxFor(row.variant), row, label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
   }
-  return { engine: getStockfish('lite'), row: { family: 'sf', variant: 'lite', strength: 12 }, label: 'SF Lite', depth: 12 };
-}
-
-function winWhiteFromInfo(fen: string, info: { scoreCp?: number; mateIn?: number } | undefined): number {
-  if (!info) return 0.5;
-  const turn = parseFen(fen).turn;
-  const whiteCp = info.scoreCp === undefined ? undefined : turn === 'w' ? info.scoreCp : -info.scoreCp;
-  const whiteMate = info.mateIn === undefined ? undefined : turn === 'w' ? info.mateIn : -info.mateIn;
-  return evalBarWhitePercent(whiteCp, whiteMate) / 100;
-}
-
-const REVIEW_CLASS_LABEL: Record<ReviewedMove['class'], string> = {
-  best: 'Best',
-  good: 'Good',
-  inaccuracy: 'Inaccuracy',
-  mistake: 'Mistake',
-  blunder: 'Blunder',
-  forced: 'Forced',
-};
-
-function reviewSummaryHtml(review: GameReview): string {
-  const side = (label: string, accuracy: number, counts: GameReview['counts']['white']) =>
-    `<div><div class="small">${label}</div><div class="acc">${accuracy.toFixed(1)}%</div>` +
-    `<div class="small">${counts.blunder}×<span class="review-badge blunder">??</span> ${counts.mistake}×<span class="review-badge mistake">?</span> ${counts.inaccuracy}×<span class="review-badge inaccuracy">?!</span></div></div>`;
-  return `<div class="review-summary">${side('White accuracy', review.accuracy.white, review.counts.white)}${side('Black accuracy', review.accuracy.black, review.counts.black)}</div>`;
+  throw new Error('Unsupported reviewer.');
 }
 
 function renderReview(review: GameReview, nodes: GameNode[]): void {
   el('reviewSummary').hidden = false;
   el('reviewSummary').innerHTML = reviewSummaryHtml(review);
+  el('reviewResults').hidden = false;
   el('reviewChart').hidden = false;
-  el('reviewChart').innerHTML = lineChartSvg(
-    [
-      {
-        label: 'White win %',
-        color: '#4a7a2a',
-        points: review.moves.map((move) => ({ x: move.ply, y: move.winAfter })),
-      },
-    ],
-    { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%`, height: 110 },
-  );
   const critical = el('reviewCritical');
   critical.hidden = review.criticalMoves.length === 0;
   critical.innerHTML = review.criticalMoves
     .map((move) => {
       const node = nodes[move.ply];
-      const moveNo = `${Math.ceil(move.ply / 2)}${move.side === 'w' ? '.' : '…'}`;
-      return (
-        `<li data-node="${node?.id ?? ''}"><span class="review-badge ${move.class}">${REVIEW_CLASS_LABEL[move.class]}</span> ` +
-        `<span class="mono">${moveNo} ${htmlEscape(move.san)}</span> · win ${Math.round(move.winBefore * 100)}%→${Math.round(move.winAfter * 100)}%` +
-        `${move.bestUci ? ` · best <span class="mono">${htmlEscape(move.bestUci)}</span>` : ''}</li>`
-      );
+      return `<li><button type="button" data-node="${node?.id ?? ''}" data-ply="${move.ply}"><strong>${htmlEscape(reviewMoveLabel(nodes[0].fen, move))}</strong>` +
+        `<span class="review-badge ${move.class}">${REVIEW_CLASS_LABEL[move.class]}</span><span class="review-loss">−${Math.round(move.moverLoss * 100)} pp</span></button></li>`;
     })
     .join('');
+  el('reviewMomentsEmpty').hidden = review.criticalMoves.length > 0;
+  syncReviewNavigation();
+  renderMoveList();
+}
+
+function syncReviewNavigation(): void {
+  if (!lastReview) return;
+  const ply = lastReviewNodes.indexOf(tree.current);
+  const chart = el('reviewChart');
+  chart.innerHTML = reviewChartSvg(lastReview, ply);
+  chart.setAttribute('aria-valuemin', '0');
+  chart.setAttribute('aria-valuemax', String(lastReview.moves.length));
+  chart.setAttribute('aria-valuenow', String(Math.max(0, ply)));
+  const move = lastReview.moves[ply - 1];
+  const caption = ply < 0 ? 'Variation · the graph shows the reviewed mainline.' : move
+    ? `${reviewMoveLabel(lastReviewNodes[0].fen, move)} · ${REVIEW_CLASS_LABEL[move.class]} · White advantage ${Math.round(move.winAfter * 100)}%`
+    : `Starting position · White advantage ${Math.round(lastReview.moves[0].winBefore * 100)}%`;
+  chart.setAttribute('aria-valuetext', caption);
+  el('reviewSelection').textContent = caption;
+  for (const button of el('reviewCritical').querySelectorAll<HTMLButtonElement>('[data-ply]')) {
+    if (Number(button.dataset.ply) === ply) button.setAttribute('aria-current', 'step');
+    else button.removeAttribute('aria-current');
+  }
+  for (const id of ['reviewPrevious', 'reviewNext']) el(id).toggleAttribute('disabled', !lastReview.criticalMoves.length);
+}
+
+function jumpReviewPly(ply: number): void {
+  const node = lastReviewNodes[Math.max(0, Math.min(lastReviewNodes.length - 1, ply))];
+  if (!lastReview || !node || reviewSignature() !== lastReviewSignature) return;
+  tree.goTo(node);
+  afterNavigation();
 }
 
 async function runGameReview(): Promise<void> {
@@ -2934,8 +2991,21 @@ async function runGameReview(): Promise<void> {
     el('reviewStatus').textContent = 'Load a PGN or play some moves first.';
     return;
   }
-  cancelActiveAnalysisRun();
+  // Hand off ownership from the cancelled position search. Its finally must
+  // not consume queued maintenance and reload/dispose the reviewer's runtime.
+  // The next interactive analysis applies these flags before taking cache keys.
+  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+  analysisAbort = null;
+  analyzing = false;
+  retireAnalysisRunCentipawnKeys();
+  clearAnalysisSearchProgress();
+  el('message').textContent = 'Position analysis paused for game review.';
+  el('stop').toggleAttribute('disabled', true);
+  el('analyze').toggleAttribute('disabled', false);
+  selectEl('lc0RuntimeSelect').disabled = false;
+  hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
   const { engine, row, label, depth } = reviewEngineChoice();
+  clearReviewState();
   const reviewTree = tree;
   // Review remains a single-PV search. A MultiPV=3 interactive line is not
   // equivalent to MultiPV=1 at fixed depth, so it deliberately cannot hit.
@@ -2945,21 +3015,29 @@ async function runGameReview(): Promise<void> {
   let cacheHits = 0;
   const controller = new AbortController();
   reviewAbort = controller;
+  reviewRunSignature = reviewSignature(nodes);
+  const signature = reviewRunSignature;
+  const progress = el('reviewProgress') as HTMLProgressElement;
+  progress.max = nodes.length;
+  progress.value = 0;
+  progress.hidden = false;
   el('reviewGame').toggleAttribute('disabled', true);
   el('reviewStop').toggleAttribute('disabled', false);
   el('reviewCopyPgn').hidden = true;
   try {
     const positions: ReviewPosition[] = [];
     for (let i = 0; i < nodes.length; i++) {
-      if (controller.signal.aborted) break;
-      el('reviewStatus').textContent = `Reviewing with ${label}: position ${i + 1}/${nodes.length}…`;
+      // Yield even on cache hits so cancellation, navigation and rendering stay responsive.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (controller.signal.aborted || reviewAbort !== controller) break;
+      progress.value = i;
+      el('reviewStatus').textContent = `${label} · depth ${depth} · position ${i + 1} of ${nodes.length}…`;
       const fen = nodes[i].fen;
       const board = parseFen(fen);
       const legal = legalMoves(board).length;
-      if (legal === 0) {
-        // Terminal: engines return no lines here. Checkmate scores the side to
-        // move as lost; stalemate is a draw.
-        positions.push({ winWhite: inCheck(board) ? (board.turn === 'w' ? 0 : 1) : 0.5, bestUci: null, legalMoves: 0 });
+      const terminal = terminalReviewPosition(board, nodes.slice(0, i).map((node) => node.fen), legal);
+      if (terminal) {
+        positions.push(terminal);
         continue;
       }
       const cached = cachedReviewPosition(engineLineCache.get(cacheKeys[i]), legal);
@@ -2971,36 +3049,48 @@ async function runGameReview(): Promise<void> {
       const engineId = row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`;
       const lines = await withCpuLease(engineId, controller.signal, async (lease) => {
         cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
-        if (cpuSessions.needsReset(engine, reviewTree)) {
-          await engine.newGame(controller.signal);
-          cpuSessions.prepared(engine, reviewTree);
-        }
-        return withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-          analyzeCpuPosition(engine, row, fen, analysisGamePosition(reviewTree, nodes[i]), { multipv: reviewMultiPv, depth, signal }),
-        );
+        // Include startup in the abort race: Stockfish's cold init itself is
+        // not abortable, but must not retain a CPU lease after Cancel.
+        return withEngineTimeout(label, controller.signal, Math.max(cpuColdStartTimeoutMs(row), cpuAnalysisTimeoutMs(row)), async (signal) => {
+          if (cpuSessions.needsReset(engine, reviewTree)) {
+            await engine.newGame(signal);
+            if (signal.aborted) throw new DOMException('Review aborted', 'AbortError');
+            cpuSessions.prepared(engine, reviewTree);
+          }
+          return analyzeCpuPosition(engine, row, fen, analysisGamePosition(reviewTree, nodes[i]), { multipv: reviewMultiPv, depth, signal });
+        });
       });
       if (reviewAbort !== controller) return;
       if (controller.signal.aborted) break;
       const formatted = stockfishAnalysisLines(lines, fen, label);
-      if (formatted.length) cacheEngineLines(cacheKeys[i], formatted);
-      positions.push({
-        winWhite: winWhiteFromInfo(fen, lines[0]),
-        bestUci: lines[0]?.pvUci?.[0] ?? null,
-        legalMoves: legal,
-      });
+      const position = cachedReviewPosition(formatted, legal);
+      if (!position) throw new Error(`No scored evaluation at position ${i + 1}. Try a different depth or reviewer.`);
+      cacheEngineLines(cacheKeys[i], formatted);
+      positions.push(position);
     }
     if (reviewAbort !== controller) return;
     if (controller.signal.aborted || positions.length !== nodes.length) {
       el('reviewStatus').textContent = 'Review stopped.';
       return;
     }
+    if (tree !== reviewTree || reviewSignature() !== signature || cacheKeys[0] !== engineAnalysisCacheKey(nodes[0].fen, row, nodes[0], reviewMultiPv)) {
+      el('reviewStatus').textContent = 'Game or settings changed. Review the mainline again.';
+      return;
+    }
     const moves = nodes.slice(1).map((node) => ({ san: node.san ?? '?', uci: node.move ? moveToUci(node.move) : '' }));
     lastReview = reviewGame(positions, moves, parseFen(nodes[0].fen).turn);
     lastReviewNodes = nodes;
     lastReviewSignature = reviewSignature(nodes);
+    el('reviewGraphSource').textContent = `${analysisEngineName(label)} · depth ${depth}`;
     renderReview(lastReview, nodes);
     el('reviewCopyPgn').hidden = false;
-    el('reviewStatus').textContent = `Reviewed ${moves.length} moves with ${label} · ${cacheHits}/${nodes.length} cached positions.`;
+    el('reviewDownloadPgn').hidden = false;
+    el('reviewStatus').textContent = `${label} · depth ${depth} · ${moves.length} ${moves.length === 1 ? 'move' : 'moves'} reviewed · ${cacheHits}/${nodes.length} positions cached.`;
+    if (matchMedia('(max-width: 900px)').matches) {
+      // Scroll only this tab, not the page: keep the board in place and bring the graph into view.
+      const panel = el('reviewPanel');
+      panel.scrollTop += el('reviewChart').getBoundingClientRect().top - panel.getBoundingClientRect().top - 26;
+    }
   } catch (error) {
     if (reviewAbort === controller) {
       el('reviewStatus').textContent = (error as Error).name === 'AbortError' ? 'Review stopped.' : `Review failed: ${(error as Error).message}`;
@@ -3008,30 +3098,38 @@ async function runGameReview(): Promise<void> {
   } finally {
     if (reviewAbort === controller) {
       reviewAbort = null;
+      reviewRunSignature = '';
+      progress.hidden = true;
       el('reviewGame').toggleAttribute('disabled', false);
       el('reviewStop').toggleAttribute('disabled', true);
     }
   }
 }
 
-async function copyReviewPgn(): Promise<void> {
+function reviewedPgn(): string | undefined {
   if (!lastReview || !lastReviewNodes.length) return;
   if (reviewSignature() !== lastReviewSignature) {
     clearReviewState('Review cleared after game changed; run review again before copying annotated PGN.');
     return;
   }
   const start = parseFen(lastReviewNodes[0].fen);
-  const pgn = annotatedPgn(lastReview, {
-    tags: { Event: 'LC0 analysis review', ...(lastReviewNodes[0].fen === START_FEN ? {} : { SetUp: '1', FEN: lastReviewNodes[0].fen }) },
+  const metadata = reviewMetadata.get(tree);
+  return annotatedPgn(lastReview, {
+    tags: { Event: 'Game review', ...metadata?.tags, ...(lastReviewNodes[0].fen === START_FEN ? {} : { SetUp: '1', FEN: lastReviewNodes[0].fen }) },
+    result: metadata?.signature === lastReviewSignature ? metadata.result : '*',
     startFullmove: start.fullmove,
     startTurn: start.turn,
   });
+}
+
+async function copyReviewPgn(): Promise<void> {
+  const pgn = reviewedPgn();
+  if (!pgn) return;
   try {
     await navigator.clipboard.writeText(pgn);
     el('reviewStatus').textContent = 'Annotated PGN copied to clipboard.';
   } catch {
-    el('reviewStatus').textContent = 'Clipboard unavailable — annotated PGN logged to console.';
-    console.info(pgn);
+    el('reviewStatus').textContent = 'Clipboard unavailable. Use Download PGN to save the reviewed mainline.';
   }
 }
 
@@ -3148,6 +3246,8 @@ function removeHiddenTabPause(): void {
 }
 
 function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): boolean {
+  stopGameReview('Review cancelled after engine settings changed.');
+  renderReviewEngineChoices();
   if (!hasActiveAnalysisRun()) return false;
   analyzeAfterActiveRun = true;
   reloadLc0AfterActiveRun ||= options.reloadLc0 === true;
@@ -3203,6 +3303,7 @@ function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolea
 }
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
+  if (reviewAbort) return;
   if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
@@ -3223,36 +3324,6 @@ async function withCpuLease<T>(engineId: string, signal: AbortSignal, task: (lea
     return await task(lease);
   } finally {
     lease.release();
-  }
-}
-
-async function withEngineTimeout<T>(label: string, parentSignal: AbortSignal, timeoutMs: number, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  if (parentSignal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
-  const controller = new AbortController();
-  const timeoutMessage = `${label} timed out after ${Math.round(timeoutMs / 1000)}s`;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let abortReject: ((error: DOMException) => void) | null = null;
-  const abortPromise = new Promise<never>((_, reject) => {
-    abortReject = reject;
-  });
-  const onAbort = () => {
-    controller.abort();
-    abortReject?.(new DOMException('Analysis aborted', 'AbortError'));
-  };
-  parentSignal.addEventListener('abort', onAbort, { once: true });
-  try {
-    const taskPromise = task(controller.signal);
-    taskPromise.catch(() => undefined);
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new Error(timeoutMessage));
-      }, timeoutMs);
-    });
-    return await Promise.race([taskPromise, timeoutPromise, abortPromise]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    parentSignal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -3529,12 +3600,11 @@ async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
 }
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
-  if (mountAbort.signal.aborted) return;
+  if (mountAbort.signal.aborted || reviewAbort) return;
   if (deferHiddenTabWork('analysis')) {
     hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
     return;
   }
-  reviewAbort?.abort();
   if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
     analyzeAfterActiveRun = true;
     analysisReloadWantsSearch = true;
@@ -3917,15 +3987,15 @@ function afterNavigation() {
   hiddenResumeForce = false;
   if (analysisGameTree !== tree) {
     analysisGameTree = tree;
-    reviewAbort?.abort();
-    clearReviewState('Review cleared for the new game.');
-    cancelActiveAnalysisRun();
+    stopGameReview('Review cancelled for the new game.');
+    clearReviewState('Load a PGN or play moves, then review the mainline.');
+    cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     searcher?.resetTree();
     (mainEvaluator as CachedLc0Evaluator | null)?.clearCache?.();
     // Queued behind any cancelled search, so that search cannot repopulate the
     // old tree/cache after the reset. Model/runtime changes dispose the worker.
     if (searchWorker) void postWorker({ type: 'resetSearch', clearEvalCache: true }).catch(() => undefined);
-    engineLineCache.clear();
+    // The bounded position cache is history/settings keyed and can safely survive a new PGN.
     completeAnalysisKeys.clear();
   }
   const fen = tree.current.fen;
@@ -3946,7 +4016,7 @@ function afterNavigation() {
   clearReviewIfMainlineChanged();
   renderAll();
   scheduleMaia3Panel();
-  if (inputEl('autoAnalyze').checked && !cached) void analyzeCurrent();
+  if (inputEl('autoAnalyze').checked && !cached && !reviewAbort) void analyzeCurrent();
   else {
     // A cached position, or auto-analyze off, must not restart the search that
     // was paused on the position we just left.
@@ -4142,6 +4212,7 @@ function loadPgn() {
     workspaceResult = result;
     tree = parsed;
     tree.toStart();
+    reviewMetadata.set(tree, { tags, result, signature: reviewSignature() });
     lineCache.clear();
     completeAnalysisKeys.clear();
     el('message').textContent = `Loaded PGN${tags.White ? `: ${tags.White} – ${tags.Black}` : ''}.`;
@@ -4264,7 +4335,7 @@ function wireEvents() {
   // Keep routine completion quiet without concealing loading, errors or import feedback.
   const message = el('message');
   const updateMessageState = () => {
-    message.dataset.routine = String(/^(Analysis complete ·|Engines (agree|disagree):|\d+\/\d+ engines prefer)/.test(message.textContent ?? ''));
+    message.dataset.routine = String(/^(Analysis complete ·|Position analysis paused for game review\.|Engines (agree|disagree):|\d+\/\d+ engines prefer)/.test(message.textContent ?? ''));
   };
   const messageObserver = new MutationObserver(updateMessageState);
   messageObserver.observe(message, { childList: true, characterData: true, subtree: true });
@@ -4542,6 +4613,7 @@ function wireEvents() {
   el('loadPgn').addEventListener('click', loadPgn);
   el('copyPgn').addEventListener('click', copyPgn);
   el('analyze').addEventListener('click', () => {
+    stopGameReview('Review cancelled to analyze this position.');
     void analyzeCurrent({ force: true });
   });
   el('stop').addEventListener('click', () => {
@@ -4677,7 +4749,34 @@ function wireEvents() {
   el('reviewGame').addEventListener('click', () => {
     void runGameReview();
   });
-  el('reviewStop').addEventListener('click', () => reviewAbort?.abort());
+  el('reviewStop').addEventListener('click', () => stopGameReview());
+  for (const id of ['reviewEngine', 'reviewDepth']) el(id).addEventListener('change', () => {
+    stopGameReview('Review cancelled after review settings changed.');
+    clearReviewState('Review settings changed. Review the mainline again.');
+  });
+  el('reviewDownloadPgn').addEventListener('click', () => {
+    const pgn = reviewedPgn();
+    if (pgn) downloadTextFile('reviewed-game.pgn', pgn, 'application/x-chess-pgn');
+  });
+  for (const [id, direction] of [['reviewPrevious', -1], ['reviewNext', 1]] as const) el(id).addEventListener('click', () => {
+    if (!lastReview) return;
+    const ply = adjacentCriticalPly(lastReview, lastReviewNodes.indexOf(tree.current), direction);
+    if (ply !== undefined) jumpReviewPly(ply);
+  });
+  el('reviewChart').addEventListener('click', (event) => {
+    if (!lastReview) return;
+    const rect = el('reviewChart').getBoundingClientRect();
+    jumpReviewPly(reviewPlyAtRatio((event.clientX - rect.left) / rect.width, lastReview.moves.length));
+    el('reviewChart').focus({ preventScroll: true });
+  });
+  el('reviewChart').addEventListener('keydown', (event) => {
+    if (!lastReview || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const ply = lastReviewNodes.indexOf(tree.current);
+    jumpReviewPly(event.key === 'Home' ? 0 : event.key === 'End' ? lastReview.moves.length
+      : ply + (event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 1));
+  });
   el('reviewCopyPgn').addEventListener('click', () => {
     void copyReviewPgn();
   });
@@ -4827,6 +4926,9 @@ function disposeRuntimeResources(): void {
   reviewAbort?.abort();
   reviewAbort = null;
   if (reviewWasRunning) {
+    reviewRunSignature = '';
+    const progress = document.getElementById('reviewProgress');
+    if (progress) progress.hidden = true;
     // Runtime reload keeps the page mounted. The stale review's identity guard
     // intentionally skips its finally block, so restore controls here.
     (document.getElementById('reviewGame') as HTMLButtonElement | null)?.toggleAttribute('disabled', false);
@@ -5109,6 +5211,7 @@ function resetAnalysisPageState(): void {
   lastReview = null;
   lastReviewNodes = [];
   lastReviewSignature = '';
+  reviewRunSignature = '';
   analyzing = false;
   lineCache.clear();
   nodeIndex.clear();
@@ -5153,6 +5256,10 @@ export function mountAnalysisBrowser(): () => void {
     analyzing,
     searchActive: analysisAbort !== null && !analysisAbort.signal.aborted,
     reloadActive: analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
+    reloadQueued: reloadLc0AfterActiveRun,
+    disposeQueued: disposeUnusedEnginesAfterActiveRun,
+    runtime: selectedLc0Runtime(),
+    workerRuntime,
     hidden: hiddenTab.hidden,
     suspended: hiddenTab.suspended.join(','),
     fen: tree.current.fen,

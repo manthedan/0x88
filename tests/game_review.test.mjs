@@ -96,12 +96,12 @@ test('reviewGame validates position/move count alignment', () => {
   );
 });
 
-test('annotatedPgn emits NAGs, win comments, and best-move notes', () => {
+test('annotatedPgn emits portable engine evals, single NAGs and best-move notes', () => {
   const review = reviewGame(
     [
       { winWhite: 0.55, bestUci: 'e2e4' },
-      { winWhite: 0.3, bestUci: 'd7d5' },
-      { winWhite: 0.3, bestUci: 'b1c3' },
+      { winWhite: 0.3, bestUci: 'd7d5', scoreCp: -212 },
+      { winWhite: 0.3, bestUci: 'b1c3', scoreCp: -210 },
     ],
     [
       { san: 'a3', uci: 'a2a3' },
@@ -110,10 +110,12 @@ test('annotatedPgn emits NAGs, win comments, and best-move notes', () => {
   );
   const pgn = annotatedPgn(review, { tags: { White: 'A', Black: 'B' }, result: '0-1' });
   assert.ok(pgn.includes('[White "A"]'));
-  assert.ok(pgn.includes('1. a3??'));
+  assert.ok(pgn.includes('1. a3 $4'));
+  assert.ok(!pgn.includes('a3??'), 'do not double-annotate with suffix plus NAG');
   assert.ok(pgn.includes('$4'));
   assert.ok(pgn.includes('best e2e4'));
-  assert.ok(pgn.includes('[%win 30%]'));
+  assert.ok(pgn.includes('[%eval -2.12]'));
+  assert.ok(!pgn.includes('[%win'), 'estimated advantage is not a portable PGN eval');
   assert.ok(pgn.trim().endsWith('0-1'));
   // Black's best reply gets no suffix and no best-move note.
   assert.ok(pgn.includes(' d5 '));
