@@ -218,8 +218,6 @@ $: readiness = capsFailed ? 'Device check unavailable'
     border:1px solid var(--rule-strong); border-radius:8px;
     background:var(--panel);
   }
-  .device[data-tone=ok]{border-left-color:var(--accent)}
-  .device[data-tone=warn]{border-left-color:var(--warn)}
   .device p{margin:0}
   .device-label{font-family:var(--mono); font-size:12px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
   .device .device-headline{margin-top:6px}
