@@ -364,7 +364,7 @@ let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
 function saveAnalysisWorkspace(): void {
   try {
     workspaceAutosave?.schedule(tree.root.children.length || tree.root.fen !== START_FEN || tree.root.comment || Object.keys(workspaceHeaders).length
-      ? { tree: serializeTree(tree), headers: workspaceHeaders, result: workspaceResult }
+      ? { tree: serializeTree(tree), headers: workspaceHeaders, result: workspaceResult, resultSignature: reviewMetadata.get(tree)?.signature }
       : null);
   } catch {
     workspaceAutosave?.clear();

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { START_FEN, boardToFen } from '../src/chess/board.ts';
+import { moveToUci } from '../src/chess/moveCodec.ts';
 import { parsePgnGame, gameTreeToPgn } from '../src/chess/pgn.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
@@ -13,6 +14,7 @@ import {
 const engineIds = new Set(['maia3', 'sf-lite']);
 const envelope = (kind, data, version = WORKSPACE_VERSION) => JSON.stringify({ kind, version, savedAt: Date.now(), data });
 const analysisData = () => ({ tree: serializeTree(new GameTree()), headers: {}, result: '*' });
+const resultSignature = (tree) => [tree.root, ...tree.mainlineFrom()].map((node) => `${node.fen}\u0000${node.move ? moveToUci(node.move) : ''}`).join('\u0001');
 const playData = (changes = {}) => ({
   startFen: START_FEN, moves: ['e2e4'], humanColor: 'w', orientation: 'black',
   preferences: { ...DEFAULT_PLAY_PREFERENCES, color: 'random', maiaElo: 1900, maiaTemperature: 0.8, maiaTopP: 0.9 },
@@ -30,7 +32,7 @@ test('analysis round trip retains nested variations, comments, headers, result a
   const { tree, tags: headers, result } = parsed;
   tree.root.comment = 'Before the game';
   tree.goTo(tree.root.children[0].children[1].children[1]);
-  const raw = envelope('analysis', { tree: serializeTree(tree), headers, result });
+  const raw = envelope('analysis', { tree: serializeTree(tree), headers, result, resultSignature: resultSignature(tree) });
   const restored = decodeAnalysisSnapshot(raw);
   assert.ok(restored);
   assert.deepEqual(serializeTree(restored.tree), serializeTree(tree));
@@ -41,6 +43,35 @@ test('analysis round trip retains nested variations, comments, headers, result a
   assert.equal(gameTreeToPgn(restored.tree, restored.headers, restored.result), gameTreeToPgn(tree, headers, result));
   restored.tree.addUci('b8c6');
   assert.equal(new Set(restored.tree.lineTo().map((node) => node.id)).size, 5, 'new nodes get unique ids');
+});
+
+test('Analysis autosave never gives an edited mainline ownership of an imported result', () => {
+  const { tree, tags: headers, result } = parsePgnGame('[Result "1-0"]\n\n1. e4 1-0');
+  const signature = resultSignature(tree);
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  const roundTrip = (resultSignature) => {
+    saver.schedule({ tree: serializeTree(tree), headers, result, resultSignature });
+    saver.flush();
+    return readWorkspace('analysis', decodeAnalysisSnapshot, store);
+  };
+  assert.equal(roundTrip(signature).result, '1-0', 'an unedited imported line retains its result');
+  tree.toEnd();
+  assert.ok(tree.addUci('e7e5'));
+  const restored = roundTrip(signature);
+  assert.equal(restored.result, '*');
+  assert.equal(restored.headers.Result, '*');
+  const exported = gameTreeToPgn(restored.tree, restored.headers, restored.result);
+  assert.match(exported, /1\. e4 e5 \*$/);
+  assert.doesNotMatch(exported, /1-0/);
+  for (const legacySignature of [undefined, null, 12]) {
+    const legacy = roundTrip(legacySignature);
+    assert.ok(legacy, 'old or unknown result provenance does not discard the workspace');
+    assert.equal(legacy.result, '*');
+  }
+  tree.back();
+  tree.addUci('c7c5');
+  assert.equal(roundTrip(signature).result, '*', 'adding variations does not make an edited mainline own the result');
 });
 
 test('custom root, castling, en passant and promotion round trip through legal replay', () => {

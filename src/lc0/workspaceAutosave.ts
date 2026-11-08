@@ -27,6 +27,8 @@ export interface AnalysisSnapshot {
   tree: TreeSnapshot;
   headers: Record<string, string>;
   result: string;
+  /** The mainline that owned the imported result, not the line at autosave time. */
+  resultSignature?: string;
 }
 export interface PlaySnapshot {
   startFen: string;
@@ -107,8 +109,13 @@ export function decodeAnalysisSnapshot(raw: string): { tree: GameTree; headers: 
   try {
     const data = decodeEnvelope(raw, 'analysis');
     const headers = Object.fromEntries(Object.entries(object(data.headers)).map(([key, value]) => [text(key, 100), text(value, 10000)]));
-    const result = data.result === '*' ? '*' : resultCode(data.result);
-    return { tree: restoreTree(data.tree), headers, result };
+    const savedResult = data.result === '*' ? '*' : resultCode(data.result);
+    const tree = restoreTree(data.tree);
+    const signature = [tree.root, ...tree.mainlineFrom()].map((node) => `${node.fen}\u0000${node.move ? moveToUci(node.move) : ''}`).join('\u0001');
+    // Missing provenance in legacy saves is not evidence that the edited line owns a result.
+    const result = data.resultSignature === signature ? savedResult : '*';
+    if ('Result' in headers) headers.Result = result;
+    return { tree, headers, result };
   } catch {
     return null;
   }
