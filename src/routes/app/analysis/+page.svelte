@@ -1105,6 +1105,7 @@ onMount(() => {
   :global(.analysis-workspace[data-retrying]) #boardToolsButton{display:none}
   :global(.analysis-workspace[data-retrying]) .board-tools{display:flex; position:static; width:auto; height:40px; padding:0; border:0; background:transparent; box-shadow:none}
   :global(.analysis-workspace[data-retrying]) #flip{width:40px}
+  :global(.analysis-workspace[data-retrying]) .mobile-tool-label{display:none}
   :global(.analysis-workspace[data-retrying]) .app-sidebar{display:flex; flex-direction:column}
   :global(.analysis-workspace[data-retrying]) #analysisContent{display:flex; flex-direction:column}
   :global(.analysis-workspace[data-retrying]) .workbench-tabs{flex:none}

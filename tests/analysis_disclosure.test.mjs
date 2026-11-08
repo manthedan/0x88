@@ -62,6 +62,21 @@ test('desktop keeps existing tools visible; resizing to mobile closes them', () 
   disclosure.close();
   assert.equal(panel.hidden, false);
 });
+test('retry keeps the mobile Flip host visible even when focusout closes the disclosure', () => {
+  let retry = false;
+  const { root, panel, disclosure } = fixture(() => !retry);
+  assert.equal(panel.hidden, true);
+  retry = true;
+  disclosure.close();
+  assert.equal(panel.hidden, false);
+  const out = new Event('focusout');
+  Object.defineProperty(out, 'relatedTarget', { value: null });
+  root.dispatchEvent(out);
+  assert.equal(panel.hidden, false, 'closing must not hide the only Flip control during retry');
+  retry = false;
+  disclosure.close();
+  assert.equal(panel.hidden, true);
+});
 test('a handled nested Escape does not also dismiss the parent disclosure', () => {
   const { doc, trigger, panel } = fixture();
   trigger.dispatchEvent(new Event('click'));

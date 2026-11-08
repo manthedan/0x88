@@ -63,6 +63,8 @@ test('a shared best move is one arrow that names every backing engine colour', (
   assert.match(marker, /<title>2 engines share this move: Lc0 Small, Stockfish Lite<\/title>/);
   assert.match(marker, />2<\/text>/);
   assert.match(marker, /font-size="22"/);
+  assert.match(marker, /pointer-events:none/, 'markers must not intercept chess-square taps');
+  assert.match(marker, /tabindex="0"/, 'engine attribution is still available to keyboard users');
   assert.doesNotMatch(marker, /translate\(/, 'Chessground custom viewBox already aligns the SVG with square bounds');
   assert.equal(analysisArrowCandidates([lc0, lc0, sf], false)[0].shared.length, 2, 'duplicate results never double-count a backer');
 });

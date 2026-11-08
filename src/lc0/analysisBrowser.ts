@@ -2009,6 +2009,7 @@ function renderBoard() {
   if (!ground) ground = Chessground(el('ground'), cfg);
   else ground.set(cfg);
   el('ground').querySelector('cg-board')?.setAttribute('aria-hidden', 'true');
+  el('ground').querySelector('cg-board')?.removeAttribute('title');
   keyboardBoard ??= createAnalysisKeyboardBoard(el('keyboardBoard'), {
     onSelect: (key) => ground?.selectSquare(key),
     onMove: (from, to) => { void onUserMove(from, to, true); },
@@ -4815,13 +4816,33 @@ function wireEvents() {
   const mobileTools = matchMedia('(max-width: 600px)');
   const toolsDisclosure = mountAnalysisDisclosure({
     root: el('boardToolDisclosure'), trigger: el('boardToolsButton'), panel: el('boardTools'), signal: mountAbort.signal,
-    enabled: () => mobileTools.matches,
+    enabled: () => mobileTools.matches && !retry,
     closeOnAction: (button) => button.id !== 'copyMenuButton',
   });
+  // Retry exposes only Flip and hides the disclosure trigger. Keep its host
+  // genuinely visible (not just styled over [hidden]) until retry ends.
+  const retryToolsObserver = new MutationObserver(() => {
+    copyDisclosure.close();
+    toolsDisclosure.close();
+  });
+  retryToolsObserver.observe(el('main'), { attributes: true, attributeFilter: ['data-retrying'] });
+  mountAbort.signal.addEventListener('abort', () => retryToolsObserver.disconnect(), { once: true });
   mobileTools.addEventListener('change', () => {
     copyDisclosure.close();
     toolsDisclosure.close(mobileTools.matches && el('boardTools').contains(document.activeElement));
   }, { signal: mountAbort.signal });
+  // Count markers remain pointer-transparent so every part of a chess square
+  // stays playable. The board supplies the same native hover tooltip beneath them.
+  el('ground').addEventListener('pointermove', (event) => {
+    const marker = retry ? undefined : [...el('ground').querySelectorAll<SVGElement>('.shared-move-marker')].find((node) => {
+      const rect = node.getBoundingClientRect();
+      return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    });
+    const board = el('ground').querySelector<HTMLElement>('cg-board');
+    const title = marker?.getAttribute('aria-label') ?? '';
+    if (board && board.title !== title) board.title = title;
+  }, { signal: mountAbort.signal });
+  el('ground').addEventListener('pointerleave', () => el('ground').querySelector('cg-board')?.removeAttribute('title'), { signal: mountAbort.signal });
   el('quickCopyFen').addEventListener('click', () => { copyFen(); flashCopied(el('quickCopyFen')); });
   el('quickCopyPgn').addEventListener('click', () => { copyPgn(); flashCopied(el('quickCopyPgn')); });
   el('playFromHere').addEventListener('click', () => {

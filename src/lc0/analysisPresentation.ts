@@ -51,7 +51,7 @@ export function sharedArrowMarkerSvg(engines: string[], corner: [number, number]
   const label = htmlEscape(`${engines.length} engines share this move: ${engines.map(analysisEngineName).join(', ')}`);
   // 22 square-local units remain >=10px even on the 390px board. One tile,
   // rather than a cluster, leaves the piece and the centre arrowhead uncovered.
-  return `<g class="shared-move-marker" role="img" tabindex="0" aria-label="${label}" style="pointer-events:auto"><title>${label}</title><rect x="${x - 16}" y="${y - 15}" width="32" height="30" rx="6" fill="${engineBrushes(engines[0]).swatch}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 8}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="22" font-weight="750">${engines.length}</text></g>`;
+  return `<g class="shared-move-marker" role="img" tabindex="0" aria-label="${label}" style="pointer-events:none"><title>${label}</title><rect x="${x - 16}" y="${y - 15}" width="32" height="30" rx="6" fill="${engineBrushes(engines[0]).swatch}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 8}" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="22" font-weight="750">${engines.length}</text></g>`;
 }
 
 /**
