@@ -781,6 +781,14 @@ onMount(() => {
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}
     :global(.movelist .mv){min-height:32px}
   }
+  /* Narrow two-column boards need the same separate nav/tool groups as phones. */
+  @media (min-width:601px) and (max-width:1200px){
+    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:6px}
+    .nav{height:44px}
+    .board-tools{display:grid; grid-template-columns:40px 1fr 1fr auto 1fr; height:40px}
+    .tool-button{padding:0 6px}
+    .copy-button{min-width:0}
+  }
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
