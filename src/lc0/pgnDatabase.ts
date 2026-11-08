@@ -6,7 +6,7 @@
  * for current-position opening lookups across saved collections.
  */
 
-import { boundedPgnChunks, importLocalPgn, MAX_BACKUP_BYTES, parseLocalPgnGame } from './localPgnImport.ts';
+import { importStoredPgn, MAX_BACKUP_BYTES, parseLocalPgnGame, storedPgnChunks } from './localPgnImport.ts';
 import { buildOpeningPositionIndex, OPENING_INDEX_VERSION, type OpeningMoveStat, type OpeningPositionIndex, openingSummary, positionKey } from './openingStats.ts';
 
 export type PgnCollectionSource = 'manual' | 'lichess' | 'chesscom';
@@ -165,7 +165,7 @@ export function normalizePgnDatabaseBackup(input: unknown): SavePgnCollectionInp
     const entry = raw as Record<string, unknown>;
     const pgn = normalizeString(entry.pgn);
     if (!pgn.trim()) throw new Error(`Collection ${i + 1} has no PGN`);
-    boundedPgnChunks(pgn); // Derived indexes are deliberately ignored and rebuilt.
+    storedPgnChunks(pgn); // Derived indexes are deliberately ignored and rebuilt.
     return {
       name: sanitizePgnCollectionName(normalizeString(entry.name), `Imported backup ${i + 1}`),
       pgn,
@@ -303,6 +303,7 @@ export function serializePgnDatabaseBackup(backup: PgnDatabaseBackup): string {
   if (new TextEncoder().encode(json).length > MAX_BACKUP_BYTES) {
     throw new Error('Backup exceeds the 16 MiB restore limit. Use “Back up selected collection” for each collection instead.');
   }
+  normalizePgnDatabaseBackup(backup);
   return json;
 }
 
@@ -317,7 +318,9 @@ export async function exportPgnDatabaseBackup(now = new Date(), collectionId?: s
     // Omit derived indexes: smaller portable backups, rebuilt using current semantics on restore.
     const rawCollections = collections.map(({ positionIndex: _index, ...record }) => record);
     const backup: PgnDatabaseBackup = { kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: now.toISOString(), collections: rawCollections };
-    serializePgnDatabaseBackup(backup); // Never report success for a file that restore would reject.
+    serializePgnDatabaseBackup(backup); // Check size and shape before replaying any games.
+    // Validate legal replay once, yielding between games just as restore does.
+    for (const collection of rawCollections) await importStoredPgn(collection.pgn);
     return backup;
   } finally {
     db.close();
@@ -325,7 +328,7 @@ export async function exportPgnDatabaseBackup(now = new Date(), collectionId?: s
 }
 
 export function rebuildPgnCollectionIndex(collection: SavePgnCollectionInput): SavePgnCollectionInput {
-  const games = boundedPgnChunks(collection.pgn).map((chunk, i) => parseLocalPgnGame(chunk, i + 1));
+  const games = storedPgnChunks(collection.pgn).map((chunk, i) => parseLocalPgnGame(chunk, i + 1));
   const positionIndex = buildOpeningPositionIndex(games);
   return {
     ...collection,
@@ -342,7 +345,7 @@ export async function importPgnDatabaseBackup(input: unknown, onProgress: (done:
   for (let i = 0; i < inputs.length; i++) {
     onProgress(i, inputs.length);
     const input = inputs[i];
-    const batch = await importLocalPgn(input.pgn, () => {}, signal);
+    const batch = await importStoredPgn(input.pgn, () => {}, signal);
     const now = Date.now();
     collections.push({ ...input, id: newId(), source: input.source ?? 'manual', gameCount: batch.games.length,
       positionIndex: batch.positionIndex, indexVersion: OPENING_INDEX_VERSION,

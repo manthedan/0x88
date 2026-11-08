@@ -15,6 +15,15 @@ export function boundedPgnChunks(raw: string): string[] {
   return chunks;
 }
 
+/** Saved collections predate the new-input batch limits. Replay one game at a time. */
+export function storedPgnChunks(raw: string): string[] {
+  if (new TextEncoder().encode(raw).length > MAX_BACKUP_BYTES) throw new Error('Collection exceeds 16 MiB.');
+  const chunks = splitPgnGames(raw);
+  if (!chunks.length) throw new Error('Collection has no PGN games.');
+  if (chunks.some((chunk) => new TextEncoder().encode(chunk).length > MAX_PGN_GAME_BYTES)) throw new Error('One game exceeds 32 KiB. Remove large comments or split the game.');
+  return chunks;
+}
+
 export function parseLocalPgnGame(chunk: string, number: number): ImportedGame {
   try {
     const game = parsePgnGame(chunk, { strict: true, mainlineOnly: true });
@@ -32,7 +41,14 @@ export interface LocalPgnBatch {
 
 /** Yield between games so progress paints and navigation stays responsive. Publish only a complete batch. */
 export async function importLocalPgn(raw: string, onProgress: (done: number, total: number) => void = () => {}, signal?: AbortSignal): Promise<LocalPgnBatch> {
-  const chunks = boundedPgnChunks(raw);
+  return importPgnChunks(boundedPgnChunks(raw), onProgress, signal);
+}
+
+export async function importStoredPgn(raw: string, onProgress: (done: number, total: number) => void = () => {}, signal?: AbortSignal): Promise<LocalPgnBatch> {
+  return importPgnChunks(storedPgnChunks(raw), onProgress, signal);
+}
+
+async function importPgnChunks(chunks: string[], onProgress: (done: number, total: number) => void, signal?: AbortSignal): Promise<LocalPgnBatch> {
   const games: ImportedGame[] = [];
   const positionIndex: OpeningPositionIndex = {};
   onProgress(0, chunks.length);

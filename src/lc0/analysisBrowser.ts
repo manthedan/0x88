@@ -77,7 +77,7 @@ import {
   updatePgnCollectionPositionIndex,
 } from './pgnDatabase.ts';
 
-import { importLocalPgn, MAX_BACKUP_BYTES, MAX_PGN_BYTES } from './localPgnImport.ts';
+import { importLocalPgn, importStoredPgn, MAX_BACKUP_BYTES, MAX_PGN_BYTES } from './localPgnImport.ts';
 
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
@@ -2445,11 +2445,11 @@ async function runPgnTask(action: () => void | Promise<void>): Promise<void> {
   }
 }
 
-async function setImportedPgn(raw: string, messagePrefix = 'Imported'): Promise<number> {
+async function setImportedPgn(raw: string, messagePrefix = 'Imported', savedCollection = false): Promise<number> {
   const signal = mountAbort.signal;
   const progress = el('importProgress') as HTMLProgressElement;
   progress.hidden = false;
-  const batch = await importLocalPgn(raw, (done, total) => {
+  const batch = await (savedCollection ? importStoredPgn : importLocalPgn)(raw, (done, total) => {
     if (isStaleMount(signal)) return;
     progress.max = total;
     progress.value = done;
@@ -2761,7 +2761,7 @@ async function loadSelectedPgnCollection(): Promise<void> {
     lastImportColor = record.color ?? '';
     inputEl('pgnDbName').value = record.name;
     inputEl('importGamesInput').value = record.pgn;
-    await setImportedPgn(record.pgn, `Loaded “${record.name}”:`);
+    await setImportedPgn(record.pgn, `Loaded “${record.name}”:`, true);
     (el('collectionImport') as HTMLDetailsElement).open = false;
     el('openingExplorer').scrollTop = 0;
     if (record.indexVersion !== OPENING_INDEX_VERSION && importedPositionIndex) {
