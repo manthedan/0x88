@@ -394,13 +394,13 @@ onMount(() => {
     --analysis-header-height:64px; /* measured locally by the page controller */
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
     --result-highlight:color-mix(in srgb, var(--ink) 13%, var(--panel));
-    --board-size:min(704px, calc(100dvh - 200px), calc(100vw - 450px));
+    --board-size:min(704px, max(280px, calc(100svh - 200px)), calc(100vw - 450px));
     grid-template-columns:calc(var(--board-size) + 34px) minmax(0, 470px); gap:16px; align-items:start;
     max-width:1288px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
   }
   /* Reserve the second toolbar row in narrower or shorter workspaces. */
   @media (max-width:1239px), (max-height:899px){
-    .analysis-workspace{--board-size:min(704px, calc(100svh - 240px), calc(100vw - 450px))}
+    .analysis-workspace{--board-size:min(704px, max(280px, calc(100svh - 240px)), calc(100vw - 450px))}
   }
   .board-column{min-width:0}
   .board-panel{min-width:0; padding:8px; container-type:inline-size}
@@ -1002,7 +1002,7 @@ onMount(() => {
     }
   }
   @media (min-width:601px) and (max-width:767px){
-    .board-panel{width:min(100%, calc(100svh - 360px)); justify-self:center}
+    .board-panel{width:min(100%, max(320px, calc(100svh - 360px))); justify-self:center}
   }
   @media (max-width:767px){
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
