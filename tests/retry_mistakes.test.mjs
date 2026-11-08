@@ -71,10 +71,16 @@ test('bad moves say try again, remain on the pre-error board and do not count as
   assert.equal(session.tree.current.fen, before);
   assert.equal(session.solved, 0);
   assert.equal(session.remaining, 2);
+  assert.equal(session.isLast, false);
   session.reveal();
   assert.equal(session.remaining, 1);
   session.next();
+  assert.equal(session.isLast, true, 'the last item offers finish, not another position');
   assert.equal(session.tree.current.fen, nodes[2].fen, 'before the next error, not after it');
+  session.reveal();
+  session.next();
+  assert.equal(session.phase, 'complete');
+  assert.equal(session.remaining, 0);
 });
 
 test('cancel on skip/reveal/exit prevents stale verification from solving another problem', async () => {

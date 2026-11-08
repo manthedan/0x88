@@ -21,6 +21,7 @@ import {
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
+import { mountAnalysisDisclosure } from './analysisDisclosure.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
 import { criticalPositionLines } from './criticalMomentsPresentation.ts';
 import { CriticalAnalysisRefresh } from './criticalMoments.ts';
@@ -2008,6 +2009,7 @@ function renderBoard() {
   if (!ground) ground = Chessground(el('ground'), cfg);
   else ground.set(cfg);
   el('ground').querySelector('cg-board')?.setAttribute('aria-hidden', 'true');
+  el('ground').querySelector('cg-board')?.removeAttribute('title');
   keyboardBoard ??= createAnalysisKeyboardBoard(el('keyboardBoard'), {
     onSelect: (key) => ground?.selectSquare(key),
     onMove: (from, to) => { void onUserMove(from, to, true); },
@@ -2165,7 +2167,7 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
     const meter = progress ? `<span class="engine-summary-meter${pct === null ? ' indeterminate' : ''}" style="--progress:${pct ?? 100}%" aria-hidden="true"></span>` : '';
     const focused = arrowFocusEngine === name;
     const agrees = !!line && line.pvUci[0] === agreed;
-    const move = line?.pvUci[0] ? `<button type="button" class="compare-move${agrees ? ' agrees' : ''}" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}${agrees ? ` (shared with ${groups[0].engines.length - 1} other engine${groups[0].engines.length > 2 ? 's' : ''})` : ''}" title="${htmlEscape(agrees ? `Shared best move: ${groups[0].engines.map(analysisEngineName).join(' + ')}. Play ${firstAnalysisMove(line)}` : `Play ${firstAnalysisMove(line)}`)}">${agrees ? '<span class="agreement-mark" aria-hidden="true">✓</span>' : ''}${htmlEscape(firstAnalysisMove(line))}</button>` : '<span class="compare-move-empty" aria-hidden="true">—</span>';
+    const move = line?.pvUci[0] ? `<button type="button" class="compare-move${agrees ? ' agrees' : ''}" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}${agrees ? ` (shared with ${groups[0].engines.length - 1} other engine${groups[0].engines.length > 2 ? 's' : ''})` : ''}" title="${htmlEscape(agrees ? `Shared best move: ${groups[0].engines.map(analysisEngineName).join(' + ')}. Play ${firstAnalysisMove(line)}` : `Play ${firstAnalysisMove(line)}`)}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span class="compare-move-empty" aria-hidden="true">—</span>';
     const open = engineLinesExpanded(name);
     const header = `<div class="engine-summary"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-pressed="${focused}" aria-label="${htmlEscape(`${name}: ${focused ? 'show every engine\'s arrow' : 'show only this engine\'s arrow and use it for the eval bar'}`)}" title="${htmlEscape(`${name}: ${focused ? 'click again to show every engine\'s arrow' : 'show only its arrow (and use it for the eval bar)'}`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${move}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button></div>`;
     return `<section class="engine-card${progress ? ' searching' : ''}${focused ? ' arrow-focus' : ''}${open ? ' open' : ''}" style="--engine-color:${swatch}" aria-label="${htmlEscape(name)}">${header}${engineLinesMarkup(engine, name, engineLines, open)}${meter}</section>`;
@@ -2190,9 +2192,9 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     // The header already carries the top line's eval; alternatives show rank + their own eval.
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
     const toggle = index === 0
-      ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? '−' : '+'}${extra}</span>${CHEVRON_ICON}</button>` : ''
+      ? extra > 0 ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="${key}|toggle" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${usable.length} lines`}"><span>${open ? 'Hide' : extra} ${open ? 'extra lines' : `more line${extra > 1 ? 's' : ''}`}</span>${CHEVRON_ICON}</button>` : ''
       : '';
-    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv}`)}"${preview.steps.length ? '' : ' disabled'} title="Preview line on a board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button>${toggle}</div></li>`;
+    return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv} on the board`)}"${preview.steps.length ? '' : ' disabled'} title="Preview this line on the board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button>${toggle}</div></li>`;
   });
   if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
@@ -2357,7 +2359,10 @@ function renderMoveList() {
   const hadFocus = list.contains(document.activeElement);
   // Unchanged markup is left alone so a half-typed PGN in the empty-state box survives re-renders.
   const markup = analysisMoveMarkup(tree.root, tree.current);
-  if (list.innerHTML !== markup) list.innerHTML = markup;
+  // HTML serialization normalizes valueless data attributes, so string equality
+  // alone cannot preserve the live empty-state textarea and its selection.
+  const livePasteBox = !tree.root.children.length && list.querySelector('[data-quick-pgn]');
+  if (!livePasteBox && list.innerHTML !== markup) list.innerHTML = markup;
   decorateMoveEvals();
   const selected = list.querySelector<HTMLButtonElement>('[aria-current="step"]');
   if (hadFocus) selected?.focus({ preventScroll: true });
@@ -2380,8 +2385,8 @@ function renderOpening() {
   const stats = currentBookStats();
   const summary = openingSummary(stats);
   if (hasDatabasePositionStats && !importedGames.length)
-    el('openingSummary').textContent = `Local search · ${databasePositionCollectionCount} collections · ${summary.total} games with a continuation`;
-  else el('openingSummary').textContent = `${importedGames.length} games loaded · ${summary.total} with a continuation here`;
+    el('openingSummary').textContent = `${summary.total} games here · ${databasePositionCollectionCount} collections`;
+  else el('openingSummary').textContent = `${summary.total} game${summary.total === 1 ? '' : 's'} continue${summary.total === 1 ? 's' : ''} here`;
   renderExplorerComparison();
   if (!stats.length) {
     body.innerHTML = '<tr><td colspan="3" class="small">No mainline continuations here. Move back or load another collection.</td></tr>';
@@ -2789,7 +2794,10 @@ async function renameSelectedPgnCollection(): Promise<void> {
     if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
     inputEl('pgnDbName').value = record.name;
     await refreshPgnDatabaseCollections(record.id, mountSignal);
-    if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Renamed collection to “${record.name}”.`;
+    if (!isStaleMount(mountSignal)) {
+      el('pgnDbInfo').textContent = `Renamed collection to “${record.name}”.`;
+      (el('collectionImport') as HTMLDetailsElement).open = false;
+    }
   } catch (error) {
     if (!isStaleMount(mountSignal)) el('pgnDbInfo').textContent = `Rename failed: ${(error as Error).message}`;
   }
@@ -3214,6 +3222,7 @@ function renderMistakeRetry(): void {
   el('retrySkip').hidden = complete || session.answered;
   el('retryReveal').hidden = complete || session.answered;
   el('retryNext').hidden = complete || !session.answered;
+  el('retryNext').textContent = session.isLast ? 'Finish retry' : 'Next position';
   el('retryHuman').hidden = complete || !session.answered;
   el('retryHumanStatus').textContent = '';
   renderBoard();
@@ -4803,34 +4812,37 @@ function wireEvents() {
   };
   el('copyFen').addEventListener('click', () => { copyFen(); flashCopied(el('copyFen')); });
   // Plain disclosure: native buttons use Tab, and Escape returns to the trigger.
-  const copyTools = el('copyTools');
-  const copyMenu = el('copyMenu');
-  const copyTrigger = el('copyMenuButton');
-  const closeCopyMenu = (restoreFocus = false) => {
-    copyMenu.hidden = true;
-    copyTrigger.setAttribute('aria-expanded', 'false');
-    if (restoreFocus) copyTrigger.focus({ preventScroll: true });
-  };
-  copyTrigger.addEventListener('click', () => {
-    copyMenu.hidden = !copyMenu.hidden;
-    copyTrigger.setAttribute('aria-expanded', String(!copyMenu.hidden));
+  const copyDisclosure = mountAnalysisDisclosure({ root: el('copyTools'), trigger: el('copyMenuButton'), panel: el('copyMenu'), signal: mountAbort.signal });
+  const mobileTools = matchMedia('(max-width: 600px)');
+  const toolsDisclosure = mountAnalysisDisclosure({
+    root: el('boardToolDisclosure'), trigger: el('boardToolsButton'), panel: el('boardTools'), signal: mountAbort.signal,
+    enabled: () => mobileTools.matches && !retry,
+    closeOnAction: (button) => button.id !== 'copyMenuButton',
   });
-  copyMenu.addEventListener('click', (event) => {
-    // A synchronous clipboard fallback may already have focused the manual URL field.
-    if ((event.target as HTMLElement).closest('button')) closeCopyMenu(copyTools.contains(document.activeElement));
+  // Retry exposes only Flip and hides the disclosure trigger. Keep its host
+  // genuinely visible (not just styled over [hidden]) until retry ends.
+  const retryToolsObserver = new MutationObserver(() => {
+    copyDisclosure.close();
+    toolsDisclosure.close();
   });
-  copyTools.addEventListener('focusout', (event) => {
-    if (!copyTools.contains(event.relatedTarget as Node | null)) closeCopyMenu();
-  });
-  document.addEventListener('pointerdown', (event) => {
-    if (!copyTools.contains(event.target as Node)) closeCopyMenu();
+  retryToolsObserver.observe(el('main'), { attributes: true, attributeFilter: ['data-retrying'] });
+  mountAbort.signal.addEventListener('abort', () => retryToolsObserver.disconnect(), { once: true });
+  mobileTools.addEventListener('change', () => {
+    copyDisclosure.close();
+    toolsDisclosure.close(mobileTools.matches && el('boardTools').contains(document.activeElement));
   }, { signal: mountAbort.signal });
-  document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || copyMenu.hidden) return;
-    event.preventDefault();
-    event.stopPropagation();
-    closeCopyMenu(true);
-  }, { capture: true, signal: mountAbort.signal });
+  // Count markers remain pointer-transparent so every part of a chess square
+  // stays playable. The board supplies the same native hover tooltip beneath them.
+  el('ground').addEventListener('pointermove', (event) => {
+    const marker = retry ? undefined : [...el('ground').querySelectorAll<SVGElement>('.shared-move-marker')].find((node) => {
+      const rect = node.getBoundingClientRect();
+      return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    });
+    const board = el('ground').querySelector<HTMLElement>('cg-board');
+    const title = marker?.getAttribute('aria-label') ?? '';
+    if (board && board.title !== title) board.title = title;
+  }, { signal: mountAbort.signal });
+  el('ground').addEventListener('pointerleave', () => el('ground').querySelector('cg-board')?.removeAttribute('title'), { signal: mountAbort.signal });
   el('quickCopyFen').addEventListener('click', () => { copyFen(); flashCopied(el('quickCopyFen')); });
   el('quickCopyPgn').addEventListener('click', () => { copyPgn(); flashCopied(el('quickCopyPgn')); });
   el('playFromHere').addEventListener('click', () => {
@@ -4958,7 +4970,10 @@ function wireEvents() {
   // "Load" goes to the one paste box when it is on screen (empty game); otherwise it opens the full panel.
   el('openPosition').addEventListener('click', () => {
     const quick = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]');
-    if (quick && quick.getClientRects().length && !positionTools.open) {
+    if (quick && !positionTools.open) {
+      // Explorer is a Moves subview that conceals the list, even on an empty game.
+      (el('openingExplorer') as HTMLDetailsElement).open = false;
+      setView(el('movesTab') as HTMLButtonElement);
       quick.focus({ preventScroll: true });
       quick.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       return;
@@ -5295,7 +5310,11 @@ function wireEvents() {
   el('openingComparison').addEventListener('toggle', renderExplorerComparison);
   el('explorerRating').addEventListener('change', renderExplorerComparison);
   el('importGames').addEventListener('click', () => { void runPgnTask(importGames); });
+  el('collectionImport').addEventListener('toggle', () => {
+    if (!(el('collectionImport') as HTMLDetailsElement).open) el('confirmPgnDbName').hidden = true;
+  });
   el('newPgnCollection').addEventListener('click', () => {
+    el('confirmPgnDbName').hidden = true;
     activePgnCollectionId = '';
     renderPgnDatabaseCollections('');
     inputEl('pgnDbName').value = '';
@@ -5349,8 +5368,15 @@ function wireEvents() {
     void runPgnTask(deleteSelectedPgnCollection);
   });
   el('renamePgnDb').addEventListener('click', () => {
-    void runPgnTask(renameSelectedPgnCollection);
+    if (!selectedPgnCollectionId()) {
+      el('pgnDbInfo').textContent = 'Choose a saved PGN collection to rename.';
+      return;
+    }
+    (el('collectionImport') as HTMLDetailsElement).open = true;
+    el('confirmPgnDbName').hidden = false;
+    inputEl('pgnDbName').focus();
   });
+  el('confirmPgnDbName').addEventListener('click', () => { void runPgnTask(renameSelectedPgnCollection); });
   el('duplicatePgnDb').addEventListener('click', () => {
     void runPgnTask(duplicateSelectedPgnCollection);
   });
@@ -5371,7 +5397,7 @@ function wireEvents() {
     void searchCurrentPositionInPgnDatabase();
   });
   inputEl('pgnDbName').addEventListener('keydown', (event) => {
-    if ((event as KeyboardEvent).key === 'Enter') void runPgnTask(saveCurrentPgnCollection);
+    if ((event as KeyboardEvent).key === 'Enter') void runPgnTask(el('confirmPgnDbName').hidden ? saveCurrentPgnCollection : renameSelectedPgnCollection);
   });
   inputEl('importGamesInput').addEventListener('input', () => {
     activePgnCollectionId = '';
@@ -5394,7 +5420,8 @@ function wireEvents() {
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = (event: KeyboardEvent) => {
     if (retry) return;
-    if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
+    // The results scroller owns arrow keys; scrolling must never change the game.
+    if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, #engineSummaries, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
     if (event.key === 'ArrowLeft') {
       tree.back();
       afterNavigation();

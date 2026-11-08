@@ -58,32 +58,34 @@ test('a shared best move is one arrow that names every backing engine colour', (
   assert.equal(candidates.find((c) => c.uci === 'c3a4').shared, undefined);
   const marker = sharedArrowMarkerSvg(['Lc0', 'SF Lite']);
   assert.match(marker, /#7a4fd6/);
-  assert.match(marker, /#1f5fcf/);
-  assert.equal((marker.match(/<rect /g) ?? []).length, 2);
-  assert.match(marker, /Shared move: Lc0 Small \+ Stockfish Lite/);
-  assert.match(marker, />L0<\/text>/);
-  assert.match(marker, />SF<\/text>/);
+  assert.equal((marker.match(/<rect /g) ?? []).length, 1);
+  assert.match(marker, /aria-label="2 engines share this move: Lc0 Small, Stockfish Lite"/);
+  assert.match(marker, /<title>2 engines share this move: Lc0 Small, Stockfish Lite<\/title>/);
+  assert.match(marker, />2<\/text>/);
+  assert.match(marker, /font-size="22"/);
+  assert.match(marker, /pointer-events:none/, 'markers must not intercept chess-square taps');
+  assert.match(marker, /tabindex="0"/, 'engine attribution is still available to keyboard users');
   assert.doesNotMatch(marker, /translate\(/, 'Chessground custom viewBox already aligns the SVG with square bounds');
   assert.equal(analysisArrowCandidates([lc0, lc0, sf], false)[0].shared.length, 2, 'duplicate results never double-count a backer');
 });
 
-test('shared-move identity badges stay inside the destination square in either orientation', () => {
+test('a single shared-move count stays clear of the piece centre in either orientation', () => {
   const engines = ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess', 'Reckless', 'Viridithas', 'Stormphrax', '<unsafe&>'];
   for (const corner of [[1, -1], [-1, -1]]) {
     const marker = sharedArrowMarkerSvg(engines.slice(0, 4), corner);
     const badges = [...marker.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.]+)" height="([\d.]+)"/g)].map(([, ...values]) => values.map(Number));
-    assert.equal(badges.length, 4);
+    assert.equal(badges.length, 1);
     // Include the 2px outline in the bounds; the custom viewBox makes these square-local.
     assert.ok(badges.every(([x, y, w, h]) => x >= 1 && x + w <= 99 && y >= 1 && y + h <= 99));
     assert.ok(badges.every(([x, , w]) => corner[0] > 0 ? x + w / 2 > 50 : x + w / 2 < 50));
     assert.ok(badges.every(([, y, , h]) => y + h < 50));
   }
   const all = sharedArrowMarkerSvg(engines);
-  assert.equal((all.match(/<rect /g) ?? []).length, 4);
-  assert.match(all, />\+5<\/text>/);
+  assert.equal((all.match(/<rect /g) ?? []).length, 1);
+  assert.match(all, />8<\/text>/);
   const many = sharedArrowMarkerSvg(Array.from({ length: 20 }, (_, i) => `Engine ${i}`));
-  assert.equal((many.match(/<rect /g) ?? []).length, 4);
-  assert.match(many, />\+17<\/text>/);
+  assert.equal((many.match(/<rect /g) ?? []).length, 1);
+  assert.match(many, />20<\/text>/);
   assert.match(many, /Engine 19/, 'all contributors remain in the full title');
   assert.match(all, /&lt;unsafe&amp;&gt;/);
   assert.doesNotMatch(all, /<unsafe/);
@@ -191,7 +193,8 @@ test('Black-to-move FEN history leaves the White ply empty and escapes imported 
   assert.doesNotMatch(html, /<img/);
   const empty = analysisMoveMarkup(new GameTree().root, tree.current);
   assert.match(empty, /No moves yet/);
-  assert.match(empty, /<textarea[^>]+data-quick-pgn/);
+  assert.match(empty, /<label for="quickPgn">PGN game or FEN position<\/label>/);
+  assert.match(empty, /<textarea[^>]+id="quickPgn"[^>]+data-quick-pgn/);
   assert.match(empty, /<button[^>]+data-quick-pgn-load>Load<\/button>/);
   assert.match(empty, /PGN or FEN/);
   assert.ok(looksLikeFen('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'));

@@ -81,8 +81,10 @@ onMount(() => {
       <button id="navForward" type="button" title="Forward (Right)" aria-label="Go forward one move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 8 7-8 7" /></svg></button>
       <button id="navEnd" type="button" title="End (Down)" aria-label="Go to last move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg></button>
     </div>
-    <div class="board-tools" aria-label="Board tools">
-      <button id="flip" class="tool-button icon-only" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg></button>
+    <div id="boardToolDisclosure" class="board-tool-disclosure">
+    <button id="boardToolsButton" class="tool-button board-tools-trigger" type="button" aria-label="Board tools" title="Board tools" aria-controls="boardTools" aria-expanded="false">•••</button>
+    <div id="boardTools" class="board-tools" role="group" aria-label="Board tools">
+      <button id="flip" class="tool-button icon-only" type="button" title="Flip board" aria-label="Flip board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4m-4 4 4-4 4 4m4-4v16m-4-4 4 4 4-4" /></svg><span class="mobile-tool-label">Flip board</span></button>
       <div id="copyTools" class="copy-tools">
       <button id="copyMenuButton" class="tool-button" type="button" aria-expanded="false" aria-controls="copyMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5H4v12h4"/></svg>Copy<svg class="copy-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
       <div id="copyMenu" class="copy-menu" role="group" aria-label="Copy position or game" hidden>
@@ -93,6 +95,7 @@ onMount(() => {
       </div>
       <button id="playFromHere" class="tool-button" type="button" title="Continue this position against Maia3 or an engine" aria-describedby="playFromHereReason">Play from here</button>
       <button id="openPosition" class="tool-button position-toggle" type="button" aria-controls="positionTools" aria-expanded="false" title="Load a game or position (PGN or FEN)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4-4 4 4 4-4M5 19h14"/></svg><span class="tool-label">Load</span></button>
+    </div>
     </div>
     </div>
     <p id="playFromHereReason" class="small" hidden></p>
@@ -122,11 +125,12 @@ onMount(() => {
     <header class="analysis-overview">
       <div class="position-status">
         <span id="analysisStatus" class="analysis-status" data-state="loading" role="status">Loading…</span>
+        <button id="analyze" class="primary run-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span id="analyzeLabel">Analyze</span></button>
+        <button id="stop" class="primary run-action stop-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>Stop<span id="stopProgress" class="stop-progress"></span></button>
       </div>
       <div class="analyze-actions">
         <button id="manageEngines" class="manage-engines" type="button" aria-label="Manage engines" title="Manage engines: models, search budget, arrows" aria-haspopup="dialog" aria-controls="engineManager"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span class="manage-label">Engines</span><span id="engineCount" class="engine-count">2</span></button>
-        <button id="analyze" class="primary run-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span id="analyzeLabel">Analyze</span></button>
-        <button id="stop" class="primary run-action stop-action" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>Stop<span id="stopProgress" class="stop-progress"></span></button>
+        <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">more available</small></span></button>
       </div>
     </header>
     <div id="message" aria-live="polite">Loading model…</div>
@@ -134,7 +138,6 @@ onMount(() => {
     <div id="downloadProgress" class="model-load-progress" hidden></div>
     <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
     <div id="analysisContent" class="analysis-content" data-view="moves">
-    <button id="addEngine" class="add-engine-inline" type="button"><span class="add-engine-plus" aria-hidden="true">+</span><span class="add-engine-text"><strong>Add engine</strong><small id="addEngineHint">more available</small></span></button>
     <div class="workbench-tabs" role="tablist" aria-label="Analysis views">
       <button id="movesTab" type="button" role="tab" aria-selected="true" aria-controls="historyPanel" data-view="moves">Moves</button>
       <button id="enginesTab" type="button" role="tab" aria-selected="false" aria-controls="enginesPanel" tabindex="-1" data-view="engines">Engines<span id="enginesTabCount" class="engine-count">2</span></button>
@@ -145,7 +148,9 @@ onMount(() => {
     <!-- DOM order keeps the mobile active panel after its tab; desktop CSS retains engine-first layout. -->
     <div id="enginesPanel" class="engine-strip" role="tabpanel" aria-labelledby="enginesTab" tabindex="-1">
       <div id="comparisonInsight" class="comparison-insight" aria-label="Engine comparison insight" hidden></div>
-      <div id="engineSummaries" class="engine-summaries" aria-label="Engines and their best lines"></div>
+      <!-- Scrollable results must be reachable without a pointer. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div id="engineSummaries" class="engine-summaries" tabindex="0" role="region" aria-label="Engines and their best lines; scroll for more engines"></div>
       <div id="engineLegend" class="legend" hidden></div>
     </div>
     <div id="historyPanel" class="history-panel" role="tabpanel" aria-labelledby="movesTab" tabindex="0">
@@ -160,7 +165,7 @@ onMount(() => {
               <div class="collection-actions" role="group" aria-label="Collection actions">
                 <button id="loadPgnDb" type="button">Load selected collection</button>
                 <button id="newPgnCollection" type="button">New collection</button>
-                <button id="renamePgnDb" type="button">Rename to name below</button>
+                <button id="renamePgnDb" type="button">Rename collection…</button>
                 <button id="duplicatePgnDb" type="button">Duplicate collection</button>
                 <button id="exportPgnDbCollection" type="button">Download selected PGN</button>
                 <button id="exportPgnDbSelected" type="button">Back up selected collection (JSON)</button>
@@ -170,7 +175,7 @@ onMount(() => {
               </div>
             </details>
           </div>
-          <div class="field collection-name"><label for="pgnDbName">Collection name</label><input id="pgnDbName" type="text" maxlength="80" autocomplete="off" placeholder="My games" /></div>
+          <div class="field collection-name"><label for="pgnDbName">Collection name</label><input id="pgnDbName" type="text" maxlength="80" autocomplete="off" placeholder="My games" /><button id="confirmPgnDbName" type="button" hidden>Save collection name</button></div>
           <p id="pgnDbInfo" class="small" role="status">Checking local storage…</p>
           <p id="openingSummary" class="small">Import a PGN batch to explore it from the board position.</p>
           <table id="opening" class="opening"><thead><tr><th scope="col">Move</th><th scope="col" class="num">Games</th><th scope="col">Results</th></tr></thead><tbody></tbody></table>
@@ -251,7 +256,7 @@ onMount(() => {
           </div>
           <div id="criticalEngineProgress" class="critical-engine-progress"></div>
           <p id="criticalSource" class="review-hint"></p>
-          <p class="review-hint">Engine evaluations favor White when positive. Stockfish pawns and Lc0’s Q-mapped pawns use different scales. Different top moves do not by themselves establish an error. Maia predicts human choices, not accuracy.</p>
+          <p class="review-hint">Engine evaluations favor White when positive. Lc0 converts its expected score to pawns; that scale differs from Stockfish’s evaluation. Different top moves do not by themselves establish an error. Maia predicts human choices, not accuracy.</p>
           <div id="criticalReport"></div>
         </section>
       </div>
@@ -381,7 +386,8 @@ onMount(() => {
   .analysis-workspace{
     --muted:color-mix(in srgb, var(--ink) 78%, var(--panel));
     --muted-2:var(--muted); --text-soft:var(--muted);
-    --border-input:color-mix(in srgb, var(--ink) 38%, var(--panel));
+    --border-input:color-mix(in srgb, var(--ink) 52%, var(--panel));
+    --border-input-hover:var(--border-input);
     --engine-color:var(--accent); /* overridden inline per engine row */
     --analysis-header-height:64px; /* measured locally by the page controller */
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
@@ -397,7 +403,7 @@ onMount(() => {
   /* Desktop: the panel shares the board column's baseline (board + toolbar), so there is no dead block under it. */
   .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:calc(var(--board-size) + 98px); max-height:none; overflow:hidden}
   .analysis-workspace .app-sidebar>*{flex:0 0 auto}
-  /* Engine blocks shrink (and scroll) before the move list drops below ~5 rows. */
+  /* Engine results scroll independently before the game loses its twelve visible rows. */
   .analysis-workspace .engine-strip{order:0; flex:0 1 auto; min-height:0}
   :global(.analysis-workspace .sr-only){position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0}
   .board-shell{position:relative; min-width:0}
@@ -411,6 +417,9 @@ onMount(() => {
   .analysis-workspace .section-block>summary::before{font-size:12px}
   /* Tools stay secondary to the wide move-navigation buttons. */
   .board-tools{display:flex; align-items:stretch; gap:6px; flex:0 0 auto}
+  .board-tools:global([hidden]){display:none}
+  .board-tool-disclosure{display:contents}
+  .tool-button.board-tools-trigger, .mobile-tool-label{display:none}
   .tool-button{display:inline-flex; align-items:center; justify-content:center; gap:6px; height:100%; min-height:0; padding:0 11px; border-radius:7px; border:1px solid var(--border-input); background:transparent; color:var(--ink); font:600 13px var(--sans); white-space:nowrap}
   .tool-button:hover:not(:disabled){background:var(--panel-2); color:var(--ink)}
   .tool-button.icon-only{width:40px; padding:0}
@@ -427,7 +436,7 @@ onMount(() => {
   .copy-button:global([data-copied=true]) .copied-icon{display:block}
   /* Copied: check icon + accent outline in place (no width change); the live message line says what was copied. */
   .position-toggle:global([aria-expanded=true]){border-color:var(--accent)}
-  .tool-button svg, .analyze-actions svg{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round}
+  .tool-button svg, .analysis-overview svg{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round}
   .nav svg{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2.3; stroke-linecap:round; stroke-linejoin:round}
   .analysis-workspace :global(button:focus-visible), .analysis-workspace :global(summary:focus-visible), .analysis-workspace :global(select:focus-visible), .analysis-workspace :global(input:focus-visible){outline:2px solid var(--accent); outline-offset:2px}
   .analysis-workspace .app-sidebar>.analysis-content{display:flex; flex-direction:column; flex:1 1 auto; min-width:0; min-height:0}
@@ -575,6 +584,7 @@ onMount(() => {
     background:var(--panel-inset); color:var(--text-soft);
     font-size:12px; line-height:1.5;
   }
+  .app-sidebar #message:empty{display:none}
   .app-sidebar :global(#message[data-routine=true]){position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%)}
   .app-sidebar :global(.model-load-progress){margin:6px 12px 0}
   /* Per-engine progress lives in the summary rows (meter + stats) and on the Stop button. */
@@ -691,8 +701,8 @@ onMount(() => {
   :global(.wdlbar .d){background:#b9b3a4}
   :global(.wdlbar .b){background:#3a3a3a}
   /* ── Right column, Lichess-shaped: header → engine strip → top lines → tabs → move list (fills the rest). ── */
-  .analysis-overview{display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
-  .position-status{display:flex; align-items:center; gap:10px; min-width:0}
+  .analysis-overview{display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
+  .position-status{display:flex; flex:0 0 auto; align-items:center; gap:10px; min-width:0}
   /* Quiet, neutral run state: text + glyph, no pill competing with the primary action. */
   .analysis-status{display:inline-flex; align-items:center; gap:5px; color:var(--muted); font:500 12.5px/1 var(--sans); white-space:nowrap}
   .analysis-status::before{content:''; width:6px; height:6px; flex:0 0 auto; border-radius:50%; background:currentColor; opacity:.7}
@@ -700,24 +710,24 @@ onMount(() => {
   :global(.analysis-status[data-state=running])::before{width:8px; height:8px; border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent); background:transparent; opacity:1; animation:analysis-spin .8s linear infinite}
   :global(.analysis-status[data-state=done])::before{content:'✓'; width:auto; height:auto; background:none; opacity:1; font-size:12px; font-weight:800}
   @keyframes -global-analysis-spin{to{transform:rotate(360deg)}}
-  .analyze-actions{display:flex; align-items:stretch; gap:8px; flex:0 0 auto}
-  .analyze-actions button{display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:38px; padding:0 13px; border-radius:8px; font-size:14px; white-space:nowrap}
+  .analyze-actions{display:flex; align-items:stretch; gap:8px; flex:0 0 auto; margin-left:auto}
+  .analysis-overview button{display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:38px; padding:0 9px; border-radius:8px; font-size:13px; white-space:nowrap}
   .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input)}
   .engine-count{display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:var(--panel-2); font:700 12px/1 var(--sans); font-variant-numeric:tabular-nums}
   .manage-engines:hover:not(:disabled){background:var(--panel); color:var(--ink)}
   /* Analyze / Stop is the one filled primary in every state. */
-  .run-action{min-width:108px; font-weight:650}
+  .run-action{min-width:0; font-weight:650}
   .run-action svg{fill:currentColor; stroke:none}
   #analyze:disabled{opacity:.55}
   /* Done: the primary action steps down to a quiet outlined "Re-analyze"; the ✓ Done label carries the state. */
-  .analysis-overview:global([data-status=done]) #analyze{background:transparent; color:var(--ink); border:1px solid var(--border-input); font-weight:600}
+  .analysis-overview:global([data-status=done]) #analyze{background:transparent; color:var(--muted); border:1px solid transparent; font-weight:500; padding-inline:4px}
   .analysis-overview:global([data-status=done]) #analyze:hover:not(:disabled){background:var(--panel-2); border-color:var(--accent)}
   .analysis-overview:global([data-status=done]) #analyze svg{display:none}
   .stop-action{position:relative; overflow:hidden; isolation:isolate; --progress:0%}
   .stop-action::before{content:''; position:absolute; inset:0 auto 0 0; width:var(--progress); background:#0000002e; z-index:-1; transition:width .2s}
   .stop-progress{font:600 12px var(--sans); font-variant-numeric:tabular-nums; opacity:.85}
   .stop-progress:empty{display:none}
-  .analyze-actions #stop:disabled, .analyze-actions:has(#stop:not(:disabled)) #analyze{display:none}
+  .analysis-overview #stop:disabled, .analysis-overview:has(#stop:not(:disabled)) #analyze{display:none}
 
   /* Engine strip */
   .engine-strip{display:flex; flex-direction:column; min-width:0}
@@ -727,14 +737,13 @@ onMount(() => {
   :global(.comparison-insight[hidden]){display:none}
   :global(.insight-action){display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:2px 12px; width:100%; min-height:48px; padding:6px 12px; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left; line-height:1.3}
   :global(.insight-action:hover:not(:disabled)){background:var(--result-highlight)}
-  :global(.insight-headline){display:flex; align-items:center; gap:7px; font:650 14px/1.3 var(--sans)}
+  :global(.insight-headline){display:flex; align-items:center; gap:7px; width:100%; font:650 17px/1.3 var(--sans)}
   :global(.insight-headline strong){font-weight:650}
   :global(.insight-groups){display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; width:100%; margin-top:3px}
   :global(.insight-group){display:inline-flex; align-items:center; gap:4px; font:600 13px var(--sans)}
   :global(.insight-group .engine-avatar){width:22px; height:20px; flex-basis:22px; font-size:11px}
   :global(.insight-spread){font:13px/1.3 var(--sans); font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap}
-  :global(.insight-spread[data-level=apart]){color:var(--ink)}
-  :global(.insight-spread[data-level=wide]){color:var(--warn); font-weight:650}
+  :global(.insight-spread[data-level=wide]){color:var(--muted)}
   /* One block per engine: header row, then its principal variation indented under the name. */
   :global(.engine-card){position:relative; border-bottom:1px solid var(--rule)}
   :global(.engine-card.arrow-focus){background:var(--result-highlight)}
@@ -749,7 +758,6 @@ onMount(() => {
   :global(.engine-summary-score){display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; min-width:62px; font:700 17px/1 var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em; text-align:right; color:var(--ink)}
   :global(.engine-summary .compare-move){height:28px; min-height:0; padding:0 4px; border:0; border-radius:4px; background:color-mix(in srgb, var(--engine-color) 15%, var(--panel)); font:750 15px var(--sans); text-align:center; color:var(--ink)}
   :global(.engine-summary .compare-move:hover){background:color-mix(in srgb, var(--engine-color) 28%, var(--panel)); text-decoration:underline; text-underline-offset:3px}
-  :global(.agreement-mark){margin-right:4px; font-size:12px}
   :global(.compare-move-empty){text-align:center; color:var(--muted)}
   :global(.engine-gear){display:grid; place-items:center; width:30px; height:30px; min-height:0; padding:0; border:0; border-radius:6px; background:transparent}
   :global(.engine-gear:hover:not(:disabled)){background:var(--panel-2)}
@@ -759,8 +767,9 @@ onMount(() => {
   :global(.engine-summary-meter.indeterminate){width:100%; opacity:.55; animation:analysis-pulse 1.4s ease-in-out infinite}
   @keyframes -global-analysis-pulse{50%{opacity:.15}}
   :global(.engine-avatar){display:inline-grid; place-items:center; width:22px; height:22px; flex:0 0 22px; border-radius:5px; background:var(--engine-color); color:#fff; font:700 10.5px/1 var(--mono); letter-spacing:0; box-shadow:inset 0 0 0 1px #ffffff26}
-  /* A real outlined button: multi-engine comparison is the product's differentiator. */
-  .add-engine-inline{order:1; flex:0 0 auto; display:flex; align-items:center; justify-content:center; gap:8px; width:auto; min-height:36px; margin:8px 10px; padding:0 12px; border:1px solid var(--border-input); border-radius:8px; background:transparent; color:var(--ink); text-align:left}
+  /* The engine entry point belongs at the header, not between results and the game. */
+  .analysis-overview .add-engine-inline{flex:0 0 auto; gap:5px; border:1px solid var(--accent); background:var(--accent-soft); color:var(--ink); text-align:left}
+  #addEngineHint{display:none}
   .add-engine-inline:hover:not(:disabled){border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
   .add-engine-plus{display:inline-grid; place-items:center; width:18px; height:18px; flex:0 0 18px; color:var(--accent); font:700 19px/1 var(--sans)}
   .add-engine-text{display:flex; align-items:baseline; gap:6px; min-width:0}
@@ -777,10 +786,10 @@ onMount(() => {
   :global(.line-play:hover:not(:disabled)){background:transparent; color:var(--ink)}
   :global(.line-rank){flex:0 0 12px; font:600 13px var(--mono); color:var(--muted); text-align:center}
   :global(.engine-lines .score){flex:0 0 50px; font:700 13.5px var(--mono); font-variant-numeric:tabular-nums; color:var(--ink); text-align:right}
-  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; align-content:flex-start; height:30px; overflow:hidden; font:13.5px/1.5 var(--sans); color:var(--ink)}
+  :global(.engine-lines .pv){flex:1 1 auto; min-width:0; display:flex; flex-wrap:wrap; align-content:flex-start; height:32px; overflow:hidden; font:14px/1.6 var(--sans); color:var(--ink)}
   :global(.pv-ellipsis){flex:0 0 12px; visibility:hidden; color:var(--muted)}
   :global(.pv-clipped .pv-ellipsis){visibility:visible}
-  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:30px; padding:2px 2px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
+  :global(.engine-lines .pv-move){flex:0 0 auto; min-height:32px; padding:2px 2px; border:0; border-radius:4px; background:transparent; color:var(--ink); font:inherit; white-space:nowrap}
   :global(.engine-lines .pv-move:hover){background:var(--selection-bg)}
   :global(.line-actions){display:flex; align-items:center}
   :global(.line-preview){display:grid; place-items:center; width:30px; min-height:32px; padding:2px; border:0; background:transparent; color:var(--muted)}
@@ -788,7 +797,7 @@ onMount(() => {
   :global(.line-preview:hover){background:var(--panel-2); color:var(--ink)}
   :global(.engine-lines .pv-move:first-child){font-weight:700}
   :global(.engine-lines .pv-num){color:var(--muted); font-weight:400; font-variant-numeric:tabular-nums}
-  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:40px; min-height:32px; padding:0 5px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:600 13px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
+  :global(.line-toggle){display:inline-flex; align-items:center; justify-content:flex-end; gap:2px; min-width:40px; min-height:32px; margin:0 5px; padding:0 6px; border:1px solid var(--border-input); border-radius:5px; background:var(--panel-inset); color:var(--ink); font:600 12px var(--sans); font-variant-numeric:tabular-nums; white-space:nowrap}
   :global(.line-toggle:hover:not(:disabled)){background:var(--panel-2); color:var(--ink)}
   :global(.line-toggle svg){width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
   :global(.line-toggle[aria-expanded=true] svg){transform:rotate(180deg)}
@@ -809,6 +818,10 @@ onMount(() => {
   .tab-badge{padding:1px 4px; border:1px solid var(--accent-tint-border); border-radius:3px; color:var(--accent-soft-text); font-size:11px; font-weight:600}
   .history-panel, .analysis-workspace .comparison-panel, .analysis-workspace .human-panel, .analysis-workspace .review-panel{order:3; flex:1 1 0; min-height:0}
   .history-panel{display:none; flex-direction:column; min-width:0; padding:0; overflow:hidden}
+  @media (min-width:901px){
+    .analysis-workspace .analysis-content>.history-panel:has(:global(.move-pair)){flex-shrink:0; min-height:clamp(144px, calc(var(--board-size) - 326px), 374px)}
+    .history-panel:has(.opening-explorer[open]){min-height:0!important}
+  }
   .opening-explorer{flex:0 0 auto; border-top:1px solid var(--rule); min-height:0}
   .opening-explorer>summary{padding:10px 12px; color:var(--ink); font-weight:600; cursor:pointer}
   .opening-explorer>summary span{font-weight:400; font-size:12px; color:var(--muted); margin-left:8px}
@@ -826,7 +839,9 @@ onMount(() => {
   .collection-menu[open]{flex-basis:100%}
   .collection-actions{display:grid; grid-template-columns:1fr 1fr; gap:4px; padding-top:6px}
   .collection-actions button{font-size:13px; min-height:40px; text-align:left; padding:6px 8px}
-  .collection-name{margin-top:10px}
+  .collection-name{display:none; margin-top:10px}
+  .explorer-body:has(#collectionImport[open]) .collection-name{display:block}
+  #confirmPgnDbName{margin-top:8px}
   .collection-import, .explorer-comparison{margin-top:12px; border-top:1px solid var(--rule); padding-top:10px}
   .collection-import>summary, .explorer-comparison>summary{cursor:pointer; font-weight:600; color:var(--ink)}
   .collection-import textarea{width:100%; min-height:100px; margin:6px 0}
@@ -861,7 +876,9 @@ onMount(() => {
   :global(.analysis-workspace[data-retrying]) .analysis-overview, :global(.analysis-workspace[data-retrying]) .add-engine-inline, :global(.analysis-workspace[data-retrying]) #message{display:none}
   :global(.analysis-workspace[data-retrying]) .evalbar, :global(.analysis-workspace[data-retrying]) #evalSourceButton{visibility:hidden}
   :global(.analysis-workspace[data-retrying]) .board-tools>:not(#flip){display:none}
-  :global(.analysis-workspace[data-retrying]) .review-panel{max-height:none}
+  :global(.analysis-workspace[data-retrying]) .review-panel{flex:0 0 auto; min-height:0; max-height:none}
+  :global(.analysis-workspace[data-retrying]) .app-sidebar{height:auto}
+  :global(.analysis-workspace[data-retrying]) #retryActive{margin-bottom:0; padding-bottom:0; border-bottom:0}
   .review-settings{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px}
   .review-settings select{width:100%; min-width:0; font-size:13px; min-height:36px; padding:4px 6px}
   .review-settings label{font-size:13px; color:var(--muted); margin-bottom:4px; display:block}
@@ -932,26 +949,31 @@ onMount(() => {
   .opening-name{flex:0 0 auto; margin:0; padding:7px 12px; border-bottom:1px solid var(--rule); color:var(--muted); font:13px/1.4 var(--sans)}
   .opening-name[hidden]{display:none}
   .opening-name :global(strong){margin-right:6px; color:var(--ink); font:600 12px var(--mono)}
-  /* Move list: compact SAN columns; remaining width is quiet, not a gap between moves. */
+  /* Narrow numbers, then two equal SAN columns across the entire panel. */
   .history-panel :global(.movelist){flex:1 1 auto; min-height:0; max-height:none}
   :global(.movelist){font:14px/1.4 var(--sans); overflow:auto; scroll-snap-type:y proximity; background:var(--panel); scroll-padding:8px; overscroll-behavior:contain; scrollbar-width:thin; padding:0}
-  :global(.move-pair){display:grid; grid-template-columns:36px minmax(90px,110px) minmax(90px,110px); align-items:stretch; scroll-snap-align:start}
-  :global(.move-pair:nth-child(even) .mv){background:color-mix(in srgb, var(--ink) 3%, var(--panel))}
+  :global(.move-pair){display:grid; grid-template-columns:36px repeat(2,minmax(0,1fr)); align-items:stretch; scroll-snap-align:start}
+  :global(.move-pair:nth-child(even)){background:color-mix(in srgb, var(--ink) 6%, var(--panel))}
+  :global(.move-pair:has(.mv.current)){background:color-mix(in srgb, var(--accent) 14%, var(--panel))}
   :global(.move-number), :global(.missing-ply){display:grid; place-items:center; color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; background:var(--panel-inset); border-right:1px solid var(--rule-soft)}
   :global(.missing-ply){background:transparent; border:0}
   :global(.history-empty){display:grid; gap:10px; margin:0; padding:18px 16px; font:13.5px/1.55 var(--sans); color:var(--muted)}
   :global(.history-empty p){margin:0}
+  :global(.history-empty label){color:var(--ink); font-weight:600}
+  .analysis-workspace .app-sidebar:has(:global(.history-empty)){height:auto}
+  .analysis-workspace .analysis-content>.history-panel:has(:global(.history-empty)){flex:0 0 auto; min-height:0}
+  .history-panel :global(.movelist:has(.history-empty)){flex:0 0 auto}
   :global(.history-empty strong){color:var(--ink); font-weight:650}
   :global(.quick-pgn){width:100%; min-height:72px; resize:vertical; padding:8px 10px; border:1px solid var(--border-input); border-radius:7px; background:var(--panel-inset); color:var(--ink); font:13px/1.45 var(--mono)}
   :global(.quick-pgn::placeholder){font-family:var(--sans); color:var(--muted)}
   :global(.quick-pgn-actions){display:flex; align-items:center; gap:14px}
   :global(.quick-pgn-hint){font-size:13px; color:var(--muted)}
-  :global(.quick-pgn-load){min-height:32px; padding:0 14px; border:1px solid var(--border-input-hover); border-radius:7px; background:var(--panel-2); color:var(--ink); font:600 13px var(--sans)}
+  :global(.quick-pgn-load){min-height:44px; padding:0 18px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:var(--on-accent); font:650 14px var(--sans)}
   /* Rare long SAN + large eval pairs wrap the score rather than spilling into the next ply. */
   :global(.movelist .mv){display:flex; flex-wrap:wrap; align-items:center; align-content:center; justify-content:space-between; gap:0 5px; cursor:pointer; min-height:24px; padding:0 9px; border:0; border-radius:0; text-align:left; background:transparent; color:var(--ink); font:inherit}
   :global(.movelist .mv:hover:not(.current)){background:var(--accent-soft) !important; color:var(--ink)}
-  /* The current move is unmistakable (Lichess-strength): tinted cell plus an edge marker. */
-  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 28%, var(--panel)) !important; color:var(--ink); font-weight:700}
+  /* Fill plus a complete inset outline: selection never depends on hue or a left stripe. */
+  :global(.movelist .mv.current){background:color-mix(in srgb, var(--accent) 42%, var(--panel)) !important; box-shadow:inset 0 0 0 2px var(--border-input); color:var(--ink); font-weight:700}
   :global(.movelist .mv-eval){margin-left:auto; white-space:nowrap; font:13px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   @media (max-width:900px){
@@ -963,11 +985,11 @@ onMount(() => {
     .analysis-workspace .app-sidebar>*{grid-column:1 / -1}
     .board-toolbar{height:44px}
     /* Full PV cards have their own mobile view; Add engine stays beside the run control. */
-    .analysis-overview, .analyze-actions, .analysis-workspace .app-sidebar>.analysis-content{display:contents}
+    .analysis-overview, .analyze-actions, .position-status, .analysis-workspace .app-sidebar>.analysis-content{display:contents}
     .analysis-workspace .engine-strip{display:none; grid-column:1 / -1; grid-row:calc(3 + var(--restore-row))}
     .analysis-workspace :global(.analysis-content[data-view=engines] > .engine-strip){display:flex}
-    .position-status{grid-column:1; grid-row:calc(1 + var(--restore-row)); min-height:44px; padding-left:7px}
-    .analyze-actions button{grid-row:calc(1 + var(--restore-row)); align-self:center; min-height:36px; margin-block:4px}
+    .analysis-status{grid-column:1; grid-row:calc(1 + var(--restore-row)); min-height:44px; padding-left:7px}
+    .analysis-overview button{grid-row:calc(1 + var(--restore-row)); align-self:center; min-height:44px; margin-block:4px}
     .manage-engines{grid-column:2}
     .manage-label, .manage-engines .engine-count{display:none}
     .run-action{grid-column:4; margin-right:5px}
@@ -1010,17 +1032,24 @@ onMount(() => {
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
     .evalbar .mid{top:0; bottom:0; left:50%; width:2px; height:auto}
     .board-panel :global(#ground){border-radius:3px}
-    .board-toolbar{display:grid; grid-template-columns:1fr; height:auto; gap:8px; margin:6px 0 0}
+    .board-toolbar{display:grid; grid-template-columns:minmax(0,1fr) 48px; height:44px; gap:6px; margin:6px 0 0}
     .nav{gap:4px; height:44px}
     .nav button{min-width:0; padding:4px}
-    .board-tools{display:grid; grid-template-columns:44px minmax(0,1fr) auto minmax(0,1fr); gap:6px; height:44px}
+    .board-tool-disclosure{display:block; position:relative}
+    .tool-button.board-tools-trigger{display:flex; width:48px!important; height:44px; font-size:18px!important; letter-spacing:1px}
+    .mobile-tool-label{display:inline}
+    .board-tools{position:absolute; z-index:25; bottom:calc(100% + 6px); right:0; display:grid; grid-template-columns:1fr; gap:3px; width:230px; height:auto; padding:6px; border:1px solid var(--border-input); border-radius:8px; background:var(--panel); box-shadow:0 8px 24px #0004}
+    .board-tools .tool-button{justify-content:flex-start; height:auto; min-height:44px; width:100%; border-color:transparent; font-size:14px}
+    .board-tools .copy-tools{display:block}
+    .board-tools .copy-menu{position:static; width:auto; margin-left:14px; box-shadow:none; border:0; border-radius:0; border-top:1px solid var(--rule)}
+    .board-tools #openPosition .tool-label::after{content:' game or position'}
     .tool-button, .tool-button.icon-only{width:auto; padding:0 8px; gap:5px; font-size:12.5px}
     .copy-button{min-width:0}
     .copy-button svg{width:14px; height:14px; flex-basis:14px}
     .position-status{min-width:0}
     .analysis-status{gap:4px; font-size:12px; color:var(--muted)}
-    .analyze-actions button{min-height:36px; padding:0 8px; font-size:13px; gap:5px}
-    .run-action{min-width:90px}
+    .analysis-overview button{min-height:44px; padding:0 8px; font-size:13px; gap:5px}
+    .run-action{min-width:0}
     .engine-count{min-width:18px; height:18px; padding:0 4px}
     .add-engine-plus{width:14px; flex-basis:14px}
     .add-engine-text strong{font-size:13px}
@@ -1029,12 +1058,14 @@ onMount(() => {
     /* Four recent pairs fit beside the navigation without a second page scroll. */
     .history-panel :global(.movelist:has(.move-pair)){max-height:120px}
     :global(.movelist .mv){min-height:30px}
-    :global(.move-pair){grid-template-columns:32px minmax(90px,110px) minmax(90px,110px)}
+    :global(.move-pair){grid-template-columns:32px repeat(2,minmax(0,1fr))}
     .app-sidebar #message{margin:4px 10px}
     :global(.analysis-workspace #ground coords){font-size:11px}
     :global(.insight-action){min-height:44px; padding:6px 10px; gap:3px}
-    :global(.insight-headline){font-size:14px}
+    :global(.insight-headline){font-size:16px}
     :global(.insight-spread){font-size:13px}
+    /* The following engine rows already identify each move's supporters. */
+    :global(.insight-groups){display:none}
     :global(.engine-summary){grid-template-columns:minmax(0,1fr) auto 56px 36px; gap:5px; min-height:40px; padding:2px 0 0 7px}
     :global(.engine-summary-name){min-height:38px; gap:7px}
     :global(.engine-summary-text){display:grid; gap:2px}
@@ -1043,7 +1074,8 @@ onMount(() => {
     :global(.engine-summary-score){min-width:56px; font-size:16px; gap:4px}
     :global(.engine-gear){width:36px; height:40px}
     .workbench-tabs{padding:0 2px; gap:0}
-    .workbench-tabs [role=tab]{flex:1 1 auto; justify-content:center; padding:0 6px; min-height:42px}
+    .workbench-tabs [role=tab]{flex:1 1 0; justify-content:center; padding:0 4px; min-height:44px; font-size:13px}
+    #enginesTab .engine-count{display:none}
     .review-panel{padding:10px}
     .review-settings select, .review-actions button, .review-exports button, .review-moments-heading button, :global(.review-critical button){min-height:40px}
     .tab-badge{display:none}
@@ -1069,15 +1101,18 @@ onMount(() => {
   :global(.analysis-workspace[data-retrying] #analysisRestoreNotice),
   :global(.analysis-workspace[data-retrying]) .nav{display:none!important}
   :global(.analysis-workspace[data-retrying]) .board-toolbar{display:flex; justify-content:flex-end; height:40px}
-  :global(.analysis-workspace[data-retrying]) .board-tools{display:flex; height:40px}
+  :global(.analysis-workspace[data-retrying]) .board-tool-disclosure{display:contents}
+  :global(.analysis-workspace[data-retrying]) #boardToolsButton{display:none}
+  :global(.analysis-workspace[data-retrying]) .board-tools{display:flex; position:static; width:auto; height:40px; padding:0; border:0; background:transparent; box-shadow:none}
   :global(.analysis-workspace[data-retrying]) #flip{width:40px}
+  :global(.analysis-workspace[data-retrying]) .mobile-tool-label{display:none}
   :global(.analysis-workspace[data-retrying]) .app-sidebar{display:flex; flex-direction:column}
   :global(.analysis-workspace[data-retrying]) #analysisContent{display:flex; flex-direction:column}
   :global(.analysis-workspace[data-retrying]) .workbench-tabs{flex:none}
   @media (max-width:360px){
     .eval-turn{font-size:11px}
     .eval-source:global([data-short]:not([data-short='']))::before{display:none}
-    .analyze-actions button{padding-inline:6px}
+    .analysis-overview button{padding-inline:6px}
     .workbench-tabs [role=tab]{font-size:12px; padding-inline:4px}
   }
   @media (prefers-reduced-motion: reduce){
