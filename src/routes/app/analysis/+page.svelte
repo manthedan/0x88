@@ -1087,7 +1087,7 @@ onMount(() => {
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
-    /* A 14px track has its own bracket/tap gutter. Reclaim the 22px increase
+    /* A 14px track has its own bracket/tap gutter. Reclaim the 23px increase
        from board width so navigation and engine lines keep their baseline. */
     .board-readout{min-height:32px; padding:0 0 4px; gap:4px}
     .eval-chip{min-width:0; max-width:calc(100% - 108px); gap:5px; padding:0 5px; min-height:28px}
@@ -1096,20 +1096,20 @@ onMount(() => {
     .eval-turn{font-size:12px; gap:4px}
     .eval-prefix{display:none}
     .board-wrap{grid-template-columns:1fr; gap:0}
-    .evalbar{width:auto; height:14px; margin:9px 12px; border:1px solid #8a8780; border-radius:3px}
-    .board-wrap>.board-shell{width:calc(100% - 22px); justify-self:center}
+    .evalbar{width:auto; height:14px; margin:9px 12px 10px; border:1px solid #8a8780; border-radius:3px}
+    .board-wrap>.board-shell{width:calc(100% - 23px); justify-self:center}
     .eval-end{display:block; position:absolute; top:50%; transform:translateY(-50%); color:var(--muted); font:650 10px/12px var(--sans)}
     .eval-end.w{left:-12px}
     .eval-end.b{right:-12px}
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
     .evalbar .mid{top:0; bottom:0; left:50%; width:2px; height:auto}
-    .eval-spread{left:var(--low); bottom:auto; top:-7px; width:calc(var(--high) - var(--low)); height:5px; border-width:3px 3px 0}
+    .eval-spread{left:var(--low); bottom:auto; top:-10px; width:calc(var(--high) - var(--low)); height:5px; border-width:3px 3px 0}
     .eval-range-label{display:none}
     .eval-ticks :global(.eval-tick){left:calc(var(--pos) + var(--hit-shift)); bottom:auto; top:50%; width:44px; height:32px; transform:translate(-50%,-50%)}
     .eval-ticks :global(.eval-tick-line){left:calc(50% - var(--hit-shift)); right:auto; top:50%; width:2px; height:10px; transform:translate(-50%,-50%); flex-direction:column}
     .eval-ticks :global(.chosen .eval-tick-line){width:3px; height:12px}
     .eval-ticks :global(.eval-tick-count){left:calc(50% - var(--hit-shift) + var(--badge-shift)); top:50%; transform:translate(-50%,-50%)}
-    .eval-ticks :global(.eval-chosen-mark){left:var(--pos); right:auto; bottom:auto; top:calc(100% + 3px); width:8px; height:3px; transform:translateX(-50%)}
+    .eval-ticks :global(.eval-chosen-mark){left:var(--pos); right:auto; bottom:auto; top:calc(100% + 5px); width:8px; height:3px; transform:translateX(-50%)}
     .eval-ticks :global(.eval-tick-tip){left:calc(50% + var(--tip-shift)); top:calc(100% + 4px); transform:translateX(-50%); max-width:220px}
     .eval-ticks :global(.eval-tick:hover .eval-tick-tip), .eval-ticks :global(.eval-tick:focus-visible .eval-tick-tip){display:none}
     .eval-details header button{width:44px; height:44px}
