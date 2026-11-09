@@ -2104,7 +2104,6 @@ function renderEvalBar() {
   patchAnalysisResults(tickContainer, evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile }));
   el('evalDetailsSummary').textContent = 'White’s view';
   if (bar) {
-    bar.style.setProperty('--details-top', `${Math.round((rect?.bottom ?? 0) + 6)}px`);
     details.style.setProperty('--details-top', `${Math.round((rect?.bottom ?? 0) + 6)}px`);
     details.style.setProperty('--details-left', `${Math.max(8, Math.round((rect?.right ?? 0) + 8))}px`);
   }

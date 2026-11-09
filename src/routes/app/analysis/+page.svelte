@@ -506,7 +506,7 @@ onMount(() => {
   .eval-ticks :global(.eval-engine-label.selected){font-weight:800}
   .eval-ticks :global(.eval-chosen-mark){position:absolute; left:-3px; right:-1px; bottom:var(--pos); height:4px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 1.5px #29251d; z-index:4}
   .eval-ticks :global(.eval-chosen-mark)::before{content:''; position:absolute; right:100%; top:-3px; border:5px solid transparent; border-left-color:var(--tick-color); transform:translateX(2px)}
-  .eval-details{position:fixed; inset: auto; top: max(8px, calc(50dvh - 100px)); left:min(var(--details-left,40px),calc(100vw - 330px)); margin:0; width:min(300px,calc(100vw - 24px)); max-height:240px; padding:10px; overflow:auto; background:var(--panel); color:var(--ink); border:1px solid var(--border-input); border-radius:9px; box-shadow:0 12px 44px #0006}
+  .eval-details{--details-top:140px; --details-left:40px; position:fixed; inset: auto; top: max(8px, calc(50dvh - 100px)); left:min(var(--details-left,40px),calc(100vw - 330px)); margin:0; width:min(300px,calc(100vw - 24px)); max-height:240px; padding:10px; overflow:auto; background:var(--panel); color:var(--ink); border:1px solid var(--border-input); border-radius:9px; box-shadow:0 12px 44px #0006}
   .eval-details header{display:flex; align-items:center; justify-content:space-between; gap:12px}
   .eval-details h2{margin:0; color:var(--ink); font:650 16px var(--sans); text-transform:none; letter-spacing:0}
   .eval-details header button{height:32px; width:32px; padding:0; font-size:22px}
