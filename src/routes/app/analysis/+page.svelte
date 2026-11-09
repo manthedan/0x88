@@ -400,8 +400,9 @@ onMount(() => {
     --selection-bg:color-mix(in srgb, var(--ink) 12%, var(--panel-inset));
     --result-highlight:color-mix(in srgb, var(--ink) 13%, var(--panel));
     --board-size:min(704px, max(280px, calc(100svh - 200px)), calc(100vw - 450px));
-    grid-template-columns:calc(var(--board-size) + 34px) minmax(0, 470px); gap:16px; align-items:start;
-    max-width:1288px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
+    /* Pay for the new rail gutter in column width, not the board's height. */
+    grid-template-columns:calc(var(--board-size) + 58px) minmax(0, 470px); gap:16px; align-items:start;
+    max-width:1312px; padding:16px 24px 32px; font-size:14px; font-variant-numeric:tabular-nums;
   }
   /* Reserve the second toolbar row in narrower or shorter workspaces. */
   @media (max-width:1239px), (max-height:899px){
