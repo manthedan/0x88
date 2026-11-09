@@ -775,7 +775,7 @@ function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => 
   });
 }
 
-function resetSearchWorker(reason: string): void {
+function resetSearchWorker(reason: string | Error): void {
   activeWorkerSearchId = null;
   workerSearchWarm = false;
   searchWorker?.terminate();
@@ -783,8 +783,7 @@ function resetSearchWorker(reason: string): void {
   workerReady = false;
   workerBackend = '';
   workerRuntime = '';
-  const error = new Error(reason);
-  error.name = 'AbortError';
+  const error = typeof reason === 'string' ? new DOMException(reason, 'AbortError') : reason;
   for (const pending of workerPending.values()) pending.reject(error);
   workerPending.clear();
 }
@@ -796,7 +795,9 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
     searchWorker = selectedLc0Runtime().startsWith('hybrid-')
       ? new Worker(new URL('./hybridSearchWorker.ts', import.meta.url), { type: 'module' })
       : new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
-  searchWorker.addEventListener('message', (event: MessageEvent) => {
+  const worker = searchWorker;
+  worker.addEventListener('message', (event: MessageEvent) => {
+    if (searchWorker !== worker) return;
     const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
     if (message.type === 'downloadProgress') {
       showModelProgress('Lc0 small net', message.loadedBytes ?? 0, message.totalBytes, 'Downloading');
@@ -813,12 +814,15 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
     if (message.type === 'error') pending.reject(new Error(message.error ?? 'worker error'));
     else pending.resolve(message);
   });
-  searchWorker.addEventListener('error', (event) => {
-    for (const pending of workerPending.values()) pending.reject(new Error(event.message || 'LC0 worker error'));
-    workerPending.clear();
+  worker.addEventListener('error', (event) => {
+    if (searchWorker === worker) resetSearchWorker(new Error(event.message || 'LC0 worker crashed'));
+  });
+  worker.addEventListener('messageerror', () => {
+    if (searchWorker === worker) resetSearchWorker(new Error('LC0 worker message could not be decoded'));
   });
   const runtime = selectedLc0Runtime();
   const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback'] }>(lc0InitMessage(runtime));
+  if (searchWorker !== worker) throw new Error('LC0 worker invalidated during initialization');
   if (operationSignal?.aborted) throw new DOMException('LC0 backend load cancelled', 'AbortError');
   workerReady = true;
   workerBackend = ready.backend;
@@ -4454,6 +4458,22 @@ async function enableMaia3Panel(): Promise<void> {
     maia3PanelStatus('Loading Maia3…');
     showModelProgress('Maia3', undefined, undefined, 'Preparing');
     const evaluator = await Maia3BrowserEvaluator.create({
+      onFailure: (error) => {
+        if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
+        maia3PanelTask?.dispose();
+        maia3PanelTask = null;
+        maia3PanelEvaluator = null;
+        if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+        maia3PanelTimer = null;
+        explorerMaia = null;
+        renderExplorerComparison();
+        el('maia3Grid').hidden = true;
+        el('maia3Caption').hidden = true;
+        const enable = el('maia3Enable') as HTMLButtonElement;
+        enable.hidden = false;
+        enable.disabled = false;
+        maia3PanelStatus(`Maia3 failed: ${error.message}. Enable Maia3 to retry.`);
+      },
       onProgress: (loaded, total) => {
         if (!isStaleMount(mountSignal) && generation === maia3PanelLoadGeneration) {
           maia3PanelStatus(`Downloading Maia3 ${(loaded / 1e6).toFixed(0)}/${total ? (total / 1e6).toFixed(0) : '?'}MB…`);
