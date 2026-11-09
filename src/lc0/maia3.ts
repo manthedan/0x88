@@ -230,6 +230,8 @@ export interface Maia3BrowserEvaluatorOptions {
   signal?: AbortSignal;
   /** Optional owner-supplied CPU reservation; ordinary Human/Play defaults are unchanged. */
   wasmThreads?: number;
+  /** Fatal transport failure, including when no inference is in flight. */
+  onFailure?: (error: Error) => void;
   modelUrl?: string;
   selfElo?: number;
   oppoElo?: number;
@@ -251,6 +253,16 @@ export class Maia3BrowserEvaluator {
   readonly backend: string;
   private abortCleanup?: () => void;
   private terminated = false;
+  private readonly onFailure?: (error: Error) => void;
+  private terminalError: Error | null = null;
+  private readonly messageListener = (event: MessageEvent) => this.onMessage(event);
+  private readonly errorListener = (event: ErrorEvent) => this.fail(new Error(event.message || 'Maia3 worker crashed'));
+  private readonly messageErrorListener = () => this.fail(new Error('Maia3 worker message could not be decoded'));
+
+  /** A fatal failure is distinct from owner cancellation and requires a fresh evaluator. */
+  get failure(): Error | null {
+    return this.terminalError?.name === 'AbortError' ? null : this.terminalError;
+  }
 
   private constructor(
     worker: Worker,
@@ -258,15 +270,19 @@ export class Maia3BrowserEvaluator {
     selfElo: number,
     oppoElo: number,
     names: { inputNames: string[]; outputNames: string[]; backend: string },
+    onFailure?: (error: Error) => void,
   ) {
     this.worker = worker;
+    this.onFailure = onFailure;
     this.modelLoad = modelLoad;
     this.selfElo = selfElo;
     this.oppoElo = oppoElo;
     this.inputNames = names.inputNames;
     this.outputNames = names.outputNames;
     this.backend = names.backend;
-    this.worker.addEventListener('message', (event: MessageEvent) => this.onMessage(event));
+    this.worker.addEventListener('message', this.messageListener);
+    this.worker.addEventListener('error', this.errorListener);
+    this.worker.addEventListener('messageerror', this.messageErrorListener);
   }
 
   static async create(options: Maia3BrowserEvaluatorOptions = {}): Promise<Maia3BrowserEvaluator> {
@@ -297,7 +313,7 @@ export class Maia3BrowserEvaluator {
     try {
       const names = await Maia3BrowserEvaluator.postInit(worker, modelLoad.model, options.ep, options.signal, options.wasmThreads);
       options.signal?.throwIfAborted();
-      const evaluator = new Maia3BrowserEvaluator(worker, modelLoad, selfElo, oppoElo, names);
+      const evaluator = new Maia3BrowserEvaluator(worker, modelLoad, selfElo, oppoElo, names, options.onFailure);
       const abort = () => evaluator.terminate();
       options.signal?.addEventListener('abort', abort, { once: true });
       evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
@@ -320,6 +336,7 @@ export class Maia3BrowserEvaluator {
       const cleanup = () => {
         worker.removeEventListener('message', onMessage);
         worker.removeEventListener('error', onError);
+        worker.removeEventListener('messageerror', onMessageError);
         signal?.removeEventListener('abort', onAbort);
       };
       const onAbort = () => {
@@ -330,6 +347,10 @@ export class Maia3BrowserEvaluator {
       const onError = (event: ErrorEvent) => {
         cleanup();
         reject(new Error(event.message || 'Maia3 worker failed to initialize'));
+      };
+      const onMessageError = () => {
+        cleanup();
+        reject(new Error('Maia3 worker initialization message could not be decoded'));
       };
       const onMessage = (event: MessageEvent) => {
         const data = event.data as { type?: string; id?: number; message?: string; inputNames?: string[]; outputNames?: string[]; backend?: string };
@@ -344,6 +365,7 @@ export class Maia3BrowserEvaluator {
       };
       worker.addEventListener('message', onMessage);
       worker.addEventListener('error', onError);
+      worker.addEventListener('messageerror', onMessageError);
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) { onAbort(); return; }
       if (typeof model === 'string') worker.postMessage({ type: 'init', id, model, ep, wasmThreads });
@@ -362,7 +384,7 @@ export class Maia3BrowserEvaluator {
   }
 
   private post<T>(message: Record<string, unknown>, transfers: Transferable[] = []): Promise<T> {
-    if (this.terminated) return Promise.reject(new DOMException('Maia3 cancelled', 'AbortError'));
+    if (this.terminalError) return Promise.reject(this.terminalError);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
@@ -438,13 +460,28 @@ export class Maia3BrowserEvaluator {
     });
   }
 
+  private stop(error: Error): void {
+    if (this.terminated) return;
+    this.terminated = true;
+    this.terminalError = error;
+    this.abortCleanup?.();
+    this.worker.removeEventListener('message', this.messageListener);
+    this.worker.removeEventListener('error', this.errorListener);
+    this.worker.removeEventListener('messageerror', this.messageErrorListener);
+    this.worker.terminate();
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+
+  private fail(error: Error): void {
+    if (this.terminated) return;
+    this.stop(error);
+    this.onFailure?.(error);
+  }
+
   /** Hard stop for an owner that is cancelling a bounded job, not a graceful session release. */
   terminate(): void {
-    this.terminated = true;
-    this.abortCleanup?.();
-    this.worker.terminate();
-    for (const pending of this.pending.values()) pending.reject(new DOMException('Maia3 cancelled', 'AbortError'));
-    this.pending.clear();
+    this.stop(new DOMException('Maia3 cancelled', 'AbortError'));
   }
 
   async dispose(): Promise<void> {

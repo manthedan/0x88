@@ -615,8 +615,14 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
   return centipawnLoadPromise;
 }
 
-function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
-  if (maia3Promise) return maia3Promise;
+async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
+  if (maia3Promise) {
+    const cached = maia3Promise;
+    const evaluator = await cached;
+    if (!evaluator.failure) return evaluator;
+    if (maia3Promise === cached) maia3Promise = null;
+    return ctxEnsureMaia3(ctx);
+  }
   const uiGeneration = ctx.enginePreparationGeneration;
   maia3Promise = (async () => {
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Maia3 human model…');
