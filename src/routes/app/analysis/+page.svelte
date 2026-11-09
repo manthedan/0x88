@@ -409,8 +409,8 @@ onMount(() => {
   }
   .board-column{min-width:0}
   .board-panel{min-width:0; padding:8px; container-type:inline-size}
-  .board-wrap{display:grid; grid-template-columns:36px 1fr; gap:3px; position:relative}
-  .board-toolbar{display:flex; align-items:stretch; gap:12px; margin:8px 0 0 39px; height:40px}
+  .board-wrap{display:grid; grid-template-columns:36px 1fr; gap:6px; position:relative}
+  .board-toolbar{display:flex; align-items:stretch; gap:12px; margin:8px 0 0 42px; height:40px}
   /* Desktop: the panel shares the board column's baseline (board + toolbar), so there is no dead block under it. */
   .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:calc(var(--board-size) + 98px); min-height:560px; max-height:none; overflow:hidden; container-type:inline-size}
   .analysis-workspace .app-sidebar>*{flex:0 0 auto}
@@ -514,6 +514,7 @@ onMount(() => {
   .eval-ticks :global(.eval-tick:hover), .eval-ticks :global(.eval-tick:focus){z-index:12}
   .eval-ticks :global(.eval-tick:focus-visible){outline:2px solid var(--accent); outline-offset:1px}
   .eval-ticks :global(.eval-tick:hover .eval-tick-tip), .eval-ticks :global(.eval-tick:focus-visible .eval-tick-tip){display:block}
+  .board-panel:has(.eval-details:popover-open) .eval-ticks :global(.eval-tick-tip){display:none}
   .eval-details{width:min(340px,calc(100vw - 24px)); max-height:70dvh; padding:12px; overflow:auto; background:var(--panel); color:var(--ink); border:1px solid var(--border-input); border-radius:9px; box-shadow:0 12px 44px #0006}
   .eval-details header{display:flex; align-items:center; justify-content:space-between; gap:12px}
   .eval-details h2{margin:0; color:var(--ink); font:650 16px var(--sans); text-transform:none; letter-spacing:0}
@@ -1109,6 +1110,7 @@ onMount(() => {
     .eval-ticks :global(.eval-tick-count){left:calc(50% - var(--hit-shift) + var(--badge-shift)); top:50%; transform:translate(-50%,-50%)}
     .eval-ticks :global(.eval-chosen-mark){left:var(--pos); right:auto; bottom:auto; top:calc(100% + 3px); width:8px; height:3px; transform:translateX(-50%)}
     .eval-ticks :global(.eval-tick-tip){left:calc(50% + var(--tip-shift)); top:calc(100% + 4px); transform:translateX(-50%); max-width:220px}
+    .eval-ticks :global(.eval-tick:hover .eval-tick-tip), .eval-ticks :global(.eval-tick:focus-visible .eval-tick-tip){display:none}
     .eval-details header button{width:44px; height:44px}
     .board-panel :global(#ground){border-radius:3px}
     .board-toolbar{display:grid; grid-template-columns:minmax(0,1fr) 48px; height:44px; gap:6px; margin:6px 0 0}
