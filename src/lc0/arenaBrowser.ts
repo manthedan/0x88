@@ -1888,7 +1888,7 @@ function renderSeatSelectors(): void {
       .join('');
   el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   reconcileActiveRuntimeFallbackWarning();
-  if (!running) renderStrips();
+  if (!running) renderSideLabels();
   renderSetupSummary();
 }
 
