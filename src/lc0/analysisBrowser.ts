@@ -36,6 +36,7 @@ import {
   lc0AnalysisLines,
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
+import { compareEvals, evalPercent, groupEvalTicks } from './evalCompare.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
@@ -2047,6 +2048,9 @@ function renderEvalBar() {
     el('evalSourceMenu').replaceChildren();
     el('evalSourceMenu').hidden = true;
     el('evalWhite').parentElement?.style.setProperty('--eval-pct', '50%');
+    el('evalTicks').replaceChildren();
+    el('evalSpread').hidden = true;
+    el('evalSpreadLabel').hidden = true;
     return;
   }
   const lines = lineCache.get(tree.current.fen) ?? [];
@@ -2060,10 +2064,35 @@ function renderEvalBar() {
   el('evalSource').dataset.short = line ? engineMonogram(line.engine) : '';
   el('evalSourceButton').style.setProperty('--engine-color', line ? analysisChipColor(line.engine) : 'var(--muted)');
   // A readable source selector above the board drives the attached bar.
-  const ready = evalSourceChoices(lines).filter((choice) => choice.line).length;
+  const choices = evalSourceChoices(lines);
+  const ready = choices.filter((choice) => choice.line).length;
+  const ticks = choices.flatMap(({ name, engine, line: result }) => result && evalPercent(result) !== undefined
+    ? [{ ...result, id: name, name, color: engineBrushes(engine).swatch }] : []);
+  const comparison = compareEvals(ticks);
+  const spread = el('evalSpread');
+  spread.hidden = !comparison;
+  if (comparison) {
+    spread.style.setProperty('--low', `${comparison.min}%`);
+    spread.style.setProperty('--high', `${comparison.max}%`);
+    spread.dataset.meaningful = String(comparison.meaningful || comparison.oppositeSides);
+  }
+  const spreadLabel = el('evalSpreadLabel');
+  spreadLabel.hidden = !comparison || !(comparison.meaningful || comparison.oppositeSides);
+  spreadLabel.textContent = comparison ? `Δ ${comparison.label.replace(' pawns', '')}` : '';
+  const rect = bar?.getBoundingClientRect();
+  const length = (matchMedia('(max-width:600px)').matches ? rect?.width : rect?.height) ?? 400;
+  const groups = choices.length > 1 ? groupEvalTicks(ticks, line ? analysisEngineName(line.engine) : undefined, length) : [];
+  // Results are from the CURRENT FEN cache only. No placeholder or previous-position ticks.
+  patchAnalysisResults(el('evalTicks'), groups.map((group) => {
+    const details = group.members.map((tick) => `${tick.name} ${tick.scoreText}${group.selected && tick.id === analysisEngineName(line!.engine) ? ' (shown on bar)' : ''} · ${tick.detail}`).join('; ');
+    const color = group.members.find((tick) => tick.id === analysisEngineName(line?.engine ?? ''))?.color ?? group.members[0].color;
+    return `<span class="eval-tick${group.selected ? ' chosen' : ''}${group.members.length > 1 ? ' grouped' : ''}${group.percent < 10 ? ' near-start' : group.percent > 90 ? ' near-end' : ''}" role="img" tabindex="0" data-focus-key="${htmlEscape(group.members.map((tick) => tick.id).sort().join('|'))}" style="--pos:${group.percent}%;--tick-color:${color}" title="${htmlEscape(details)}" aria-label="${htmlEscape(details)}">${group.members.length > 1 ? `<span class="eval-tick-count" aria-hidden="true">${group.members.length}</span>` : ''}<span class="eval-tick-tip" aria-hidden="true">${htmlEscape(details)}</span></span>`;
+  }).join(''));
   const button = el('evalSourceButton');
   button.dataset.switchable = String(ready > 1);
-  const label = line ? `Eval bar: ${analysisEngineName(line.engine)} ${line.scoreText}, White's perspective.${ready > 1 ? ' Choose the engine shown' : ''}` : 'Eval bar: no evaluation yet';
+  const comparisonLabel = comparison ? ` Engine spread: ${comparison.label}${comparison.oppositeSides ? '; prefer different sides' : ''}. ${ticks.map((tick) => `${tick.name} ${tick.scoreText}`).join('; ')}.` : '';
+  const label = line ? `Eval bar: ${analysisEngineName(line.engine)} ${line.scoreText}, White's perspective.${comparisonLabel}${ready > 1 ? ' Choose the engine shown' : ''}` : 'Eval bar: no evaluation yet';
+  bar?.setAttribute('aria-label', label);
   button.setAttribute('aria-label', label);
   button.title = label;
   if (!el('evalSourceMenu').hidden) renderEvalSourceMenu();
@@ -5825,9 +5854,13 @@ export function mountAnalysisBrowser(): () => void {
   smokeGlobal.__analysisSetHidden = setHiddenHook;
   const pvResize = new ResizeObserver(() => fitAnalysisPvRows(el('engineSummaries')));
   pvResize.observe(el('engineSummaries'));
+  // Group in screen pixels again when the rail rotates or the board resizes.
+  const evalResize = new ResizeObserver(() => renderEvalBar());
+  evalResize.observe(el('evalWhite').parentElement!);
   void init(controller.signal);
   return () => {
     pvResize.disconnect();
+    evalResize.disconnect();
     controller.abort();
     if (mountAbort === controller) disposePageResources();
     // Only clear the test hook if it is still ours (a newer mount may have
