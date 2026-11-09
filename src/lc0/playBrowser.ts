@@ -1132,7 +1132,7 @@ function ctxNewGame(ctx: PlayContext): void {
   el('playRestoreNotice').hidden = true;
   ctxCancelEngineTurn(ctx);
   ctx.engineReady = false;
-  ctx.opponent = committedPlayOpponent(ctxCurrentPlayPreferences(ctx));
+  ctxSetOpponent(ctx, committedPlayOpponent(ctxCurrentPlayPreferences(ctx)));
   ctxPersistPlayPreferences(ctx);
   const colorChoice = ctx.opponent.active.color;
   ctx.humanColor = colorChoice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : colorChoice === 'black' ? 'b' : 'w';
@@ -1729,6 +1729,14 @@ function ctxRender(ctx: PlayContext): void {
 // Restart banner logic
 // ---------------------------------------------------------------------------
 
+function ctxSetOpponent(ctx: PlayContext, next: PlayOpponentState): void {
+  const previousEngineId = ctx.opponent.active.engineId;
+  ctx.opponent = next;
+  // Stormphrax's large WASM heap must not share residency with the next model.
+  // A pending restart still belongs to the current game, so retain it until commit.
+  if (previousEngineId === 'stormphrax' && next.active.engineId !== previousEngineId) disposeCachedCpuEngine(previousEngineId);
+}
+
 function ctxRestoreOpponentControls(ctx: PlayContext): void {
   const preferences = ctx.opponent.pending ?? ctx.opponent.active;
   selectEl('engineSelect').value = preferences.engineId;
@@ -1746,9 +1754,9 @@ function ctxRestoreOpponentControls(ctx: PlayContext): void {
 
 function ctxMaybeQueueRestart(ctx: PlayContext): void {
   const gameInProgress = !ctxGameIsFresh(ctx) && !ctx.gameOver;
-  ctx.opponent = transitionPlayOpponent(ctx.opponent, {
+  ctxSetOpponent(ctx, transitionPlayOpponent(ctx.opponent, {
     type: 'edit', preferences: ctxCurrentPlayPreferences(ctx), gameInProgress,
-  });
+  }));
   ctxRestoreOpponentControls(ctx);
   ctxPersistPlayPreferences(ctx);
   if (!gameInProgress) {
@@ -1759,20 +1767,20 @@ function ctxMaybeQueueRestart(ctx: PlayContext): void {
 }
 
 function ctxConfirmRestart(ctx: PlayContext): void {
-  ctx.opponent = transitionPlayOpponent(ctx.opponent, { type: 'confirm' });
+  ctxSetOpponent(ctx, transitionPlayOpponent(ctx.opponent, { type: 'confirm' }));
   ctxRestoreOpponentControls(ctx);
   ctxNewGame(ctx);
 }
 
 function ctxDismissRestart(ctx: PlayContext): void {
-  ctx.opponent = transitionPlayOpponent(ctx.opponent, { type: 'dismiss' });
+  ctxSetOpponent(ctx, transitionPlayOpponent(ctx.opponent, { type: 'dismiss' }));
   ctxRestoreOpponentControls(ctx);
   ctxPersistPlayPreferences(ctx);
   ctxRender(ctx);
 }
 
 function ctxTuneOpponent(ctx: PlayContext): void {
-  ctx.opponent = transitionPlayOpponent(ctx.opponent, { type: 'tune', preferences: ctxCurrentPlayPreferences(ctx) });
+  ctxSetOpponent(ctx, transitionPlayOpponent(ctx.opponent, { type: 'tune', preferences: ctxCurrentPlayPreferences(ctx) }));
   ctxPersistPlayPreferences(ctx);
   ctxRender(ctx);
 }
@@ -1818,7 +1826,7 @@ function ctxPrepareOrStartEngine(ctx: PlayContext): void {
 
 function ctxResetGameStateForMount(ctx: PlayContext): void {
   ctxCancelEngineTurn(ctx);
-  ctx.opponent = committedPlayOpponent(ctxCurrentPlayPreferences(ctx));
+  ctxSetOpponent(ctx, committedPlayOpponent(ctxCurrentPlayPreferences(ctx)));
   const colorChoice = ctx.opponent.active.color;
   ctx.humanColor = colorChoice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : colorChoice === 'black' ? 'b' : 'w';
   ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';

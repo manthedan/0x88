@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
 import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
 import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
 
@@ -51,6 +53,25 @@ test('live strength changes keep their existing policy and cannot change opponen
   assert.equal(state.active.color, 'white');
   assert.equal(state.active.maiaElo, 1900);
   assert.equal(state.active.level, 1);
+});
+
+test('Stormphrax residency is retired at commit, never while restart consent is pending', () => {
+  const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
+  const setter = source.slice(source.indexOf('function ctxSetOpponent('), source.indexOf('function ctxRestoreOpponentControls('));
+  const disposed = [];
+  const setOpponent = new Function('disposeCachedCpuEngine', ts.transpile(`${setter}; return ctxSetOpponent;`, { target: ts.ScriptTarget.ESNext }))((id) => disposed.push(id));
+  const ctx = { opponent: committedPlayOpponent({ ...preferences, engineId: 'stormphrax' }) };
+  setOpponent(ctx, edit(ctx.opponent, { engineId: 'maia3' }));
+  assert.deepEqual(disposed, []);
+  setOpponent(ctx, transitionPlayOpponent(ctx.opponent, { type: 'dismiss' }));
+  assert.deepEqual(disposed, []);
+  setOpponent(ctx, edit(ctx.opponent, { engineId: 'sf-lite' }));
+  setOpponent(ctx, transitionPlayOpponent(ctx.opponent, { type: 'confirm' }));
+  assert.deepEqual(disposed, ['stormphrax']);
+  // Fresh setup changes also commit immediately and retire the previous worker.
+  ctx.opponent = committedPlayOpponent({ ...preferences, engineId: 'stormphrax' });
+  setOpponent(ctx, edit(ctx.opponent, { engineId: 'maia3' }, false));
+  assert.deepEqual(disposed, ['stormphrax', 'stormphrax']);
 });
 
 test('takeback leaves pending consent intact; reload restores only the active settings', () => {
