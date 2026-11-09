@@ -24,6 +24,7 @@ import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
+import { arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import {
   appendCpuArenaTrail,
   arenaChartEngineName,
@@ -1187,7 +1188,6 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
   thinkingSince.delete(snapshot.engineId);
   arenaSearchProgress.delete(snapshot.engineId);
   engineOutputs.set(snapshot.engineId, snapshot);
-  lastOutputEngineId = snapshot.engineId;
   engineOutputTotalCount += 1;
   engineOutputHistory.push(snapshot);
   if (engineOutputHistory.length > MAX_ENGINE_OUTPUT_HISTORY) engineOutputHistory.splice(0, engineOutputHistory.length - MAX_ENGINE_OUTPUT_HISTORY);
@@ -1209,29 +1209,47 @@ function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
 }
 
-let lastOutputEngineId: string | null = null;
+const evalLaneOutputs: (EngineOutputSnapshot | undefined)[] = [];
 
-/** One shared bar: the eval of the engine that searched most recently (White's view), its value printed at the bar's end. */
+/** Fixed lanes: White-playing engine then Black-playing engine, independent of board orientation. */
 function renderEvalBars(): void {
   const node = el('arenaEvalBar');
-  const ids = [boardWhiteId, boardBlackId].filter((id): id is string => !!id);
-  const sourceId = lastOutputEngineId && ids.includes(lastOutputEngineId) && engineOutputs.has(lastOutputEngineId) ? lastOutputEngineId : ids.find((id) => engineOutputs.has(id));
-  const output = sourceId ? engineOutputs.get(sourceId) : undefined;
-  const bar = output?.evalBar;
-  const whiteScore = clamp01(bar?.whiteScore ?? 0.5);
-  node.classList.toggle('empty', !bar);
-  node.style.setProperty('--eng', output ? engineBrushes(output.engineName).swatch : 'var(--border-input)');
-  const text = output?.evalText ?? bar?.label;
-  const label = output && text ? `Evaluation ${text} from White's view, by ${displayEngineName(output.engineName)}` : 'Evaluation: none yet';
+  // Track live seats even while a chart review temporarily hides their evals.
+  [boardWhiteId, boardBlackId].forEach((id, index) => {
+    evalLaneOutputs[index] = arenaLaneOutput(evalLaneOutputs[index], id ? engineOutputs.get(id) : undefined, id, index === 0 ? 'w' : 'b');
+  });
+  const sides = stripSides();
+  const lanes = [
+    { id: sides.w.id, name: sides.w.name, side: 'White', shortSide: 'W' },
+    { id: sides.b.id, name: sides.b.name, side: 'Black', shortSide: 'B' },
+  ].map((seat, index) => {
+    const output = seat.id ? evalLaneOutputs[index] : undefined;
+    const name = displayEngineName(output?.engineName ?? seat.name ?? 'No engine');
+    // Use the same displayed pawn->bar scale as Analysis for BOTH engines.
+    // Lc0's WDL remains in its card/charts; mixing WDL and logistic cp here would
+    // manufacture a spread even when the printed evals are identical.
+    const score = { fen: output?.fen, scoreCp: output?.whiteCp ?? (output?.qWhite !== undefined ? qToCentipawns(output.qWhite) : undefined), mateIn: output?.mateInWhitePov };
+    return { ...seat, name, score, percent: evalPercent(score), text: output?.evalText ?? '—', color: engineBrushes(name).swatch };
+  });
+  const state = compareArenaEvals(lanes.map((lane) => lane.score), shownPosition().fen);
+  const comparison = state.comparison;
+  const emphasis = !!comparison && (comparison.meaningful || comparison.oppositeSides);
+  const descriptions = lanes.map((lane, index) => `${lane.name} (${lane.side}), ${lane.text}, ${lane.percent === undefined ? 'No completed search' : searchAgeLabel(state.ages[index])}`);
+  const gap = emphasis ? `Δ ${comparison.label}` : '';
+  const context = state.adjacent ? 'adjacent searches, not the same position' : 'same position';
+  const label = `Evaluations from White’s view. ${descriptions.join('; ')}.${gap ? ` ${gap}; ${context}.${comparison?.oppositeSides ? ' Prefer different sides.' : ''}` : ''}`;
+  node.classList.toggle('empty', lanes.every((lane) => lane.percent === undefined));
+  node.dataset.disagreement = String(!!comparison?.oppositeSides);
   node.title = label;
   node.setAttribute('aria-label', label);
-  node.innerHTML = bar
-    ? `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div><span class="eval-bar-value ${whiteScore >= 0.5 ? 'at-white' : 'at-black'}">${htmlEscape(text ?? '—')}</span>`
-    : '<span class="eval-none">—</span>';
-  // The bar prints its own value; the caption repeats it only on phones, where the bar is too narrow to.
-  el('evalSource').innerHTML = output && bar
-    ? `<span class="eval-source-value"><strong>${htmlEscape(text ?? '—')}</strong> · </span>${htmlEscape(displayEngineName(output.engineName))} · White’s view · last completed search`
-    : 'No evaluation yet';
+  node.innerHTML = lanes.map((lane, index) => `<div class="eval-lane${state.fresh[index] ? '' : ' stale'}${lane.percent === undefined ? ' unavailable' : ''}" style="--eng:${lane.color};--pct:${lane.percent ?? 0}%" title="${htmlEscape(descriptions[index])}"><span class="eval-cap"></span>${lane.percent === undefined ? '<span class="eval-none">—</span>' : '<div class="eval-fill"></div>'}</div>`).join('')
+    + '<div class="eval-midline"></div>'
+    + (emphasis ? `<span class="eval-gap" style="--low:${comparison.min}%;--high:${comparison.max}%"></span>` : '');
+  const caption = el('evalSource');
+  caption.title = label;
+  caption.setAttribute('aria-label', label);
+  caption.innerHTML = lanes.map((lane, index) => `<span class="eval-reading${state.fresh[index] ? '' : ' older'}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine"><span class="eval-engine-full">${htmlEscape(lane.name)}</span><span class="eval-engine-short">${htmlEscape(lane.name.startsWith('Lc0') ? 'Lc0' : engineMonogram(lane.name))}</span></span><strong>${htmlEscape(lane.text)}</strong></span>`).join('')
+    + (gap && comparison ? `<span class="eval-delta" title="${htmlEscape(`${gap}; ${context}${comparison.oppositeSides ? '; prefer different sides' : ''}`)}">Δ ${htmlEscape(comparison.label.replace(' pawns', ''))}</span>` : '<span class="eval-perspective">White’s view</span>');
 }
 
 /** Numbered SAN for a PV searched from `fen` ("16… Bb3 17. a5 Rfd1"), first move emphasised. */
@@ -1870,7 +1888,7 @@ function renderSeatSelectors(): void {
       .join('');
   el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   reconcileActiveRuntimeFallbackWarning();
-  if (!running) renderStrips();
+  if (!running) renderSideLabels();
   renderSetupSummary();
 }
 
@@ -5128,7 +5146,6 @@ function resetArenaPageState(): void {
   checkpointProblem = '';
   checkpointUnreadable = false;
   checkpointSaving = false;
-  lastOutputEngineId = null;
   thinkingSince.clear();
   engines.clear();
   seatRows.splice(0, seatRows.length, { family: 'lc0', variant: 'small', strength: 100 }, { family: 'sf', variant: 'lite', strength: 8 });

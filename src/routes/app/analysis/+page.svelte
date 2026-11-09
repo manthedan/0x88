@@ -61,12 +61,12 @@ onMount(() => {
   <div class="board-column">
   <section class="panel board-panel" aria-label="Board">
     <div class="board-readout">
-      <button id="evalSourceButton" class="eval-chip" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="evalSourceMenu" data-switchable="false"><span class="eval-prefix">Eval:</span><span id="evalSource" class="eval-source" aria-hidden="true">Preparing…</span><span id="evalScore" class="eval-score">—</span><svg class="eval-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+      <button id="evalSourceButton" class="eval-chip" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="evalSourceMenu" data-switchable="false"><span class="eval-prefix">Eval:</span><span id="evalSource" class="eval-source" aria-hidden="true">Preparing…</span><span id="evalScore" class="eval-score">—</span><span id="evalSpreadLabel" class="eval-spread-label" hidden></span><svg class="eval-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
       <span id="evalTurn" class="eval-turn" data-turn="w">White to move</span>
       <div id="evalSourceMenu" class="eval-menu" role="menu" aria-label="Engine shown on the eval bar" hidden></div>
     </div>
     <div class="board-wrap">
-      <div class="evalbar" aria-hidden="true"><div class="white" id="evalWhite"></div><div class="mid"></div></div>
+      <div class="evalbar" role="group" aria-label="Evaluation from White’s view"><div class="white" id="evalWhite"></div><div class="mid"></div><span id="evalSpread" class="eval-spread" hidden></span><div id="evalTicks" class="eval-ticks"></div></div>
       <div class="board-shell">
         <div id="ground"></div>
         <div id="keyboardBoard"></div>
@@ -477,15 +477,31 @@ onMount(() => {
   :global(.analysis-workspace .engine-row .row-unit){font-size:12px}
   :global(.analysis-workspace .engine-row .row-strength){flex-basis:76px; width:76px}
   .evalbar{
-    --eval-pct:50%;
+    --eval-pct:50%; --low:0%; --high:100%; --pos:50%; --tick-color:var(--muted); --tip-shift:0px; --badge-shift:0px;
     width:18px; border:1px solid #68655e; border-radius:4px 0 0 4px;
-    overflow:hidden; background:#555550; position:relative; flex:0 0 auto;
+    overflow:visible; background:#555550; position:relative; flex:0 0 auto;
     box-sizing:border-box;
   }
   .evalbar .white{
     position:absolute; left:0; right:0; bottom:0; height:var(--eval-pct);
-    background:#e9e4d8; transition:height .25s, width .25s;
+    background:#e9e4d8; border-radius:inherit; transition:height .25s, width .25s;
   }
+  .eval-spread{position:absolute; z-index:2; left:-6px; bottom:var(--low); width:4px; height:calc(var(--high) - var(--low)); box-sizing:border-box; border:solid var(--muted); border-width:2px 0 2px 2px; opacity:.6}
+  .eval-spread:global([data-meaningful=true]){border-color:var(--warn); opacity:1}
+  .eval-spread-label{color:var(--warn); font:700 11px var(--mono); white-space:nowrap}
+  .eval-spread-label[hidden], .eval-spread[hidden]{display:none}
+  /* Chessground's custom arrow labels sit at 9; details must read above them,
+     but remain below the existing source menu (20). */
+  .eval-ticks{position:absolute; inset:0; pointer-events:none; z-index:10}
+  .eval-ticks :global(.eval-tick){position:absolute; left:-3px; width:22px; bottom:var(--pos); height:2px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 2px #29251d; pointer-events:auto}
+  .eval-ticks :global(.eval-tick.chosen){left:-4px; width:26px; height:4px; z-index:2}
+  .eval-ticks :global(.eval-tick.grouped){background:var(--ink)}
+  .eval-ticks :global(.eval-tick-count){position:absolute; left:-2px; top:calc(50% - var(--badge-shift)); transform:translateY(-50%); display:grid; place-items:center; min-width:13px; height:13px; border-radius:3px; background:var(--panel); color:var(--ink); outline:1px solid var(--muted); font:700 10px/1 var(--mono)}
+  .eval-ticks :global(.chosen .eval-tick-count){outline:2px solid var(--tick-color)}
+  .eval-ticks :global(.eval-tick-tip){display:none; position:absolute; left:calc(100% + 7px); top:-8px; width:max-content; max-width:270px; padding:8px 10px; border:1px solid var(--border-input); border-radius:6px; background:var(--panel); color:var(--ink); font:500 12px/1.5 var(--sans); box-shadow:0 4px 16px #0004; white-space:normal; pointer-events:none}
+  .eval-ticks :global(.eval-tick:hover), .eval-ticks :global(.eval-tick:focus){z-index:6}
+  .eval-ticks :global(.eval-tick:focus-visible){outline:2px solid var(--accent); outline-offset:3px}
+  .eval-ticks :global(.eval-tick:hover .eval-tick-tip), .eval-ticks :global(.eval-tick:focus .eval-tick-tip){display:block}
   .board-readout{position:relative; display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:34px; padding:0 0 6px}
   .eval-turn{display:inline-flex; align-items:center; gap:6px; color:var(--muted); font:500 13px var(--sans); white-space:nowrap}
   .eval-turn::before{content:''; width:9px; height:9px; border:1px solid #999; border-radius:50%; background:#f4efe4}
@@ -1058,6 +1074,11 @@ onMount(() => {
     .evalbar{width:auto; height:10px; border:1px solid #8a8780; border-bottom:0; border-radius:3px 3px 0 0}
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
     .evalbar .mid{top:0; bottom:0; left:50%; width:2px; height:auto}
+    .eval-spread{left:var(--low); bottom:auto; top:-4px; width:calc(var(--high) - var(--low)); height:3px; border-width:2px 2px 0}
+    .eval-ticks :global(.eval-tick){left:var(--pos); bottom:auto; top:-2px; width:2px; height:12px; transform:translateX(-50%)}
+    .eval-ticks :global(.eval-tick.chosen){left:var(--pos); width:4px; height:14px; top:-3px}
+    .eval-ticks :global(.eval-tick-count){left:calc(50% + var(--badge-shift)); top:50%; transform:translate(-50%,-50%)}
+    .eval-ticks :global(.eval-tick-tip){left:calc(50% + var(--tip-shift)); top:calc(100% + 7px); transform:translateX(-50%); max-width:180px}
     .board-panel :global(#ground){border-radius:3px}
     .board-toolbar{display:grid; grid-template-columns:minmax(0,1fr) 48px; height:44px; gap:6px; margin:6px 0 0}
     :global(.analysis-workspace[data-empty-game]) .board-toolbar{grid-template-columns:minmax(0,1fr) 54px 48px}
