@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from '../src/lc0/evalBarPresentation.ts';
 const marker = (name, cp, color = '#1f5fcf') => ({ id: name, name, scoreCp: cp, color, scoreText: `${cp < 0 ? '' : '+'}${(cp / 100).toFixed(2)}` });
 const desktop = { pixels: 680, mobile: false };
@@ -45,6 +46,13 @@ test('mate ticks stay pinned to true endpoints without badges or displaced label
   assert.match(html, /--pos:0%/);
   assert.doesNotMatch(html, /shift|count/);
 });
+test('the stable whole-bar invoker owns native focus ordering and survives one-engine refreshes', () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  assert.match(source, /showPopover as \(options: \{ source: HTMLElement \}\) => void\)\(\{ source: rail \}\)/);
+  assert.match(source, /if \(details.dataset.fen !== tree.current.fen\) \{/);
+  assert.doesNotMatch(source, /details.dataset.fen !== tree.current.fen \|\| choices.length/);
+});
+
 test('all engine text is escaped', () => {
   const tick = marker('Stockfish <img src=x onerror="alert(1)">', 20);
   const html = evalMarkerMarkup([tick], tick.id, desktop) + evalDetailsMarkup([tick], tick.id);

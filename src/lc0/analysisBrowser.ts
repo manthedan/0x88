@@ -2096,7 +2096,7 @@ function renderEvalBar() {
   const selectedId = line ? analysisEngineName(line.engine) : undefined;
   const tickContainer = el('evalTicks');
   const details = el('evalCompareDetails');
-  if (details.dataset.fen !== tree.current.fen || choices.length < 2) {
+  if (details.dataset.fen !== tree.current.fen) {
     if (details.matches(':popover-open')) details.hidePopover();
     details.dataset.fen = tree.current.fen;
   }
@@ -5896,10 +5896,13 @@ export function mountAnalysisBrowser(): () => void {
   evalResize.observe(el('evalWhite').parentElement!);
   const rail = el('evalWhite').parentElement!;
   const details = el('evalCompareDetails');
+  // The DOM library predates the native source option. It keeps Tab ordering
+  // and Escape restoration attached to this one stable invoker, even on hover.
+  const showEvalDetails = () => (details.showPopover as (options: { source: HTMLElement }) => void)({ source: rail });
   const openEvalDetails = () => {
     if (retry || matchMedia('(hover:none)').matches || details.matches(':popover-open')) return;
     renderEvalBar();
-    details.showPopover();
+    showEvalDetails();
   };
   rail.addEventListener('pointerenter', openEvalDetails, { signal: controller.signal });
   rail.addEventListener('focus', openEvalDetails, { signal: controller.signal });
@@ -5908,7 +5911,7 @@ export function mountAnalysisBrowser(): () => void {
     event.preventDefault();
     if (!details.matches(':popover-open')) {
       renderEvalBar();
-      details.showPopover();
+      showEvalDetails();
     }
   }, { signal: controller.signal });
   // Escape leaves focus on the stable whole-bar invoker.
