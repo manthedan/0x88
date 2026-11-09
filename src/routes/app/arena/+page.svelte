@@ -49,7 +49,8 @@ onMount(() => {
       <div class="board-shell"><div id="ground"></div></div>
     </div>
     <div id="whiteSideLabel" class="player-strip" aria-label="White player"></div>
-    <div id="evalSource" class="eval-source">No evaluation yet</div>
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (The caption exposes both search ages on keyboard focus.) -->
+    <div id="evalSource" class="eval-source" tabindex="0">No evaluation yet</div>
   </section>
   <section id="chartsPanel" class="panel charts-panel" aria-label="Game charts" data-chart="evalChart" hidden>
     <div class="charts-head">
@@ -310,23 +311,28 @@ onMount(() => {
   .board-shell{position:relative}
   .arena-workspace :global(#ground coords){font-size:12px; font-weight:700; opacity:1}
   .arena-eval-bar{
-    position:relative; overflow:hidden; border-radius:6px;
-    background:var(--eval-dark); border:2px solid var(--eng, var(--border-input));
-    transition:border-color .2s;
+    --pct:0%; --low:0%; --high:100%;
+    position:relative; display:grid; grid-template-columns:1fr 1fr; gap:2px;
+    border:1px solid var(--border-input); border-radius:4px; background:var(--rule-strong);
   }
-  .arena-eval-bar :global(.eval-fill){position:absolute; left:0; right:0; bottom:0; background:var(--eval-light); transition:height .25s}
-  .arena-eval-bar :global(.eval-midline){position:absolute; left:0; right:0; top:50%; height:1px; background:#9a8f7a}
-  .arena-eval-bar :global(.eval-bar-value){
-    position:absolute; left:0; right:0; text-align:center;
-    font:700 11px/1 var(--sans); letter-spacing:-.04em; pointer-events:none;
-  }
-  .arena-eval-bar :global(.eval-bar-value.at-white){bottom:5px; color:var(--eval-dark)}
-  .arena-eval-bar :global(.eval-bar-value.at-black){top:5px; color:var(--eval-light)}
-  .arena-eval-bar:global(.empty){background:var(--panel-inset); border-color:var(--rule-strong)}
-  .arena-eval-bar :global(.eval-none){position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:18px}
-  .eval-source{min-height:18px; color:var(--muted); text-align:right; font-size:12px; line-height:18px}
-  .eval-source :global(strong){color:var(--ink)}
-  .eval-source :global(.eval-source-value){display:none}
+  .arena-eval-bar :global(.eval-lane){position:relative; background:var(--eval-dark); overflow:hidden; border-radius:2px}
+  .arena-eval-bar :global(.eval-lane.stale){opacity:.45}
+  .arena-eval-bar :global(.eval-lane.unavailable){background:var(--panel-inset)}
+  .arena-eval-bar :global(.eval-fill){position:absolute; inset:auto 0 0; height:var(--pct); background:var(--eval-light)}
+  .arena-eval-bar :global(.eval-cap){position:absolute; z-index:2; inset:0 0 auto; height:6px; background:var(--eng)}
+  .arena-eval-bar :global(.eval-midline){position:absolute; z-index:3; left:-1px; right:-1px; top:50%; height:2px; background:#c09c52; box-shadow:0 0 0 1px #29251db3}
+  .arena-eval-bar:global([data-disagreement=true]) :global(.eval-midline){background:var(--warn); height:3px}
+  .arena-eval-bar :global(.eval-gap){position:absolute; z-index:4; left:calc(50% - 4px); width:8px; bottom:var(--low); height:calc(var(--high) - var(--low)); border:solid var(--warn); border-width:2px 0; background:color-mix(in srgb, var(--warn) 45%, transparent)}
+  .arena-eval-bar :global(.eval-none){position:absolute; inset:6px 0 0; display:grid; place-items:center; color:var(--muted); font-size:14px}
+  .eval-source{display:flex; align-items:center; gap:14px; min-width:0; min-height:18px; color:var(--muted); font-size:12px; line-height:18px}
+  .eval-source:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .eval-source :global(.eval-reading){display:flex; align-items:baseline; gap:5px; min-width:0; color:color-mix(in srgb, var(--eng) 65%, var(--ink))}
+  .eval-source :global(.eval-engine-short){display:none}
+  .eval-source :global(.eval-side){font-size:11px; color:var(--muted)}
+  .eval-source :global(.eval-engine){overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .eval-source :global(strong){font:700 13px/18px var(--mono); white-space:nowrap; color:inherit}
+  .eval-source :global(.eval-perspective){margin-left:auto; white-space:nowrap}
+  .eval-source :global(.eval-delta){margin-left:auto; color:var(--warn); font:700 12px var(--mono); white-space:nowrap}
 
   .player-strip{
     display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h);
@@ -662,12 +668,23 @@ onMount(() => {
     .move-nav .live-button{flex:1.6 1 0}
   }
   @media (max-width:600px){
-    .arena-workspace{--strip-h:44px}
+    /* Two horizontal lanes replace the hairline rail. Reclaim their 12px from
+       the existing player strips; board size and content below keep their baseline. */
+    .arena-workspace{--strip-h:38px}
     .board-panel{padding:0; border:0; background:transparent; gap:2px}
-    .board-with-eval{grid-template-columns:12px minmax(0,1fr); gap:5px}
-    .arena-eval-bar{border-width:1.5px; border-radius:4px}
-    .arena-eval-bar :global(.eval-bar-value){display:none}
-    .eval-source :global(.eval-source-value){display:inline}
+    .board-with-eval{grid-template-columns:minmax(0,1fr); gap:0}
+    .board-shell{grid-row:1; width:calc(100% - 17px); justify-self:center}
+    .arena-eval-bar{grid-row:2; grid-template-columns:1fr; grid-template-rows:1fr 1fr; height:12px; gap:2px; border-radius:2px}
+    .arena-eval-bar :global(.eval-fill){inset:0 auto 0 0; height:auto; width:var(--pct)}
+    .arena-eval-bar :global(.eval-cap){inset:0 auto 0 0; width:5px; height:auto}
+    .arena-eval-bar :global(.eval-midline){inset:-1px auto -1px 50%; width:2px; height:auto}
+    .arena-eval-bar:global([data-disagreement=true]) :global(.eval-midline){height:auto; width:3px}
+    .arena-eval-bar :global(.eval-gap){left:var(--low); width:calc(var(--high) - var(--low)); bottom:4px; height:2px; border-width:0 2px}
+    .arena-eval-bar :global(.eval-none){display:none}
+    .eval-source{gap:12px}
+    .eval-source :global(.eval-engine-full){display:none}
+    .eval-source :global(.eval-engine-short){display:inline; font-weight:600}
+    .eval-source :global(.eval-perspective){font-size:11px}
     .arena-workspace :global(#ground coords){font-size:11px}
     .player-strip{gap:8px}
     .arena-workspace :global(.player-strip .arena-avatar){flex-basis:30px; width:30px; height:30px; font-size:11.5px}
@@ -689,7 +706,6 @@ onMount(() => {
     .ghost-button, .stop-button{min-height:44px}
   }
   @media (prefers-reduced-motion: reduce){
-    .arena-eval-bar :global(.eval-fill){transition:none}
     .player-strip :global(.strip-thinking)::before, .live-dot{animation:none}
   }
 </style>
