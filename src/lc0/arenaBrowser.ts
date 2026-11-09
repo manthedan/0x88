@@ -1257,7 +1257,7 @@ function renderEvalBars(): void {
   caption.setAttribute('aria-label', label);
   const markup = lanes.map((lane, index) => {
     return `<span class="eval-reading${lane.percent === undefined ? ' pending' : ''}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine">${htmlEscape(lane.tag)}</span><strong>${htmlEscape(lane.text)}</strong></span>`;
-  }).join('') + `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}">${htmlEscape(status.text)}</span>`;
+  }).join('') + `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}${comparison?.oppositeSides ? ' opposite' : ''}">${htmlEscape(status.text)}</span>`;
   if (caption.innerHTML !== markup) caption.innerHTML = markup;
 }
 

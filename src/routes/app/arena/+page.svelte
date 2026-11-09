@@ -342,6 +342,7 @@ onMount(() => {
   .eval-source :global(.eval-reading.pending){color:var(--muted)}
   .eval-source :global(.eval-comparison){color:var(--muted); font:500 13px/18px var(--sans)}
   .eval-source :global(.eval-comparison.emphasis){color:var(--warn); font-weight:650}
+  .eval-source :global(.eval-comparison.opposite){font-weight:800}
 
   .player-strip{
     display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h);
