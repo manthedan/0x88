@@ -112,4 +112,3 @@ export function arenaLaneOutput<T extends { engineId: string; fen: string }>(pre
   if (latest.engineId === engineId && latest.fen.split(/\s+/)[1] === side) return latest;
   return previous?.engineId === engineId && previous.fen.split(/\s+/)[1] === side ? previous : undefined;
 }
-

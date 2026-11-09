@@ -1075,26 +1075,31 @@ onMount(() => {
     .copy-button{min-width:0}
   }
   @media (max-width:600px){
-    .analysis-workspace{padding:8px 4px 32px; gap:8px}
+    .analysis-workspace{padding:5px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
     /* The full-width board no longer pays for marker/counter gutters. */
-    .board-readout{min-height:32px; padding:0 0 4px; gap:4px}
-    .eval-chip{min-width:0; max-width:calc(100% - 108px); gap:5px; padding:0 5px; min-height:28px}
+    .board-readout{min-height:44px; padding:0; gap:4px}
+    .eval-turn{display:none}
+    .eval-chip{min-width:0; max-width:200px; gap:5px; padding:0 5px; min-height:28px}
     .eval-score, .eval-caret{flex-shrink:0}
-    .eval-source{font-size:12px}
+    .eval-source{font-size:0}
+    .eval-source:global([data-short]:not([data-short='']))::before{margin-right:0}
     .eval-turn{font-size:12px; gap:4px}
     .eval-prefix{display:none}
     .board-wrap{grid-template-columns:1fr; gap:0}
-    .evalbar{width:auto; height:16px; margin:7px 12px 8px 44px; border-radius:3px}
-    /* Expand the hit area, not the annotation stack. */
-    .evalbar::after{content:''; position:absolute; inset:-14px -10px}
+    /* Share the existing header row: a real 44px target, a 16px track, and no
+       width/height tax on the board. The source menu remains independent. */
+    .evalbar{position:absolute; right:12px; top:-44px; width:calc(100% - 252px); height:44px; margin:0; border:0; background:transparent}
+    .evalbar:hover{background:transparent}
+    .evalbar::before{content:''; position:absolute; inset:14px 0; background:#2b2722; border:1px solid #8a8172; border-radius:3px}
     .board-wrap>.board-shell{width:100%; justify-self:center}
     .eval-end{display:block; position:absolute; top:50%; transform:translateY(-50%); color:var(--muted); font:650 10px/12px var(--sans)}
     .eval-end.w{left:-44px}
     .eval-end.b{right:-12px}
-    .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
-    .evalbar .mid{top:0; bottom:0; left:50%; width:1px; height:auto}
-    .eval-spread{left:var(--low); bottom:auto; top:-7px; width:calc(var(--high) - var(--low)); height:4px; border-width:2px 2px 0}
+    .evalbar .white{top:15px; bottom:15px; left:1px; right:auto; height:auto; width:calc(var(--eval-pct) - 1px)}
+    .evalbar .mid{top:15px; bottom:15px; left:50%; width:1px; height:auto}
+    .eval-ticks{top:15px; bottom:15px}
+    .eval-spread{left:var(--low); bottom:auto; top:7px; width:calc(var(--high) - var(--low)); height:4px; border-width:2px 2px 0}
     .eval-ticks :global(.eval-tick){left:var(--pos); right:auto; bottom:0; top:-2px; width:2px; height:auto; transform:translateX(-50%)}
     .eval-ticks :global(.eval-engine-label){left:clamp(12px,var(--pos),calc(100% - 12px)); right:auto; bottom:auto; top:calc(100% + 1px); transform:translateX(-50%); font-size:9px; line-height:10px}
     .eval-ticks :global(.eval-engine-label.selected){left:-8px; top:50%; transform:translate(-100%,-50%); font-size:10px; line-height:12px}
