@@ -36,7 +36,7 @@ import {
   lc0AnalysisLines,
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
-import { compareEvals, evalPercent, evalTickFocusKey, evalTooltipShift, groupEvalTicks } from './evalCompare.ts';
+import { compareEvals, evalPercent, evalTickBadgeShift, evalTickFocusKey, evalTooltipShift, groupEvalTicks } from './evalCompare.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
@@ -2092,7 +2092,8 @@ function renderEvalBar() {
     const color = group.members.find((tick) => tick.id === analysisEngineName(line?.engine ?? ''))?.color ?? group.members[0].color;
     const focusKey = evalTickFocusKey(group.members.map((tick) => tick.id), selectedId, focusedId);
     const tipShift = mobile ? evalTooltipShift((rect?.left ?? 0) + length * group.percent / 100, innerWidth) : 0;
-    return `<span class="eval-tick${group.selected ? ' chosen' : ''}${group.members.length > 1 ? ' grouped' : ''}${group.percent < 10 ? ' near-start' : group.percent > 90 ? ' near-end' : ''}" role="img" tabindex="0" data-focus-key="${htmlEscape(focusKey)}" style="--pos:${group.percent}%;--tick-color:${color};--tip-shift:${tipShift}px" title="${htmlEscape(details)}" aria-label="${htmlEscape(details)}">${group.members.length > 1 ? `<span class="eval-tick-count" aria-hidden="true">${group.members.length}</span>` : ''}<span class="eval-tick-tip" aria-hidden="true">${htmlEscape(details)}</span></span>`;
+    const badgeShift = evalTickBadgeShift(group.percent, length, group.selected);
+    return `<span class="eval-tick${group.selected ? ' chosen' : ''}${group.members.length > 1 ? ' grouped' : ''}" role="img" tabindex="0" data-focus-key="${htmlEscape(focusKey)}" style="--pos:${group.percent}%;--tick-color:${color};--tip-shift:${tipShift}px;--badge-shift:${badgeShift}px" title="${htmlEscape(details)}" aria-label="${htmlEscape(details)}">${group.members.length > 1 ? `<span class="eval-tick-count" aria-hidden="true">${group.members.length}</span>` : ''}<span class="eval-tick-tip" aria-hidden="true">${htmlEscape(details)}</span></span>`;
   }).join(''));
   const button = el('evalSourceButton');
   button.dataset.switchable = String(ready > 1);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { arenaLaneOutput, compareArenaEvals, compareEvals, evalPercent, evalTickFocusKey, evalTooltipShift, fenPly, groupEvalTicks, searchAge, searchAgeLabel } from '../src/lc0/evalCompare.ts';
+import { arenaLaneOutput, compareArenaEvals, compareEvals, evalPercent, evalTickBadgeShift, evalTickFocusKey, evalTooltipShift, fenPly, groupEvalTicks, searchAge, searchAgeLabel } from '../src/lc0/evalCompare.ts';
 
 const fen = (ply, pieces = '8/8/8/8/8/8/8/K6k') => `${pieces} ${ply % 2 ? 'b' : 'w'} - - 0 ${1 + Math.floor(ply / 2)}`;
 const score = (ply, cp = 20) => ({ fen: fen(ply), scoreCp: cp });
@@ -96,6 +96,24 @@ test('count badges coalesce instead of overlapping other counts or individual ti
   assert.equal(groups.length, 1);
   assert.equal(groups[0].members.length, 4);
   assert.equal(groups[0].percent, evalPercent(ticks[1]));
+});
+test('endpoint badge placement and collision detection share pixel bounds', () => {
+  assert.equal(evalTickBadgeShift(0, 382, true), 8.5);
+  assert.equal(evalTickBadgeShift(100, 382, true), -8.5);
+  assert.equal(evalTickBadgeShift(8, 382, true), 0, 'do not shift badges that already fit');
+  assert.equal(evalTickBadgeShift(92, 382, false), 0);
+  const ticks = [-620, -610, -510].map((scoreCp, index) => ({ id: String(index), scoreCp }));
+  assert.equal(groupEvalTicks(ticks, '1', 382).length, 1, 'leave no overlapping count and adjacent tick');
+  const groups = groupEvalTicks([-10000, -1400, -1000, -800, -620, -610, -510, -200, -50, 0, 100, 1000, 1300, 10000]
+    .map((scoreCp, index) => ({ id: String(index), scoreCp })), '5', 382);
+  for (let i = 1; i < groups.length; i++) {
+    const bounds = (group) => {
+      const half = group.members.length > 1 ? (group.selected ? 8.5 : 7.5) : group.selected ? 4 : 3;
+      const center = group.percent * 382 / 100 + (group.members.length > 1 ? evalTickBadgeShift(group.percent, 382, group.selected) : 0);
+      return { min: center - half, max: center + half };
+    };
+    assert.ok(bounds(groups[i]).min - bounds(groups[i - 1]).max >= 2);
+  }
 });
 test('separate single ticks do not chain into a misleading count group', () => {
   const ticks = [0, 10, 20].map((cp, index) => ({ id: String(index), scoreCp: cp }));
