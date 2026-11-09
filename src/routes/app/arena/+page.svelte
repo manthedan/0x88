@@ -47,9 +47,9 @@ onMount(() => {
     <div class="board-with-eval">
       <div id="arenaEvalBar" class="arena-eval-bar empty" role="img" aria-label="Waiting for first search">
         {#each ['w', 'b'] as side}
-          <div class="eval-lane unavailable" data-side={side}><div class="eval-fill"></div><span class="eval-cap"></span><span class="eval-lane-label"></span><span class="eval-none">—</span></div>
+          <div class="eval-lane unavailable" data-side={side}><div class="eval-fill"></div><span class="eval-cap"></span><span class="eval-lane-label"></span></div>
         {/each}
-        <div class="eval-midline"></div><span class="eval-gap" hidden></span>
+        <div class="eval-midline"></div><span class="eval-gap" hidden></span><span class="eval-end w" aria-hidden="true">W</span><span class="eval-end b" aria-hidden="true">B</span>
       </div>
       <div class="board-shell"><div id="ground"></div></div>
     </div>
@@ -324,33 +324,24 @@ onMount(() => {
   .arena-eval-bar .eval-lane.unavailable{background:var(--panel-inset)}
   .arena-eval-bar .eval-fill{position:absolute; inset:auto 0 0; height:var(--pct); background:var(--eval-light); border-radius:2px; transition:height .18s ease, width .18s ease}
   .arena-eval-bar .eval-cap{position:absolute; z-index:2; inset:0 0 auto; height:3px; background:var(--eng); transition:opacity .18s ease}
-  .arena-eval-bar .eval-lane:global(.stale) .eval-cap{opacity:.65; background:repeating-linear-gradient(135deg,var(--eng) 0 3px,var(--panel) 3px 5px)}
-  .arena-eval-bar .eval-lane-label{position:absolute; z-index:2; top:5px; left:0; right:0; background:var(--panel); color:color-mix(in srgb,var(--eng) 65%,var(--ink)); text-align:center; font:700 11px/14px var(--sans)}
+  .arena-eval-bar .eval-lane-label{position:absolute; z-index:2; top:5px; left:0; right:0; background:var(--panel); color:color-mix(in srgb,var(--eng) 65%,var(--ink)); text-align:center; font:700 10px/14px var(--mono); font-variant-numeric:slashed-zero}
   .arena-eval-bar .eval-lane.unavailable :is(.eval-cap,.eval-fill){display:none}
   .arena-eval-bar .eval-lane.unavailable .eval-lane-label{color:var(--muted)}
-  .arena-eval-bar .eval-none{display:none}
-  .arena-eval-bar .eval-lane.unavailable .eval-none{display:grid}
-  .arena-eval-bar:global(.empty) .eval-midline{opacity:.3}
-  .arena-eval-bar .eval-lane:global(.thinking) .eval-lane-label{font-weight:800; text-decoration:underline; text-underline-offset:3px}
-  .arena-eval-bar :global(.eval-midline){position:absolute; z-index:3; left:-1px; right:-1px; top:50%; height:2px; background:#c09c52; box-shadow:0 0 0 1px #29251db3}
-  .arena-eval-bar:global([data-disagreement=true]) :global(.eval-midline){background:var(--warn); height:3px}
+  .arena-eval-bar :global(.eval-midline){position:absolute; z-index:1; left:0; right:0; top:50%; height:1px; background:#a77a23}
+  .arena-eval-bar .eval-lane:not(.unavailable)::after{content:''; position:absolute; z-index:2; left:0; right:0; bottom:var(--pct); height:1px; background:var(--eng)}
+  .eval-end{display:none}
   .arena-eval-bar :global(.eval-gap){position:absolute; z-index:4; left:calc(50% - 4px); width:8px; bottom:var(--low); height:calc(var(--high) - var(--low)); border:solid var(--warn); border-width:2px 0; background:color-mix(in srgb, var(--warn) 45%, transparent)}
-  .arena-eval-bar .eval-none{position:absolute; inset:20px 0 0; place-items:center; color:var(--muted); font-size:14px}
   .arena-eval-bar .eval-gap[hidden]{display:none}
-  .eval-source{display:flex; align-items:center; gap:14px; min-width:0; min-height:18px; color:var(--muted); font-size:12px; line-height:18px}
+  .eval-source{display:flex; align-items:center; flex-wrap:wrap; gap:4px 10px; min-width:0; min-height:18px; color:var(--muted); font:600 13px/18px var(--sans)}
   .eval-source:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
   .eval-source :global(.eval-reading){display:flex; align-items:baseline; gap:5px; min-width:0; color:color-mix(in srgb, var(--eng) 65%, var(--ink))}
-  .eval-source :global(.eval-engine-short){display:none}
-  .eval-source :global(.eval-side){font-size:11px; color:var(--muted)}
+  .eval-source :global(.eval-side){font-weight:600; color:var(--ink)}
+  .eval-source :global(.eval-engine){font-family:var(--mono); font-variant-numeric:slashed-zero}
   .eval-source :global(.eval-engine){overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .eval-source :global(strong){font:700 13px/18px var(--mono); white-space:nowrap; color:inherit}
-  .eval-source :global(.eval-age){color:var(--muted); font-size:11px; white-space:nowrap}
-  .eval-source :global(.eval-age:empty){display:none}
-  .eval-source :global(.eval-age.older){text-decoration:underline dotted; text-underline-offset:3px}
   .eval-source :global(.eval-reading.pending){color:var(--muted)}
-  .eval-source :global(.eval-comparison){margin-left:auto; color:var(--muted); text-align:right; font:500 12px/18px var(--sans)}
+  .eval-source :global(.eval-comparison){color:var(--muted); font:500 13px/18px var(--sans)}
   .eval-source :global(.eval-comparison.emphasis){color:var(--warn); font-weight:650}
-  .eval-source :global(.eval-searching){width:9px; height:9px; align-self:center; flex-shrink:0; border:1.5px solid var(--rule-strong); border-top-color:var(--eng); border-radius:50%; animation:arena-spin .8s linear infinite}
 
   .player-strip{
     display:flex; align-items:center; gap:10px; min-width:0; height:var(--strip-h);
@@ -359,7 +350,7 @@ onMount(() => {
   .player-strip:global([data-turn=true]){background:color-mix(in srgb, var(--accent) 13%, var(--panel))}
   .arena-workspace :global(.arena-avatar){
     display:inline-grid; place-items:center; flex:0 0 32px; width:32px; height:32px; border-radius:7px;
-    background:var(--eng); color:#fff; font:700 12px/1 var(--sans); letter-spacing:0;
+    background:var(--eng); color:#fff; font:700 11px/1 var(--mono); font-variant-numeric:slashed-zero; letter-spacing:0;
     box-shadow:inset 0 0 0 1px #ffffff2e;
   }
   .arena-workspace :global(.arena-avatar.sm){flex-basis:24px; width:24px; height:24px; border-radius:5px; font-size:10px}
@@ -686,27 +677,23 @@ onMount(() => {
     .move-nav .live-button{flex:1.6 1 0}
   }
   @media (max-width:600px){
-    /* Two legible 7px lanes plus a 2px gap. The existing strips and a few pixels
-       of board width pay for the thicker rail/gap, keeping the controls' baseline. */
+    /* Two 10px lanes; preserve the existing chart/control baseline. */
     .arena-workspace{--strip-h:34px}
     .board-panel{padding:0; border:0; background:transparent; gap:2px}
     .board-with-eval{grid-template-columns:minmax(0,1fr); gap:4px}
-    .board-shell{grid-row:1; width:calc(100% - 19px); justify-self:center}
-    .arena-eval-bar{grid-row:2; grid-template-columns:1fr; grid-template-rows:1fr 1fr; height:18px; margin-left:32px; gap:2px; border-radius:2px}
+    .board-shell{grid-row:1; width:calc(100% - 25px); justify-self:center}
+    .arena-eval-bar{grid-row:2; grid-template-columns:1fr; grid-template-rows:1fr 1fr; height:24px; margin:0 12px 0 44px; gap:2px; border-radius:2px}
     .arena-eval-bar .eval-fill{inset:0 auto 0 0; height:auto; width:var(--pct)}
     .arena-eval-bar .eval-cap{inset:0 auto 0 0; width:4px; height:auto}
-    .arena-eval-bar .eval-lane-label{top:50%; left:-33px; right:auto; width:28px; transform:translateY(-50%); background:none; font-size:10px; line-height:10px}
-    .arena-eval-bar :global(.eval-midline){inset:-1px auto -1px 50%; width:2px; height:auto}
-    .arena-eval-bar:global([data-disagreement=true]) :global(.eval-midline){height:auto; width:3px}
+    .arena-eval-bar .eval-lane-label{top:50%; left:-33px; right:auto; width:28px; transform:translateY(-50%); background:none; font-size:10px; line-height:10px; font-family:var(--mono); font-variant-numeric:slashed-zero}
+    .arena-eval-bar :global(.eval-midline){inset:0 auto 0 50%; width:1px; height:auto}
+    .arena-eval-bar .eval-lane:not(.unavailable)::after{left:var(--pct); right:auto; top:0; bottom:0; width:1px; height:auto}
+    .eval-end{display:block; position:absolute; top:50%; transform:translateY(-50%); color:var(--muted); font:650 10px/12px var(--sans)}
+    .eval-end.w{left:-44px}
+    .eval-end.b{right:-12px}
     .arena-eval-bar :global(.eval-gap){left:var(--low); width:calc(var(--high) - var(--low)); bottom:4px; height:2px; border-width:0 2px}
-    .arena-eval-bar .eval-lane.unavailable .eval-none{display:none}
     .eval-source{gap:8px; min-height:18px; align-items:center}
     .eval-source :global(.eval-reading){gap:4px; flex-shrink:0}
-    .eval-source :global(.eval-side){font-size:11px}
-    .eval-source :global(.eval-age){font-size:10px}
-    .eval-source :global(.eval-comparison){font-size:11px; line-height:15px; max-width:160px}
-    .eval-source :global(.eval-engine-full){display:none}
-    .eval-source :global(.eval-engine-short){display:inline; font-weight:600}
     .arena-workspace :global(#ground coords){font-size:11px}
     .player-strip{gap:8px}
     .arena-workspace :global(.player-strip .arena-avatar){flex-basis:30px; width:30px; height:30px; font-size:11.5px}
@@ -730,6 +717,6 @@ onMount(() => {
   }
   @media (prefers-reduced-motion: reduce){
     .arena-eval-bar .eval-fill, .arena-eval-bar .eval-cap{transition:none}
-    .eval-source :global(.eval-searching), .player-strip :global(.strip-thinking)::before, .live-dot{animation:none}
+    .player-strip :global(.strip-thinking)::before, .live-dot{animation:none}
   }
 </style>
