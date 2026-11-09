@@ -107,12 +107,21 @@ test('a sole completed result among pending engines needs only one endpoint tag'
   assert.equal((html.match(/class="eval-edge-tag"/g) ?? []).length, 1);
 });
 
-test('the open value list retains its native invoker until dismissal, then refreshes the rail', () => {
+test('the open value list refreshes markers while reusing its native invoker object', () => {
   const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
   const render = source.slice(source.indexOf('function renderEvalBar()'), source.indexOf('function evalSourceChoices('));
-  assert.match(render, /if \(!details\.matches\(':popover-open'\)\) patchAnalysisResults\(tickContainer,/);
-  assert.ok(render.indexOf('details.dataset.fen !== tree.current.fen') < render.indexOf('patchAnalysisResults(tickContainer,'), 'position changes close the list before refreshing markers');
-  assert.match(source, /el\('evalCompareDetails'\)\.addEventListener\('toggle',[\s\S]*?newState === 'closed'\) renderEvalBar\(\);[\s\S]*?signal: controller.signal/);
+  assert.match(render, /next\.replaceWith\(evalDetailsInvoker\);\s*tickContainer\.replaceChildren\(template.content\)/);
+  assert.match(render, /details\.matches\(':popover-open'\) \? evalDetailsInvoker\?\.dataset.focusKey/);
+  assert.ok(render.indexOf('details.dataset.fen !== tree.current.fen') < render.indexOf('const markerMarkup'), 'position changes close the list before refreshing markers');
+  assert.match(source, /addEventListener\('beforetoggle',[\s\S]*?newState === 'open'[\s\S]*?evalDetailsInvoker = active[\s\S]*?signal: controller.signal/);
+  assert.match(source, /addEventListener\('toggle',[\s\S]*?newState === 'closed'[\s\S]*?evalDetailsInvoker = null;\s*renderEvalBar\(\)/);
+});
+test('a newly completed default source updates the chosen notch without losing the invoking engine key', () => {
+  const ticks = [marker('Lc0 Small', -200, '#7a4fd6'), marker('Stockfish Lite', 20)];
+  const html = evalMarkerMarkup(ticks, 'Lc0 Small', { ...mobile, focusedId: 'Stockfish Lite' });
+  assert.match(html, /data-focus-key="Stockfish Lite"/);
+  assert.ok(html.includes(`class="eval-chosen-mark" aria-hidden="true" style="--pos:${evalPercent(ticks[0])}%;--tick-color:#7a4fd6"`));
+  assert.doesNotMatch(html, /Stockfish Lite \+0.20 \(shown on bar\)/);
 });
 
 test('mate lines stay on the true endpoint even when the labelled count shifts inward', () => {

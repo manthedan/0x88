@@ -2043,6 +2043,8 @@ function evalBarLine(lines: AnalysisLine[]): AnalysisLine | undefined {
   return best.find((entry) => analysisEngineName(entry.engine) === evalSourceEngine) ?? best[0];
 }
 
+let evalDetailsInvoker: HTMLButtonElement | null = null;
+
 function renderEvalBar() {
   if (retry) {
     el('evalScore').textContent = '';
@@ -2100,11 +2102,26 @@ function renderEvalBar() {
     if (details.matches(':popover-open')) details.hidePopover();
     details.dataset.fen = tree.current.fen;
   }
-  const focusedId = tickContainer.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focusKey : undefined;
-  // Keep the native popover invoker attached until dismissal so Escape can
-  // restore focus. Results keep streaming into the list; re-group on close.
+  const focusedId = tickContainer.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focusKey : details.matches(':popover-open') ? evalDetailsInvoker?.dataset.focusKey : undefined;
   // Results are from the CURRENT FEN cache only. No placeholder or previous-position ticks.
-  if (!details.matches(':popover-open')) patchAnalysisResults(tickContainer, choices.length > 1 ? evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile, left: rect?.left ?? 0, viewport: innerWidth, focusedId }) : '');
+  const markerMarkup = choices.length > 1 ? evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile, left: rect?.left ?? 0, viewport: innerWidth, focusedId }) : '';
+  if (details.matches(':popover-open') && evalDetailsInvoker?.isConnected) {
+    // Refresh every marker, including a newly selected default engine, but reuse
+    // the native invoker object so Escape can still return focus after regrouping.
+    const template = document.createElement('template');
+    template.innerHTML = markerMarkup;
+    const next = template.content.querySelector<HTMLButtonElement>(`[data-focus-key="${CSS.escape(evalDetailsInvoker.dataset.focusKey ?? '')}"]`);
+    if (next) {
+      for (const name of evalDetailsInvoker.getAttributeNames()) if (!next.hasAttribute(name)) evalDetailsInvoker.removeAttribute(name);
+      for (const { name, value } of next.attributes) evalDetailsInvoker.setAttribute(name, value);
+      evalDetailsInvoker.replaceChildren(...next.childNodes);
+      next.replaceWith(evalDetailsInvoker);
+      tickContainer.replaceChildren(template.content);
+    } else {
+      details.hidePopover();
+      patchAnalysisResults(tickContainer, markerMarkup);
+    }
+  } else patchAnalysisResults(tickContainer, markerMarkup);
   el('evalDetailsSummary').textContent = comparison ? `Spread ${comparison.label} · White’s view` : `${ticks.length} of ${choices.length} results · White’s view`;
   patchAnalysisResults(el('evalDetailList'), evalDetailsMarkup(ticks, selectedId));
   const button = el('evalSourceButton');
@@ -5892,15 +5909,27 @@ export function mountAnalysisBrowser(): () => void {
   // Group in screen pixels again when the rail rotates or the board resizes.
   const evalResize = new ResizeObserver(() => renderEvalBar());
   evalResize.observe(el('evalWhite').parentElement!);
+  el('evalCompareDetails').addEventListener('beforetoggle', (event) => {
+    if ((event as ToggleEvent).newState === 'open') {
+      const active = document.activeElement;
+      evalDetailsInvoker = active instanceof HTMLButtonElement && el('evalTicks').contains(active) ? active : null;
+    }
+  }, { signal: controller.signal });
   el('evalCompareDetails').addEventListener('toggle', (event) => {
-    if ((event as ToggleEvent).newState === 'closed') renderEvalBar();
+    if ((event as ToggleEvent).newState === 'closed') {
+      evalDetailsInvoker = null;
+      renderEvalBar();
+    }
   }, { signal: controller.signal });
   void init(controller.signal);
   return () => {
     pvResize.disconnect();
     evalResize.disconnect();
     controller.abort();
-    if (mountAbort === controller) disposePageResources();
+    if (mountAbort === controller) {
+      evalDetailsInvoker = null;
+      disposePageResources();
+    }
     // Only clear the test hook if it is still ours (a newer mount may have
     // installed its own).
     if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
