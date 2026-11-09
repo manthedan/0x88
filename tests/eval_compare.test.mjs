@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { arenaLaneOutput, compareArenaEvals, compareEvals, evalPercent, evalTickBadgeShift, evalTickFocusKey, evalTooltipShift, fenPly, groupEvalTicks, searchAge, searchAgeLabel } from '../src/lc0/evalCompare.ts';
+import { arenaComparisonStatus, arenaLaneOutput, compactEvalSpread, compareArenaEvals, compareEvals, evalPercent, evalTickBadgeShift, evalTickFocusKey, evalTooltipShift, fenPly, groupEvalTicks, searchAge, searchAgeLabel } from '../src/lc0/evalCompare.ts';
 
 const fen = (ply, pieces = '8/8/8/8/8/8/8/K6k') => `${pieces} ${ply % 2 ? 'b' : 'w'} - - 0 ${1 + Math.floor(ply / 2)}`;
 const score = (ply, cp = 20) => ({ fen: fen(ply), scoreCp: cp });
@@ -119,6 +119,25 @@ test('separate single ticks do not chain into a misleading count group', () => {
   const ticks = [0, 10, 20].map((cp, index) => ({ id: String(index), scoreCp: cp }));
   assert.equal(groupEvalTicks(ticks, undefined, 700).length, 3);
 });
+test('Arena caption distinguishes pending, agreement, small and meaningful gaps', () => {
+  const status = (scores) => arenaComparisonStatus(compareArenaEvals(scores, fen(2)), scores.map((s) => evalPercent(s) !== undefined), ['Lc0', 'SF']);
+  assert.equal(status([{}, {}]).text, 'Waiting for first search');
+  assert.match(status([score(0), {}]).text, /Black.*first search/);
+  assert.match(status([{}, score(1)]).text, /White.*first search/);
+  assert.deepEqual(status([score(0, 30), score(1, 40)]), { text: 'agree', emphasis: false });
+  assert.deepEqual(status([score(0, 0), score(1, 51)]), { text: 'Δ 0.51', emphasis: false });
+  assert.deepEqual(status([score(0, 20), score(1, 180)]), { text: '1.60 apart', emphasis: true });
+  assert.deepEqual(status([score(0, -60), score(1, 110)]), { text: 'disagree on who’s better', emphasis: true });
+});
+test('Arena caption explains an unfair age instead of claiming agreement', () => {
+  const scores = [score(2), score(5)];
+  assert.deepEqual(arenaComparisonStatus(compareArenaEvals(scores, fen(6)), [true, true], ['Lc0', 'SF']), { text: 'not comparable · Lc0 4 plies old', emphasis: false });
+});
+test('mate spread compact labels keep scale-point units', () => {
+  assert.equal(compactEvalSpread(compareEvals([{ mateIn: -1 }, { mateIn: 1 }])), '100 pts');
+  assert.equal(compactEvalSpread(compareEvals([{ scoreCp: 20 }, { scoreCp: 180 }])), '1.60');
+});
+
 test('self-play keeps distinct side results even when the engine ID is shared', () => {
   const white = { engineId: 'lc0-small', ...score(0, 20) };
   const black = { engineId: 'lc0-small', ...score(1, -60) };

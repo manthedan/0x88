@@ -24,7 +24,7 @@ import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
-import { arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
+import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import {
   appendCpuArenaTrail,
   arenaChartEngineName,
@@ -1229,27 +1229,47 @@ function renderEvalBars(): void {
     // Lc0's WDL remains in its card/charts; mixing WDL and logistic cp here would
     // manufacture a spread even when the printed evals are identical.
     const score = { fen: output?.fen, scoreCp: output?.whiteCp ?? (output?.qWhite !== undefined ? qToCentipawns(output.qWhite) : undefined), mateIn: output?.mateInWhitePov };
-    return { ...seat, name, score, percent: evalPercent(score), text: output?.evalText ?? '—', color: engineBrushes(name).swatch };
+    const tag = engineMonogram(name).replace('L0', 'Lc0');
+    const thinking = running && !reviewing && board.turn === (index === 0 ? 'w' : 'b') && !!seat.id && thinkingEngineIds.has(seat.id);
+    return { ...seat, name, tag, thinking, score, percent: evalPercent(score), text: output?.evalText ?? '—', color: engineBrushes(name).swatch };
   });
   const state = compareArenaEvals(lanes.map((lane) => lane.score), shownPosition().fen);
   const comparison = state.comparison;
   const emphasis = !!comparison && (comparison.meaningful || comparison.oppositeSides);
-  const descriptions = lanes.map((lane, index) => `${lane.name} (${lane.side}), ${lane.text}, ${lane.percent === undefined ? 'No completed search' : searchAgeLabel(state.ages[index])}`);
-  const gap = emphasis ? `Δ ${comparison.label}` : '';
+  const status = arenaComparisonStatus(state, lanes.map((lane) => lane.percent !== undefined), lanes.map((lane) => lane.tag));
+  const descriptions = lanes.map((lane, index) => `${lane.name} (${lane.side}), ${lane.text}, ${lane.percent === undefined ? 'No completed search' : searchAgeLabel(state.ages[index])}${lane.thinking ? ', searching now' : ''}`);
   const context = state.adjacent ? 'adjacent searches, not the same position' : 'same position';
-  const label = `Evaluations from White’s view. ${descriptions.join('; ')}.${gap ? ` ${gap}; ${context}.${comparison?.oppositeSides ? ' Prefer different sides.' : ''}` : ''}`;
+  const label = `Evaluations from White’s view. ${descriptions.join('; ')}. ${status.text}.${comparison ? ` Spread ${comparison.label}; ${context}.` : ''}`;
   node.classList.toggle('empty', lanes.every((lane) => lane.percent === undefined));
   node.dataset.disagreement = String(!!comparison?.oppositeSides);
   node.title = label;
   node.setAttribute('aria-label', label);
-  node.innerHTML = lanes.map((lane, index) => `<div class="eval-lane${state.fresh[index] ? '' : ' stale'}${lane.percent === undefined ? ' unavailable' : ''}" style="--eng:${lane.color};--pct:${lane.percent ?? 0}%" title="${htmlEscape(descriptions[index])}"><span class="eval-cap"></span>${lane.percent === undefined ? '<span class="eval-none">—</span>' : '<div class="eval-fill"></div>'}</div>`).join('')
-    + '<div class="eval-midline"></div>'
-    + (emphasis ? `<span class="eval-gap" style="--low:${comparison.min}%;--high:${comparison.max}%"></span>` : '');
+  // Keep the lane DOM stable so fill/freshness changes can ease rather than flash.
+  node.querySelectorAll<HTMLElement>('.eval-lane').forEach((laneNode, index) => {
+    const lane = lanes[index];
+    laneNode.classList.toggle('stale', !state.fresh[index]);
+    laneNode.classList.toggle('unavailable', lane.percent === undefined);
+    laneNode.classList.toggle('thinking', lane.thinking);
+    laneNode.style.setProperty('--eng', lane.color);
+    laneNode.style.setProperty('--pct', `${lane.percent ?? 0}%`);
+    laneNode.title = descriptions[index];
+    laneNode.querySelector('.eval-lane-label')!.textContent = lane.tag;
+  });
+  const range = node.querySelector<HTMLElement>('.eval-gap')!;
+  range.hidden = !emphasis;
+  if (comparison) {
+    range.style.setProperty('--low', `${comparison.min}%`);
+    range.style.setProperty('--high', `${comparison.max}%`);
+  }
   const caption = el('evalSource');
   caption.title = label;
   caption.setAttribute('aria-label', label);
-  caption.innerHTML = lanes.map((lane, index) => `<span class="eval-reading${state.fresh[index] ? '' : ' older'}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine"><span class="eval-engine-full">${htmlEscape(lane.name)}</span><span class="eval-engine-short">${htmlEscape(lane.name.startsWith('Lc0') ? 'Lc0' : engineMonogram(lane.name))}</span></span><strong>${htmlEscape(lane.text)}</strong></span>`).join('')
-    + (gap && comparison ? `<span class="eval-delta" title="${htmlEscape(`${gap}; ${context}${comparison.oppositeSides ? '; prefer different sides' : ''}`)}">Δ ${htmlEscape(comparison.label.replace(' pawns', ''))}</span>` : '<span class="eval-perspective">White’s view</span>');
+  const markup = lanes.map((lane, index) => {
+    const age = state.ages[index];
+    const stamp = lane.percent === undefined ? '—' : age === 0 ? 'now' : age !== undefined && age > 0 ? `${age}p` : 'older';
+    return `<span class="eval-reading${lane.percent === undefined ? ' pending' : ''}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine"><span class="eval-engine-full">${htmlEscape(lane.name)}</span><span class="eval-engine-short">${htmlEscape(lane.tag)}</span></span><strong>${htmlEscape(lane.text)}</strong><span class="eval-age${state.fresh[index] ? '' : ' older'}">${htmlEscape(stamp)}</span>${lane.thinking ? '<span class="eval-searching" aria-hidden="true"></span>' : ''}</span>`;
+  }).join('') + `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}">${htmlEscape(status.text)}</span>`;
+  if (caption.innerHTML !== markup) caption.innerHTML = markup;
 }
 
 /** Numbered SAN for a PV searched from `fen` ("16… Bb3 17. a5 Rfd1"), first move emphasised. */

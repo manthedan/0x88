@@ -32,7 +32,7 @@ export function compareEvals(scores: readonly EvalScore[]) {
   const oppositeSides = min <= 50 - SIDE_THRESHOLD && max >= 50 + SIDE_THRESHOLD;
   const allCp = results.every(({ score }) => score.mateIn === undefined && Number.isFinite(score.scoreCp));
   const pawnSpread = allCp ? (Math.max(...results.map(({ score }) => score.scoreCp!)) - Math.min(...results.map(({ score }) => score.scoreCp!))) / 100 : undefined;
-  return { min, max, spread, oppositeSides, meaningful: spread >= MEANINGFUL_SPREAD,
+  return { min, max, spread, pawnSpread, oppositeSides, meaningful: spread >= MEANINGFUL_SPREAD,
     // Never subtract mate distances as though they were pawns.
     label: pawnSpread === undefined ? `${spread.toFixed(0)} points on bar` : `${pawnSpread.toFixed(2)} pawns` };
 }
@@ -81,6 +81,27 @@ export function compareArenaEvals(scores: readonly (EvalScore & { fen?: string }
     && Math.abs(ages[0]! - ages[1]!) <= 1
     && (ages[0] !== ages[1] || position(scores[0].fen!) === position(scores[1].fen!));
   return { ages, fresh, fair, adjacent: fair && ages[0] !== ages[1], comparison: fair ? compareEvals(scores) : undefined };
+}
+
+/** Compact text retains the unit for mate comparisons; a mate distance is not pawns. */
+export function compactEvalSpread(comparison: NonNullable<ReturnType<typeof compareEvals>>): string {
+  return comparison.pawnSpread === undefined ? `${comparison.spread.toFixed(0)} pts` : comparison.pawnSpread.toFixed(2);
+}
+
+/** Visible verdicts use the same eligibility/scale rules as the bar, including pending results. */
+export function arenaComparisonStatus(state: ReturnType<typeof compareArenaEvals>, available: readonly boolean[], names: readonly string[]) {
+  if (!available.some(Boolean)) return { text: 'Waiting for first search', emphasis: false };
+  if (available.some((ready) => !ready)) return { text: `Waiting for ${available[0] ? 'Black' : 'White'}’s first search`, emphasis: false };
+  if (!state.comparison) {
+    const old = state.ages.findIndex((age) => age !== undefined && age > 2);
+    return { text: old >= 0 ? `not comparable · ${names[old]} ${state.ages[old]} plies old` : 'not comparable', emphasis: false };
+  }
+  const comparison = state.comparison;
+  if (comparison.oppositeSides) return { text: 'disagree on who’s better', emphasis: true };
+  if (comparison.meaningful) return { text: `${compactEvalSpread(comparison)} apart`, emphasis: true };
+  // "Agree" is a tight (<=2 point) match on the nonlinear scale, not a claim of
+  // equal search effort or simultaneous opinions. Other eligible gaps stay visible.
+  return { text: comparison.spread <= 2 ? 'agree' : `Δ ${compactEvalSpread(comparison)}`, emphasis: false };
 }
 
 /**
