@@ -25,10 +25,22 @@ type MarkerGroup = ReturnType<typeof groupEvalTicks<EvalMarker>>[number];
 function markerLabels(group: MarkerGroup, ordered: readonly EvalMarker[], pixels: number) {
   const shift = group.members.length > 1 ? evalTickBadgeShift(group.percent, pixels, group.selected, 46) : 0;
   const ends = ordered.length > 1 ? [ordered[0], ordered.at(-1)!] : ordered;
+  const point = group.percent * pixels / 100;
+  const half = group.selected ? 3 : 2.5;
+  const occupied = [{ min: point - half, max: point + half }];
+  if (group.members.length > 1) occupied.push({ min: point + shift - 9, max: point + shift + 9 });
   return ends.flatMap((tick, index) => {
     if (!group.members.includes(tick)) return [];
-    const center = group.percent * pixels / 100 + shift + (index ? 17 : -17);
-    return [{ tick, position: Math.max(7, Math.min(pixels - 7, center)) }];
+    const preferred = point + shift + (index ? 17 : -17);
+    // A clamped endpoint tag must clear its OWN true tick/count too. Find the
+    // nearest free 12px label slot; later tags also avoid earlier ones.
+    const candidates = [Math.max(7, Math.min(pixels - 7, preferred)), ...occupied.flatMap((box) => [box.min - 7, box.max + 7])];
+    const position = candidates.filter((candidate) => candidate >= 7 && candidate <= pixels - 7
+      && occupied.every((box) => candidate + 6 <= box.min - 1 || candidate - 6 >= box.max + 1))
+      .sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred))[0];
+    if (position === undefined) return [];
+    occupied.push({ min: position - 6, max: position + 6 });
+    return [{ tick, position }];
   });
 }
 

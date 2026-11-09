@@ -76,6 +76,32 @@ test('clamped singleton endpoint labels cannot obscure nearby extreme ticks', ()
   const negative = ticks.map((tick) => ({ ...tick, scoreCp: -tick.scoreCp, ...(tick.mateIn !== undefined ? { mateIn: -tick.mateIn } : {}) }));
   assert.equal(evalMarkerGroups(negative, 'Lc0 Small', desktop).length, 1, 'protect the negative endpoint too');
 });
+test('clamped endpoint tags clear their own unselected true tick on either end', () => {
+  for (const sign of [1, -1]) {
+    const ticks = [marker('Lc0 Small', 0), marker('Stockfish Lite', sign * 1200)];
+    const groups = evalMarkerGroups(ticks, 'Lc0 Small', desktop);
+    assert.equal(groups.length, 2);
+    const html = evalMarkerMarkup(ticks, 'Lc0 Small', desktop);
+    const position = Number(html.match(/--edge:([\d.]+)px;--edge-color:[^>]+>SF</)[1]);
+    const point = evalPercent(ticks[1]) * desktop.pixels / 100;
+    assert.ok(Math.abs(position - point) >= 9.5, '12px tag + 5px tick + 1px gap');
+    assert.ok(position >= 7 && position <= desktop.pixels - 7);
+  }
+});
+test('coincident mate endpoint tags clear their own count, tick and each other', () => {
+  const ticks = [{ ...marker('Stockfish Lite', 0), mateIn: 1 }, { ...marker('PlentyChess', 0), mateIn: 2 }];
+  const html = evalMarkerMarkup(ticks, 'Stockfish Lite', desktop);
+  const positions = [...html.matchAll(/--edge:([\d.]+)px/g)].map((match) => Number(match[1]));
+  assert.equal(positions.length, 2);
+  const point = desktop.pixels;
+  const count = point + evalTickBadgeShift(100, point, true, 46);
+  for (const position of positions) {
+    assert.ok(Math.abs(position - point) >= 10);
+    assert.ok(Math.abs(position - count) >= 16);
+  }
+  assert.ok(Math.abs(positions[0] - positions[1]) >= 13);
+});
+
 test('a sole completed result among pending engines needs only one endpoint tag', () => {
   const html = evalMarkerMarkup([marker('Lc0 Small', 980)], 'Lc0 Small', desktop);
   assert.equal((html.match(/class="eval-edge-tag"/g) ?? []).length, 1);
