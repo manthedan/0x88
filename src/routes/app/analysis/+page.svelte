@@ -490,7 +490,9 @@ onMount(() => {
   .eval-spread:global([data-meaningful=true]){border-color:var(--warn); opacity:1}
   .eval-spread-label{color:var(--warn); font:700 11px var(--mono); white-space:nowrap}
   .eval-spread-label[hidden], .eval-spread[hidden]{display:none}
-  .eval-ticks{position:absolute; inset:0; pointer-events:none; z-index:4}
+  /* Chessground's custom arrow labels sit at 9; details must read above them,
+     but remain below the existing source menu (20). */
+  .eval-ticks{position:absolute; inset:0; pointer-events:none; z-index:10}
   .eval-ticks :global(.eval-tick){position:absolute; left:-3px; width:22px; bottom:var(--pos); height:2px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 2px #29251d; pointer-events:auto}
   .eval-ticks :global(.eval-tick.chosen){left:-4px; width:26px; height:4px; z-index:2}
   .eval-ticks :global(.eval-tick.grouped){background:var(--ink)}
