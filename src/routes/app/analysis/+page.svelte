@@ -66,13 +66,18 @@ onMount(() => {
       <div id="evalSourceMenu" class="eval-menu" role="menu" aria-label="Engine shown on the eval bar" hidden></div>
     </div>
     <div class="board-wrap">
-      <div class="evalbar" role="group" aria-label="Evaluation from White’s view"><div class="white" id="evalWhite"></div><div class="mid"></div><span id="evalSpread" class="eval-spread" hidden></span><div id="evalTicks" class="eval-ticks"></div></div>
+      <div class="evalbar" role="group" aria-label="Evaluation from White’s view"><div class="white" id="evalWhite"></div><div class="mid"></div><span class="eval-end w" aria-hidden="true">W</span><span class="eval-end b" aria-hidden="true">B</span><span id="evalSpread" class="eval-spread" hidden><span class="eval-range-label" aria-hidden="true">Δ</span></span><div id="evalTicks" class="eval-ticks"></div></div>
       <div class="board-shell">
         <div id="ground"></div>
         <div id="keyboardBoard"></div>
       </div>
       <p id="boardInstructions" class="sr-only">Arrow keys explore squares. Enter or Space selects a piece, then a legal destination. Escape cancels selection. Tab leaves the board.</p>
       <p id="boardAnnouncement" class="sr-only" aria-live="polite"></p>
+    </div>
+    <div id="evalCompareDetails" class="eval-details" popover="auto" role="dialog" aria-labelledby="evalDetailsTitle" aria-describedby="evalDetailsSummary">
+      <header><h2 id="evalDetailsTitle">Engine evaluations</h2><button type="button" class="tool-button" popovertarget="evalCompareDetails" popovertargetaction="hide" aria-label="Close engine evaluations">×</button></header>
+      <p id="evalDetailsSummary" class="small"></p><div id="evalDetailList"></div>
+      <p class="small">Tick spacing uses the nonlinear bar scale, not pawn distance.</p>
     </div>
     <div class="board-toolbar">
     <div class="nav" aria-label="Move navigation">
@@ -404,8 +409,8 @@ onMount(() => {
   }
   .board-column{min-width:0}
   .board-panel{min-width:0; padding:8px; container-type:inline-size}
-  .board-wrap{display:grid; grid-template-columns:18px 1fr; gap:0; position:relative}
-  .board-toolbar{display:flex; align-items:stretch; gap:12px; margin:8px 0 0 18px; height:40px}
+  .board-wrap{display:grid; grid-template-columns:36px 1fr; gap:3px; position:relative}
+  .board-toolbar{display:flex; align-items:stretch; gap:12px; margin:8px 0 0 39px; height:40px}
   /* Desktop: the panel shares the board column's baseline (board + toolbar), so there is no dead block under it. */
   .analysis-workspace .app-sidebar{position:static; display:flex; flex-direction:column; min-width:0; height:calc(var(--board-size) + 98px); min-height:560px; max-height:none; overflow:hidden; container-type:inline-size}
   .analysis-workspace .app-sidebar>*{flex:0 0 auto}
@@ -477,8 +482,8 @@ onMount(() => {
   :global(.analysis-workspace .engine-row .row-unit){font-size:12px}
   :global(.analysis-workspace .engine-row .row-strength){flex-basis:76px; width:76px}
   .evalbar{
-    --eval-pct:50%; --low:0%; --high:100%; --pos:50%; --tick-color:var(--muted); --tip-shift:0px; --badge-shift:0px;
-    width:18px; border:1px solid #68655e; border-radius:4px 0 0 4px;
+    --eval-pct:50%; --low:0%; --high:100%; --mid:50%; --pos:50%; --tick-color:var(--muted); --tip-shift:0px; --badge-shift:0px; --hit-shift:0px; --edge:0px; --edge-color:var(--muted);
+    width:20px; margin-left:16px; border:1px solid #68655e; border-radius:4px 0 0 4px;
     overflow:visible; background:#555550; position:relative; flex:0 0 auto;
     box-sizing:border-box;
   }
@@ -486,22 +491,39 @@ onMount(() => {
     position:absolute; left:0; right:0; bottom:0; height:var(--eval-pct);
     background:#e9e4d8; border-radius:inherit; transition:height .25s, width .25s;
   }
-  .eval-spread{position:absolute; z-index:2; left:-6px; bottom:var(--low); width:4px; height:calc(var(--high) - var(--low)); box-sizing:border-box; border:solid var(--muted); border-width:2px 0 2px 2px; opacity:.6}
-  .eval-spread:global([data-meaningful=true]){border-color:var(--warn); opacity:1}
-  .eval-spread-label{color:var(--warn); font:700 11px var(--mono); white-space:nowrap}
+  .eval-spread{position:absolute; z-index:2; left:-15px; bottom:var(--low); width:6px; height:calc(var(--high) - var(--low)); box-sizing:border-box; color:var(--muted); border:solid currentColor; border-width:3px 0 3px 3px}
+  .eval-spread:global([data-meaningful=true]){color:var(--warn)}
+  .eval-range-label{position:absolute; left:4px; top:50%; transform:translateY(-50%); font:650 10px/12px var(--sans); color:inherit}
+  .eval-spread-label{color:var(--muted); border-inline-start:1px solid var(--border-input); padding-inline-start:7px; margin-inline-start:1px; font:650 12px/20px var(--mono); white-space:nowrap}
+  .eval-spread-label:global([data-meaningful=true]){color:var(--warn)}
   .eval-spread-label[hidden], .eval-spread[hidden]{display:none}
-  /* Chessground's custom arrow labels sit at 9; details must read above them,
-     but remain below the existing source menu (20). */
+  .eval-end{display:none}
+  /* Above Chessground's labels (9), below the existing source menu (20). */
   .eval-ticks{position:absolute; inset:0; pointer-events:none; z-index:10}
-  .eval-ticks :global(.eval-tick){position:absolute; left:-3px; width:22px; bottom:var(--pos); height:2px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 2px #29251d; pointer-events:auto}
-  .eval-ticks :global(.eval-tick.chosen){left:-4px; width:26px; height:4px; z-index:2}
-  .eval-ticks :global(.eval-tick.grouped){background:var(--ink)}
-  .eval-ticks :global(.eval-tick-count){position:absolute; left:-2px; top:calc(50% - var(--badge-shift)); transform:translateY(-50%); display:grid; place-items:center; min-width:13px; height:13px; border-radius:3px; background:var(--panel); color:var(--ink); outline:1px solid var(--muted); font:700 10px/1 var(--mono)}
-  .eval-ticks :global(.chosen .eval-tick-count){outline:2px solid var(--tick-color)}
-  .eval-ticks :global(.eval-tick-tip){display:none; position:absolute; left:calc(100% + 7px); top:-8px; width:max-content; max-width:270px; padding:8px 10px; border:1px solid var(--border-input); border-radius:6px; background:var(--panel); color:var(--ink); font:500 12px/1.5 var(--sans); box-shadow:0 4px 16px #0004; white-space:normal; pointer-events:none}
-  .eval-ticks :global(.eval-tick:hover), .eval-ticks :global(.eval-tick:focus){z-index:6}
-  .eval-ticks :global(.eval-tick:focus-visible){outline:2px solid var(--accent); outline-offset:3px}
-  .eval-ticks :global(.eval-tick:hover .eval-tick-tip), .eval-ticks :global(.eval-tick:focus .eval-tick-tip){display:block}
+  .eval-ticks :global(.eval-tick){position:absolute; left:0; width:18px; bottom:var(--pos); height:32px; padding:0; min-height:0; transform:translateY(50%); background:transparent; border:0; border-radius:0; color:var(--ink); pointer-events:auto; overflow:visible}
+  .eval-ticks :global(.eval-tick:hover){background:transparent}
+  .eval-ticks :global(.eval-tick-line){position:absolute; left:1px; right:1px; top:50%; height:2px; display:flex; transform:translateY(-50%); outline:.7px solid #f4f1e8; box-shadow:0 0 0 1.2px #29251d}
+  .eval-ticks :global(.chosen .eval-tick-line){height:3px}
+  .eval-ticks :global(.eval-tick-line i), .eval-ticks :global(.eval-segments i){flex:1; min-width:0}
+  .eval-ticks :global(.eval-tick-count){position:absolute; left:0; top:calc(50% - var(--badge-shift)); transform:translateY(-50%); display:grid; place-items:center; width:18px; height:18px; border:1px solid var(--border-input); border-radius:3px; background:var(--panel); color:var(--ink); font:700 12px/1 var(--mono); overflow:hidden}
+  .eval-ticks :global(.chosen .eval-tick-count){border-color:var(--tick-color)}
+  .eval-ticks :global(.eval-segments){position:absolute; bottom:0; left:0; right:0; height:3px; display:flex}
+  .eval-ticks :global(.eval-edge-tag){position:absolute; bottom:var(--edge); left:-1px; width:20px; transform:translateY(50%); background:var(--panel); color:color-mix(in srgb,var(--edge-color) 65%,var(--ink)); text-align:center; font:700 10px/12px var(--sans); pointer-events:none}
+  .eval-ticks :global(.eval-chosen-mark){position:absolute; right:-2px; bottom:var(--pos); width:8px; height:4px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 1.7px #29251d; z-index:8; pointer-events:none}
+  .eval-ticks :global(.eval-tick-tip){display:none; position:absolute; left:calc(100% + 8px); top:8px; width:max-content; max-width:270px; padding:8px 10px; border:1px solid var(--border-input); border-radius:6px; background:var(--panel); color:var(--ink); font:500 12px/1.5 var(--sans); box-shadow:0 4px 16px #0004; white-space:normal; text-align:left; pointer-events:none}
+  .eval-ticks :global(.eval-tick:hover), .eval-ticks :global(.eval-tick:focus){z-index:12}
+  .eval-ticks :global(.eval-tick:focus-visible){outline:2px solid var(--accent); outline-offset:1px}
+  .eval-ticks :global(.eval-tick:hover .eval-tick-tip), .eval-ticks :global(.eval-tick:focus-visible .eval-tick-tip){display:block}
+  .eval-details{width:min(340px,calc(100vw - 24px)); max-height:70dvh; padding:12px; overflow:auto; background:var(--panel); color:var(--ink); border:1px solid var(--border-input); border-radius:9px; box-shadow:0 12px 44px #0006}
+  .eval-details header{display:flex; align-items:center; justify-content:space-between; gap:12px}
+  .eval-details h2{margin:0; color:var(--ink); font:650 16px var(--sans); text-transform:none; letter-spacing:0}
+  .eval-details header button{height:32px; width:32px; padding:0; font-size:22px}
+  .eval-details p{margin:8px 0}
+  .eval-details :global(.eval-detail-row){display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--rule)}
+  .eval-details :global(.eval-detail-row strong){display:block; font:600 13px var(--sans)}
+  .eval-details :global(.eval-detail-row small){display:block; margin-top:2px; color:var(--muted); font:400 12px/1.4 var(--sans)}
+  .eval-details :global(.eval-detail-row>b){font:700 14px var(--mono)}
+  .eval-details :global(.eval-detail-tag){display:grid; place-items:center; height:24px; border-radius:4px; background:var(--engine-color); color:#fff; font:700 10px var(--sans)}
   .board-readout{position:relative; display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:34px; padding:0 0 6px}
   .eval-turn{display:inline-flex; align-items:center; gap:6px; color:var(--muted); font:500 13px var(--sans); white-space:nowrap}
   .eval-turn::before{content:''; width:9px; height:9px; border:1px solid #999; border-radius:50%; background:#f4efe4}
@@ -525,7 +547,7 @@ onMount(() => {
   .eval-score{color:var(--ink); font:750 14px/1 var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap}
   .evalbar .mid{
     position:absolute; left:0; right:0; top:50%;
-    height:2px; background:#99978e; box-shadow:0 1px 0 #0006;
+    height:2px; background:#c09c52; box-shadow:0 0 0 1px #29251d80;
   }
   .nav{display:flex; flex:1 1 auto; gap:6px; min-width:0}
   .nav button{
@@ -1063,7 +1085,8 @@ onMount(() => {
   @media (max-width:600px){
     .analysis-workspace{padding:8px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
-    /* Labels have their own baseline; the full-width 10px fill remains unobstructed. */
+    /* A 14px track has its own bracket/tap gutter. Reclaim the 22px increase
+       from board width so navigation and engine lines keep their baseline. */
     .board-readout{min-height:32px; padding:0 0 4px; gap:4px}
     .eval-chip{min-width:0; max-width:calc(100% - 108px); gap:5px; padding:0 5px; min-height:28px}
     .eval-score, .eval-caret{flex-shrink:0}
@@ -1071,14 +1094,22 @@ onMount(() => {
     .eval-turn{font-size:12px; gap:4px}
     .eval-prefix{display:none}
     .board-wrap{grid-template-columns:1fr; gap:0}
-    .evalbar{width:auto; height:10px; border:1px solid #8a8780; border-bottom:0; border-radius:3px 3px 0 0}
+    .evalbar{width:auto; height:14px; margin:9px 12px; border:1px solid #8a8780; border-radius:3px}
+    .board-wrap>.board-shell{width:calc(100% - 22px); justify-self:center}
+    .eval-end{display:block; position:absolute; top:50%; transform:translateY(-50%); color:var(--muted); font:650 10px/12px var(--sans)}
+    .eval-end.w{left:-12px}
+    .eval-end.b{right:-12px}
     .evalbar .white{top:0; bottom:0; left:0; right:auto; height:auto; width:var(--eval-pct)}
     .evalbar .mid{top:0; bottom:0; left:50%; width:2px; height:auto}
-    .eval-spread{left:var(--low); bottom:auto; top:-4px; width:calc(var(--high) - var(--low)); height:3px; border-width:2px 2px 0}
-    .eval-ticks :global(.eval-tick){left:var(--pos); bottom:auto; top:-2px; width:2px; height:12px; transform:translateX(-50%)}
-    .eval-ticks :global(.eval-tick.chosen){left:var(--pos); width:4px; height:14px; top:-3px}
-    .eval-ticks :global(.eval-tick-count){left:calc(50% + var(--badge-shift)); top:50%; transform:translate(-50%,-50%)}
-    .eval-ticks :global(.eval-tick-tip){left:calc(50% + var(--tip-shift)); top:calc(100% + 7px); transform:translateX(-50%); max-width:180px}
+    .eval-spread{left:var(--low); bottom:auto; top:-7px; width:calc(var(--high) - var(--low)); height:5px; border-width:3px 3px 0}
+    .eval-range-label{display:none}
+    .eval-ticks :global(.eval-tick){left:calc(var(--pos) + var(--hit-shift)); bottom:auto; top:50%; width:44px; height:32px; transform:translate(-50%,-50%)}
+    .eval-ticks :global(.eval-tick-line){left:calc(50% - var(--hit-shift)); right:auto; top:50%; width:2px; height:10px; transform:translate(-50%,-50%); flex-direction:column}
+    .eval-ticks :global(.chosen .eval-tick-line){width:3px; height:12px}
+    .eval-ticks :global(.eval-tick-count){left:calc(50% - var(--hit-shift) + var(--badge-shift)); top:50%; transform:translate(-50%,-50%)}
+    .eval-ticks :global(.eval-chosen-mark){left:var(--pos); right:auto; bottom:auto; top:calc(100% + 3px); width:8px; height:3px; transform:translateX(-50%)}
+    .eval-ticks :global(.eval-tick-tip){left:calc(50% + var(--tip-shift)); top:calc(100% + 4px); transform:translateX(-50%); max-width:220px}
+    .eval-details header button{width:44px; height:44px}
     .board-panel :global(#ground){border-radius:3px}
     .board-toolbar{display:grid; grid-template-columns:minmax(0,1fr) 48px; height:44px; gap:6px; margin:6px 0 0}
     :global(.analysis-workspace[data-empty-game]) .board-toolbar{grid-template-columns:minmax(0,1fr) 54px 48px}

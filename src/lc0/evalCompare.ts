@@ -129,9 +129,9 @@ export function evalTooltipShift(anchor: number, viewport: number, maxWidth = 18
 }
 
 /** Inward shift for a count badge's actual outline, along the track's value axis. */
-export function evalTickBadgeShift(percent: number, trackPixels: number, selected: boolean): number {
+export function evalTickBadgeShift(percent: number, trackPixels: number, selected: boolean, footprint?: number): number {
   const center = percent * trackPixels / 100;
-  const half = Math.min(selected ? 8.5 : 7.5, trackPixels / 2);
+  const half = Math.min(footprint !== undefined ? footprint / 2 : selected ? 8.5 : 7.5, trackPixels / 2);
   return Math.max(half, Math.min(trackPixels - half, center)) - center;
 }
 
@@ -144,7 +144,7 @@ export interface EvalTick extends EvalScore { id: string }
  * same shifted centers as the renderer, not percentage-based endpoint classes.
  * The chosen engine anchors its group; other groups use their mean position.
  */
-export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selectedId: string | undefined, trackPixels: number, tolerance = TICK_GROUP_PX) {
+export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selectedId: string | undefined, trackPixels: number, tolerance = TICK_GROUP_PX, badgePixels?: number) {
   const sorted = scores.flatMap((score) => {
     const percent = evalPercent(score);
     return percent === undefined ? [] : [{ score, percent }];
@@ -159,9 +159,9 @@ export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selecte
     groups.push({ members: entries.map(({ score }) => score), selected: !!selected,
       percent: selected?.percent ?? entries.reduce((sum, entry) => sum + entry.percent, 0) / entries.length });
   }
-  const footprint = (group: typeof groups[number]) => group.members.length > 1 ? (group.selected ? 17 : 15) : group.selected ? 8 : 6;
+  const footprint = (group: typeof groups[number]) => group.members.length > 1 ? (badgePixels ?? (group.selected ? 17 : 15)) : group.selected ? 8 : 6;
   const center = (group: typeof groups[number]) => group.percent * pixels / 100
-    + (group.members.length > 1 ? evalTickBadgeShift(group.percent, pixels, group.selected) : 0);
+    + (group.members.length > 1 ? evalTickBadgeShift(group.percent, pixels, group.selected, badgePixels) : 0);
   for (let i = 1; i < groups.length;) {
     const a = groups[i - 1];
     const b = groups[i];
