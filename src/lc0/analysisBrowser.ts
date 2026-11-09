@@ -5919,14 +5919,14 @@ export function mountAnalysisBrowser(): () => void {
   // the pre-hover control, rather than the bar the user subsequently entered.
   details.addEventListener('beforetoggle', (event) => {
     if ((event as ToggleEvent).newState === 'closed') {
+      restoringEvalFocus = true;
       restoreEvalFocus = details.contains(document.activeElement) || document.activeElement === rail;
     }
   }, { signal: controller.signal });
   details.addEventListener('toggle', (event) => {
-    if ((event as ToggleEvent).newState === 'closed' && restoreEvalFocus && rail.isConnected) {
+    if ((event as ToggleEvent).newState === 'closed') {
+      if (restoreEvalFocus && rail.isConnected) rail.focus({ preventScroll: true });
       restoreEvalFocus = false;
-      restoringEvalFocus = true;
-      rail.focus({ preventScroll: true });
       restoringEvalFocus = false;
     }
   }, { signal: controller.signal });

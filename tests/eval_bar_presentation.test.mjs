@@ -51,7 +51,8 @@ test('the stable whole-bar invoker owns native focus ordering and survives one-e
   assert.match(source, /showPopover as \(options: \{ source: HTMLElement \}\) => void\)\(\{ source: rail \}\)/);
   assert.match(source, /if \(details.dataset.fen !== tree.current.fen\) \{/);
   assert.doesNotMatch(source, /details.dataset.fen !== tree.current.fen \|\| choices.length/);
-  assert.match(source, /restoringEvalFocus = true;\s*rail.focus\(\{ preventScroll: true \}\);\s*restoringEvalFocus = false/);
+  assert.match(source, /newState === 'closed'\) \{\s*restoringEvalFocus = true;\s*restoreEvalFocus =/);
+  assert.match(source, /if \(restoreEvalFocus && rail.isConnected\) rail.focus\(\{ preventScroll: true \}\);/);
   assert.match(source, /if \(restoringEvalFocus \|\| retry/);
 });
 
