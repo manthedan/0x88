@@ -699,7 +699,7 @@ onMount(() => {
     .arena-eval-bar :global(.eval-midline){inset:-1px auto -1px 50%; width:2px; height:auto}
     .arena-eval-bar:global([data-disagreement=true]) :global(.eval-midline){height:auto; width:3px}
     .arena-eval-bar :global(.eval-gap){left:var(--low); width:calc(var(--high) - var(--low)); bottom:4px; height:2px; border-width:0 2px}
-    .arena-eval-bar :global(.eval-none){display:none}
+    .arena-eval-bar .eval-lane.unavailable .eval-none{display:none}
     .eval-source{gap:8px; min-height:18px; align-items:center}
     .eval-source :global(.eval-reading){gap:4px; flex-shrink:0}
     .eval-source :global(.eval-side){font-size:11px}
