@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compareArenaEvals, compareEvals, evalPercent, fenPly, groupEvalTicks, searchAge, searchAgeLabel } from '../src/lc0/evalCompare.ts';
+import { arenaLaneOutput, compareArenaEvals, compareEvals, evalPercent, evalTickFocusKey, evalTooltipShift, fenPly, groupEvalTicks, searchAge, searchAgeLabel } from '../src/lc0/evalCompare.ts';
 
 const fen = (ply, pieces = '8/8/8/8/8/8/8/K6k') => `${pieces} ${ply % 2 ? 'b' : 'w'} - - 0 ${1 + Math.floor(ply / 2)}`;
 const score = (ply, cp = 20) => ({ fen: fen(ply), scoreCp: cp });
@@ -101,6 +101,40 @@ test('separate single ticks do not chain into a misleading count group', () => {
   const ticks = [0, 10, 20].map((cp, index) => ({ id: String(index), scoreCp: cp }));
   assert.equal(groupEvalTicks(ticks, undefined, 700).length, 3);
 });
+test('self-play keeps distinct side results even when the engine ID is shared', () => {
+  const white = { engineId: 'lc0-small', ...score(0, 20) };
+  const black = { engineId: 'lc0-small', ...score(1, -60) };
+  assert.equal(arenaLaneOutput(undefined, white, white.engineId, 'w'), white);
+  assert.equal(arenaLaneOutput(undefined, white, white.engineId, 'b'), undefined);
+  assert.equal(arenaLaneOutput(white, black, white.engineId, 'w'), white);
+  assert.equal(arenaLaneOutput(undefined, black, black.engineId, 'b'), black);
+  const next = { engineId: 'lc0-small', ...score(2, 40) };
+  assert.equal(arenaLaneOutput(white, next, next.engineId, 'w'), next);
+  assert.equal(arenaLaneOutput(black, next, next.engineId, 'b'), black);
+});
+test('lane results reset at game boundaries and when the playing engine changes', () => {
+  const previous = { engineId: 'lc0-small', ...score(0) };
+  assert.equal(arenaLaneOutput(previous, undefined, previous.engineId, 'w'), undefined);
+  assert.equal(arenaLaneOutput(previous, previous, null, 'w'), undefined);
+  assert.equal(arenaLaneOutput(previous, previous, 'stockfish', 'w'), undefined);
+});
+test('focused engine stays the focus key when a tick joins a group or splits out', () => {
+  const before = evalTickFocusKey(['b'], undefined, undefined);
+  const joined = evalTickFocusKey(['a', 'b', 'c'], 'a', before);
+  assert.equal(joined, 'b');
+  assert.equal(evalTickFocusKey(['a'], 'a', joined), 'a');
+  assert.equal(evalTickFocusKey(['b', 'c'], 'a', joined), 'b');
+});
+test('mobile tooltips stay within gutters at endpoints and at +/-5 pawn positions', () => {
+  for (const cp of [-10000, -500, -200, 0, 200, 500, 10000]) {
+    const anchor = 4 + 382 * evalPercent({ scoreCp: cp }) / 100;
+    const center = anchor + evalTooltipShift(anchor, 390);
+    assert.ok(center - 90 >= 8 - 0.001, `left bound at ${cp}`);
+    assert.ok(center + 90 <= 382 + 0.001, `right bound at ${cp}`);
+  }
+  assert.equal(evalTooltipShift(195, 390), 0);
+});
+
 test('mate endpoints and exact overlaps remain visible in groups', () => {
   const groups = groupEvalTicks([{ id: 'a', mateIn: 1 }, { id: 'b', mateIn: 7 }, { id: 'c', mateIn: -3 }], 'a', 390);
   assert.equal(groups.length, 2);

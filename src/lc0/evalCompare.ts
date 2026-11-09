@@ -83,6 +83,30 @@ export function compareArenaEvals(scores: readonly (EvalScore & { fen?: string }
   return { ages, fresh, fair, adjacent: fair && ages[0] !== ages[1], comparison: fair ? compareEvals(scores) : undefined };
 }
 
+/**
+ * Arena may use one engine ID for both seats. Retain each side's own last
+ * completed search instead of borrowing the other side's shared-map snapshot.
+ * A missing latest output resets the lane: Arena clears its output map before
+ * rendering a new game (even when both seats keep the same IDs).
+ */
+export function arenaLaneOutput<T extends { engineId: string; fen: string }>(previous: T | undefined, latest: T | undefined, engineId: string | null, side: 'w' | 'b'): T | undefined {
+  if (!engineId || !latest) return undefined;
+  if (latest.engineId === engineId && latest.fen.split(/\s+/)[1] === side) return latest;
+  return previous?.engineId === engineId && previous.fen.split(/\s+/)[1] === side ? previous : undefined;
+}
+
+/** Keep the focused engine's identity when a marker joins or leaves a group. */
+export function evalTickFocusKey(members: readonly string[], selectedId: string | undefined, focusedId: string | undefined): string {
+  return [focusedId, selectedId].find((id): id is string => id !== undefined && members.includes(id)) ?? members[0] ?? '';
+}
+
+/** Shift a centered mobile tooltip inside viewport gutters, including wide engine names. */
+export function evalTooltipShift(anchor: number, viewport: number, maxWidth = 180, gutter = 8): number {
+  const width = Math.min(maxWidth, Math.max(0, viewport - 2 * gutter));
+  const left = Math.max(gutter, Math.min(viewport - gutter - width, anchor - width / 2));
+  return left + width / 2 - anchor;
+}
+
 export interface EvalTick extends EvalScore { id: string }
 
 /**

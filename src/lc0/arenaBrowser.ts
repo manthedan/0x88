@@ -24,7 +24,7 @@ import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
-import { compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
+import { arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import {
   appendCpuArenaTrail,
   arenaChartEngineName,
@@ -1209,15 +1209,21 @@ function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
 }
 
+const evalLaneOutputs: (EngineOutputSnapshot | undefined)[] = [];
+
 /** Fixed lanes: White-playing engine then Black-playing engine, independent of board orientation. */
 function renderEvalBars(): void {
   const node = el('arenaEvalBar');
+  // Track live seats even while a chart review temporarily hides their evals.
+  [boardWhiteId, boardBlackId].forEach((id, index) => {
+    evalLaneOutputs[index] = arenaLaneOutput(evalLaneOutputs[index], id ? engineOutputs.get(id) : undefined, id, index === 0 ? 'w' : 'b');
+  });
   const sides = stripSides();
   const lanes = [
     { id: sides.w.id, name: sides.w.name, side: 'White', shortSide: 'W' },
     { id: sides.b.id, name: sides.b.name, side: 'Black', shortSide: 'B' },
-  ].map((seat) => {
-    const output = seat.id ? engineOutputs.get(seat.id) : undefined;
+  ].map((seat, index) => {
+    const output = seat.id ? evalLaneOutputs[index] : undefined;
     const name = displayEngineName(output?.engineName ?? seat.name ?? 'No engine');
     // Use the same displayed pawn->bar scale as Analysis for BOTH engines.
     // Lc0's WDL remains in its card/charts; mixing WDL and logistic cp here would
