@@ -1,4 +1,7 @@
 <script lang="ts">
+import { ARROW_GEOMETRY, arrowHeadPath, arrowLayout } from '../../lc0/arrowGeometry.ts';
+import { CHESSGROUND_SHAPES_LAYER_OPACITY, ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH } from '../../lc0/analysisFormat.ts';
+
 type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
 type Piece = { color: 'white' | 'black'; role: PieceRole; square: string };
 
@@ -29,16 +32,17 @@ function xy(square: string): [number, number] {
   return [FILES.indexOf(square[0]), 8 - Number(square[1])];
 }
 
-// Match the owner's chessground engine arrows: width 11 (64-unit squares) at 75% opacity.
-// Only one best-move arrow per engine, drawn over the pieces as chessground does on the Analysis board;
-// the 75% opacity keeps the pieces underneath readable.
-const STROKE = (11 / 64) * 100;
-const MARGIN = (10 / 64) * 100;
+// Match the owner's chessground engine arrows: the same width, the same opacity (the brush's 75%
+// times chessground's 60% shapes layer) and the shared arrow geometry (chess.com-style tail, fixed
+// head). Only one best-move arrow per engine, drawn over the pieces as chessground does on the
+// Analysis board. The svg uses one unit per square, like chessground's.
+const STROKE = ENGINE_ARROW_WIDTH / 64;
+const ARROW_OPACITY = Math.round(ENGINE_ARROW_OPACITY * CHESSGROUND_SHAPES_LAYER_OPACITY * 1000) / 1000;
+const HEAD = arrowHeadPath(ARROW_GEOMETRY);
 function arrow(from: string, to: string) {
-  const [fx, fy] = xy(from).map((v) => v * 100 + 50);
-  const [tx, ty] = xy(to).map((v) => v * 100 + 50);
-  const angle = Math.atan2(ty - fy, tx - fx);
-  return { x1: fx, y1: fy, x2: tx - Math.cos(angle) * MARGIN, y2: ty - Math.sin(angle) * MARGIN };
+  const centre = (square: string) => xy(square).map((v) => v + 0.5) as [number, number];
+  const { x1, y1, x2, y2 } = arrowLayout(centre(from), centre(to), false, ARROW_GEOMETRY);
+  return { x1, y1, x2, y2 };
 }
 
 const pieces = fenPieces(FEN);
@@ -85,17 +89,17 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
           <piece class={`${piece.color} ${piece.role}`} style={`transform:translate(${xy(piece.square)[0] * 100}%,${xy(piece.square)[1] * 100}%)`}></piece>
         {/each}
       </cg-board>
-      <svg class="arrows" viewBox="0 0 800 800" aria-hidden="true">
+      <svg class="arrows" viewBox="0 0 8 8" aria-hidden="true" opacity={ARROW_OPACITY}>
         <defs>
           {#each engines as engine (engine.id)}
-            <marker id={`preview-head-${engine.id}`} markerWidth="4" markerHeight="4" refX="2.05" refY="2" orient="auto">
-              <path d="M0,0 V4 L3,2 Z" fill={engine.color}></path>
+            <marker id={`preview-head-${engine.id}`} markerUnits="userSpaceOnUse" markerWidth={ARROW_GEOMETRY.headLength} markerHeight={ARROW_GEOMETRY.headWidth} refX={ARROW_GEOMETRY.overlap} refY="0" orient="auto" overflow="visible">
+              <path d={HEAD} fill={engine.color}></path>
             </marker>
           {/each}
         </defs>
         {#each engines as engine (engine.id)}
           {@const a = arrow(engine.arrow[0], engine.arrow[1])}
-          <line {...a} stroke={engine.color} stroke-width={STROKE} stroke-linecap="round" marker-end={`url(#preview-head-${engine.id})`}></line>
+          <line {...a} stroke={engine.color} stroke-width={STROKE} stroke-linecap="butt" marker-end={`url(#preview-head-${engine.id})`}></line>
         {/each}
       </svg>
     </div>
@@ -155,7 +159,7 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
     overflow:hidden; border-radius:3px; background:var(--board-light); isolation:isolate;
   }
   .preview-board cg-board{position:absolute; inset:0; display:block; overflow:hidden}
-  .arrows{position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; opacity:.75}
+  .arrows{position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none}
   .pv-results{grid-area:results; min-width:0}
   .pv-legend{display:grid; gap:2px; margin:0 0 10px; color:var(--ink-soft); font-size:13px; line-height:1.5}
   .pv-legend>span{color:var(--muted)}

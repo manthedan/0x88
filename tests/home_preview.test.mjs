@@ -7,7 +7,9 @@ import { render } from 'svelte/server';
 // Exercise the real component's SSR, not a second copy of its example data.
 const source = readFileSync(new URL('../src/lib/components/AnalysisPreview.svelte', import.meta.url), 'utf8');
 const { js } = compile(source, { generate: 'server' });
-const code = js.code.replace(/(['"])svelte\/internal\/server\1/g, JSON.stringify(import.meta.resolve('svelte/internal/server')));
+const code = js.code
+  .replace(/(['"])svelte\/internal\/server\1/g, JSON.stringify(import.meta.resolve('svelte/internal/server')))
+  .replace(/(['"])(\.\.\/\.\.\/lc0\/[^'"]+)\1/g, (_, _q, path) => JSON.stringify(new URL(path, new URL('../src/lib/components/', import.meta.url)).href));
 const { default: Preview } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const { body: html } = render(Preview);
 
@@ -41,7 +43,16 @@ test('home position retains its chessground board, coordinates and FEN deep link
 test('home arrows keep one best move per engine at the owner’s uniform width', () => {
   const arrows = [...html.matchAll(/<line\b[^>]+>/g)].map(m => m[0]);
   assert.equal(arrows.length, 2);
-  for (const arrow of arrows) assert.match(arrow, /stroke-width="17\.1875"/, '11 / 64 on 100-unit squares');
+  for (const arrow of arrows) {
+    assert.match(arrow, /stroke-width="0\.171875"/, '11 / 64 on one-unit squares, as chessground draws them');
+    assert.match(arrow, /stroke-linecap="butt"/);
+  }
+  // The shaft starts near the origin square's edge (c3 → e2): 0.42 squares along the arrow.
+  const [x1, y1] = ['x1', 'y1'].map((name) => Number(arrows[0].match(new RegExp(`${name}="([^"]+)"`))[1]));
+  assert.ok(Math.abs(Math.hypot(x1 - 2.5, y1 - 5.5) - 0.42) < 1e-9);
+  assert.match(html, /markerUnits="userSpaceOnUse"/);
+  assert.match(html, /<svg class="arrows[^"]*"[^>]*opacity="0\.45"/, 'brush 75% × chessground shapes layer 60%');
+  assert.match(html, /d="M0,-0\.275 L0\.4,0 L0,0\.275 Z"/);
   assert.match(arrows[0], /stroke="#7a4fd6"/);
   assert.match(arrows[1], /stroke="#1f5fcf"/);
   assert.match(html, /Best-move arrows/);

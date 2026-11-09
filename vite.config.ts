@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+import { patchChessgroundSvg } from './src/lc0/chessgroundArrowPatch.ts';
 
 const crossOriginIsolationHeaders = {
   'Cross-Origin-Opener-Policy': 'same-origin',
@@ -7,9 +8,23 @@ const crossOriginIsolationHeaders = {
 };
 const labOnly = process.env.LC0_TVMJS_LAB === '1';
 
+// Chessground can't size its arrowheads independently of line width; patch its svg.js at build
+// time (see src/lc0/chessgroundArrowPatch.ts). Chessground is kept out of dependency
+// pre-bundling so the dev server applies the same patch.
+function chessgroundArrows(): Plugin {
+  return {
+    name: '0x88-chessground-arrows',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!/[\\/]chessground[\\/]dist[\\/]svg\.js$/.test(id.split('?')[0])) return null;
+      return { code: patchChessgroundSvg(code), map: null };
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: labOnly ? [] : [sveltekit()],
-  optimizeDeps: labOnly ? { exclude: ['onnxruntime-web'] } : undefined,
+  plugins: labOnly ? [] : [chessgroundArrows(), sveltekit()],
+  optimizeDeps: labOnly ? { exclude: ['onnxruntime-web'] } : { exclude: ['chessground'] },
   resolve: {
     // ORT is configured to load its staged /ort/ glue and WASM at runtime.
     // Select the external-WASM export so Vite does not emit another copy for

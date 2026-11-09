@@ -77,6 +77,10 @@ export interface EngineBrushes {
 // Alternatives keep the same width and a lighter opacity.
 export const ENGINE_ARROW_WIDTH = 11;
 export const ENGINE_ARROW_OPACITY = 0.75;
+// Chessground's stylesheet (public/chessground.base.css, `.cg-wrap .cg-shapes`) also dims the whole
+// arrow layer to 60%, so a 75% brush shows at 45%. The owner picked the width and opacity on the live
+// board, so 45% is what they chose. Arrows drawn outside chessground must apply both factors.
+export const CHESSGROUND_SHAPES_LAYER_OPACITY = 0.6;
 export const ANALYSIS_DRAWABLE_BRUSHES = {
   // Lc0: violet, so engine identity never reads as the brand-lime actions or the last-move highlight.
   violet: { key: 'v', color: '#7a4fd6', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
