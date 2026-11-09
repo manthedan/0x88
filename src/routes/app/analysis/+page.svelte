@@ -510,7 +510,7 @@ onMount(() => {
   .eval-ticks :global(.chosen .eval-tick-count){border-color:var(--tick-color)}
   .eval-ticks :global(.eval-segments){position:absolute; bottom:0; left:0; right:0; height:3px; display:flex}
   .eval-ticks :global(.eval-edge-tag){position:absolute; bottom:var(--edge); left:-1px; width:20px; transform:translateY(50%); background:var(--panel); color:color-mix(in srgb,var(--edge-color) 65%,var(--ink)); text-align:center; font:700 10px/12px var(--sans); pointer-events:none}
-  .eval-ticks :global(.eval-chosen-mark){position:absolute; right:-2px; bottom:var(--pos); width:8px; height:4px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 1.7px #29251d; z-index:8; pointer-events:none}
+  .eval-ticks :global(.eval-chosen-mark){position:absolute; right:-3px; bottom:var(--pos); width:5px; height:4px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 1.7px #29251d; z-index:14; pointer-events:none}
   .eval-ticks :global(.eval-tick-tip){display:none; position:absolute; left:calc(100% + 8px); top:8px; width:max-content; max-width:270px; padding:8px 10px; border:1px solid var(--border-input); border-radius:6px; background:var(--panel); color:var(--ink); font:500 12px/1.5 var(--sans); box-shadow:0 4px 16px #0004; white-space:normal; text-align:left; pointer-events:none}
   .eval-ticks :global(.eval-tick:hover), .eval-ticks :global(.eval-tick:focus){z-index:12}
   .eval-ticks :global(.eval-tick:focus-visible){outline:2px solid var(--accent); outline-offset:1px}
