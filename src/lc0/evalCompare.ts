@@ -32,7 +32,7 @@ export function compareEvals(scores: readonly EvalScore[]) {
   const oppositeSides = min <= 50 - SIDE_THRESHOLD && max >= 50 + SIDE_THRESHOLD;
   const allCp = results.every(({ score }) => score.mateIn === undefined && Number.isFinite(score.scoreCp));
   const pawnSpread = allCp ? (Math.max(...results.map(({ score }) => score.scoreCp!)) - Math.min(...results.map(({ score }) => score.scoreCp!))) / 100 : undefined;
-  return { min, max, spread, oppositeSides, meaningful: spread >= MEANINGFUL_SPREAD,
+  return { min, max, spread, pawnSpread, oppositeSides, meaningful: spread >= MEANINGFUL_SPREAD,
     // Never subtract mate distances as though they were pawns.
     label: pawnSpread === undefined ? `${spread.toFixed(0)} points on bar` : `${pawnSpread.toFixed(2)} pawns` };
 }
@@ -83,6 +83,27 @@ export function compareArenaEvals(scores: readonly (EvalScore & { fen?: string }
   return { ages, fresh, fair, adjacent: fair && ages[0] !== ages[1], comparison: fair ? compareEvals(scores) : undefined };
 }
 
+/** Compact text retains the unit for mate comparisons; a mate distance is not pawns. */
+export function compactEvalSpread(comparison: NonNullable<ReturnType<typeof compareEvals>>): string {
+  return comparison.pawnSpread === undefined ? `${comparison.spread.toFixed(0)} pts` : comparison.pawnSpread.toFixed(2);
+}
+
+/** Visible verdicts use the same eligibility/scale rules as the bar, including pending results. */
+export function arenaComparisonStatus(state: ReturnType<typeof compareArenaEvals>, available: readonly boolean[], names: readonly string[]) {
+  if (!available.some(Boolean)) return { text: 'Waiting for first search', emphasis: false };
+  if (available.some((ready) => !ready)) return { text: `Waiting for ${available[0] ? 'Black' : 'White'}’s search`, emphasis: false };
+  if (!state.comparison) {
+    const old = state.ages.findIndex((age) => age !== undefined && age > 2);
+    return { text: old >= 0 ? `not comparable · ${names[old]} ${state.ages[old]} plies old` : 'not comparable', emphasis: false };
+  }
+  const comparison = state.comparison;
+  if (comparison.oppositeSides) return { text: 'disagree on who’s better', emphasis: true };
+  if (comparison.meaningful) return { text: `${compactEvalSpread(comparison)} apart`, emphasis: true };
+  // "Agree" is a tight (<=2 point) match on the nonlinear scale, not a claim of
+  // equal search effort or simultaneous opinions. Other eligible gaps stay visible.
+  return { text: comparison.spread <= 2 ? 'agree' : `Δ ${compactEvalSpread(comparison)}`, emphasis: false };
+}
+
 /**
  * Arena may use one engine ID for both seats. Retain each side's own last
  * completed search instead of borrowing the other side's shared-map snapshot.
@@ -108,9 +129,9 @@ export function evalTooltipShift(anchor: number, viewport: number, maxWidth = 18
 }
 
 /** Inward shift for a count badge's actual outline, along the track's value axis. */
-export function evalTickBadgeShift(percent: number, trackPixels: number, selected: boolean): number {
+export function evalTickBadgeShift(percent: number, trackPixels: number, selected: boolean, footprint?: number): number {
   const center = percent * trackPixels / 100;
-  const half = Math.min(selected ? 8.5 : 7.5, trackPixels / 2);
+  const half = Math.min(footprint !== undefined ? footprint / 2 : selected ? 8.5 : 7.5, trackPixels / 2);
   return Math.max(half, Math.min(trackPixels - half, center)) - center;
 }
 
@@ -123,7 +144,7 @@ export interface EvalTick extends EvalScore { id: string }
  * same shifted centers as the renderer, not percentage-based endpoint classes.
  * The chosen engine anchors its group; other groups use their mean position.
  */
-export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selectedId: string | undefined, trackPixels: number, tolerance = TICK_GROUP_PX) {
+export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selectedId: string | undefined, trackPixels: number, tolerance = TICK_GROUP_PX, badgePixels?: number) {
   const sorted = scores.flatMap((score) => {
     const percent = evalPercent(score);
     return percent === undefined ? [] : [{ score, percent }];
@@ -138,9 +159,9 @@ export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selecte
     groups.push({ members: entries.map(({ score }) => score), selected: !!selected,
       percent: selected?.percent ?? entries.reduce((sum, entry) => sum + entry.percent, 0) / entries.length });
   }
-  const footprint = (group: typeof groups[number]) => group.members.length > 1 ? (group.selected ? 17 : 15) : group.selected ? 8 : 6;
+  const footprint = (group: typeof groups[number]) => group.members.length > 1 ? (badgePixels ?? (group.selected ? 17 : 15)) : group.selected ? 8 : 6;
   const center = (group: typeof groups[number]) => group.percent * pixels / 100
-    + (group.members.length > 1 ? evalTickBadgeShift(group.percent, pixels, group.selected) : 0);
+    + (group.members.length > 1 ? evalTickBadgeShift(group.percent, pixels, group.selected, badgePixels) : 0);
   for (let i = 1; i < groups.length;) {
     const a = groups[i - 1];
     const b = groups[i];

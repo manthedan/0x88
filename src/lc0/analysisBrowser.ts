@@ -36,7 +36,8 @@ import {
   lc0AnalysisLines,
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
-import { compareEvals, evalPercent, evalTickBadgeShift, evalTickFocusKey, evalTooltipShift, groupEvalTicks } from './evalCompare.ts';
+import { compactEvalSpread, compareEvals, evalPercent } from './evalCompare.ts';
+import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from './evalBarPresentation.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
@@ -2042,6 +2043,8 @@ function evalBarLine(lines: AnalysisLine[]): AnalysisLine | undefined {
   return best.find((entry) => analysisEngineName(entry.engine) === evalSourceEngine) ?? best[0];
 }
 
+let evalDetailsInvoker: HTMLButtonElement | null = null;
+
 function renderEvalBar() {
   if (retry) {
     el('evalScore').textContent = '';
@@ -2055,6 +2058,9 @@ function renderEvalBar() {
     el('evalTicks').replaceChildren();
     el('evalSpread').hidden = true;
     el('evalSpreadLabel').hidden = true;
+    const details = el('evalCompareDetails');
+    if (details.matches(':popover-open')) details.hidePopover();
+    el('evalDetailList').replaceChildren();
     return;
   }
   const lines = lineCache.get(tree.current.fen) ?? [];
@@ -2065,7 +2071,7 @@ function renderEvalBar() {
   el('evalScore').textContent = line?.scoreText ?? '—';
   el('evalScore').dataset.long = String((line?.scoreText ?? '').length > 5);
   el('evalSource').textContent = line ? analysisEngineName(line.engine) : 'Choose engine';
-  el('evalSource').dataset.short = line ? engineMonogram(line.engine) : '';
+  el('evalSource').dataset.short = line ? evalEngineTag(line.engine) : '';
   el('evalSourceButton').style.setProperty('--engine-color', line ? analysisChipColor(line.engine) : 'var(--muted)');
   // A readable source selector above the board drives the attached bar.
   const choices = evalSourceChoices(lines);
@@ -2078,27 +2084,46 @@ function renderEvalBar() {
   if (comparison) {
     spread.style.setProperty('--low', `${comparison.min}%`);
     spread.style.setProperty('--high', `${comparison.max}%`);
+    spread.style.setProperty('--mid', `${(comparison.min + comparison.max) / 2}%`);
     spread.dataset.meaningful = String(comparison.meaningful || comparison.oppositeSides);
+    spread.title = `Engine spread: ${comparison.label}. Positions use the nonlinear evaluation-bar scale, not pawn distance.`;
   }
   const spreadLabel = el('evalSpreadLabel');
-  spreadLabel.hidden = !comparison || !(comparison.meaningful || comparison.oppositeSides);
-  spreadLabel.textContent = comparison ? `Δ ${comparison.label.replace(' pawns', '')}` : '';
+  spreadLabel.hidden = choices.length < 2;
+  spreadLabel.dataset.meaningful = String(!!comparison && (comparison.meaningful || comparison.oppositeSides));
+  spreadLabel.textContent = comparison ? `Δ ${compactEvalSpread(comparison)}` : 'Δ —';
   const rect = bar?.getBoundingClientRect();
   const mobile = matchMedia('(max-width:600px)').matches;
   const length = (mobile ? rect?.width : rect?.height) ?? 400;
   const selectedId = line ? analysisEngineName(line.engine) : undefined;
-  const groups = choices.length > 1 ? groupEvalTicks(ticks, selectedId, length) : [];
   const tickContainer = el('evalTicks');
-  const focusedId = tickContainer.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focusKey : undefined;
+  const details = el('evalCompareDetails');
+  if (details.dataset.fen !== tree.current.fen || choices.length < 2) {
+    if (details.matches(':popover-open')) details.hidePopover();
+    details.dataset.fen = tree.current.fen;
+  }
+  const focusedId = tickContainer.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focusKey : details.matches(':popover-open') ? evalDetailsInvoker?.dataset.focusKey : undefined;
   // Results are from the CURRENT FEN cache only. No placeholder or previous-position ticks.
-  patchAnalysisResults(tickContainer, groups.map((group) => {
-    const details = group.members.map((tick) => `${tick.name} ${tick.scoreText}${group.selected && tick.id === analysisEngineName(line!.engine) ? ' (shown on bar)' : ''} · ${tick.detail}`).join('; ');
-    const color = group.members.find((tick) => tick.id === analysisEngineName(line?.engine ?? ''))?.color ?? group.members[0].color;
-    const focusKey = evalTickFocusKey(group.members.map((tick) => tick.id), selectedId, focusedId);
-    const tipShift = mobile ? evalTooltipShift((rect?.left ?? 0) + length * group.percent / 100, innerWidth) : 0;
-    const badgeShift = evalTickBadgeShift(group.percent, length, group.selected);
-    return `<span class="eval-tick${group.selected ? ' chosen' : ''}${group.members.length > 1 ? ' grouped' : ''}" role="img" tabindex="0" data-focus-key="${htmlEscape(focusKey)}" style="--pos:${group.percent}%;--tick-color:${color};--tip-shift:${tipShift}px;--badge-shift:${badgeShift}px" title="${htmlEscape(details)}" aria-label="${htmlEscape(details)}">${group.members.length > 1 ? `<span class="eval-tick-count" aria-hidden="true">${group.members.length}</span>` : ''}<span class="eval-tick-tip" aria-hidden="true">${htmlEscape(details)}</span></span>`;
-  }).join(''));
+  const markerMarkup = choices.length > 1 ? evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile, left: rect?.left ?? 0, viewport: innerWidth, focusedId }) : '';
+  if (details.matches(':popover-open') && evalDetailsInvoker?.isConnected) {
+    // Refresh every marker, including a newly selected default engine, but reuse
+    // the native invoker object so Escape can still return focus after regrouping.
+    const template = document.createElement('template');
+    template.innerHTML = markerMarkup;
+    const next = template.content.querySelector<HTMLButtonElement>(`[data-focus-key="${CSS.escape(evalDetailsInvoker.dataset.focusKey ?? '')}"]`);
+    if (next) {
+      for (const name of evalDetailsInvoker.getAttributeNames()) if (!next.hasAttribute(name)) evalDetailsInvoker.removeAttribute(name);
+      for (const { name, value } of next.attributes) evalDetailsInvoker.setAttribute(name, value);
+      evalDetailsInvoker.replaceChildren(...next.childNodes);
+      next.replaceWith(evalDetailsInvoker);
+      tickContainer.replaceChildren(template.content);
+    } else {
+      details.hidePopover();
+      patchAnalysisResults(tickContainer, markerMarkup);
+    }
+  } else patchAnalysisResults(tickContainer, markerMarkup);
+  el('evalDetailsSummary').textContent = comparison ? `Spread ${comparison.label} · White’s view` : `${ticks.length} of ${choices.length} results · White’s view`;
+  patchAnalysisResults(el('evalDetailList'), evalDetailsMarkup(ticks, selectedId));
   const button = el('evalSourceButton');
   button.dataset.switchable = String(ready > 1);
   const comparisonLabel = comparison ? ` Engine spread: ${comparison.label}${comparison.oppositeSides ? '; prefer different sides' : ''}. ${ticks.map((tick) => `${tick.name} ${tick.scoreText}`).join('; ')}.` : '';
@@ -5477,9 +5502,9 @@ function wireEvents() {
   });
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = (event: KeyboardEvent) => {
-    if (retry) return;
-    // The results scroller owns arrow keys; scrolling must never change the game.
-    if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, #engineSummaries, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
+    if (retry || el('evalCompareDetails').matches(':popover-open')) return;
+    // Results and evaluation details own arrow keys; scrolling must never change the game.
+    if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, #engineSummaries, #evalCompareDetails, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
     if (event.key === 'ArrowLeft') {
       tree.back();
       afterNavigation();
@@ -5884,12 +5909,27 @@ export function mountAnalysisBrowser(): () => void {
   // Group in screen pixels again when the rail rotates or the board resizes.
   const evalResize = new ResizeObserver(() => renderEvalBar());
   evalResize.observe(el('evalWhite').parentElement!);
+  el('evalCompareDetails').addEventListener('beforetoggle', (event) => {
+    if ((event as ToggleEvent).newState === 'open') {
+      const active = document.activeElement;
+      evalDetailsInvoker = active instanceof HTMLButtonElement && el('evalTicks').contains(active) ? active : null;
+    }
+  }, { signal: controller.signal });
+  el('evalCompareDetails').addEventListener('toggle', (event) => {
+    if ((event as ToggleEvent).newState === 'closed') {
+      evalDetailsInvoker = null;
+      renderEvalBar();
+    }
+  }, { signal: controller.signal });
   void init(controller.signal);
   return () => {
     pvResize.disconnect();
     evalResize.disconnect();
     controller.abort();
-    if (mountAbort === controller) disposePageResources();
+    if (mountAbort === controller) {
+      evalDetailsInvoker = null;
+      disposePageResources();
+    }
     // Only clear the test hook if it is still ours (a newer mount may have
     // installed its own).
     if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
