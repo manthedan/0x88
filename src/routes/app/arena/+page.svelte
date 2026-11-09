@@ -312,7 +312,7 @@ onMount(() => {
 
   /* ── Board column: strip / eval bar + board / strip ── */
   .board-panel{display:flex; flex-direction:column; gap:4px; min-width:0; padding:8px}
-  .board-with-eval{display:grid; grid-template-columns:38px minmax(0,1fr); gap:8px; align-items:stretch}
+  .board-with-eval{display:grid; grid-template-columns:42px minmax(0,1fr); gap:8px; align-items:stretch}
   .board-shell{position:relative}
   .arena-workspace :global(#ground coords){font-size:12px; font-weight:700; opacity:1}
   .arena-eval-bar{
@@ -325,7 +325,7 @@ onMount(() => {
   .arena-eval-bar .eval-fill{position:absolute; inset:auto 0 0; height:var(--pct); background:var(--eval-light); border-radius:2px; transition:height .18s ease, width .18s ease}
   .arena-eval-bar .eval-cap{position:absolute; z-index:2; inset:0 0 auto; height:3px; background:var(--eng); transition:opacity .18s ease}
   .arena-eval-bar .eval-lane:global(.stale) .eval-cap{opacity:.65; background:repeating-linear-gradient(135deg,var(--eng) 0 3px,var(--panel) 3px 5px)}
-  .arena-eval-bar .eval-lane-label{position:absolute; z-index:2; top:5px; left:0; right:0; background:var(--panel); color:color-mix(in srgb,var(--eng) 65%,var(--ink)); text-align:center; font:700 10px/14px var(--sans)}
+  .arena-eval-bar .eval-lane-label{position:absolute; z-index:2; top:5px; left:0; right:0; background:var(--panel); color:color-mix(in srgb,var(--eng) 65%,var(--ink)); text-align:center; font:700 11px/14px var(--sans)}
   .arena-eval-bar .eval-lane.unavailable :is(.eval-cap,.eval-fill){display:none}
   .arena-eval-bar .eval-lane.unavailable .eval-lane-label{color:var(--muted)}
   .arena-eval-bar .eval-none{display:none}
@@ -345,6 +345,7 @@ onMount(() => {
   .eval-source :global(.eval-engine){overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .eval-source :global(strong){font:700 13px/18px var(--mono); white-space:nowrap; color:inherit}
   .eval-source :global(.eval-age){color:var(--muted); font-size:11px; white-space:nowrap}
+  .eval-source :global(.eval-age:empty){display:none}
   .eval-source :global(.eval-age.older){text-decoration:underline dotted; text-underline-offset:3px}
   .eval-source :global(.eval-reading.pending){color:var(--muted)}
   .eval-source :global(.eval-comparison){margin-left:auto; color:var(--muted); text-align:right; font:500 12px/18px var(--sans)}

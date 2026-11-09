@@ -1266,7 +1266,7 @@ function renderEvalBars(): void {
   caption.setAttribute('aria-label', label);
   const markup = lanes.map((lane, index) => {
     const age = state.ages[index];
-    const stamp = lane.percent === undefined ? '—' : age === 0 ? 'now' : age !== undefined && age > 0 ? `${age}p` : 'older';
+    const stamp = lane.percent === undefined ? '' : age === 0 ? 'now' : age !== undefined && age > 0 ? `${age}p` : 'older';
     return `<span class="eval-reading${lane.percent === undefined ? ' pending' : ''}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine"><span class="eval-engine-full">${htmlEscape(lane.name)}</span><span class="eval-engine-short">${htmlEscape(lane.tag)}</span></span><strong>${htmlEscape(lane.text)}</strong><span class="eval-age${state.fresh[index] ? '' : ' older'}">${htmlEscape(stamp)}</span>${lane.thinking ? '<span class="eval-searching" aria-hidden="true"></span>' : ''}</span>`;
   }).join('') + `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}">${htmlEscape(status.text)}</span>`;
   if (caption.innerHTML !== markup) caption.innerHTML = markup;
