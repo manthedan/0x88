@@ -85,7 +85,11 @@ export function compareArenaEvals(scores: readonly (EvalScore & { fen?: string }
 
 export interface EvalTick extends EvalScore { id: string }
 
-/** Cluster by total diameter, not transitive neighbours, so a chain cannot swallow a range. */
+/**
+ * Cluster nearby ticks by diameter, then coalesce colliding count badges. A badge
+ * is 13px plus its outline; treating it as a 2px tick would create stacked counts.
+ * The chosen engine anchors its group; other groups use their mean position.
+ */
 export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selectedId: string | undefined, trackPixels: number, tolerance = TICK_GROUP_PX) {
   const sorted = scores.flatMap((score) => {
     const percent = evalPercent(score);
@@ -100,6 +104,21 @@ export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selecte
     const selected = entries.find(({ score }) => score.id === selectedId);
     groups.push({ members: entries.map(({ score }) => score), selected: !!selected,
       percent: selected?.percent ?? entries.reduce((sum, entry) => sum + entry.percent, 0) / entries.length });
+  }
+  const footprint = (group: typeof groups[number]) => group.members.length > 1 ? 15 : group.selected ? 8 : 6;
+  for (let i = 1; i < groups.length;) {
+    const a = groups[i - 1];
+    const b = groups[i];
+    const gap = (b.percent - a.percent) * pixels / 100;
+    // Plain ticks were already grouped by the requested tolerance. Only badges
+    // need extra room; don't chain a row of otherwise distinct single ticks.
+    if ((a.members.length > 1 || b.members.length > 1) && gap < (footprint(a) + footprint(b)) / 2 + 2) {
+      const members = [...a.members, ...b.members];
+      const selected = members.find((member) => member.id === selectedId);
+      groups.splice(i - 1, 2, { members, selected: !!selected,
+        percent: selected ? evalPercent(selected)! : members.reduce((sum, member) => sum + evalPercent(member)!, 0) / members.length });
+      i = Math.max(1, i - 1);
+    } else i++;
   }
   return groups;
 }

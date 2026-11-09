@@ -90,9 +90,16 @@ test('tick collision tolerance is in pixels and changes with track length', () =
   assert.equal(groupEvalTicks(ticks, undefined, 390).length, 1);
   assert.equal(groupEvalTicks(ticks, undefined, 700).length, 2);
 });
-test('grouping uses diameter rather than chaining all nearby ticks', () => {
-  const ticks = [0, 30, 60].map((cp, index) => ({ id: String(index), scoreCp: cp }));
-  assert.equal(groupEvalTicks(ticks, undefined, 100, 4).length, 2);
+test('count badges coalesce instead of overlapping other counts or individual ticks', () => {
+  const ticks = [22, 25, 36, 40].map((cp, index) => ({ id: String(index), scoreCp: cp }));
+  const groups = groupEvalTicks(ticks, '1', 700);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].members.length, 4);
+  assert.equal(groups[0].percent, evalPercent(ticks[1]));
+});
+test('separate single ticks do not chain into a misleading count group', () => {
+  const ticks = [0, 10, 20].map((cp, index) => ({ id: String(index), scoreCp: cp }));
+  assert.equal(groupEvalTicks(ticks, undefined, 700).length, 3);
 });
 test('mate endpoints and exact overlaps remain visible in groups', () => {
   const groups = groupEvalTicks([{ id: 'a', mateIn: 1 }, { id: 'b', mateIn: 7 }, { id: 'c', mateIn: -3 }], 'a', 390);
