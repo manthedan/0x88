@@ -75,7 +75,10 @@ onMount(() => {
       <p id="boardAnnouncement" class="sr-only" aria-live="polite"></p>
     </div>
     <div id="evalCompareDetails" class="eval-details" popover="auto" role="dialog" aria-labelledby="evalDetailsTitle" aria-describedby="evalDetailsSummary">
-      <header><h2 id="evalDetailsTitle">Engine evaluations</h2><button type="button" class="tool-button" popovertarget="evalCompareDetails" popovertargetaction="hide" aria-label="Close engine evaluations">×</button></header>
+      <header><h2 id="evalDetailsTitle">Engine evaluations</h2>
+        <!-- svelte-ignore a11y_autofocus (Native popover focus enters only after the user opens this value list.) -->
+        <button type="button" class="tool-button" autofocus popovertarget="evalCompareDetails" popovertargetaction="hide" aria-label="Close engine evaluations">×</button>
+      </header>
       <p id="evalDetailsSummary" class="small"></p><div id="evalDetailList"></div>
       <p class="small">Tick spacing uses the nonlinear bar scale, not pawn distance.</p>
     </div>
