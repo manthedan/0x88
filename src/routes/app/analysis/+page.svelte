@@ -477,7 +477,7 @@ onMount(() => {
   :global(.analysis-workspace .engine-row .row-unit){font-size:12px}
   :global(.analysis-workspace .engine-row .row-strength){flex-basis:76px; width:76px}
   .evalbar{
-    --eval-pct:50%; --low:0%; --high:100%; --pos:50%; --tick-color:var(--muted);
+    --eval-pct:50%; --low:0%; --high:100%; --pos:50%; --tick-color:var(--muted); --tip-shift:0px;
     width:18px; border:1px solid #68655e; border-radius:4px 0 0 4px;
     overflow:visible; background:#555550; position:relative; flex:0 0 auto;
     box-sizing:border-box;
@@ -1076,9 +1076,7 @@ onMount(() => {
     .eval-ticks :global(.eval-tick){left:var(--pos); bottom:auto; top:-2px; width:2px; height:12px; transform:translateX(-50%)}
     .eval-ticks :global(.eval-tick.chosen){left:var(--pos); width:4px; height:14px; top:-3px}
     .eval-ticks :global(.eval-tick-count){left:50%; top:50%; transform:translate(-50%,-50%)}
-    .eval-ticks :global(.eval-tick-tip){left:50%; top:calc(100% + 7px); transform:translateX(-50%); max-width:180px}
-    .eval-ticks :global(.near-start .eval-tick-tip){left:0; transform:none}
-    .eval-ticks :global(.near-end .eval-tick-tip){left:0; transform:translateX(-100%)}
+    .eval-ticks :global(.eval-tick-tip){left:calc(50% + var(--tip-shift)); top:calc(100% + 7px); transform:translateX(-50%); max-width:180px}
     .eval-ticks :global(.near-start .eval-tick-count){left:0; transform:translateY(-50%)}
     .eval-ticks :global(.near-end .eval-tick-count){left:auto; right:0; transform:translateY(-50%)}
     .board-panel :global(#ground){border-radius:3px}

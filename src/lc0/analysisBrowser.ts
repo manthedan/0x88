@@ -36,7 +36,7 @@ import {
   lc0AnalysisLines,
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
-import { compareEvals, evalPercent, groupEvalTicks } from './evalCompare.ts';
+import { compareEvals, evalPercent, evalTickFocusKey, evalTooltipShift, groupEvalTicks } from './evalCompare.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
@@ -2080,13 +2080,19 @@ function renderEvalBar() {
   spreadLabel.hidden = !comparison || !(comparison.meaningful || comparison.oppositeSides);
   spreadLabel.textContent = comparison ? `Δ ${comparison.label.replace(' pawns', '')}` : '';
   const rect = bar?.getBoundingClientRect();
-  const length = (matchMedia('(max-width:600px)').matches ? rect?.width : rect?.height) ?? 400;
-  const groups = choices.length > 1 ? groupEvalTicks(ticks, line ? analysisEngineName(line.engine) : undefined, length) : [];
+  const mobile = matchMedia('(max-width:600px)').matches;
+  const length = (mobile ? rect?.width : rect?.height) ?? 400;
+  const selectedId = line ? analysisEngineName(line.engine) : undefined;
+  const groups = choices.length > 1 ? groupEvalTicks(ticks, selectedId, length) : [];
+  const tickContainer = el('evalTicks');
+  const focusedId = tickContainer.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focusKey : undefined;
   // Results are from the CURRENT FEN cache only. No placeholder or previous-position ticks.
-  patchAnalysisResults(el('evalTicks'), groups.map((group) => {
+  patchAnalysisResults(tickContainer, groups.map((group) => {
     const details = group.members.map((tick) => `${tick.name} ${tick.scoreText}${group.selected && tick.id === analysisEngineName(line!.engine) ? ' (shown on bar)' : ''} · ${tick.detail}`).join('; ');
     const color = group.members.find((tick) => tick.id === analysisEngineName(line?.engine ?? ''))?.color ?? group.members[0].color;
-    return `<span class="eval-tick${group.selected ? ' chosen' : ''}${group.members.length > 1 ? ' grouped' : ''}${group.percent < 10 ? ' near-start' : group.percent > 90 ? ' near-end' : ''}" role="img" tabindex="0" data-focus-key="${htmlEscape(group.members.map((tick) => tick.id).sort().join('|'))}" style="--pos:${group.percent}%;--tick-color:${color}" title="${htmlEscape(details)}" aria-label="${htmlEscape(details)}">${group.members.length > 1 ? `<span class="eval-tick-count" aria-hidden="true">${group.members.length}</span>` : ''}<span class="eval-tick-tip" aria-hidden="true">${htmlEscape(details)}</span></span>`;
+    const focusKey = evalTickFocusKey(group.members.map((tick) => tick.id), selectedId, focusedId);
+    const tipShift = mobile ? evalTooltipShift((rect?.left ?? 0) + length * group.percent / 100, innerWidth) : 0;
+    return `<span class="eval-tick${group.selected ? ' chosen' : ''}${group.members.length > 1 ? ' grouped' : ''}${group.percent < 10 ? ' near-start' : group.percent > 90 ? ' near-end' : ''}" role="img" tabindex="0" data-focus-key="${htmlEscape(focusKey)}" style="--pos:${group.percent}%;--tick-color:${color};--tip-shift:${tipShift}px" title="${htmlEscape(details)}" aria-label="${htmlEscape(details)}">${group.members.length > 1 ? `<span class="eval-tick-count" aria-hidden="true">${group.members.length}</span>` : ''}<span class="eval-tick-tip" aria-hidden="true">${htmlEscape(details)}</span></span>`;
   }).join(''));
   const button = el('evalSourceButton');
   button.dataset.switchable = String(ready > 1);
