@@ -2095,14 +2095,16 @@ function renderEvalBar() {
   const length = (mobile ? rect?.width : rect?.height) ?? 400;
   const selectedId = line ? analysisEngineName(line.engine) : undefined;
   const tickContainer = el('evalTicks');
-  const focusedId = tickContainer.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focusKey : undefined;
-  // Results are from the CURRENT FEN cache only. No placeholder or previous-position ticks.
-  patchAnalysisResults(tickContainer, choices.length > 1 ? evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile, left: rect?.left ?? 0, viewport: innerWidth, focusedId }) : '');
   const details = el('evalCompareDetails');
   if (details.dataset.fen !== tree.current.fen || choices.length < 2) {
     if (details.matches(':popover-open')) details.hidePopover();
     details.dataset.fen = tree.current.fen;
   }
+  const focusedId = tickContainer.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focusKey : undefined;
+  // Keep the native popover invoker attached until dismissal so Escape can
+  // restore focus. Results keep streaming into the list; re-group on close.
+  // Results are from the CURRENT FEN cache only. No placeholder or previous-position ticks.
+  if (!details.matches(':popover-open')) patchAnalysisResults(tickContainer, choices.length > 1 ? evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile, left: rect?.left ?? 0, viewport: innerWidth, focusedId }) : '');
   el('evalDetailsSummary').textContent = comparison ? `Spread ${comparison.label} · White’s view` : `${ticks.length} of ${choices.length} results · White’s view`;
   patchAnalysisResults(el('evalDetailList'), evalDetailsMarkup(ticks, selectedId));
   const button = el('evalSourceButton');
@@ -5890,6 +5892,9 @@ export function mountAnalysisBrowser(): () => void {
   // Group in screen pixels again when the rail rotates or the board resizes.
   const evalResize = new ResizeObserver(() => renderEvalBar());
   evalResize.observe(el('evalWhite').parentElement!);
+  el('evalCompareDetails').addEventListener('toggle', (event) => {
+    if ((event as ToggleEvent).newState === 'closed') renderEvalBar();
+  }, { signal: controller.signal });
   void init(controller.signal);
   return () => {
     pvResize.disconnect();

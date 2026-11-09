@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { evalDetailsMarkup, evalEngineTag, evalMarkerGroups, evalMarkerMarkup } from '../src/lc0/evalBarPresentation.ts';
 import { evalPercent, evalTickBadgeShift, groupEvalTicks } from '../src/lc0/evalCompare.ts';
 
@@ -78,6 +79,14 @@ test('clamped singleton endpoint labels cannot obscure nearby extreme ticks', ()
 test('a sole completed result among pending engines needs only one endpoint tag', () => {
   const html = evalMarkerMarkup([marker('Lc0 Small', 980)], 'Lc0 Small', desktop);
   assert.equal((html.match(/class="eval-edge-tag"/g) ?? []).length, 1);
+});
+
+test('the open value list retains its native invoker until dismissal, then refreshes the rail', () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const render = source.slice(source.indexOf('function renderEvalBar()'), source.indexOf('function evalSourceChoices('));
+  assert.match(render, /if \(!details\.matches\(':popover-open'\)\) patchAnalysisResults\(tickContainer,/);
+  assert.ok(render.indexOf('details.dataset.fen !== tree.current.fen') < render.indexOf('patchAnalysisResults(tickContainer,'), 'position changes close the list before refreshing markers');
+  assert.match(source, /el\('evalCompareDetails'\)\.addEventListener\('toggle',[\s\S]*?newState === 'closed'\) renderEvalBar\(\);[\s\S]*?signal: controller.signal/);
 });
 
 test('mate lines stay on the true endpoint even when the labelled count shifts inward', () => {
