@@ -59,7 +59,8 @@ import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
 import { playMaterial } from './playMaterial.ts';
 import { playGameToPgn, playMoveLabel, playMoveRows, type PlayPosition, playTakebackPly, replayPlayPosition } from './playPosition.ts';
-import { loadPlayPreferences, type PlayPreferences, type PreferenceStorage, savePlayPreferences } from './playPreferences.ts';
+import { DEFAULT_PLAY_PREFERENCES, loadPlayPreferences, type PlayPreferences, type PreferenceStorage, savePlayPreferences } from './playPreferences.ts';
+import { committedPlayOpponent, type PlayOpponentState, transitionPlayOpponent } from './playOpponentState.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { defaultStormphraxVariantKey, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
@@ -208,9 +209,7 @@ interface PlayContext {
   searchProgress: { label: string; progress: SearchProgress } | null;
   /** Last view key the move list was scrolled for, so engine replies do not yank a manually scrolled list. */
   moveListScrollKey: string;
-  pendingRestart: { engine: string; color: 'white' | 'black' | 'random' } | null;
-  activeEngineId: string;
-  activeColor: 'white' | 'black' | 'random';
+  opponent: PlayOpponentState;
   lastEngineId: string;
   pendingPreferredEngineId: string | null;
   pendingPreferredEngineTimer: ReturnType<typeof setTimeout> | null;
@@ -255,9 +254,7 @@ function createPlayContext(): PlayContext {
     viewPly: null,
     searchProgress: null,
     moveListScrollKey: '',
-    pendingRestart: null,
-    activeEngineId: 'maia3',
-    activeColor: 'white',
+    opponent: committedPlayOpponent(DEFAULT_PLAY_PREFERENCES),
     lastEngineId: 'maia3',
     pendingPreferredEngineId: null,
     pendingPreferredEngineTimer: null,
@@ -294,8 +291,10 @@ function ctxAsyncUiIsCurrent(ctx: PlayContext, generation: number): boolean {
 // ---------------------------------------------------------------------------
 
 function ctxSelectedEngine(ctx: PlayContext): PlayEngineOption {
-  const id = selectEl('engineSelect').value;
-  return ENGINE_OPTIONS.find((option) => option.id === id) ?? ENGINE_OPTIONS[0];
+  return ENGINE_OPTIONS.find((option) => option.id === ctx.opponent.active.engineId) ?? ENGINE_OPTIONS[0];
+}
+function ctxDraftEngine(): PlayEngineOption {
+  return ENGINE_OPTIONS.find((option) => option.id === selectEl('engineSelect').value) ?? ENGINE_OPTIONS[0];
 }
 function ctxSelectedLevel(): number {
   return Math.max(0, Math.min(LEVEL_COUNT - 1, Number(selectEl('levelSelect').value) || 0));
@@ -326,7 +325,7 @@ function playPreferenceStorage(): PreferenceStorage | undefined {
 
 function ctxCurrentPlayPreferences(ctx: PlayContext): PlayPreferences {
   return {
-    engineId: ctxSelectedEngine(ctx).id,
+    engineId: ctxDraftEngine().id,
     level: ctxSelectedLevel(),
     color: selectEl('colorSelect').value as PlayPreferences['color'],
     maiaElo: ctxSelectedMaia3Elo(),
@@ -337,7 +336,7 @@ function ctxCurrentPlayPreferences(ctx: PlayContext): PlayPreferences {
 }
 
 function ctxPersistPlayPreferences(ctx: PlayContext): void {
-  savePlayPreferences(playPreferenceStorage(), ctxCurrentPlayPreferences(ctx));
+  savePlayPreferences(playPreferenceStorage(), ctx.opponent.active);
 }
 
 function ctxStrengthFor(option: PlayEngineOption, level: number): number {
@@ -351,7 +350,7 @@ function ctxStrengthFor(option: PlayEngineOption, level: number): number {
 }
 
 function ctxStrengthCaption(ctx: PlayContext): string {
-  const option = ctxSelectedEngine(ctx);
+  const option = ctxDraftEngine();
   const level = ctxSelectedLevel();
   if (option.family === 'maia3') {
     const style = ctxSelectedMaia3Style();
@@ -389,7 +388,7 @@ function ctxLqoSearchOptions(ctx: PlayContext): Pick<Bt4SearchOptions, 'drawScor
 function ctxRenderLevelOptions(ctx: PlayContext): void {
   const select = selectEl('levelSelect');
   const previous = select.value;
-  const option = ctxSelectedEngine(ctx);
+  const option = ctxDraftEngine();
   const field = select.closest('.field') as HTMLElement;
   field.hidden = option.family === 'maia3';
   const labels = option.family === 'sf' ? SF_LEVELS.map((sf) => sf.label) : EFFORT_LEVEL_NAMES.map((name, i) => `${i + 1} · ${name}`);
@@ -398,7 +397,7 @@ function ctxRenderLevelOptions(ctx: PlayContext): void {
 }
 
 function ctxRenderMaia3Controls(ctx: PlayContext): void {
-  const isMaia3 = ctxSelectedEngine(ctx).family === 'maia3';
+  const isMaia3 = ctxDraftEngine().family === 'maia3';
   el('maia3Controls').hidden = !isMaia3;
   el('maia3Advanced').hidden = !isMaia3;
   const elo = ctxSelectedMaia3Elo();
@@ -627,8 +626,8 @@ async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> 
   maia3Promise = (async () => {
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Maia3 human model…');
     const evaluator = await Maia3BrowserEvaluator.create({
-      selfElo: ctxSelectedMaia3Elo(),
-      oppoElo: ctxSelectedMaia3Elo(),
+      selfElo: ctx.opponent.active.maiaElo,
+      oppoElo: ctx.opponent.active.maiaElo,
       onProgress: (loaded, total) => {
         if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Maia3', loaded, total);
       },
@@ -731,7 +730,8 @@ function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): bool
 
 async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Promise<string | null> {
   const option = ctxSelectedEngine(ctx);
-  const level = ctxSelectedLevel();
+  const preferences = ctx.opponent.active;
+  const level = preferences.level;
   const visitsOrDepth = ctxStrengthFor(option, level);
   if (option.family === 'lc0' && option.variant === 'lqo') {
     const historyUcis = ctx.moves.map(moveToUci);
@@ -779,11 +779,11 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     const choice = await player.chooseMove(
       { positions: ctx.positions },
       {
-        selfElo: ctxSelectedMaia3Elo(),
-        oppoElo: ctxSelectedMaia3Elo(),
-        style: ctxSelectedMaia3Style(),
-        temperature: ctxSelectedMaia3Temperature(),
-        topP: ctxSelectedMaia3TopP(),
+        selfElo: preferences.maiaElo,
+        oppoElo: preferences.maiaElo,
+        style: preferences.maiaStyle,
+        temperature: preferences.maiaTemperature,
+        topP: preferences.maiaTopP,
       },
     );
     return choice.move;
@@ -892,6 +892,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   if (ctx.disposed || ctx.board.turn !== ctx.humanColor) return;
   const resumingGame = ctx.moves.length > 0;
   const option = ctxSelectedEngine(ctx);
+  const preferences = ctx.opponent.active;
   releaseUnusedBigNetSearchers(option.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
   const signal = ctx.abort.signal;
   const generation = ++ctx.enginePreparationGeneration;
@@ -906,8 +907,8 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
       await player.chooseMove(
         { positions: ctx.positions },
         {
-          selfElo: ctxSelectedMaia3Elo(),
-          oppoElo: ctxSelectedMaia3Elo(),
+          selfElo: preferences.maiaElo,
+          oppoElo: preferences.maiaElo,
           style: 'argmax',
         },
       );
@@ -988,8 +989,6 @@ function ctxCheckGameOver(ctx: PlayContext): void {
 
 function ctxApplyMove(ctx: PlayContext, move: Move): void {
   if (ctx.moves.length === ctx.practiceBoundary) {
-    ctx.activeEngineId = selectEl('engineSelect').value;
-    ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
     ctxSetEngineNote('');
   }
   ctx.sans.push(moveToSan(ctx.board, move));
@@ -1133,7 +1132,9 @@ function ctxNewGame(ctx: PlayContext): void {
   el('playRestoreNotice').hidden = true;
   ctxCancelEngineTurn(ctx);
   ctx.engineReady = false;
-  const colorChoice = selectEl('colorSelect').value;
+  ctx.opponent = committedPlayOpponent(ctxCurrentPlayPreferences(ctx));
+  ctxPersistPlayPreferences(ctx);
+  const colorChoice = ctx.opponent.active.color;
   ctx.humanColor = colorChoice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : colorChoice === 'black' ? 'b' : 'w';
   ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';
   ctxResetStartPosition(ctx);
@@ -1149,11 +1150,8 @@ function ctxNewGame(ctx: PlayContext): void {
   ctxSetEngineNote('');
   ctxDisarmResign(ctx);
   ctxDisarmNewGame(ctx);
-  const selectedEngineId = selectEl('engineSelect').value;
-  const engineChanged = ctx.activeEngineId !== selectedEngineId;
-  ctx.activeEngineId = selectedEngineId;
-  if (engineChanged) ctxRestoreSelectedRuntimeWarning(ctx);
-  ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
+  ctxRestoreSelectedRuntimeWarning(ctx);
+  evictInactiveCpuEngines(ctx.opponent.active.engineId);
   ctxRender(ctx);
   ctxPrepareOrStartEngine(ctx);
 }
@@ -1343,13 +1341,13 @@ function ctxSetViewPly(ctx: PlayContext, viewPly: number | null): void {
 
 function ctxRenderRestartBanner(ctx: PlayContext): void {
   const banner = el('restartBanner');
-  if (!ctx.pendingRestart) {
+  if (!ctx.opponent.pending) {
     banner.hidden = true;
     return;
   }
   banner.hidden = false;
-  const engineLabel = ENGINE_OPTIONS.find((o) => o.id === ctx.pendingRestart?.engine)?.label ?? 'the new engine';
-  const colorLabel = ctx.pendingRestart.color === 'random' ? 'random side' : `as ${ctx.pendingRestart.color}`;
+  const engineLabel = ENGINE_OPTIONS.find((o) => o.id === ctx.opponent.pending?.engineId)?.label ?? 'the new engine';
+  const colorLabel = ctx.opponent.pending.color === 'random' ? 'random side' : `as ${ctx.opponent.pending.color}`;
   el('restartMessage').textContent = `Start a new game vs ${engineLabel}, ${colorLabel}? The current game will be discarded.`;
 }
 
@@ -1431,7 +1429,7 @@ function ctxResolvePendingPreferredEngine(ctx: PlayContext): void {
 }
 
 function ctxRenderEngineCaution(ctx: PlayContext): void {
-  const option = ctxSelectedEngine(ctx);
+  const option = ctxDraftEngine();
   const caution = el('engineCaution');
   if (option.family === 'lc0' && option.variant !== 'small') {
     const config = BIG_NETS[option.variant as BigNetKey];
@@ -1450,7 +1448,7 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
 
 // ---------------------------------------------------------------------------
 // Game chrome: player strips, setup summary, game-over card, opening name.
-// Presentation only; every value is derived from the context and the controls.
+// Presentation only; live identity is committed, while setup fields show the draft.
 // ---------------------------------------------------------------------------
 
 const SF_LEVEL_NAMES = ['Weakest', 'Casual', 'Club', 'Strong', 'Full strength'] as const;
@@ -1503,14 +1501,14 @@ function maiaRatingBand(elo: number): string {
 
 function ctxOpponentMeta(ctx: PlayContext): string {
   const option = ctxSelectedEngine(ctx);
-  if (option.family === 'maia3') return `${ctxSelectedMaia3Elo()} · ${ctxSelectedMaia3Style() === 'argmax' ? 'top human move' : 'human-like'}`;
-  const level = ctxSelectedLevel();
+  if (option.family === 'maia3') return `${ctx.opponent.active.maiaElo} · ${ctx.opponent.active.maiaStyle === 'argmax' ? 'top human move' : 'human-like'}`;
+  const level = ctx.opponent.active.level;
   const name = option.family === 'sf' ? SF_LEVEL_NAMES[level] : EFFORT_LEVEL_NAMES[level];
   return `${option.variant === 'lqo' ? 'Queen odds · ' : ''}Level ${level + 1} · ${name}`;
 }
 
 function ctxOpponentBlurb(ctx: PlayContext): string {
-  const option = ctxSelectedEngine(ctx);
+  const option = ctxDraftEngine();
   if (option.family === 'maia3') {
     const elo = ctxSelectedMaia3Elo();
     return ctxSelectedMaia3Style() === 'argmax'
@@ -1567,6 +1565,9 @@ function ctxRenderChrome(ctx: PlayContext, shownBoard: BoardState, shownPly: num
   const phase = ctxPhase(ctx);
   const main = el('main');
   main.dataset.phase = phase;
+  main.dataset.opponentState = ctx.opponent.tag;
+  main.dataset.opponent = ctx.opponent.active.engineId;
+  main.dataset.pendingOpponent = ctx.opponent.pending?.engineId ?? '';
   const hasNotice = !buttonEl('retryEngine').hidden || !el('runtimeWarning').hidden || !el('dlProgress').hidden;
   main.dataset.quiet = String(!hasNotice && ctx.engineReady && !ctx.preparingEngine && !ctx.engineThinking && !ctx.pendingPromotion && ctx.viewPly === null && !boardCheck(ctx.board));
   main.dataset.config = ctx.configOpen && phase !== 'setup' ? 'open' : 'closed';
@@ -1643,7 +1644,7 @@ function ctxRender(ctx: PlayContext): void {
     humanColor: ctx.humanColor,
     orientation: ctx.orientation,
     // Queued opponent/colour changes are not the opponent of this game until confirmed.
-    preferences: { ...ctxCurrentPlayPreferences(ctx), engineId: ctx.activeEngineId, color: ctx.activeColor },
+    preferences: ctx.opponent.active,
     gameOver: ctx.gameOver,
     started: ctx.started,
     ...(ctx.practiceBoundary ? { practiceBoundary: ctx.practiceBoundary } : {}),
@@ -1728,33 +1729,51 @@ function ctxRender(ctx: PlayContext): void {
 // Restart banner logic
 // ---------------------------------------------------------------------------
 
+function ctxRestoreOpponentControls(ctx: PlayContext): void {
+  const preferences = ctx.opponent.pending ?? ctx.opponent.active;
+  selectEl('engineSelect').value = preferences.engineId;
+  selectEl('colorSelect').value = preferences.color;
+  ctx.lastEngineId = preferences.engineId;
+  ctxRenderLevelOptions(ctx);
+  selectEl('levelSelect').value = String(preferences.level);
+  (el('maia3Elo') as HTMLInputElement).value = String(preferences.maiaElo);
+  selectEl('maia3Style').value = preferences.maiaStyle;
+  (el('maia3Temperature') as HTMLInputElement).value = String(preferences.maiaTemperature);
+  (el('maia3TopP') as HTMLInputElement).value = String(preferences.maiaTopP);
+  ctxRenderMaia3Controls(ctx);
+  ctxRenderEngineCaution(ctx);
+}
+
 function ctxMaybeQueueRestart(ctx: PlayContext): void {
-  if ((!ctx.moves.length && !ctx.practicePosition) || ctx.gameOver || ctx.engineThinking) {
-    ctx.pendingRestart = null;
-    ctxRender(ctx);
+  const gameInProgress = !ctxGameIsFresh(ctx) && !ctx.gameOver;
+  ctx.opponent = transitionPlayOpponent(ctx.opponent, {
+    type: 'edit', preferences: ctxCurrentPlayPreferences(ctx), gameInProgress,
+  });
+  ctxRestoreOpponentControls(ctx);
+  ctxPersistPlayPreferences(ctx);
+  if (!gameInProgress) {
+    ctxNewGame(ctx);
     return;
   }
-  ctx.pendingRestart = {
-    engine: selectEl('engineSelect').value,
-    color: selectEl('colorSelect').value as 'white' | 'black' | 'random',
-  };
   ctxRender(ctx);
 }
 
 function ctxConfirmRestart(ctx: PlayContext): void {
-  ctx.pendingRestart = null;
-  void ctxNewGame(ctx);
+  ctx.opponent = transitionPlayOpponent(ctx.opponent, { type: 'confirm' });
+  ctxRestoreOpponentControls(ctx);
+  ctxNewGame(ctx);
 }
 
 function ctxDismissRestart(ctx: PlayContext): void {
-  selectEl('engineSelect').value = ctx.activeEngineId;
-  selectEl('colorSelect').value = ctx.activeColor;
-  ctx.lastEngineId = ctx.activeEngineId;
-  ctx.pendingRestart = null;
-  ctxRenderLevelOptions(ctx);
+  ctx.opponent = transitionPlayOpponent(ctx.opponent, { type: 'dismiss' });
+  ctxRestoreOpponentControls(ctx);
   ctxPersistPlayPreferences(ctx);
-  ctxRenderMaia3Controls(ctx);
-  ctxRenderEngineCaution(ctx);
+  ctxRender(ctx);
+}
+
+function ctxTuneOpponent(ctx: PlayContext): void {
+  ctx.opponent = transitionPlayOpponent(ctx.opponent, { type: 'tune', preferences: ctxCurrentPlayPreferences(ctx) });
+  ctxPersistPlayPreferences(ctx);
   ctxRender(ctx);
 }
 
@@ -1799,16 +1818,15 @@ function ctxPrepareOrStartEngine(ctx: PlayContext): void {
 
 function ctxResetGameStateForMount(ctx: PlayContext): void {
   ctxCancelEngineTurn(ctx);
-  const colorChoice = selectEl('colorSelect').value;
+  ctx.opponent = committedPlayOpponent(ctxCurrentPlayPreferences(ctx));
+  const colorChoice = ctx.opponent.active.color;
   ctx.humanColor = colorChoice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : colorChoice === 'black' ? 'b' : 'w';
   ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';
   ctxResetStartPosition(ctx);
   ctx.gameOver = null;
   ctx.pendingPromotion = null;
   ctx.viewPly = null;
-  ctx.pendingRestart = null;
-  ctx.activeEngineId = selectEl('engineSelect').value;
-  ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
+  ctx.lastEngineId = ctx.opponent.active.engineId;
   ctxSetEngineNote('');
   ctxDisarmResign(ctx);
 }
@@ -1839,9 +1857,6 @@ function ctxInit(ctx: PlayContext): void {
   (el('maia3TopP') as HTMLInputElement).value = String(preferences.maiaTopP);
   ctxRenderLevelOptions(ctx);
   selectEl('levelSelect').value = String(preferences.level);
-  ctx.activeEngineId = selectEl('engineSelect').value;
-  ctx.lastEngineId = ctx.activeEngineId;
-  ctx.activeColor = preferences.color;
   ctxResetGameStateForMount(ctx);
   if (saved) {
     const { preferences: _preferences, ...game } = saved;
@@ -2000,31 +2015,7 @@ function ctxInit(ctx: PlayContext): void {
   });
   trackListener(ctx, el('confirmRestart'), 'click', () => ctxConfirmRestart(ctx));
   trackListener(ctx, el('dismissRestart'), 'click', () => ctxDismissRestart(ctx));
-  trackListener(ctx, selectEl('colorSelect'), 'change', () => {
-    ctxPersistPlayPreferences(ctx);
-    ctxSetEngineNote('');
-    if (ctxGameIsFresh(ctx) && (ctx.moves.length || ctx.practicePosition)) {
-      // Imported history is not a played game; keep it while choosing a colour.
-      ctxNewGame(ctx);
-    } else if (!ctx.moves.length && !ctx.practicePosition) {
-      ctxCancelEngineTurn(ctx);
-      ctx.engineReady = false;
-      const choice = selectEl('colorSelect').value;
-      ctx.humanColor = choice === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : choice === 'black' ? 'b' : 'w';
-      ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';
-      ctx.startFen = startFenFor(ctxSelectedEngine(ctx), ctx.humanColor);
-      ctx.board = parseFen(ctx.startFen);
-      ctx.positions = [ctx.board];
-      ctx.gameOver = null;
-      ctx.activeEngineId = selectEl('engineSelect').value;
-      ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
-      ctxRender(ctx);
-      if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
-      else void ctxVerifySelectedEngineReady(ctx);
-    } else {
-      ctxMaybeQueueRestart(ctx);
-    }
-  });
+  trackListener(ctx, selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
   trackListener(ctx, selectEl('engineSelect'), 'change', () => {
     ctx.pendingPreferredEngineId = null;
     if (ctx.pendingPreferredEngineTimer) {
@@ -2037,7 +2028,7 @@ function ctxInit(ctx: PlayContext): void {
       ctxRender(ctx);
       return;
     }
-    const option = ctxSelectedEngine(ctx);
+    const option = ctxDraftEngine();
     if (option.family === 'maia3' && previousEngineId.startsWith('maia-')) {
       const carried = Number(ctx.lastEngineId.slice('maia-'.length));
       if (Number.isFinite(carried)) {
@@ -2045,58 +2036,14 @@ function ctxInit(ctx: PlayContext): void {
       }
     }
     ctx.lastEngineId = option.id;
-    ctxPersistPlayPreferences(ctx);
-    ctxSetEngineNote('');
-    if (previousEngineId === 'stormphrax' && option.id !== 'stormphrax') disposeCachedCpuEngine('stormphrax');
-    // Neural and Maia selections never call ctxCpuEngineFor, so the cap has to
-    // run here too. The id in use is omitted even when it is not a CPU engine.
-    evictInactiveCpuEngines(option.id);
     ctxRenderLevelOptions(ctx);
-    ctxRenderMaia3Controls(ctx);
-    ctxRenderEngineCaution(ctx);
-    if (ctxGameIsFresh(ctx) && (ctx.moves.length || ctx.practicePosition)) {
-      ctxNewGame(ctx);
-    } else if (!ctx.moves.length && !ctx.practicePosition) {
-      ctxCancelEngineTurn(ctx);
-      ctx.engineReady = false;
-      ctx.orientation = ctx.humanColor === 'w' ? 'white' : 'black';
-      ctx.startFen = startFenFor(ctxSelectedEngine(ctx), ctx.humanColor);
-      ctx.board = parseFen(ctx.startFen);
-      ctx.positions = [ctx.board];
-      ctx.gameOver = null;
-      ctx.activeEngineId = selectEl('engineSelect').value;
-      ctxRestoreSelectedRuntimeWarning(ctx);
-      ctx.activeColor = selectEl('colorSelect').value as 'white' | 'black' | 'random';
-      ctxRender(ctx);
-      if (ctx.humanColor === 'b') void ctxEngineTurn(ctx);
-      else void ctxVerifySelectedEngineReady(ctx);
-    } else if (!ctx.gameOver && !ctx.engineThinking) {
-      ctxMaybeQueueRestart(ctx);
-      ctxRender(ctx);
-    } else {
-      ctxRender(ctx);
-    }
+    ctxMaybeQueueRestart(ctx);
   });
-  trackListener(ctx, selectEl('levelSelect'), 'change', () => {
-    ctxPersistPlayPreferences(ctx);
-    ctxRender(ctx);
-  });
-  trackListener(ctx, selectEl('maia3Style'), 'change', () => {
-    ctxPersistPlayPreferences(ctx);
-    ctxRender(ctx);
-  });
-  trackListener(ctx, el('maia3Elo'), 'input', () => {
-    ctxPersistPlayPreferences(ctx);
-    ctxRender(ctx);
-  });
-  trackListener(ctx, el('maia3Temperature'), 'input', () => {
-    ctxPersistPlayPreferences(ctx);
-    ctxRender(ctx);
-  });
-  trackListener(ctx, el('maia3TopP'), 'input', () => {
-    ctxPersistPlayPreferences(ctx);
-    ctxRender(ctx);
-  });
+  trackListener(ctx, selectEl('levelSelect'), 'change', () => ctxTuneOpponent(ctx));
+  trackListener(ctx, selectEl('maia3Style'), 'change', () => ctxTuneOpponent(ctx));
+  trackListener(ctx, el('maia3Elo'), 'input', () => ctxTuneOpponent(ctx));
+  trackListener(ctx, el('maia3Temperature'), 'input', () => ctxTuneOpponent(ctx));
+  trackListener(ctx, el('maia3TopP'), 'input', () => ctxTuneOpponent(ctx));
   const refreshIfMounted = () => {
     if (!ctxIsDisposed(ctx)) {
       ctxRefreshEngineOptions(ctx);
