@@ -24,10 +24,10 @@ import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
+import { arenaChartGroups } from './arenaChartPresentation.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import {
   appendCpuArenaTrail,
-  arenaChartEngineName,
   type CpuArenaPosition,
   type CpuArenaSeat,
   captureCpuArenaDiagnostics,
@@ -3469,10 +3469,6 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
   return uci ? legalMoves(current).find((m) => moveToUci(m) === uci) : undefined;
 }
 
-function chartColorFor(engineId: string): string {
-  return engineBrushes(arenaChartEngineName(gameChartSamples, engineId)).swatch;
-}
-
 function formatCompactNumber(value: number): string {
   if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
   if (value >= 1000) return `${Math.round(value / 1000)}k`;
@@ -3513,18 +3509,12 @@ function describeChart(id: string, summary: string): void {
 function renderGameCharts(): void {
   const chartSize = { width: Math.max(300, el('chartsPanel').clientWidth - 24), height: 64 };
   const ids = [...new Set(gameChartSamples.map((sample) => sample.engineId))];
-  // Identical-engine self-play shares a worker ID. Preserve two traces by search
-  // parity, with the same identity colour and a dashed second trace.
-  const groups = ids.flatMap((id) => {
-    const samples = gameChartSamples.filter((sample) => sample.engineId === id);
-    const parities = [...new Set(samples.map((sample) => sample.ply % 2))];
-    return ids.length === 1 && parities.length === 2 ? parities.sort().map((parity) => ({ id, samples: samples.filter((sample) => sample.ply % 2 === parity), suffix: ` · ${parity === 0 ? 'first' : 'alternate'} moves` })) : [{ id, samples, suffix: '' }];
-  });
+  const groups = arenaChartGroups(gameChartSamples);
   const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] =>
-    groups.map(({ id, samples, suffix }, index) => ({
-      label: arenaChartEngineName(gameChartSamples, id) + suffix,
-      color: chartColorFor(id),
-      dashed: groups.slice(0, index).some((other) => chartColorFor(other.id) === chartColorFor(id)),
+    groups.map(({ label, color, dashed, samples }) => ({
+      label,
+      color,
+      dashed,
       points: samples
         .flatMap((sample) => {
           const y = value(sample);
@@ -3551,7 +3541,7 @@ function renderGameCharts(): void {
   describeChart('timeChart', `Search time by ply. Latest: ${summaries((sample) => formatSeconds(sample.moveMs))}. Use the Review game position slider to explore.`);
   describeChart('npsChart', `Search speed by ply. Latest: ${summaries((sample) => sample.nps === undefined ? 'unavailable' : `${formatNps(sample.nps)} nodes or visits per second`)}. Use the Review game position slider to explore.`);
   el('chartLegend').innerHTML = groups
-    .map(({ id, suffix }, index) => `<span><span class="swatch" style="background:${chartColorFor(id)}${groups.slice(0, index).some((other) => chartColorFor(other.id) === chartColorFor(id)) ? ';background:repeating-linear-gradient(90deg,' + chartColorFor(id) + ' 0 3px,transparent 3px 5px)' : ''}"></span>${htmlEscape(arenaChartEngineName(gameChartSamples, id) + suffix)}</span>`)
+    .map(({ label, color, dashed }) => `<span><span class="swatch" style="background:${dashed ? `repeating-linear-gradient(90deg,${color} 0 3px,transparent 3px 5px)` : color}"></span>${htmlEscape(label)}</span>`)
     .join('');
 }
 

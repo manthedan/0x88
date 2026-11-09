@@ -692,7 +692,8 @@ onMount(() => {
     .eval-end.w{left:-44px}
     .eval-end.b{right:-12px}
     .arena-eval-bar :global(.eval-gap){left:var(--low); width:calc(var(--high) - var(--low)); bottom:4px; height:2px; border-width:0 2px}
-    .eval-source{gap:8px; min-height:18px; align-items:center}
+    .eval-source{gap:8px; min-height:18px; align-items:center; line-height:17px}
+    #whiteSideLabel{order:1}
     .eval-source :global(.eval-reading){gap:4px; flex-shrink:0}
     .arena-workspace :global(#ground coords){font-size:11px}
     .player-strip{gap:8px}
