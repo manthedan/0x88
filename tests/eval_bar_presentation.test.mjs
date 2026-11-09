@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from '../src/lc0/evalBarPresentation.ts';
+import { evalDetailsMarkup, evalEngineTag, evalMarkerGroups, evalMarkerMarkup } from '../src/lc0/evalBarPresentation.ts';
 import { evalPercent, evalTickBadgeShift, groupEvalTicks } from '../src/lc0/evalCompare.ts';
 
 const marker = (name, cp, color = '#1f5fcf') => ({ id: name, name, scoreCp: cp, color, scoreText: `+${(cp / 100).toFixed(2)}`, detail: 'depth 12' });
@@ -67,6 +67,19 @@ test('new larger counters use the same collision and endpoint footprint as their
     }
   }
 });
+test('clamped singleton endpoint labels cannot obscure nearby extreme ticks', () => {
+  const ticks = [marker('Lc0 Small', 980), marker('Stockfish Lite', 1160), { ...marker('PlentyChess', 0), mateIn: 1, scoreText: '#1' }];
+  const groups = evalMarkerGroups(ticks, 'Lc0 Small', desktop);
+  assert.equal(groups.length, 1, 'the clamped mate tag must not cover the +11.60 tick');
+  assert.equal(groups[0].members.length, 3);
+  const negative = ticks.map((tick) => ({ ...tick, scoreCp: -tick.scoreCp, ...(tick.mateIn !== undefined ? { mateIn: -tick.mateIn } : {}) }));
+  assert.equal(evalMarkerGroups(negative, 'Lc0 Small', desktop).length, 1, 'protect the negative endpoint too');
+});
+test('a sole completed result among pending engines needs only one endpoint tag', () => {
+  const html = evalMarkerMarkup([marker('Lc0 Small', 980)], 'Lc0 Small', desktop);
+  assert.equal((html.match(/class="eval-edge-tag"/g) ?? []).length, 1);
+});
+
 test('mate lines stay on the true endpoint even when the labelled count shifts inward', () => {
   const ticks = [{ ...marker('Stockfish Lite', 0), mateIn: 1, scoreText: '#1' }, { ...marker('PlentyChess', 0), mateIn: 2, scoreText: '#2' }];
   const html = evalMarkerMarkup(ticks, 'Stockfish Lite', desktop);
