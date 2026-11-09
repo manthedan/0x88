@@ -1105,14 +1105,16 @@ onMount(() => {
     .eval-ticks :global(.eval-engine-label.selected){left:-8px; top:50%; transform:translate(-100%,-50%); font-size:10px; line-height:12px}
     .eval-ticks :global(.eval-chosen-mark){left:var(--pos); right:auto; bottom:-1px; top:-2px; width:4px; height:auto; transform:translateX(-50%)}
     .eval-ticks :global(.eval-chosen-mark)::before{right:auto; left:-3px; top:-7px; border:5px solid transparent; border-top-color:var(--tick-color); transform:none}
-    .eval-details{top:var(--details-top,140px); left:8px; right:8px; width:auto; max-height:220px; padding:8px 10px}
+    .eval-details{top:var(--details-top,140px); left:8px; right:8px; width:auto; max-height:190px; padding:8px 10px}
     @supports (top:anchor(bottom)){
       .eval-details{position-anchor:--eval-rail; top:calc(anchor(bottom) + 6px)}
     }
-    .eval-details header button{width:44px; height:44px}
+    .eval-details header{position:relative; height:32px; padding-right:44px}
+    .eval-details header button{position:absolute; top:-8px; right:-6px; width:44px; height:44px}
     .eval-details h2{font-size:14px}
-    .eval-details p{margin:2px 0}
-    .eval-details :global(.eval-detail-row){padding:5px 0}
+    .eval-details p{margin:0; font-size:11px; line-height:14px}
+    .eval-details :global(.eval-detail-row){padding:3px 0}
+    .eval-details :global(.eval-detail-row small){font-size:11px; line-height:12px}
     .board-panel :global(#ground){border-radius:3px}
     .board-toolbar{display:grid; grid-template-columns:minmax(0,1fr) 48px; height:44px; gap:6px; margin:6px 0 0}
     :global(.analysis-workspace[data-empty-game]) .board-toolbar{grid-template-columns:minmax(0,1fr) 54px 48px}

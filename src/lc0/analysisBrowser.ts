@@ -5898,8 +5898,10 @@ export function mountAnalysisBrowser(): () => void {
   // The DOM library predates the native source option. It keeps Tab ordering
   // and Escape restoration attached to this one stable invoker, even on hover.
   const showEvalDetails = () => (details.showPopover as (options: { source: HTMLElement }) => void)({ source: rail });
+  let restoringEvalFocus = false;
+  let restoreEvalFocus = false;
   const openEvalDetails = () => {
-    if (retry || matchMedia('(hover:none)').matches || details.matches(':popover-open')) return;
+    if (restoringEvalFocus || retry || matchMedia('(hover:none)').matches || details.matches(':popover-open')) return;
     renderEvalBar();
     showEvalDetails();
   };
@@ -5913,7 +5915,21 @@ export function mountAnalysisBrowser(): () => void {
       showEvalDetails();
     }
   }, { signal: controller.signal });
-  // Escape leaves focus on the stable whole-bar invoker.
+  // A hover open can precede click focus. Native dismissal otherwise restores
+  // the pre-hover control, rather than the bar the user subsequently entered.
+  details.addEventListener('beforetoggle', (event) => {
+    if ((event as ToggleEvent).newState === 'closed') {
+      restoreEvalFocus = details.contains(document.activeElement) || document.activeElement === rail;
+    }
+  }, { signal: controller.signal });
+  details.addEventListener('toggle', (event) => {
+    if ((event as ToggleEvent).newState === 'closed' && restoreEvalFocus && rail.isConnected) {
+      restoreEvalFocus = false;
+      restoringEvalFocus = true;
+      rail.focus({ preventScroll: true });
+      restoringEvalFocus = false;
+    }
+  }, { signal: controller.signal });
   const closeOnLeave = () => {
     if (details.matches(':popover-open') && !rail.matches(':hover') && !details.matches(':hover')
       && !details.contains(document.activeElement) && document.activeElement !== rail) details.hidePopover();
