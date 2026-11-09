@@ -91,7 +91,7 @@ export function compactEvalSpread(comparison: NonNullable<ReturnType<typeof comp
 /** Visible verdicts use the same eligibility/scale rules as the bar, including pending results. */
 export function arenaComparisonStatus(state: ReturnType<typeof compareArenaEvals>, available: readonly boolean[], names: readonly string[]) {
   if (!available.some(Boolean)) return { text: 'Waiting for first search', emphasis: false };
-  if (available.some((ready) => !ready)) return { text: `Waiting for ${available[0] ? 'Black' : 'White'}’s first search`, emphasis: false };
+  if (available.some((ready) => !ready)) return { text: `Waiting for ${available[0] ? 'Black' : 'White'}’s search`, emphasis: false };
   if (!state.comparison) {
     const old = state.ages.findIndex((age) => age !== undefined && age > 2);
     return { text: old >= 0 ? `not comparable · ${names[old]} ${state.ages[old]} plies old` : 'not comparable', emphasis: false };

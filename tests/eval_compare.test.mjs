@@ -122,8 +122,9 @@ test('separate single ticks do not chain into a misleading count group', () => {
 test('Arena caption distinguishes pending, agreement, small and meaningful gaps', () => {
   const status = (scores) => arenaComparisonStatus(compareArenaEvals(scores, fen(2)), scores.map((s) => evalPercent(s) !== undefined), ['Lc0', 'SF']);
   assert.equal(status([{}, {}]).text, 'Waiting for first search');
-  assert.match(status([score(0), {}]).text, /Black.*first search/);
-  assert.match(status([{}, score(1)]).text, /White.*first search/);
+  assert.match(status([score(0), {}]).text, /Black.*search/);
+  assert.match(status([{}, score(1)]).text, /White.*search/);
+  assert.ok(status([score(0), {}]).text.length <= 26, 'partial-search caption stays on the phone baseline');
   assert.deepEqual(status([score(0, 30), score(1, 40)]), { text: 'agree', emphasis: false });
   assert.deepEqual(status([score(0, 0), score(1, 51)]), { text: 'Δ 0.51', emphasis: false });
   assert.deepEqual(status([score(0, 20), score(1, 180)]), { text: '1.60 apart', emphasis: true });
