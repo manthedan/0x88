@@ -1368,10 +1368,20 @@ function renderStrips(): void {
     const name = side.name ? displayEngineName(side.name) : 'No engine';
     const showClock = !reviewing && (running || usedMs > 0);
     node.dataset.turn = String(thinking);
-    node.innerHTML =
+    const head =
       `${side.name ? engineAvatarHtml(side.name) : ''}` +
-      `<span class="strip-id"><strong>${htmlEscape(name)}</strong><small><span class="side-dot ${color}" aria-hidden="true"></span>${meta}</small></span>` +
-      (showClock ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small>${formatSeconds(usedMs)}</span>` : '');
+      `<span class="strip-id"><strong>${htmlEscape(name)}</strong><small><span class="side-dot ${color}" aria-hidden="true"></span>${meta}</small></span>`;
+    // The clock ticks every 100 ms. Update only its text, so the thinking spinner isn't recreated
+    // (and its animation restarted) on every tick.
+    const signature = `${head}|${showClock}`;
+    const clock = node.querySelector<HTMLElement>('.strip-clock-value');
+    if (node.dataset.signature === signature && (!showClock || clock)) {
+      if (clock) clock.textContent = formatSeconds(usedMs);
+      return;
+    }
+    node.dataset.signature = signature;
+    node.innerHTML = head +
+      (showClock ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small><span class="strip-clock-value">${formatSeconds(usedMs)}</span></span>` : '');
   };
   update('blackSideLabel', 'b', sides.b);
   update('whiteSideLabel', 'w', sides.w);
