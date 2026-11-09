@@ -10,8 +10,6 @@ export interface EvalScore {
 // +0.20 vs +1.80 spans 15.3 points; +5 vs +6 spans only 3.6.
 export const MEANINGFUL_SPREAD = 12;
 export const SIDE_THRESHOLD = 5;
-// Includes the outlined markers' footprint, especially on the short mobile track.
-export const TICK_GROUP_PX = 6;
 
 /** Missing / non-finite results must not masquerade as equality. Mate wins over cp. */
 export function evalPercent(score: EvalScore): number | undefined {
@@ -94,14 +92,13 @@ export function arenaComparisonStatus(state: ReturnType<typeof compareArenaEvals
   if (available.some((ready) => !ready)) return { text: `Waiting for ${available[0] ? 'Black' : 'White'}’s search`, emphasis: false };
   if (!state.comparison) {
     const old = state.ages.findIndex((age) => age !== undefined && age > 2);
-    return { text: old >= 0 ? `not comparable · ${names[old]} ${state.ages[old]} plies old` : 'not comparable', emphasis: false };
+    const age = old >= 0 ? state.ages[old] : undefined;
+    return { text: age !== undefined ? `not comparable, ${names[old]}’s eval is ${age} ${age === 1 ? 'move' : 'moves'} old` : 'not comparable', emphasis: false };
   }
   const comparison = state.comparison;
   if (comparison.oppositeSides) return { text: 'disagree on who’s better', emphasis: true };
   if (comparison.meaningful) return { text: `${compactEvalSpread(comparison)} apart`, emphasis: true };
-  // "Agree" is a tight (<=2 point) match on the nonlinear scale, not a claim of
-  // equal search effort or simultaneous opinions. Other eligible gaps stay visible.
-  return { text: comparison.spread <= 2 ? 'agree' : `Δ ${compactEvalSpread(comparison)}`, emphasis: false };
+  return { text: state.adjacent ? 'similar, one move apart' : 'similar, same position', emphasis: false };
 }
 
 /**
@@ -116,65 +113,3 @@ export function arenaLaneOutput<T extends { engineId: string; fen: string }>(pre
   return previous?.engineId === engineId && previous.fen.split(/\s+/)[1] === side ? previous : undefined;
 }
 
-/** Keep the focused engine's identity when a marker joins or leaves a group. */
-export function evalTickFocusKey(members: readonly string[], selectedId: string | undefined, focusedId: string | undefined): string {
-  return [focusedId, selectedId].find((id): id is string => id !== undefined && members.includes(id)) ?? members[0] ?? '';
-}
-
-/** Shift a centered mobile tooltip inside viewport gutters, including wide engine names. */
-export function evalTooltipShift(anchor: number, viewport: number, maxWidth = 180, gutter = 8): number {
-  const width = Math.min(maxWidth, Math.max(0, viewport - 2 * gutter));
-  const left = Math.max(gutter, Math.min(viewport - gutter - width, anchor - width / 2));
-  return left + width / 2 - anchor;
-}
-
-/** Inward shift for a count badge's actual outline, along the track's value axis. */
-export function evalTickBadgeShift(percent: number, trackPixels: number, selected: boolean, footprint?: number): number {
-  const center = percent * trackPixels / 100;
-  const half = Math.min(footprint !== undefined ? footprint / 2 : selected ? 8.5 : 7.5, trackPixels / 2);
-  return Math.max(half, Math.min(trackPixels - half, center)) - center;
-}
-
-export interface EvalTick extends EvalScore { id: string }
-
-/**
- * Cluster nearby ticks by diameter, then coalesce colliding count badges. A badge
- * is 13px plus its outline; treating it as a 2px tick would create stacked counts.
- * Badge centers clamp inside the track at endpoints; collision bounds use the
- * same shifted centers as the renderer, not percentage-based endpoint classes.
- * The chosen engine anchors its group; other groups use their mean position.
- */
-export function groupEvalTicks<T extends EvalTick>(scores: readonly T[], selectedId: string | undefined, trackPixels: number, tolerance = TICK_GROUP_PX, badgePixels?: number) {
-  const sorted = scores.flatMap((score) => {
-    const percent = evalPercent(score);
-    return percent === undefined ? [] : [{ score, percent }];
-  }).sort((a, b) => a.percent - b.percent || a.score.id.localeCompare(b.score.id));
-  const groups: { members: T[]; percent: number; selected: boolean }[] = [];
-  const pixels = Math.max(1, trackPixels);
-  for (let i = 0; i < sorted.length;) {
-    const start = i++;
-    while (i < sorted.length && (sorted[i].percent - sorted[start].percent) * pixels / 100 <= tolerance) i++;
-    const entries = sorted.slice(start, i);
-    const selected = entries.find(({ score }) => score.id === selectedId);
-    groups.push({ members: entries.map(({ score }) => score), selected: !!selected,
-      percent: selected?.percent ?? entries.reduce((sum, entry) => sum + entry.percent, 0) / entries.length });
-  }
-  const footprint = (group: typeof groups[number]) => group.members.length > 1 ? (badgePixels ?? (group.selected ? 17 : 15)) : group.selected ? 8 : 6;
-  const center = (group: typeof groups[number]) => group.percent * pixels / 100
-    + (group.members.length > 1 ? evalTickBadgeShift(group.percent, pixels, group.selected, badgePixels) : 0);
-  for (let i = 1; i < groups.length;) {
-    const a = groups[i - 1];
-    const b = groups[i];
-    const gap = center(b) - center(a);
-    // Plain ticks were already grouped by the requested tolerance. Only badges
-    // need extra room; don't chain a row of otherwise distinct single ticks.
-    if ((a.members.length > 1 || b.members.length > 1) && gap < (footprint(a) + footprint(b)) / 2 + 2) {
-      const members = [...a.members, ...b.members];
-      const selected = members.find((member) => member.id === selectedId);
-      groups.splice(i - 1, 2, { members, selected: !!selected,
-        percent: selected ? evalPercent(selected)! : members.reduce((sum, member) => sum + evalPercent(member)!, 0) / members.length });
-      i = Math.max(1, i - 1);
-    } else i++;
-  }
-  return groups;
-}

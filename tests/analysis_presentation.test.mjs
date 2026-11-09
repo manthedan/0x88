@@ -66,7 +66,7 @@ test('a shared best move is one arrow that names every backing engine colour', (
   assert.equal((marker.match(/<rect /g) ?? []).length, 1);
   assert.match(marker, /aria-label="2 engines share this move: Lc0 Small, Stockfish Lite"/);
   assert.match(marker, /<title>2 engines share this move: Lc0 Small, Stockfish Lite<\/title>/);
-  assert.match(marker, />L0 SF<\/text>/);
+  assert.match(marker, />Lc0 SF<\/text>/);
   assert.match(marker, /font-size="22"/);
   assert.match(marker, /pointer-events:none/, 'markers must not intercept chess-square taps');
   assert.match(marker, /tabindex="0"/, 'engine attribution is still available to keyboard users');
@@ -75,8 +75,8 @@ test('a shared best move is one arrow that names every backing engine colour', (
 });
 
 test('shared pills show two or three monograms and use a count only for a wide 4+ group', () => {
-  assert.equal(sharedArrowMarkerText(['Lc0', 'PlentyChess']), 'L0 PC');
-  assert.equal(sharedArrowMarkerText(['Lc0', 'SF Lite', 'PlentyChess']), 'L0 SF PC');
+  assert.equal(sharedArrowMarkerText(['Lc0', 'PlentyChess']), 'Lc0 PC');
+  assert.equal(sharedArrowMarkerText(['Lc0', 'SF Lite', 'PlentyChess']), 'Lc0 SF PC');
   const engines = ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess', 'Reckless', 'Viridithas', 'Stormphrax', '<unsafe&>'];
   assert.equal(sharedArrowMarkerText(engines.slice(0, 4)), '4');
   const all = sharedArrowMarkerSvg(engines);
@@ -153,7 +153,7 @@ test('callout groups engines by move and states agreement explicitly', () => {
 });
 
 test('engine avatars use one two-character uppercase monogram rule', () => {
-  assert.equal(engineMonogram('Lc0'), 'L0');
+  assert.equal(engineMonogram('Lc0'), 'Lc0');
   assert.equal(engineMonogram('SF Lite'), 'SF');
   assert.equal(engineMonogram('PlentyChess'), 'PC');
   assert.equal(engineMonogram('Berserk'), 'BE');
