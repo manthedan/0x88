@@ -69,6 +69,7 @@ async function main() {
       let progressEvents = 0;
       const result = await loadLc0ModelForOrt(modelUrl, {
         cache: false,
+        allowUnverified: true,
         manifestUrl,
         onProgress: () => {
           progressEvents += 1;

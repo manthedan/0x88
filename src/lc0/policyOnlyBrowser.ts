@@ -1479,6 +1479,7 @@ async function initSearchWorker(options: { initModel?: boolean } = {}): Promise<
     modelUrl: MODEL_URL,
     ep: requestedWorkerEp(),
     cacheModel: CACHE_MODEL,
+    allowUnverifiedModel: true,
     ortDiagnostics: requestedOrtDiagnosticsPayload(),
     ...(ORT_DEQUANT_FOLD === undefined ? {} : { dequantFold: ORT_DEQUANT_FOLD }),
     ortWasmArtifact: requestedWasmArtifact,
@@ -4753,7 +4754,7 @@ async function init(mountSignal: AbortSignal) {
       if (isStaleMount(mountSignal)) return;
       renderWorkerGpuStatus(searchWorkerBackend);
     } else {
-      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL, requestPersistentStorage: CACHE_MODEL });
+      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL, requestPersistentStorage: CACHE_MODEL, allowUnverified: true });
       if (isStaleMount(mountSignal)) return;
       mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
       const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);

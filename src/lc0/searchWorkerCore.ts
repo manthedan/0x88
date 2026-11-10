@@ -32,6 +32,8 @@ type InitMessage = {
   modelUrl: string;
   ep: OrtExecutionProviderPreference;
   cacheModel: boolean;
+  /** Explicit lab opt-out; product callers leave verification enabled. */
+  allowUnverifiedModel?: boolean;
   runtime?: 'onnx' | 'hybrid' | 'whole-onnx-webgpu';
   packUrl?: string;
   wholeModelManifestUrl?: string;
@@ -281,6 +283,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     modelUrl: message.modelUrl,
     ep: message.ep,
     cacheModel: message.cacheModel,
+    allowUnverifiedModel: message.allowUnverifiedModel === true,
     packUrl: message.packUrl,
     wholeModelManifestUrl: message.wholeModelManifestUrl,
     wholeModelBatch: message.wholeModelBatch,
@@ -373,6 +376,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   let lastReportedBytes = -Infinity;
   const modelLoad = await loadLc0ModelForOrt(message.modelUrl, {
     cache: message.cacheModel,
+    allowUnverified: message.allowUnverifiedModel,
     requestPersistentStorage: message.requestPersistentModelStorage,
     minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
     onProgress: message.reportDownloadProgress
