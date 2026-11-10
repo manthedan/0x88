@@ -5284,9 +5284,19 @@ export function arenaLeaveMessage(): string {
 }
 
 let arenaUnloadConfirmed = false;
+let arenaUnloadResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+function resetArenaUnload(): void {
+  clearTimeout(arenaUnloadResetTimer);
+  arenaUnloadResetTimer = undefined;
+  arenaUnloadConfirmed = false;
+}
 
 export function allowArenaUnload(): void {
+  resetArenaUnload();
   arenaUnloadConfirmed = true;
+  // Navigation may be stopped before beforeunload, without unmounting this page.
+  arenaUnloadResetTimer = setTimeout(resetArenaUnload, 1000);
 }
 
 export function mountArenaBrowser(): () => void {
@@ -5297,11 +5307,28 @@ export function mountArenaBrowser(): () => void {
   }
   lastArenaMountHref = href;
   resetArenaPageState();
-  arenaUnloadConfirmed = false;
+  resetArenaUnload();
   const controller = new AbortController();
   mountAbort = controller;
   arenaMountedCallbackCache = new WeakMap();
-  window.addEventListener('beforeunload', (event) => guardArenaUnload(event, isArenaRunActive() && !arenaUnloadConfirmed), { signal: controller.signal });
+  window.addEventListener(
+    'beforeunload',
+    (event) => {
+      const confirmed = arenaUnloadConfirmed;
+      resetArenaUnload();
+      guardArenaUnload(event, isArenaRunActive() && !confirmed);
+    },
+    { signal: controller.signal },
+  );
+  window.addEventListener(
+    'pageshow',
+    (event) => {
+      if (event.persisted) resetArenaUnload();
+    },
+    { signal: controller.signal },
+  );
+  for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, resetArenaUnload, { capture: true, signal: controller.signal });
+  controller.signal.addEventListener('abort', resetArenaUnload, { once: true });
   void init(controller.signal).catch((error) => {
     if (controller.signal.aborted || mountAbort !== controller) return;
     hideEngineWarmupStatus();

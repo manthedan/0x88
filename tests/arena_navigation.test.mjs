@@ -109,3 +109,40 @@ test('hidden tournaments bypass pacing, and hiding cancels a pending visible del
   controller.abort();
   await aborted;
 });
+
+test('Arena unload confirmation is consumed once and resets after bfcache or aborted navigation', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
+  const setup = source.slice(
+    source.indexOf('let arenaUnloadConfirmed'),
+    source.indexOf('  void init(controller.signal).catch', source.indexOf('export function mountArenaBrowser()')),
+  );
+  for (const reason of ['consumed', 'bfcache', 'timeout', 'pointerdown', 'keydown']) {
+    const window = new EventTarget();
+    const code = `
+      let lastArenaMountHref = null, mountAbort, arenaMountedCallbackCache;
+      const location = {href: 'https://example.test/app/arena/?dev'};
+      const resetArenaPageState = () => {}, isArenaRunActive = () => true;
+      ${stripTypeScriptTypes(setup.replaceAll('export ', '') + 'return () => controller.abort(); }')}
+      return {allow: allowArenaUnload, cleanup: mountArenaBrowser()};
+    `;
+    const { allow, cleanup } = new Function('window', 'guardArenaUnload', code)(window, guardArenaUnload);
+    const unload = () => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    assert.equal(unload(), true);
+    allow();
+    if (reason === 'consumed') assert.equal(unload(), false, 'Confirmed navigation must bypass exactly one unload');
+    else if (reason === 'bfcache') {
+      const event = new Event('pageshow');
+      event.persisted = true;
+      window.dispatchEvent(event);
+    } else if (reason === 'timeout') t.mock.timers.tick(2000);
+    else window.dispatchEvent(new Event(reason));
+    assert.equal(unload(), true, reason + ' must restore the active-game guard');
+    cleanup();
+    assert.equal(unload(), false, 'Unmount removes the guard');
+  }
+});
