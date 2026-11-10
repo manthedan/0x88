@@ -94,7 +94,11 @@ Two things people usually miss:
 
 1. **Pin the upstream commit** in `engines/<name>/upstream.lock.json` and keep
    your changes in a patch file under `patches/`. Nobody can reproduce a build
-   from an unpinned `git clone`.
+   from an unpinned `git clone`. `scripts/write_engine_artifact_manifest.mjs`
+   and `scripts/write_engine_source_archive.mjs` read the pin from the lock;
+   the build script's env-overridable defaults (`<NAME>_REPO`, `<NAME>_REF`,
+   network SHA-256) must equal it, and `tests/engine_upstream_locks.test.mjs`
+   fails if they drift (add the engine to its `ENGINES` list).
 2. **Licensing is a gate, not paperwork.** If you add a GPL or AGPL engine, it
    ships with a corresponding-source archive and a release manifest, or it does
    not ship. Networks need the same care as engines, and the absence of a

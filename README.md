@@ -116,7 +116,10 @@ Documented end to end in
 and [`browser_c_engine_porting.md`](docs/browser_c_engine_porting.md).
 Roughly:
 
-1. Pin the upstream commit in `engines/<name>/upstream.lock.json`.
+1. Pin the upstream repo, commit and licence in
+   `engines/<name>/upstream.lock.json`. The manifest and source-archive writers
+   read the pin from there; the build script's `<NAME>_REF` default must match
+   (`tests/engine_upstream_locks.test.mjs` checks this).
 2. Write a build script that applies your patch and emits WASM
    (`scripts/build_<name>_*.mjs`) — C/C++ through Emscripten, Rust through
    `wasm32-wasip1`.

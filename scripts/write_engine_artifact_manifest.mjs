@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, relative } from 'node:path';
 import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
@@ -9,16 +9,23 @@ import { STOCKFISH_RELEASE, stockfishArtifactBases } from './stockfish_release_c
 
 const ROOT = process.cwd();
 
+// Upstream pins come from engines/<engine>/upstream.lock.json (Stockfish's from
+// stockfish_release_config.mjs). The lock is resolved next to this script and
+// read only for the selected engine (via the getters below), so the copy inside
+// a corresponding-source archive needs only that engine's lock file. `keys`
+// fixes which fields are recorded, in manifest order; `commit` is the lock's `ref`.
+function lockedUpstream(engine, keys) {
+  const { upstream } = JSON.parse(readFileSync(new URL(`../engines/${engine}/upstream.lock.json`, import.meta.url), 'utf8'));
+  return Object.fromEntries(keys.map((key) => [key, upstream[key === 'commit' ? 'ref' : key]]));
+}
+
 const CONFIGS = {
   berserk: {
     engine: 'berserk',
     flavor: 'emscripten-single-thread',
     status: 'experimental',
-    upstream: {
-      repo: 'https://github.com/jhonnold/berserk.git',
-      tag: '14',
-      commit: '8ae895a6151695be4a50d4fb65b0c131659c513a',
-      license: 'GPL-3.0',
+    get upstream() {
+      return lockedUpstream('berserk', ['repo', 'tag', 'commit', 'license']);
     },
     build: {
       script: 'scripts/build_berserk_emscripten.mjs',
@@ -50,12 +57,8 @@ const CONFIGS = {
     engine: 'plentychess',
     flavor: 'emscripten-single-thread',
     status: 'experimental',
-    upstream: {
-      repo: 'https://github.com/Yoshie2000/PlentyChess.git',
-      commit: '50ad9f1b523063cbbbf599fe0547f42870fe2906',
-      tag: 'b-v8.0.0',
-      version: '8.0.0',
-      license: 'GPL-3.0',
+    get upstream() {
+      return lockedUpstream('plentychess', ['repo', 'commit', 'tag', 'version', 'license']);
     },
     build: {
       script: 'scripts/build_plentychess_emscripten.mjs',
@@ -89,12 +92,8 @@ const CONFIGS = {
     engine: 'stormphrax',
     flavor: 'emscripten-single-thread',
     status: 'experimental',
-    upstream: {
-      repo: 'https://github.com/Ciekce/Stormphrax.git',
-      tag: 'v8.0.0',
-      commit: '582965517ed2032d41a6b4cd6c2e66b1b934e2ad',
-      version: '8.0.0',
-      license: 'GPL-3.0-or-later',
+    get upstream() {
+      return lockedUpstream('stormphrax', ['repo', 'tag', 'commit', 'version', 'license']);
     },
     build: {
       script: 'scripts/build_stormphrax_emscripten.mjs',
@@ -125,10 +124,9 @@ const CONFIGS = {
     engine: 'reckless',
     flavor: 'wasip1-browser',
     status: 'experimental',
-    upstream: {
-      repo: 'https://github.com/codedeliveryservice/Reckless.git',
-      commit: '0010617448bdef4c8cd7d4f4825b7e42c8bc262a',
-      license: 'AGPL-3.0',
+    // The Reckless lock's "version" names its network (v60), not an engine release.
+    get upstream() {
+      return lockedUpstream('reckless', ['repo', 'commit', 'license']);
     },
     build: {
       script: 'scripts/build_reckless_release_assets.mjs',
@@ -167,11 +165,8 @@ const CONFIGS = {
     engine: 'viridithas',
     flavor: 'wasip1-scalar-simd128',
     status: 'experimental',
-    upstream: {
-      repo: 'https://github.com/cosmobobak/viridithas.git',
-      commit: '0631113e2215714c54d397cce9a8caebc5e6f8ee',
-      version: 'v20.0.0',
-      license: 'MIT',
+    get upstream() {
+      return lockedUpstream('viridithas', ['repo', 'commit', 'version', 'license']);
     },
     build: {
       script: 'scripts/build_viridithas_wasi.mjs',

@@ -1,0 +1,37 @@
+{
+  "name": "stormphrax-wasm",
+  "upstream": {
+    "repo": "https://github.com/Ciekce/Stormphrax.git",
+    "ref": "582965517ed2032d41a6b4cd6c2e66b1b934e2ad",
+    "tag": "v8.0.0",
+    "version": "8.0.0",
+    "license": "GPL-3.0-or-later"
+  },
+  "network": {
+    "name": "undertown.nnue",
+    "url": "https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/undertown.nnue",
+    "sha256": "04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf"
+  },
+  "patches": {
+    "emscripten": "patches/stormphrax-emscripten.patch (SP_SYNC_SEARCH synchronous search, SP_WASM_SIMD wasm128 backend; relaxed integer dot under __wasm_relaxed_simd__)"
+  },
+  "variants": {
+    "base": {
+      "base": "stormphrax-emscripten",
+      "flags": [
+        "-msimd128",
+        "-mssse3",
+        "-msse4.1"
+      ]
+    },
+    "relaxed-simd128": {
+      "base": "stormphrax-emscripten-relaxed-simd128",
+      "flags": [
+        "-msimd128",
+        "-mssse3",
+        "-msse4.1",
+        "-mrelaxed-simd"
+      ]
+    }
+  }
+}
