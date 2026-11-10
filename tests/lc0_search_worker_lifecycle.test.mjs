@@ -47,7 +47,7 @@ test('worker disposes a replacement after diagnostics fail and keeps its working
       pending.set(++id, resolve);
       handleMessage({ data: { ...message, id } });
     });
-  const init = (modelUrl, evalCacheEntries = 0) => send({ type: 'init', modelUrl, ep: 'wasm', cacheModel: false, evalCacheEntries });
+  const init = (modelUrl, evalCacheEntries = 0) => send({ type: 'init', modelUrl, ep: 'wasm', cacheModel: false, allowUnverifiedModel: true, evalCacheEntries });
   try {
     startSearchWorker();
     assert.equal((await init('https://test.invalid/old.onnx')).type, 'ready');
