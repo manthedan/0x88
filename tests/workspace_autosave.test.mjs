@@ -104,7 +104,7 @@ test('custom root, castling, en passant and promotion round trip through legal r
     ['4k3/P7/8/8/8/8/8/6K1 w - - 0 1', ['a7a8n']],
   ]) {
     const tree = new GameTree(fen);
-    moves.forEach((uci) => assert.ok(tree.addUci(uci)));
+    for (const uci of moves) assert.ok(tree.addUci(uci));
     assert.deepEqual(serializeTree(restoreTree(serializeTree(tree))), serializeTree(tree));
   }
 });

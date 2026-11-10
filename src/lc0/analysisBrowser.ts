@@ -2623,7 +2623,7 @@ async function runPgnTask(action: () => void | Promise<void>): Promise<void> {
   root.setAttribute('aria-busy', 'true');
   const controls = [...root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('button,input,select,textarea')];
   const disabled = controls.map((node) => node.disabled);
-  controls.forEach((node) => (node.disabled = true));
+  for (const node of controls) node.disabled = true;
   try {
     await action();
   } catch (error) {
@@ -2631,7 +2631,9 @@ async function runPgnTask(action: () => void | Promise<void>): Promise<void> {
   } finally {
     if (!isStaleMount(signal)) {
       pgnTaskBusy = false;
-      controls.forEach((node, i) => (node.disabled = disabled[i]));
+      controls.forEach((node, i) => {
+        node.disabled = disabled[i];
+      });
       const info = el('pgnDbInfo').textContent;
       const name = inputEl('pgnDbName').value;
       renderPgnDatabaseCollections(activePgnCollectionId);
@@ -5669,13 +5671,13 @@ function wireEvents() {
         clearPreview();
         return;
       }
-      container.querySelectorAll('.previewing').forEach((node) => node.classList.remove('previewing'));
+      for (const node of container.querySelectorAll('.previewing')) node.classList.remove('previewing');
       target.closest('.result-line, tr')?.classList.add('previewing');
       hoverLine((target.dataset.pv ?? '').split(' ').filter(Boolean), target.dataset.engine ?? 'Lc0');
     };
     const clearPreview = () => {
       arrowPreview = null;
-      container.querySelectorAll('.previewing').forEach((node) => node.classList.remove('previewing'));
+      for (const node of container.querySelectorAll('.previewing')) node.classList.remove('previewing');
       setShapes(bestShapes());
     };
     container.addEventListener('mouseover', preview);

@@ -176,9 +176,9 @@ const CONTAINERS =
 function cleanText(node: Element): string {
   const clone = node.cloneNode(true) as Element;
   // Headings are indexed as titles; the live device check is not documentation.
-  clone.querySelectorAll('.anchor-link, .device-check, h2, h3, h4, script, style').forEach((el) => el.remove());
+  for (const el of clone.querySelectorAll('.anchor-link, .device-check, h2, h3, h4, script, style')) el.remove();
   // Keep table cells and list items from running together ("PlayAGPL").
-  clone.querySelectorAll('td, th, li, dt, dd, p, h4, caption, .sub').forEach((el) => el.append(' '));
+  for (const el of clone.querySelectorAll('td, th, li, dt, dd, p, h4, caption, .sub')) el.append(' ');
   return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 

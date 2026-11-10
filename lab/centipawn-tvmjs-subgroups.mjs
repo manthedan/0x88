@@ -151,7 +151,8 @@ async function gpuInvoke(evaluator, profile, boards) {
       busyNs += ns;
       const name = p.names[i / 2];
       if (!name) throw new Error('Missing timestamp pipeline identity');
-      const k = (kernels[name] ??= { count: 0, gpuMs: 0, zeroPasses: 0 });
+      kernels[name] ??= { count: 0, gpuMs: 0, zeroPasses: 0 };
+      const k = kernels[name];
       k.count++;
       k.gpuMs += Number(ns) / 1e6;
       k.zeroPasses += ns === 0n ? 1 : 0;
@@ -362,6 +363,7 @@ window.checkSubgroupRouting = async () => {
         },
         { fallback: false },
       );
+      let lostReason;
       try {
         const expected = mode === 'candidate' ? 'v3-subgroups' : 'v2-shape-k16';
         if (!result.manifestUrl.endsWith(`/${expected}/manifest.json`) || !result.runtimeConfigId.endsWith(expected))
@@ -372,8 +374,9 @@ window.checkSubgroupRouting = async () => {
         rows.push({ mode, manifestUrl: result.manifestUrl, runtimeConfigId: result.runtimeConfigId, requestedFeatures });
       } finally {
         result.evaluator.destroy();
-        if ((await device.lost).reason !== 'destroyed') throw new Error('Routing probe device was not destroyed');
+        lostReason = (await device.lost).reason;
       }
+      if (lostReason !== 'destroyed') throw new Error('Routing probe device was not destroyed');
     }
     const result = { ok: true, rows, parity: compare(evaluations, [evaluations[0], evaluations[0], evaluations[0]]) };
     window.subgroupsRoutingResult = result;

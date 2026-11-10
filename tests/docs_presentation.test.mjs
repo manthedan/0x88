@@ -11,7 +11,7 @@ function walk(node, ancestors = []) {
   if (node.type === 'Element') elements.push({ node, ancestors });
   for (const [key, value] of Object.entries(node)) {
     if (key === 'parent') continue;
-    if (Array.isArray(value)) value.forEach((child) => walk(child, [...ancestors, node]));
+    if (Array.isArray(value)) for (const child of value) walk(child, [...ancestors, node]);
     else if (value && typeof value === 'object') walk(value, [...ancestors, node]);
   }
 }

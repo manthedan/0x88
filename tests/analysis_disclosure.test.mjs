@@ -31,21 +31,21 @@ function fixture(enabled) {
   root.children = [trigger, panel];
   const controller = new AbortController();
   const disclosure = mountAnalysisDisclosure({ root, trigger, panel, signal: controller.signal, enabled });
-  const escape = () => {
+  const pressEscape = () => {
     const event = new Event('keydown', { cancelable: true });
     Object.defineProperty(event, 'key', { value: 'Escape' });
     doc.dispatchEvent(event);
     return event;
   };
-  return { doc, root, trigger, panel, disclosure, controller, escape };
+  return { doc, root, trigger, panel, disclosure, controller, pressEscape };
 }
 test('board tools and Copy use a disclosure with Escape focus restoration and outside close', () => {
-  const { doc, root, trigger, panel, controller, escape } = fixture();
+  const { doc, root, trigger, panel, controller, pressEscape } = fixture();
   assert.equal(panel.hidden, true);
   trigger.dispatchEvent(new Event('click'));
   assert.equal(panel.hidden, false);
   assert.equal(trigger.attrs['aria-expanded'], 'true');
-  assert.equal(escape().defaultPrevented, true);
+  assert.equal(pressEscape().defaultPrevented, true);
   assert.equal(panel.hidden, true);
   assert.equal(doc.activeElement, trigger);
   trigger.dispatchEvent(new Event('click'));

@@ -34,7 +34,7 @@ test('cancelled cold review startups release both broker slots before initializa
   await tick();
   assert.equal(broker.snapshot().activeLeases.length, 2);
   const rejections = tasks.map((task) => assert.rejects(task, { name: 'AbortError' }));
-  controllers.forEach((controller) => controller.abort());
+  for (const controller of controllers) controller.abort();
   await Promise.all(rejections);
   assert.equal(broker.snapshot().activeLeases.length, 0);
   const other = await broker.acquire({ engineId: 'other' });

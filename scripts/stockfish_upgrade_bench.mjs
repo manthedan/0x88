@@ -97,7 +97,7 @@ export async function runCell(
   let cursor = 0;
   const pending = new Set();
   let exited = false;
-  let completed = false;
+  let completedResult;
   let exitStatus;
   let expectedSearches = 0;
   let replayStart = 0;
@@ -239,8 +239,7 @@ export async function runCell(
       const info = parseUciSearch([...lines.slice(infoStart, cursor - 1), best], depth);
       rows.push({ position: label, ...info, wallMs });
     }
-    completed = true;
-    return {
+    completedResult = {
       ...cell,
       startupMs,
       benchDepth,
@@ -277,34 +276,35 @@ export async function runCell(
       kill();
       for (const signal of ['SIGINT', 'SIGTERM']) process.removeListener(signal, onSignal);
     }
-    if (completed) {
-      if (exitStatus?.code !== 0 || exitStatus?.signal) {
-        throw new Error(`${cell.label} replay engine exited abnormally (${exitStatus?.code}, ${exitStatus?.signal})`);
-      }
-      // Drain the complete transcript, including output after the final search
-      // and partial final lines. A first bestmove is not a license to ignore
-      // malformed or surplus completion records before a clean shutdown.
-      if (cell.nativeBench) {
-        validateCompletions(
-          lines.slice(nativeBenchStart, replayStart),
-          defaults.filter((entry) => !entry.startsWith('setoption ')).length,
-          'native built-in bench',
-        );
-        const finalNativeSignature = benchSignature(lines.slice(nativeBenchStart));
-        if (finalNativeSignature !== replaySignature) {
-          throw new Error(`Bench replay mismatch after shutdown: native=${finalNativeSignature}, replay=${replaySignature}`);
-        }
-      }
-      validateCompletions(lines.slice(replayStart), expectedSearches, 'replay');
-      for (const [index, line] of lines.entries()) {
-        // Only info captured BEFORE completion of a verified terminal corpus
-        // search may omit PV moves. Late/quit records are never sanitized.
-        if (/^info\s/.test(line) && !/^info\s+string\b/.test(line)) {
-          parseInfo(terminalInfo.has(index) ? line.replace(/\s+pv\s*$/, '') : line);
-        }
-      }
+  }
+  // Only reached when the try block finished normally and shutdown drained
+  // cleanly; validate the complete transcript before reporting the result.
+  if (exitStatus?.code !== 0 || exitStatus?.signal) {
+    throw new Error(`${cell.label} replay engine exited abnormally (${exitStatus?.code}, ${exitStatus?.signal})`);
+  }
+  // Drain the complete transcript, including output after the final search
+  // and partial final lines. A first bestmove is not a license to ignore
+  // malformed or surplus completion records before a clean shutdown.
+  if (cell.nativeBench) {
+    validateCompletions(
+      lines.slice(nativeBenchStart, replayStart),
+      defaults.filter((entry) => !entry.startsWith('setoption ')).length,
+      'native built-in bench',
+    );
+    const finalNativeSignature = benchSignature(lines.slice(nativeBenchStart));
+    if (finalNativeSignature !== replaySignature) {
+      throw new Error(`Bench replay mismatch after shutdown: native=${finalNativeSignature}, replay=${replaySignature}`);
     }
   }
+  validateCompletions(lines.slice(replayStart), expectedSearches, 'replay');
+  for (const [index, line] of lines.entries()) {
+    // Only info captured BEFORE completion of a verified terminal corpus
+    // search may omit PV moves. Late/quit records are never sanitized.
+    if (/^info\s/.test(line) && !/^info\s+string\b/.test(line)) {
+      parseInfo(terminalInfo.has(index) ? line.replace(/\s+pv\s*$/, '') : line);
+    }
+  }
+  return completedResult;
 }
 
 export function parityReport(cells) {

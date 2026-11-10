@@ -25,7 +25,9 @@ test('parity includes depth, bestmove, score, nodes and full PV; missing fields 
 test('rotated and reversed order gives every artifact every slot over ten rounds', () => {
   const items = ['current', 'o2', 'o3', 'o2-lto', 'o3-lto'];
   const counts = Object.fromEntries(items.map((i) => [i, [0, 0, 0, 0, 0]]));
-  for (let r = 0; r < 10; r += 1) roundOrder(items, r).forEach((i, slot) => counts[i][slot]++);
+  for (let r = 0; r < 10; r += 1) {
+    for (const [slot, i] of roundOrder(items, r).entries()) counts[i][slot]++;
+  }
   for (const slots of Object.values(counts)) assert.deepEqual(slots, [2, 2, 2, 2, 2]);
   assert.deepEqual(items, ['current', 'o2', 'o3', 'o2-lto', 'o3-lto']);
 });
@@ -37,7 +39,7 @@ test('even-sized matrices counterbalance A/B and give every artifact every slot'
     const items = Array.from({ length: size }, (_, i) => i);
     const counts = items.map(() => Array(size).fill(0));
     for (let round = 0; round < 2 * size; round++) {
-      roundOrder(items, round).forEach((item, slot) => counts[item][slot]++);
+      for (const [slot, item] of roundOrder(items, round).entries()) counts[item][slot]++;
     }
     for (const slots of counts) assert.deepEqual(slots, Array(size).fill(2));
   }
