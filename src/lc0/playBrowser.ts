@@ -17,7 +17,7 @@ import {
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
+import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcher, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
@@ -57,6 +57,7 @@ import {
 } from './moveNavigation.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
+import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import { playMaterial } from './playMaterial.ts';
 import { committedPlayOpponent, type PlayOpponentState, transitionPlayOpponent } from './playOpponentState.ts';
 import { type PlayPosition, playGameToPgn, playMoveLabel, playMoveRows, playTakebackPly, replayPlayPosition } from './playPosition.ts';
@@ -169,6 +170,7 @@ function startFenFor(option: PlayEngineOption, human: Color): string {
 // ---------------------------------------------------------------------------
 interface PlayContext {
   autosave: ReturnType<typeof createWorkspaceAutosave> | null;
+  pendingInput: PendingInput | null;
   restoredGame: boolean;
   abort: AbortController;
   disposed: boolean;
@@ -223,6 +225,7 @@ interface PlayContext {
 function createPlayContext(): PlayContext {
   return {
     autosave: null,
+    pendingInput: null,
     restoredGame: false,
     abort: new AbortController(),
     disposed: false,
@@ -1121,6 +1124,7 @@ function ctxSubmitTypedMove(ctx: PlayContext): void {
 }
 
 function ctxNewGame(ctx: PlayContext): void {
+  ctxUpdatePendingInput(ctx, { type: 'discarded' });
   ctx.autosave?.clear();
   ctx.restoredGame = false;
   el('playRestoreNotice').hidden = true;
@@ -1799,9 +1803,17 @@ function ctxTuneOpponent(ctx: PlayContext): void {
 // Mount/init
 // ---------------------------------------------------------------------------
 
+function ctxUpdatePendingInput(ctx: PlayContext, event: PendingInputEvent): void {
+  const { pending, acknowledged } = transitionPendingInput(ctx.pendingInput, event);
+  ctx.pendingInput = pending;
+  for (const transfer of acknowledged?.transfers ?? []) acknowledgeInputTransfer(transfer);
+}
+
 /** Import before any autosaved-game restore; callers must skip restore when this returns true. */
-function ctxApplyPlayHandoffForMount(ctx: PlayContext, defer: (consume: () => void) => void): boolean {
-  const handoff = takePlayHandoff(Date.now(), defer);
+function ctxApplyPlayHandoffForMount(ctx: PlayContext): boolean {
+  const handoff = takePlayHandoff(Date.now(), (_consume, transfer) => {
+    ctxUpdatePendingInput(ctx, { type: 'applied', input: { urlKeys: [], transfers: [transfer] } });
+  });
   if (handoff.status === 'ready') {
     ctx.practicePosition = handoff.position;
     return true;
@@ -1851,10 +1863,7 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 
 function ctxInit(ctx: PlayContext): void {
   // Only a decoded storage position handoff replaces a saved game. URL options never contain a Play game.
-  let completeHandoff: (() => void) | undefined;
-  const handedOff = ctxApplyPlayHandoffForMount(ctx, (consume) => {
-    completeHandoff = consume;
-  });
+  const handedOff = ctxApplyPlayHandoffForMount(ctx);
   const validEngineIds = new Set(ENGINE_OPTIONS.map((option) => option.id));
   const saved = handedOff ? null : readWorkspace('play', (raw) => decodePlaySnapshot(raw, validEngineIds));
   ctx.restoredGame = !!saved;
@@ -1882,10 +1891,7 @@ function ctxInit(ctx: PlayContext): void {
     Object.assign(ctx, game);
     el('playRestoreNotice').hidden = false;
   }
-  ctx.autosave = createWorkspaceAutosave('play', undefined, 400, undefined, undefined, () => {
-    completeHandoff?.();
-    completeHandoff = undefined;
-  });
+  ctx.autosave = createWorkspaceAutosave('play', undefined, 400, undefined, undefined, (type) => ctxUpdatePendingInput(ctx, { type }));
   trackListener(ctx, window, 'pagehide', () => ctx.autosave?.flush());
   trackListener(ctx, window, 'pageshow', (event: Event) => {
     if (!(event as PageTransitionEvent).persisted) return;
@@ -1931,6 +1937,7 @@ function ctxInit(ctx: PlayContext): void {
     ctxNewGame(ctx);
   });
   trackListener(ctx, el('useStartingPosition'), 'click', () => {
+    ctxUpdatePendingInput(ctx, { type: 'discarded' });
     ctx.practicePosition = null;
     ctx.handoffNotice = '';
     ctx.started = false;
