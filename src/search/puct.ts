@@ -1344,7 +1344,7 @@ function buildSearchProgress(
   };
 }
 
-async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyContext, stats?: SearchStats): Promise<number> {
+async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyContext, stats?: SearchStats, isSearchRoot = false): Promise<number> {
   const moves = legalMoves(node.board);
   if (!moves.length) {
     node.expanded = true;
@@ -1357,7 +1357,9 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
     }
     return node.terminalValue;
   }
-  if (automaticDrawReason(node.board, node.historyFens)) {
+  // Like LC0's ExtendNode, draws by rule end interior nodes only: a root that is
+  // already a claimable draw is still searched, since choosing its move is the point.
+  if (!isSearchRoot && automaticDrawReason(node.board, node.historyFens)) {
     node.expanded = true;
     node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
@@ -1910,6 +1912,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const reusableRoot =
     !options.rootMoves &&
     options.root &&
+    // A reused child may have been cut off as a draw by rule; the root must be searched afresh.
+    options.root.terminalValue === null &&
     boardToFen(options.root.board) === boardToFen(board) &&
     sameHistory(options.root.historyFens, requestedHistory) &&
     nodeSearchValueCompatible(options.root, currentSearchValueKey)
@@ -1932,13 +1936,6 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       stats.expansions += 1;
       stats.terminalHits += 1;
       rootValue = root.terminalValue;
-    } else if (automaticDrawReason(root.board, root.historyFens)) {
-      root.expanded = true;
-      root.terminalValue = contemptDrawValue(context, root.board.turn);
-      root.edges = [];
-      stats.expansions += 1;
-      stats.terminalHits += 1;
-      rootValue = root.terminalValue;
     } else {
       const beforeMetrics = evaluatorMetrics(evaluator);
       stats.evalCalls += 1;
@@ -1954,7 +1951,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       stats.expansions += 1;
     }
   } else {
-    rootValue = await expand(root, evaluator, context, stats);
+    rootValue = await expand(root, evaluator, context, stats, true);
   }
   if (!root.edges.length) {
     finalizeEvaluationTimingStats(stats);
