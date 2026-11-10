@@ -5,7 +5,14 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { extname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseIntegritySmokeArgs } from './lib/engine_integrity_smoke.mjs';
+import {
+  actionableIntegrityErrors,
+  integrityEngineSpecs,
+  integritySmokeExitCode,
+  integrityUiAssets,
+  missingIntegrityAssets,
+  parseIntegritySmokeArgs,
+} from './lib/engine_integrity_smoke.mjs';
 
 const args = parseIntegritySmokeArgs(process.argv.slice(2));
 const repo = process.cwd();
@@ -19,27 +26,10 @@ const { build } = await import(pathToFileURL(require.resolve('vite')));
 const { chromium } = require('playwright');
 const timeoutMs = 180000;
 const temp = mkdtempSync(join(scratch, 'harness-'));
-const specs = [
-  { name: 'Stockfish lite', family: 'sf', base: '/stockfish/stockfish-19-lite-single' },
-  { name: 'Reckless', family: 'reckless', base: '/reckless/reckless' },
-  { name: 'Viridithas', family: 'viridithas', base: '/viridithas/viridithas' },
-  { name: 'Berserk defaults', family: 'berserk', base: '/berserk/berserk-emscripten' },
-  { name: 'PlentyChess defaults', family: 'plentychess', base: '/plentychess/plentychess-emscripten' },
-  { name: 'Stormphrax defaults', family: 'stormphrax', base: '/stormphrax/stormphrax-emscripten' },
-  { name: 'Stockfish full pthread', family: 'sf', base: '/stockfish/stockfish-19', threads: 2 },
-];
+const specs = integrityEngineSpecs;
 function assetFile(path) {
   const stagedFile = join(scratch, 'staged', path.split('/').at(-1));
   return path.startsWith('/reckless/') && existsSync(stagedFile) ? stagedFile : join(dist, path);
-}
-for (const spec of specs) {
-  spec.wasm = spec.base + '.wasm';
-  spec.assets = [
-    spec.wasm,
-    ...(['reckless', 'viridithas'].includes(spec.family) ? [] : [spec.base + '.js']),
-    ...(['berserk', 'plentychess', 'stormphrax'].includes(spec.family) ? [spec.base + '.data'] : []),
-  ];
-  for (const path of spec.assets) assert.ok(existsSync(assetFile(path)), `Missing ${spec.name}: ${path}`);
 }
 const source = (name) => JSON.stringify(join(repo, 'src', name));
 // Compile the unmodified real Analysis prefetch function with inert UI progress
@@ -110,9 +100,16 @@ let tamperPath;
 let tampered = 0;
 let failures = 0;
 let passed = 0;
+let skipped = 0;
 const requests = [];
 const servers = [];
-async function check(label, task) {
+async function check(label, assets, task) {
+  const missing = missingIntegrityAssets(assets, assetFile);
+  if (missing.length) {
+    skipped++;
+    console.log(`SKIPPED ${label}: missing artifacts: ${missing.join(', ')}`);
+    return;
+  }
   try {
     const detail = await task();
     passed++;
@@ -210,13 +207,27 @@ async function context(assetBase) {
   );
   return context;
 }
-function errorsFor(page) {
+function errorsFor(page, requiredAssets) {
   const errors = [];
-  page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
+  const optionalMissingProbeUrls = new Set();
+  const fetchedUrls = new Set();
+  page.on('request', (request) => {
+    if (request.method() === 'GET') fetchedUrls.add(request.url());
   });
-  page.on('pageerror', (error) => errors.push(error.message));
-  return errors;
+  page.on('response', (response) => {
+    const path = new URL(response.url()).pathname;
+    if (requiredAssets && !requiredAssets.includes(path) && response.request().method() === 'HEAD' && [404, 410].includes(response.status())) {
+      optionalMissingProbeUrls.add(response.url());
+    }
+  });
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push({ kind: 'console', text: message.text(), url: message.location().url });
+  });
+  page.on('pageerror', (error) => errors.push({ kind: 'pageerror', text: error.message }));
+  return {
+    actionable: () => actionableIntegrityErrors(errors, optionalMissingProbeUrls, fetchedUrls),
+    optionalMissingProbeUrls,
+  };
 }
 const run = (page, spec) => page.evaluate(async ({ spec, timeoutMs }) => (await import('/__integrity__/entry.js')).run(spec, timeoutMs), { spec, timeoutMs });
 const network = (start, spec) => requests.slice(start).filter((r) => spec.assets.includes(r.path));
@@ -247,7 +258,7 @@ try {
   const origin = await server();
   const assetBase = await server();
   for (const spec of args.uiOnly ? [] : specs) {
-    await check(`${spec.name} legal moves, clean console, HTTP cache`, async () => {
+    await check(`${spec.name} legal moves, clean console, HTTP cache`, spec.assets, async () => {
       const ctx = await context();
       try {
         const page = await ctx.newPage();
@@ -267,13 +278,13 @@ try {
         const offline = await run(page, spec);
         assert.ok(offline.move, JSON.stringify(offline));
         assert.deepEqual(network(warmBefore, spec), []);
-        assert.deepEqual(errors, []);
+        assert.deepEqual(errors.actionable(), []);
         return `cold ${cold.ms}ms/${coldNetwork.length} GETs/${coldNetwork.reduce((n, r) => n + r.size, 0)}B; warm ${warm.ms}ms/0 GETs/0B; offline ${offline.ms}ms; ${cold.move},${warm.move}`;
       } finally {
         await ctx.close();
       }
     });
-    await check(`${spec.name} tamper rejected before execution; clean retry`, async () => {
+    await check(`${spec.name} tamper rejected before execution; clean retry`, spec.assets, async () => {
       const ctx = await context();
       try {
         const page = await ctx.newPage();
@@ -289,7 +300,7 @@ try {
         const retry = await run(page, spec);
         assert.ok(retry.move, JSON.stringify(retry));
         assert.ok((await page.evaluate(() => globalThis.__integrityExecution)).length);
-        assert.deepEqual(errors, []);
+        assert.deepEqual(errors.actionable(), []);
         return `2 corrupt GETs, zero engine execution; retry ${retry.move}`;
       } finally {
         tamperPath = undefined;
@@ -298,8 +309,8 @@ try {
     });
   }
   for (const crossOrigin of args.uiOnly ? [] : [false, true]) {
-    await check(`real Analysis prefetch shares ${crossOrigin ? 'cross-origin' : 'same-origin'} cache with adapter`, async () => {
-      const spec = specs.find((s) => s.family === 'stormphrax');
+    const spec = specs.find((s) => s.family === 'stormphrax');
+    await check(`real Analysis prefetch shares ${crossOrigin ? 'cross-origin' : 'same-origin'} cache with adapter`, spec.assets, async () => {
       const ctx = await context(crossOrigin ? assetBase : undefined);
       try {
         const page = await ctx.newPage();
@@ -313,7 +324,7 @@ try {
         const result = await run(page, spec);
         assert.ok(result.move, JSON.stringify(result));
         assert.deepEqual(network(loaded, spec), []);
-        assert.deepEqual(errors, []);
+        assert.deepEqual(errors.actionable(), []);
         return `${preload.length} prefetch GETs/${preload.reduce((n, r) => n + r.size, 0)}B; adapter 0 GETs/0B (${result.ms}ms); mode=${preload[0].mode}, credentials=same-origin`;
       } finally {
         await ctx.close();
@@ -321,13 +332,13 @@ try {
     });
   }
   for (const path of ['/app/play/', '/app/arena/']) {
-    await check(`real UI ${path} ${path.includes('arena') ? 'one-game CPU match' : 'Stockfish opponent move'}`, async () => {
+    await check(`real UI ${path} ${path.includes('arena') ? 'one-game CPU match' : 'Stockfish opponent move'}`, integrityUiAssets(path), async () => {
       const ctx = await context();
       try {
         await ctx.addInitScript(() => localStorage.setItem('0x88-play-preferences-v1', JSON.stringify({ engineId: 'sf-lite', level: 0, color: 'white' })));
         const page = await ctx.newPage();
-        const errors = errorsFor(page);
-        await page.goto(origin + path + '?seatA=sf:lite:1&seatB=sf:lite:1&sfThreads=1&delayMs=0');
+        const errors = errorsFor(page, integrityUiAssets(path));
+        await page.goto(origin + path + '?seatA=sf:lite:1&seatB=sf:lite:1&sfThreads=1&delayMs=0&berserkVariant=emscripten');
         await page.waitForFunction(
           (arena) => (arena ? !!document.querySelector('.seat-fam option') : !!document.querySelector('#engineSelect option')),
           path.includes('arena'),
@@ -346,6 +357,7 @@ try {
         } else {
           await page.locator('.seat-fam').nth(0).selectOption('sf');
           await page.locator('.seat-fam').nth(1).selectOption('berserk');
+          await page.locator('.seat-var').nth(1).selectOption('emscripten');
           await page.locator('#budgetModeSelect').selectOption('fixed');
           await page.locator('.seat-strength').nth(0).fill('1');
           await page.locator('.seat-strength').nth(1).fill('1');
@@ -358,8 +370,8 @@ try {
           assert.equal(detail, '1 of 1 game played');
         }
         writeFileSync(join(scratch, path.includes('arena') ? 'arena-ui.txt' : 'play-ui.txt'), await page.locator('body').innerText());
-        assert.deepEqual(errors, []);
-        return detail;
+        assert.deepEqual(errors.actionable(), []);
+        return `${detail}${errors.optionalMissingProbeUrls.size ? `; ${errors.optionalMissingProbeUrls.size} optional HEAD 404/410s` : ''}`;
       } finally {
         await ctx.close();
       }
@@ -372,5 +384,5 @@ try {
   for (const server of servers) await new Promise((resolve) => server.close(resolve));
   rmSync(temp, { recursive: true, force: true });
 }
-console.log(`RESULT ${passed} passed, ${failures} failed`);
-process.exitCode = failures ? 1 : 0;
+console.log(`RESULT ${passed} passed, ${failures} failed, ${skipped} skipped${args.requireAll ? ' (--require-all)' : ''}`);
+process.exitCode = integritySmokeExitCode({ failures, skipped }, args.requireAll);

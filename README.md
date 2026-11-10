@@ -196,10 +196,23 @@ npm run test:stage-lc0-assets        # fetch the hash-pinned Lc0 parity models
 npm run bench:movegen                # movegen throughput
 npm run lc0:drift-sweep              # f32/f16 numerical drift
 npm run build:netlify:r2             # production build
+npm run dist:browser-smoke           # built client page initialization in Chromium
+npm run engines:integrity-smoke      # built client engine integrity/cache checks and Play/Arena journeys
 npm run deploy:ort-wasm-dedup-check
 npm run deploy:ort-runtime-assets-check
 npm run productization:fast-gate
 ```
+
+After `npm run build:client`, `npm run engines:integrity-smoke -- [dist-directory]`
+(default `dist-client`) runs locally in Playwright Chromium. Add `--ui-only`
+for just the Stockfish Play and Stockfish–Berserk Arena journeys. Missing
+artifacts are reported as `SKIPPED` with their paths; failures exit nonzero,
+and `--require-all` makes skips fatal too. UI checks need Stockfish lite and
+Berserk, not the other harness engines. Reckless is optional and gitignored;
+locally staged WASM files may also be supplied under
+`$ENGINE_INTEGRITY_BROWSER_SCRATCH/staged/`. The runner binds ephemeral ports
+and removes its temporary browser profiles. This additional smoke is not wired
+into CI; `dist:browser-smoke` remains the CI page-initialization check.
 
 The Lc0 model tests skip when their networks are missing.
 `npm run test:stage-lc0-assets` verifies or fetches the parity set into
