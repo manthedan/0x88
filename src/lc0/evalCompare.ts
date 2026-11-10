@@ -98,7 +98,7 @@ export function arenaComparisonStatus(state: ReturnType<typeof compareArenaEvals
   if (!state.comparison) {
     const old = state.ages.findIndex((age) => age !== undefined && age > 2);
     const age = old >= 0 ? state.ages[old] : undefined;
-    return { text: age !== undefined ? `not comparable, ${names[old]}’s eval is ${age} ${age === 1 ? 'move' : 'moves'} old` : 'not comparable', emphasis: false };
+    return { text: age !== undefined ? `not comparable, ${names[old]}’s eval is ${age} plies old` : 'not comparable', emphasis: false };
   }
   const comparison = state.comparison;
   if (comparison.oppositeSides) return { text: 'disagree on who’s better', emphasis: true };

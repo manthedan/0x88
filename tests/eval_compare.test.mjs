@@ -89,7 +89,7 @@ test('Arena status states adjacent positions rather than claiming agreement', ()
   assert.equal(status([score(1), score(1)]).text, 'similar, same position');
 });
 test('unfair age is explained only in the not-comparable status', () => {
-  assert.deepEqual(arenaComparisonStatus(compareArenaEvals([score(2), score(5)], fen(6)), [true, true], ['Lc0', 'SF']), { text: 'not comparable, Lc0’s eval is 4 moves old', emphasis: false });
+  assert.deepEqual(arenaComparisonStatus(compareArenaEvals([score(2), score(5)], fen(6)), [true, true], ['Lc0', 'SF']), { text: 'not comparable, Lc0’s eval is 4 plies old', emphasis: false });
 });
 test('self-play retains each side’s own result and resets at game/engine boundaries', () => {
   const white = { engineId: 'lc0-small', ...score(0, 20) };
