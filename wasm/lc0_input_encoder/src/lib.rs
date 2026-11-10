@@ -217,8 +217,9 @@ fn parse_fen(input: &[u8]) -> Result<Board, i32> {
     Ok(board)
 }
 
+// LC0 compares ChessBoard == kStartposBoard, which ignores the move counters.
 fn is_start(board: &Board) -> bool {
-    if board.turn != 0 || board.castling != 0b1111 || board.ep != -1 || board.halfmove != 0.0 || board.fullmove != 1 { return false; }
+    if board.turn != 0 || board.castling != 0b1111 || board.ep != -1 { return false; }
     let start = b"RNBQKBNRPPPPPPPP                                pppppppprnbqkbnr";
     for sq in 0..64 {
         let expected = match start[sq] {
@@ -319,13 +320,21 @@ fn encode_history(boards: &[Board], fen_only_fill: bool) -> Result<(), i32> {
         history[i] = boards[boards.len() - 1 - i];
         count += 1;
     }
-    if fen_only_fill && boards.len() == 1 && !is_start(&current) {
-        let synthetic = board_before_ep_double_push(current);
-        while count < HISTORY { history[count] = synthetic; count += 1; }
+    let real = count;
+    // LC0 EncodePositionForNN: past the real history, keep encoding the oldest
+    // position with any en-passant double push undone; FEN_ONLY fills every
+    // remaining slot unless that position is the startpos board, NO writes one
+    // such slot only when it has an en-passant square.
+    if real < HISTORY {
+        let oldest = boards[0];
+        let fill_to = if fen_only_fill { if is_start(&oldest) { real } else { HISTORY } } else if oldest.ep >= 0 { real + 1 } else { real };
+        let synthetic = board_before_ep_double_push(oldest);
+        while count < fill_to { history[count] = synthetic; count += 1; }
     }
     for i in 0..count.min(HISTORY) {
         encode_board_pieces(&history[i], i, current.turn);
-        if !fen_only_fill && boards.len() > 1 {
+        // Synthetic slots repeat the oldest position and never carry a repetition flag.
+        if i < real {
             let source_idx = boards.len() - 1 - i;
             let mut j = 0usize;
             while j < source_idx {
@@ -352,7 +361,7 @@ pub extern "C" fn lc0_encode_fen(len: usize, history_fill: i32) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn lc0_encode_fen_history(len: usize) -> i32 {
+pub extern "C" fn lc0_encode_fen_history(len: usize, history_fill: i32) -> i32 {
     if len > INPUT_CAP { return set_error(1); }
     let bytes = unsafe { &INPUT_BUF[..len] };
     let mut boards: [Board; MAX_EXPLICIT_HISTORY] = [Board { squares: [EMPTY;64], turn: 0, castling: 0, ep: -1, halfmove: 0.0, fullmove: 1 }; MAX_EXPLICIT_HISTORY];
@@ -375,7 +384,7 @@ pub extern "C" fn lc0_encode_fen_history(len: usize) -> i32 {
         }
         i += 1;
     }
-    match encode_history(&boards[..count], false) {
+    match encode_history(&boards[..count], history_fill != 0) {
         Ok(()) => set_error(0),
         Err(code) => set_error(code),
     }

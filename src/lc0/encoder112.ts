@@ -73,13 +73,14 @@ function setPiecePlanes(board: BoardState, masks: bigint[], historySlot: number,
   }
 }
 
-function isExactStartPosition(board: BoardState): boolean {
+// LC0 compares ChessBoard == kStartposBoard: pieces, side to move, castling
+// and en passant only. The move counters live in Position, so a startpos board
+// with non-default counters still counts as the start position.
+function isStartposBoard(board: BoardState): boolean {
   return (
     board.turn === START_BOARD.turn &&
-    board.castling === START_BOARD.castling &&
+    board.castling.length === 4 &&
     board.epSquare === START_BOARD.epSquare &&
-    board.halfmove === START_BOARD.halfmove &&
-    board.fullmove === START_BOARD.fullmove &&
     board.squares.every((piece, i) => piece === START_BOARD.squares[i])
   );
 }
@@ -144,15 +145,30 @@ export function encodeLc0Classical112(boardOrFen: Lc0EncoderInput, options?: { h
   const masks = Array<bigint>(LC0_CLASSICAL_112_PLANES).fill(0n);
   const values = Array<number>(LC0_CLASSICAL_112_PLANES).fill(1);
 
-  if (!explicitHistory && historyFill === 'fen_only' && !isExactStartPosition(board)) {
-    const syntheticHistoryBoard = boardBeforeEpDoublePush(board);
-    while (historyBoards.length < LC0_HISTORY_PLANES) historyBoards.push(syntheticHistoryBoard);
+  // Repetition flags come from real positions only; synthetic slots repeat the
+  // oldest position, which has no earlier position to repeat.
+  const historyKeys = explicitHistory ? historyBoards.map(repetitionKey) : [];
+  const realSlots = historyBoards.length;
+
+  // LC0 EncodePositionForNN: once the real history runs out it keeps encoding
+  // the oldest position with any en-passant double push undone, for every
+  // remaining slot under FEN_ONLY (unless that position is the startpos board)
+  // and for exactly one slot under NO (only when that position has an en-passant
+  // square). This applies to any history length, not just a bare FEN root.
+  if (realSlots < LC0_HISTORY_PLANES) {
+    const oldest = historyBoards[realSlots - 1];
+    let fillTo = realSlots;
+    if (historyFill === 'fen_only' && !isStartposBoard(oldest)) fillTo = LC0_HISTORY_PLANES;
+    else if (historyFill === 'no' && oldest.epSquare !== null) fillTo = realSlots + 1;
+    if (fillTo > realSlots) {
+      const syntheticHistoryBoard = boardBeforeEpDoublePush(oldest);
+      while (historyBoards.length < fillTo) historyBoards.push(syntheticHistoryBoard);
+    }
   }
 
-  const historyKeys = explicitHistory ? historyBoards.map(repetitionKey) : [];
   for (let i = 0; i < Math.min(historyBoards.length, LC0_HISTORY_PLANES); i++) {
     setPiecePlanes(historyBoards[i], masks, i, board.turn);
-    if (explicitHistory && historyKeys.slice(i + 1).includes(historyKeys[i])) masks[i * LC0_PLANES_PER_HISTORY + 12] = ALL_SQUARES_MASK;
+    if (i < realSlots && explicitHistory && historyKeys.slice(i + 1).includes(historyKeys[i])) masks[i * LC0_PLANES_PER_HISTORY + 12] = ALL_SQUARES_MASK;
   }
   setClassicalAuxPlanes(board, masks, values);
 

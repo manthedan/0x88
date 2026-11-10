@@ -9,6 +9,7 @@ import { createLc0WasmInputEncoder } from '../src/lc0/wasmInputEncoder.ts';
 const fenFixtures = JSON.parse(readFileSync('fixtures/lc0/fen_only.json', 'utf8'));
 const historyFixtures = JSON.parse(readFileSync('fixtures/lc0/history.json', 'utf8'));
 const repetitionFixtures = JSON.parse(readFileSync('fixtures/lc0/repetition_history.json', 'utf8'));
+const fenHistoryFixtures = JSON.parse(readFileSync('fixtures/lc0/fen_history.json', 'utf8'));
 const wasmBytes = readFileSync('public/lc0/lc0_input_encoder.wasm');
 
 function maxAbsDiff(a, b) {
@@ -84,12 +85,26 @@ test('SIMD WASM LC0 input encoder matches JS explicit FEN history encoding', asy
   }
 });
 
-test('SIMD WASM LC0 input encoder does not synthetic-fill explicit single-FEN history', async () => {
+test('SIMD WASM LC0 input encoder fills explicit single-FEN history like a bare FEN', async () => {
   const wasm = await createLc0WasmInputEncoder(wasmBytes);
   const fen = fenFixtures.find((fixture) => fixture.id === 'black-to-move-after-e4').fen;
-  const expected = encodeLc0Classical112({ positions: [fen] }).planes;
-  const actual = wasm.encodeFenHistory([fen]).planes;
-  assert.equal(maxAbsDiff(actual, expected), 0);
+  for (const historyFill of ['fen_only', 'no']) {
+    const expected = encodeLc0Classical112({ positions: [fen] }, { historyFill });
+    assertEncodedEqual(wasm.encodeFenHistory([fen], { historyFill: historyFill !== 'no' }), expected, `explicit ${historyFill}`);
+    assertEncodedEqual(wasm.encodeFen(fen, { historyFill: historyFill !== 'no' }), expected, `bare ${historyFill}`);
+  }
+});
+
+test('SIMD WASM LC0 input encoder matches JS history fill below FEN roots', async () => {
+  const wasm = await createLc0WasmInputEncoder(wasmBytes);
+  for (const fixture of fenHistoryFixtures) {
+    const positions = buildBoardHistoryFromMoves(fixture.moves, fixture.startFen);
+    for (const historyFill of ['fen_only', 'no']) {
+      const expected = encodeLc0Classical112({ positions }, { historyFill });
+      const actual = wasm.encodeFenHistory(positions.map(boardToFen), { historyFill: historyFill !== 'no' });
+      assertEncodedEqual(actual, expected, `${fixture.id} ${historyFill}`);
+    }
+  }
 });
 
 test('SIMD WASM LC0 input encoder matches JS repetition-plane history encoding', async () => {

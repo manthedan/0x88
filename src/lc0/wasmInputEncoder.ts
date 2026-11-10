@@ -31,7 +31,7 @@ type Lc0InputEncoderExports = WebAssembly.Exports & {
   lc0_values_buffer_ptr: () => number;
   lc0_last_error: () => number;
   lc0_encode_fen: (len: number, historyFill: number) => number;
-  lc0_encode_fen_history: (len: number) => number;
+  lc0_encode_fen_history: (len: number, historyFill: number) => number;
 };
 
 export class Lc0WasmInputEncoder {
@@ -66,11 +66,11 @@ export class Lc0WasmInputEncoder {
     return { encoded, timing: { textEncodeMs, writeMs, wasmEncodeMs, readMs, totalMs, bridgeCopyMs: textEncodeMs + writeMs + readMs } };
   }
 
-  encodeFenHistory(fens: readonly string[]): Lc0EncodedPlanes112 {
-    return this.encodeFenHistoryTimed(fens).encoded;
+  encodeFenHistory(fens: readonly string[], options: { historyFill?: boolean } = {}): Lc0EncodedPlanes112 {
+    return this.encodeFenHistoryTimed(fens, options).encoded;
   }
 
-  encodeFenHistoryTimed(fens: readonly string[]): Lc0WasmInputEncoderTimedResult {
+  encodeFenHistoryTimed(fens: readonly string[], options: { historyFill?: boolean } = {}): Lc0WasmInputEncoderTimedResult {
     const totalStarted = nowMs();
     const textEncodeStarted = nowMs();
     const bytes = this.textEncoder.encode(fens.join('\n'));
@@ -79,7 +79,7 @@ export class Lc0WasmInputEncoder {
     this.writeInput(bytes);
     const writeMs = nowMs() - writeStarted;
     const wasmEncodeStarted = nowMs();
-    const status = this.exports.lc0_encode_fen_history(bytes.byteLength);
+    const status = this.exports.lc0_encode_fen_history(bytes.byteLength, options.historyFill === false ? 0 : 1);
     const wasmEncodeMs = nowMs() - wasmEncodeStarted;
     this.assertOk(status);
     const readStarted = nowMs();
