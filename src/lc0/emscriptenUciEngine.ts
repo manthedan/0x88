@@ -111,7 +111,11 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
   if (!modulePromise) {
     const resolvedJsUrl = resolveUrl(jsUrl);
     const resolvedWasmUrl = wasmUrl ? resolveUrl(wasmUrl) : null;
-    const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : null;
+    // Default adapters use the glue's sibling preload. Variant callers still
+    // supply the canonical shared package explicitly for SIMD tiers.
+    const siblingDataUrl = new URL(resolvedJsUrl);
+    siblingDataUrl.pathname = siblingDataUrl.pathname.replace(/\.js$/, '.data');
+    const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : siblingDataUrl.href;
     artifactUrls = [resolvedJsUrl, resolvedWasmUrl, resolvedDataUrl];
     try {
       // Verify the entire set before ANY engine glue executes or data mounts.

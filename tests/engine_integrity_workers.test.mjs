@@ -80,6 +80,14 @@ test('Emscripten passes only verified WASM and preload bytes to the factory', as
   assert.equal(env.imports(), 1);
   assert.equal(env.messages.at(-1)?.type, 'ready');
 });
+test('Emscripten default constructors verify the sibling preload requested by glue', async () => {
+  const env = sandbox();
+  vm.runInNewContext(withPins(emscriptenUciWorkerScript({ label: 'Fixture', factoryGlobal: 'Factory' })), env.context);
+  env.context.onmessage({ data: { type: 'init', id: 1, jsUrl: '/fixture/engine.js', trustedJsUrl: true } });
+  await flush();
+  assert.equal(env.imports(), 1);
+  assert.equal(env.messages.at(-1)?.type, 'ready', JSON.stringify(env.messages));
+});
 for (const artifact of ['js', 'wasm']) {
   test(`Stockfish rejects corrupt ${artifact} before executing glue or starting pthreads`, async () => {
     let script;
