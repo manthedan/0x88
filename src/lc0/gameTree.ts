@@ -22,6 +22,8 @@ export interface GameNode {
   ply: number;
   children: GameNode[];
   comment?: string;
+  /** PGN numeric annotation glyphs ($1 = !, $2 = ?, ...) in source order. */
+  nags?: number[];
 }
 
 export class GameTree {

@@ -274,6 +274,9 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
       continue;
     }
     tokens.push({ type: 'move', value: word });
+    // A suffix glyph (`Nf6!?`) is the move's NAG; SAN resolution ignores it.
+    const glyph = /[!?]{1,2}$/.exec(word)?.[0];
+    if (glyph && GLYPH_NAGS[glyph]) tokens.push({ type: 'nag', value: `$${GLYPH_NAGS[glyph]}` });
   }
   return tokens;
 }
@@ -338,10 +341,13 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       continue;
     }
     if (token.type === 'nag') {
+      const nag = Number(token.value.slice(1));
+      if (last !== tree.root && token.value.length > 1 && nag <= 255 && !last.nags?.includes(nag)) last.nags = [...(last.nags ?? []), nag];
       continue;
     }
     if (token.type === 'comment') {
-      if (last !== tree.root) last.comment = last.comment ? `${last.comment} ${token.value}` : token.value;
+      // A comment before the first move belongs to the root (the game as a whole).
+      last.comment = last.comment ? `${last.comment} ${token.value}` : token.value;
       continue;
     }
     // move
@@ -399,35 +405,33 @@ export function parsePgnGames(text: string): PgnGame[] {
 function serializeNode(node: GameNode, withNumber: boolean): string {
   const board = parseFen(node.parent!.fen);
   const number = board.turn === 'w' ? `${board.fullmove}. ` : withNumber ? `${board.fullmove}... ` : '';
+  const nags = node.nags?.length ? ` ${node.nags.map((nag) => `$${nag}`).join(' ')}` : '';
   const comment = node.comment ? ` {${node.comment}}` : '';
-  return `${number}${node.san}${comment}`;
+  return `${number}${node.san}${nags}${comment}`;
 }
 
-/** Serialize a variation tree to PGN movetext (mainline with parenthesized variations). */
-export function serializeMovetext(tree: GameTree): string {
+/** Tokens for the line continuing from `from`: its mainline, with each variation nested where it branches. */
+function serializeLine(from: GameNode, forceNumber: boolean): string[] {
   const out: string[] = [];
-  let node: GameNode | undefined = tree.root.children[0];
-  // A move number must be re-printed after a variation or for any black move that starts a token run.
-  let forceNumber = true;
-  while (node) {
-    out.push(serializeNode(node, forceNumber));
-    forceNumber = false;
-    const variations = node.parent!.children.slice(1);
+  let node = from;
+  // A black move number is re-printed at the start of a line and after a comment or a variation.
+  let force = forceNumber;
+  while (node.children.length) {
+    const [main, ...variations] = node.children;
+    out.push(serializeNode(main, force));
     for (const variation of variations) {
-      out.push('(');
-      let cursor: GameNode | undefined = variation;
-      let varForce = true;
-      while (cursor) {
-        out.push(serializeNode(cursor, varForce));
-        varForce = false;
-        cursor = cursor.children[0];
-      }
-      out.push(')');
-      forceNumber = true; // resume mainline with an explicit move number
+      out.push(`(${[serializeNode(variation, true), ...serializeLine(variation, !!variation.comment)].join(' ')})`);
     }
-    node = node.children[0];
+    force = variations.length > 0 || !!main.comment;
+    node = main;
   }
-  return out.join(' ').replace(/\(\s/g, '(').replace(/\s\)/g, ')');
+  return out;
+}
+
+/** Serialize a variation tree to PGN movetext: the pre-game comment, then every line recursively. */
+export function serializeMovetext(tree: GameTree): string {
+  const intro = tree.root.comment ? [`{${tree.root.comment}}`] : [];
+  return [...intro, ...serializeLine(tree.root, true)].join(' ');
 }
 
 /** Serialize a full PGN (tags + movetext + result). */

@@ -3,8 +3,9 @@ import { test } from 'node:test';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../src/chess/movegen.ts';
-import { describePgnWarning, parseFirstPgnGame, parsePgnGame, sanToMove, splitPgnGames } from '../src/chess/pgn.ts';
+import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame, parsePgnGame, sanToMove, serializeMovetext, splitPgnGames } from '../src/chess/pgn.ts';
 import { moveToSan } from '../src/chess/san.ts';
+import { GameTree } from '../src/lc0/gameTree.ts';
 
 const mainline = (game) => game.tree.mainlineFrom().map((node) => node.san);
 
@@ -194,5 +195,78 @@ test('sanToMove resolves every legal move from its canonical SAN in a sweep of r
         board = makeMove(board, moves[rand(moves.length)]);
       }
     }
+  }
+});
+
+const shape = (node) => ({
+  san: node.san,
+  ...(node.comment ? { comment: node.comment } : {}),
+  ...(node.nags?.length ? { nags: node.nags } : {}),
+  children: node.children.map(shape),
+});
+const countNodes = (node) => 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0);
+const roundTrip = (tree) => parsePgnGame(gameTreeToPgn(tree, tree.root.fen === START_FEN ? {} : { SetUp: '1', FEN: tree.root.fen }));
+
+test('export keeps nested variations at every depth with correct move numbers', () => {
+  const src = '1. e4 e5 (1... c5 2. Nf3 (2. Nc3 Nc6 (2... e6)) 2... d6) 2. Nf3 *';
+  const { tree } = parsePgnGame(src);
+  assert.equal(countNodes(tree.root), 10);
+  assert.equal(serializeMovetext(tree), '1. e4 e5 (1... c5 2. Nf3 (2. Nc3 Nc6 (2... e6)) 2... d6) 2. Nf3');
+  const again = roundTrip(tree);
+  assert.equal(countNodes(again.tree.root), 10);
+  assert.deepEqual(shape(again.tree.root), shape(tree.root));
+});
+
+test('export keeps the pre-game comment and NAGs and re-numbers black after a comment', () => {
+  const { tree } = parsePgnGame('{Opening comment} 1. e4 $1 {good} e5 $2 2. Nf3 !? Nc6?! (2... d6!) 3. Bb5 *');
+  assert.equal(tree.root.comment, 'Opening comment');
+  const [e4, e5, nf3, nc6] = tree.mainlineFrom();
+  assert.deepEqual(e4.nags, [1]);
+  assert.deepEqual(e5.nags, [2]);
+  assert.deepEqual(nf3.nags, [5]);
+  assert.deepEqual(nc6.nags, [6]);
+  assert.deepEqual(nf3.children[1].nags, [1]);
+  assert.equal(serializeMovetext(tree), '{Opening comment} 1. e4 $1 {good} 1... e5 $2 2. Nf3 $5 Nc6 $6 (2... d6 $1) 3. Bb5');
+  assert.deepEqual(shape(roundTrip(tree).tree.root), shape(tree.root));
+});
+
+test('export numbers a black-to-move start and keeps comments with PGN punctuation intact', () => {
+  const fen = 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3';
+  const { tree } = parsePgnGame(`[SetUp "1"]\n[FEN "${fen}"]\n\n3... Nf6 {a ( b ) ; c [%clk 0:01:00]} (3... Bc5 4. c3) 4. Ng5 *`);
+  assert.equal(serializeMovetext(tree), '3... Nf6 {a ( b ) ; c [%clk 0:01:00]} (3... Bc5 4. c3) 4. Ng5');
+  assert.deepEqual(shape(roundTrip(tree).tree.root), shape(tree.root));
+});
+
+test('PGN round-trips random variation trees (seeded property test)', () => {
+  let seed = 20261109;
+  const rand = (n) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  const COMMENTS = ['plan', 'a (b) c', 'x ; y', '[%eval 0.31]', 'line\nbreak', '1. e4 is not a move here', '$1 ! ?', 'tab\tand  spaces'];
+  const STARTS = [START_FEN, 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3', '8/2P1k3/8/8/8/8/1p2K3/8 w - - 0 40'];
+  for (let round = 0; round < 40; round++) {
+    const tree = new GameTree(STARTS[round % STARTS.length]);
+    if (rand(3) === 0) tree.root.comment = COMMENTS[rand(COMMENTS.length)];
+    const grow = (node, depth, budget) => {
+      if (depth >= budget) return;
+      const moves = legalMoves(parseFen(node.fen));
+      if (!moves.length) return;
+      const branches = depth > 0 && rand(4) === 0 ? 1 + rand(3) : 1;
+      for (let b = 0; b < branches; b++) {
+        tree.current = node;
+        const child = tree.addMove(moves[rand(moves.length)]);
+        if (rand(4) === 0) child.comment = COMMENTS[rand(COMMENTS.length)];
+        if (rand(5) === 0) child.nags = [1 + rand(20), ...(rand(3) ? [] : [140 + rand(5)])];
+        grow(child, depth + 1, b === 0 ? budget : Math.min(budget, depth + 1 + rand(6)));
+      }
+    };
+    grow(tree.root, 0, 6 + rand(24));
+    tree.current = tree.root;
+    const reparsed = roundTrip(tree);
+    assert.deepEqual(reparsed.warnings, [], `round ${round}`);
+    assert.deepEqual(shape(reparsed.tree.root), shape(tree.root), `round ${round}: ${serializeMovetext(tree)}`);
+    assert.equal(reparsed.tree.root.comment, tree.root.comment);
+    assert.equal(serializeMovetext(reparsed.tree), serializeMovetext(tree));
   }
 });
