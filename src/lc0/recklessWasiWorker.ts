@@ -1,6 +1,6 @@
 import { ConsoleStdout, Fd, File, OpenFile, PreopenDirectory, WASI, wasi } from '@bjorn3/browser_wasi_shim';
 
-/** Extra file fetched over HTTP and exposed to the engine via the WASI preopened cwd (e.g. Monty's detached networks). */
+/** Extra file fetched over HTTP and exposed to the engine via the WASI preopened cwd (e.g. an external NNUE file). */
 type PreopenFileSpec = { name: string; url: string; expectedBytes?: number };
 
 type OneShotWorkerRequest = {
