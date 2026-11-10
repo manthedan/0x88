@@ -1,6 +1,7 @@
 import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
+import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
 import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
@@ -109,37 +110,6 @@ function isStandardCastlingMove(board: BoardState, move: Move): boolean {
   return piece?.[1] === 'k' && Math.abs(fileOf(move.to) - fileOf(move.from)) === 2;
 }
 
-function f16ToF32(bits: number): number {
-  const sign = bits & 0x8000 ? -1 : 1;
-  const exponent = (bits >>> 10) & 0x1f;
-  const fraction = bits & 0x03ff;
-  if (exponent === 0) return sign * (fraction === 0 ? 0 : 2 ** -14 * (fraction / 1024));
-  if (exponent === 0x1f) return fraction === 0 ? sign * Infinity : NaN;
-  return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
-}
-
-function f32ToF16Bits(value: number): number {
-  if (Number.isNaN(value)) return 0x7e00;
-  if (value === Infinity) return 0x7c00;
-  if (value === -Infinity) return 0xfc00;
-  const sign = value < 0 || Object.is(value, -0) ? 0x8000 : 0;
-  const abs = Math.abs(value);
-  if (abs === 0) return sign;
-  if (abs >= 65504) return sign | 0x7bff;
-  if (abs < 2 ** -24) return sign;
-  if (abs < 2 ** -14) return sign | Math.round(abs / 2 ** -24);
-  const exponent = Math.floor(Math.log2(abs));
-  const fraction = abs / 2 ** exponent - 1;
-  let halfExponent = exponent + 15;
-  let halfFraction = Math.round(fraction * 1024);
-  if (halfFraction === 1024) {
-    halfExponent += 1;
-    halfFraction = 0;
-  }
-  if (halfExponent >= 31) return sign | 0x7bff;
-  return sign | (halfExponent << 10) | (halfFraction & 0x03ff);
-}
-
 function float32ToFloat16Array(values: Float32Array): Uint16Array {
   const out = new Uint16Array(values.length);
   for (let i = 0; i < values.length; i++) out[i] = f32ToF16Bits(values[i]);
@@ -152,7 +122,7 @@ function coerceTensorData(tensor: { type?: string }, rawData: unknown): number[]
     // ORT-web returns Uint16Array float16 bits in Node today, while modern
     // browsers may expose Float16Array values directly. Handle both forms.
     if (data.constructor?.name === 'Float16Array') return Array.from(data);
-    return Array.from(data, f16ToF32);
+    return Array.from(data, f16BitsToF32);
   }
   return rawData as Float32Array | number[];
 }

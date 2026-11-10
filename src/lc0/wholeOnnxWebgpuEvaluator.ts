@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import type { BoardState } from '../chess/board.ts';
+import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
 import { encodeLc0Classical112 } from './encoder112.ts';
 import {
   currentBoardAndFen,
@@ -115,37 +116,6 @@ export interface Lc0WholeOnnxWebgpuEvaluatorOptions {
 
 function sumFinite(values: Array<number | undefined>): number {
   return values.reduce<number>((sum, value) => sum + (Number.isFinite(value) ? (value as number) : 0), 0);
-}
-
-function f32ToF16Bits(value: number): number {
-  if (Number.isNaN(value)) return 0x7e00;
-  if (value === Infinity) return 0x7c00;
-  if (value === -Infinity) return 0xfc00;
-  const sign = value < 0 || Object.is(value, -0) ? 0x8000 : 0;
-  const abs = Math.abs(value);
-  if (abs === 0) return sign;
-  if (abs >= 65504) return sign | 0x7bff;
-  if (abs < 2 ** -24) return sign;
-  if (abs < 2 ** -14) return sign | Math.round(abs / 2 ** -24);
-  const exponent = Math.floor(Math.log2(abs));
-  const fraction = abs / 2 ** exponent - 1;
-  let halfExponent = exponent + 15;
-  let halfFraction = Math.round(fraction * 1024);
-  if (halfFraction === 1024) {
-    halfExponent += 1;
-    halfFraction = 0;
-  }
-  if (halfExponent >= 31) return sign | 0x7bff;
-  return sign | (halfExponent << 10) | (halfFraction & 0x03ff);
-}
-
-function f16BitsToF32(bits: number): number {
-  const sign = bits & 0x8000 ? -1 : 1;
-  const exponent = (bits >>> 10) & 0x1f;
-  const fraction = bits & 0x03ff;
-  if (exponent === 0) return sign * (fraction === 0 ? 0 : 2 ** -14 * (fraction / 1024));
-  if (exponent === 0x1f) return fraction === 0 ? sign * Infinity : NaN;
-  return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
 }
 
 function float32ToFloat16Bytes(values: Float32Array): Uint8Array {
