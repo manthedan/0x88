@@ -1499,7 +1499,7 @@ test('first shard worker failure aborts siblings and waits for their settlement'
         }
         if (url.endsWith('/slow.bin')) {
           slowStarted();
-          return new Promise((resolve, reject) => {
+          return new Promise((_resolve, reject) => {
             init.signal.addEventListener(
               'abort',
               () => {

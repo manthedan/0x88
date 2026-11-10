@@ -387,7 +387,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
         const expectedPolicy = this.physicalBatchSize * this.meta.policy_size;
         if (policyRaw.length !== expectedPolicy) throw new Error(`TVMJS policy output length ${policyRaw.length} != ${expectedPolicy}`);
         if (wdlRaw.length !== this.physicalBatchSize * 3) throw new Error(`TVMJS WDL output length ${wdlRaw.length} != ${this.physicalBatchSize * 3}`);
-        return boards.map((board, index) => {
+        return boards.map((_board, index) => {
           const row = rows[index]!;
           const evalLegal = row.legalMoves ?? legalMoves(row.board);
           const policyRow = policyRaw.subarray(index * this.meta.policy_size, (index + 1) * this.meta.policy_size);

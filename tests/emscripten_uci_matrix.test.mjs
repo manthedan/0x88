@@ -49,7 +49,7 @@ test('protocol pins hash and threads, resets before each search, excludes warmup
   const stdout = [];
   const commands = [];
   const module = {
-    ccall(name, ret, types, [command]) {
+    ccall(_name, _ret, _types, [command]) {
       commands.push(command);
       if (command === 'uci') stdout.push('uciok');
       if (command === 'isready') stdout.push('readyok');
@@ -71,7 +71,7 @@ test('protocol pins hash and threads, resets before each search, excludes warmup
 test('protocol rejects incomplete UCI output', () => {
   const stdout = [];
   const module = {
-    ccall(name, ret, types, [c]) {
+    ccall(_name, _ret, _types, [c]) {
       if (c === 'uci') stdout.push('uciok');
       if (c === 'isready') stdout.push('readyok');
       if (c.startsWith('go')) stdout.push('bestmove e2e4');

@@ -851,20 +851,6 @@ function onnxInt64Tensor(name: string, dims: number[], values: readonly number[]
   return writer.finish();
 }
 
-function onnxInt32Tensor(name: string, dims: number[], values: readonly number[]): Uint8Array {
-  const raw = new Uint8Array(values.length * 4);
-  const view = new DataView(raw.buffer);
-  values.forEach((value, index) => {
-    view.setInt32(index * 4, value, true);
-  });
-  const writer = new ProtoWriter();
-  for (const dim of dims) writer.int64(1, dim);
-  writer.int32(2, 6); // TensorProto.INT32
-  writer.string(8, name);
-  writer.bytes(9, raw);
-  return writer.finish();
-}
-
 function onnxFloatAttribute(name: string, value: number): Uint8Array {
   const writer = new ProtoWriter();
   writer.string(1, name);
@@ -2156,34 +2142,6 @@ async function readF32OutputOnce(
   }
 }
 
-async function measureGpuTimestampMs(device: DeviceLike, commandBuffers: unknown[]): Promise<number | undefined> {
-  const globals = gpuGlobals();
-  const usage = globals.GPUBufferUsage!;
-  if (!device.createQuerySet || !usage.QUERY_RESOLVE) return undefined;
-  const startEncoder = device.createCommandEncoder();
-  const finishEncoder = device.createCommandEncoder();
-  if (!startEncoder.writeTimestamp || !finishEncoder.writeTimestamp || !finishEncoder.resolveQuerySet) return undefined;
-  const querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
-  const resolveBuffer = device.createBuffer({ size: 16, usage: usage.QUERY_RESOLVE | usage.COPY_SRC });
-  const readbackBuffer = device.createBuffer({ size: 16, usage: usage.MAP_READ | usage.COPY_DST });
-  try {
-    startEncoder.writeTimestamp(querySet, 0);
-    finishEncoder.writeTimestamp(querySet, 1);
-    finishEncoder.resolveQuerySet(querySet, 0, 2, resolveBuffer, 0);
-    finishEncoder.copyBufferToBuffer(resolveBuffer, 0, readbackBuffer, 0, 16);
-    device.queue.submit([startEncoder.finish(), ...commandBuffers, finishEncoder.finish()]);
-    await readbackBuffer.mapAsync(globals.GPUMapMode!.READ);
-    const timestamps = new BigUint64Array(readbackBuffer.getMappedRange().slice(0));
-    readbackBuffer.unmap();
-    const elapsedNs = timestamps[1] > timestamps[0] ? timestamps[1] - timestamps[0] : 0n;
-    return Number(elapsedNs) / 1_000_000;
-  } finally {
-    querySet.destroy?.();
-    resolveBuffer.destroy?.();
-    readbackBuffer.destroy?.();
-  }
-}
-
 export async function runLc0WebSoftmaxBenchmark(options: Lc0WebSoftmaxBenchmarkOptions): Promise<Lc0WebSoftmaxBenchmarkResult> {
   const totalStarted = nowMs();
   const warmup = clampInteger(options.warmup, 10, 0, 1000);
@@ -3039,11 +2997,6 @@ export async function runLc0WebAttentionBlockBenchmark(options: Lc0WebAttentionB
   }
 }
 
-const DEFAULT_OUT_DENSE_WEIGHT = '/encoder0/mha/out/dense/w/w';
-const DEFAULT_OUT_DENSE_BIAS = '/encoder0/mha/out/dense/b/w';
-const DEFAULT_OUT_ALPHA = '/encoder0/alpha*input/w';
-const DEFAULT_LN1_SCALE = '/encoder0/ln1/w/scale';
-const DEFAULT_LN1_BIAS = '/encoder0/ln1/w/bias';
 const DEFAULT_LN_EPSILON = 9.999999974752427e-7;
 
 export type Lc0WebAttentionOutProjKernelVariant = 'hand' | 'tvm-packed-f16';
@@ -4284,13 +4237,6 @@ export async function runLc0WebAttentionOutputOrtBenchmark(
   };
 }
 
-const DEFAULT_FFN_DENSE1_WEIGHT = '/encoder0/ffn/dense1/w/w';
-const DEFAULT_FFN_DENSE1_BIAS = '/encoder0/ffn/dense1/b/w';
-const DEFAULT_FFN_DENSE2_WEIGHT = '/encoder0/ffn/dense2/w/w';
-const DEFAULT_FFN_DENSE2_BIAS = '/encoder0/ffn/dense2/b/w';
-const DEFAULT_FFN_ALPHA = '/encoder0/ffn/alpha/w';
-const DEFAULT_LN2_SCALE = '/encoder0/ln2/w/scale';
-const DEFAULT_LN2_BIAS = '/encoder0/ln2/w/bias';
 const DEFAULT_FFN_HIDDEN = 1024;
 const DEFAULT_ENCODER_PREFIX = '/encoder0';
 
@@ -7117,23 +7063,6 @@ async function mapWgslLegalPriorsOutputs(
   } finally {
     runtime.headsReadbackBuffer.unmap();
   }
-}
-
-async function runCachedWgslPolicyValueHeads(
-  device: DeviceLike,
-  runtime: WgslPolicyValueHeadRuntime,
-): Promise<{ runMs: number; mappedPolicy: number[]; wdl: number[]; readbackSyncedMs: number }> {
-  const started = nowMs();
-  const encoder = device.createCommandEncoder();
-  const pass = encoder.beginComputePass();
-  encodeWgslPolicyValueHeads(pass, runtime);
-  pass.end();
-  copyWgslPolicyValueHeadOutputs(encoder, runtime);
-  device.queue.submit([encoder.finish()]);
-  const { mappedPolicy, wdl, readbackSyncedMs } = await mapWgslPolicyValueHeadOutputs(runtime);
-  if (!arrayHasNonzero(mappedPolicy) || !arrayHasVariation(mappedPolicy) || !arrayHasNonzero(wdl) || !arrayHasVariation(wdl))
-    throw new Error('WGSL hybrid heads produced zero or uniform mapped policy/WDL');
-  return { runMs: nowMs() - started, mappedPolicy: Array.from(mappedPolicy), wdl: Array.from(wdl), readbackSyncedMs };
 }
 
 const DEFAULT_INPUT_BODY_TENSORS = {
@@ -10292,7 +10221,6 @@ export async function runLc0WebEncoder0BlockBenchmark(options: Lc0WebEncoder0Blo
 }
 
 export async function runLc0WebEncoderStackBenchmark(options: Lc0WebEncoderStackBenchmarkOptions): Promise<Lc0WebEncoderStackBenchmarkResult> {
-  const totalStarted = nowMs();
   const warmup = clampInteger(options.warmup, 0, 0, 10);
   const layers = clampInteger(options.layers, 2, 1, 32);
   const compareOrt = options.compareOrt ?? true;

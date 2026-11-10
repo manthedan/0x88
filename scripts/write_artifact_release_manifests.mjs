@@ -105,7 +105,7 @@ function logicalUrlFromPublicPath(path) {
   return `/${path.replace(/^public\//, '')}`;
 }
 
-function artifactFromModelEntry(entry, sourceManifest, manifestPath, args) {
+function artifactFromModelEntry(entry, sourceManifest, manifestPath) {
   if (!entry?.sha256 || !Number.isFinite(entry.bytes) || (!entry.file && !entry.url)) return undefined;
   const file = entry.file ?? basename(entry.url ?? 'artifact');
   const logicalUrl = entry.url?.startsWith('/') ? entry.url : logicalUrlFromPublicPath(posix.join(dirname(manifestPath).replace(/\\/g, '/'), file));
@@ -122,7 +122,7 @@ function artifactFromModelEntry(entry, sourceManifest, manifestPath, args) {
   };
 }
 
-function artifactFromEngineEntry(entry, sourceManifest, args) {
+function artifactFromEngineEntry(entry, sourceManifest) {
   if (!entry?.sha256 || !Number.isFinite(entry.bytes) || !entry.path) return undefined;
   const file = basename(entry.path);
   const kind = file.includes('source') || file.endsWith('.tar.gz') ? 'source' : 'engine';
@@ -138,7 +138,7 @@ function artifactFromEngineEntry(entry, sourceManifest, args) {
   };
 }
 
-function artifactFromTvmjsFile(entry, sourceManifest, manifestPath, args) {
+function artifactFromTvmjsFile(entry, sourceManifest, manifestPath) {
   if (!entry?.path || !entry?.sha256 || !Number.isFinite(entry.bytes)) return undefined;
   const normalizedPath = posix.normalize(String(entry.path).replace(/\\/g, '/'));
   if (normalizedPath.startsWith('../') || posix.isAbsolute(normalizedPath)) {
@@ -409,7 +409,7 @@ async function collectArtifacts(args) {
     const manifest = await readJson(absolute);
     if (Array.isArray(manifest.models)) {
       for (const entry of manifest.models) {
-        const artifact = artifactFromModelEntry(entry, manifestPath, manifestPath, args);
+        const artifact = artifactFromModelEntry(entry, manifestPath, manifestPath);
         if (artifact) artifacts.push(artifact);
       }
     }
@@ -418,18 +418,18 @@ async function collectArtifacts(args) {
     }
     if (Array.isArray(manifest.artifacts)) {
       for (const entry of manifest.artifacts) {
-        const artifact = artifactFromEngineEntry(entry, manifestPath, args);
+        const artifact = artifactFromEngineEntry(entry, manifestPath);
         if (artifact) artifacts.push(artifact);
       }
     }
     if (Array.isArray(manifest.files)) {
       for (const entry of manifest.files) {
-        const artifact = artifactFromTvmjsFile(entry, manifestPath, manifestPath, args);
+        const artifact = artifactFromTvmjsFile(entry, manifestPath, manifestPath);
         if (artifact) artifacts.push(artifact);
       }
     }
     if (manifest.sourceArchive?.sha256 && manifest.sourceArchive?.path) {
-      const artifact = artifactFromEngineEntry(manifest.sourceArchive, manifestPath, args);
+      const artifact = artifactFromEngineEntry(manifest.sourceArchive, manifestPath);
       if (artifact) artifacts.push(artifact);
     }
   }

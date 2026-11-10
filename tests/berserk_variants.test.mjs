@@ -14,7 +14,6 @@ import {
   BERSERK_SIMD_VARIANT,
   BERSERK_SOURCE_NETWORK_URL,
   BERSERK_VARIANTS,
-  berserkVariantAssetNote,
   berserkVariantAssetStatus,
   berserkVariantByKey,
   berserkVariantFromParams,

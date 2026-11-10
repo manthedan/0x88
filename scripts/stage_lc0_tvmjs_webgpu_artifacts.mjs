@@ -119,7 +119,6 @@ function tvmProvenance(tvmSrc, requiredFeatures) {
   };
 }
 
-const repo = process.cwd();
 const modelFamily = arg('model-family', process.env.LC0_TVMJS_MODEL_FAMILY ?? 't1-256x10-distilled-swa-2432500');
 const dtype = arg('dtype', process.env.LC0_TVMJS_DTYPE ?? 'f16');
 const requiredFeatures = dtype === 'f16' ? ['webgpu', 'shader-f16'] : ['webgpu'];

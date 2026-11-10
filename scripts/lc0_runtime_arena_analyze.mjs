@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readdir, stat, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { parseScriptArgs } from './lib/cli.mjs';
 
 const USAGE = `Usage: node scripts/lc0_runtime_arena_analyze.mjs <report.json|report-dir>... [options]\n\nBuilds normalized LC0 browser runtime arena summaries from report JSON files.\n\nOptions:\n  --out PATH              Write full analysis JSON\n  --summary-tsv PATH      Write normalized summary TSV\n  --divergence-tsv PATH   Write LC0 same-position move divergence TSV\n  -h, --help              Show this help\n`;

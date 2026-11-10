@@ -201,8 +201,6 @@ export function moveformerLegalInputs(
   for (let bi = 0; bi < boards.length; bi++) {
     const board = boards[bi];
     actionIds.fill(20480n, bi * width, (bi + 1) * width);
-    const ownKing = kingSquare(board, board.turn);
-    const enemyKing = kingSquare(board, board.turn === 'w' ? 'b' : 'w');
     for (let j = 0; j < Math.min(width, moves[bi].length); j++) {
       const move = moves[bi][j];
       const actionId = moveToActionId(move);
@@ -258,7 +256,7 @@ export function moveformerLegalInputs(
   return { moves, actionIds, features, mask, width };
 }
 
-function addPiecePlanes(data: Float32Array, fen: string, offset: number, inputPlanes: number) {
+function addPiecePlanes(data: Float32Array, fen: string, offset: number) {
   const placement = fen.split(/\s+/)[0];
   let rank = 0,
     file = 0;
@@ -279,8 +277,8 @@ export function onnxInputPlanes(board: BoardState, meta: Pick<OnnxStudentMeta, '
   const fen = boardToFen(board);
   const inputPlanes = meta.input_planes;
   const data = new Float32Array(inputPlanes * 64);
-  addPiecePlanes(data, fen, 0, inputPlanes);
-  for (let h = 0; h < meta.history_plies && h < historyFens.length; h++) addPiecePlanes(data, historyFens[h], 12 * (h + 1), inputPlanes);
+  addPiecePlanes(data, fen, 0);
+  for (let h = 0; h < meta.history_plies && h < historyFens.length; h++) addPiecePlanes(data, historyFens[h], 12 * (h + 1));
   const parts = fen.split(/\s+/);
   const side = parts[1] ?? 'w';
   const castling = parts[2] ?? '-';
@@ -327,38 +325,6 @@ function optionalFloatOutput(outputs: Record<string, ort.Tensor>, ...names: stri
     return tensor.data;
   }
   return undefined;
-}
-
-function configureOrtWasmRuntime() {
-  (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
-  const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean };
-  const isBrowserMainThread = typeof document !== 'undefined';
-  const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? (isBrowserMainThread ? '1' : '0'));
-  if (Number.isFinite(threads) && threads > 0) wasm.numThreads = Math.floor(threads);
-  if (isBrowserMainThread) {
-    // ORT's threaded WASM path starts Emscripten pthread workers from import.meta.url.
-    // In a Vite single-bundle deploy that URL is the app bundle, which touches
-    // `document` at top level and crashes inside workers on Netlify.
-    wasm.numThreads = Number.isFinite(threads) && threads > 0 ? Math.floor(threads) : 1;
-    wasm.proxy = false;
-  }
-}
-
-function sessionOptions(): ort.InferenceSession.SessionOptions {
-  configureOrtWasmRuntime();
-  const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
-  const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
-  const epEnv = globalThis.process?.env?.TINY_LEELA_ORT_EP ?? globalThis.process?.env?.ORT_EXECUTION_PROVIDERS ?? '';
-  const executionProviders = epEnv
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (executionProviders.length) opts.executionProviders = executionProviders;
-  if (Number.isFinite(threads) && threads > 0) {
-    opts.intraOpNumThreads = Math.floor(threads);
-    opts.interOpNumThreads = 1;
-  }
-  return opts;
 }
 
 export class OnnxEvaluator implements Evaluator {

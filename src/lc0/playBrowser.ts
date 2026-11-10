@@ -39,7 +39,6 @@ import { inactiveCpuEnginesToEvict } from './cpuEngineResidency.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
-import { GameTree } from './gameTree.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, Maia3BrowserEvaluator, type Maia3MoveStyle } from './maia3.ts';
@@ -323,7 +322,7 @@ function playPreferenceStorage(): PreferenceStorage | undefined {
   }
 }
 
-function ctxCurrentPlayPreferences(ctx: PlayContext): PlayPreferences {
+function ctxCurrentPlayPreferences(_ctx: PlayContext): PlayPreferences {
   return {
     engineId: ctxDraftEngine().id,
     level: ctxSelectedLevel(),
@@ -349,7 +348,7 @@ function ctxStrengthFor(option: PlayEngineOption, level: number): number {
   return enginePlayLevels(option.family)[level];
 }
 
-function ctxStrengthCaption(ctx: PlayContext): string {
+function ctxStrengthCaption(_ctx: PlayContext): string {
   const option = ctxDraftEngine();
   const level = ctxSelectedLevel();
   if (option.family === 'maia3') {
@@ -385,7 +384,7 @@ function ctxLqoSearchOptions(ctx: PlayContext): Pick<Bt4SearchOptions, 'drawScor
   };
 }
 
-function ctxRenderLevelOptions(ctx: PlayContext): void {
+function ctxRenderLevelOptions(_ctx: PlayContext): void {
   const select = selectEl('levelSelect');
   const previous = select.value;
   const option = ctxDraftEngine();
@@ -396,7 +395,7 @@ function ctxRenderLevelOptions(ctx: PlayContext): void {
   select.value = previous && Number(previous) < LEVEL_COUNT ? previous : '2';
 }
 
-function ctxRenderMaia3Controls(ctx: PlayContext): void {
+function ctxRenderMaia3Controls(_ctx: PlayContext): void {
   const isMaia3 = ctxDraftEngine().family === 'maia3';
   el('maia3Controls').hidden = !isMaia3;
   el('maia3Advanced').hidden = !isMaia3;
@@ -1431,7 +1430,7 @@ function ctxResolvePendingPreferredEngine(ctx: PlayContext): void {
   ctxPrepareOrStartEngine(ctx);
 }
 
-function ctxRenderEngineCaution(ctx: PlayContext): void {
+function ctxRenderEngineCaution(_ctx: PlayContext): void {
   const option = ctxDraftEngine();
   const caution = el('engineCaution');
   if (option.family === 'lc0' && option.variant !== 'small') {
@@ -1510,7 +1509,7 @@ function ctxOpponentMeta(ctx: PlayContext): string {
   return `${option.variant === 'lqo' ? 'Queen odds · ' : ''}Level ${level + 1} · ${name}`;
 }
 
-function ctxOpponentBlurb(ctx: PlayContext): string {
+function ctxOpponentBlurb(_ctx: PlayContext): string {
   const option = ctxDraftEngine();
   if (option.family === 'maia3') {
     const elo = ctxSelectedMaia3Elo();
@@ -1564,7 +1563,7 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   strip.setAttribute('aria-label', `${isHuman ? 'You' : ctxOpponentName(option)}, ${side}${text ? `, ${text.replace('…', '')}` : ''}`);
 }
 
-function ctxRenderChrome(ctx: PlayContext, shownBoard: BoardState, shownPly: number): void {
+function ctxRenderChrome(ctx: PlayContext, _shownBoard: BoardState, shownPly: number): void {
   const phase = ctxPhase(ctx);
   const main = el('main');
   main.dataset.phase = phase;

@@ -63,8 +63,8 @@ test('valid zero-move records are skipped without losing playable games or progr
   }
 });
 
-test('stored zero-move records survive index rebuild, export and restore with playable counts', async (t) => {
-  installMemoryIdb(t);
+test('stored zero-move records survive index rebuild, export and restore with playable counts', async () => {
+  installMemoryIdb();
   const raw = `[Result "0-1"]\n0-1\n\n${pgn}`;
   const record = await savePgnCollection({ name: 'With forfeit', pgn: raw, gameCount: 2 });
   assert.equal((await searchPgnCollectionsByPosition(START_FEN))[0].total, 1);
@@ -119,8 +119,8 @@ test('oversized backups are rejected before download with a selected-collection 
   assert.equal(JSON.parse(serializePgnDatabaseBackup(backup)).collections[0].pgn, pgn);
 });
 
-test('legacy 201–300-game collections load, rebuild and round-trip through the backup contract', async (t) => {
-  installMemoryIdb(t);
+test('legacy 201–300-game collections load, rebuild and round-trip through the backup contract', async () => {
+  installMemoryIdb();
   for (const count of [201, 300]) {
     const raw = Array(count)
       .fill(`[Result "1-0"]\n\n1. e4 {${'x'.repeat(4096)}} e5 1-0`)
@@ -152,8 +152,8 @@ test('legacy 201–300-game collections load, rebuild and round-trip through the
   }
 });
 
-test('stored collection and uploaded backup replay retain the per-game safety bound', async (t) => {
-  installMemoryIdb(t);
+test('stored collection and uploaded backup replay retain the per-game safety bound', async () => {
+  installMemoryIdb();
   const oversizedGame = `1. e4 {${'x'.repeat(32768)}} e5 *`;
   const backup = {
     kind: 'lc0-analysis-pgn-database-backup',
@@ -167,8 +167,8 @@ test('stored collection and uploaded backup replay retain the per-game safety bo
   assert.equal((await listPgnCollections()).length, 0);
 });
 
-test('backup export rejects records that restore cannot legally replay', async (t) => {
-  installMemoryIdb(t);
+test('backup export rejects records that restore cannot legally replay', async () => {
+  installMemoryIdb();
   const record = await savePgnCollection({ name: 'Invalid', pgn: '1. e4 e5 2. e4 *', gameCount: 1 });
   assert.doesNotThrow(
     () => serializePgnDatabaseBackup({ kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: '', collections: [record] }),
@@ -281,7 +281,7 @@ function memoryDatabase() {
 }
 
 // The database itself contains functions, so its open request must not structuredClone it.
-function installMemoryIdb(t) {
+function installMemoryIdb() {
   const database = memoryDatabase();
   Object.defineProperty(globalThis, 'indexedDB', {
     value: {
@@ -302,7 +302,7 @@ function installMemoryIdb(t) {
   return database;
 }
 
-test('IndexedDB denied, missing, and blocked failures settle without hanging', async (t) => {
+test('IndexedDB denied, missing, and blocked failures settle without hanging', async () => {
   Object.defineProperty(globalThis, 'indexedDB', { value: undefined, configurable: true });
   await assert.rejects(listPgnCollections(), /unavailable/);
   Object.defineProperty(globalThis, 'indexedDB', {
@@ -338,8 +338,8 @@ test('IndexedDB denied, missing, and blocked failures settle without hanging', a
   assert.equal(closed, true, 'late connection is closed after rejection');
 });
 
-test('backup round trip rebuilds poisoned indexes and collection CRUD stays local', async (t) => {
-  installMemoryIdb(t);
+test('backup round trip rebuilds poisoned indexes and collection CRUD stays local', async () => {
+  installMemoryIdb();
   const batch = await importLocalPgn(pgn);
   const record = await savePgnCollection({ name: 'Original', pgn, gameCount: 1, positionIndex: batch.positionIndex });
   assert.equal(record.indexVersion, OPENING_INDEX_VERSION);

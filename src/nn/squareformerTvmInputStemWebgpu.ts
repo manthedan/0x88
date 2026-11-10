@@ -162,12 +162,6 @@ function createInitializedF32Buffer(device: GPUDevice, label: string, data: Floa
   buffer.unmap();
   return buffer;
 }
-function createInitializedU32Buffer(device: GPUDevice, label: string, data: Uint32Array, usage = 0): GPUBuffer {
-  const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: GPUBufferUsage.STORAGE | usage, mappedAtCreation: true });
-  new Uint32Array(buffer.getMappedRange()).set(data);
-  buffer.unmap();
-  return buffer;
-}
 function packWeights(weights: SquareformerTvmInputStemWeights): Float32Array {
   assertLength('pieceEmb', weights.pieceEmb.length, 104 * 128);
   assertLength('stmEmb', weights.stmEmb.length, 3 * 128);

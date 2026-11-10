@@ -157,12 +157,6 @@ function coerceTensorData(tensor: { type?: string }, rawData: unknown): number[]
   return rawData as Float32Array | number[];
 }
 
-function tensorData(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, name: string): number[] | Float32Array {
-  const tensor = outputs[name];
-  if (!tensor) throw new Error(`LC0 ONNX output ${name} missing`);
-  return coerceTensorData(tensor, tensor.data);
-}
-
 async function tensorDataTimed(
   outputs: Awaited<ReturnType<ort.InferenceSession['run']>>,
   name: string,

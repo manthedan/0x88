@@ -7,11 +7,6 @@ const MANIFEST = 'public/models/maia3/manifest.json';
 const PROVENANCE = 'docs/model_provenance/maia3.md';
 const README = 'public/models/maia3/README.md';
 
-async function sha256(path) {
-  const bytes = await readFile(path);
-  return createHash('sha256').update(bytes).digest('hex');
-}
-
 async function main() {
   const manifest = JSON.parse(await readFile(MANIFEST, 'utf8'));
   const entries = Array.isArray(manifest.models) ? manifest.models : [];

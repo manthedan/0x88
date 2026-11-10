@@ -157,7 +157,6 @@ import {
   plentyChessVariantUnsupportedReason,
   resolveDefaultPlentyChessVariantAssetFallback,
 } from './plentychessVariants.ts';
-import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import { formatRecklessBrowserApiLoadStatus, RecklessEngine } from './recklessEngine.ts';
 import {
   checkRecklessVariantAsset,
@@ -451,8 +450,6 @@ let lc0LoadAbort: AbortController | null = null;
 let running = false;
 let startPending = false;
 let abort: AbortController | null = null;
-let player: Lc0PolicyOnlyPlayer | null = null;
-let searcher: Lc0PuctSearcher | null = null;
 let lc0Cache: CachedLc0Evaluator | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
@@ -706,7 +703,7 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
   void renderRuntimeBadge();
 }
 
-function centipawnModelForVariant(variant: string): { modelId: string; onnx: string; meta: string } {
+function centipawnModelForVariant(_variant: string): { modelId: string; onnx: string; meta: string } {
   return LEGACY_CENTIPAWN_OVERRIDE
     ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
     : { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
@@ -4474,8 +4471,6 @@ function disposeLc0Resources(): void {
   loadingLc0 = false;
   void lc0Cache?.dispose();
   lc0Cache = null;
-  player = null;
-  searcher = null;
   lc0Searchers.clear();
   lastLc0SearchResults.clear();
   pendingLc0ReplyProbes.clear();
@@ -4606,8 +4601,6 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
     });
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
     lc0Searchers.clear();
-    player = new Lc0PolicyOnlyPlayer(lc0Cache);
-    searcher = new Lc0PuctSearcher(lc0Cache);
     renderCacheInfo();
     hideDownloadProgress();
     el('start').toggleAttribute('disabled', false);

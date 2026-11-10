@@ -802,7 +802,6 @@ export function threatgraphSquareSummaryV2(board: BoardState, rankflipColorSwap 
     if (piece) {
       const color = piece[0] as Color;
       const enemy = opposite(color);
-      const colorI = colorIndex(color);
       const enemyI = colorIndex(enemy);
       const enemyRing = kingRing(board, enemy);
       const enemyEsc = kingEscapeCandidates(board, enemy);
@@ -919,38 +918,6 @@ function selectedSquareformerOutputs(session: ort.InferenceSession): string[] | 
   return fetches.length ? fetches : undefined;
 }
 
-function configureOrtWasmRuntime() {
-  (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
-  const wasm = ort.env.wasm as unknown as { numThreads?: number; proxy?: boolean };
-  const isBrowserMainThread = typeof document !== 'undefined';
-  const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? (isBrowserMainThread ? '1' : '0'));
-  if (Number.isFinite(threads) && threads > 0) wasm.numThreads = Math.floor(threads);
-  if (isBrowserMainThread) {
-    // ORT's threaded WASM path starts Emscripten pthread workers from import.meta.url.
-    // In a Vite single-bundle deploy that URL is the app bundle, which touches
-    // `document` at top level and crashes inside workers on Netlify.
-    wasm.numThreads = Number.isFinite(threads) && threads > 0 ? Math.floor(threads) : 1;
-    wasm.proxy = false;
-  }
-}
-
-function sessionOptions(): ort.InferenceSession.SessionOptions {
-  configureOrtWasmRuntime();
-  const threads = Number(globalThis.process?.env?.ORT_INTRA_OP_NUM_THREADS ?? globalThis.process?.env?.ORT_NUM_THREADS ?? '0');
-  const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all' };
-  const epEnv = globalThis.process?.env?.TINY_LEELA_ORT_EP ?? globalThis.process?.env?.ORT_EXECUTION_PROVIDERS ?? '';
-  const executionProviders = epEnv
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (executionProviders.length) opts.executionProviders = executionProviders;
-  if (Number.isFinite(threads) && threads > 0) {
-    opts.intraOpNumThreads = Math.floor(threads);
-    opts.interOpNumThreads = 1;
-  }
-  return opts;
-}
-
 export class SquareFormerEvaluator implements Evaluator {
   private session: ort.InferenceSession;
   private meta: SquareFormerMeta;
@@ -1057,7 +1024,7 @@ export class SquareFormerEvaluator implements Evaluator {
     const rankRaw = optionalFloatOutput(outputs, 'rank_scores');
     const regretRaw = optionalFloatOutput(outputs, 'regrets');
     const policySize = this.meta.policy_size;
-    const out = boards.map((board, i) => {
+    const out = boards.map((_board, i) => {
       const evalLegal = evalContexts[i]?.legalMoves ?? legalMoves(evalBoards[i]);
       const policyRow = policyRaw.subarray(i * policySize, (i + 1) * policySize);
       const logits = evalLegal.map((move) => Number(policyRow[moveToSquareformerPolicyIndex(move)] ?? -100));

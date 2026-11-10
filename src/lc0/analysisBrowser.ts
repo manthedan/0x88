@@ -1164,7 +1164,7 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
   renderRecklessRuntimeInfo();
 }
 
-function centipawnModelForVariant(variant: string): { modelId: string; onnx: string; meta: string } {
+function centipawnModelForVariant(_variant: string): { modelId: string; onnx: string; meta: string } {
   return LEGACY_CENTIPAWN_OVERRIDE
     ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
     : { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };

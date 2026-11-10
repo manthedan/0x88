@@ -37,7 +37,7 @@ test('selected side is filtered before the five-position limit and inaccuracies 
   const long = new GameTree();
   for (const uci of Array(4).fill(['g1f3', 'g8f6', 'f3g1', 'f6g8']).flat()) long.addUci(uci);
   const longNodes = [long.root, ...long.mainlineFrom()];
-  const moves = longNodes.slice(1).map((node, i) => ({
+  const moves = longNodes.slice(1).map((_node, i) => ({
     ...review.moves[0],
     ply: i + 1,
     side: i % 2 ? 'b' : 'w',

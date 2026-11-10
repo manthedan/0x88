@@ -24,7 +24,7 @@ export function createCriticalEngines(
   let lc0Ready: Promise<{ backend: string }> | undefined;
   let maiaReady: Promise<Maia3BrowserEvaluator> | undefined;
   let sequence = 0;
-  const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; progress: (text: string) => void }>();
+  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; progress: (text: string) => void }>();
   const ids = ['critical-sf', 'critical-lc0', ...(rating === undefined ? [] : ['critical-maia'])];
   // Reserve CPU capacity even for neural providers: ORT may fall back to WASM.
   for (const id of ids) broker.register(id, { resourceClass: 'cpu', maxThreads: 1 });
@@ -47,7 +47,8 @@ export function createCriticalEngines(
     if (!worker) return Promise.reject(new Error('Lc0 worker unavailable.'));
     const id = ++sequence;
     return new Promise<T>((resolve, reject) => {
-      pending.set(id, { resolve, reject, progress });
+      // Each entry is resolved with the worker reply for the request type T posted under that id.
+      pending.set(id, { resolve: resolve as (value: unknown) => void, reject, progress });
       worker!.postMessage({ ...message, id });
     });
   };

@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../src/lc0/wgslMatmulAddProbe.ts', import.meta.url), 'utf8');
 const maxMoves = Number(source.match(/const WGSL_GPU_LEGAL_MAX_MOVES = (\d+);/)[1]);
-const shader = source.match(/const WGSL_LEGAL_PRIORS_PROBE = `([\s\S]*?)`;/)[1].replaceAll('${WGSL_GPU_LEGAL_MAX_MOVES}', String(maxMoves));
+const shader = source.match(/const WGSL_LEGAL_PRIORS_PROBE = `([\s\S]*?)`;/)[1].replaceAll(/\$\{WGSL_GPU_LEGAL_MAX_MOVES\}/g, String(maxMoves));
 
 console.log(`(async () => {
   const adapter = await navigator.gpu.requestAdapter();

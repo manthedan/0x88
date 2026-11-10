@@ -23,7 +23,7 @@ function shuffleHistory() {
 // A constant near-neutral evaluator: every position is a hair better than a
 // draw for the side to move, so only the drawScore moves the draw decision.
 const flatEvaluator = {
-  async evaluate(board, context) {
+  async evaluate(_board, context) {
     const moves = context?.legalMoves ?? [];
     const uniform = moves.length ? 1 / moves.length : 0;
     return { policy: new Map(moves.map((move) => [moveToActionId(move), uniform])), wdl: [0.36, 0.3, 0.34] };
