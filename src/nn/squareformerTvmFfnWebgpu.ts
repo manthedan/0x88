@@ -294,9 +294,11 @@ export class SquareformerTvmFfnWebgpuBlock {
 
   async readOutput(): Promise<Float32Array> {
     await this.readback.mapAsync(GPUMapMode.READ);
-    const out = new Float32Array(this.readback.getMappedRange()).slice();
-    this.readback.unmap();
-    return out;
+    try {
+      return new Float32Array(this.readback.getMappedRange()).slice();
+    } finally {
+      this.readback.unmap();
+    }
   }
 
   async run(input: Float32Array, options: SquareformerTvmFfnRunOptions = {}): Promise<Float32Array | GPUBuffer> {
