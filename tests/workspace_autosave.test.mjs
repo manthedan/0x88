@@ -11,7 +11,11 @@ import {
   decodeAnalysisSnapshot,
   decodePlaySnapshot,
   hasExplicitWorkspaceInput,
+  hasPreviousAnalysis,
+  PREVIOUS_ANALYSIS_KEY,
+  preservePreviousAnalysis,
   readWorkspace,
+  restorePreviousAnalysis,
   restoreTree,
   serializeTree,
   WORKSPACE_MAX_CHARS,
@@ -49,6 +53,159 @@ const storage = () => {
     removeItem: (key) => values.delete(key),
   };
 };
+
+test('reopening an equal linked workspace never overwrites the previous analysis', () => {
+  const store = storage();
+  const original = envelope('analysis', analysisData());
+  store.setItem(workspaceStorageKey('analysis'), original);
+  const linked = new GameTree();
+  linked.addUci('e2e4');
+  assert.equal(preservePreviousAnalysis(store, linked), true);
+  store.setItem(workspaceStorageKey('analysis'), envelope('analysis', { ...analysisData(), tree: serializeTree(linked) }));
+  linked.toStart();
+  assert.equal(preservePreviousAnalysis(store, linked), true);
+  assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), original);
+});
+
+test('equal moves with different PGN metadata preserve the complete original analysis', () => {
+  const base = parsePgnGame('[Event "Original"]\n[White "Alice"]\n[Result "1-0"]\n\n1. e4! {centre} e5 (1... c5) 1-0');
+  const snapshot = (parsed) => ({
+    tree: serializeTree(parsed.tree),
+    headers: parsed.tags,
+    result: parsed.result,
+    resultSignature: resultSignature(parsed.tree),
+  });
+  for (const change of [
+    (parsed) => {
+      parsed.tags.White = 'Bob';
+    },
+    (parsed) => {
+      parsed.result = '0-1';
+    },
+    (parsed) => {
+      parsed.tree.root.children[0].comment = 'different';
+    },
+    (parsed) => {
+      parsed.tree.root.children[0].nags = [2];
+    },
+    (parsed) => {
+      parsed.tree.root.children[0].children.pop();
+    },
+  ]) {
+    const store = storage();
+    const original = envelope('analysis', snapshot(base));
+    store.setItem(workspaceStorageKey('analysis'), original);
+    store.setItem(PREVIOUS_ANALYSIS_KEY, envelope('analysis', analysisData()));
+    const replacement = { tree: restoreTree(serializeTree(base.tree)), tags: { ...base.tags }, result: base.result };
+    change(replacement);
+    assert.equal(preservePreviousAnalysis(store, replacement.tree, replacement.tags, replacement.result), true);
+    assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), original, 'All persisted content must participate in equality');
+  }
+  const store = storage();
+  store.setItem(workspaceStorageKey('analysis'), envelope('analysis', snapshot(base)));
+  const older = envelope('analysis', analysisData());
+  store.setItem(PREVIOUS_ANALYSIS_KEY, older);
+  const equal = { tree: restoreTree(serializeTree(base.tree)), tags: { ...base.tags }, result: base.result };
+  equal.tree.toEnd();
+  assert.equal(preservePreviousAnalysis(store, equal.tree, Object.fromEntries(Object.entries(equal.tags).reverse()), equal.result), true);
+  assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), older, 'Header order and current selection do not change the analysis');
+});
+
+test('save then reopen identical PGN corpus never writes the recovery slot after normalization', () => {
+  const corpus = [
+    '[Result "*"]\n\n1. e4 1-0',
+    '[Result "0-1"]\n\n1. e4 1/2-1/2',
+    '[Event "Commented"]\n\n{intro} 1. e4! {centre} e5 $2 *',
+    '1. e4 (1. d4 $6 d5) e5 (1... c5 {Sicilian} 2. Nf3) *',
+    '[SetUp "1"]\n[FEN "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 23"]\n\n23. exd6 *',
+    '[SetUp "1"]\n[FEN "4k3/P7/8/8/8/8/8/6K1 w - - 0 1"]\n\n1. a8=N *',
+    '[SetUp "1"]\n[FEN "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 20"]\n\n20. O-O O-O-O *',
+    ...['*', '1-0', '0-1', '1/2-1/2'].flatMap((header) =>
+      ['*', '1-0', '0-1', '1/2-1/2'].map((result) => `[Result "${header}"]\n\n1. e4 $1 {keep} e5 (1... c5 $6) ${result}`),
+    ),
+  ];
+  for (const pgn of corpus) {
+    const store = storage();
+    const older = envelope('analysis', analysisData());
+    store.setItem(PREVIOUS_ANALYSIS_KEY, older);
+    const parsed = parsePgnGame(pgn);
+    const saver = createWorkspaceAutosave('analysis', store);
+    saver.schedule({ tree: serializeTree(parsed.tree), headers: parsed.tags, result: parsed.result, resultSignature: resultSignature(parsed.tree) });
+    assert.equal(saver.flush(), true);
+    for (const selectEnd of [false, true, false]) {
+      const identical = parsePgnGame(pgn);
+      if (selectEnd) identical.tree.toEnd();
+      else identical.tree.toStart();
+      const writes = store.writes;
+      assert.equal(preservePreviousAnalysis(store, identical.tree, identical.tags, identical.result), true);
+      assert.equal(store.writes, writes, pgn);
+      assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), older, pgn);
+    }
+  }
+});
+
+test('optional equality failure backs up the saved raw snapshot and accepts an oversized linked PGN', () => {
+  const store = storage();
+  const original = envelope('analysis', analysisData());
+  store.setItem(workspaceStorageKey('analysis'), original);
+  // Legal repeating moves exceed autosave's node limit without making the PGN invalid.
+  const pgn = Array.from({ length: 1251 }, (_, i) => `${i * 2 + 1}. Nf3 Nf6 ${i * 2 + 2}. Ng1 Ng8`).join(' ') + ' *';
+  const replacement = parsePgnGame(pgn);
+  assert.throws(() => serializeTree(replacement.tree), /Tree too large/);
+  assert.equal(preservePreviousAnalysis(store, replacement.tree, replacement.tags, replacement.result), true);
+  assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), original);
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
+  assert.equal(
+    preservePreviousAnalysis(
+      {
+        ...store,
+        setItem() {
+          throw Error('quota');
+        },
+      },
+      replacement.tree,
+    ),
+    false,
+    'An actual backup failure must still reject replacement',
+  );
+});
+
+test('autosave resumes after a smaller save, recovered storage or clearing, and reports later failures', () => {
+  const store = storage();
+  const pauses = [];
+  let resumed = 0;
+  const saver = createWorkspaceAutosave(
+    'analysis',
+    store,
+    400,
+    (reason) => pauses.push(reason),
+    () => resumed++,
+  );
+  const oversized = { ...analysisData(), headers: { Event: 'x'.repeat(WORKSPACE_MAX_CHARS) } };
+  saver.schedule(oversized);
+  saver.flush();
+  saver.schedule(analysisData());
+  saver.flush();
+  assert.equal(resumed, 1, 'a smaller analysis clears the paused notice');
+  const write = store.setItem;
+  store.setItem = () => {
+    throw Error('quota');
+  };
+  saver.schedule({ ...analysisData(), headers: { Event: 'retry' } });
+  saver.flush();
+  store.setItem = write;
+  saver.schedule({ ...analysisData(), headers: { Event: 'retry' } });
+  saver.flush();
+  assert.equal(resumed, 2, 'successful retry of the same snapshot clears the notice');
+  saver.pause('too-large');
+  saver.clear();
+  assert.equal(resumed, 3, 'reset clears the paused notice');
+  saver.pause('storage');
+  saver.pause('storage');
+  saver.pause('too-large');
+  assert.deepEqual(pauses, ['too-large', 'storage', 'too-large', 'storage', 'too-large']);
+  saver.clear();
+});
 
 test('analysis round trip retains nested variations, comments, headers, result and selected non-mainline node', () => {
   const parsed = parsePgnGame('[Event "My game"]\n[White "Alice"]\n[Black "Bob"]\n\n1. e4 {Centre} e5 (1... c5 2. Nf3 (2. Nc3)) 2. Nf3 1-0');
@@ -178,7 +335,7 @@ test('snapshot annotation validation and size limits remain enforced', () => {
   assert.ok(store.getItem(workspaceStorageKey('analysis')));
   saver.schedule(oversized);
   saver.flush();
-  assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
+  assert.ok(store.getItem(workspaceStorageKey('analysis')));
   const tooManyNodes = { ...data.tree, nodes: Array(5001).fill({ parent: 0, uci: 'e2e4', nags: [1] }) };
   assert.equal(decodeAnalysisSnapshot(envelope('analysis', { ...data, tree: tooManyNodes })), null);
 });
@@ -355,32 +512,66 @@ test('denied/full storage fails safely and invalid saved data is removed', () =>
   });
   full.schedule(playData());
   full.flush();
-  assert.equal(store.getItem(workspaceStorageKey('play')), null, 'old game must not survive a failed replacement');
+  assert.ok(store.getItem(workspaceStorageKey('play')), 'last good save survives a failed write');
 });
 
-test('oversized work cannot leave a stale saved game behind', () => {
+test('oversized work retains the last good saved game', () => {
   const store = storage();
   const saver = createWorkspaceAutosave('analysis', store);
   saver.schedule(analysisData());
   saver.flush();
   saver.schedule({ ...analysisData(), headers: { Event: 'x'.repeat(WORKSPACE_MAX_CHARS) } });
   saver.flush();
-  assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
+  assert.ok(store.getItem(workspaceStorageKey('analysis')));
 });
 
-test('explicit FEN and handoff URLs take precedence without consuming the handoff', () => {
-  for (const [search, hash] of [
-    ['?fen=abc', ''],
-    ['?handoff=token', ''],
-    ['?fromAnalysis=1', ''],
-    ['', '#game=payload'],
-  ]) {
-    assert.equal(hasExplicitWorkspaceInput(search, hash), true);
+test('only consumed Analysis search keys classify as URL workspace input', () => {
+  for (const key of ['fen', 'pgn']) assert.equal(hasExplicitWorkspaceInput(`?${key}=abc`), true);
+  for (const key of ['game', 'position', 'handoff', 'playhandoff', 'playfrom', 'fromanalysis', 'startfen', 'from', 'play', 'FEN']) {
+    assert.equal(hasExplicitWorkspaceInput(`?${key}=payload`), false, key);
   }
-  assert.equal(hasExplicitWorkspaceInput('?dev&model=local&perfDial=eco'), false);
-  assert.equal(hasExplicitWorkspaceInput('?ep=wasm&lc0Runtime=hybrid&pack=local&recklessVariant=simd'), false);
-  assert.equal(hasExplicitWorkspaceInput('?utm_source=docs', '#moves'), false);
-  assert.equal(hasExplicitWorkspaceInput(''), false);
+  assert.equal(hasExplicitWorkspaceInput('', '#fen=abc'), false);
+  assert.equal(hasExplicitWorkspaceInput('?fen=abc&pgn=abc', '', 'play'), false);
+  assert.equal(hasExplicitWorkspaceInput('?dev&model=local'), false);
+});
+
+test('save, explicit replacement and restore retain the full previous analysis', () => {
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  const { tree } = parsePgnGame('1. e4! {keep} e5 (1... c5 2. Nf3) *');
+  tree.toEnd();
+  saver.schedule({ tree: serializeTree(tree), headers: { Event: 'Original' }, result: '*' });
+  saver.flush();
+  const original = store.getItem(workspaceStorageKey('analysis'));
+  assert.equal(preservePreviousAnalysis(store), true);
+  saver.clear();
+  saver.schedule(analysisData());
+  saver.flush();
+  assert.equal(hasPreviousAnalysis(store), true);
+  const restored = restorePreviousAnalysis(store);
+  assert.deepEqual(serializeTree(restored.tree), serializeTree(tree));
+  assert.equal(restored.headers.Event, 'Original');
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
+  assert.equal(hasPreviousAnalysis(store), false);
+});
+
+test('failed backup or restore does not delete the current or previous save', () => {
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  saver.schedule(analysisData());
+  saver.flush();
+  const original = store.getItem(workspaceStorageKey('analysis'));
+  const denied = {
+    ...store,
+    setItem() {
+      throw Error('quota');
+    },
+  };
+  assert.equal(preservePreviousAnalysis(denied), false);
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
+  assert.equal(preservePreviousAnalysis(store), true);
+  assert.equal(restorePreviousAnalysis(denied), null);
+  assert.equal(hasPreviousAnalysis(store), true);
 });
 
 test('play practice boundary (Play from here) round-trips and is validated against the move count', () => {
@@ -444,4 +635,44 @@ test('Copy PGN drops an imported result once the mainline no longer owns it', as
   assert.match(pgn, /\[Result "\*"\]/);
   assert.match(pgn, /\*$/);
   assert.equal(pgnResultForExport({ White: 'A' }, '1-0', false).headers.Result, undefined);
+});
+
+test('quota, serialization and node-limit failures pause once per reason without removing the last save', () => {
+  const store = storage();
+  const seed = createWorkspaceAutosave('analysis', store);
+  seed.schedule(analysisData());
+  seed.flush();
+  const original = store.getItem(workspaceStorageKey('analysis'));
+  const notices = [];
+  const saver = createWorkspaceAutosave(
+    'analysis',
+    {
+      ...store,
+      setItem() {
+        throw Error('quota');
+      },
+    },
+    400,
+    (reason) => notices.push(reason),
+  );
+  saver.schedule(analysisData());
+  saver.flush();
+  saver.schedule({ ...analysisData(), headers: { Event: 'another' } });
+  saver.flush();
+  const circular = {};
+  circular.tree = circular;
+  saver.schedule(circular);
+  saver.pause('too-large');
+  assert.deepEqual(notices, ['storage', 'too-large']);
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
+  const tooLargeNotices = [];
+  const oversized = createWorkspaceAutosave('analysis', store, 400, (reason) => tooLargeNotices.push(reason));
+  oversized.schedule({ ...analysisData(), headers: { Event: 'x'.repeat(WORKSPACE_MAX_CHARS) } });
+  oversized.flush();
+  assert.deepEqual(tooLargeNotices, ['too-large']);
+  const tree = new GameTree();
+  for (let i = 0; i < 5001; i++) tree.addUci(['g1f3', 'g8f6', 'f3g1', 'f6g8'][i % 4]);
+  assert.throws(() => serializeTree(tree), /Tree too large/);
+  oversized.pause('too-large');
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
 });

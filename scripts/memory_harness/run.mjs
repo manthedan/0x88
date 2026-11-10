@@ -256,7 +256,7 @@ async function playEngineFirstMove(page, engineId, timeoutMs) {
   await page.evaluate((id) => {
     const banner = document.querySelector('#restartBanner');
     if (banner && !banner.hidden) document.querySelector('#confirmRestart')?.click();
-    else if ((document.querySelector('#moveList')?.textContent?.trim() ?? '') !== 'No moves yet') document.querySelector('#newGame')?.click();
+    else if (document.querySelector('#moveList .san')) document.querySelector('#newGame')?.click();
     const engine = document.querySelector('#engineSelect');
     if (engine && engine.value !== id) {
       engine.value = id;
@@ -274,10 +274,10 @@ async function playEngineFirstMove(page, engineId, timeoutMs) {
       const engine = document.querySelector('#engineSelect')?.value;
       const level = document.querySelector('#levelSelect')?.value;
       const note = document.querySelector('#engineNote')?.textContent ?? '';
-      const moves = document.querySelector('#moveList')?.textContent?.trim() ?? '';
+      const moves = document.querySelectorAll('#moveList .san').length;
       const banner = document.querySelector('#restartBanner');
       if (banner && !banner.hidden) document.querySelector('#confirmRestart')?.click();
-      return { ok: engine === id && level === '0' && note.includes('is ready') && moves === 'No moves yet', engine, level, note, moves };
+      return { ok: engine === id && level === '0' && note.includes('is ready') && moves === 0, engine, level, note, moves };
     },
     engineId,
     timeoutMs,
@@ -293,8 +293,8 @@ async function playEngineFirstMove(page, engineId, timeoutMs) {
     (id) => {
       const engine = document.querySelector('#engineSelect')?.value;
       const status = document.querySelector('#status')?.textContent ?? '';
-      const moves = document.querySelector('#moveList')?.textContent?.trim() ?? '';
-      return { ok: engine === id && status.includes('Your move') && moves.length > 0 && moves !== 'No moves yet', engine, status, moves };
+      const moves = document.querySelectorAll('#moveList .san').length;
+      return { ok: engine === id && status.includes('Your move') && moves > 0, engine, status, moves };
     },
     engineId,
     timeoutMs,

@@ -4,10 +4,10 @@ import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame, parsePgnGame } from '../chess/pgn.ts';
+import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import type { Evaluator } from '../nn/evaluator.ts';
 import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
@@ -31,8 +31,11 @@ import {
   lc0AnalysisLines,
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
-import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
+import { acknowledgeInputTransfer, takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
+import { analysisUrlFen } from './analysisUrlInput.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
+import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
+import { writeClipboard } from './clipboard.ts';
 import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
 import { criticalPositionLines } from './criticalMomentsPresentation.ts';
@@ -57,6 +60,7 @@ import {
   openingSummary,
   positionKey,
 } from './openingStats.ts';
+import { type InputTransfer, type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import {
   defaultPgnCollectionName,
   deletePgnCollection,
@@ -83,8 +87,11 @@ import {
   createWorkspaceAutosave,
   decodeAnalysisSnapshot,
   hasExplicitWorkspaceInput,
+  hasPreviousAnalysis,
   pgnResultForExport,
+  preservePreviousAnalysis,
   readWorkspace,
+  restorePreviousAnalysis,
   serializeTree,
 } from './workspaceAutosave.ts';
 
@@ -400,24 +407,43 @@ function renderOpeningName(): void {
   label.title = opening ? `${opening[0]} ${opening[1]} · Lichess opening names (CC0)` : label.textContent;
 }
 
-let tree = new GameTree(params.get('fen') ?? START_FEN);
+let tree = new GameTree(START_FEN);
 let workspaceHeaders: Record<string, string> = {};
 let workspaceResult = '*';
 let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
+let pendingAnalysisInput: PendingInput | null = null;
+
+function updatePendingAnalysisInput(event: PendingInputEvent): void {
+  const { pending, acknowledged } = transitionPendingInput(pendingAnalysisInput, event);
+  pendingAnalysisInput = pending;
+  if (!acknowledged) return;
+  for (const transfer of acknowledged.transfers) acknowledgeInputTransfer(transfer);
+  if (!acknowledged.urlKeys.length) return;
+  const consumedUrl = new URL(location.href);
+  for (const key of acknowledged.urlKeys) {
+    consumedUrl.searchParams.delete(key);
+    params.delete(key);
+  }
+  history.replaceState(history.state, '', consumedUrl);
+  lastAnalysisMountHref = location.href;
+}
 
 function saveAnalysisWorkspace(): void {
   try {
+    // Validate even an apparently empty tree before deciding to remove its save.
+    const snapshot = serializeTree(tree);
     workspaceAutosave?.schedule(
       tree.root.children.length || tree.root.fen !== START_FEN || tree.root.comment || Object.keys(workspaceHeaders).length
-        ? { tree: serializeTree(tree), headers: workspaceHeaders, result: workspaceResult, resultSignature: reviewMetadata.get(tree)?.signature }
+        ? { tree: snapshot, headers: workspaceHeaders, result: workspaceResult, resultSignature: reviewMetadata.get(tree)?.signature }
         : null,
     );
   } catch {
-    workspaceAutosave?.clear();
+    workspaceAutosave?.pause('too-large');
   }
 }
 
-function clearAnalysisWorkspace(): void {
+function clearAnalysisWorkspace(discard = true): void {
+  if (discard) updatePendingAnalysisInput({ type: 'discarded' });
   workspaceAutosave?.clear();
   workspaceHeaders = {};
   workspaceResult = '*';
@@ -425,29 +451,53 @@ function clearAnalysisWorkspace(): void {
 }
 
 function restoreAnalysisWorkspace(): void {
-  const handoffPgn = takeAnalysisHandoff();
-  if (hasExplicitWorkspaceInput(location.search, location.hash) || handoffPgn) {
-    clearAnalysisWorkspace();
-    if (!params.has('fen') && handoffPgn) {
-      try {
-        const parsed = parsePgnGame(handoffPgn);
-        tree = parsed.tree;
-        tree.toStart();
-        // Same game identity as the restore path, so the first navigation doesn't treat it as a new game and clear its review.
-        analysisGameTree = tree;
+  let handoffTransfer: InputTransfer | undefined;
+  const handoffPgn = takeAnalysisHandoff(Date.now(), (_consume, transfer) => {
+    handoffTransfer = transfer;
+  });
+  let linkedInputError = '';
+  el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
+  if (hasExplicitWorkspaceInput(location.search) || handoffPgn) {
+    try {
+      // Decode before touching either saved slot. URL FEN takes precedence over PGN/handoff.
+      const linkedFen = analysisUrlFen(params.get('fen'));
+      if (linkedFen.error) throw new Error(linkedFen.error);
+      const rawPgn = params.get('pgn') ?? handoffPgn;
+      const parsed = params.has('fen') ? null : parseFirstPgnGame(rawPgn ?? '').game;
+      const replacement = parsed?.tree ?? new GameTree(linkedFen.fen);
+      if (!preservePreviousAnalysis(undefined, replacement, parsed?.tags, parsed?.result))
+        throw new Error('Could not keep the previous analysis. Export it before replacing it.');
+      clearAnalysisWorkspace(false);
+      tree = replacement;
+      tree.toStart();
+      analysisGameTree = tree;
+      if (parsed) {
         workspaceHeaders = parsed.tags;
         workspaceResult = parsed.result;
-        inputEl('pgnInput').value = handoffPgn;
+        inputEl('pgnInput').value = rawPgn!;
         reviewMetadata.set(tree, { tags: parsed.tags, result: parsed.result, signature: reviewSignature() });
-      } catch {
-        /* Invalid handoffs leave the explicit starting position alone. */
+        if (parsed.warnings.length) renderPgnImportNotice(describePgnWarning(parsed.warnings[0]));
       }
+      updatePendingAnalysisInput({
+        type: 'applied',
+        input: {
+          urlKeys: ['fen', 'pgn'].filter((key) => params.has(key)) as Array<'fen' | 'pgn'>,
+          transfers: handoffTransfer ? [handoffTransfer] : [],
+        },
+      });
+      el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
+      saveAnalysisWorkspace();
+      workspaceAutosave?.flush();
+      return;
+    } catch (error) {
+      linkedInputError = `Could not load linked analysis: ${(error as Error).message}`;
     }
-    saveAnalysisWorkspace();
-    return;
   }
   const saved = readWorkspace('analysis', decodeAnalysisSnapshot);
-  if (!saved) return;
+  if (!saved) {
+    if (linkedInputError) renderPgnImportNotice(linkedInputError);
+    return;
+  }
   tree = saved.tree;
   analysisGameTree = tree;
   workspaceHeaders = saved.headers;
@@ -462,15 +512,13 @@ function restoreAnalysisWorkspace(): void {
   // Review export keeps the restored game's headers; the signature still guards its result tag.
   reviewMetadata.set(tree, { tags: workspaceHeaders, result: workspaceResult, signature: reviewSignature() });
   el('analysisRestoreNotice').hidden = false;
+  if (linkedInputError) renderPgnImportNotice(linkedInputError);
 }
 let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0EvaluationProvider | null = null;
 let stockfishLite: StockfishEngine | null = null;
 let stockfishFull: StockfishEngine | null = null;
-const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
-const centipawnEvaluators = new Set<CachedEvaluator>();
-const centipawnEvaluatorsByKey = new Map<string, CachedEvaluator>();
-let centipawnEvaluatorGeneration = 0;
+const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 
 function initialPerformanceDial(): PerformanceDial {
@@ -1170,7 +1218,7 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
   renderRecklessRuntimeInfo();
 }
 
-function centipawnModelForVariant(_variant: string): { modelId: string; onnx: string; meta: string } {
+function centipawnModel(): { modelId: string; onnx: string; meta: string } {
   return LEGACY_CENTIPAWN_OVERRIDE
     ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
     : { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
@@ -1179,7 +1227,7 @@ function centipawnModelForVariant(_variant: string): { modelId: string; onnx: st
 function centipawnEvaluatorCacheKey(variant: string): string {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
-  const model = centipawnModelForVariant(variant);
+  const model = centipawnModel();
   return `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
 }
 
@@ -1202,17 +1250,15 @@ function activeCentipawnEvaluatorKeys(): Set<string> {
   return new Set([...centipawnEvaluatorKeysForRows(activeEngineRows()), ...analysisRunCentipawnKeys]);
 }
 
-async function centipawnEvaluator(variant: string): Promise<Evaluator> {
+function centipawnEvaluator(variant: string): Promise<Evaluator> {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
+  const model = centipawnModel();
   const key = centipawnEvaluatorCacheKey(variant);
-  const existing = centipawnEvaluatorPromises.get(key);
-  if (existing) return existing;
-  const generation = centipawnEvaluatorGeneration;
-  const created = (async () => {
-    const model = centipawnModelForVariant(variant);
-    const loaded = await createBrowserSquareformerRuntimeEvaluator(
-      {
+  return centipawnCache.get(
+    key,
+    {
+      spec: {
         id: model.modelId,
         modelId: model.modelId,
         label: centipawnEngineLabel(variant),
@@ -1221,73 +1267,29 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
         runtime,
         manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
       },
-      {
+      options: {
         runtime,
         manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
         fallback,
         audit: { surface: 'analysis', searchBudget: `multipv=${multiPv()}` },
       },
-    );
-    console.info('[lc0-analysis] loaded Centipawn evaluator', {
-      requestedRuntime: loaded.requestedRuntime,
-      resolvedRuntime: loaded.resolvedRuntime,
-      runtimeConfigId: loaded.runtimeConfigId,
-      manifestUrl: loaded.manifestUrl,
-      fallbackReason: loaded.fallbackReason,
-    });
-    const cached = new CachedEvaluator(loaded.evaluator, {
       maxEntries: 4096,
-      includeHistory: true,
-      includeLegalMoves: true,
       label: `centipawn-analysis:${runtime}`,
-    });
-    if (centipawnEvaluatorGeneration !== generation || !activeCentipawnEvaluatorKeys().has(key)) {
-      destroyCentipawnEvaluator(cached);
-      const error = new Error('Centipawn evaluator was disposed before it finished loading');
-      error.name = 'AbortError';
-      throw error;
-    }
-    centipawnEvaluators.add(cached);
-    centipawnEvaluatorsByKey.set(key, cached);
-    return cached;
-  })();
-  centipawnEvaluatorPromises.set(key, created);
-  try {
-    return await created;
-  } catch (error) {
-    centipawnEvaluatorPromises.delete(key);
-    throw error;
-  }
+    },
+    () => activeCentipawnEvaluatorKeys().has(key),
+  );
 }
 
 function centipawnHistoryFens(positions: BoardState[]): string[] {
   return positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16);
 }
 
-function destroyCentipawnEvaluator(evaluator: CachedEvaluator): void {
-  evaluator.clear();
-  const destroy = (evaluator.inner as Evaluator & { destroy?: () => void }).destroy;
-  if (typeof destroy === 'function') destroy.call(evaluator.inner);
-}
-
 function disposeCentipawnEvaluators(): void {
-  centipawnEvaluatorGeneration++;
-  for (const evaluator of centipawnEvaluators) destroyCentipawnEvaluator(evaluator);
-  centipawnEvaluators.clear();
-  centipawnEvaluatorsByKey.clear();
-  centipawnEvaluatorPromises.clear();
+  centipawnCache.clear();
 }
 
 function disposeUnusedCentipawnEvaluators(): void {
-  const activeCentipawnKeys = activeCentipawnEvaluatorKeys();
-  for (const key of [...centipawnEvaluatorPromises.keys()]) if (!activeCentipawnKeys.has(key)) centipawnEvaluatorPromises.delete(key);
-  for (const [key, evaluator] of [...centipawnEvaluatorsByKey]) {
-    if (activeCentipawnKeys.has(key)) continue;
-    destroyCentipawnEvaluator(evaluator);
-    centipawnEvaluators.delete(evaluator);
-    centipawnEvaluatorsByKey.delete(key);
-    centipawnEvaluatorPromises.delete(key);
-  }
+  centipawnCache.retain(activeCentipawnEvaluatorKeys());
 }
 
 function clampStrengthForRow(row: EngineRow): number {
@@ -1718,7 +1720,7 @@ function activeEngineRows(): EngineRow[] {
 
 function runtimeAuditIdentityForRow(row: EngineRow): string | null {
   if (row.family === 'centipawn') {
-    const model = centipawnModelForVariant(row.variant);
+    const model = centipawnModel();
     return browserRuntimeAuditIdentity({
       source: 'active-analysis-engine',
       surface: 'analysis',
@@ -3737,12 +3739,15 @@ function reviewedPgn(): string | undefined {
 }
 
 async function copyReviewPgn(): Promise<void> {
+  const signal = mountAbort.signal;
   const pgn = reviewedPgn();
   if (!pgn) return;
   try {
     await navigator.clipboard.writeText(pgn);
+    if (isStaleMount(signal)) return;
     el('reviewStatus').textContent = 'Annotated PGN copied to clipboard.';
   } catch {
+    if (isStaleMount(signal)) return;
     el('reviewStatus').textContent = 'Clipboard unavailable. Use Download PGN to save the reviewed mainline.';
   }
 }
@@ -4373,7 +4378,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         pushTask(index, cacheKey, label, async (beginSearch) => {
           const loadingId = `startup:${label}`;
           const evaluatorKey = centipawnEvaluatorCacheKey(row.variant);
-          const evaluatorPrepared = centipawnEvaluatorPromises.has(evaluatorKey);
+          const evaluatorPrepared = centipawnCache.has(evaluatorKey);
           if (evaluatorPrepared) beginSearch();
           else showLoadingProgressItem(loadingId, { label, phase: 'Preparing engine' });
           let evaluator: Evaluator;
@@ -4910,22 +4915,30 @@ function loadPgn() {
   }
 }
 
-function copyFen() {
+async function copyFen(): Promise<boolean> {
+  const signal = mountAbort.signal;
   const fen = tree.current.fen;
   inputEl('fenInput').value = fen;
-  void navigator.clipboard?.writeText(fen).catch(() => undefined);
-  el('message').textContent = 'FEN copied to the clipboard.';
+  const copied = await writeClipboard(fen);
+  if (isStaleMount(signal)) return false;
+  el('message').textContent = copied ? 'FEN copied to the clipboard.' : 'Could not copy FEN to the clipboard. Copy it from the FEN box.';
+  return copied;
 }
 
-function copyPgn() {
+async function copyPgn(): Promise<boolean> {
+  const signal = mountAbort.signal;
   try {
     const exported = pgnResultForExport(workspaceHeaders, workspaceResult, reviewMetadata.get(tree)?.signature === reviewSignature());
     const pgn = gameTreeToPgn(tree, exported.headers, exported.result);
     inputEl('pgnInput').value = pgn;
-    void navigator.clipboard?.writeText(pgn).catch(() => undefined);
-    el('message').textContent = 'PGN copied to the box and clipboard.';
+    const copied = await writeClipboard(pgn);
+    if (isStaleMount(signal)) return false;
+    el('message').textContent = copied ? 'PGN copied to the box and clipboard.' : 'Could not copy PGN to the clipboard. Copy it from the PGN box.';
+    return copied;
   } catch (error) {
+    if (isStaleMount(signal)) return false;
     el('message').textContent = `PGN export failed: ${(error as Error).message}`;
+    return false;
   }
 }
 
@@ -5215,13 +5228,11 @@ function wireEvents() {
     { signal: mountAbort.signal },
   );
   el('ground').addEventListener('pointerleave', () => el('ground').querySelector('cg-board')?.removeAttribute('title'), { signal: mountAbort.signal });
-  el('quickCopyFen').addEventListener('click', () => {
-    copyFen();
-    flashCopied(el('quickCopyFen'));
+  el('quickCopyFen').addEventListener('click', async () => {
+    if (await copyFen()) flashCopied(el('quickCopyFen'));
   });
-  el('quickCopyPgn').addEventListener('click', () => {
-    copyPgn();
-    flashCopied(el('quickCopyPgn'));
+  el('quickCopyPgn').addEventListener('click', async () => {
+    if (await copyPgn()) flashCopied(el('quickCopyPgn'));
   });
   el('playFromHere').addEventListener('click', () => {
     if (playFromHereUnavailableReason(tree)) return;
@@ -5425,6 +5436,32 @@ function wireEvents() {
   el('loadFen').addEventListener('click', loadFen);
   inputEl('fenInput').addEventListener('keydown', (event) => {
     if ((event as KeyboardEvent).key === 'Enter') loadFen();
+  });
+  el('restorePreviousAnalysis').addEventListener('click', () => {
+    workspaceAutosave?.flush();
+    const saved = restorePreviousAnalysis();
+    if (!saved) {
+      renderPgnImportNotice('Could not restore previous analysis. Storage may be unavailable.');
+      return;
+    }
+    updatePendingAnalysisInput({ type: 'discarded' });
+    cancelActiveAnalysisRun();
+    tree = saved.tree;
+    workspaceHeaders = saved.headers;
+    workspaceResult = saved.result;
+    reviewMetadata.set(tree, { tags: workspaceHeaders, result: workspaceResult, signature: reviewSignature() });
+    el('restorePreviousAnalysis').hidden = true;
+    el('analysisRestoreNotice').hidden = false;
+    lineCache.clear();
+    completeAnalysisKeys.clear();
+    afterNavigation();
+    renderPgnImportNotice('Previous analysis restored.');
+    try {
+      inputEl('pgnInput').value = gameTreeToPgn(tree, workspaceHeaders, workspaceResult);
+    } catch (error) {
+      renderPgnImportNotice(`Previous analysis restored. PGN export failed: ${(error as Error).message}`);
+    }
+    el('quickCopyPgn').focus();
   });
   el('analysisRestoreDismiss').addEventListener('click', () => {
     el('analysisRestoreNotice').hidden = true;
@@ -6154,7 +6191,7 @@ async function init(mountSignal: AbortSignal) {
 let lastAnalysisMountHref: string | null = null;
 
 function resetAnalysisPageState(): void {
-  tree = new GameTree(params.get('fen') ?? START_FEN);
+  tree = new GameTree(START_FEN);
   workspaceHeaders = {};
   workspaceResult = '*';
   analysisGameTree = tree;
@@ -6211,7 +6248,24 @@ export function mountAnalysisBrowser(): () => void {
   }
   lastAnalysisMountHref = href;
   resetAnalysisPageState();
-  workspaceAutosave = createWorkspaceAutosave('analysis');
+  pendingAnalysisInput = null;
+  workspaceAutosave = createWorkspaceAutosave(
+    'analysis',
+    undefined,
+    400,
+    (reason) => {
+      el('autosaveNotice').textContent =
+        reason === 'too-large'
+          ? 'Autosave paused: analysis too large — export PGN to keep it.'
+          : 'Autosave paused: storage unavailable or full — export PGN to keep it.';
+    },
+    () => {
+      el('autosaveNotice').textContent = '';
+    },
+    (type) => {
+      updatePendingAnalysisInput({ type });
+    },
+  );
   analysisWorkerProgressMessages = 0;
   analysisUiProgressSamples = 0;
   installHiddenTabPause();

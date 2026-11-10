@@ -9,7 +9,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { uciLineToSan, uciToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import type { Evaluator } from '../nn/evaluator.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
@@ -24,6 +24,7 @@ import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
+import { arenaAdjudicationLabel, arenaAdjudicationTags } from './arenaAdjudication.ts';
 import { arenaChartGroups } from './arenaChartPresentation.ts';
 import {
   ARENA_CONTROL_IDS,
@@ -55,6 +56,7 @@ import {
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
+import { arenaMoveDelay, guardArenaUnload } from './arenaNavigation.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { loadArenaResource } from './arenaResourceLoad.ts';
 import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
@@ -102,6 +104,7 @@ import {
   checkBigNetAsset,
   probeBt4Support,
 } from './bt4Engine.ts';
+import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
@@ -143,6 +146,7 @@ import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
+import { rememberMoveFocus } from './moveListFocus.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import {
@@ -468,11 +472,7 @@ const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (varia
 const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) =>
   createStormphraxEngine(variant, ARENA_CPU_ENGINE_OPTIONS),
 );
-const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
-const centipawnEvaluatorLoadTokens = new Map<string, symbol>();
-const centipawnEvaluators = new Set<CachedEvaluator>();
-const centipawnEvaluatorsByKey = new Map<string, CachedEvaluator>();
-let centipawnEvaluatorGeneration = 0;
+const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
@@ -521,6 +521,7 @@ let arenaClockTimer: ReturnType<typeof setInterval> | null = null;
 let arenaChartResizeObserver: ResizeObserver | null = null;
 interface ArenaGameResultChip {
   index: number;
+  reason: string;
   result: GameResultCode;
   whiteName: string;
   blackName: string;
@@ -704,7 +705,7 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
   void renderRuntimeBadge();
 }
 
-function centipawnModelForVariant(_variant: string): { modelId: string; onnx: string; meta: string } {
+function centipawnModel(): { modelId: string; onnx: string; meta: string } {
   return LEGACY_CENTIPAWN_OVERRIDE
     ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
     : { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
@@ -713,7 +714,7 @@ function centipawnModelForVariant(_variant: string): { modelId: string; onnx: st
 function centipawnEvaluatorCacheKey(variant: string): string {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
-  const model = centipawnModelForVariant(variant);
+  const model = centipawnModel();
   return `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
 }
 
@@ -725,18 +726,15 @@ function activeCentipawnEvaluatorKeys(): Set<string> {
   );
 }
 
-async function centipawnEvaluator(variant: string): Promise<Evaluator> {
+function centipawnEvaluator(variant: string): Promise<Evaluator> {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
-  const model = centipawnModelForVariant(variant);
+  const model = centipawnModel();
   const key = centipawnEvaluatorCacheKey(variant);
-  const existing = centipawnEvaluatorPromises.get(key);
-  if (existing) return existing;
-  const loadToken = Symbol(key);
-  const generation = centipawnEvaluatorGeneration;
-  const created = (async () => {
-    const loaded = await createBrowserSquareformerRuntimeEvaluator(
-      {
+  return centipawnCache.get(
+    key,
+    {
+      spec: {
         id: model.modelId,
         modelId: model.modelId,
         label: centipawnEngineLabel(variant),
@@ -745,71 +743,22 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
         runtime,
         manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
       },
-      {
+      options: {
         params,
         runtime,
         manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
         fallback,
         audit: { surface: 'arena', searchBudget: 'visits=seat strength' },
       },
-    );
-    console.info('[lc0-arena] loaded Centipawn evaluator', {
-      requestedRuntime: loaded.requestedRuntime,
-      resolvedRuntime: loaded.resolvedRuntime,
-      runtimeConfigId: loaded.runtimeConfigId,
-      manifestUrl: loaded.manifestUrl,
-      fallbackReason: loaded.fallbackReason,
-    });
-    const cached = new CachedEvaluator(loaded.evaluator, {
       maxEntries: arenaCacheEntries(),
-      includeHistory: true,
-      includeLegalMoves: true,
       label: `centipawn-arena:${runtime}`,
-    });
-    if (centipawnEvaluatorGeneration !== generation || centipawnEvaluatorLoadTokens.get(key) !== loadToken) {
-      destroyCentipawnEvaluator(cached);
-      const error = new Error('Centipawn evaluator was disposed before it finished loading');
-      error.name = 'AbortError';
-      throw error;
-    }
-    centipawnEvaluators.add(cached);
-    centipawnEvaluatorsByKey.set(key, cached);
-    return cached;
-  })();
-  centipawnEvaluatorPromises.set(key, created);
-  centipawnEvaluatorLoadTokens.set(key, loadToken);
-  try {
-    return await created;
-  } catch (error) {
-    if (centipawnEvaluatorPromises.get(key) === created) {
-      centipawnEvaluatorPromises.delete(key);
-      if (centipawnEvaluatorLoadTokens.get(key) === loadToken) centipawnEvaluatorLoadTokens.delete(key);
-    }
-    throw error;
-  }
-}
-
-function destroyCentipawnEvaluator(evaluator: CachedEvaluator): void {
-  evaluator.clear();
-  const destroy = (evaluator.inner as Evaluator & { destroy?: () => void }).destroy;
-  if (typeof destroy === 'function') destroy.call(evaluator.inner);
+    },
+    () => activeCentipawnEvaluatorKeys().has(key),
+  );
 }
 
 function disposeUnusedCentipawnEvaluators(): void {
-  const activeKeys = activeCentipawnEvaluatorKeys();
-  for (const key of [...centipawnEvaluatorPromises.keys()]) {
-    if (activeKeys.has(key)) continue;
-    centipawnEvaluatorPromises.delete(key);
-    centipawnEvaluatorLoadTokens.delete(key);
-  }
-  for (const [key, evaluator] of [...centipawnEvaluatorsByKey]) {
-    if (activeKeys.has(key)) continue;
-    destroyCentipawnEvaluator(evaluator);
-    centipawnEvaluators.delete(evaluator);
-    centipawnEvaluatorsByKey.delete(key);
-    centipawnEvaluatorPromises.delete(key);
-    centipawnEvaluatorLoadTokens.delete(key);
-  }
+  centipawnCache.retain(activeCentipawnEvaluatorKeys());
 }
 
 function centipawnHistoryFens(positions: BoardState[]): string[] {
@@ -1595,6 +1544,7 @@ function keepMovesAtLiveEnd(): void {
 /** Scoresheet rows (number | White | Black), as on Play; opening-book plies are muted. */
 function renderMoveStrip(): void {
   const strip = el('gameMoves');
+  const restoreFocus = rememberMoveFocus(strip, 'data-idx');
   const block = document.getElementById('movesBlock');
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   if (!trail || trail.entries.length <= 1) {
@@ -1626,6 +1576,7 @@ function renderMoveStrip(): void {
     }
   }
   strip.innerHTML = rows.join('');
+  restoreFocus();
   if (!reviewing) {
     keepMovesAtLiveEnd();
     return;
@@ -1851,7 +1802,7 @@ function activeSeatRows(): EngineRow[] {
 
 function runtimeAuditIdentityForRow(row: EngineRow): string | null {
   if (row.family === 'centipawn') {
-    const model = centipawnModelForVariant(row.variant);
+    const model = centipawnModel();
     return browserRuntimeAuditIdentity({
       source: 'active-arena-engine',
       surface: 'arena',
@@ -3448,7 +3399,7 @@ function renderGameResultChips(): void {
       const outcome =
         chip.aPoints === null ? (chip.result === '1/2-1/2' ? 'draw' : 'decisive') : chip.aPoints === 1 ? 'win' : chip.aPoints === 0 ? 'loss' : 'draw';
       const text = chip.result === '1/2-1/2' ? '½–½' : chip.result.replace('-', '–');
-      return `<button type="button" class="sb-chip ${outcome}" data-game="${chip.index}" title="Game ${chip.index + 1}: ${htmlEscape(displayEngineName(chip.whiteName))} (White) vs ${htmlEscape(displayEngineName(chip.blackName))} (Black), ${chip.result}. Click to replay."><span class="sb-chip-n">G${chip.index + 1}</span>${text}</button>`;
+      return `<button type="button" class="sb-chip ${outcome}" data-game="${chip.index}" title="Game ${chip.index + 1}: ${htmlEscape(displayEngineName(chip.whiteName))} (White) vs ${htmlEscape(displayEngineName(chip.blackName))} (Black), ${chip.result}${arenaAdjudicationLabel(chip.reason) ? `, ${arenaAdjudicationLabel(chip.reason)}` : ''}. Click to replay."><span class="sb-chip-n">G${chip.index + 1}</span>${text}${arenaAdjudicationLabel(chip.reason) ? ` · ${arenaAdjudicationLabel(chip.reason)}` : ''}</button>`;
     })
     .join('');
 }
@@ -3752,7 +3703,7 @@ async function playArenaGame(
     const node = tree.addUci(lastUci);
     liveTrail?.entries.push({ fen: boardToFen(board), uci: lastUci, san: node?.san ?? null });
     renderBoard();
-    await sleep(delay, signal);
+    await arenaMoveDelay(delay, signal, document);
   }
   return { result: '1/2-1/2', reason: 'max plies', tree };
 }
@@ -3913,7 +3864,7 @@ async function runIsolatedCpuTournament(
               live.set(index, { position, white, black, trail });
               show(index);
             },
-            delay: () => sleep(delayMs, gameSignal),
+            delay: () => arenaMoveDelay(delayMs, gameSignal, document),
           });
           return { ...outcome, trail, diagnostics: captureCpuArenaDiagnostics(seats, cpuEngineHashMbForSurface('arena'), searchTelemetryText) };
         } finally {
@@ -4050,6 +4001,7 @@ function showCheckpointResults(saved: ArenaCheckpoint): void {
     finishedTrails[game.scheduleIndex] = trail;
     gameResultChips.push({
       index: game.scheduleIndex,
+      reason: game.reason,
       result: game.result,
       whiteName,
       blackName,
@@ -4313,7 +4265,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       }
     }
     const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
-    const pgn = gameTreeToPgn(tree, tags, result);
+    const pgn = gameTreeToPgn(tree, { ...tags, ...arenaAdjudicationTags(reason) }, result);
     const completed: ArenaCompletedGame = {
       pgn,
       scheduleIndex: i,
@@ -4339,6 +4291,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     }
     gameResultChips.push({
       index: i,
+      reason,
       result,
       whiteName: white.name,
       blackName: black.name,
@@ -4497,12 +4450,7 @@ function disposeRuntimeResources(): void {
   arenaSearchProgress.clear();
   hideDownloadProgress();
   disposeLc0Resources();
-  centipawnEvaluatorGeneration++;
-  for (const evaluator of centipawnEvaluators) destroyCentipawnEvaluator(evaluator);
-  centipawnEvaluators.clear();
-  centipawnEvaluatorsByKey.clear();
-  centipawnEvaluatorPromises.clear();
-  centipawnEvaluatorLoadTokens.clear();
+  centipawnCache.clear();
   disposeStockfish();
   for (const engine of isolatedCpuEngines) engine.dispose();
   isolatedCpuEngines.clear();
@@ -5325,6 +5273,32 @@ function resetArenaPageState(): void {
   seatRows.splice(0, seatRows.length, { family: 'lc0', variant: 'small', strength: 100 }, { family: 'sf', variant: 'lite', strength: 8 });
 }
 
+export function isArenaRunActive(): boolean {
+  return running;
+}
+
+export function arenaLeaveMessage(): string {
+  return checkpointProblem
+    ? 'Leave this tournament? The current game will be lost. Completed games could not be saved. Export the PGN before leaving.'
+    : 'Leave this tournament? The current game will be lost. Completed games are saved.';
+}
+
+let arenaUnloadConfirmed = false;
+let arenaUnloadResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+function resetArenaUnload(): void {
+  clearTimeout(arenaUnloadResetTimer);
+  arenaUnloadResetTimer = undefined;
+  arenaUnloadConfirmed = false;
+}
+
+export function allowArenaUnload(): void {
+  resetArenaUnload();
+  arenaUnloadConfirmed = true;
+  // Navigation may be stopped before beforeunload, without unmounting this page.
+  arenaUnloadResetTimer = setTimeout(resetArenaUnload, 1000);
+}
+
 export function mountArenaBrowser(): () => void {
   const href = location.href;
   if (lastArenaMountHref !== null && lastArenaMountHref !== href) {
@@ -5333,9 +5307,28 @@ export function mountArenaBrowser(): () => void {
   }
   lastArenaMountHref = href;
   resetArenaPageState();
+  resetArenaUnload();
   const controller = new AbortController();
   mountAbort = controller;
   arenaMountedCallbackCache = new WeakMap();
+  window.addEventListener(
+    'beforeunload',
+    (event) => {
+      const confirmed = arenaUnloadConfirmed;
+      resetArenaUnload();
+      guardArenaUnload(event, isArenaRunActive() && !confirmed);
+    },
+    { signal: controller.signal },
+  );
+  window.addEventListener(
+    'pageshow',
+    (event) => {
+      if (event.persisted) resetArenaUnload();
+    },
+    { signal: controller.signal },
+  );
+  for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, resetArenaUnload, { capture: true, signal: controller.signal });
+  controller.signal.addEventListener('abort', resetArenaUnload, { once: true });
   void init(controller.signal).catch((error) => {
     if (controller.signal.aborted || mountAbort !== controller) return;
     hideEngineWarmupStatus();

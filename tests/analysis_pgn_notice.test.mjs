@@ -11,7 +11,7 @@ const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta
 const template = readFileSync(new URL('../src/routes/app/analysis/+page.svelte', import.meta.url), 'utf8');
 const statusStart = source.includes('let pgnImportNotice:') ? source.indexOf('let pgnImportNotice:') : source.indexOf('function renderAnalysisStatus()');
 const statusFunctions = source.slice(statusStart, source.indexOf('function activeEngineNames()'));
-const loadFunction = source.slice(source.indexOf('function loadPgn()'), source.indexOf('function copyFen()'));
+const loadFunction = source.slice(source.indexOf('function loadPgn()'), source.indexOf('async function copyFen()'));
 
 function controller() {
   const elements = new Map();
@@ -114,15 +114,18 @@ test('template notice is scoped, accessible, bounded and placed across the mobil
 });
 
 function exportController() {
-  const elements = new Map(['message', 'pgnInput', 'analysisRestoreNotice'].map((id) => [id, { value: 'previous PGN', textContent: '', hidden: true }]));
+  const elements = new Map(
+    ['message', 'pgnInput', 'analysisRestoreNotice', 'restorePreviousAnalysis'].map((id) => [id, { value: 'previous PGN', textContent: '', hidden: true }]),
+  );
   const restore = source.slice(source.indexOf('function restoreAnalysisWorkspace()'), source.indexOf('let searcher:'));
-  const copy = source.slice(source.indexOf('function copyPgn()'), source.indexOf('function closePvPreview()'));
+  const copy = source.slice(source.indexOf('async function copyPgn()'), source.indexOf('function closePvPreview()'));
   const code = ts.transpile(
     `
     let tree = new GameTree(), analysisGameTree = tree, workspaceHeaders = {}, workspaceResult = '*';
     const reviewMetadata = new Map(), reviewSignature = () => 'signature';
+    const mountAbort = new AbortController(), isStaleMount = signal => signal.aborted;
     const el = id => elements.get(id), inputEl = el;
-    const takeAnalysisHandoff = () => null, hasExplicitWorkspaceInput = () => false;
+    const takeAnalysisHandoff = () => null, hasExplicitWorkspaceInput = () => false, hasPreviousAnalysis = () => false;
     const location = {search: '', hash: ''}, decodeAnalysisSnapshot = () => {}, params = new Map();
     const readWorkspace = () => ({ tree: new GameTree(), headers: {}, result: '*' });
     const renderPgnImportNotice = text => { el('message').textContent = text; };
@@ -145,9 +148,9 @@ test('workspace restore survives an unexpected export error and finishes restori
   assert.match(api.elements.get('message').textContent, /PGN export failed.*export failed/);
 });
 
-test('copy PGN reports export errors without changing the existing input', () => {
+test('copy PGN reports export errors without changing the existing input', async () => {
   const api = exportController();
-  assert.doesNotThrow(() => api.copyPgn());
+  await assert.doesNotReject(api.copyPgn());
   assert.equal(api.elements.get('pgnInput').value, 'previous PGN');
   assert.match(api.elements.get('message').textContent, /PGN export failed.*export failed/);
 });

@@ -6,6 +6,7 @@ export type BoardStyle = 'brown' | 'night' | 'blue' | 'green';
 const THEME_KEY = '0x88-theme';
 const BOARD_KEY = '0x88-board';
 const BOARDS: BoardStyle[] = ['brown', 'night', 'blue', 'green'];
+let explicitTheme: ThemeMode | null = null;
 
 function prefersDark(): boolean {
   try {
@@ -18,7 +19,10 @@ function prefersDark(): boolean {
 function initialTheme(): ThemeMode {
   try {
     const saved = localStorage.getItem(THEME_KEY);
-    if (saved === 'dark' || saved === 'light') return saved;
+    if (saved === 'dark' || saved === 'light') {
+      explicitTheme = saved;
+      return saved;
+    }
   } catch {}
   return prefersDark() ? 'dark' : 'light';
 }
@@ -35,15 +39,19 @@ export const theme = writable<ThemeMode>(initialTheme());
 export const boardStyle = writable<BoardStyle>(initialBoard());
 
 export function toggleTheme(): void {
-  theme.update((t) => (t === 'dark' ? 'light' : 'dark'));
+  theme.update((t) => {
+    const next = t === 'dark' ? 'light' : 'dark';
+    explicitTheme = next;
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {}
+    return next;
+  });
 }
 
 function applyTheme(mode: ThemeMode): void {
   const root = document.documentElement;
   root.dataset.theme = mode;
-  try {
-    localStorage.setItem(THEME_KEY, mode);
-  } catch {}
 }
 
 function applyBoard(style: BoardStyle): void {
@@ -59,14 +67,23 @@ export function syncThemeToDom(): () => void {
   const unsubTheme = theme.subscribe((v) => applyTheme(v));
   const unsubBoard = boardStyle.subscribe((v) => applyBoard(v));
 
+  let media: MediaQueryList | undefined;
+  const followSystem = () => {
+    if (explicitTheme) return;
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(THEME_KEY);
+    } catch {}
+    if (saved !== 'light' && saved !== 'dark') theme.set(prefersDark() ? 'dark' : 'light');
+  };
   try {
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      const saved = localStorage.getItem(THEME_KEY);
-      if (!saved) theme.set(prefersDark() ? 'dark' : 'light');
-    });
+    media = matchMedia('(prefers-color-scheme: dark)');
+    media.addEventListener('change', followSystem);
+    followSystem();
   } catch {}
 
   return () => {
+    media?.removeEventListener('change', followSystem);
     unsubTheme();
     unsubBoard();
   };

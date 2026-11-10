@@ -1,12 +1,23 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import { afterNavigate } from '$app/navigation';
+import { beforeNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 let mountedUrl: URL | null = null;
-afterNavigate(({ to }) => {
-  if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
+let isRunActive = () => false;
+let leaveMessage = () => '';
+let allowLeave = () => {};
+beforeNavigate(({ cancel, willUnload, to }) => {
+  if (mountedUrl && to?.url.origin === mountedUrl.origin && to.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) {
+    // Reload this controller only after deciding to leave, while its original URL is still current.
+    cancel();
+    if (isRunActive() && !window.confirm(leaveMessage())) return;
+    allowLeave();
+    location.assign(to.url.href);
+    return;
+  }
+  if (isRunActive() && !willUnload && !window.confirm(leaveMessage())) cancel();
 });
 const title = '0x88 Chess — engine arena';
 const description =
@@ -19,6 +30,9 @@ onMount(() => {
   void import('../../../lc0/arenaBrowser')
     .then((module) => {
       if (!mounted) return;
+      isRunActive = module.isArenaRunActive;
+      leaveMessage = module.arenaLeaveMessage;
+      allowLeave = module.allowArenaUnload;
       cleanup = module.mountArenaBrowser();
     })
     .catch((error) => {
@@ -29,6 +43,7 @@ onMount(() => {
     });
   return () => {
     mounted = false;
+    isRunActive = () => false;
     cleanup();
   };
 });
@@ -275,7 +290,7 @@ onMount(() => {
       <div class="log" id="log"></div>
       <pre id="benchResult" class="small" hidden></pre>
       <div class="row"><button id="exportPgn" type="button">Export PGN</button></div>
-      <textarea id="pgnOut" spellcheck="false" placeholder="game PGNs appear here after Export PGN" hidden></textarea>
+      <textarea id="pgnOut" aria-label="Exported tournament PGNs" spellcheck="false" placeholder="game PGNs appear here after Export PGN" hidden></textarea>
     </details>
     <details class="section-block runtime-block">
       <summary>Runtime status</summary>

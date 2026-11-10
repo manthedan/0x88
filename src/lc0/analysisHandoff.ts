@@ -1,9 +1,10 @@
 // Independent one-shot handoffs: Play → Analysis PGN and Analysis → Play position/history.
 // localStorage rather than sessionStorage also reaches a new tab. Both entries
-// expire quickly and are removed as soon as the destination reads them.
+// expire quickly; destinations can defer consumption until their workspace is saved.
 
 import { boardToFen } from '../chess/board.ts';
 import { gameOutcome } from './engineBattle.ts';
+import { type InputTransfer } from './pendingInput.ts';
 import { type PlayPosition, replayPlayPosition } from './playPosition.ts';
 
 const HANDOFF_KEY = '0x88-analysis-handoff-pgn-v1';
@@ -61,30 +62,61 @@ export function writePlayHandoff(position: PlayPosition, now = Date.now()): bool
   }
 }
 
-/** Consume before saved-game restore. Even an invalid explicit handoff wins over a saved game. */
-export function takePlayHandoff(now = Date.now()): PlayHandoffResult {
+/** Only acknowledge the input that this destination read, never a newer transfer. */
+function acknowledgeHandoff(storage: Storage, key: string, raw: string): () => void {
+  return () => {
+    try {
+      if (storage.getItem(key) === raw) storage.removeItem(key);
+    } catch {
+      // A retained transfer is safer than losing an input when storage is blocked.
+    }
+  };
+}
+
+export function acknowledgeInputTransfer(transfer: InputTransfer): void {
+  const storage = handoffStorage();
+  if (storage) acknowledgeHandoff(storage, transfer.key, transfer.id)();
+}
+
+/** Read before saved-game restore; callers can acknowledge valid input after a durable save. */
+export function takePlayHandoff(now = Date.now(), defer?: (consume: () => void, transfer: InputTransfer) => void): PlayHandoffResult {
   try {
     const storage = handoffStorage();
     if (!storage) return { status: 'none' };
     const raw = storage.getItem(PLAY_HANDOFF_KEY);
-    if (raw !== null) storage.removeItem(PLAY_HANDOFF_KEY);
-    return decodePlayHandoff(raw, now);
+    const handoff = decodePlayHandoff(raw, now);
+    if (raw !== null) {
+      const consume = acknowledgeHandoff(storage, PLAY_HANDOFF_KEY, raw);
+      if (handoff.status === 'ready' && defer) defer(consume, { key: PLAY_HANDOFF_KEY, id: raw });
+      else consume();
+    }
+    return handoff;
   } catch {
     return { status: 'invalid' };
   }
 }
 
-/** Returns the pending PGN (and clears it), or null when none is fresh. */
-export function takeAnalysisHandoff(now = Date.now()): string | null {
+/** Returns a fresh PGN; callers can defer acknowledgement until their workspace is saved. */
+export function takeAnalysisHandoff(now = Date.now(), defer?: (consume: () => void, transfer: InputTransfer) => void): string | null {
   const storage = handoffStorage();
   if (!storage) return null;
   try {
     const raw = storage.getItem(HANDOFF_KEY);
     if (!raw) return null;
-    storage.removeItem(HANDOFF_KEY);
-    const parsed = JSON.parse(raw) as { pgn?: unknown; at?: unknown };
-    if (typeof parsed.pgn !== 'string' || typeof parsed.at !== 'number') return null;
-    if (now - parsed.at > HANDOFF_TTL_MS || now < parsed.at - 60_000) return null;
+    const consume = acknowledgeHandoff(storage, HANDOFF_KEY, raw);
+    let parsed: { pgn?: unknown; at?: unknown };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      consume();
+      return null;
+    }
+    if (!parsed || typeof parsed.pgn !== 'string' || typeof parsed.at !== 'number' || now - parsed.at > HANDOFF_TTL_MS || now < parsed.at - 60_000) {
+      consume();
+      return null;
+    }
+    if (defer) defer(consume, { key: HANDOFF_KEY, id: raw });
+    else consume();
     return parsed.pgn;
   } catch {
     return null;

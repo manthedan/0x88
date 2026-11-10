@@ -129,6 +129,11 @@ export function pgnResultForExport(headers: Record<string, string>, result: stri
   return { headers: 'Result' in headers ? { ...headers, Result: '*' } : headers, result: '*' };
 }
 
+/** Persisted and incoming PGNs use the same movetext-authoritative Result header. */
+function normalizedAnalysisHeaders(headers: Record<string, string>, result: string): Record<string, string> {
+  return 'Result' in headers ? { ...headers, Result: result } : headers;
+}
+
 export function decodeAnalysisSnapshot(raw: string): { tree: GameTree; headers: Record<string, string>; result: string } | null {
   try {
     const data = decodeEnvelope(raw, 'analysis');
@@ -138,8 +143,7 @@ export function decodeAnalysisSnapshot(raw: string): { tree: GameTree; headers: 
     const signature = [tree.root, ...tree.mainlineFrom()].map((node) => `${node.fen}\u0000${node.move ? moveToUci(node.move) : ''}`).join('\u0001');
     // Missing provenance in legacy saves is not evidence that the edited line owns a result.
     const result = data.resultSignature === signature ? savedResult : '*';
-    if ('Result' in headers) headers.Result = result;
-    return { tree, headers, result };
+    return { tree, headers: normalizedAnalysisHeaders(headers, result), result };
   } catch {
     return null;
   }
@@ -219,45 +223,123 @@ export function readWorkspace<T>(kind: WorkspaceKind, decode: (raw: string) => T
   }
 }
 
-/** Recognize game inputs, not runtime/debug options or ordinary anchors. Never consume a handoff here. */
-export function hasExplicitWorkspaceInput(search: string, hash = ''): boolean {
-  const gameParams = new Set(['fen', 'pgn', 'game', 'position', 'handoff', 'playhandoff', 'playfrom', 'fromanalysis', 'startfen', 'from', 'play']);
-  const hasGameInput = (input: string) => [...new URLSearchParams(input).keys()].some((key) => gameParams.has(key.toLowerCase()));
-  return hasGameInput(search) || hasGameInput(hash.replace(/^#/, ''));
+/** Only Analysis consumes URL workspace inputs: exact search keys fen and pgn. Play uses a storage handoff. */
+export function hasExplicitWorkspaceInput(search: string, _hash = '', kind: WorkspaceKind = 'analysis'): boolean {
+  const params = new URLSearchParams(search);
+  return kind === 'analysis' && (params.has('fen') || params.has('pgn'));
+}
+
+export const PREVIOUS_ANALYSIS_KEY = '0x88-analysis-previous-workspace';
+
+/** Back up before replacement; a failed backup must leave the current workspace intact. */
+export function preservePreviousAnalysis(storage = workspaceStorage(), replacement?: GameTree, headers: Record<string, string> = {}, result = '*'): boolean {
+  try {
+    const raw = storage?.getItem(workspaceStorageKey('analysis'));
+    const saved = raw ? decodeAnalysisSnapshot(raw) : null;
+    if (saved && replacement) {
+      try {
+        // Selection is not a different workspace. Keep the older recovery slot on a repeated link.
+        const snapshot = (tree: GameTree, headers: Record<string, string>, result: string) =>
+          JSON.stringify({
+            tree: { ...serializeTree(tree), current: 0 },
+            headers: Object.entries(normalizedAnalysisHeaders(headers, result)).sort(([a], [b]) => a.localeCompare(b)),
+            result,
+          });
+        if (snapshot(saved.tree, saved.headers, saved.result) === snapshot(replacement, headers, result)) return true;
+      } catch {
+        // Equality is optional: a large linked PGN can still replace a recoverable save.
+      }
+    }
+    if (raw && saved) storage?.setItem(PREVIOUS_ANALYSIS_KEY, raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function hasPreviousAnalysis(storage = workspaceStorage()): boolean {
+  try {
+    return !!decodeAnalysisSnapshot(storage?.getItem(PREVIOUS_ANALYSIS_KEY) ?? '');
+  } catch {
+    return false;
+  }
+}
+
+export function restorePreviousAnalysis(storage = workspaceStorage()): ReturnType<typeof decodeAnalysisSnapshot> {
+  try {
+    const raw = storage?.getItem(PREVIOUS_ANALYSIS_KEY);
+    const saved = raw ? decodeAnalysisSnapshot(raw) : null;
+    if (!saved || !raw) return null;
+    storage?.setItem(workspaceStorageKey('analysis'), raw);
+    storage?.removeItem(PREVIOUS_ANALYSIS_KEY);
+    return saved;
+  } catch {
+    return null;
+  }
 }
 
 /** One small local slot per surface. Only changed committed state resets the debounce. */
-export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspaceStorage(), delay = 400) {
+export function createWorkspaceAutosave(
+  kind: WorkspaceKind,
+  storage = workspaceStorage(),
+  delay = 400,
+  onPause?: (reason: 'too-large' | 'storage') => void,
+  onResume?: () => void,
+  onCommit?: (type: 'saved' | 'cleared') => void,
+) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: string | undefined;
   let last: string | undefined;
-  const remove = () => {
-    try {
-      storage?.removeItem(workspaceStorageKey(kind));
-    } catch {
-      /* Storage denied. */
-    }
-  };
-  const flush = () => {
+  let pauseReason: 'too-large' | 'storage' | undefined;
+  const pause = (reason: 'too-large' | 'storage' = 'too-large') => {
     clearTimeout(timer);
     timer = undefined;
-    if (pending === undefined) return;
+    pending = undefined;
+    last = undefined;
+    if (pauseReason !== reason) {
+      pauseReason = reason;
+      onPause?.(reason);
+    }
+  };
+  const resume = () => {
+    if (pauseReason === undefined) return;
+    pauseReason = undefined;
+    onResume?.();
+  };
+  const flush = (): boolean => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (pending === undefined) return false;
     try {
       const raw = `{"kind":${JSON.stringify(kind)},"version":${WORKSPACE_VERSION},"savedAt":${Date.now()},"data":${pending}}`;
-      if (raw.length > WORKSPACE_MAX_CHARS) throw new Error('Snapshot too large');
-      storage?.setItem(workspaceStorageKey(kind), raw);
+      if (raw.length > WORKSPACE_MAX_CHARS) {
+        pause('too-large');
+        return false;
+      }
+      if (!storage) throw new Error('Storage unavailable');
+      storage.setItem(workspaceStorageKey(kind), raw);
+      resume();
+      pending = undefined;
+      onCommit?.('saved');
+      return true;
     } catch {
-      // Do not resurrect an older game after a failed replacement. PGN export remains available.
-      remove();
+      pause('storage');
+      return false;
     }
-    pending = undefined;
   };
   const clear = () => {
     clearTimeout(timer);
     timer = undefined;
     pending = undefined;
     last = undefined;
-    remove();
+    try {
+      if (!storage) throw new Error('Storage unavailable');
+      storage.removeItem(workspaceStorageKey(kind));
+      resume();
+      onCommit?.('cleared');
+    } catch {
+      pause('storage');
+    }
   };
   return {
     schedule(data: AnalysisSnapshot | PlaySnapshot | null) {
@@ -273,9 +355,10 @@ export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspace
         clearTimeout(timer);
         timer = setTimeout(flush, delay);
       } catch {
-        clear();
+        pause('too-large');
       }
     },
+    pause,
     clear,
     flush,
   };

@@ -17,7 +17,7 @@ import {
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
 import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
+import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcher, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
@@ -35,6 +35,7 @@ import {
   probeBt4Support,
   T3_NET,
 } from './bt4Engine.ts';
+import { writeClipboard } from './clipboard.ts';
 import { inactiveCpuEnginesToEvict } from './cpuEngineResidency.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
@@ -43,6 +44,7 @@ import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, Maia3BrowserEvaluator, type Maia3MoveStyle } from './maia3.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
+import { rememberMoveFocus } from './moveListFocus.ts';
 import {
   displayedPly,
   type MoveNavAction,
@@ -55,6 +57,7 @@ import {
 } from './moveNavigation.ts';
 import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
+import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import { playMaterial } from './playMaterial.ts';
 import { committedPlayOpponent, type PlayOpponentState, transitionPlayOpponent } from './playOpponentState.ts';
 import { type PlayPosition, playGameToPgn, playMoveLabel, playMoveRows, playTakebackPly, replayPlayPosition } from './playPosition.ts';
@@ -63,7 +66,8 @@ import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { defaultStormphraxVariantKey, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
 import { uciGameHistory } from './uciGameHistory.ts';
-import { createWorkspaceAutosave, decodePlaySnapshot, hasExplicitWorkspaceInput, readWorkspace } from './workspaceAutosave.ts';
+import { createWakeLockManager } from './wakeLock.ts';
+import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './workspaceAutosave.ts';
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
@@ -150,21 +154,7 @@ interface CpuEngine {
 // Screen wake lock (best-effort): keeps the screen on while the engine is
 // thinking so a sleeping laptop does not abandon the move.
 // ---------------------------------------------------------------------------
-type WakeLockSentinelLike = { release: () => Promise<void> };
-let wakeLock: WakeLockSentinelLike | null = null;
-async function requestWakeLock(): Promise<void> {
-  try {
-    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<WakeLockSentinelLike> } };
-    wakeLock = await nav.wakeLock?.request('screen');
-  } catch {
-    // Surface API missing or denied; play continues without the lock.
-  }
-}
-function releaseWakeLock(): void {
-  if (!wakeLock) return;
-  void wakeLock.release().catch(() => {});
-  wakeLock = null;
-}
+const wakeLocks = createWakeLockManager(() => navigator.wakeLock?.request('screen'));
 
 /** Start FEN for the current game; odds opponents remove their own queen. */
 function startFenFor(option: PlayEngineOption, human: Color): string {
@@ -180,6 +170,7 @@ function startFenFor(option: PlayEngineOption, human: Color): string {
 // ---------------------------------------------------------------------------
 interface PlayContext {
   autosave: ReturnType<typeof createWorkspaceAutosave> | null;
+  pendingInput: PendingInput | null;
   restoredGame: boolean;
   abort: AbortController;
   disposed: boolean;
@@ -234,6 +225,7 @@ interface PlayContext {
 function createPlayContext(): PlayContext {
   return {
     autosave: null,
+    pendingInput: null,
     restoredGame: false,
     abort: new AbortController(),
     disposed: false,
@@ -978,7 +970,6 @@ function ctxCancelEngineTurn(ctx: PlayContext): void {
   ctx.preparingEngine = false;
   ctx.enginePreparationGeneration += 1;
   ctxHideDownloadProgress();
-  releaseWakeLock();
 }
 
 function ctxPriorFens(ctx: PlayContext): string[] {
@@ -1023,7 +1014,11 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   ctx.engineThinking = true;
   ctx.lastProgressAnnouncement = -1;
   el('progressAnnouncement').textContent = '';
-  await requestWakeLock();
+  const releaseWakeLock = await wakeLocks.acquire(signal);
+  if (signal.aborted || ctx.disposed) {
+    releaseWakeLock();
+    return;
+  }
   ctxRender(ctx);
   let uci: string | null = null;
   try {
@@ -1032,7 +1027,6 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
     if (signal.aborted) return;
     ctx.engineThinking = false;
     ctx.engineReady = false;
-    releaseWakeLock();
     ctxSetEngineFailure(ctx, error);
     ctxRender(ctx);
     return;
@@ -1130,6 +1124,7 @@ function ctxSubmitTypedMove(ctx: PlayContext): void {
 }
 
 function ctxNewGame(ctx: PlayContext): void {
+  ctxUpdatePendingInput(ctx, { type: 'discarded' });
   ctx.autosave?.clear();
   ctx.restoredGame = false;
   el('playRestoreNotice').hidden = true;
@@ -1281,6 +1276,7 @@ function ctxLiveStatusText(ctx: PlayContext): string {
 
 function ctxRenderMoveList(ctx: PlayContext): void {
   const list = el('moveList');
+  const restoreFocus = rememberMoveFocus(list, 'data-ply');
   if (!ctx.sans.length) {
     list.innerHTML = '<span class="placeholder">Your game starts here. Move a piece, or type a move below (e.g. Nf3).</span>';
     return;
@@ -1296,6 +1292,7 @@ function ctxRenderMoveList(ctx: PlayContext): void {
     );
   }
   list.innerHTML = rows.join('');
+  restoreFocus();
   if (ctx.viewPly === null) {
     ctx.moveListScrollKey = 'live';
     list.scrollTop = list.scrollHeight;
@@ -1567,7 +1564,7 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   strip.setAttribute('aria-label', `${isHuman ? 'You' : ctxOpponentName(option)}, ${side}${text ? `, ${text.replace('…', '')}` : ''}`);
 }
 
-function ctxRenderChrome(ctx: PlayContext, _shownBoard: BoardState, shownPly: number): void {
+function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   const phase = ctxPhase(ctx);
   const main = el('main');
   main.dataset.phase = phase;
@@ -1734,7 +1731,7 @@ function ctxRender(ctx: PlayContext): void {
     : ctx.handoffNotice;
   // Switching roots is only offered before play or after the game is finished.
   buttonEl('useStartingPosition').hidden = !ctx.practicePosition || (ctx.started && !ctx.gameOver);
-  ctxRenderChrome(ctx, shownBoard, shownPly);
+  ctxRenderChrome(ctx, shownPly);
 }
 
 // ---------------------------------------------------------------------------
@@ -1806,16 +1803,24 @@ function ctxTuneOpponent(ctx: PlayContext): void {
 // Mount/init
 // ---------------------------------------------------------------------------
 
+function ctxUpdatePendingInput(ctx: PlayContext, event: PendingInputEvent): void {
+  const { pending, acknowledged } = transitionPendingInput(ctx.pendingInput, event);
+  ctx.pendingInput = pending;
+  for (const transfer of acknowledged?.transfers ?? []) acknowledgeInputTransfer(transfer);
+}
+
 /** Import before any autosaved-game restore; callers must skip restore when this returns true. */
 function ctxApplyPlayHandoffForMount(ctx: PlayContext): boolean {
-  const handoff = takePlayHandoff();
+  const handoff = takePlayHandoff(Date.now(), (_consume, transfer) => {
+    ctxUpdatePendingInput(ctx, { type: 'applied', input: { urlKeys: [], transfers: [transfer] } });
+  });
   if (handoff.status === 'ready') {
     ctx.practicePosition = handoff.position;
     return true;
   }
   if (handoff.status === 'invalid') {
     ctx.handoffNotice = 'That position could not be loaded or is finished. Set up a normal game instead.';
-    return true;
+    return false;
   }
   return false;
 }
@@ -1857,11 +1862,10 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 }
 
 function ctxInit(ctx: PlayContext): void {
-  // Handoff (including rejected transfers) takes precedence over saved-game restore; explicit URLs also skip restore.
+  // Only a decoded storage position handoff replaces a saved game. URL options never contain a Play game.
   const handedOff = ctxApplyPlayHandoffForMount(ctx);
   const validEngineIds = new Set(ENGINE_OPTIONS.map((option) => option.id));
-  const saved =
-    handedOff || hasExplicitWorkspaceInput(location.search, location.hash) ? null : readWorkspace('play', (raw) => decodePlaySnapshot(raw, validEngineIds));
+  const saved = handedOff ? null : readWorkspace('play', (raw) => decodePlaySnapshot(raw, validEngineIds));
   ctx.restoredGame = !!saved;
   if (saved) ctx.practicePosition = saved.practicePosition;
   ctxRefreshEngineOptions(ctx);
@@ -1887,9 +1891,14 @@ function ctxInit(ctx: PlayContext): void {
     Object.assign(ctx, game);
     el('playRestoreNotice').hidden = false;
   }
-  ctx.autosave = createWorkspaceAutosave('play');
-  if (handedOff || hasExplicitWorkspaceInput(location.search, location.hash)) ctx.autosave.clear();
+  ctx.autosave = createWorkspaceAutosave('play', undefined, 400, undefined, undefined, (type) => ctxUpdatePendingInput(ctx, { type }));
   trackListener(ctx, window, 'pagehide', () => ctx.autosave?.flush());
+  trackListener(ctx, window, 'pageshow', (event: Event) => {
+    if (!(event as PageTransitionEvent).persisted) return;
+    ctxDisarmResign(ctx);
+    ctxDisarmNewGame(ctx);
+    ctxRender(ctx);
+  });
   trackListener(ctx, document, 'visibilitychange', () => {
     if (document.hidden) ctx.autosave?.flush();
   });
@@ -1928,6 +1937,7 @@ function ctxInit(ctx: PlayContext): void {
     ctxNewGame(ctx);
   });
   trackListener(ctx, el('useStartingPosition'), 'click', () => {
+    ctxUpdatePendingInput(ctx, { type: 'discarded' });
     ctx.practicePosition = null;
     ctx.handoffNotice = '';
     ctx.started = false;
@@ -2031,11 +2041,14 @@ function ctxInit(ctx: PlayContext): void {
     ctxRender(ctx);
   });
   trackListener(ctx, el('copyPgn'), 'click', () => {
-    void navigator.clipboard.writeText(ctxExportPgn(ctx)).then(() => {
+    void writeClipboard(ctxExportPgn(ctx)).then((copied) => {
+      if (ctx.disposed) return;
       const btn = buttonEl('copyPgn');
-      setButtonLabel(btn, 'Copied');
-      btn.dataset.copied = 'true';
+      setButtonLabel(btn, copied ? 'Copied' : 'Copy failed');
+      btn.dataset.copied = String(copied);
+      if (!copied) el('gameAnnouncement').textContent = 'Could not copy PGN to the clipboard. Use Download PGN to keep the game.';
       setTimeout(() => {
+        if (ctx.disposed) return;
         setButtonLabel(btn, 'Copy PGN');
         btn.dataset.copied = 'false';
       }, 1500);
