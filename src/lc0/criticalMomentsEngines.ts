@@ -37,6 +37,7 @@ export function createCriticalEngines(
   const dispose = () => {
     signal.removeEventListener('abort', dispose);
     sf?.dispose();
+    sf = undefined;
     stopWorker();
     maia?.terminate();
     for (const id of ids) broker.unregister(id);
@@ -121,7 +122,10 @@ export function createCriticalEngines(
         protectedWork('critical-sf', async (operationSignal) => {
           sf ??= new StockfishEngine({ threads: 1, hashMb: cpuEngineHashMbForSurface('analysis') }, sfBuild);
           const engine = sf;
-          const abort = () => engine.dispose();
+          const abort = () => {
+            engine.dispose();
+            if (sf === engine) sf = undefined;
+          };
           operationSignal.addEventListener('abort', abort, { once: true });
           try {
             progress('Searching at depth 12');

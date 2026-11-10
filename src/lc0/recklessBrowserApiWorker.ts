@@ -27,6 +27,8 @@ type ApiExports = WebAssembly.Exports & {
   reckless_api_global_error_ptr?: () => number;
   reckless_api_global_error_len?: () => number;
   reckless_api_free(handle: number): void;
+  // This published ABI has no make-move/position-history export. Passing a
+  // final FEN cannot retain repetitions; use the WASI backend for history.
   reckless_api_set_fen(handle: number, ptr: number, len: number): number;
   reckless_api_set_multipv(handle: number, multiPv: number): number;
   reckless_api_resize_hash(handle: number, hashMb: number): number;

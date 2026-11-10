@@ -82,10 +82,9 @@ async function main() {
     if (unknown.length) throw new Error(`Unknown family id(s): ${unknown.join(', ')}`);
   }
   const groups = await Promise.all(selected.map(checkGroup));
-  // A family whose artifacts are deliberately not distributed (Berserk: the
-  // upstream NNUE has no resolved license) is expected to be absent on a clean
-  // checkout. Report it so `nextCommands` still tells you how to build it, but
-  // do not fail the readiness check over an intentional absence.
+  // Only explicitly build-local families may be absent on a clean checkout.
+  // Berserk is distributed with its GPL-3.0 network and corresponding source
+  // under the release policy recorded in NOTICE.md.
   const buildLocally = (group) => group.status === 'build-locally-not-distributed';
   const missingFamilies = groups.filter((group) => !group.ok && !buildLocally(group)).map((group) => group.family);
   const optionalMissingFamilies = groups.filter((group) => !group.ok && buildLocally(group)).map((group) => group.family);

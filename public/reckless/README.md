@@ -1,6 +1,6 @@
 # Reckless WASI asset
 
-Generated `*.wasm`, `.nnue`, and corresponding-source archives are intentionally not committed. Production/deploy builds that offer Reckless should generate and publish the scalar fallback, the default SIMD artifact, the experimental relaxed-SIMD artifact exposed in the UI when supported, plus their patched source archives:
+Generated `*.wasm` and `.nnue` binaries are gitignored; the release manifest and corresponding-source archives are committed. Production/deploy builds that offer Reckless should generate and publish the scalar fallback, the default SIMD artifact, the experimental relaxed-SIMD artifact exposed in the UI when supported, plus their patched source archives:
 
 ```sh
 npm run reckless:build-production
