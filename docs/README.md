@@ -45,7 +45,7 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`r2_model_hosting.md`](r2_model_hosting.md) — external model hosting policy.
 - [`asset_telemetry_plan.md`](asset_telemetry_plan.md) — privacy-preserving asset telemetry spec.
 - [`engine_packaging_reorg.md`](engine_packaging_reorg.md) — where patched engine sources live and why.
-- [`model_manifest.md`](model_manifest.md) — LC0 model manifest notes.
+- [`model_manifest.md`](model_manifest.md) — historical: the removed project-level model manifest builder; points to the current per-artifact manifests.
 - [`model_efficiency_metrics.md`](model_efficiency_metrics.md) — model efficiency comparison metrics.
 - [`model_provenance/`](model_provenance/) — per-model provenance and derivation recipes (license load-bearing):
   - [`model_provenance/bt4_soap_rem_c19000_final.md`](model_provenance/bt4_soap_rem_c19000_final.md) — Centipawn `bt4_soap_rem_c19000_final` model.
