@@ -95,10 +95,8 @@ test('every Emscripten worker can resolve its pinned sidecars at runtime', async
 // non-default SIMD tier would request a .data that is no longer published and
 // the tests above would still pass. These assert against the real committed
 // artifacts, so a regenerated glue that dropped the hook fails here.
-// Berserk is listed even though its artifacts are never committed: the skip
-// below keeps a clean checkout green, while anyone who has run
-// `npm run berserk:build-emscripten` gets the same assertion applied to their
-// locally generated glue, which is the only place it can be checked at all.
+// Every glue file listed here is committed as a plain git file (not LFS), so
+// these assertions run in a clean checkout and in CI, Berserk included.
 const GENERATED_GLUE = [
   ['plentychess', 'plentychess-emscripten.js'],
   ['plentychess', 'plentychess-emscripten-sse41.js'],
@@ -117,13 +115,10 @@ for (const [family, file] of GENERATED_GLUE) {
     try {
       source = readFileSync(path, 'utf8');
     } catch (error) {
-      // Artifacts are build outputs; some checkouts legitimately lack them.
-      // Skip rather than fail so this does not become a false red for someone
-      // who has not built or pulled LFS.
-      // Loud on purpose. Berserk's glue is never committed (its network has no
-      // resolved license), so this assertion CANNOT run in clean CI and a quiet
-      // skip would read as coverage it does not provide. The CI-runnable half
-      // of this guarantee is the --preload-file assertion below.
+      // The glue is tracked, so it is only missing from a partial or sparse
+      // checkout. Skip loudly rather than fail: a quiet skip would read as
+      // coverage this checkout does not provide. The --preload-file assertion
+      // below still checks the cause.
       t.skip(`${file} absent — generated-glue assertion NOT exercised in this checkout (${error.code})`);
       return;
     }
@@ -135,14 +130,14 @@ for (const [family, file] of GENERATED_GLUE) {
   });
 }
 
-// The CI-runnable half of the Berserk guarantee.
+// The build-script half of the guarantee.
 //
 // Emscripten only emits the package loader that consults Module.locateFile when
 // the build packages a preload file; drop `--preload-file` and the generated
 // glue stops routing the .data through the hook entirely, which is the exact
-// regression the assertions above exist to catch. Berserk's glue is never
-// committed, so for that family this is the only check that can run without a
-// local toolchain — it verifies the cause rather than the effect.
+// regression the assertions above exist to catch. This checks the cause in the
+// build scripts, so a rebuild that dropped the flag fails before new glue is
+// committed.
 test('every Emscripten build script still packages its preload file', () => {
   for (const family of ['berserk', 'plentychess', 'stormphrax']) {
     const script = readFileSync(new URL(`../scripts/build_${family}_emscripten.mjs`, import.meta.url), 'utf8');
