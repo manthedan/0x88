@@ -5,13 +5,15 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { extname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseIntegritySmokeArgs } from './lib/engine_integrity_smoke.mjs';
 
+const args = parseIntegritySmokeArgs(process.argv.slice(2));
 const repo = process.cwd();
 // A persistent profile is needed to exercise disk caching of 99 MB artifacts;
 // incognito contexts only have a small memory cache. Keep all output local.
 const scratch = resolve(process.env.ENGINE_INTEGRITY_BROWSER_SCRATCH ?? '.local-dev-artifacts/engine-integrity-browser');
 mkdirSync(scratch, { recursive: true });
-const dist = resolve(process.argv[2] ?? 'dist-client');
+const dist = args.dist;
 const require = createRequire(join(repo, 'package.json'));
 const { build } = await import(pathToFileURL(require.resolve('vite')));
 const { chromium } = require('playwright');
@@ -244,7 +246,7 @@ try {
   console.log(`PASS harness: preserved run/prefetch exports; ${outputs.size} real Vite/worker outputs; ephemeral servers; no Playwright routing`);
   const origin = await server();
   const assetBase = await server();
-  for (const spec of process.argv.includes('--ui-only') ? [] : specs) {
+  for (const spec of args.uiOnly ? [] : specs) {
     await check(`${spec.name} legal moves, clean console, HTTP cache`, async () => {
       const ctx = await context();
       try {
@@ -295,7 +297,7 @@ try {
       }
     });
   }
-  for (const crossOrigin of process.argv.includes('--ui-only') ? [] : [false, true]) {
+  for (const crossOrigin of args.uiOnly ? [] : [false, true]) {
     await check(`real Analysis prefetch shares ${crossOrigin ? 'cross-origin' : 'same-origin'} cache with adapter`, async () => {
       const spec = specs.find((s) => s.family === 'stormphrax');
       const ctx = await context(crossOrigin ? assetBase : undefined);
