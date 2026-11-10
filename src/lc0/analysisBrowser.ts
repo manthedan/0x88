@@ -413,9 +413,11 @@ let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
 
 function saveAnalysisWorkspace(): void {
   try {
+    // Validate even an apparently empty tree before deciding to remove its save.
+    const snapshot = serializeTree(tree);
     workspaceAutosave?.schedule(
       tree.root.children.length || tree.root.fen !== START_FEN || tree.root.comment || Object.keys(workspaceHeaders).length
-        ? { tree: serializeTree(tree), headers: workspaceHeaders, result: workspaceResult, resultSignature: reviewMetadata.get(tree)?.signature }
+        ? { tree: snapshot, headers: workspaceHeaders, result: workspaceResult, resultSignature: reviewMetadata.get(tree)?.signature }
         : null,
     );
   } catch {
@@ -5413,7 +5415,6 @@ function wireEvents() {
     }
     cancelActiveAnalysisRun();
     tree = saved.tree;
-    analysisGameTree = tree;
     workspaceHeaders = saved.headers;
     workspaceResult = saved.result;
     reviewMetadata.set(tree, { tags: workspaceHeaders, result: workspaceResult, signature: reviewSignature() });
