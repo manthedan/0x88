@@ -25,8 +25,17 @@ function f16Bytes(count, bitsAt) {
  * the current scope, detachFromCurrentScope() throwing for unknown objects, and
  * GPU->CPU copies that only land in the CPU tensor at device.sync().
  */
-function fakeRuntime(batch, { syncGate } = {}) {
-  const state = { live: new Set(), scopes: [], invokes: 0, writeAfterFree: 0, runtimeDisposed: 0, deviceDestroyed: 0, pendingCopies: [] };
+function fakeRuntime(batch, { syncGate, failCopyAt } = {}) {
+  const state = {
+    live: new Set(),
+    scopes: [],
+    invokes: 0,
+    writeAfterFree: 0,
+    disposedBeforeReadback: 0,
+    runtimeDisposed: 0,
+    deviceDestroyed: 0,
+    pendingCopies: [],
+  };
   const attach = (obj) => {
     if (!state.scopes.length) throw new Error('Must call beginScope to use functions that returns TVM objects');
     state.scopes.at(-1).push(obj);
@@ -36,6 +45,7 @@ function fakeRuntime(batch, { syncGate } = {}) {
     obj.disposed = false;
     state.live.add(obj);
     obj.dispose = () => {
+      if (obj.readbackPending) state.disposedBeforeReadback += 1;
       obj.disposed = true;
       state.live.delete(obj);
     };
@@ -47,6 +57,7 @@ function fakeRuntime(batch, { syncGate } = {}) {
       for (const copy of state.pendingCopies.splice(0)) copy();
     },
   };
+  let copies = 0;
   const tensor = (shape, dtype, bytes) => {
     const t = track({ shape, dtype, bytes, device });
     t.copyFromRawBytes = (raw) => {
@@ -55,9 +66,12 @@ function fakeRuntime(batch, { syncGate } = {}) {
     };
     t.copyFrom = (source) => {
       assert.equal(source.disposed, false, 'copy from a disposed tensor');
+      if (++copies === failCopyAt) throw new Error('copy enqueue failed');
+      t.readbackPending = true;
       state.pendingCopies.push(() => {
         if (t.disposed) state.writeAfterFree += 1;
         else t.bytes = source.bytes.slice();
+        t.readbackPending = false;
       });
     };
     t.toRawBytes = () => {
@@ -171,16 +185,44 @@ test('whole-model evaluator keeps concurrent evaluations independent of each oth
   assert.equal(state.scopes.length, 1);
 });
 
-test('whole-model evaluator releases the batch when readback fails', async () => {
+test('whole-model evaluator drains submitted batches before rejecting a later invalid FEN', async () => {
+  const { evaluator, state } = createEvaluator(4, { syncGate: () => new Promise((resolve) => setTimeout(resolve, 0)) });
+  const baseline = state.live.size;
+  await assert.rejects(evaluator.evaluateBatchSequence([FENS, ['invalid FEN']]), /FEN/);
+  assert.equal(state.disposedBeforeReadback, 0, 'staging allocations must remain live until deferred writes finish');
+  assert.equal(state.pendingCopies.length, 0, 'readbacks settle even when submission throws');
+  assert.equal(state.writeAfterFree, 0);
+  assert.equal(state.live.size, baseline);
+  assertDecoded(await evaluator.evaluateBatch(FENS), 4);
+});
+
+test('whole-model evaluator drains partial staging copies when enqueueing throws', async () => {
+  for (const sequence of [false, true]) {
+    const { evaluator, state } = createEvaluator(4, { failCopyAt: 2 });
+    const baseline = state.live.size;
+    await assert.rejects(sequence ? evaluator.evaluateBatchSequence([FENS]) : evaluator.evaluateBatch(FENS), /copy enqueue failed/);
+    assert.equal(state.disposedBeforeReadback, 0);
+    assert.equal(state.writeAfterFree, 0);
+    assert.equal(state.pendingCopies.length, 0);
+    assert.equal(state.live.size, baseline);
+  }
+});
+
+test('whole-model evaluator retains destinations if draining readbacks fails', async () => {
   const { evaluator, state } = createEvaluator(4, {
     syncGate: async () => {
       throw new Error('device lost');
     },
   });
-  const baseline = state.live.size;
   await assert.rejects(evaluator.evaluateBatch(FENS), /device lost/);
   await assert.rejects(evaluator.evaluateBatchSequence([FENS, FENS]), /device lost/);
-  assert.equal(state.live.size, baseline);
+  await assert.rejects(evaluator.evaluateBatchSequence([FENS, ['invalid FEN']]), /device lost/);
+  assert.equal(state.disposedBeforeReadback, 0);
+  evaluator.dispose();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.runtimeDisposed, 0, 'pending WASM destinations must outlive the runtime too');
+  for (const copy of state.pendingCopies.splice(0)) copy();
+  assert.equal(state.writeAfterFree, 0);
   assert.equal(state.scopes.length, 1);
 });
 
