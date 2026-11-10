@@ -133,11 +133,11 @@ async function tensorDataTimed(
   timingKey: string,
   timing: Record<string, number>,
 ): Promise<number[] | Float32Array> {
-  const tensor = outputs[name] as (ort.Tensor & { location?: string; getData?: () => Promise<unknown> }) | undefined;
+  const tensor = outputs[name];
   if (!tensor) throw new Error(`LC0 ONNX output ${name} missing`);
   const started = ort.tinyLeelaNowMs();
   try {
-    const rawData = tensor.location === 'gpu-buffer' && typeof tensor.getData === 'function' ? await tensor.getData() : tensor.data;
+    const rawData = await ort.ortTensorData(tensor);
     return coerceTensorData(tensor, rawData);
   } finally {
     timing[`${timingKey}GetDataMs`] = ort.tinyLeelaNowMs() - started;
@@ -570,11 +570,18 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     const allGetDataStarted = ort.tinyLeelaNowMs();
     // Older/smaller nets (e.g. Maia) have no moves-left head; treat MLH as 0.
     const hasMlh = LC0_ONNX_OUTPUT_MLH in outputs;
-    const [policy, wdlRaw, mlhRaw] = await Promise.all([
-      tensorDataTimed(outputs, LC0_ONNX_OUTPUT_POLICY, 'ortPolicy', downloadTiming),
-      tensorDataTimed(outputs, LC0_ONNX_OUTPUT_WDL, 'ortWdl', downloadTiming),
-      hasMlh ? tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming) : Promise.resolve(undefined),
-    ]);
+    let policy: number[] | Float32Array;
+    let wdlRaw: number[] | Float32Array;
+    let mlhRaw: number[] | Float32Array | undefined;
+    try {
+      [policy, wdlRaw, mlhRaw] = await Promise.all([
+        tensorDataTimed(outputs, LC0_ONNX_OUTPUT_POLICY, 'ortPolicy', downloadTiming),
+        tensorDataTimed(outputs, LC0_ONNX_OUTPUT_WDL, 'ortWdl', downloadTiming),
+        hasMlh ? tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming) : Promise.resolve(undefined),
+      ]);
+    } finally {
+      ort.releaseOrtGpuOutputs(outputs);
+    }
     const allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     await ort.waitForOrtWebGpuDiagnostics();
     const postprocessStarted = ort.tinyLeelaNowMs();

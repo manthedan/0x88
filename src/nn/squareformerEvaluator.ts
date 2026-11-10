@@ -1024,9 +1024,12 @@ export class SquareFormerEvaluator implements Evaluator {
     const tLegal = ort.tinyLeelaNowMs();
     const fetches = selectedSquareformerOutputs(this.session);
     const tRun0 = ort.tinyLeelaNowMs();
-    const outputs = await this.runExclusive(() => {
+    const outputs = await this.runExclusive(async () => {
       if (this.destroyed) throw new Error('SquareFormer evaluator is destroyed');
-      return fetches ? this.session.run(feeds, fetches) : this.session.run(feeds);
+      const result = fetches ? await this.session.run(feeds, fetches) : await this.session.run(feeds);
+      // GPU-located outputs (?ortGpuOutputs) are read before the session can be released.
+      await ort.downloadOrtOutputs(result);
+      return result;
     });
     const tRun1 = ort.tinyLeelaNowMs();
     const policyRaw = requiredFloatOutput(outputs, 'policy');

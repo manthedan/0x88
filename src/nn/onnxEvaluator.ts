@@ -391,6 +391,7 @@ export class OnnxEvaluator implements Evaluator {
       const tLegal = ort.tinyLeelaNowMs();
       const tRun0 = ort.tinyLeelaNowMs();
       const outputs = await this.session.run(feeds);
+      await ort.downloadOrtOutputs(outputs);
       const tRun1 = ort.tinyLeelaNowMs();
       const policyRaw = requiredFloatOutput(outputs, 'policy_logits_legal');
       const wdlRaw = requiredFloatOutput(outputs, 'wdl_logits');
@@ -464,6 +465,7 @@ export class OnnxEvaluator implements Evaluator {
     const tLegal = ort.tinyLeelaNowMs();
     const tRun0 = ort.tinyLeelaNowMs();
     const outputs = await this.session.run(feeds);
+    await ort.downloadOrtOutputs(outputs);
     const tRun1 = ort.tinyLeelaNowMs();
     const policyRaw = requiredFloatOutput(outputs, 'policy_logits');
     const wdlRaw = requiredFloatOutput(outputs, 'wdl_logits');
