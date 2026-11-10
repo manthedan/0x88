@@ -83,6 +83,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
   <div class="wrap">
     <p class="eyebrow"><span></span> Engines</p>
     <h2 id="engines-h">{engineCount} engines, plus human-style opponents</h2>
+    <p class="thanks">Built with open-source engines and networks. Thanks to their authors. <a href="/docs/#licenses">Licenses and source <span aria-hidden="true">→</span></a></p>
     <div class="kinds">
       <a class="kind" href="/app/analysis/">
         <h3>Neural networks</h3>
@@ -106,7 +107,6 @@ $: readiness = capsFailed ? 'Device check unavailable'
         <span class="kind-go">Play a game <span aria-hidden="true">→</span></span>
       </a>
     </div>
-    <p class="credits">Built with open-source engines and networks. Thanks to their authors. <a href="/docs/#licenses">Licenses and source</a></p>
   </div>
 </section>
 
@@ -207,7 +207,11 @@ $: readiness = capsFailed ? 'Device check unavailable'
 
   .engines .wrap{padding-top:56px; padding-bottom:52px}
   .engines .eyebrow{margin:0 0 10px}
-  .engines h2{margin:0 0 26px; font-size:clamp(28px,3.4vw,38px); line-height:1.1; letter-spacing:-.02em}
+  .engines h2{margin:0; font-size:clamp(28px,3.4vw,38px); line-height:1.1; letter-spacing:-.02em}
+  .thanks{margin:12px 0 26px; color:var(--ink-soft); font-size:17px; line-height:1.55}
+  .thanks a{color:var(--ink); font-weight:650; white-space:nowrap; text-decoration:none}
+  .thanks a:hover{text-decoration:underline; text-underline-offset:3px}
+  .thanks a span{color:var(--accent); margin-left:3px}
   .kinds{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px}
   .kind{display:grid; grid-template-columns:1fr auto; align-content:start; gap:8px 12px; padding:18px; border:1px solid var(--rule-strong); border-radius:12px; color:inherit; text-decoration:none}
   .kind:hover{background:var(--panel); text-decoration:none}
@@ -217,9 +221,6 @@ $: readiness = capsFailed ? 'Device check unavailable'
   .kind p.kind-eg{color:var(--ink-soft); font-size:13px}
   .kind-go{grid-column:1 / -1; margin-top:4px; color:var(--ink); font-size:13px; font-weight:650}
   .kind-go span{color:var(--accent); margin-left:3px}
-  .credits{margin:18px 0 0; color:var(--muted); font-size:13px; line-height:1.6}
-  .credits a{color:inherit; text-decoration:underline; text-decoration-color:var(--rule-strong); text-underline-offset:3px}
-  .credits a:hover{color:var(--ink)}
   @media (max-width:760px){
     .engines .wrap{padding:44px 16px 40px}
     .kinds{grid-template-columns:1fr; gap:10px}
