@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { moveFromUci } from '../src/chess/moveCodec.ts';
 import {
@@ -15,6 +15,7 @@ import {
   transformPolicyUci,
   uciToLc0PolicyIndex,
 } from '../src/lc0/policyMap.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const LC0_ENCODER_SOURCE = new URL('../../repos/lc0/src/neural/encoder.cc', import.meta.url);
 
@@ -26,7 +27,7 @@ function lc0SourceMoveStrings() {
 }
 
 test('LC0 generated policy table matches encoder.cc kMoveStrs', {
-  skip: !existsSync(LC0_ENCODER_SOURCE) ? 'missing external LC0 source checkout' : false,
+  skip: skipUnlessAssets(LC0_ENCODER_SOURCE),
 }, () => {
   assert.equal(LC0_POLICY_MAP, 'lc0_1858_from_encoder_cc');
   assert.equal(LC0_POLICY_SIZE, 1858);

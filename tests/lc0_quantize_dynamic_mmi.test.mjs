@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createOrtSession, setRequestedOrtExecutionProviderForCurrentThread, Tensor } from '../src/nn/ortRuntime.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const python = resolve(root, '.venv-onnx/bin/python');
@@ -15,8 +16,9 @@ function run(args) {
 }
 
 test('dynamic MatMulInteger transformer emits an executable integer graph', async (t) => {
-  if (!existsSync(python)) {
-    t.skip('project ONNX virtual environment is unavailable');
+  const missingVenv = skipUnlessAssets(python);
+  if (missingVenv) {
+    t.skip(missingVenv);
     return;
   }
   const dependencyCheck = run(['-c', 'import numpy, onnx']);
@@ -97,8 +99,9 @@ test('dynamic MatMulInteger transformer emits an executable integer graph', asyn
 });
 
 test('dynamic MatMulInteger transformer can retain smolgen MatMuls in f32', (t) => {
-  if (!existsSync(python)) {
-    t.skip('project ONNX virtual environment is unavailable');
+  const missingVenv = skipUnlessAssets(python);
+  if (missingVenv) {
+    t.skip(missingVenv);
     return;
   }
   const dependencyCheck = run(['-c', 'import numpy, onnx']);

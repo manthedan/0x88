@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { Lc0PolicyOnlyPlayer } from '../src/lc0/policyOnlyPlayer.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const NATIVE_PRIORS = 'fixtures/lc0/native_fen_only_blas.jsonl';
@@ -47,7 +48,7 @@ test('LC0 policy-only player returns evaluator argmax without search', async () 
 });
 
 test('LC0 policy-only player matches native BLAS fixture best moves', {
-  skip: (!existsSync(MODEL) || !existsSync(NATIVE_PRIORS)) && 'missing model or native prior artifact',
+  skip: skipUnlessAssets(MODEL, NATIVE_PRIORS),
 }, async () => {
   const nativeRecords = readFileSync(NATIVE_PRIORS, 'utf8')
     .trim()

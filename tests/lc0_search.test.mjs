@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
 import { Lc0PuctSearcher, Lc0SearchEvaluator } from '../src/lc0/search.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const NATIVE_FEN_SEARCH = 'fixtures/lc0/native_search_fen_only_blas_nodes32.jsonl';
@@ -378,7 +379,7 @@ test('LC0 search honors a signal aborted mid-flight and stops early', async () =
 });
 
 test('LC0 fixed-visit PUCT matches native BLAS nodes32 fixture best moves', {
-  skip: (!existsSync(MODEL) || !existsSync(NATIVE_FEN_SEARCH) || !existsSync(NATIVE_HISTORY_SEARCH)) && 'missing model or native search artifacts',
+  skip: skipUnlessAssets(MODEL, NATIVE_FEN_SEARCH, NATIVE_HISTORY_SEARCH),
 }, async () => {
   const searcher = await Lc0PuctSearcher.create(readFileSync(MODEL));
   const records = [...readJsonl(NATIVE_FEN_SEARCH), ...readJsonl(NATIVE_HISTORY_SEARCH)];
@@ -399,9 +400,8 @@ test('LC0 fixed-visit PUCT matches native BLAS nodes32 fixture best moves', {
 });
 
 for (const { visits, files } of HIGHER_VISIT_SUITES) {
-  const present = existsSync(MODEL) && files.every(existsSync);
   test(`LC0 fixed-visit PUCT matches native BLAS nodes${visits} fixture best moves`, {
-    skip: !present && `missing model or native nodes${visits} artifacts`,
+    skip: skipUnlessAssets(MODEL, ...files),
   }, async () => {
     const searcher = await Lc0PuctSearcher.create(readFileSync(MODEL));
     const records = files.flatMap(readJsonl);

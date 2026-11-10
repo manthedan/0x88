@@ -18,6 +18,8 @@ const COMMITTED_CHANNEL_URL = new URL('../public/channels/stable.json', import.m
 export const REQUIRED_ASSETS = Object.freeze([
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx',
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx',
+  // tests/onnx_dequant_fold.test.mjs: the shipped default Play model.
+  '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx',
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch4.f16.onnx',
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.onnx',
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json',

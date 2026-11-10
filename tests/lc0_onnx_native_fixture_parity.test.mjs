@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const NATIVE_PRIORS = 'fixtures/lc0/native_fen_only_blas.jsonl';
@@ -22,7 +23,7 @@ function nativeCastlingToStandard(uci) {
 }
 
 test('LC0 f32 ONNX evaluator matches native BLAS/Eigen FEN-only fixture priors', {
-  skip: (!existsSync(MODEL) || !existsSync(NATIVE_PRIORS)) && 'missing model or native prior artifact',
+  skip: skipUnlessAssets(MODEL, NATIVE_PRIORS),
 }, async () => {
   const nativeRecords = readFileSync(NATIVE_PRIORS, 'utf8')
     .trim()

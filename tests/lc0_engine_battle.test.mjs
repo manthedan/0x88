@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
@@ -8,6 +8,7 @@ import { gameOutcome, lc0PolicyBattleEngine, lc0SearchBattleEngine, playGame, ru
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PolicyOnlyPlayer } from '../src/lc0/policyOnlyPlayer.ts';
 import { Lc0PuctSearcher } from '../src/lc0/search.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const BACK_RANK_MATE = '6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1';
@@ -138,7 +139,7 @@ test('playGame reports a cancelled result when an engine aborts mid-move', async
   assert.equal(result.reason, 'cancelled');
 });
 
-test('LC0 adapters play a finite game from a near-terminal position', { skip: !existsSync(MODEL) && 'missing ONNX model' }, async () => {
+test('LC0 adapters play a finite game from a near-terminal position', { skip: skipUnlessAssets(MODEL) }, async () => {
   const evaluator = await Lc0OnnxEvaluator.create(readFileSync(MODEL));
   const search = lc0SearchBattleEngine(new Lc0PuctSearcher(evaluator), 8);
   const policy = lc0PolicyBattleEngine(new Lc0PolicyOnlyPlayer(evaluator));

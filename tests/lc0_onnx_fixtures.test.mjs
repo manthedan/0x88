@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const fixtures = JSON.parse(readFileSync('fixtures/lc0/fen_only.json', 'utf8'));
@@ -18,7 +19,7 @@ const EXPECTED_BEST = new Map([
   ['rule50-nonzero', 'h1h7'],
 ]);
 
-test('LC0 f32 ONNX evaluator runs every FEN-only fixture with normalized legal priors', { skip: !existsSync(MODEL) && `missing ${MODEL}` }, async () => {
+test('LC0 f32 ONNX evaluator runs every FEN-only fixture with normalized legal priors', { skip: skipUnlessAssets(MODEL) }, async () => {
   const evaluator = await Lc0OnnxEvaluator.create(readFileSync(MODEL));
   for (const fixture of fixtures) {
     const evaluation = await evaluator.evaluate(fixture.fen);

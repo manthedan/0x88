@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const BATCH1 = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx';
 const BATCH4 = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch4.f16.onnx';
@@ -16,10 +17,7 @@ const FENS = [
   'rnbqkbnr/ppp1pppp/8/3p4/2P5/8/PP1PPPPP/RNBQKBNR w KQkq d6 0 2',
 ];
 
-function skipIfMissing(...paths) {
-  const missing = paths.find((path) => !existsSync(path));
-  return missing ? `missing ${missing}` : false;
-}
+const skipIfMissing = skipUnlessAssets;
 
 async function compareBatchArtifact(path, size) {
   const baseline = await Lc0OnnxEvaluator.create(readFileSync(BATCH1));
