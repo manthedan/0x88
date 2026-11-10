@@ -230,7 +230,7 @@ export function checkPlentyChessVariantAsset(variant: PlentyChessVariant, onChan
     onChange?.();
     return Promise.resolve('missing');
   }
-  if (!assetProbeRetryAllowed(assetUrls(variant))) return Promise.resolve('unknown');
+  if (!assetProbeRetryAllowed(assetUrls(variant), onChange)) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
   const promise = probeAssetUrls(assetUrls(variant)).then((status) => {
     assetStatuses.set(key, status);

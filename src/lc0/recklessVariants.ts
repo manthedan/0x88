@@ -222,7 +222,7 @@ export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: (
     return Promise.resolve('missing');
   }
   const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
-  if (!assetProbeRetryAllowed(urls)) return Promise.resolve('unknown');
+  if (!assetProbeRetryAllowed(urls, onChange)) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
   const promise = probeAssetUrls(urls).then((status) => {
     assetStatuses.set(key, status);

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { probeAssetUrls } from '../src/lc0/assetProbe.ts';
-import { checkBerserkVariantAsset } from '../src/lc0/berserkVariants.ts';
-import { checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
-import { checkPlentyChessVariantAsset } from '../src/lc0/plentychessVariants.ts';
-import { checkRecklessVariantAsset } from '../src/lc0/recklessVariants.ts';
-import { checkStormphraxVariantAsset } from '../src/lc0/stormphraxVariants.ts';
-import { checkViridithasVariantAsset } from '../src/lc0/viridithasVariants.ts';
+import { assetProbeRetryAllowed, probeAssetUrls, subscribeAssetProbeRetry } from '../src/lc0/assetProbe.ts';
+import { berserkVariantAssetStatus, checkBerserkVariantAsset } from '../src/lc0/berserkVariants.ts';
+import { browserVariantOption } from '../src/lc0/browserVariantOption.ts';
+import { bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
+import { checkPlentyChessVariantAsset, plentyChessVariantAssetStatus } from '../src/lc0/plentychessVariants.ts';
+import { checkRecklessVariantAsset, recklessVariantAssetStatus } from '../src/lc0/recklessVariants.ts';
+import { checkStormphraxVariantAsset, stormphraxVariantAssetStatus } from '../src/lc0/stormphraxVariants.ts';
+import { checkViridithasVariantAsset, viridithasVariantAssetStatus } from '../src/lc0/viridithasVariants.ts';
 
 for (const code of [404, 410]) {
   test(`confirmed ${code} resolves missing even when another required HEAD hangs`, async (t) => {
@@ -29,6 +30,7 @@ for (const code of [404, 410]) {
 }
 
 test('shared probe classifies HTTP status, network errors and bounded aborts', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   for (const [status, expected] of [
     [200, 'present'],
     [204, 'present'],
@@ -47,7 +49,9 @@ test('shared probe classifies HTTP status, network errors and bounded aborts', a
   });
   assert.equal(await probeAssetUrls(['/offline']), 'unknown');
   t.mock.method(globalThis, 'fetch', () => new Promise(() => {}));
-  assert.equal(await probeAssetUrls(['/hanging'], { timeoutMs: 5 }), 'unknown', 'even a fetch ignoring abort is bounded');
+  const hanging = probeAssetUrls(['/hanging'], { timeoutMs: 5 });
+  t.mock.timers.tick(5);
+  assert.equal(await hanging, 'unknown', 'even a fetch ignoring abort is bounded');
   assert.equal(await probeAssetUrls(['/aborted'], { signal: AbortSignal.abort() }), 'unknown');
 });
 for (const [name, check, ok] of [
@@ -145,3 +149,113 @@ for (const [name, check] of [
     });
   }
 }
+
+const flush = async () => {
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+};
+
+for (const [name, check, read, ok] of [
+  ['Berserk', checkBerserkVariantAsset, berserkVariantAssetStatus, 'present'],
+  ['PlentyChess', checkPlentyChessVariantAsset, plentyChessVariantAssetStatus, 'present'],
+  ['Reckless', checkRecklessVariantAsset, recklessVariantAssetStatus, 'present'],
+  ['Stormphrax', checkStormphraxVariantAsset, stormphraxVariantAssetStatus, 'present'],
+  ['Viridithas', checkViridithasVariantAsset, viridithasVariantAssetStatus, 'ok'],
+  ['BT4', checkBigNetAsset, bigNetAssetStatusSync, 'present'],
+]) {
+  for (const recover of [true, false]) {
+    test(`${name} render-driven probes ${recover ? 'recover automatically after cooldown' : 'settle missing after three failures'}`, async (t) => {
+      t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+      const variant = {
+        key: 'custom',
+        jsUrl: `/${name}/render-${recover}.js`,
+        wasmUrl: `/${name}/render-${recover}.wasm`,
+        dataUrl: `/${name}/render-${recover}.data`,
+        modelUrl: `/${name}/render-${recover}.onnx`,
+      };
+      let calls = 0;
+      let notifications = 0;
+      let status = 503;
+      t.mock.method(globalThis, 'fetch', async () => {
+        calls++;
+        return new Response(null, { status });
+      });
+      // The pickers render synchronously on each notification and immediately
+      // check again while their cached status is unknown/checking.
+      const render = () => {
+        notifications++;
+        if (['unknown', 'checking'].includes(read(variant))) void check(variant, render);
+      };
+      render();
+      await flush();
+      const firstCalls = calls;
+      const firstNotifications = notifications;
+      assert.ok(firstCalls > 0);
+      if (recover) status = 200;
+      t.mock.timers.tick(999);
+      await flush();
+      assert.equal(calls, firstCalls);
+      assert.equal(notifications, firstNotifications, 'silent during cooldown');
+      t.mock.timers.tick(1);
+      await flush();
+      assert.equal(calls, firstCalls * 2, 'cooldown wakes the render without external activity');
+      if (!recover) {
+        const secondNotifications = notifications;
+        t.mock.timers.tick(1_999);
+        await flush();
+        assert.equal(notifications, secondNotifications);
+        t.mock.timers.tick(1);
+        await flush();
+        assert.equal(calls, firstCalls * 3);
+      }
+      assert.equal(read(variant), recover ? ok : 'missing');
+      if (!recover) {
+        const option = name === 'BT4' ? bigNetOptionState(variant) : browserVariantOption('test', name, { assetStatus: read(variant), requirePresent: true });
+        assert.equal(option.disabled, true);
+        assert.match(option.label ?? option.suffix, /missing|not hosted/);
+      }
+      const settledNotifications = notifications;
+      t.mock.timers.tick(120_000);
+      await flush();
+      assert.equal(calls, firstCalls * (recover ? 2 : 3));
+      assert.equal(notifications, settledNotifications, 'no retry or notification after settling');
+    });
+  }
+}
+
+test('retry notifications share one unref timer and cancel when the last listener leaves', async (t) => {
+  const urls = ['/cancelled-retry.wasm'];
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 503 }));
+  assert.equal(await probeAssetUrls(urls), 'unknown');
+  let unrefs = 0;
+  const handle = { unref: () => unrefs++ };
+  const schedule = t.mock.method(globalThis, 'setTimeout', () => handle);
+  const cancel = t.mock.method(globalThis, 'clearTimeout', () => {});
+  assert.equal(assetProbeRetryAllowed(urls), false);
+  assert.equal(schedule.mock.callCount(), 0, 'no timer without a listener');
+  const listener = () => assert.fail('cancelled listener must not run');
+  const unsubscribe = subscribeAssetProbeRetry(urls, listener);
+  assert.equal(subscribeAssetProbeRetry(urls, listener), unsubscribe, 'deduplicate the same render');
+  const controller = new AbortController();
+  subscribeAssetProbeRetry(urls, () => assert.fail('aborted listener must not run'), controller.signal);
+  assert.equal(schedule.mock.callCount(), 1);
+  assert.equal(unrefs, 1, 'Node timer cannot keep the process alive');
+  unsubscribe();
+  assert.equal(cancel.mock.callCount(), 0, 'another listener still needs the timer');
+  controller.abort();
+  assert.equal(cancel.mock.callCount(), 1, 'cancel timer as soon as no listeners remain');
+  assert.equal(cancel.mock.calls[0].arguments[0], handle);
+});
+
+test('the shared helper keeps exhausted probes missing without more requests', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 503 }));
+  const urls = ['/exhausted-probe.wasm'];
+  assert.equal(await probeAssetUrls(urls), 'unknown');
+  t.mock.timers.tick(1_000);
+  assert.equal(await probeAssetUrls(urls), 'unknown');
+  t.mock.timers.tick(2_000);
+  assert.equal(await probeAssetUrls(urls), 'missing');
+  t.mock.timers.tick(120_000);
+  assert.equal(await probeAssetUrls(urls), 'missing');
+  assert.equal(fetch.mock.callCount(), 3);
+});

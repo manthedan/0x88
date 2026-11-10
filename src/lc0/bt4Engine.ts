@@ -227,7 +227,7 @@ export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?
     onStatus?.();
     return 'missing';
   }
-  if (!assetProbeRetryAllowed([config.modelUrl])) return 'unknown';
+  if (!assetProbeRetryAllowed([config.modelUrl], onStatus)) return 'unknown';
   const probe = probeAssetUrls([config.modelUrl]).then((status) => {
     assetStatuses.set(config.modelUrl, status);
     assetProbes.delete(config.modelUrl);

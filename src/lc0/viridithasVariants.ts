@@ -130,7 +130,7 @@ export function checkViridithasVariantAsset(variant: ViridithasVariant, onChange
     onChange?.();
     return Promise.resolve(variant.assetStatus);
   }
-  if (!assetProbeRetryAllowed([variant.wasmUrl])) return Promise.resolve('unknown');
+  if (!assetProbeRetryAllowed([variant.wasmUrl], onChange)) return Promise.resolve('unknown');
   variant.assetStatus = 'checking';
   const promise = probeAssetUrls([variant.wasmUrl])
     .then((status): ViridithasAssetStatus => (status === 'present' ? 'ok' : status))
