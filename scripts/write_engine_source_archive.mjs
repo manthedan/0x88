@@ -174,7 +174,8 @@ const CONFIGS = {
         name: 'sandhi-s2-b200.nnue.zst',
         sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v109/sandhi-s2-b200.nnue.zst',
         rawSha256: '066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585',
-        licenseNote: 'sandhi-s2-b200.nnue.zst is CC0-1.0 (cosmobobak/viridithas-networks LICENSE at 1040c3ee, 2026-06-08, before the v109 release). The engine source is MIT.',
+        licenseNote:
+          'sandhi-s2-b200.nnue.zst is CC0-1.0 (cosmobobak/viridithas-networks LICENSE at 1040c3ee, 2026-06-08, before the v109 release). The engine source is MIT.',
       },
     ],
     envPrefix: 'VIRIDITHAS',
@@ -191,9 +192,15 @@ const CONFIGS = {
     output: stockfishSourceArchive,
     buildScript: 'scripts/build_stockfish_relaxed_simd.mjs',
     smokeScript: 'scripts/uci_stockfish_js_wrapper.mjs',
-    adapterFiles: ['src/lc0/stockfishEngine.ts', 'src/lc0/stockfishPthreadBootstrap.js',
-      'src/lc0/wasmFeatures.ts', 'src/lc0/assetUrls.ts', 'src/lc0/browserUciEngine.ts',
-      'src/lc0/engineCatalog.ts', 'src/chess/board.ts'],
+    adapterFiles: [
+      'src/lc0/stockfishEngine.ts',
+      'src/lc0/stockfishPthreadBootstrap.js',
+      'src/lc0/wasmFeatures.ts',
+      'src/lc0/assetUrls.ts',
+      'src/lc0/browserUciEngine.ts',
+      'src/lc0/engineCatalog.ts',
+      'src/chess/board.ts',
+    ],
     docs: [
       'docs/engine_artifact_distribution.md',
       'docs/engine_catalog.md',
@@ -374,19 +381,21 @@ async function writeArchiveDocs(config, archiveRoot) {
     assets: config.assets.map((asset) => asset.name),
   };
   await writeFile(join(archiveRoot, 'SOURCE_ARCHIVE.json'), `${JSON.stringify(meta, null, 2)}\n`);
-  const patchNote = config.engine === 'stockfish'
-    ? 'The relaxed builder enables the upstream relaxed-dot gate, adds its audited operand-range comment and supports the O2/O3 × LTO matrix. SF19 supplies the stack and pthread bootstrap fixes upstream. The native-audit patch only repairs a pointer typo in the non-WASM CLI.'
-    : config.patch
-    ? `The build script applies ${config.patch} to the upstream snapshot in ${config.sourcePrefix}.`
-    : `No local source patch is applied; the deployed artifacts come from the pinned upstream/package source in ${config.sourcePrefix}.`;
+  const patchNote =
+    config.engine === 'stockfish'
+      ? 'The relaxed builder enables the upstream relaxed-dot gate, adds its audited operand-range comment and supports the O2/O3 × LTO matrix. SF19 supplies the stack and pthread bootstrap fixes upstream. The native-audit patch only repairs a pointer typo in the non-WASM CLI.'
+      : config.patch
+        ? `The build script applies ${config.patch} to the upstream snapshot in ${config.sourcePrefix}.`
+        : `No local source patch is applied; the deployed artifacts come from the pinned upstream/package source in ${config.sourcePrefix}.`;
   // PlentyChess's builder/smoke use only Node built-ins, and Stockfish builds in
   // pinned Docker; npm ci would invoke the application's Svelte prepare script
   // in this deliberately partial tree.
-  const setup = config.engine === 'stockfish'
-    ? 'Install Node.js and Docker. The pinned Docker image supplies Emscripten and Node; the --no-minify builder needs no host npm dependencies. Do not run npm ci in this source subset (it is not a complete Svelte application).'
-    : config.engine === 'plentychess'
-      ? 'Install Node, Emscripten, a native C++ compiler, make, curl and git (no npm dependencies are needed for the engine build), then run:'
-      : 'Install Node dependencies and the documented upstream toolchain, then run:';
+  const setup =
+    config.engine === 'stockfish'
+      ? 'Install Node.js and Docker. The pinned Docker image supplies Emscripten and Node; the --no-minify builder needs no host npm dependencies. Do not run npm ci in this source subset (it is not a complete Svelte application).'
+      : config.engine === 'plentychess'
+        ? 'Install Node, Emscripten, a native C++ compiler, make, curl and git (no npm dependencies are needed for the engine build), then run:'
+        : 'Install Node dependencies and the documented upstream toolchain, then run:';
   const install = config.engine === 'stockfish' || config.engine === 'plentychess' ? '' : 'npm ci\n';
   await writeFile(
     join(archiveRoot, 'BUILDING.md'),

@@ -46,9 +46,11 @@ export interface ArrowLayout {
  * svg.js at build time, so it must stay self-contained: no imports and no module-level references.
  */
 export function arrowLayout(from: [number, number], to: [number, number], shorten: boolean, g: ArrowGeometry): ArrowLayout {
-  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const dx = to[0] - from[0],
+    dy = to[1] - from[1];
   const length = Math.hypot(dx, dy) || 1;
-  const ux = dx / length, uy = dy / length;
+  const ux = dx / length,
+    uy = dy / length;
   const tipAt = length - (shorten ? g.shortenBy : 0);
   const shaftEnd = tipAt - g.headLength + g.overlap;
   // Keep a visible shaft on one-square moves to a shortened (shared) target.

@@ -1,9 +1,9 @@
-import { type Color, boardToFen } from '../chess/board.ts';
+import { boardToFen, type Color } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
-import { gameOutcome, type GameResultCode } from './engineBattle.ts';
-import { GameTree, type GameNode } from './gameTree.ts';
-import { normalizePlayPreferences, type PlayPreferences } from './playPreferences.ts';
+import { type GameResultCode, gameOutcome } from './engineBattle.ts';
+import { type GameNode, GameTree } from './gameTree.ts';
 import { type PlayPosition, replayPlayPosition } from './playPosition.ts';
+import { normalizePlayPreferences, type PlayPreferences } from './playPreferences.ts';
 
 export const WORKSPACE_VERSION = 1;
 export const WORKSPACE_MAX_CHARS = 1_000_000;
@@ -101,7 +101,14 @@ export function restoreTree(value: unknown): GameTree {
 function decodeEnvelope(raw: string, kind: WorkspaceKind): Record<string, unknown> {
   if (raw.length > WORKSPACE_MAX_CHARS) throw new Error('Snapshot too large');
   const envelope = object(JSON.parse(raw));
-  if (envelope.kind !== kind || envelope.version !== WORKSPACE_VERSION || typeof envelope.savedAt !== 'number' || !Number.isFinite(envelope.savedAt) || envelope.savedAt < 0) throw new Error('Invalid snapshot version');
+  if (
+    envelope.kind !== kind ||
+    envelope.version !== WORKSPACE_VERSION ||
+    typeof envelope.savedAt !== 'number' ||
+    !Number.isFinite(envelope.savedAt) ||
+    envelope.savedAt < 0
+  )
+    throw new Error('Invalid snapshot version');
   return object(envelope.data);
 }
 
@@ -158,7 +165,8 @@ export function decodePlaySnapshot(raw: string, validEngineIds: ReadonlySet<stri
       const replayed = replayPlayPosition(practice);
       const moves = replayed.moves.map(moveToUci);
       const savedMoves = data.moves;
-      if (replayed.startFen !== tree.root.fen || moves.length !== boundary || moves.some((move, i) => move !== savedMoves[i])) throw new Error('Invalid practice position');
+      if (replayed.startFen !== tree.root.fen || moves.length !== boundary || moves.some((move, i) => move !== savedMoves[i]))
+        throw new Error('Invalid practice position');
       practicePosition = { startFen: replayed.startFen, moves };
     }
     return {
@@ -181,7 +189,11 @@ export function decodePlaySnapshot(raw: string, validEngineIds: ReadonlySet<stri
 }
 
 export function workspaceStorage(): WorkspaceStorage | undefined {
-  try { return globalThis.localStorage; } catch { return undefined; }
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 export function readWorkspace<T>(kind: WorkspaceKind, decode: (raw: string) => T | null, storage = workspaceStorage()): T | null {
@@ -191,7 +203,9 @@ export function readWorkspace<T>(kind: WorkspaceKind, decode: (raw: string) => T
     const restored = decode(raw);
     if (!restored) storage?.removeItem(workspaceStorageKey(kind));
     return restored;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** Recognize game inputs, not runtime/debug options or ordinary anchors. Never consume a handoff here. */
@@ -206,7 +220,13 @@ export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspace
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: string | undefined;
   let last: string | undefined;
-  const remove = () => { try { storage?.removeItem(workspaceStorageKey(kind)); } catch { /* Storage denied. */ } };
+  const remove = () => {
+    try {
+      storage?.removeItem(workspaceStorageKey(kind));
+    } catch {
+      /* Storage denied. */
+    }
+  };
   const flush = () => {
     clearTimeout(timer);
     timer = undefined;
@@ -230,7 +250,10 @@ export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspace
   };
   return {
     schedule(data: AnalysisSnapshot | PlaySnapshot | null) {
-      if (data === null) { clear(); return; }
+      if (data === null) {
+        clear();
+        return;
+      }
       try {
         const json = JSON.stringify(data);
         if (json === last) return;
@@ -238,7 +261,9 @@ export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspace
         pending = json;
         clearTimeout(timer);
         timer = setTimeout(flush, delay);
-      } catch { clear(); }
+      } catch {
+        clear();
+      }
     },
     clear,
     flush,

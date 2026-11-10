@@ -25,9 +25,7 @@
       {
         "fixture": "startpos",
         "move": "d2d4",
-        "pv": [
-          "d2d4"
-        ],
+        "pv": ["d2d4"],
         "visits": 16
       }
     ],

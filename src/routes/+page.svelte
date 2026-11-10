@@ -1,13 +1,14 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
-import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import { footerNav } from '$lib/nav';
 import { engineFamilyOptions } from '../lc0/engineCatalog.ts';
 
 const title = '0x88 | Browser chess engine workbench';
-const description = 'Run Lc0, Stockfish and other chess engines in a browser tab. Compare them on one position, play human-style opponents and run tournaments. Computation stays on your device.';
+const description =
+  'Run Lc0, Stockfish and other chess engines in a browser tab. Compare them on one position, play human-style opponents and run tournaments. Computation stays on your device.';
 const github = 'https://github.com/manthedan/0x88';
 const engineCount = engineFamilyOptions().length;
 
@@ -27,18 +28,27 @@ function summarize(report: BrowserCapabilityReport | null, failed: boolean): Dev
   if (failed) return { tone: 'warn', headline: 'Could not check this browser.', detail: 'Each engine picks a fallback runtime when it loads.' };
   if (!report) return { tone: 'neutral', headline: 'Checking this browser…', detail: 'Looking for WebGPU, WebAssembly SIMD and threads.' };
   if (!report.wasm) return { tone: 'warn', headline: 'This browser cannot run the engines.', detail: 'WebAssembly is unavailable.' };
-  if (report.webgpu === true) return { tone: 'ok', headline: 'This device runs Lc0 on WebGPU.', detail: 'Neural engines use the GPU; CPU engines run as WebAssembly.' };
+  if (report.webgpu === true)
+    return { tone: 'ok', headline: 'This device runs Lc0 on WebGPU.', detail: 'Neural engines use the GPU; CPU engines run as WebAssembly.' };
   if (report.webgpu === null)
     return { tone: 'warn', headline: 'WebGPU did not answer.', detail: 'Neural engines fall back to WebAssembly if the GPU stays unavailable.' };
-  return { tone: 'warn', headline: 'No WebGPU in this browser.', detail: 'Neural engines fall back to WebAssembly and run slower. CPU engines are unaffected.' };
+  return {
+    tone: 'warn',
+    headline: 'No WebGPU in this browser.',
+    detail: 'Neural engines fall back to WebAssembly and run slower. CPU engines are unaffected.',
+  };
 }
 
 $: summary = summarize(caps, capsFailed);
-$: readiness = capsFailed ? 'Device check unavailable'
-  : !caps ? 'Checking this device…'
-  : !caps.wasm ? 'WebAssembly unavailable'
-  : caps.webgpu === true ? `WebGPU ready · ${caps.threadedWasm ? `${caps.threads} threads` : 'single-thread'}`
-  : `WebGPU ${caps.webgpu === null ? 'unknown' : 'unavailable'} · WASM fallback`;
+$: readiness = capsFailed
+  ? 'Device check unavailable'
+  : !caps
+    ? 'Checking this device…'
+    : !caps.wasm
+      ? 'WebAssembly unavailable'
+      : caps.webgpu === true
+        ? `WebGPU ready · ${caps.threadedWasm ? `${caps.threads} threads` : 'single-thread'}`
+        : `WebGPU ${caps.webgpu === null ? 'unknown' : 'unavailable'} · WASM fallback`;
 </script>
 
 <svelte:head>

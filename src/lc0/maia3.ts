@@ -367,7 +367,10 @@ export class Maia3BrowserEvaluator {
       worker.addEventListener('error', onError);
       worker.addEventListener('messageerror', onMessageError);
       signal?.addEventListener('abort', onAbort, { once: true });
-      if (signal?.aborted) { onAbort(); return; }
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
       if (typeof model === 'string') worker.postMessage({ type: 'init', id, model, ep, wasmThreads });
       else worker.postMessage({ type: 'init', id, model, ep, wasmThreads }, [model]);
     });

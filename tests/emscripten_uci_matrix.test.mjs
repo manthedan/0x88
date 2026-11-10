@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { ROTATED_FEN_SUITE, exactSearch, median, parseInfo, roundOrder, runSuite, summarizeCell } from '../scripts/emscripten_uci_protocol.mjs';
+import { exactSearch, median, parseInfo, ROTATED_FEN_SUITE, roundOrder, runSuite, summarizeCell } from '../scripts/emscripten_uci_protocol.mjs';
 import { summarizeMatrix } from '../scripts/summarize_emscripten_uci_matrix.mjs';
 
 test('shared rotated suite has all 20 original positions', () => {
@@ -46,15 +46,17 @@ test('even-sized matrices counterbalance A/B and give every artifact every slot'
 test('protocol pins hash and threads, resets before each search, excludes warmup', () => {
   const stdout = [];
   const commands = [];
-  const module = { ccall(name, ret, types, [command]) {
-    commands.push(command);
-    if (command === 'uci') stdout.push('uciok');
-    if (command === 'isready') stdout.push('readyok');
-    if (command.startsWith('go depth ')) {
-      stdout.push(`info depth ${command.split(' ').at(-1)} score cp 1 nodes 100 nps 10000 time 10 pv e2e4`);
-      stdout.push('bestmove e2e4');
-    }
-  } };
+  const module = {
+    ccall(name, ret, types, [command]) {
+      commands.push(command);
+      if (command === 'uci') stdout.push('uciok');
+      if (command === 'isready') stdout.push('readyok');
+      if (command.startsWith('go depth ')) {
+        stdout.push(`info depth ${command.split(' ').at(-1)} score cp 1 nodes 100 nps 10000 time 10 pv e2e4`);
+        stdout.push('bestmove e2e4');
+      }
+    },
+  };
   const rows = runSuite(module, stdout, { depth: 11, hash: 16, positions: 20 });
   assert.equal(rows.length, 20);
   assert.equal(commands.filter((c) => c === 'ucinewgame').length, 21);
@@ -66,18 +68,27 @@ test('protocol pins hash and threads, resets before each search, excludes warmup
 
 test('protocol rejects incomplete UCI output', () => {
   const stdout = [];
-  const module = { ccall(name, ret, types, [c]) {
-    if (c === 'uci') stdout.push('uciok');
-    if (c === 'isready') stdout.push('readyok');
-    if (c.startsWith('go')) stdout.push('bestmove e2e4');
-  } };
+  const module = {
+    ccall(name, ret, types, [c]) {
+      if (c === 'uci') stdout.push('uciok');
+      if (c === 'isready') stdout.push('readyok');
+      if (c.startsWith('go')) stdout.push('bestmove e2e4');
+    },
+  };
   assert.throws(() => runSuite(module, stdout, { depth: 11 }), /Incomplete/);
 });
 
 test('report compares matching rounds and does not lose PV-only mismatches', () => {
   const row = { position: 'start', depth: 11, bestmove: 'e2e4', score: 'cp 1', nodes: 100, pv: 'e2e4', timeMs: 10, nps: 10000, wallMs: 10 };
-  const cells = ['current', 'o3'].map((label) => ({ engine: 'berserk', label, round: 0, compileMs: 1, startupMs: 2,
-    rows: [{ ...row, pv: label === 'current' ? 'e2e4' : 'e2e4 e7e5' }], summary: summarizeCell([row]) }));
+  const cells = ['current', 'o3'].map((label) => ({
+    engine: 'berserk',
+    label,
+    round: 0,
+    compileMs: 1,
+    startupMs: 2,
+    rows: [{ ...row, pv: label === 'current' ? 'e2e4' : 'e2e4 e7e5' }],
+    summary: summarizeCell([row]),
+  }));
   const summary = summarizeMatrix({ cells, positions: 1 });
   assert.equal(summary.berserk.o3.exact, 0);
   assert.equal(summary.berserk.o3.mismatches[0].baseline.pv, 'e2e4');

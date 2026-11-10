@@ -1,14 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisChipColor, analysisSpreadText, isEmptyAnalysisGame, looksLikeFen, sharedMarkerPosition, sharedArrowMarkerText, analysisAvailability, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisPvText, analysisShortEngineNames, defaultAnalysisEngineRows, engineMonogram, nextAnalysisEvalSource, sharedArrowMarkerSvg } from '../src/lc0/analysisPresentation.ts';
 import { ANALYSIS_DRAWABLE_BRUSHES } from '../src/lc0/analysisFormat.ts';
+import {
+  analysisAgreementHeadline,
+  analysisArrowCandidates,
+  analysisAvailability,
+  analysisChipColor,
+  analysisConsensus,
+  analysisEngineName,
+  analysisMoveGroups,
+  analysisMoveMarkup,
+  analysisPvText,
+  analysisShortEngineNames,
+  analysisSpreadText,
+  defaultAnalysisEngineRows,
+  engineMonogram,
+  isEmptyAnalysisGame,
+  looksLikeFen,
+  nextAnalysisEvalSource,
+  sharedArrowMarkerSvg,
+  sharedArrowMarkerText,
+  sharedMarkerPosition,
+} from '../src/lc0/analysisPresentation.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 
 const line = (engine, move, san, scoreCp, mateIn) => ({ engine, pvUci: [move], pvSan: san, scoreCp, mateIn, multipv: 1, scoreText: '', detail: '' });
 
 test('first visit and reset compare two small engines without sharing mutable rows', () => {
   const rows = defaultAnalysisEngineRows();
-  assert.deepEqual(rows, [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'sf', variant: 'lite', strength: 12 }]);
+  assert.deepEqual(rows, [
+    { family: 'lc0', variant: 'small', strength: 400 },
+    { family: 'sf', variant: 'lite', strength: 12 },
+  ]);
   rows[0].variant = 'bt4';
   assert.equal(defaultAnalysisEngineRows()[0].variant, 'small');
 });
@@ -20,8 +43,15 @@ test('default arrows show only engine best moves; opt-in alternatives never cove
   const third = { ...line('Lc0', 'g1f3', 'Nf3', 0), multipv: 3 };
   const failed = { ...line('Berserk', 'a2a4', 'a4', 0), error: 'Unavailable' };
   const lines = [alternative, lc0, third, sf, failed];
-  assert.deepEqual(analysisArrowCandidates(lines, false), [{ uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'violet' }]);
-  assert.deepEqual(analysisArrowCandidates(lines, true), [{ uci: 'g1f3', brush: 'paleViolet' }, { uci: 'e2e4', brush: 'blue' }, { uci: 'd2d4', brush: 'violet' }]);
+  assert.deepEqual(analysisArrowCandidates(lines, false), [
+    { uci: 'e2e4', brush: 'blue' },
+    { uci: 'd2d4', brush: 'violet' },
+  ]);
+  assert.deepEqual(analysisArrowCandidates(lines, true), [
+    { uci: 'g1f3', brush: 'paleViolet' },
+    { uci: 'e2e4', brush: 'blue' },
+    { uci: 'd2d4', brush: 'violet' },
+  ]);
   assert.equal(lines[0], alternative, 'rendering does not reorder cached lines');
   assert.ok(Object.values(ANALYSIS_DRAWABLE_BRUSHES).every((brush) => brush.lineWidth === 11));
   // Best-move arrows share the owner's 75% opacity; alternatives stay lighter.
@@ -59,7 +89,10 @@ test('a shared best move is one arrow that names every backing engine colour', (
   const berserk = line('Berserk', 'c3a4', 'Na4', 48);
   const candidates = analysisArrowCandidates([lc0, sf, berserk], false);
   assert.equal(candidates.length, 2);
-  assert.deepEqual(candidates.find((c) => c.uci === 'c3e2'), { uci: 'c3e2', brush: 'violet', shared: ['Lc0', 'SF Lite'] });
+  assert.deepEqual(
+    candidates.find((c) => c.uci === 'c3e2'),
+    { uci: 'c3e2', brush: 'violet', shared: ['Lc0', 'SF Lite'] },
+  );
   assert.equal(candidates.find((c) => c.uci === 'c3a4').shared, undefined);
   const marker = sharedArrowMarkerSvg(['Lc0', 'SF Lite']);
   assert.match(marker, /#6941b8/);
@@ -91,7 +124,11 @@ test('pills stay on board and clear the destination square in both orientations,
   const fen = 'r2q1rk1/3nbppp/p2pbn2/4p1P1/1p2P3/1NN1BP2/PPPQ3P/2KR1B1R w - - 0 13';
   for (const uci of ['c3e2', 'g5f6', 'e4e5', 'a2a3', 'h2h3']) {
     for (const orientation of ['white', 'black']) {
-      for (const engines of [['Lc0', 'PlentyChess'], ['Lc0', 'SF Lite', 'PlentyChess'], ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess']]) {
+      for (const engines of [
+        ['Lc0', 'PlentyChess'],
+        ['Lc0', 'SF Lite', 'PlentyChess'],
+        ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess'],
+      ]) {
         const [x, y] = sharedMarkerPosition(uci, orientation, fen, engines);
         const sign = orientation === 'white' ? 1 : -1;
         const fromX = orientation === 'white' ? uci.charCodeAt(0) - 97 : 104 - uci.charCodeAt(0);
@@ -110,11 +147,15 @@ test('pills stay on board and clear the destination square in both orientations,
 
 test('Analysis monogram fills have at least 4.5:1 contrast with white without changing arrows', () => {
   const luminance = (hex) => {
-    const channels = hex.slice(1).match(/../g).map((x) => parseInt(x, 16) / 255).map((x) => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4);
-    return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+    const channels = hex
+      .slice(1)
+      .match(/../g)
+      .map((x) => parseInt(x, 16) / 255)
+      .map((x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4));
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
   };
   for (const engine of ['Lc0', 'SF Lite', 'Berserk', 'PlentyChess', 'Viridithas', 'Reckless', 'Stormphrax']) {
-    assert.ok(1.05 / (luminance(analysisChipColor(engine)) + .05) >= 4.5, engine);
+    assert.ok(1.05 / (luminance(analysisChipColor(engine)) + 0.05) >= 4.5, engine);
   }
   assert.equal(ANALYSIS_DRAWABLE_BRUSHES.orange.color, '#c45a11');
   assert.equal(ANALYSIS_DRAWABLE_BRUSHES.cyan.color, '#007a87');
@@ -137,7 +178,14 @@ test('callout groups engines by move and states agreement explicitly', () => {
   const berserk = line('Berserk', 'c3a4', 'Na4', 48);
   const plenty = line('PlentyChess', 'g5f6', 'gxf6', 9);
   const groups = analysisMoveGroups([berserk, lc0, sf, plenty]);
-  assert.deepEqual(groups.map((g) => [g.san, g.engines.length]), [['Ne2', 2], ['Na4', 1], ['gxf6', 1]]);
+  assert.deepEqual(
+    groups.map((g) => [g.san, g.engines.length]),
+    [
+      ['Ne2', 2],
+      ['Na4', 1],
+      ['gxf6', 1],
+    ],
+  );
   assert.equal(analysisAgreementHeadline(groups, 4), '2 of 4 engines pick Ne2');
   assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, berserk]), 2), 'Engines split: Ne2 / Na4');
   assert.equal(analysisAgreementHeadline(analysisMoveGroups([lc0, sf]), 2), 'Both engines pick Ne2');
@@ -170,7 +218,10 @@ test('PVs number White and initial Black moves, including the full continuation'
 });
 
 test('comparison describes ties honestly and uses an unsigned spread', () => {
-  assert.equal(analysisConsensus([line('Lc0', 'c3e2', 'Ne2 Nh5', 25), line('SF Lite', 'g5f6', 'gxf6 Qxc3', 36)]), 'Engines disagree: Ne2 / gxf6 · 11 cp spread');
+  assert.equal(
+    analysisConsensus([line('Lc0', 'c3e2', 'Ne2 Nh5', 25), line('SF Lite', 'g5f6', 'gxf6 Qxc3', 36)]),
+    'Engines disagree: Ne2 / gxf6 · 11 cp spread',
+  );
   assert.equal(analysisConsensus([line('A', 'e2e4', 'e4', -20), line('B', 'e2e4', 'e4', 10)]), 'Engines agree: e4 · 30 cp spread');
 });
 
@@ -198,7 +249,9 @@ test('friendly names do not require changing engine/cache identities', () => {
 
 test('history pairs numbered plies with named buttons and exactly one current move', () => {
   const tree = new GameTree();
-  tree.addUci('e2e4'); tree.addUci('e7e5'); tree.addUci('g1f3');
+  tree.addUci('e2e4');
+  tree.addUci('e7e5');
+  tree.addUci('g1f3');
   const html = analysisMoveMarkup(tree.root, tree.current);
   assert.equal((html.match(/class="move-pair"/g) ?? []).length, 2);
   assert.equal((html.match(/data-node=/g) ?? []).length, 3);
@@ -209,9 +262,13 @@ test('history pairs numbered plies with named buttons and exactly one current mo
 
 test('history retains nested variations without duplicating sibling branches', () => {
   const tree = new GameTree();
-  tree.addUci('e2e4'); tree.addUci('e7e5');
-  tree.toStart(); tree.addUci('d2d4'); tree.addUci('d7d5');
-  tree.back(); tree.addUci('g8f6');
+  tree.addUci('e2e4');
+  tree.addUci('e7e5');
+  tree.toStart();
+  tree.addUci('d2d4');
+  tree.addUci('d7d5');
+  tree.back();
+  tree.addUci('g8f6');
   const html = analysisMoveMarkup(tree.root, tree.current);
   assert.equal((html.match(/data-node=/g) ?? []).length, 5);
   assert.equal((html.match(/class="variation"/g) ?? []).length, 2);

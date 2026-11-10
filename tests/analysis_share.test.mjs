@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
-import { GameTree } from '../src/lc0/gameTree.ts';
 import { positionShareUrl } from '../src/lc0/analysisShare.ts';
+import { GameTree } from '../src/lc0/gameTree.ts';
 
 test('position links keep the origin and discard queries, fragments and private engine overrides', () => {
   const url = new URL(positionShareUrl(START_FEN, 'https://example.test/app/analysis/?dev&model=https://private.test/model&fen=old#private-game'));
@@ -38,10 +38,7 @@ test('a copied current position round-trips independently from the game tree', (
 });
 
 test('custom starts retain turn, castling, en passant and counters in a bounded FEN-only URL', () => {
-  for (const fen of [
-    'r3k2r/8/8/3pP3/8/8/8/R3K2R w KQkq d6 0 42',
-    '7k/8/8/8/8/8/p7/7K b - - 17 23',
-  ]) {
+  for (const fen of ['r3k2r/8/8/3pP3/8/8/8/R3K2R w KQkq d6 0 42', '7k/8/8/8/8/8/p7/7K b - - 17 23']) {
     const url = positionShareUrl(fen, 'http://localhost:5198/app/analysis/?dev');
     assert.equal(new URL(url).searchParams.get('fen'), fen);
     assert.ok(url.length < 300);

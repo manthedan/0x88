@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import { statistics, summarizeRun } from '../scripts/summarize_centipawn_subgroups.mjs';
+
 const root = 'lab/centipawn-tvmjs-subgroups-results/';
 const load = (name) => JSON.parse(readFileSync(root + name + '.json'));
 

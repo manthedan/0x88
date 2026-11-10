@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { SquareformerTvmjsWebgpuEvaluator } from '../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import { CENTIPAWN_TVMJS_WEBGPU_V2, promotedTvmjsRuntimeForModel } from '../src/nn/runtimeRegistry.ts';
+import { SquareformerTvmjsWebgpuEvaluator } from '../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
 
 const prefix = '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/';
 const base = {

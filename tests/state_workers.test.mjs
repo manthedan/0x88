@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { START_FEN } from '../src/chess/board.ts';
 import { BT4_NET, Bt4WorkerSearcher } from '../src/lc0/bt4Engine.ts';
 import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
-import { START_FEN } from '../src/chess/board.ts';
 
 class FakeWorker {
   static instances = [];
@@ -10,14 +10,20 @@ class FakeWorker {
   listeners = new Map();
   messages = [];
   terminated = false;
-  constructor() { FakeWorker.instances.push(this); }
+  constructor() {
+    FakeWorker.instances.push(this);
+  }
   addEventListener(type, listener) {
     const listeners = this.listeners.get(type) ?? new Set();
     listeners.add(listener);
     this.listeners.set(type, listeners);
   }
-  removeEventListener(type, listener) { this.listeners.get(type)?.delete(listener); }
-  emit(type, data) { for (const listener of this.listeners.get(type) ?? []) listener(data); }
+  removeEventListener(type, listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+  emit(type, data) {
+    for (const listener of this.listeners.get(type) ?? []) listener(data);
+  }
   postMessage(message) {
     this.messages.push(message);
     if (message.type === 'init' && FakeWorker.autoReady) queueMicrotask(() => this.ready(message.id));
@@ -25,7 +31,9 @@ class FakeWorker {
   ready(id = this.messages.find((message) => message.type === 'init').id) {
     this.emit('message', { data: { type: 'ready', id, backend: 'fake', inputNames: [], outputNames: [] } });
   }
-  terminate() { this.terminated = true; }
+  terminate() {
+    this.terminated = true;
+  }
 }
 
 const drain = () => new Promise(setImmediate);
@@ -33,35 +41,47 @@ async function withBigNet(run) {
   const original = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   const searcher = new Bt4WorkerSearcher(BT4_NET);
-  try { await run(searcher); }
-  finally { searcher.dispose(); globalThis.Worker = original; FakeWorker.autoReady = true; }
+  try {
+    await run(searcher);
+  } finally {
+    searcher.dispose();
+    globalThis.Worker = original;
+    FakeWorker.autoReady = true;
+  }
 }
 function maia(worker, onFailure) {
   // Use the real post-init constructor without fetching models or requiring GPU.
-  return new Maia3BrowserEvaluator(worker, { cacheStatus: 'disabled', model: '/unused' }, 1500, 1500,
-    { inputNames: [], outputNames: [], backend: 'fake' }, onFailure);
+  return new Maia3BrowserEvaluator(
+    worker,
+    { cacheStatus: 'disabled', model: '/unused' },
+    1500,
+    1500,
+    { inputNames: [], outputNames: [], backend: 'fake' },
+    onFailure,
+  );
 }
 
 for (const type of ['error', 'messageerror']) {
-  test(`B02: big-net ${type} invalidates loaded state, settles all requests and permits retry`, () => withBigNet(async (searcher) => {
-    await searcher.init();
-    const worker = FakeWorker.instances.at(-1);
-    const requests = [searcher.evaluate(START_FEN), searcher.evaluate(START_FEN)];
-    const rejected = requests.map((request) => assert.rejects(request, /injected fatal|could not be decoded/));
-    await drain();
-    worker.emit(type, { message: 'injected fatal worker crash' });
-    assert.equal(searcher.loaded, false);
-    assert.equal(searcher.backend, '');
-    assert.equal(worker.terminated, true);
-    await Promise.all(rejected);
-    await searcher.init();
-    const replacement = FakeWorker.instances.at(-1);
-    assert.notEqual(replacement, worker);
-    worker.emit('error', { message: 'late crash' });
-    worker.ready();
-    assert.equal(searcher.loaded, true);
-    assert.equal(replacement.terminated, false);
-  }));
+  test(`B02: big-net ${type} invalidates loaded state, settles all requests and permits retry`, () =>
+    withBigNet(async (searcher) => {
+      await searcher.init();
+      const worker = FakeWorker.instances.at(-1);
+      const requests = [searcher.evaluate(START_FEN), searcher.evaluate(START_FEN)];
+      const rejected = requests.map((request) => assert.rejects(request, /injected fatal|could not be decoded/));
+      await drain();
+      worker.emit(type, { message: 'injected fatal worker crash' });
+      assert.equal(searcher.loaded, false);
+      assert.equal(searcher.backend, '');
+      assert.equal(worker.terminated, true);
+      await Promise.all(rejected);
+      await searcher.init();
+      const replacement = FakeWorker.instances.at(-1);
+      assert.notEqual(replacement, worker);
+      worker.emit('error', { message: 'late crash' });
+      worker.ready();
+      assert.equal(searcher.loaded, true);
+      assert.equal(replacement.terminated, false);
+    }));
 
   test(`B03: Maia runtime ${type} rejects all inference, keeps the failure and terminates once`, async () => {
     const worker = new FakeWorker();
@@ -80,47 +100,52 @@ for (const type of ['error', 'messageerror']) {
     await assert.rejects(evaluator.evaluate(START_FEN), (error) => error === failures[0]);
     await evaluator.dispose();
     assert.equal(failures.length, 1);
-    assert.equal([...worker.listeners.values()].every((listeners) => !listeners.size), true);
+    assert.equal(
+      [...worker.listeners.values()].every((listeners) => !listeners.size),
+      true,
+    );
     const replacement = maia(new FakeWorker());
     assert.equal(replacement.failure, null);
     replacement.terminate();
   });
 }
 
-test('B02: crashed initialization cannot clear a replacement init or accept an old ready event', () => withBigNet(async (searcher) => {
-  FakeWorker.autoReady = false;
-  const first = searcher.init();
-  const rejected = assert.rejects(first, /init crash/);
-  const worker = FakeWorker.instances.at(-1);
-  worker.emit('error', { message: 'init crash' });
-  const second = searcher.init();
-  const replacement = FakeWorker.instances.at(-1);
-  await rejected;
-  worker.ready();
-  assert.equal(searcher.loaded, false);
-  assert.equal(replacement.terminated, false);
-  replacement.ready();
-  await second;
-  await searcher.init();
-  assert.equal(FakeWorker.instances.at(-1), replacement);
-}));
+test('B02: crashed initialization cannot clear a replacement init or accept an old ready event', () =>
+  withBigNet(async (searcher) => {
+    FakeWorker.autoReady = false;
+    const first = searcher.init();
+    const rejected = assert.rejects(first, /init crash/);
+    const worker = FakeWorker.instances.at(-1);
+    worker.emit('error', { message: 'init crash' });
+    const second = searcher.init();
+    const replacement = FakeWorker.instances.at(-1);
+    await rejected;
+    worker.ready();
+    assert.equal(searcher.loaded, false);
+    assert.equal(replacement.terminated, false);
+    replacement.ready();
+    await second;
+    await searcher.init();
+    assert.equal(FakeWorker.instances.at(-1), replacement);
+  }));
 
-test('B02: cancellation keeps a healthy worker; cache-size changes recreate it', () => withBigNet(async (searcher) => {
-  await searcher.init();
-  const worker = FakeWorker.instances.at(-1);
-  const controller = new AbortController();
-  const request = searcher.search(START_FEN, { visits: 1, signal: controller.signal });
-  await drain();
-  controller.abort();
-  const search = worker.messages.find((message) => message.type === 'search');
-  assert.deepEqual(worker.messages.at(-1), { type: 'cancel', target: search.id });
-  worker.emit('message', { data: { type: 'result', id: search.id, result: { cancelled: true } } });
-  await request;
-  assert.equal(searcher.loaded, true);
-  await searcher.init({ evalCacheEntries: 32 });
-  assert.equal(worker.terminated, true);
-  assert.notEqual(FakeWorker.instances.at(-1), worker);
-}));
+test('B02: cancellation keeps a healthy worker; cache-size changes recreate it', () =>
+  withBigNet(async (searcher) => {
+    await searcher.init();
+    const worker = FakeWorker.instances.at(-1);
+    const controller = new AbortController();
+    const request = searcher.search(START_FEN, { visits: 1, signal: controller.signal });
+    await drain();
+    controller.abort();
+    const search = worker.messages.find((message) => message.type === 'search');
+    assert.deepEqual(worker.messages.at(-1), { type: 'cancel', target: search.id });
+    worker.emit('message', { data: { type: 'result', id: search.id, result: { cancelled: true } } });
+    await request;
+    assert.equal(searcher.loaded, true);
+    await searcher.init({ evalCacheEntries: 32 });
+    assert.equal(worker.terminated, true);
+    assert.notEqual(FakeWorker.instances.at(-1), worker);
+  }));
 
 test('B03: a crash during graceful dispose settles it instead of waiting forever', async () => {
   const worker = new FakeWorker();

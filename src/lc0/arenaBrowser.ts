@@ -1,7 +1,7 @@
 import { Chessground } from 'chessground';
-import artifactChannel from '../../public/channels/stable.json';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
+import artifactChannel from '../../public/channels/stable.json';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { parseValidatedFen } from '../chess/fenValidation.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
@@ -25,8 +25,27 @@ import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPo
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
 import { arenaChartGroups } from './arenaChartPresentation.ts';
-import { arenaSideTimeMs } from './arenaTiming.ts';
-import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
+import {
+  ARENA_CONTROL_IDS,
+  type ArenaChartSample,
+  type ArenaCheckpoint,
+  type ArenaCheckpointConfig,
+  ArenaCheckpointConflictError,
+  ArenaCheckpointInvalidError,
+  type ArenaCheckpointToken,
+  type ArenaCompletedGame,
+  type ArenaRootChartSample,
+  arenaCompletedTree,
+  arenaRemainingIndices,
+  claimArenaCheckpoint,
+  commitArenaGame,
+  createArenaCheckpoint,
+  discardArenaCheckpoint,
+  hydrateArenaSchedule,
+  loadArenaCheckpoint,
+  normalizeArenaControls,
+  saveArenaCheckpoint,
+} from './arenaCheckpoint.ts';
 import {
   appendCpuArenaTrail,
   type CpuArenaPosition,
@@ -36,15 +55,11 @@ import {
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
-import {
-  ARENA_CONTROL_IDS, ArenaCheckpointConflictError, ArenaCheckpointInvalidError, type ArenaCheckpoint, type ArenaCheckpointToken, type ArenaChartSample,
-  type ArenaCompletedGame, type ArenaCheckpointConfig, type ArenaRootChartSample, arenaCompletedTree, arenaRemainingIndices, claimArenaCheckpoint, commitArenaGame,
-  createArenaCheckpoint, discardArenaCheckpoint, hydrateArenaSchedule, loadArenaCheckpoint, normalizeArenaControls, saveArenaCheckpoint,
-} from './arenaCheckpoint.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { loadArenaResource } from './arenaResourceLoad.ts';
 import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
+import { arenaSideTimeMs } from './arenaTiming.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import {
@@ -123,6 +138,7 @@ import {
   viridithasCacheKey,
 } from './engineProvision.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
+import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
@@ -1219,18 +1235,35 @@ function renderEvalBars(): void {
     // Use the same displayed pawn->bar scale as Analysis for BOTH engines.
     // Lc0's WDL remains in its card/charts; mixing WDL and logistic cp here would
     // manufacture a spread even when the printed evals are identical.
-    const score = { fen: output?.fen, scoreCp: output?.whiteCp ?? (output?.qWhite !== undefined ? qToCentipawns(output.qWhite) : undefined), mateIn: output?.mateInWhitePov };
+    const score = {
+      fen: output?.fen,
+      scoreCp: output?.whiteCp ?? (output?.qWhite !== undefined ? qToCentipawns(output.qWhite) : undefined),
+      mateIn: output?.mateInWhitePov,
+    };
     const tag = engineMonogram(name);
     const thinking = running && !reviewing && board.turn === (index === 0 ? 'w' : 'b') && !!seat.id && thinkingEngineIds.has(seat.id);
     return { ...seat, name, tag, thinking, score, percent: evalPercent(score), text: output?.evalText ?? '—', color: engineBrushes(name).swatch };
   });
-  const state = compareArenaEvals(lanes.map((lane) => lane.score), shownPosition().fen);
+  const state = compareArenaEvals(
+    lanes.map((lane) => lane.score),
+    shownPosition().fen,
+  );
   const comparison = state.comparison;
-  const status = arenaComparisonStatus(state, lanes.map((lane) => lane.percent !== undefined), lanes.map((lane) => lane.tag));
-  const descriptions = lanes.map((lane, index) => `${lane.name} (${lane.side}), ${lane.text}, ${lane.percent === undefined ? 'No completed search' : searchAgeLabel(state.ages[index])}${lane.thinking ? ', searching now' : ''}`);
+  const status = arenaComparisonStatus(
+    state,
+    lanes.map((lane) => lane.percent !== undefined),
+    lanes.map((lane) => lane.tag),
+  );
+  const descriptions = lanes.map(
+    (lane, index) =>
+      `${lane.name} (${lane.side}), ${lane.text}, ${lane.percent === undefined ? 'No completed search' : searchAgeLabel(state.ages[index])}${lane.thinking ? ', searching now' : ''}`,
+  );
   const context = state.adjacent ? 'adjacent searches, not the same position' : 'same position';
   const label = `Evaluations from White’s view. ${descriptions.join('; ')}. ${status.text}.${comparison ? ` Spread ${comparison.label}; ${context}.` : ''}`;
-  node.classList.toggle('empty', lanes.every((lane) => lane.percent === undefined));
+  node.classList.toggle(
+    'empty',
+    lanes.every((lane) => lane.percent === undefined),
+  );
   node.dataset.disagreement = String(!!comparison?.oppositeSides);
   node.title = label;
   node.setAttribute('aria-label', label);
@@ -1248,9 +1281,13 @@ function renderEvalBars(): void {
   const caption = el('evalSource');
   caption.title = label;
   caption.setAttribute('aria-label', label);
-  const markup = lanes.map((lane, index) => {
-    return `<span class="eval-reading${lane.percent === undefined ? ' pending' : ''}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine">${htmlEscape(lane.tag)}</span><strong>${htmlEscape(lane.text)}</strong></span>`;
-  }).join('') + `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}${comparison?.oppositeSides ? ' opposite' : ''}">${htmlEscape(status.text)}</span>`;
+  const markup =
+    lanes
+      .map((lane, index) => {
+        return `<span class="eval-reading${lane.percent === undefined ? ' pending' : ''}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine">${htmlEscape(lane.tag)}</span><strong>${htmlEscape(lane.text)}</strong></span>`;
+      })
+      .join('') +
+    `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}${comparison?.oppositeSides ? ' opposite' : ''}">${htmlEscape(status.text)}</span>`;
   if (caption.innerHTML !== markup) caption.innerHTML = markup;
 }
 
@@ -1285,7 +1322,9 @@ function engineCardHtml(id: string): string {
   const live = thinking ? arenaSearchProgressHtml(progress) : '';
   const searched = snapshot ? parseFen(snapshot.fen) : null;
   const resultLabel = searched ? `Previous move ${searched.fullmove}${searched.turn === 'b' ? '…' : '.'}` : 'No completed search';
-  const activity = thinking ? `<span class="eng-thinking-label" title="Searching move ${board.fullmove}; results below are from the previous completed search">Thinking</span>` : '';
+  const activity = thinking
+    ? `<span class="eng-thinking-label" title="Searching move ${board.fullmove}; results below are from the previous completed search">Thinking</span>`
+    : '';
   const head = `<header class="eng-head">${engineAvatarHtml(rawName)}<span class="eng-title"><span class="eng-name">${htmlEscape(name)}${activity}</span><span class="eng-side">${side ? `${side} · ` : ''}${resultLabel}</span></span><span class="eng-eval" title="Previous move’s evaluation from White's view">${htmlEscape(snapshot?.evalText ?? '—')}</span></header>`;
   if (!snapshot) {
     return `<article class="eng-card${thinking ? ' thinking' : ''}" data-engine-id="${htmlEscape(id)}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${thinking ? '' : '<p class="eng-empty">Waiting for its first move.</p>'}</article>`;
@@ -1306,12 +1345,10 @@ function engineCardHtml(id: string): string {
   const statsHtml = stats.length
     ? `<dl class="eng-stats">${stats.map(([label, value]) => `<div${label === 'Move time' ? ' class="move-time"' : ''}><dt>${label}</dt><dd>${htmlEscape(value)}</dd></div>`).join('')}</dl>`
     : '';
-  const line = snapshot.pv?.length
-    ? pvSanHtml(snapshot.fen, snapshot.pv)
-    : snapshot.move
-      ? pvSanHtml(snapshot.fen, [snapshot.move])
-      : '';
-  const lineHtml = line ? `<p class="eng-line" tabindex="0" data-fen="${htmlEscape(snapshot.fen)}" aria-label="Previous move’s principal variation"><span class="eng-line-label">PV</span> ${line}</p>` : '';
+  const line = snapshot.pv?.length ? pvSanHtml(snapshot.fen, snapshot.pv) : snapshot.move ? pvSanHtml(snapshot.fen, [snapshot.move]) : '';
+  const lineHtml = line
+    ? `<p class="eng-line" tabindex="0" data-fen="${htmlEscape(snapshot.fen)}" aria-label="Previous move’s principal variation"><span class="eng-line-label">PV</span> ${line}</p>`
+    : '';
   return `<article class="eng-card${thinking ? ' thinking' : ''}" data-engine-id="${htmlEscape(id)}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${wdl}${statsHtml}${lineHtml}</article>`;
 }
 
@@ -1328,10 +1365,12 @@ function renderEngineOutputs(): void {
   const cards = ids.filter((id) => running || engineOutputs.has(id)).map(engineCardHtml);
   const grid = el('engineEvalInfo');
   // Progress refreshes must not interrupt a spectator reading a long retained PV.
-  const pvState = new Map([...grid.querySelectorAll<HTMLElement>('.eng-line')].map((line) => [
-    line.closest<HTMLElement>('.eng-card')!.dataset.engineId,
-    { fen: line.dataset.fen, scrollLeft: line.scrollLeft, focused: document.activeElement === line },
-  ]));
+  const pvState = new Map(
+    [...grid.querySelectorAll<HTMLElement>('.eng-line')].map((line) => [
+      line.closest<HTMLElement>('.eng-card')!.dataset.engineId,
+      { fen: line.dataset.fen, scrollLeft: line.scrollLeft, focused: document.activeElement === line },
+    ]),
+  );
   grid.innerHTML = cards.join('');
   for (const line of grid.querySelectorAll<HTMLElement>('.eng-line')) {
     const previous = pvState.get(line.closest<HTMLElement>('.eng-card')!.dataset.engineId);
@@ -1353,9 +1392,11 @@ interface StripSide {
 
 /** Before any game, the strips preview the selected seats (Engine 1 plays White in game 1). */
 function stripSides(): { w: StripSide; b: StripSide } {
-  if (reviewing && reviewTrail?.sides) return {
-    w: { id: null, name: reviewTrail.sides.whiteName, seat: null }, b: { id: null, name: reviewTrail.sides.blackName, seat: null },
-  };
+  if (reviewing && reviewTrail?.sides)
+    return {
+      w: { id: null, name: reviewTrail.sides.whiteName, seat: null },
+      b: { id: null, name: reviewTrail.sides.blackName, seat: null },
+    };
   if (running || liveTrail || boardWhiteName || boardBlackName) {
     return { w: { id: boardWhiteId, name: boardWhiteName, seat: null }, b: { id: boardBlackId, name: boardBlackName, seat: null } };
   }
@@ -1375,9 +1416,7 @@ function renderStrips(): void {
   const sides = stripSides();
   const turn = board.turn;
   const now = performance.now();
-  const sideTimeMs = liveTrail
-    ? arenaSideTimeMs(liveTrail.charts, parseFen(liveTrail.entries[liveTrail.openingPlies].fen).turn)
-    : { w: 0, b: 0 };
+  const sideTimeMs = liveTrail ? arenaSideTimeMs(liveTrail.charts, parseFen(liveTrail.entries[liveTrail.openingPlies].fen).turn) : { w: 0, b: 0 };
   const update = (nodeId: string, color: 'w' | 'b', side: StripSide) => {
     const node = el(nodeId);
     const colorName = color === 'w' ? 'White' : 'Black';
@@ -1403,8 +1442,11 @@ function renderStrips(): void {
       return;
     }
     node.dataset.signature = signature;
-    node.innerHTML = head +
-      (showClock ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small><span class="strip-clock-value">${formatSeconds(usedMs)}</span></span>` : '');
+    node.innerHTML =
+      head +
+      (showClock
+        ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small><span class="strip-clock-value">${formatSeconds(usedMs)}</span></span>`
+        : '');
   };
   update('blackSideLabel', 'b', sides.b);
   update('whiteSideLabel', 'w', sides.w);
@@ -1925,9 +1967,7 @@ type ArenaMatchState = 'none' | 'live' | 'final' | 'stopped' | 'failed';
 let arenaMatchState: ArenaMatchState = 'none';
 
 function readyMessage(): string {
-  return arenaTournamentMode() === 'match'
-    ? 'Ready. Set up your match.'
-    : 'Ready. Set up your tournament.';
+  return arenaTournamentMode() === 'match' ? 'Ready. Set up your match.' : 'Ready. Set up your tournament.';
 }
 
 function isReadyMessage(text: string | null): boolean {
@@ -1952,11 +1992,18 @@ function renderSetupSummary(): void {
   });
   const who = mode === 'match' ? names.join(' vs ') : `${mode === 'gauntlet' ? 'Gauntlet' : 'Round robin'} · ${names.length} engines`;
   const budget = arenaBudgetMode() === 'movetime' ? `${arenaMovetimeMs()} ms/move` : 'Fixed visits / depth';
-  node.textContent = checkpoint ? checkpoint.config.controls.budgetModeSelect === 'movetime' ? `${checkpoint.config.controls.movetimeInput} ms/move` : 'Fixed visits / depth' : budget;
+  node.textContent = checkpoint
+    ? checkpoint.config.controls.budgetModeSelect === 'movetime'
+      ? `${checkpoint.config.controls.movetimeInput} ms/move`
+      : 'Fixed visits / depth'
+    : budget;
   let scheduleText: string;
   try {
     const openings = selectedOpenings();
-    const pairs = tournamentPairings(mode, activeSeatRows().map((_, index) => String(index)));
+    const pairs = tournamentPairings(
+      mode,
+      activeSeatRows().map((_, index) => String(index)),
+    );
     const count = openings.length * pairs.length * arenaGamesPerOpening();
     scheduleText = `${count} game${count === 1 ? '' : 's'} · ${budget} · ${selectEl('startingPositionSelect').selectedOptions[0]?.textContent ?? 'Custom openings'}`;
   } catch {
@@ -3304,7 +3351,9 @@ function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, sco
   const side = (name: string, seat: string) =>
     `<span class="sb-player">${engineAvatarHtml(name)}<span class="sb-name"><strong>${htmlEscape(displayEngineName(name))}</strong>${sameEngine ? `<small>${seat}</small>` : ''}</span></span>`;
   const points = (value: number) => formatScoreHalf(value) || '0';
-  const record = score.games ? `<div class="sb-record">${htmlEscape(displayEngineName(nameA))} · W ${score.aWins} · D ${score.draws} · L ${score.bWins} · ${score.games}/${scheduledGameCount || score.games} finished</div>` : '';
+  const record = score.games
+    ? `<div class="sb-record">${htmlEscape(displayEngineName(nameA))} · W ${score.aWins} · D ${score.draws} · L ${score.bWins} · ${score.games}/${scheduledGameCount || score.games} finished</div>`
+    : '';
   el('matchScore').innerHTML =
     `<div class="sb-match">${side(nameA, 'Engine 1')}<span class="sb-points" aria-label="Score ${points(score.a)} to ${points(score.b)}">${points(score.a)}<span class="sb-dash">–</span>${points(score.b)}</span>${side(nameB, 'Engine 2').replace('sb-player', 'sb-player right')}</div>` +
     record;
@@ -3333,13 +3382,21 @@ function renderCrosstable(standings: TournamentStandings): void {
   const host = el('crosstableSection');
   host.hidden = rows.length < 3;
   const name = (row: (typeof rows)[number]) => htmlEscape(displayEngineName(row.name));
-  el('crosstable').innerHTML = `<table class="arena-detail-table"><caption>Row engine’s points / games against each opponent.</caption><thead><tr><th scope="col">Engine</th>${rows.map((row) => `<th scope="col">${name(row)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr><th scope="row">${name(row)}</th>${rows.map((opponent) => {
-    const record = row.perOpponent.get(opponent.id);
-    if (row.id === opponent.id) return '<td class="cross-self" aria-label="Same seat">—</td>';
-    if (!record) return '<td aria-label="No games played">—</td>';
-    const count = record.wins + record.draws + record.losses;
-    return `<td title="${record.wins} wins, ${record.draws} draws, ${record.losses} losses">${formatArenaPoints(record.wins + record.draws / 2)} / ${count}</td>`;
-  }).join('')}</tr>`).join('')}</tbody></table>`;
+  el('crosstable').innerHTML =
+    `<table class="arena-detail-table"><caption>Row engine’s points / games against each opponent.</caption><thead><tr><th scope="col">Engine</th>${rows.map((row) => `<th scope="col">${name(row)}</th>`).join('')}</tr></thead><tbody>${rows
+      .map(
+        (row) =>
+          `<tr><th scope="row">${name(row)}</th>${rows
+            .map((opponent) => {
+              const record = row.perOpponent.get(opponent.id);
+              if (row.id === opponent.id) return '<td class="cross-self" aria-label="Same seat">—</td>';
+              if (!record) return '<td aria-label="No games played">—</td>';
+              const count = record.wins + record.draws + record.losses;
+              return `<td title="${record.wins} wins, ${record.draws} draws, ${record.losses} losses">${formatArenaPoints(record.wins + record.draws / 2)} / ${count}</td>`;
+            })
+            .join('')}</tr>`,
+      )
+      .join('')}</tbody></table>`;
 }
 
 function renderOpeningPairs(): void {
@@ -3364,10 +3421,18 @@ function renderOpeningPairs(): void {
     const points = result === '1/2-1/2' ? 0.5 : (resultsSchedule[index].whiteId === pair.a) === (result === '1-0') ? 1 : 0;
     return `<td><button type="button" data-game="${index}" title="Replay game ${index + 1}">${formatArenaPoints(points)}–${formatArenaPoints(1 - points)}</button></td>`;
   };
-  el('openingPairs').innerHTML = `<table class="arena-detail-table"><caption>Scores in ${name(first.a)}–${name(first.b)} order. Select a game score to replay it.</caption><thead><tr><th scope="col">Opening</th><th scope="col">${name(first.a)}<br>White</th><th scope="col">${name(first.a)}<br>Black</th><th scope="col">Pair total</th></tr></thead><tbody>${selected.map((pair) => {
-    const total = pair.played === 2 ? `${formatArenaPoints(pair.points[0])}–${formatArenaPoints(pair.points[1])}` : pair.indices.length < 2 ? 'Unpaired' : `${pair.played} of 2`;
-    return `<tr><th scope="row">${htmlEscape(pair.opening.name)}${pair.round > 1 ? ` · pair ${pair.round}` : ''}</th>${cell(pair, 0)}${cell(pair, 1)}<td>${total}</td></tr>`;
-  }).join('')}</tbody></table>`;
+  el('openingPairs').innerHTML =
+    `<table class="arena-detail-table"><caption>Scores in ${name(first.a)}–${name(first.b)} order. Select a game score to replay it.</caption><thead><tr><th scope="col">Opening</th><th scope="col">${name(first.a)}<br>White</th><th scope="col">${name(first.a)}<br>Black</th><th scope="col">Pair total</th></tr></thead><tbody>${selected
+      .map((pair) => {
+        const total =
+          pair.played === 2
+            ? `${formatArenaPoints(pair.points[0])}–${formatArenaPoints(pair.points[1])}`
+            : pair.indices.length < 2
+              ? 'Unpaired'
+              : `${pair.played} of 2`;
+        return `<tr><th scope="row">${htmlEscape(pair.opening.name)}${pair.round > 1 ? ` · pair ${pair.round}` : ''}</th>${cell(pair, 0)}${cell(pair, 1)}<td>${total}</td></tr>`;
+      })
+      .join('')}</tbody></table>`;
 }
 
 /** Finished games as small chips (Engine 1's result in a match); click one to replay it. */
@@ -3376,7 +3441,8 @@ function renderGameResultChips(): void {
   host.hidden = !gameResultChips.length;
   host.innerHTML = gameResultChips
     .map((chip) => {
-      const outcome = chip.aPoints === null ? (chip.result === '1/2-1/2' ? 'draw' : 'decisive') : chip.aPoints === 1 ? 'win' : chip.aPoints === 0 ? 'loss' : 'draw';
+      const outcome =
+        chip.aPoints === null ? (chip.result === '1/2-1/2' ? 'draw' : 'decisive') : chip.aPoints === 1 ? 'win' : chip.aPoints === 0 ? 'loss' : 'draw';
       const text = chip.result === '1/2-1/2' ? '½–½' : chip.result.replace('-', '–');
       return `<button type="button" class="sb-chip ${outcome}" data-game="${chip.index}" title="Game ${chip.index + 1}: ${htmlEscape(displayEngineName(chip.whiteName))} (White) vs ${htmlEscape(displayEngineName(chip.blackName))} (Black), ${chip.result}. Click to replay."><span class="sb-chip-n">G${chip.index + 1}</span>${text}</button>`;
     })
@@ -3509,11 +3575,10 @@ function renderGameCharts(): void {
       label,
       color,
       dashed,
-      points: samples
-        .flatMap((sample) => {
-          const y = value(sample);
-          return y === undefined || !Number.isFinite(y) ? [] : [{ x: sample.ply, y }];
-        }),
+      points: samples.flatMap((sample) => {
+        const y = value(sample);
+        return y === undefined || !Number.isFinite(y) ? [] : [{ x: sample.ply, y }];
+      }),
     }));
   el('evalChart').innerHTML = lineChartSvg(
     seriesFor((sample) => sample.whiteScore),
@@ -3527,15 +3592,30 @@ function renderGameCharts(): void {
     seriesFor((sample) => sample.nps),
     { ...chartSize, yMin: 0, formatY: formatCompactNumber },
   );
-  const summaries = (value: (sample: GameChartSample) => string) => ids.map((id) => {
-    const sample = gameChartSamples.findLast((entry) => entry.engineId === id);
-    return sample ? `${displayEngineName(sample.engineName)}: ${value(sample)}` : '';
-  }).join('; ');
-  describeChart('evalChart', `White expected score by ply. Latest: ${summaries((sample) => sample.whiteScore === undefined ? 'unavailable' : percent0(sample.whiteScore))}. Use the Review game position slider to explore.`);
-  describeChart('timeChart', `Search time by ply. Latest: ${summaries((sample) => formatSeconds(sample.moveMs))}. Use the Review game position slider to explore.`);
-  describeChart('npsChart', `Search speed by ply. Latest: ${summaries((sample) => sample.nps === undefined ? 'unavailable' : `${formatNps(sample.nps)} nodes or visits per second`)}. Use the Review game position slider to explore.`);
+  const summaries = (value: (sample: GameChartSample) => string) =>
+    ids
+      .map((id) => {
+        const sample = gameChartSamples.findLast((entry) => entry.engineId === id);
+        return sample ? `${displayEngineName(sample.engineName)}: ${value(sample)}` : '';
+      })
+      .join('; ');
+  describeChart(
+    'evalChart',
+    `White expected score by ply. Latest: ${summaries((sample) => (sample.whiteScore === undefined ? 'unavailable' : percent0(sample.whiteScore)))}. Use the Review game position slider to explore.`,
+  );
+  describeChart(
+    'timeChart',
+    `Search time by ply. Latest: ${summaries((sample) => formatSeconds(sample.moveMs))}. Use the Review game position slider to explore.`,
+  );
+  describeChart(
+    'npsChart',
+    `Search speed by ply. Latest: ${summaries((sample) => (sample.nps === undefined ? 'unavailable' : `${formatNps(sample.nps)} nodes or visits per second`))}. Use the Review game position slider to explore.`,
+  );
   el('chartLegend').innerHTML = groups
-    .map(({ label, color, dashed }) => `<span><span class="swatch" style="background:${dashed ? `repeating-linear-gradient(90deg,${color} 0 3px,transparent 3px 5px)` : color}"></span>${htmlEscape(label)}</span>`)
+    .map(
+      ({ label, color, dashed }) =>
+        `<span><span class="swatch" style="background:${dashed ? `repeating-linear-gradient(90deg,${color} 0 3px,transparent 3px 5px)` : color}"></span>${htmlEscape(label)}</span>`,
+    )
     .join('');
 }
 
@@ -3548,8 +3628,11 @@ function renderRootChart(engineId: string, display = true): void {
     .slice(0, 8)
     .filter((child) => child.visits > 0);
   if (!top.length) return;
-  const data = { fen: result.fen, engineName: engines.get(engineId)?.name ?? engineId,
-    children: top.map((child) => ({ uci: child.uci, visits: child.visits, q: child.q, prior: child.prior })) };
+  const data = {
+    fen: result.fen,
+    engineName: engines.get(engineId)?.name ?? engineId,
+    children: top.map((child) => ({ uci: child.uci, visits: child.visits, q: child.q, prior: child.prior })),
+  };
   if (liveTrail) liveTrail.rootChart = data;
   if (display) renderSavedRootChart(data);
 }
@@ -3567,7 +3650,14 @@ function renderSavedRootChart(data?: ArenaRootChartSample): void {
   el('rootChartTitle').textContent = `${data.engineName} root visits (Q from side to move)`;
   (el('rootChart').parentElement as HTMLElement).hidden = false;
   el('rootChartTab').hidden = false;
-  selectEl('rootCandidate').innerHTML = '<option value="">Choose a move…</option>' + top.map((child, index) => `<option value="${index}">${htmlEscape(uciToSan(parseFen(data.fen), child.uci))} · ${formatCount(child.visits)} ${child.visits === 1 ? 'visit' : 'visits'} · Q ${signed(child.q, 2)}</option>`).join('');
+  selectEl('rootCandidate').innerHTML =
+    '<option value="">Choose a move…</option>' +
+    top
+      .map(
+        (child, index) =>
+          `<option value="${index}">${htmlEscape(uciToSan(parseFen(data.fen), child.uci))} · ${formatCount(child.visits)} ${child.visits === 1 ? 'visit' : 'visits'} · Q ${signed(child.q, 2)}</option>`,
+      )
+      .join('');
   el('rootChart').innerHTML = hBarChartSvg(
     top.map((child) => ({
       label: child.uci,
@@ -3576,10 +3666,20 @@ function renderSavedRootChart(data?: ArenaRootChartSample): void {
       color: engineBrushes(data.engineName).swatch,
     })),
   );
-  describeChart('rootChart', `Root search candidates by visits. ${top.map((child) => `${child.uci}: ${child.visits} ${child.visits === 1 ? 'visit' : 'visits'}`).join('; ')}. Use Preview a root search candidate to show arrows on the board.`);
+  describeChart(
+    'rootChart',
+    `Root search candidates by visits. ${top.map((child) => `${child.uci}: ${child.visits} ${child.visits === 1 ? 'visit' : 'visits'}`).join('; ')}. Use Preview a root search candidate to show arrows on the board.`,
+  );
 }
 
-function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number, samples = liveTrail?.charts ?? gameChartSamples, display = true, captured?: ArenaChartSample): void {
+function recordGameChartSample(
+  ply: number,
+  engine: Pick<ArenaEngine, 'id' | 'name'>,
+  moveMs: number,
+  samples = liveTrail?.charts ?? gameChartSamples,
+  display = true,
+  captured?: ArenaChartSample,
+): void {
   const snapshot = engineOutputs.get(engine.id);
   const lc0 = lastLc0SearchResults.get(engine.id);
   const nps = snapshot?.nps ?? (lc0 && moveMs > 0 ? Math.round((lc0.visits / moveMs) * 1000) : undefined);
@@ -3711,7 +3811,14 @@ async function runIsolatedCpuTournament(
   pendingIndices: number[],
   byPid: Map<string, { index: number; name: string }>,
   signal: AbortSignal,
-  complete: (index: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail, diagnostics: { runtime: string; search: string }) => Promise<void>,
+  complete: (
+    index: number,
+    result: GameResultCode,
+    reason: string,
+    tree: GameTree,
+    trail: GameTrail,
+    diagnostics: { runtime: string; search: string },
+  ) => Promise<void>,
 ): Promise<void> {
   const concurrency = selectedArenaConcurrency();
   const broker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: concurrency, dial: resourceBroker.getDial() });
@@ -3819,7 +3926,8 @@ async function runIsolatedCpuTournament(
           if (live.size) show(Math.min(...live.keys()));
         }
       },
-      complete: (pendingIndex, outcome) => complete(pendingIndices[pendingIndex], outcome.result, outcome.reason, outcome.tree, outcome.trail, outcome.diagnostics),
+      complete: (pendingIndex, outcome) =>
+        complete(pendingIndices[pendingIndex], outcome.result, outcome.reason, outcome.tree, outcome.trail, outcome.diagnostics),
     });
   } finally {
     if (cpuTournamentBroker === broker) cpuTournamentBroker = null;
@@ -3835,9 +3943,17 @@ function renderCheckpointStatus(): void {
   storage.hidden = !checkpoint || !!checkpointProblem;
   storage.textContent = checkpointSaving ? 'Saving completed games on this device…' : 'Completed games are saved on this device.';
   const pending = checkpoint ? arenaRemainingIndices(checkpoint).length : 0;
-  el('checkpointText').textContent = checkpointProblem || (checkpointSaving ? 'Saving completed games on this device…' : running
-    ? 'Completed games are saved on this device.'
-    : checkpoint ? pending ? 'Saved on this device. Unfinished games restart from their opening.' : 'Finished results are saved on this device until you start a new run.' : '');
+  el('checkpointText').textContent =
+    checkpointProblem ||
+    (checkpointSaving
+      ? 'Saving completed games on this device…'
+      : running
+        ? 'Completed games are saved on this device.'
+        : checkpoint
+          ? pending
+            ? 'Saved on this device. Unfinished games restart from their opening.'
+            : 'Finished results are saved on this device until you start a new run.'
+          : '');
   const resume = el('resumeTournament') as HTMLButtonElement;
   resume.hidden = !checkpoint || !pending || running;
   resume.disabled = startPending || checkpointSaving || checkpointUnreadable;
@@ -3854,28 +3970,52 @@ async function checkpointCompatibility(): Promise<string> {
   // prevents combining results from different app/search builds after an update.
   const channelUrl = resolvePublicAssetUrl('/models/arena-channel-probe').replace('/models/arena-channel-probe', '/channels/stable.json');
   const channel = await fetch(channelUrl, { cache: 'no-cache', signal: AbortSignal.timeout(5000) })
-    .then((response) => response.ok ? response.json() : artifactChannel).catch(() => artifactChannel);
-  return JSON.stringify({ bundle: import.meta.url, release: channel.releaseId, query: location.search,
-    model: MODEL_URL, pack: PACK_URL, centipawn: CENTIPAWN_MODEL_URL, centipawnRuntime: CENTIPAWN_HYBRID_MANIFEST_URL,
-    whole: LC0_WHOLE_MODEL_MANIFEST_URL, dial: resourceBroker.getDial() });
+    .then((response) => (response.ok ? response.json() : artifactChannel))
+    .catch(() => artifactChannel);
+  return JSON.stringify({
+    bundle: import.meta.url,
+    release: channel.releaseId,
+    query: location.search,
+    model: MODEL_URL,
+    pack: PACK_URL,
+    centipawn: CENTIPAWN_MODEL_URL,
+    centipawnRuntime: CENTIPAWN_HYBRID_MANIFEST_URL,
+    whole: LC0_WHOLE_MODEL_MANIFEST_URL,
+    dial: resourceBroker.getDial(),
+  });
 }
 
 function captureCheckpointConfig(participants: { pid: string; index: number; name: string }[], compatibility: string): ArenaCheckpointConfig {
-  const controls = normalizeArenaControls(Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls']);
-  return { mode: arenaTournamentMode(), seats: participants.map((participant) => ({
-    id: participant.pid, name: participant.name, ...seatRows[participant.index],
-  })), controls, compatibility };
+  const controls = normalizeArenaControls(
+    Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls'],
+  );
+  return {
+    mode: arenaTournamentMode(),
+    seats: participants.map((participant) => ({
+      id: participant.pid,
+      name: participant.name,
+      ...seatRows[participant.index],
+    })),
+    controls,
+    compatibility,
+  };
 }
 
 function applyCheckpointConfig(saved: ArenaCheckpoint): void {
   for (const id of ARENA_CONTROL_IDS) {
     const control = el(id) as HTMLInputElement | HTMLSelectElement;
     control.value = saved.config.controls[id];
-    if (control.value !== saved.config.controls[id]) throw new Error(`Saved setting ${id} is no longer supported. Export the completed PGNs and start a new run.`);
+    if (control.value !== saved.config.controls[id])
+      throw new Error(`Saved setting ${id} is no longer supported. Export the completed PGNs and start a new run.`);
   }
-  seatRows.splice(0, seatRows.length, ...saved.config.seats.map((seat) => ({ family: seat.family as EngineFamily, variant: seat.variant, strength: seat.strength })));
+  seatRows.splice(
+    0,
+    seatRows.length,
+    ...saved.config.seats.map((seat) => ({ family: seat.family as EngineFamily, variant: seat.variant, strength: seat.strength })),
+  );
   renderSeatSelectors();
-  if (seatRows.some((row, i) => row.variant !== saved.config.seats[i].variant)) throw new Error('A saved engine version is unavailable. Completed results are still viewable and exportable.');
+  if (seatRows.some((row, i) => row.variant !== saved.config.seats[i].variant))
+    throw new Error('A saved engine version is unavailable. Completed results are still viewable and exportable.');
   refreshBudgetControls();
   refreshSeatControls();
 }
@@ -3895,14 +4035,26 @@ function showCheckpointResults(saved: ArenaCheckpoint): void {
     games.push({ pgn: game.pgn, scheduleIndex: game.scheduleIndex, result: game.result });
     const whiteName = resultsNames.get(scheduled.whiteId)!;
     const blackName = resultsNames.get(scheduled.blackId)!;
-    const trail = trailFromTree(arenaCompletedTree(game), `Game ${game.scheduleIndex + 1}: ${whiteName} vs ${blackName} (${game.result})`, scheduled.opening.moves?.length ?? 0);
+    const trail = trailFromTree(
+      arenaCompletedTree(game),
+      `Game ${game.scheduleIndex + 1}: ${whiteName} vs ${blackName} (${game.result})`,
+      scheduled.opening.moves?.length ?? 0,
+    );
     trail.charts = game.charts;
     trail.rootChart = game.rootChart;
     trail.sides = { whiteName, blackName };
     finishedTrails[game.scheduleIndex] = trail;
-    gameResultChips.push({ index: game.scheduleIndex, result: game.result, whiteName, blackName,
-      aPoints: saved.config.mode === 'match' ? game.result === '1/2-1/2' ? 0.5 : (scheduled.whiteId === '0') === (game.result === '1-0') ? 1 : 0 : null });
-    appendLog(`${game.scheduleIndex + 1}. ${whiteName} vs ${blackName} [${scheduled.opening.name}]: ${game.result} (${game.reason}) · ${game.diagnostics.runtime} · ${game.diagnostics.search}`, game.scheduleIndex);
+    gameResultChips.push({
+      index: game.scheduleIndex,
+      result: game.result,
+      whiteName,
+      blackName,
+      aPoints: saved.config.mode === 'match' ? (game.result === '1/2-1/2' ? 0.5 : (scheduled.whiteId === '0') === (game.result === '1-0') ? 1 : 0) : null,
+    });
+    appendLog(
+      `${game.scheduleIndex + 1}. ${whiteName} vs ${blackName} [${scheduled.opening.name}]: ${game.result} (${game.reason}) · ${game.diagnostics.runtime} · ${game.diagnostics.search}`,
+      game.scheduleIndex,
+    );
   }
   if (saved.config.mode === 'match') {
     const a = standings.table().find((row) => row.id === '0')!;
@@ -3919,20 +4071,23 @@ function queueCheckpointSave(saved: ArenaCheckpoint, mountSignal: AbortSignal): 
   pendingCheckpointSaves++;
   checkpointSaving = true;
   renderCheckpointStatus();
-  checkpointWrites = checkpointWrites.then(async () => {
-    if (checkpointProblem) return;
-    await saveArenaCheckpoint(saved, { runId: saved.runId, revision: saved.revision - 1 });
-    checkpointToken = { runId: saved.runId, revision: saved.revision };
-  }).catch((error) => {
-    checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Export PGN before leaving.`;
-    if (error instanceof ArenaCheckpointConflictError) abort?.abort();
-  }).finally(() => {
-    pendingCheckpointSaves--;
-    if (!isStaleMount(mountSignal)) {
-      checkpointSaving = pendingCheckpointSaves > 0;
-      renderCheckpointStatus();
-    }
-  });
+  checkpointWrites = checkpointWrites
+    .then(async () => {
+      if (checkpointProblem) return;
+      await saveArenaCheckpoint(saved, { runId: saved.runId, revision: saved.revision - 1 });
+      checkpointToken = { runId: saved.runId, revision: saved.revision };
+    })
+    .catch((error) => {
+      checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Export PGN before leaving.`;
+      if (error instanceof ArenaCheckpointConflictError) abort?.abort();
+    })
+    .finally(() => {
+      pendingCheckpointSaves--;
+      if (!isStaleMount(mountSignal)) {
+        checkpointSaving = pendingCheckpointSaves > 0;
+        renderCheckpointStatus();
+      }
+    });
 }
 
 async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null): Promise<void> {
@@ -3947,12 +4102,17 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   const compatibility = await checkpointCompatibility();
   if (isStaleMount(mountSignal)) return;
   if (resume) {
-    if (resume.config.compatibility !== compatibility) throw new Error('The app build, engine assets or runtime overrides changed. Completed results are still viewable and exportable, but cannot be mixed with a new build.');
+    if (resume.config.compatibility !== compatibility)
+      throw new Error(
+        'The app build, engine assets or runtime overrides changed. Completed results are still viewable and exportable, but cannot be mixed with a new build.',
+      );
     applyCheckpointConfig(resume);
     // UI runtime changes while paused may have created a different evaluator.
     disposeLc0Resources();
   }
-  const effectiveControls = normalizeArenaControls(Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls']);
+  const effectiveControls = normalizeArenaControls(
+    Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls'],
+  );
   for (const id of ARENA_CONTROL_IDS) (el(id) as HTMLInputElement).value = effectiveControls[id];
   syncSeatRowsFromDom();
   const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
@@ -3967,7 +4127,13 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   }
   buildEngines();
   populateSeats();
-  if (resume && seatRows.some((row, i) => row.family !== resume.config.seats[i]?.family || row.variant !== resume.config.seats[i]?.variant || row.strength !== resume.config.seats[i]?.strength)) {
+  if (
+    resume &&
+    seatRows.some(
+      (row, i) =>
+        row.family !== resume.config.seats[i]?.family || row.variant !== resume.config.seats[i]?.variant || row.strength !== resume.config.seats[i]?.strength,
+    )
+  ) {
     throw new Error('The saved engine configuration is no longer supported. Export the completed PGNs before starting a new run.');
   }
   const mode = arenaTournamentMode();
@@ -4023,14 +4189,16 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   let schedule: ScheduledGame<ArenaOpening>[];
   try {
     // Colors alternate per game index within each pairing (see tournament.ts).
-    schedule = resume ? hydrateArenaSchedule(resume) : buildSchedule(
-      tournamentPairings(
-        mode,
-        participants.map((participant) => participant.pid),
-      ),
-      selectedOpenings(),
-      gamesPerOpening,
-    );
+    schedule = resume
+      ? hydrateArenaSchedule(resume)
+      : buildSchedule(
+          tournamentPairings(
+            mode,
+            participants.map((participant) => participant.pid),
+          ),
+          selectedOpenings(),
+          gamesPerOpening,
+        );
   } catch (error) {
     el('message').textContent = `Opening setup error: ${(error as Error).message}`;
     clearStartPending();
@@ -4143,7 +4311,11 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
     const pgn = gameTreeToPgn(tree, tags, result);
     const completed: ArenaCompletedGame = {
-      pgn, scheduleIndex: i, result, reason, rootFen: tree.root.fen,
+      pgn,
+      scheduleIndex: i,
+      result,
+      reason,
+      rootFen: tree.root.fen,
       moves: tree.mainlineFrom(tree.root).map((node) => moveToUci(node.move!)),
       charts: (trail?.charts ?? []).map((sample) => ({ ...sample })),
       ...(trail?.rootChart ? { rootChart: structuredClone(trail.rootChart) } : {}),
@@ -4350,7 +4522,9 @@ async function createSelectedLc0Evaluator(signal: AbortSignal): Promise<Lc0OnnxE
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
       cache: true,
       signal,
-      onProgress: (loaded, total) => { if (!signal.aborted) showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'); },
+      onProgress: (loaded, total) => {
+        if (!signal.aborted) showDownloadProgress('Lc0 small net', loaded, total, 'Downloading');
+      },
     });
     return Lc0OnnxEvaluator.create(modelLoad.model);
   }
@@ -5103,7 +5277,9 @@ async function init(mountSignal: AbortSignal) {
   } catch (error) {
     if (isStaleMount(mountSignal)) return;
     checkpointUnreadable = error instanceof ArenaCheckpointInvalidError;
-    checkpointProblem = checkpointUnreadable ? `${error instanceof Error ? error.message : String(error)}. Discard it to start a new run.` : `Local saving is unavailable: ${error instanceof Error ? error.message : String(error)}. Export PGN before leaving.`;
+    checkpointProblem = checkpointUnreadable
+      ? `${error instanceof Error ? error.message : String(error)}. Discard it to start a new run.`
+      : `Local saving is unavailable: ${error instanceof Error ? error.message : String(error)}. Export PGN before leaving.`;
     renderCheckpointStatus();
   }
   if (!checkpoint) await loadLc0Evaluator(mountSignal);

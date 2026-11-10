@@ -354,8 +354,7 @@ export function inspectWasmSimd(bytes) {
     relaxedTotal: relaxed.reduce((sum, [, count]) => sum + count, 0),
     relaxedOps: Object.fromEntries(relaxed.map(([op, count]) => [SIMD_NAMES.get(op), count])),
     relaxedDot: counts.get(275) ?? 0,
-    relaxedF32: Object.fromEntries(['madd', 'nmadd', 'min', 'max'].map((name) =>
-      [name, counts.get({ madd: 261, nmadd: 262, min: 269, max: 270 }[name]) ?? 0])),
+    relaxedF32: Object.fromEntries(['madd', 'nmadd', 'min', 'max'].map((name) => [name, counts.get({ madd: 261, nmadd: 262, min: 269, max: 270 }[name]) ?? 0])),
   };
 }
 

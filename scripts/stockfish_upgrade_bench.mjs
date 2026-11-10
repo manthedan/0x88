@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseInfo, parseUciSearch, roundOrder } from './emscripten_uci_protocol.mjs';
+import { exactSearch, parseBestmove, parseInfo, parseUciSearch, ROTATED_FEN_SUITE, roundOrder } from './emscripten_uci_protocol.mjs';
 
 export function benchSignature(lines) {
   let nodes = null;
@@ -33,14 +33,13 @@ export function benchDefaults(source) {
 
 // Reviewed terminal boards in pinned Stockfish Defaults. New terminal corpus
 // entries need adapter review; a null bestmove alone is never terminal proof.
-const terminalBenchPositions = new Set([
-  '8/8/8/8/8/6k1/6p1/6K1 w - -',
-  '7k/7P/6K1/8/3B4/8/8/8 b - -',
-]);
+const terminalBenchPositions = new Set(['8/8/8/8/8/6k1/6p1/6K1 w - -', '7k/7P/6K1/8/3B4/8/8/8 b - -']);
 function isTerminalBenchPosition(entry) {
   const fields = entry.trim().split(/\s+/);
-  return (fields.length === 4 || (fields.length === 6 && /^\d+$/.test(fields[4]) && /^\d+$/.test(fields[5])))
-    && terminalBenchPositions.has(fields.slice(0, 4).join(' '));
+  return (
+    (fields.length === 4 || (fields.length === 6 && /^\d+$/.test(fields[4]) && /^\d+$/.test(fields[5]))) &&
+    terminalBenchPositions.has(fields.slice(0, 4).join(' '))
+  );
 }
 
 function markTerminalInfo(lines, start, end, entries, allowed) {
@@ -55,8 +54,7 @@ function replaySearch(lines, best, entry) {
   const bestmove = parseBestmove(best);
   // Select node-bearing records, not just records whose numeric prefix parses.
   // A corrupt final count must never cause fallback to an earlier info line.
-  const infos = lines.filter((line) => /^info\s/.test(line) && !/^info\s+string\b/.test(line)
-    && line.trim().split(/\s+/).includes('nodes'));
+  const infos = lines.filter((line) => /^info\s/.test(line) && !/^info\s+string\b/.test(line) && line.trim().split(/\s+/).includes('nodes'));
   const terminal = isTerminalBenchPosition(entry);
   const noMove = ['0000', '(none)'].includes(bestmove);
   if (noMove !== terminal) throw new Error(`Invalid terminal bestmove for bench position: ${entry}`);
@@ -65,8 +63,8 @@ function replaySearch(lines, best, entry) {
   for (const info of infos) {
     const tokens = info.trim().split(/\s+/);
     const token = tokens[tokens.indexOf('nodes') + 1];
-    if (tokens.filter((part) => part === 'nodes').length !== 1 || !/^\d+$/.test(token ?? '')
-      || !Number.isSafeInteger(Number(token))) throw new Error(`Malformed replay nodes record: ${info}`);
+    if (tokens.filter((part) => part === 'nodes').length !== 1 || !/^\d+$/.test(token ?? '') || !Number.isSafeInteger(Number(token)))
+      throw new Error(`Malformed replay nodes record: ${info}`);
     nodes = Number(token);
   }
   if (nodes === 0 && !terminal) throw new Error(`Missing/zero bench nodes for nonterminal position: ${entry}`);
@@ -81,13 +79,18 @@ function validateCompletions(lines, expected, phase) {
   }
 }
 
-export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults, ownProcessGroup = true, shutdownTimeout = 2000 } = {}) {
+export async function runCell(
+  cell,
+  { depth = 9, benchDepth = 8, positions = 20, threads = 1, timeout = 180000, defaults, ownProcessGroup = true, shutdownTimeout = 2000 } = {},
+) {
   const started = performance.now();
   const grouped = ownProcessGroup && process.platform !== 'win32';
   const child = spawn(cell.command, cell.args || [], { detached: grouped, stdio: ['pipe', 'pipe', 'pipe'] });
   const kill = () => {
     if (!child.pid) return;
-    try { process.kill(grouped ? -child.pid : child.pid, 'SIGKILL'); } catch {}
+    try {
+      process.kill(grouped ? -child.pid : child.pid, 'SIGKILL');
+    } catch {}
   };
   const lines = [];
   let failure;
@@ -106,9 +109,15 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     failure = err;
     for (const notify of pending) notify();
   };
-  const onSignal = () => { kill(); fail(new Error(`${cell.label} replay interrupted`)); };
+  const onSignal = () => {
+    kill();
+    fail(new Error(`${cell.label} replay interrupted`));
+  };
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, onSignal);
-  child.on('error', (error) => { exited = true; fail(error); });
+  child.on('error', (error) => {
+    exited = true;
+    fail(error);
+  });
   child.stdin.on('error', fail);
   child.on('exit', (code, signal) => {
     exited = true;
@@ -126,28 +135,39 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       for (const notify of pending) notify();
     });
     stream.on('end', () => {
-      if (buffer) { lines.push(buffer); buffer = ''; }
+      if (buffer) {
+        lines.push(buffer);
+        buffer = '';
+      }
       for (const notify of pending) notify();
     });
   }
   const command = (text) => child.stdin.write(`${text}\n`);
-  const wait = (predicate) => new Promise((accept, reject) => {
-    const timer = setTimeout(() => { pending.delete(check); reject(new Error(`${cell.label} timed out: ${lines.slice(-8).join('\n')}`)); }, timeout);
-    const check = () => {
-      for (; cursor < lines.length; cursor += 1) {
-        if (predicate(lines[cursor])) {
-          const line = lines[cursor++];
+  const wait = (predicate) =>
+    new Promise((accept, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(check);
+        reject(new Error(`${cell.label} timed out: ${lines.slice(-8).join('\n')}`));
+      }, timeout);
+      const check = () => {
+        for (; cursor < lines.length; cursor += 1) {
+          if (predicate(lines[cursor])) {
+            const line = lines[cursor++];
+            clearTimeout(timer);
+            pending.delete(check);
+            accept(line);
+            return;
+          }
+        }
+        if (failure) {
           clearTimeout(timer);
           pending.delete(check);
-          accept(line);
-          return;
+          reject(failure);
         }
-      }
-      if (failure) { clearTimeout(timer); pending.delete(check); reject(failure); }
-    };
-    pending.add(check);
-    check();
-  });
+      };
+      pending.add(check);
+      check();
+    });
   try {
     command('uci');
     await wait((l) => l === 'uciok');
@@ -181,7 +201,10 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     let benchNodes = 0;
     const benchRows = [];
     for (const entry of defaults) {
-      if (entry.startsWith('setoption ')) { command(entry); continue; }
+      if (entry.startsWith('setoption ')) {
+        command(entry);
+        continue;
+      }
       const from = lines.length;
       command(`position fen ${entry}`);
       expectedSearches += 1;
@@ -195,7 +218,8 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
     }
     const signature = String(benchNodes);
     replaySignature = signature;
-    if (!benchNodes || (cell.nativeBench && nativeSignature !== signature)) throw Error(`Bench replay mismatch: native=${nativeSignature}, replay=${signature}`);
+    if (!benchNodes || (cell.nativeBench && nativeSignature !== signature))
+      throw Error(`Bench replay mismatch: native=${nativeSignature}, replay=${signature}`);
     command(`setoption name Threads value ${threads}`);
     const rows = [];
     // Rotate each round's positions without changing the reference suite.
@@ -216,24 +240,38 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       rows.push({ position: label, ...info, wallMs });
     }
     completed = true;
-    return { ...cell, startupMs, benchDepth, benchSignature: signature, nativeSignature, benchRows, depth, threads, hash: 16, rows,
-      wallNps: rows.reduce((n, r) => n + r.nodes, 0) * 1000 / rows.reduce((n, r) => n + r.wallMs, 0) };
+    return {
+      ...cell,
+      startupMs,
+      benchDepth,
+      benchSignature: signature,
+      nativeSignature,
+      benchRows,
+      depth,
+      threads,
+      hash: 16,
+      rows,
+      wallNps: (rows.reduce((n, r) => n + r.nodes, 0) * 1000) / rows.reduce((n, r) => n + r.wallMs, 0),
+    };
   } finally {
     let timer;
     try {
       if (!exited) child.stdin.end('quit\n');
-      await Promise.race([closed, new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          kill();
-          // Escaped/inherited pipes cannot keep this drain alive forever.
-          // Audit workers inherit their outer owner's group; standalone cells
-          // own a group so launcher descendants are terminated here as well.
-          child.stdin.destroy();
-          child.stdout.destroy();
-          child.stderr.destroy();
-          reject(new Error(`${cell.label} replay shutdown timed out while draining output`));
-        }, shutdownTimeout);
-      })]);
+      await Promise.race([
+        closed,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            kill();
+            // Escaped/inherited pipes cannot keep this drain alive forever.
+            // Audit workers inherit their outer owner's group; standalone cells
+            // own a group so launcher descendants are terminated here as well.
+            child.stdin.destroy();
+            child.stdout.destroy();
+            child.stderr.destroy();
+            reject(new Error(`${cell.label} replay shutdown timed out while draining output`));
+          }, shutdownTimeout);
+        }),
+      ]);
     } finally {
       clearTimeout(timer);
       kill();
@@ -247,7 +285,11 @@ export async function runCell(cell, { depth = 9, benchDepth = 8, positions = 20,
       // and partial final lines. A first bestmove is not a license to ignore
       // malformed or surplus completion records before a clean shutdown.
       if (cell.nativeBench) {
-        validateCompletions(lines.slice(nativeBenchStart, replayStart), defaults.filter((entry) => !entry.startsWith('setoption ')).length, 'native built-in bench');
+        validateCompletions(
+          lines.slice(nativeBenchStart, replayStart),
+          defaults.filter((entry) => !entry.startsWith('setoption ')).length,
+          'native built-in bench',
+        );
         const finalNativeSignature = benchSignature(lines.slice(nativeBenchStart));
         if (finalNativeSignature !== replaySignature) {
           throw new Error(`Bench replay mismatch after shutdown: native=${finalNativeSignature}, replay=${replaySignature}`);
@@ -275,9 +317,16 @@ export function parityReport(cells) {
         const baseline = ref.rows.find((r) => r.position === row.position && r.depth === row.depth);
         return !baseline || !exactSearch(baseline, row);
       });
-      result.push({ group, reference: ref.label, candidate: cell.label, round: cell.round,
-        benchMatch: ref.benchSignature === cell.benchSignature, pairs: cell.rows.length,
-        exact: cell.rows.length - mismatches.length, mismatches });
+      result.push({
+        group,
+        reference: ref.label,
+        candidate: cell.label,
+        round: cell.round,
+        benchMatch: ref.benchSignature === cell.benchSignature,
+        pairs: cell.rows.length,
+        exact: cell.rows.length - mismatches.length,
+        mismatches,
+      });
     }
   }
   return result;
@@ -289,8 +338,12 @@ async function main() {
   const config = JSON.parse(readFileSync(args.get('config'), 'utf8'));
   const rounds = Number(args.get('rounds') || 3);
   const defaults = benchDefaults(readFileSync(args.get('bench-source') || '.local_engines/stockfish-js-19-src/src/benchmark.cpp', 'utf8'));
-  const options = { depth: Number(args.get('depth') || 9), benchDepth: Number(args.get('bench-depth') || 8),
-    positions: Number(args.get('positions') || 20), threads: Number(args.get('threads') || 1) };
+  const options = {
+    depth: Number(args.get('depth') || 9),
+    benchDepth: Number(args.get('bench-depth') || 8),
+    positions: Number(args.get('positions') || 20),
+    threads: Number(args.get('threads') || 1),
+  };
   for (const [key, n] of Object.entries({ rounds, ...options })) {
     if (!Number.isInteger(n) || n < 1 || (key === 'positions' && n > ROTATED_FEN_SUITE.length)) throw Error(`Invalid ${key}`);
   }

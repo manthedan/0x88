@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
 import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from '../src/lc0/evalBarPresentation.ts';
+
 const marker = (name, cp, color = '#1f5fcf') => ({ id: name, name, scoreCp: cp, color, scoreText: `${cp < 0 ? '' : '+'}${(cp / 100).toFixed(2)}` });
 const desktop = { pixels: 680, mobile: false };
 const mobile = { pixels: 326, mobile: true };
@@ -12,7 +13,11 @@ test('evaluation tags share the canonical Lc0 token', () => {
   assert.equal(evalEngineTag('PlentyChess'), 'PC');
 });
 test('every engine keeps a plain tick even at exactly the same value', () => {
-  const html = evalMarkerMarkup(['Lc0 Small', 'Stockfish Lite', 'PlentyChess'].map((n) => marker(n, 20)), 'Lc0 Small', desktop);
+  const html = evalMarkerMarkup(
+    ['Lc0 Small', 'Stockfish Lite', 'PlentyChess'].map((n) => marker(n, 20)),
+    'Lc0 Small',
+    desktop,
+  );
   assert.equal((html.match(/class="eval-tick"/g) ?? []).length, 3);
   assert.doesNotMatch(html, /button|count|grouped|segment/);
   assert.equal((html.match(/class="eval-engine-label/g) ?? []).length, 1);
@@ -42,7 +47,14 @@ test('value list is sorted by eval with names, values and selected identity only
   assert.match(evalDetailsMarkup([], undefined), /Waiting for this position/);
 });
 test('mate ticks stay pinned to true endpoints without badges or displaced labels', () => {
-  const html = evalMarkerMarkup([{ ...marker('Lc0 Small', 0), mateIn: 1 }, { ...marker('Stockfish Lite', 0), mateIn: -1 }], 'Lc0 Small', desktop);
+  const html = evalMarkerMarkup(
+    [
+      { ...marker('Lc0 Small', 0), mateIn: 1 },
+      { ...marker('Stockfish Lite', 0), mateIn: -1 },
+    ],
+    'Lc0 Small',
+    desktop,
+  );
   assert.match(html, /--pos:100%/);
   assert.match(html, /--pos:0%/);
   assert.doesNotMatch(html, /shift|count/);

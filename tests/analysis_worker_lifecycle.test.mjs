@@ -12,19 +12,26 @@ function controller() {
   class Worker {
     listeners = new Map();
     terminated = false;
-    constructor() { workers.push(this); }
+    constructor() {
+      workers.push(this);
+    }
     addEventListener(type, listener) {
       const listeners = this.listeners.get(type) ?? [];
       listeners.push(listener);
       this.listeners.set(type, listeners);
     }
-    emit(type, data) { for (const listener of this.listeners.get(type) ?? []) listener(data); }
+    emit(type, data) {
+      for (const listener of this.listeners.get(type) ?? []) listener(data);
+    }
     postMessage(message) {
       if (message.type === 'init') queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'ready', backend: 'fake' } }));
     }
-    terminate() { this.terminated = true; }
+    terminate() {
+      this.terminated = true;
+    }
   }
-  const code = ts.transpile(`
+  const code = ts.transpile(
+    `
     let searchWorker = null, workerReady = false, workerBackend = '', workerRuntime = '', workerSeq = 0;
     let activeWorkerSearchId = null, workerSearchWarm = false, analysisWorkerProgressMessages = 0;
     const workerPending = new Map();
@@ -34,7 +41,9 @@ function controller() {
     const LC0_WHOLE_MODEL_MANIFEST_URL = '', PACK_URL = '';
     ${functions.replaceAll('import.meta.url', "'file:///test/analysisBrowser.ts'")}
     return { initWorker, postWorker, resetSearchWorker, snapshot: () => ({ workerReady, workerBackend, workerRuntime }) };
-  `, { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext });
+  `,
+    { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
+  );
   return { ...new Function('Worker', code)(Worker), workers };
 }
 

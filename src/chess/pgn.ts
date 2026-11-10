@@ -48,7 +48,10 @@ export function splitPgnGames(text: string): string[] {
   };
   while (i < text.length) {
     const ch = text[i];
-    if (/\s/.test(ch)) { i++; continue; }
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
     if (ch === '{') {
       const end = text.indexOf('}', i + 1);
       i = end === -1 ? text.length : end + 1;
@@ -73,12 +76,27 @@ export function splitPgnGames(text: string): string[] {
       }
       continue;
     }
-    if (ch === '(') { depth++; i++; continue; }
-    if (ch === ')') { depth = Math.max(0, depth - 1); i++; continue; }
-    if (ch === '$') { i++; while (/\d/.test(text[i] ?? '')) i++; continue; }
+    if (ch === '(') {
+      depth++;
+      i++;
+      continue;
+    }
+    if (ch === ')') {
+      depth = Math.max(0, depth - 1);
+      i++;
+      continue;
+    }
+    if (ch === '$') {
+      i++;
+      while (/\d/.test(text[i] ?? '')) i++;
+      continue;
+    }
     let j = i;
     while (j < text.length && !/[\s(){};$\[]/.test(text[j])) j++;
-    if (j === i) { i++; continue; } // Malformed punctuation is rejected by the parser, never a loop.
+    if (j === i) {
+      i++;
+      continue;
+    } // Malformed punctuation is rejected by the parser, never a loop.
     const word = text.slice(i, j).replace(/^\d+\.(\.\.)?/, '');
     sawMovetext = true;
     if (!depth && RESULTS.has(word)) ended = true;
@@ -271,7 +289,13 @@ export function serializeMovetext(tree: GameTree): string {
 export function gameTreeToPgn(tree: GameTree, tags: Record<string, string> = {}, result = '*'): string {
   const tagPairs = { Event: '?', Site: '?', Date: '????.??.??', Round: '?', White: '?', Black: '?', Result: result, ...tags };
   const header = Object.entries(tagPairs)
-    .map(([k, v]) => `[${k} "${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"]`)
+    .map(
+      ([k, v]) =>
+        `[${k} "${v
+          .replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"')
+          .replace(/[\r\n]+/g, ' ')}"]`,
+    )
     .join('\n');
   const movetext = serializeMovetext(tree);
   return `${header}\n\n${movetext} ${result}`.trim();

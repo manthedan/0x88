@@ -8,7 +8,7 @@ import { STOCKFISH_RELEASE, stockfishSourceArchive, stockfishSourcePrefix } from
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const VARIANTS = {
-  'lite-single': { lite: true, args: ['--lite', '--single-threaded'] , suffix: 'lite-single' },
+  'lite-single': { lite: true, args: ['--lite', '--single-threaded'], suffix: 'lite-single' },
   single: { lite: false, args: ['--single-threaded'], suffix: 'single' },
   'lite-threaded': { lite: true, args: ['--lite'], suffix: 'lite' },
   threaded: { lite: false, args: [], suffix: '' },
@@ -36,16 +36,17 @@ export function patchSource(sourceDir, { relaxed = true, opt = 'O3', lto = true 
     writeFileSync(makefile, text.replaceAll('-flto=full', ''));
   }
   const buildJs = resolve(sourceDir, 'build.js');
-  replaceOnce(buildJs, 'var args = ["-j", require("os").cpus().length];',
-    'var args = ["-j", process.env.STOCKFISH_MAKE_JOBS || require("os").cpus().length];');
+  replaceOnce(buildJs, 'var args = ["-j", require("os").cpus().length];', 'var args = ["-j", process.env.STOCKFISH_MAKE_JOBS || require("os").cpus().length];');
   if (!relaxed) return;
   const simd = resolve(sourceDir, 'src/nnue/simd.h');
   replaceOnce(simd, '#include "../types.h"', '#if defined(__wasm_relaxed_simd__)\n    #include <wasm_simd128.h>\n#endif\n\n#include "../types.h"');
   // SF19 upstream now carries the relaxed dot implementation itself. Match it
   // exactly so an upstream operand/gate change forces a new range/parity audit.
-  replaceOnce(simd,
+  replaceOnce(
+    simd,
     '    acc = wasm_i32x4_relaxed_dot_i8x16_i7x16_add(b, a, acc);',
-    `    // SF19 FT: sat_u8(acc0)*sat_u8(acc1)/512 <= 127. Both squared and\n    // clipped hidden activations are also in [0,127]. Keep those activations\n    // in the SECOND/i7 operand; signed weights must be the first operand.\n    // The old SSSE3 pair sum cannot saturate: 2*127*128 = 32512 < 32768.\n    acc = wasm_i32x4_relaxed_dot_i8x16_i7x16_add(b, a, acc);`);
+    `    // SF19 FT: sat_u8(acc0)*sat_u8(acc1)/512 <= 127. Both squared and\n    // clipped hidden activations are also in [0,127]. Keep those activations\n    // in the SECOND/i7 operand; signed weights must be the first operand.\n    // The old SSSE3 pair sum cannot saturate: 2*127*128 = 32512 < 32768.\n    acc = wasm_i32x4_relaxed_dot_i8x16_i7x16_add(b, a, acc);`,
+  );
 }
 
 function run(cmd, args, options = {}) {
@@ -69,18 +70,23 @@ export function requiredNet(sourceDir, variant) {
 
 function ensureNet(sourceDir, net) {
   const dest = resolve(sourceDir, 'src', net.name);
-  const candidates = [dest, process.env.STOCKFISH_NNUE_PATH,
+  const candidates = [
+    dest,
+    process.env.STOCKFISH_NNUE_PATH,
     process.env.STOCKFISH_NNUE_DIR && resolve(process.env.STOCKFISH_NNUE_DIR, net.name),
     resolve(repoRoot, '.local_engines/stockfish-nets', net.name),
-    resolve(repoRoot, 'assets', net.name)];
+    resolve(repoRoot, 'assets', net.name),
+  ];
   for (const path of candidates.filter(Boolean)) {
     if (!existsSync(path)) continue;
     if (hash(path) !== net.sha256) throw new Error(`Invalid network: ${path}`);
     if (path !== dest) copyFileSync(path, dest);
     return;
   }
-  for (const url of [`https://tests.stockfishchess.org/api/nn/${net.name}`,
-    `https://media.githubusercontent.com/media/official-stockfish/networks/master/${net.name}`]) {
+  for (const url of [
+    `https://tests.stockfishchess.org/api/nn/${net.name}`,
+    `https://media.githubusercontent.com/media/official-stockfish/networks/master/${net.name}`,
+  ]) {
     const tmp = `${dest}.tmp`;
     const result = spawnSync('curl', ['-fL', '--retry', '3', '--max-time', '300', url, '-o', tmp], { stdio: 'inherit' });
     if (result.status === 0 && hash(tmp) === net.sha256) {
@@ -126,7 +132,8 @@ The source archive contains the nets. SF18-specific bootstrap patches are retire
   const sourceDir = resolve(workRoot, 'source');
   const outDir = resolve(argValue('--out-dir') || resolve(workRoot, 'dist'));
   const sourceInput = process.env.STOCKFISH_RELAXED_SOURCE_DIR && resolve(process.env.STOCKFISH_RELAXED_SOURCE_DIR);
-  if (sourceInput && (sourceInput === workRoot || sourceInput.startsWith(`${sourceDir}/`) || sourceInput === sourceDir)) throw new Error('Source input overlaps build directory');
+  if (sourceInput && (sourceInput === workRoot || sourceInput.startsWith(`${sourceDir}/`) || sourceInput === sourceDir))
+    throw new Error('Source input overlaps build directory');
   rmSync(sourceDir, { recursive: true, force: true });
   mkdirSync(sourceDir, { recursive: true });
   mkdirSync(outDir, { recursive: true });
@@ -135,27 +142,54 @@ The source archive contains the nets. SF18-specific bootstrap patches are retire
     const archive = resolve(repoRoot, stockfishSourceArchive);
     const root = `stockfish-stockfish-js-${STOCKFISH_RELEASE.version}-corresponding-source`;
     run('tar', ['-xzf', archive, '-C', sourceDir, '--strip-components=3', `${root}/${stockfishSourcePrefix.replace(/\/$/, '')}`]);
-    for (const net of STOCKFISH_RELEASE.nets) run('tar', ['-xzf', archive, '-C', resolve(sourceDir, 'src'), '--strip-components=2', `${root}/assets/${net.name}`]);
+    for (const net of STOCKFISH_RELEASE.nets)
+      run('tar', ['-xzf', archive, '-C', resolve(sourceDir, 'src'), '--strip-components=2', `${root}/assets/${net.name}`]);
   }
   const version = JSON.parse(readFileSync(resolve(sourceDir, 'package.json'), 'utf8')).version;
   if (version !== STOCKFISH_RELEASE.version) throw new Error(`Expected Stockfish.js ${STOCKFISH_RELEASE.version}, got ${version}`);
   patchSource(sourceDir, { relaxed: simd === 'relaxed', opt, lto: lto === 'on' });
   ensureNet(sourceDir, requiredNet(sourceDir, variant));
-  run('docker', ['run', '--rm', '--platform', process.env.DOCKER_PLATFORM || 'linux/amd64',
-    '--user', `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
-    '-e', `STOCKFISH_MAKE_JOBS=${process.env.STOCKFISH_MAKE_JOBS || 2}`,
+  run('docker', [
+    'run',
+    '--rm',
+    '--platform',
+    process.env.DOCKER_PLATFORM || 'linux/amd64',
+    '--user',
+    `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
+    '-e',
+    `STOCKFISH_MAKE_JOBS=${process.env.STOCKFISH_MAKE_JOBS || 2}`,
     ...(process.env.STOCKFISH_BUILD_CPUS ? ['--cpuset-cpus', process.env.STOCKFISH_BUILD_CPUS] : []),
-    '-v', `${sourceDir}:/src`, '-w', '/src', process.env.EMSDK_DOCKER_IMAGE || STOCKFISH_RELEASE.toolchain,
-    'bash', '-lc', ['nice', '-n', '10', 'node', 'build.js', ...variant.args, '--no-split', '--skip-em-check', '--force', '--no-minify'].join(' ')]);
+    '-v',
+    `${sourceDir}:/src`,
+    '-w',
+    '/src',
+    process.env.EMSDK_DOCKER_IMAGE || STOCKFISH_RELEASE.toolchain,
+    'bash',
+    '-lc',
+    ['nice', '-n', '10', 'node', 'build.js', ...variant.args, '--no-split', '--skip-em-check', '--force', '--no-minify'].join(' '),
+  ]);
   const base = `stockfish-${STOCKFISH_RELEASE.major}${variant.suffix ? `-${variant.suffix}` : ''}`;
   const outputBase = `${base}${simd === 'relaxed' ? '-relaxed' : ''}`;
   // Upstream's default full pthread build is unversioned; --all/prepack adds
   // the versioned npm alias. The other standalone variants are versioned.
   const inputBase = variantName === 'threaded' ? 'stockfish' : base;
   for (const ext of ['js', 'wasm']) copyFileSync(resolve(sourceDir, 'src', `${inputBase}.${ext}`), resolve(outDir, `${outputBase}.${ext}`));
-  writeFileSync(resolve(outDir, `${outputBase}.build.json`), `${JSON.stringify({ upstream: STOCKFISH_RELEASE, variant: variantName, simd, opt, lto,
-    toolchain: process.env.EMSDK_DOCKER_IMAGE || STOCKFISH_RELEASE.toolchain,
-    wasmSha256: hash(resolve(outDir, `${outputBase}.wasm`)) }, null, 2)}\n`);
+  writeFileSync(
+    resolve(outDir, `${outputBase}.build.json`),
+    `${JSON.stringify(
+      {
+        upstream: STOCKFISH_RELEASE,
+        variant: variantName,
+        simd,
+        opt,
+        lto,
+        toolchain: process.env.EMSDK_DOCKER_IMAGE || STOCKFISH_RELEASE.toolchain,
+        wasmSha256: hash(resolve(outDir, `${outputBase}.wasm`)),
+      },
+      null,
+      2,
+    )}\n`,
+  );
   console.log(`Wrote ${outDir}/${outputBase}.{js,wasm}`);
 }
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
+import { cpSync } from 'node:fs';
 // Production-compile the diagnostic page after BUILD_SCOPE=product build:client.
 // Overlay only the lab HTML/assets; never serve TS sources via a dev server.
 import { build } from 'vite';
-import { cpSync } from 'node:fs';
+
 await build({
   configFile: false,
   resolve: { conditions: ['onnxruntime-web-use-extern-wasm', 'module', 'browser', 'production'] },

@@ -22,11 +22,6 @@ import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import { mountAnalysisDisclosure } from './analysisDisclosure.ts';
-import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
-import { criticalPositionLines } from './criticalMomentsPresentation.ts';
-import { CriticalAnalysisRefresh } from './criticalMoments.ts';
-import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
-import { playFromHereUnavailableReason, playPositionFromTree } from './playPosition.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
   type AnalysisLine,
@@ -36,23 +31,25 @@ import {
   lc0AnalysisLines,
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
-import { compactEvalSpread, compareEvals, evalPercent } from './evalCompare.ts';
-import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from './evalBarPresentation.ts';
+import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
+import { CriticalAnalysisRefresh } from './criticalMoments.ts';
+import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
+import { criticalPositionLines } from './criticalMomentsPresentation.ts';
+import { withEngineTimeout } from './engineTimeout.ts';
+import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from './evalBarPresentation.ts';
+import { compactEvalSpread, compareEvals, evalPercent } from './evalCompare.ts';
 import { fetchGameHistoryPgn, type ImportColor, type ImportSite } from './gameImport.ts';
 import { adjacentCriticalPly, annotatedPgn, type GameReview, type ReviewPosition, reviewGame, terminalReviewPosition } from './gameReview.ts';
 import { REVIEW_CLASS_GLYPH, REVIEW_CLASS_LABEL, reviewChartSvg, reviewMoveLabel, reviewPlyAtRatio, reviewSummaryHtml } from './gameReviewPresentation.ts';
 import { type GameNode, GameTree } from './gameTree.ts';
-import { MistakeRetry, retryProblems, retrySideFromTags } from './retryMistakes.ts';
-import { quarantineRetryPanels } from './retrySpoilers.ts';
-import { createWorkspaceAutosave, decodeAnalysisSnapshot, hasExplicitWorkspaceInput, pgnResultForExport, readWorkspace, serializeTree } from './workspaceAutosave.ts';
-import { withEngineTimeout } from './engineTimeout.ts';
 import { LatestOnlyTask } from './latestOnlyTask.ts';
+import { importLocalPgn, importStoredPgn, MAX_BACKUP_BYTES, MAX_PGN_BYTES } from './localPgnImport.ts';
 import { Maia3BrowserEvaluator, maia3WinProbability } from './maia3.ts';
 import {
-  OPENING_INDEX_VERSION,
   type ImportedGame,
   mergeOpeningMoveStats,
+  OPENING_INDEX_VERSION,
   type OpeningMoveStat,
   type OpeningPositionIndex,
   openingStatsForPosition,
@@ -79,11 +76,43 @@ import {
   serializePgnDatabaseBackup,
   updatePgnCollectionPositionIndex,
 } from './pgnDatabase.ts';
-
-import { importLocalPgn, importStoredPgn, MAX_BACKUP_BYTES, MAX_PGN_BYTES } from './localPgnImport.ts';
+import { playFromHereUnavailableReason, playPositionFromTree } from './playPosition.ts';
+import { MistakeRetry, retryProblems, retrySideFromTags } from './retryMistakes.ts';
+import { quarantineRetryPanels } from './retrySpoilers.ts';
+import {
+  createWorkspaceAutosave,
+  decodeAnalysisSnapshot,
+  hasExplicitWorkspaceInput,
+  pgnResultForExport,
+  readWorkspace,
+  serializeTree,
+} from './workspaceAutosave.ts';
 
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
+import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
+import {
+  analysisAgreementHeadline,
+  analysisArrowCandidates,
+  analysisAvailability,
+  analysisChipColor,
+  analysisConsensus,
+  analysisEngineName,
+  analysisMoveGroups,
+  analysisMoveMarkup,
+  analysisSpreadText,
+  defaultAnalysisEngineRows,
+  engineMonogram,
+  firstAnalysisMove,
+  fitAnalysisPvRows,
+  isEmptyAnalysisGame,
+  looksLikeFen,
+  patchAnalysisResults,
+  sharedArrowMarkerSvg,
+  sharedMarkerPosition,
+} from './analysisPresentation.ts';
+import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
+import { positionShareUrl } from './analysisShare.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import {
   BERSERK_VARIANTS,
@@ -144,11 +173,6 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
-import { analysisAgreementHeadline, analysisArrowCandidates, analysisAvailability, analysisChipColor, analysisConsensus, analysisEngineName, analysisMoveGroups, analysisMoveMarkup, analysisSpreadText, defaultAnalysisEngineRows, engineMonogram, firstAnalysisMove, fitAnalysisPvRows, isEmptyAnalysisGame, looksLikeFen, patchAnalysisResults, sharedArrowMarkerSvg, sharedMarkerPosition } from './analysisPresentation.ts';
-import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
-import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
-import { positionShareUrl } from './analysisShare.ts';
-import { openingNameAt, type OpeningNameIndex } from './openingNames.ts';
 import {
   berserkCacheKey,
   cpuEngineHashMbForSurface,
@@ -162,8 +186,14 @@ import {
   stormphraxCacheKey,
   viridithasCacheKey,
 } from './engineProvision.ts';
+import {
+  BUILT_IN_PROFILE_VALUE_PREFIX,
+  ENGINE_PROFILE_BACKUP_KIND,
+  type EngineAnalysisProfile,
+  engineSetupRuntime,
+  normalizeEngineProfiles,
+} from './engineSetups.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
-import { BUILT_IN_PROFILE_VALUE_PREFIX, ENGINE_PROFILE_BACKUP_KIND, type EngineAnalysisProfile, engineSetupRuntime, normalizeEngineProfiles } from './engineSetups.ts';
 import {
   cancelHiddenTabWork,
   classifyHiddenReload,
@@ -181,6 +211,7 @@ import {
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationProvider, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
 import {
   checkPlentyChessVariantAsset,
   hasExplicitPlentyChessVariant,
@@ -334,7 +365,13 @@ async function loadOpeningNames(signal: AbortSignal): Promise<void> {
     if (!response.ok) throw new Error(`Opening names: HTTP ${response.status}`);
     const index: unknown = await response.json();
     if (isStaleMount(signal)) return;
-    if (!index || typeof index !== 'object' || Array.isArray(index) || !Object.values(index).every((entry) => Array.isArray(entry) && entry.length === 2 && entry.every((value) => typeof value === 'string'))) throw new Error('Invalid opening index');
+    if (
+      !index ||
+      typeof index !== 'object' ||
+      Array.isArray(index) ||
+      !Object.values(index).every((entry) => Array.isArray(entry) && entry.length === 2 && entry.every((value) => typeof value === 'string'))
+    )
+      throw new Error('Invalid opening index');
     openingNameIndex = index as OpeningNameIndex;
     openingNamesUnavailable = false;
     renderOpeningName();
@@ -353,9 +390,13 @@ function renderOpeningName(): void {
   const label = el('openingName');
   const opening = openingNameIndex ? openingNameAt(openingNameIndex, tree.current) : null;
   label.hidden = !opening && tree.current === tree.root;
-  label.textContent = opening ? `${opening[0]} · ${opening[1]}`
-    : openingNamesUnavailable ? 'Opening names unavailable'
-      : openingNameIndex ? 'No named opening for this position' : 'Loading opening names…';
+  label.textContent = opening
+    ? `${opening[0]} · ${opening[1]}`
+    : openingNamesUnavailable
+      ? 'Opening names unavailable'
+      : openingNameIndex
+        ? 'No named opening for this position'
+        : 'Loading opening names…';
   label.title = opening ? `${opening[0]} ${opening[1]} · Lichess opening names (CC0)` : label.textContent;
 }
 
@@ -366,9 +407,11 @@ let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
 
 function saveAnalysisWorkspace(): void {
   try {
-    workspaceAutosave?.schedule(tree.root.children.length || tree.root.fen !== START_FEN || tree.root.comment || Object.keys(workspaceHeaders).length
-      ? { tree: serializeTree(tree), headers: workspaceHeaders, result: workspaceResult, resultSignature: reviewMetadata.get(tree)?.signature }
-      : null);
+    workspaceAutosave?.schedule(
+      tree.root.children.length || tree.root.fen !== START_FEN || tree.root.comment || Object.keys(workspaceHeaders).length
+        ? { tree: serializeTree(tree), headers: workspaceHeaders, result: workspaceResult, resultSignature: reviewMetadata.get(tree)?.signature }
+        : null,
+    );
   } catch {
     workspaceAutosave?.clear();
   }
@@ -396,7 +439,9 @@ function restoreAnalysisWorkspace(): void {
         workspaceResult = parsed.result;
         inputEl('pgnInput').value = handoffPgn;
         reviewMetadata.set(tree, { tags: parsed.tags, result: parsed.result, signature: reviewSignature() });
-      } catch { /* Invalid handoffs leave the explicit starting position alone. */ }
+      } catch {
+        /* Invalid handoffs leave the explicit starting position alone. */
+      }
     }
     saveAnalysisWorkspace();
     return;
@@ -607,9 +652,9 @@ const BUILT_IN_ENGINE_PROFILES: BuiltInEngineAnalysisProfile[] = [
   },
 ];
 function builtInEngineProfiles(): BuiltInEngineAnalysisProfile[] {
-  return BUILT_IN_ENGINE_PROFILES.filter((profile) =>
-    (params.has('dev') || profile.lc0Runtime === 'onnx') &&
-    (!isV0DeployProfile() || (profile.lc0Runtime === 'onnx' && !profileHasBt4(profile.rows))),
+  return BUILT_IN_ENGINE_PROFILES.filter(
+    (profile) =>
+      (params.has('dev') || profile.lc0Runtime === 'onnx') && (!isV0DeployProfile() || (profile.lc0Runtime === 'onnx' && !profileHasBt4(profile.rows))),
   );
 }
 let engineProfiles: EngineAnalysisProfile[] = [];
@@ -1379,7 +1424,11 @@ function saveCurrentEngineProfile(): void {
   const persisted = persistEngineProfiles();
   storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, name);
   renderEngineProfiles(name);
-  engineProfileMessage(persisted ? `Saved engine setup “${name}” on this device.` : `Setup “${name}” is available for this visit only. Browser storage is unavailable; export a backup to keep it.`);
+  engineProfileMessage(
+    persisted
+      ? `Saved engine setup “${name}” on this device.`
+      : `Setup “${name}” is available for this visit only. Browser storage is unavailable; export a backup to keep it.`,
+  );
 }
 function exportEngineProfiles(): void {
   const backup = { kind: ENGINE_PROFILE_BACKUP_KIND, version: 1, exportedAt: new Date().toISOString(), profiles: engineProfiles };
@@ -1396,7 +1445,9 @@ async function importEngineProfilesFile(file: File | undefined): Promise<void> {
     );
     const persisted = persistEngineProfiles();
     applyEngineProfile(incoming[0], { selected: incoming[0].name });
-    engineProfileMessage(`Imported ${incoming.length} engine setups and loaded “${incoming[0].name}”.${persisted ? '' : ' Browser storage is unavailable; export a backup to keep them.'}`);
+    engineProfileMessage(
+      `Imported ${incoming.length} engine setups and loaded “${incoming[0].name}”.${persisted ? '' : ' Browser storage is unavailable; export a backup to keep them.'}`,
+    );
   } catch (error) {
     engineProfileMessage(`Engine setup import failed: ${(error as Error).message}`);
   } finally {
@@ -1419,7 +1470,11 @@ function deleteSelectedEngineProfile(): void {
   const persisted = persistEngineProfiles();
   storageRemove(LAST_ENGINE_PROFILE_STORAGE_KEY);
   renderEngineProfiles('');
-  engineProfileMessage(persisted ? `Deleted engine setup “${name}”. The active engines are unchanged.` : `Removed “${name}” for this visit only. Browser storage is unavailable, so it may return on reload.`);
+  engineProfileMessage(
+    persisted
+      ? `Deleted engine setup “${name}”. The active engines are unchanged.`
+      : `Removed “${name}” for this visit only. Browser storage is unavailable, so it may return on reload.`,
+  );
 }
 
 // Engines to analyze are chosen as an add/remove list of cascading selects:
@@ -1718,7 +1773,8 @@ function renderEngineList(): void {
         .join('');
       const meta = strengthMeta(row.family);
       const label = htmlEscape(analysisEngineName(rowLabel(row)));
-      const remove = engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" aria-label="Remove ${label}" title="Remove ${label}">×</button>` : '';
+      const remove =
+        engineRows.length > 1 ? `<button class="row-rm" data-i="${i}" type="button" aria-label="Remove ${label}" title="Remove ${label}">×</button>` : '';
       return `<div class="engine-row">${engineLogoFrame(engineLogoHtml(engineLogoFamilyForEngineFamily(row.family)), analysisEngineName(rowLabel(row)))}<select class="row-fam" data-i="${i}" aria-label="Engine ${i + 1} family">${famSel}</select><select class="row-var" data-i="${i}" aria-label="Engine ${i + 1} model or variant">${varSel}</select><input class="row-strength" data-i="${i}" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" aria-label="${label} ${meta.unit}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
     })
     .join('');
@@ -1731,7 +1787,9 @@ function renderEngineSetupSummary(): void {
   el('engineSetupSummary').textContent = engineRows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
   el('engineCount').textContent = String(activeEngineRows().length);
   const present = new Set(engineRows.map((row) => row.family));
-  const next = analysisEngineFamilyOptions().filter((option) => !present.has(option.value)).map((option) => option.label);
+  const next = analysisEngineFamilyOptions()
+    .filter((option) => !present.has(option.value))
+    .map((option) => option.label);
   el('addEngineHint').textContent = next.length ? `${next.length} more available` : 'Another model or search budget';
   el('addEngine').title = next.length ? `Add an engine: ${next.join(', ')}` : 'Add another model or search budget';
   el('addEngine').dataset.compact = String(activeEngineRows().length >= 3);
@@ -1962,8 +2020,12 @@ function bestShapes(): DrawShape[] {
   // authoritative after its keyed control is restored by patchAnalysisResults.
   const active = document.activeElement as HTMLElement | null;
   const focused = active?.dataset.focusKey?.startsWith(`${tree.current.fen}|`) ? active.closest<HTMLElement>('[data-pv]') : null;
-  const preview = arrowPreview?.fen === tree.current.fen ? arrowPreview
-    : focused ? { uci: (focused.dataset.pv ?? '').split(' ')[0], engine: focused.dataset.engine ?? 'Lc0' } : null;
+  const preview =
+    arrowPreview?.fen === tree.current.fen
+      ? arrowPreview
+      : focused
+        ? { uci: (focused.dataset.pv ?? '').split(' ')[0], engine: focused.dataset.engine ?? 'Lc0' }
+        : null;
   if (preview) {
     const shape = uciShape(preview.uci, engineBrushes(preview.engine).primary);
     if (shape) return [shape];
@@ -1981,7 +2043,12 @@ function bestShapes(): DrawShape[] {
     if (!shape) return [];
     if (!shared) return [shape];
     // Keep attribution beside the tail/midpoint, clear of the destination piece and arrowhead.
-    return [{ ...shape, customSvg: { html: sharedArrowMarkerSvg(shared, sharedMarkerPosition(uci, orientation, tree.current.fen, shared)), center: 'orig' as const } }];
+    return [
+      {
+        ...shape,
+        customSvg: { html: sharedArrowMarkerSvg(shared, sharedMarkerPosition(uci, orientation, tree.current.fen, shared)), center: 'orig' as const },
+      },
+    ];
   });
 }
 
@@ -2002,10 +2069,14 @@ function renderBoard() {
     animation: { enabled: true, duration: 160 },
     movable: {
       free: false,
-      color: canMove ? board.turn === 'w' ? ('white' as const) : ('black' as const) : undefined,
+      color: canMove ? (board.turn === 'w' ? ('white' as const) : ('black' as const)) : undefined,
       dests: canMove ? legalDests(board) : new Map(),
       // Chessground's third argument is move metadata, not our keyboard-origin flag.
-      events: { after: (from: Key, to: Key) => { void onUserMove(from, to); } },
+      events: {
+        after: (from: Key, to: Key) => {
+          void onUserMove(from, to);
+        },
+      },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
     // Owner preference: one uniform arrow width (ENGINE_ARROW_WIDTH), including opt-in alternatives.
@@ -2020,8 +2091,12 @@ function renderBoard() {
   el('ground').querySelector('cg-board')?.removeAttribute('title');
   keyboardBoard ??= createAnalysisKeyboardBoard(el('keyboardBoard'), {
     onSelect: (key) => ground?.selectSquare(key),
-    onMove: (from, to) => { void onUserMove(from, to, true); },
-    announce: (text) => { el('boardAnnouncement').textContent = text; },
+    onMove: (from, to) => {
+      void onUserMove(from, to, true);
+    },
+    announce: (text) => {
+      el('boardAnnouncement').textContent = text;
+    },
   });
   keyboardBoard.render(board, orientation);
   el('evalTurn').textContent = board.turn === 'w' ? 'White to move' : 'Black to move';
@@ -2039,7 +2114,9 @@ function renderBoard() {
 function evalBarLine(lines: AnalysisLine[]): AnalysisLine | undefined {
   // The engine picked in the strip wins; otherwise the first selected engine with a valid result,
   // not whichever worker finished first.
-  const best = activeEngineRows().flatMap((row) => lines.filter((entry) => analysisEngineName(entry.engine) === analysisEngineName(rowLabel(row)) && entry.multipv === 1 && !entry.error));
+  const best = activeEngineRows().flatMap((row) =>
+    lines.filter((entry) => analysisEngineName(entry.engine) === analysisEngineName(rowLabel(row)) && entry.multipv === 1 && !entry.error),
+  );
   return best.find((entry) => analysisEngineName(entry.engine) === evalSourceEngine) ?? best[0];
 }
 
@@ -2074,8 +2151,9 @@ function renderEvalBar() {
   // A readable source selector above the board drives the attached bar.
   const choices = evalSourceChoices(lines);
   const ready = choices.filter((choice) => choice.line).length;
-  const ticks = choices.flatMap(({ name, engine, line: result }) => result && evalPercent(result) !== undefined
-    ? [{ ...result, id: name, name, color: engineBrushes(engine).swatch }] : []);
+  const ticks = choices.flatMap(({ name, engine, line: result }) =>
+    result && evalPercent(result) !== undefined ? [{ ...result, id: name, name, color: engineBrushes(engine).swatch }] : [],
+  );
   const comparison = compareEvals(ticks);
   const spread = el('evalSpread');
   spread.hidden = !comparison?.meaningful;
@@ -2087,9 +2165,10 @@ function renderEvalBar() {
   const spreadLabel = el('evalSpreadLabel');
   spreadLabel.hidden = !comparison?.meaningful;
   spreadLabel.textContent = comparison ? `spread ${compactEvalSpread(comparison)}` : '';
-  spreadLabel.title = comparison?.pawnSpread !== undefined
-    ? 'Largest disagreement between engines, in pawns'
-    : 'Largest disagreement between engines, in points on the bar (mate scores are not pawns)';
+  spreadLabel.title =
+    comparison?.pawnSpread !== undefined
+      ? 'Largest disagreement between engines, in pawns'
+      : 'Largest disagreement between engines, in points on the bar (mate scores are not pawns)';
   const rect = bar?.getBoundingClientRect();
   const mobile = matchMedia('(max-width:600px)').matches;
   const length = (mobile ? rect?.width : rect?.height) ?? 400;
@@ -2110,8 +2189,12 @@ function renderEvalBar() {
   patchAnalysisResults(el('evalDetailList'), evalDetailsMarkup(ticks, selectedId));
   const button = el('evalSourceButton');
   button.dataset.switchable = String(ready > 1);
-  const comparisonLabel = comparison ? ` Engine spread: ${comparison.label}${comparison.oppositeSides ? '; prefer different sides' : ''}. ${ticks.map((tick) => `${tick.name} ${tick.scoreText}`).join('; ')}.` : '';
-  const label = line ? `Eval bar: ${analysisEngineName(line.engine)} ${line.scoreText}, White's perspective.${comparisonLabel}${ready > 1 ? ' Choose the engine shown' : ''}` : 'Eval bar: no evaluation yet';
+  const comparisonLabel = comparison
+    ? ` Engine spread: ${comparison.label}${comparison.oppositeSides ? '; prefer different sides' : ''}. ${ticks.map((tick) => `${tick.name} ${tick.scoreText}`).join('; ')}.`
+    : '';
+  const label = line
+    ? `Eval bar: ${analysisEngineName(line.engine)} ${line.scoreText}, White's perspective.${comparisonLabel}${ready > 1 ? ' Choose the engine shown' : ''}`
+    : 'Eval bar: no evaluation yet';
   bar?.setAttribute('aria-label', `${label}. Open engine evaluations`);
   button.setAttribute('aria-label', label);
   button.title = label;
@@ -2129,10 +2212,12 @@ function evalSourceChoices(lines: AnalysisLine[]): { name: string; engine: strin
 function renderEvalSourceMenu(): void {
   const lines = lineCache.get(tree.current.fen) ?? [];
   const current = evalBarLine(lines);
-  const items = evalSourceChoices(lines).map(({ name, engine, line }) => {
-    const checked = !!current && analysisEngineName(current.engine) === name;
-    return `<button type="button" role="menuitemradio" class="eval-menu-item" aria-checked="${checked}" data-eval-source="${htmlEscape(name)}"${line ? '' : ' disabled'}>${engineAvatar(engine)}<span class="eval-menu-name">${htmlEscape(name)}</span><span class="eval-menu-score">${htmlEscape(line?.scoreText ?? '…')}</span></button>`;
-  }).join('');
+  const items = evalSourceChoices(lines)
+    .map(({ name, engine, line }) => {
+      const checked = !!current && analysisEngineName(current.engine) === name;
+      return `<button type="button" role="menuitemradio" class="eval-menu-item" aria-checked="${checked}" data-eval-source="${htmlEscape(name)}"${line ? '' : ' disabled'}>${engineAvatar(engine)}<span class="eval-menu-name">${htmlEscape(name)}</span><span class="eval-menu-score">${htmlEscape(line?.scoreText ?? '…')}</span></button>`;
+    })
+    .join('');
   patchAnalysisResults(el('evalSourceMenu'), `<p class="eval-menu-title" aria-hidden="true">Eval bar shows</p>${items}`);
 }
 
@@ -2156,9 +2241,17 @@ function renderAnalysisStatus(): void {
   const lines = lineCache.get(tree.current.fen) ?? [];
   const ready = new Set(lines.filter((line) => line.multipv === 1 && !line.error).map((line) => analysisEngineName(line.engine))).size;
   const failed = new Set(lines.filter((line) => line.error).map((line) => analysisEngineName(line.engine))).size;
-  const [state, text, title] = running ? ['running', 'Analyzing…', 'Engines are searching this position']
-    : ready ? ['done', failed ? `Done · ${failed} failed` : 'Done', failed ? `Analysis complete; ${failed} engine${failed > 1 ? 's' : ''} unavailable` : 'Analysis complete for this position']
-      : (el('analyze') as HTMLButtonElement).disabled ? ['loading', 'Loading…', 'Preparing engines'] : ['idle', 'Not analyzed', 'Press Analyze to evaluate this position'];
+  const [state, text, title] = running
+    ? ['running', 'Analyzing…', 'Engines are searching this position']
+    : ready
+      ? [
+          'done',
+          failed ? `Done · ${failed} failed` : 'Done',
+          failed ? `Analysis complete; ${failed} engine${failed > 1 ? 's' : ''} unavailable` : 'Analysis complete for this position',
+        ]
+      : (el('analyze') as HTMLButtonElement).disabled
+        ? ['loading', 'Loading…', 'Preparing engines']
+        : ['idle', 'Not analyzed', 'Press Analyze to evaluate this position'];
   if (status.dataset.state !== state) status.dataset.state = state;
   if (status.textContent !== text) status.textContent = text;
   status.title = title;
@@ -2199,56 +2292,80 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
   const groups = analysisMoveGroups(best);
   // Only a genuine plurality is marked as "agreed": the most-backed move with 2+ engines and no tie.
   const agreed = groups[0] && groups[0].engines.length >= 2 && (groups[1]?.engines.length ?? 0) < groups[0].engines.length ? groups[0].uci : null;
-  patchAnalysisResults(el('engineSummaries'), activeEngineRows().map((row) => {
-    // Summaries deduplicate engines, but settings controls retain the original row indexes.
-    const index = engineRows.findIndex((entry) => entry.family === row.family && entry.variant === row.variant);
-    const name = analysisEngineName(rowLabel(row));
-    const engineLines = lines.filter((entry) => analysisEngineName(entry.engine) === name);
-    const line = engineLines.find((entry) => entry.multipv === 1 && !entry.error);
-    const progress = [...searchProgressByEngine.values()].find((entry) => analysisEngineName(entry.label) === name);
-    const failure = engineLines.find((entry) => entry.error);
-    // Budget is explicitly labeled; do not present a requested depth/visit count as achieved work.
-    const raw = progress ? searchProgressText(progress).replace(`${progress.label}: `, '')
-      : line ? line.detail : failure ? 'Unavailable' : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
-    // One unit in the strip (depth or visits) so it never clips beside the eval; the full string stays in the tooltip.
-    const stats = raw.startsWith('Budget · ') ? raw : raw.split(' · ')[0];
-    const engine = line?.engine ?? engineLines[0]?.engine ?? rowLabel(row);
-    const swatch = engineBrushes(engine).swatch;
-    const pct = progress && hasBoundedSearchProgress(progress) ? Math.min(100, Math.round((100 * (progress.completed ?? 0)) / Math.max(1, progress.requested ?? 1))) : null;
-    const meter = progress ? `<span class="engine-summary-meter${pct === null ? ' indeterminate' : ''}" style="--progress:${pct ?? 100}%" aria-hidden="true"></span>` : '';
-    const focused = arrowFocusEngine === name;
-    const agrees = !!line && line.pvUci[0] === agreed;
-    const move = line?.pvUci[0] ? `<button type="button" class="compare-move${agrees ? ' agrees' : ''}" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}${agrees ? ` (shared with ${groups[0].engines.length - 1} other engine${groups[0].engines.length > 2 ? 's' : ''})` : ''}" title="${htmlEscape(agrees ? `Shared best move: ${groups[0].engines.map(analysisEngineName).join(' + ')}. Play ${firstAnalysisMove(line)}` : `Play ${firstAnalysisMove(line)}`)}">${htmlEscape(firstAnalysisMove(line))}</button>` : '<span class="compare-move-empty" aria-hidden="true">—</span>';
-    const open = engineLinesExpanded(name);
-    const extra = Math.max(0, engineLines.filter((entry) => !entry.error).length - 1);
-    const toggle = extra ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="lines|${htmlEscape(name)}" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${extra + 1} lines`}">${open ? 'Hide lines' : `${extra} more line${extra > 1 ? 's' : ''}`}</button>` : '';
-    const header = `<div class="engine-summary"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-pressed="${focused}" aria-label="${htmlEscape(`${name}: ${focused ? 'show every engine\'s arrow' : 'show only this engine\'s arrow and use it for the eval bar'}`)}" title="${htmlEscape(`${name}: ${focused ? 'click again to show every engine\'s arrow' : 'show only its arrow (and use it for the eval bar)'}`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${move}${toggle}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button></div>`;
-    return `<section class="engine-card${progress ? ' searching' : ''}${focused ? ' arrow-focus' : ''}${open ? ' open' : ''}" style="--engine-color:${swatch}" aria-label="${htmlEscape(name)}">${header}${engineLinesMarkup(engine, name, engineLines, open)}${meter}</section>`;
-  }).join(''));
+  patchAnalysisResults(
+    el('engineSummaries'),
+    activeEngineRows()
+      .map((row) => {
+        // Summaries deduplicate engines, but settings controls retain the original row indexes.
+        const index = engineRows.findIndex((entry) => entry.family === row.family && entry.variant === row.variant);
+        const name = analysisEngineName(rowLabel(row));
+        const engineLines = lines.filter((entry) => analysisEngineName(entry.engine) === name);
+        const line = engineLines.find((entry) => entry.multipv === 1 && !entry.error);
+        const progress = [...searchProgressByEngine.values()].find((entry) => analysisEngineName(entry.label) === name);
+        const failure = engineLines.find((entry) => entry.error);
+        // Budget is explicitly labeled; do not present a requested depth/visit count as achieved work.
+        const raw = progress
+          ? searchProgressText(progress).replace(`${progress.label}: `, '')
+          : line
+            ? line.detail
+            : failure
+              ? 'Unavailable'
+              : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
+        // One unit in the strip (depth or visits) so it never clips beside the eval; the full string stays in the tooltip.
+        const stats = raw.startsWith('Budget · ') ? raw : raw.split(' · ')[0];
+        const engine = line?.engine ?? engineLines[0]?.engine ?? rowLabel(row);
+        const swatch = engineBrushes(engine).swatch;
+        const pct =
+          progress && hasBoundedSearchProgress(progress)
+            ? Math.min(100, Math.round((100 * (progress.completed ?? 0)) / Math.max(1, progress.requested ?? 1)))
+            : null;
+        const meter = progress
+          ? `<span class="engine-summary-meter${pct === null ? ' indeterminate' : ''}" style="--progress:${pct ?? 100}%" aria-hidden="true"></span>`
+          : '';
+        const focused = arrowFocusEngine === name;
+        const agrees = !!line && line.pvUci[0] === agreed;
+        const move = line?.pvUci[0]
+          ? `<button type="button" class="compare-move${agrees ? ' agrees' : ''}" data-focus-key="${htmlEscape(`${tree.current.fen}|${engine}|summary`)}" data-uci="${htmlEscape(line.pvUci[0])}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(name)}${agrees ? ` (shared with ${groups[0].engines.length - 1} other engine${groups[0].engines.length > 2 ? 's' : ''})` : ''}" title="${htmlEscape(agrees ? `Shared best move: ${groups[0].engines.map(analysisEngineName).join(' + ')}. Play ${firstAnalysisMove(line)}` : `Play ${firstAnalysisMove(line)}`)}">${htmlEscape(firstAnalysisMove(line))}</button>`
+          : '<span class="compare-move-empty" aria-hidden="true">—</span>';
+        const open = engineLinesExpanded(name);
+        const extra = Math.max(0, engineLines.filter((entry) => !entry.error).length - 1);
+        const toggle = extra
+          ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="lines|${htmlEscape(name)}" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${extra + 1} lines`}">${open ? 'Hide lines' : `${extra} more line${extra > 1 ? 's' : ''}`}</button>`
+          : '';
+        const header = `<div class="engine-summary"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-pressed="${focused}" aria-label="${htmlEscape(`${name}: ${focused ? "show every engine's arrow" : "show only this engine's arrow and use it for the eval bar"}`)}" title="${htmlEscape(`${name}: ${focused ? "click again to show every engine's arrow" : 'show only its arrow (and use it for the eval bar)'}`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${move}${toggle}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button></div>`;
+        return `<section class="engine-card${progress ? ' searching' : ''}${focused ? ' arrow-focus' : ''}${open ? ' open' : ''}" style="--engine-color:${swatch}" aria-label="${htmlEscape(name)}">${header}${engineLinesMarkup(engine, name, engineLines, open)}${meter}</section>`;
+      })
+      .join(''),
+  );
 }
 
 /** The engine's PV rows: the top line always, its alternatives when opened. */
 function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLine[], open: boolean): string {
   const sorted = [...engineLines].sort((x, y) => x.multipv - y.multipv);
   const rows = (open ? sorted : sorted.slice(0, 1)).map((line, index) => {
-    if (line.error) return `<li class="result-line line-error"><span class="line-error-text" title="${htmlEscape(line.error)}">${htmlEscape(line.error)}</span></li>`;
+    if (line.error)
+      return `<li class="result-line line-error"><span class="line-error-text" title="${htmlEscape(line.error)}">${htmlEscape(line.error)}</span></li>`;
     const attrs = `data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(engine)}" data-pv-fen="${htmlEscape(tree.current.fen)}" data-pv-root="${tree.current.id}" data-pv-score="${htmlEscape(line.scoreText)}" data-pv-detail="${htmlEscape(line.detail)}" data-pv-rank="${line.multipv}"`;
     const key = htmlEscape(`${tree.current.fen}|${engine}|${line.multipv}`);
     const preview = createPvPreview(tree.current.fen, line.pvUci.slice(0, 12));
-    const moves = preview.steps.map((step, ply) => {
-      // Standalone preview/accessibility labels keep their number; inline Black moves do not.
-      const text = ply > 0 ? step.label.replace(/^\d+… /, '') : step.label;
-      return `<button type="button" class="pv-move" data-pv-insert="${ply + 1}" data-focus-key="${key}|move|${ply}" aria-label="${htmlEscape(`Insert ${name} line through ${step.label}`)}" title="${htmlEscape(`Add variation through ${step.label}`)}">${htmlEscape(text)}</button>`;
-    }).join('');
+    const moves = preview.steps
+      .map((step, ply) => {
+        // Standalone preview/accessibility labels keep their number; inline Black moves do not.
+        const text = ply > 0 ? step.label.replace(/^\d+… /, '') : step.label;
+        return `<button type="button" class="pv-move" data-pv-insert="${ply + 1}" data-focus-key="${key}|move|${ply}" aria-label="${htmlEscape(`Insert ${name} line through ${step.label}`)}" title="${htmlEscape(`Add variation through ${step.label}`)}">${htmlEscape(text)}</button>`;
+      })
+      .join('');
     // The header already carries the top line's eval; alternatives show rank + their own eval.
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
     return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv} on the board`)}"${preview.steps.length ? '' : ' disabled'} title="Preview this line on the board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button></div></li>`;
   });
-  if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
+  if (!rows.length)
+    rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
 }
 
-const GEAR_ICON = '<svg class="engine-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
+const GEAR_ICON =
+  '<svg class="engine-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
 
 /** Analysis monograms use darker, hue-matched fills without changing board arrow colours. */
 function engineAvatar(engine: string): string {
@@ -2258,7 +2375,10 @@ function engineAvatar(engine: string): string {
 /** Manage-engines dialog only: every logo sits in the same framed box so mixed SVG/PNG assets read as one set. */
 function engineLogoFrame(logo: string, name: string): string {
   // Engines without a bundled mark (or before the logo probe resolves) get their initial in the same frame.
-  const mark = logo.includes('engine-logo-placeholder') || name.startsWith('PlentyChess') ? `<span class="engine-logo-initial">${htmlEscape(name.trim().charAt(0).toUpperCase())}</span>` : logo;
+  const mark =
+    logo.includes('engine-logo-placeholder') || name.startsWith('PlentyChess')
+      ? `<span class="engine-logo-initial">${htmlEscape(name.trim().charAt(0).toUpperCase())}</span>`
+      : logo;
   return `<span class="engine-logo-frame${name.startsWith('Lc0') ? ' wordmark' : ''}" aria-hidden="true">${mark}</span>`;
 }
 
@@ -2277,48 +2397,64 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const headline = analysisAgreementHeadline(groups, bestByEngine.length);
     // Spread in pawns, the same unit as every engine evaluation beside it; phrased by size.
     const spreadInfo = Number.isFinite(spreadCp) ? analysisSpreadText(spreadCp) : null;
-    const spreadMarkup = spreadInfo ? `<span class="insight-spread" data-level="${spreadInfo.level}" title="Highest minus lowest evaluation across engines, in pawns (White’s view)">${htmlEscape(spreadInfo.text)}</span>` : '';
-    const identities = groups.map((group) => `<span class="insight-group"><b>${htmlEscape(group.san)}</b>${group.engines.map((engine) => engineAvatar(engine)).join('')}</span>`).join('');
+    const spreadMarkup = spreadInfo
+      ? `<span class="insight-spread" data-level="${spreadInfo.level}" title="Highest minus lowest evaluation across engines, in pawns (White’s view)">${htmlEscape(spreadInfo.text)}</span>`
+      : '';
+    const identities = groups
+      .map((group) => `<span class="insight-group"><b>${htmlEscape(group.san)}</b>${group.engines.map((engine) => engineAvatar(engine)).join('')}</span>`)
+      .join('');
     const explanation = `Agreement compares recommended moves; eval spread is the highest minus lowest evaluation, in pawns from White’s perspective. ${groups.map((group) => `${group.san}: ${group.engines.map(analysisEngineName).join(' + ')}`).join('; ')}. Open Compare for details.`;
-    patchAnalysisResults(el('comparisonInsight'), `<button type="button" class="insight-action" data-open-comparison data-focus-key="comparison-shortcut" aria-label="${htmlEscape(`${headline}. Open Compare. ${explanation}`)}" title="${htmlEscape(explanation)}"><span class="insight-headline"><strong>${htmlEscape(headline)}</strong><span class="insight-compare" title="Open Compare for engine details">Compare <span aria-hidden="true">›</span></span></span>${spreadMarkup}<span class="insight-groups" aria-hidden="true">${identities}</span></button>`);
+    patchAnalysisResults(
+      el('comparisonInsight'),
+      `<button type="button" class="insight-action" data-open-comparison data-focus-key="comparison-shortcut" aria-label="${htmlEscape(`${headline}. Open Compare. ${explanation}`)}" title="${htmlEscape(explanation)}"><span class="insight-headline"><strong>${htmlEscape(headline)}</strong><span class="insight-compare" title="Open Compare for engine details">Compare <span aria-hidden="true">›</span></span></span>${spreadMarkup}<span class="insight-groups" aria-hidden="true">${identities}</span></button>`,
+    );
   }
   if (!bestByEngine.length) {
     const progressRows = [...searchProgressByEngine.values()].map(
-      (progress) =>
-        `<tr><td>${htmlEscape(analysisEngineName(progress.label))}</td><td colspan="3" class="small">Searching…</td></tr>`,
+      (progress) => `<tr><td>${htmlEscape(analysisEngineName(progress.label))}</td><td colspan="3" class="small">Searching…</td></tr>`,
     );
     el('engineConsensus').textContent = progressRows.length ? 'Analysis in progress.' : analyzing ? 'Preparing selected engines.' : 'No analysis yet.';
-    if (lines.some((line) => line.error) && !progressRows.length) el('engineConsensus').textContent = 'No engine results available. Check engine lines for errors.';
-    patchAnalysisResults(body, progressRows.length
-      ? progressRows.join('')
-      : `<tr><td colspan="4" class="small">${analyzing ? 'Preparing selected engines…' : 'Run analysis to compare selected engines.'}</td></tr>`);
+    if (lines.some((line) => line.error) && !progressRows.length)
+      el('engineConsensus').textContent = 'No engine results available. Check engine lines for errors.';
+    patchAnalysisResults(
+      body,
+      progressRows.length
+        ? progressRows.join('')
+        : `<tr><td colspan="4" class="small">${analyzing ? 'Preparing selected engines…' : 'Run analysis to compare selected engines.'}</td></tr>`,
+    );
     return;
   }
   const failed = new Set(lines.filter((line) => line.error).map((line) => line.engine)).size;
   const { pending, unavailable } = analysisAvailability(activeEngineRows().length, bestByEngine.length, failed, analyzing);
   const status = (pending ? ` · ${pending} pending` : '') + (unavailable ? ` · ${unavailable} unavailable` : '');
-  el('engineConsensus').textContent = bestByEngine.length === 1
-    ? `${analysisEngineName(bestByEngine[0].engine)} ready${status}`
-    // Pawn units, matching every evaluation on the page.
-    : analysisConsensus(bestByEngine).replace(/ · (\d+) cp spread$/, (_, cp: string) => ` · Eval spread ${(Number(cp) / 100).toFixed(2)} pawns (White’s view)`) + status;
+  el('engineConsensus').textContent =
+    bestByEngine.length === 1
+      ? `${analysisEngineName(bestByEngine[0].engine)} ready${status}`
+      : // Pawn units, matching every evaluation on the page.
+        analysisConsensus(bestByEngine).replace(
+          / · (\d+) cp spread$/,
+          (_, cp: string) => ` · Eval spread ${(Number(cp) / 100).toFixed(2)} pawns (White’s view)`,
+        ) + status;
   const baseline = bestByEngine[0];
   el('deltaBaseline').textContent = 'Δ';
   el('deltaBaseline').title = `Pawns versus ${analysisEngineName(baseline.engine)}`;
   const reference = baseline.mateIn === undefined ? baseline.scoreCp : undefined;
-  patchAnalysisResults(body, bestByEngine
-    .map((line) => {
-      const delta = reference === undefined || line.scoreCp === undefined || line.mateIn !== undefined ? '—' : signedPawns(line.scoreCp - reference);
-      return (
-        `<tr>` +
-        `<th scope="row">${htmlEscape(analysisEngineName(line.engine))}</th>` +
-        `<td><button type="button" class="compare-move" data-focus-key="${htmlEscape(`${tree.current.fen}|${line.engine}|compare`)}" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(analysisEngineName(line.engine))}">${htmlEscape(firstAnalysisMove(line))}</button></td>` +
-        `<td class="mono">${htmlEscape(line.scoreText)}</td>` +
-        `<td class="mono">${htmlEscape(delta)}</td></tr>`
-      );
-    })
-    .join(''));
+  patchAnalysisResults(
+    body,
+    bestByEngine
+      .map((line) => {
+        const delta = reference === undefined || line.scoreCp === undefined || line.mateIn !== undefined ? '—' : signedPawns(line.scoreCp - reference);
+        return (
+          `<tr>` +
+          `<th scope="row">${htmlEscape(analysisEngineName(line.engine))}</th>` +
+          `<td><button type="button" class="compare-move" data-focus-key="${htmlEscape(`${tree.current.fen}|${line.engine}|compare`)}" data-uci="${htmlEscape(line.pvUci[0] ?? '')}" data-pv="${htmlEscape(line.pvUci.join(' '))}" data-engine="${htmlEscape(line.engine)}" aria-label="Play ${htmlEscape(firstAnalysisMove(line))}, ${htmlEscape(analysisEngineName(line.engine))}">${htmlEscape(firstAnalysisMove(line))}</button></td>` +
+          `<td class="mono">${htmlEscape(line.scoreText)}</td>` +
+          `<td class="mono">${htmlEscape(delta)}</td></tr>`
+        );
+      })
+      .join(''),
+  );
 }
-
 
 function renderLines() {
   if (retry) return;
@@ -2462,14 +2598,21 @@ function renderExplorerComparison(): void {
   const lines = (lineCache.get(fen) ?? []).filter((line) => line.multipv === 1 && !line.error && line.pvUci[0]);
   const stats = currentBookStats();
   const total = openingSummary(stats).total;
-  el('explorerComparisonInfo').textContent = policy ? `Maia3 model at ${rating}; both players conditioned at this rating.`
-    : maia3PanelEvaluator ? 'Waiting for Maia3 predictions for this position.' : 'Load Maia3 in the Human tab to add model probabilities. No model is downloaded by this comparison.';
-  el('explorerComparisonRows').innerHTML = stats.map((stat) => {
-    const engines = lines.filter((line) => line.pvUci[0] === stat.uci).map((line) => line.engine);
-    return `<div class="prediction-row"><strong>${htmlEscape(stat.san)}</strong> · Observed ${(100 * stat.count / total).toFixed(1)}% (${stat.count}/${total})<br>` +
-      `Maia3 ${rating}: ${policy ? `${((policy.get(stat.uci) ?? 0) * 100).toFixed(1)}%` : 'not loaded'}<br>` +
-      `Engine best: ${engines.length ? htmlEscape(engines.join(', ')) : lines.length ? 'not selected by analyzed engines' : 'no analysis yet'}</div>`;
-  }).join('');
+  el('explorerComparisonInfo').textContent = policy
+    ? `Maia3 model at ${rating}; both players conditioned at this rating.`
+    : maia3PanelEvaluator
+      ? 'Waiting for Maia3 predictions for this position.'
+      : 'Load Maia3 in the Human tab to add model probabilities. No model is downloaded by this comparison.';
+  el('explorerComparisonRows').innerHTML = stats
+    .map((stat) => {
+      const engines = lines.filter((line) => line.pvUci[0] === stat.uci).map((line) => line.engine);
+      return (
+        `<div class="prediction-row"><strong>${htmlEscape(stat.san)}</strong> · Observed ${((100 * stat.count) / total).toFixed(1)}% (${stat.count}/${total})<br>` +
+        `Maia3 ${rating}: ${policy ? `${((policy.get(stat.uci) ?? 0) * 100).toFixed(1)}%` : 'not loaded'}<br>` +
+        `Engine best: ${engines.length ? htmlEscape(engines.join(', ')) : lines.length ? 'not selected by analyzed engines' : 'no analysis yet'}</div>`
+      );
+    })
+    .join('');
 }
 
 async function runPgnTask(action: () => void | Promise<void>): Promise<void> {
@@ -2480,13 +2623,15 @@ async function runPgnTask(action: () => void | Promise<void>): Promise<void> {
   root.setAttribute('aria-busy', 'true');
   const controls = [...root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('button,input,select,textarea')];
   const disabled = controls.map((node) => node.disabled);
-  controls.forEach((node) => node.disabled = true);
-  try { await action(); }
-  catch (error) { if (!isStaleMount(signal)) el('importInfo').textContent = `Import failed: ${(error as Error).message}`; }
-  finally {
+  controls.forEach((node) => (node.disabled = true));
+  try {
+    await action();
+  } catch (error) {
+    if (!isStaleMount(signal)) el('importInfo').textContent = `Import failed: ${(error as Error).message}`;
+  } finally {
     if (!isStaleMount(signal)) {
       pgnTaskBusy = false;
-      controls.forEach((node, i) => node.disabled = disabled[i]);
+      controls.forEach((node, i) => (node.disabled = disabled[i]));
       const info = el('pgnDbInfo').textContent;
       const name = inputEl('pgnDbName').value;
       renderPgnDatabaseCollections(activePgnCollectionId);
@@ -2502,12 +2647,16 @@ async function setImportedPgn(raw: string, messagePrefix = 'Imported', savedColl
   const signal = mountAbort.signal;
   const progress = el('importProgress') as HTMLProgressElement;
   progress.hidden = false;
-  const batch = await (savedCollection ? importStoredPgn : importLocalPgn)(raw, (done, total) => {
-    if (isStaleMount(signal)) return;
-    progress.max = total;
-    progress.value = done;
-    el('importInfo').textContent = `Indexing mainlines: ${done} of ${total} games…`;
-  }, signal);
+  const batch = await (savedCollection ? importStoredPgn : importLocalPgn)(
+    raw,
+    (done, total) => {
+      if (isStaleMount(signal)) return;
+      progress.max = total;
+      progress.value = done;
+      el('importInfo').textContent = `Indexing mainlines: ${done} of ${total} games…`;
+    },
+    signal,
+  );
   if (isStaleMount(signal)) throw new DOMException('Page closed', 'AbortError');
   const games = batch.games;
   importedGames = games;
@@ -2517,7 +2666,8 @@ async function setImportedPgn(raw: string, messagePrefix = 'Imported', savedColl
   databasePositionCollectionCount = 0;
   pgnDatabaseSearchKey = '';
   bookCache.clear();
-  el('importInfo').textContent = `${messagePrefix} ${games.length} playable game${games.length === 1 ? '' : 's'}${batch.skippedGames ? `; skipped ${batch.skippedGames} without moves` : ''}`;
+  el('importInfo').textContent =
+    `${messagePrefix} ${games.length} playable game${games.length === 1 ? '' : 's'}${batch.skippedGames ? `; skipped ${batch.skippedGames} without moves` : ''}`;
   renderOpening();
   renderLines(); // refresh the legend so the Book key appears
   setShapes(bestShapes());
@@ -2922,14 +3072,18 @@ async function importPgnDatabaseFile(file: File | undefined): Promise<void> {
     el('importInfo').textContent = 'Reading backup…';
     const backup = JSON.parse(await file.text()) as unknown;
     if (isStaleMount(mountSignal)) return;
-    const count = await importPgnDatabaseBackup(backup, (done, total) => {
-      if (isStaleMount(mountSignal)) return;
-      const progress = el('importProgress') as HTMLProgressElement;
-      progress.hidden = false;
-      progress.max = total || 1;
-      progress.value = done;
-      el('importInfo').textContent = `Rebuilding backup: ${done} of ${total} collections…`;
-    }, mountSignal);
+    const count = await importPgnDatabaseBackup(
+      backup,
+      (done, total) => {
+        if (isStaleMount(mountSignal)) return;
+        const progress = el('importProgress') as HTMLProgressElement;
+        progress.hidden = false;
+        progress.max = total || 1;
+        progress.value = done;
+        el('importInfo').textContent = `Rebuilding backup: ${done} of ${total} collections…`;
+      },
+      mountSignal,
+    );
     if (refreshPgnCollectionsOnReplacementMount(mountSignal)) return;
     await refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
     if (!isStaleMount(mountSignal)) {
@@ -3009,7 +3163,10 @@ async function deleteSelectedPgnCollection(): Promise<void> {
 }
 
 function renderAll() {
-  if (retry) { renderBoard(); return; }
+  if (retry) {
+    renderBoard();
+    return;
+  }
   renderBoard();
   renderLines();
   renderMoveList();
@@ -3106,7 +3263,9 @@ function renderReviewEngineChoices(): void {
   const select = selectEl('reviewEngine');
   const previous = select.value;
   const rows = reviewEngineRows();
-  select.innerHTML = rows.map((row) => `<option value="${row.family}:${htmlEscape(row.variant)}">${htmlEscape(analysisEngineName(rowLabel(row)))}</option>`).join('');
+  select.innerHTML = rows
+    .map((row) => `<option value="${row.family}:${htmlEscape(row.variant)}">${htmlEscape(analysisEngineName(rowLabel(row)))}</option>`)
+    .join('');
   select.value = rows.some((row) => `${row.family}:${row.variant}` === previous) ? previous : 'sf:lite';
   if (previous && previous !== select.value) {
     stopGameReview('Review cancelled because the reviewer changed.');
@@ -3143,8 +3302,10 @@ function renderReview(review: GameReview, nodes: GameNode[]): void {
   critical.innerHTML = review.criticalMoves
     .map((move) => {
       const node = nodes[move.ply];
-      return `<li><button type="button" data-node="${node?.id ?? ''}" data-ply="${move.ply}"><strong>${htmlEscape(reviewMoveLabel(nodes[0].fen, move))}</strong>` +
-        `<span class="review-badge ${move.class}">${REVIEW_CLASS_LABEL[move.class]}</span><span class="review-loss">−${Math.round(move.moverLoss * 100)} pp</span></button></li>`;
+      return (
+        `<li><button type="button" data-node="${node?.id ?? ''}" data-ply="${move.ply}"><strong>${htmlEscape(reviewMoveLabel(nodes[0].fen, move))}</strong>` +
+        `<span class="review-badge ${move.class}">${REVIEW_CLASS_LABEL[move.class]}</span><span class="review-loss">−${Math.round(move.moverLoss * 100)} pp</span></button></li>`
+      );
     })
     .join('');
   el('reviewMomentsEmpty').hidden = review.criticalMoves.length > 0;
@@ -3162,9 +3323,12 @@ function syncReviewNavigation(): void {
   chart.setAttribute('aria-valuemax', String(lastReview.moves.length));
   chart.setAttribute('aria-valuenow', String(Math.max(0, ply)));
   const move = lastReview.moves[ply - 1];
-  const caption = ply < 0 ? 'Variation · the graph shows the reviewed mainline.' : move
-    ? `${reviewMoveLabel(lastReviewNodes[0].fen, move)} · ${REVIEW_CLASS_LABEL[move.class]} · White advantage ${Math.round(move.winAfter * 100)}%`
-    : `Starting position · White advantage ${Math.round(lastReview.moves[0].winBefore * 100)}%`;
+  const caption =
+    ply < 0
+      ? 'Variation · the graph shows the reviewed mainline.'
+      : move
+        ? `${reviewMoveLabel(lastReviewNodes[0].fen, move)} · ${REVIEW_CLASS_LABEL[move.class]} · White advantage ${Math.round(move.winAfter * 100)}%`
+        : `Starting position · White advantage ${Math.round(lastReview.moves[0].winBefore * 100)}%`;
   chart.setAttribute('aria-valuetext', caption);
   el('reviewSelection').textContent = caption;
   for (const button of el('reviewCritical').querySelectorAll<HTMLButtonElement>('[data-ply]')) {
@@ -3230,13 +3394,24 @@ function startMistakeRetry(): void {
   clearAnalysisSearchProgress();
   // Quarantine all answer-bearing panels, even those already hidden by the active tab.
   restoreRetryPanels = quarantineRetryPanels([
-    ...['reviewStandard', 'enginesPanel', 'historyPanel', 'comparisonSection', 'humanPanel', 'positionTools', 'pvPreview', 'evalSourceMenu', 'pgnDbSearchResults'].map(el),
+    ...[
+      'reviewStandard',
+      'enginesPanel',
+      'historyPanel',
+      'comparisonSection',
+      'humanPanel',
+      'positionTools',
+      'pvPreview',
+      'evalSourceMenu',
+      'pgnDbSearchResults',
+    ].map(el),
     el('opening').querySelector('tbody')!,
   ]);
   el('retryEntry').hidden = true;
   el('retryActive').hidden = false;
   document.querySelector<HTMLElement>('.analysis-workspace')!.dataset.retrying = 'true';
-  for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd']) el(id).toggleAttribute('disabled', true);
+  for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd'])
+    el(id).toggleAttribute('disabled', true);
   el('message').textContent = '';
   el('boardAnnouncement').textContent = '';
   renderMistakeRetry();
@@ -3253,12 +3428,19 @@ function renderMistakeRetry(): void {
   hidePromotionOverlay(el('ground'));
   retryHumanGeneration += 1;
   const complete = session.phase === 'complete';
-  el('retryCounts').textContent = `${session.solved} solved · ${session.remaining} remaining · ${session.problems.length} ${session.problems.length === 1 ? 'position' : 'positions'}`;
-  const text = complete ? 'Retry complete. Return to review to continue your game.'
-    : session.phase === 'checking' ? 'Checking your move locally…'
-      : session.phase === 'solved' ? 'Success. This move is accepted.'
-        : session.phase === 'revealed' ? 'Best move revealed.'
-          : session.phase === 'wrong' ? 'Try again.' : `${session.problem.move.side === 'w' ? 'White' : 'Black'} to move. Play a better move on the board.`;
+  el('retryCounts').textContent =
+    `${session.solved} solved · ${session.remaining} remaining · ${session.problems.length} ${session.problems.length === 1 ? 'position' : 'positions'}`;
+  const text = complete
+    ? 'Retry complete. Return to review to continue your game.'
+    : session.phase === 'checking'
+      ? 'Checking your move locally…'
+      : session.phase === 'solved'
+        ? 'Success. This move is accepted.'
+        : session.phase === 'revealed'
+          ? 'Best move revealed.'
+          : session.phase === 'wrong'
+            ? 'Try again.'
+            : `${session.problem.move.side === 'w' ? 'White' : 'Black'} to move. Play a better move on the board.`;
   el('retryStatus').textContent = text;
   el('boardAnnouncement').textContent = text;
   el('retrySolution').textContent = '';
@@ -3282,7 +3464,14 @@ async function verifyRetryPosition(positionTree: GameTree, signal: AbortSignal):
   const { engine, row, label, depth } = reviewer;
   const board = positionTree.currentBoard();
   const legal = legalMoves(board).length;
-  const terminal = terminalReviewPosition(board, positionTree.lineTo().slice(0, -1).map((node) => node.fen), legal);
+  const terminal = terminalReviewPosition(
+    board,
+    positionTree
+      .lineTo()
+      .slice(0, -1)
+      .map((node) => node.fen),
+    legal,
+  );
   if (terminal) return terminal.winWhite;
   const engineId = row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`;
   const lines = await withCpuLease(engineId, signal, async (lease) => {
@@ -3332,9 +3521,11 @@ async function showRetryHumanLikelihood(): Promise<void> {
     const [evaluation] = await maia3PanelEvaluator.evaluateConditions(board, [{ selfElo: rating, oppoElo: rating }]);
     if (retry !== session || generation !== retryHumanGeneration || !session.answered) return;
     const likelihood = (uci: string) => `${((evaluation.legalPriors.find((entry) => entry.uci === uci)?.prior ?? 0) * 100).toFixed(1)}%`;
-    el('retryHumanStatus').textContent = `Human likelihood at ${rating}: game move ${session.problem.move.san} ${likelihood(session.problem.move.uci)}; review’s best ${likelihood(session.problem.move.bestUci!)}.${session.attemptedUci ? ` Your attempt ${likelihood(session.attemptedUci)}.` : ''} This predicts human choices, not correctness.`;
+    el('retryHumanStatus').textContent =
+      `Human likelihood at ${rating}: game move ${session.problem.move.san} ${likelihood(session.problem.move.uci)}; review’s best ${likelihood(session.problem.move.bestUci!)}.${session.attemptedUci ? ` Your attempt ${likelihood(session.attemptedUci)}.` : ''} This predicts human choices, not correctness.`;
   } catch (error) {
-    if (retry === session && generation === retryHumanGeneration) el('retryHumanStatus').textContent = `Human likelihood unavailable: ${(error as Error).message}`;
+    if (retry === session && generation === retryHumanGeneration)
+      el('retryHumanStatus').textContent = `Human likelihood unavailable: ${(error as Error).message}`;
   }
 }
 
@@ -3357,7 +3548,8 @@ function exitMistakeRetry(render = true): void {
   el('retryActive').hidden = true;
   el('retryEntry').hidden = false;
   for (const id of ['retrySolution', 'retryHumanStatus', 'retryStatus', 'boardAnnouncement']) el(id).textContent = '';
-  for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd']) el(id).toggleAttribute('disabled', false);
+  for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd'])
+    el(id).toggleAttribute('disabled', false);
   if (render) {
     renderAll();
     // Chessground clears manual shapes when renderBoard supplies a FEN.
@@ -3427,7 +3619,11 @@ async function runGameReview(): Promise<void> {
       const fen = nodes[i].fen;
       const board = parseFen(fen);
       const legal = legalMoves(board).length;
-      const terminal = terminalReviewPosition(board, nodes.slice(0, i).map((node) => node.fen), legal);
+      const terminal = terminalReviewPosition(
+        board,
+        nodes.slice(0, i).map((node) => node.fen),
+        legal,
+      );
       if (terminal) {
         positions.push(terminal);
         continue;
@@ -3481,7 +3677,8 @@ async function runGameReview(): Promise<void> {
     renderReview(lastReview, nodes);
     el('reviewCopyPgn').hidden = false;
     el('reviewDownloadPgn').hidden = false;
-    el('reviewStatus').textContent = `${label} · depth ${depth} · ${moves.length} ${moves.length === 1 ? 'move' : 'moves'} reviewed · ${cacheHits}/${nodes.length} positions cached.`;
+    el('reviewStatus').textContent =
+      `${label} · depth ${depth} · ${moves.length} ${moves.length === 1 ? 'move' : 'moves'} reviewed · ${cacheHits}/${nodes.length} positions cached.`;
     if (matchMedia('(max-width: 767px)').matches) {
       // Scroll only this tab, not the page: keep the board in place and bring the graph into view.
       const panel = el('reviewPanel');
@@ -3559,7 +3756,10 @@ function deferHiddenTabWork(kind: HiddenTabWork): boolean {
 }
 
 function applyHiddenTab(hidden: boolean): void {
-  if (retry) { hiddenTab = initialHiddenTabPause(hidden); return; }
+  if (retry) {
+    hiddenTab = initialHiddenTabPause(hidden);
+    return;
+  }
   if (hidden) workspaceAutosave?.flush();
   const wasHidden = hiddenTab.hidden;
   const reloadClass = classifyHiddenReload(
@@ -4589,18 +4789,24 @@ async function renderMaia3Panel(fen: string, evaluator: Maia3BrowserEvaluator, i
 
 async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
   const activeRetry = retry;
-  if (activeRetry && !['attempt', 'wrong'].includes(activeRetry.phase)) { renderBoard(); return; }
+  if (activeRetry && !['attempt', 'wrong'].includes(activeRetry.phase)) {
+    renderBoard();
+    return;
+  }
   const inputTree = activeRetry?.tree ?? tree;
   const inputNode = inputTree.current;
   const modeGeneration = retryModeGeneration;
   const board = inputTree.currentBoard();
-  const inputIsCurrent = () => retryModeGeneration === modeGeneration && retry === activeRetry
-    && (retry?.tree ?? tree) === inputTree && inputTree.current === inputNode;
+  const inputIsCurrent = () =>
+    retryModeGeneration === modeGeneration && retry === activeRetry && (retry?.tree ?? tree) === inputTree && inputTree.current === inputNode;
   const play = (move: Move): boolean => {
     // Promotion callbacks can outlive navigation or a retry-mode transition.
     if (!inputIsCurrent()) return false;
     if (activeRetry) void submitRetryMove(moveToUci(move));
-    else { tree.addMove(move); afterNavigation(); }
+    else {
+      tree.addMove(move);
+      afterNavigation();
+    }
     return true;
   };
   const matching = matchUserMoves(board, from, to);
@@ -4695,7 +4901,9 @@ function closePvPreview(): void {
   // does not disconnect its ResizeObserver, so recreating it per open leaks observers.
   (el('pvPreview') as HTMLDialogElement).close();
   if (previous?.root === tree.current) {
-    el('engineSummaries').querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(previous.focusKey)}"]`)?.focus({ preventScroll: true });
+    el('engineSummaries')
+      .querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(previous.focusKey)}"]`)
+      ?.focus({ preventScroll: true });
   }
 }
 
@@ -4706,8 +4914,11 @@ function renderPvPreview(): void {
   const fen = position?.fen ?? line.rootFen;
   const board = parseFen(fen);
   const config = {
-    fen, orientation, viewOnly: true, coordinates: true,
-    turnColor: board.turn === 'w' ? 'white' as const : 'black' as const,
+    fen,
+    orientation,
+    viewOnly: true,
+    coordinates: true,
+    turnColor: board.turn === 'w' ? ('white' as const) : ('black' as const),
     check: boardCheck(board),
     lastMove: position ? [position.uci.slice(0, 2) as Key, position.uci.slice(2, 4) as Key] : [],
     drawable: { enabled: false, visible: false },
@@ -4715,7 +4926,8 @@ function renderPvPreview(): void {
   };
   if (!pvGround) pvGround = Chessground(el('pvPreviewBoard'), config);
   else pvGround.set(config);
-  el('pvPreviewPosition').textContent = `${position ? `After ${position.label}` : 'Starting position'} · ${step} of ${line.steps.length} plies · ${board.turn === 'w' ? 'White' : 'Black'} to move`;
+  el('pvPreviewPosition').textContent =
+    `${position ? `After ${position.label}` : 'Starting position'} · ${step} of ${line.steps.length} plies · ${board.turn === 'w' ? 'White' : 'Black'} to move`;
   // Keep endpoint controls focusable so arrow-key stepping still works after reaching either end.
   for (const id of ['pvStart', 'pvBack', 'pvInsertHere']) el(id).setAttribute('aria-disabled', String(step === 0));
   for (const id of ['pvForward', 'pvEnd']) el(id).setAttribute('aria-disabled', String(step === line.steps.length));
@@ -4733,8 +4945,14 @@ function openPvPreview(row: HTMLElement, trigger: HTMLElement): void {
   pvPreview = { root: tree.current, line, step: 0, focusKey: trigger.dataset.focusKey ?? '' };
   el('pvPreviewTitle').textContent = `${analysisEngineName(row.dataset.engine ?? '')} · Line ${row.dataset.pvRank}`;
   el('pvPreviewDetail').textContent = `${row.dataset.pvScore} (White’s view) · ${row.dataset.pvDetail}`;
-  el('pvPreviewNote').textContent = line.truncated ? 'The engine line ends at its last legal move. The remaining moves were ignored.' : 'Preview only. The game and its analysis stay at the original position.';
-  el('pvPreviewMoves').innerHTML = line.steps.map((step, i) => `<button type="button" data-pv-step="${i + 1}" aria-label="${htmlEscape(`Preview after ${step.label}`)}">${htmlEscape(step.label)}</button>`).join('');
+  el('pvPreviewNote').textContent = line.truncated
+    ? 'The engine line ends at its last legal move. The remaining moves were ignored.'
+    : 'Preview only. The game and its analysis stay at the original position.';
+  el('pvPreviewMoves').innerHTML = line.steps
+    .map(
+      (step, i) => `<button type="button" data-pv-step="${i + 1}" aria-label="${htmlEscape(`Preview after ${step.label}`)}">${htmlEscape(step.label)}</button>`,
+    )
+    .join('');
   (el('pvPreview') as HTMLDialogElement).showModal();
   renderPvPreview();
 }
@@ -4742,7 +4960,10 @@ function openPvPreview(row: HTMLElement, trigger: HTMLElement): void {
 function wirePvPreview(): void {
   const dialog = el('pvPreview');
   el('closePvPreview').addEventListener('click', closePvPreview);
-  dialog.addEventListener('cancel', (event) => { event.preventDefault(); closePvPreview(); });
+  dialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closePvPreview();
+  });
   const stepTo = (step: number) => {
     if (!pvPreview) return;
     pvPreview.step = Math.max(0, Math.min(pvPreview.line.steps.length, step));
@@ -4767,7 +4988,12 @@ function wirePvPreview(): void {
     if (!pvPreview) return;
     const { root, line, step } = pvPreview;
     if (!whole && step === 0) return;
-    const added = insertPvPrefix(tree, root, line.steps.map((entry) => entry.uci), whole ? line.steps.length : step);
+    const added = insertPvPrefix(
+      tree,
+      root,
+      line.steps.map((entry) => entry.uci),
+      whole ? line.steps.length : step,
+    );
     closePvPreview();
     if (added) afterNavigation();
     else el('message').textContent = 'The position changed. Open a current engine line to insert it.';
@@ -4786,21 +5012,41 @@ function hoverLine(pvUci: string[], engine: string) {
 function wireEvents() {
   el('retryStart').addEventListener('click', startMistakeRetry);
   el('retryExit').addEventListener('click', () => exitMistakeRetry());
-  el('retrySkip').addEventListener('click', () => { retry?.next(); renderMistakeRetry(); });
-  el('retryNext').addEventListener('click', () => { retry?.next(); renderMistakeRetry(); });
-  el('retryReveal').addEventListener('click', () => { retry?.reveal(); renderMistakeRetry(); });
-  el('retryHumanShow').addEventListener('click', () => { void showRetryHumanLikelihood(); });
-  el('retryRating').addEventListener('change', () => { void showRetryHumanLikelihood(); });
+  el('retrySkip').addEventListener('click', () => {
+    retry?.next();
+    renderMistakeRetry();
+  });
+  el('retryNext').addEventListener('click', () => {
+    retry?.next();
+    renderMistakeRetry();
+  });
+  el('retryReveal').addEventListener('click', () => {
+    retry?.reveal();
+    renderMistakeRetry();
+  });
+  el('retryHumanShow').addEventListener('click', () => {
+    void showRetryHumanLikelihood();
+  });
+  el('retryRating').addEventListener('change', () => {
+    void showRetryHumanLikelihood();
+  });
   // Board moves, board orientation and the retry sub-area are the only live controls.
-  document.querySelector('.analysis-workspace')?.addEventListener('click', (event) => {
-    if (retry && !(event.target as HTMLElement).closest('#retryActive, #ground, #keyboardBoard, #flip')) {
-      event.preventDefault(); event.stopImmediatePropagation();
-    }
-  }, { capture: true, signal: mountAbort.signal });
+  document.querySelector('.analysis-workspace')?.addEventListener(
+    'click',
+    (event) => {
+      if (retry && !(event.target as HTMLElement).closest('#retryActive, #ground, #keyboardBoard, #flip')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    },
+    { capture: true, signal: mountAbort.signal },
+  );
   // Keep routine completion quiet without concealing loading, errors or import feedback.
   const message = el('message');
   const updateMessageState = () => {
-    message.dataset.routine = String(/^(Analysis complete ·|Position analysis paused for game review\.|Engines (agree|disagree):|\d+\/\d+ engines prefer)/.test(message.textContent ?? ''));
+    message.dataset.routine = String(
+      /^(Analysis complete ·|Position analysis paused for game review\.|Engines (agree|disagree):|\d+\/\d+ engines prefer)/.test(message.textContent ?? ''),
+    );
   };
   const messageObserver = new MutationObserver(updateMessageState);
   messageObserver.observe(message, { childList: true, characterData: true, subtree: true });
@@ -4813,7 +5059,10 @@ function wireEvents() {
   // The shared header is sticky and can resize with fonts/zoom; keep mobile tabs below it.
   const siteHeader = document.querySelector<HTMLElement>('.site-header');
   if (siteHeader) {
-    const syncHeaderHeight = () => document.querySelector<HTMLElement>('.analysis-workspace')?.style.setProperty('--analysis-header-height', `${siteHeader.getBoundingClientRect().height}px`);
+    const syncHeaderHeight = () =>
+      document
+        .querySelector<HTMLElement>('.analysis-workspace')
+        ?.style.setProperty('--analysis-header-height', `${siteHeader.getBoundingClientRect().height}px`);
     const headerObserver = new ResizeObserver(syncHeaderHeight);
     headerObserver.observe(siteHeader);
     syncHeaderHeight();
@@ -4853,7 +5102,8 @@ function wireEvents() {
       event.stopPropagation();
       const visible = tabs.filter((item) => item.getClientRects().length);
       const index = visible.indexOf(tab);
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? visible.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + visible.length) % visible.length;
+      const next =
+        event.key === 'Home' ? 0 : event.key === 'End' ? visible.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + visible.length) % visible.length;
       setView(visible[next]);
       visible[next].focus();
     });
@@ -4866,21 +5116,33 @@ function wireEvents() {
     if (narrow.matches) tab.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
   const narrow = matchMedia('(max-width: 767px)');
-  narrow.addEventListener('change', () => {
-    if (!narrow.matches && el('analysisContent').dataset.view === 'engines') setView(el('movesTab') as HTMLButtonElement);
-  }, { signal: mountAbort.signal });
+  narrow.addEventListener(
+    'change',
+    () => {
+      if (!narrow.matches && el('analysisContent').dataset.view === 'engines') setView(el('movesTab') as HTMLButtonElement);
+    },
+    { signal: mountAbort.signal },
+  );
   // On phones the engine results are the first thing to show (the product's main result); Moves is one tap away.
   if (narrow.matches) setView(el('enginesTab') as HTMLButtonElement);
   const flashCopied = (button: HTMLElement) => {
     button.dataset.copied = 'true';
-    window.setTimeout(() => { delete button.dataset.copied; }, 1600);
+    window.setTimeout(() => {
+      delete button.dataset.copied;
+    }, 1600);
   };
-  el('copyFen').addEventListener('click', () => { copyFen(); flashCopied(el('copyFen')); });
+  el('copyFen').addEventListener('click', () => {
+    copyFen();
+    flashCopied(el('copyFen'));
+  });
   // Plain disclosure: native buttons use Tab, and Escape returns to the trigger.
   const copyDisclosure = mountAnalysisDisclosure({ root: el('copyTools'), trigger: el('copyMenuButton'), panel: el('copyMenu'), signal: mountAbort.signal });
   const mobileTools = matchMedia('(max-width: 600px)');
   const toolsDisclosure = mountAnalysisDisclosure({
-    root: el('boardToolDisclosure'), trigger: el('boardToolsButton'), panel: el('boardTools'), signal: mountAbort.signal,
+    root: el('boardToolDisclosure'),
+    trigger: el('boardToolsButton'),
+    panel: el('boardTools'),
+    signal: mountAbort.signal,
     enabled: () => mobileTools.matches && !retry,
     closeOnAction: (button) => button.id !== 'copyMenuButton',
   });
@@ -4892,24 +5154,40 @@ function wireEvents() {
   });
   retryToolsObserver.observe(el('main'), { attributes: true, attributeFilter: ['data-retrying'] });
   mountAbort.signal.addEventListener('abort', () => retryToolsObserver.disconnect(), { once: true });
-  mobileTools.addEventListener('change', () => {
-    copyDisclosure.close();
-    toolsDisclosure.close(mobileTools.matches && el('boardTools').contains(document.activeElement));
-  }, { signal: mountAbort.signal });
+  mobileTools.addEventListener(
+    'change',
+    () => {
+      copyDisclosure.close();
+      toolsDisclosure.close(mobileTools.matches && el('boardTools').contains(document.activeElement));
+    },
+    { signal: mountAbort.signal },
+  );
   // Attribution pills remain pointer-transparent so every part of a chess square
   // stays playable. The board supplies the same native hover tooltip beneath them.
-  el('ground').addEventListener('pointermove', (event) => {
-    const marker = retry ? undefined : [...el('ground').querySelectorAll<SVGElement>('.shared-move-marker')].find((node) => {
-      const rect = node.getBoundingClientRect();
-      return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
-    });
-    const board = el('ground').querySelector<HTMLElement>('cg-board');
-    const title = marker?.getAttribute('aria-label') ?? '';
-    if (board && board.title !== title) board.title = title;
-  }, { signal: mountAbort.signal });
+  el('ground').addEventListener(
+    'pointermove',
+    (event) => {
+      const marker = retry
+        ? undefined
+        : [...el('ground').querySelectorAll<SVGElement>('.shared-move-marker')].find((node) => {
+            const rect = node.getBoundingClientRect();
+            return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+          });
+      const board = el('ground').querySelector<HTMLElement>('cg-board');
+      const title = marker?.getAttribute('aria-label') ?? '';
+      if (board && board.title !== title) board.title = title;
+    },
+    { signal: mountAbort.signal },
+  );
   el('ground').addEventListener('pointerleave', () => el('ground').querySelector('cg-board')?.removeAttribute('title'), { signal: mountAbort.signal });
-  el('quickCopyFen').addEventListener('click', () => { copyFen(); flashCopied(el('quickCopyFen')); });
-  el('quickCopyPgn').addEventListener('click', () => { copyPgn(); flashCopied(el('quickCopyPgn')); });
+  el('quickCopyFen').addEventListener('click', () => {
+    copyFen();
+    flashCopied(el('quickCopyFen'));
+  });
+  el('quickCopyPgn').addEventListener('click', () => {
+    copyPgn();
+    flashCopied(el('quickCopyPgn'));
+  });
   el('playFromHere').addEventListener('click', () => {
     if (playFromHereUnavailableReason(tree)) return;
     if (!writePlayHandoff(playPositionFromTree(tree))) {
@@ -4936,7 +5214,10 @@ function wireEvents() {
       button.dataset.copied = 'true';
       label.textContent = 'Copied';
       el('message').textContent = 'Position link copied. It contains this position only, not the game or engine settings.';
-      linkFeedbackTimer = setTimeout(() => { delete button.dataset.copied; label.textContent = 'Copy link'; }, 1600);
+      linkFeedbackTimer = setTimeout(() => {
+        delete button.dataset.copied;
+        label.textContent = 'Copy link';
+      }, 1600);
     } catch {
       if (isStaleMount(signal)) return;
       const input = inputEl('positionShareUrl');
@@ -4951,7 +5232,9 @@ function wireEvents() {
   try {
     const saved: unknown = JSON.parse(storageGet(EXPANDED_LINES_STORAGE_KEY) ?? '[]');
     expandedEngines = new Set(Array.isArray(saved) ? saved.filter((name): name is string => typeof name === 'string') : []);
-  } catch { expandedEngines = new Set(); }
+  } catch {
+    expandedEngines = new Set();
+  }
   // Eval-bar source: the bar's own label opens a small engine menu (the one source control).
   const evalMenu = el('evalSourceMenu');
   const evalButton = el('evalSourceButton');
@@ -4969,7 +5252,9 @@ function wireEvents() {
     renderEvalSourceMenu();
     evalMenu.hidden = false;
     evalButton.setAttribute('aria-expanded', 'true');
-    (evalMenu.querySelector<HTMLElement>('[aria-checked="true"]:not(:disabled)') ?? evalMenu.querySelector<HTMLElement>('button:not(:disabled)'))?.focus({ preventScroll: true });
+    (evalMenu.querySelector<HTMLElement>('[aria-checked="true"]:not(:disabled)') ?? evalMenu.querySelector<HTMLElement>('button:not(:disabled)'))?.focus({
+      preventScroll: true,
+    });
   });
   evalMenu.addEventListener('click', (event) => {
     const item = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-eval-source]');
@@ -5011,7 +5296,12 @@ function wireEvents() {
     const pvRow = pvAction?.closest<HTMLElement>('.result-line[data-pv]');
     if (pvAction && pvRow) {
       if (pvAction.hasAttribute('data-pv-preview')) openPvPreview(pvRow, pvAction);
-      else if (pvRow.dataset.pvFen === tree.current.fen && Number(pvRow.dataset.pvRoot) === tree.current.id && insertPvPrefix(tree, tree.current, (pvRow.dataset.pv ?? '').split(' ').filter(Boolean), Number(pvAction.dataset.pvInsert))) afterNavigation();
+      else if (
+        pvRow.dataset.pvFen === tree.current.fen &&
+        Number(pvRow.dataset.pvRoot) === tree.current.id &&
+        insertPvPrefix(tree, tree.current, (pvRow.dataset.pv ?? '').split(' ').filter(Boolean), Number(pvAction.dataset.pvInsert))
+      )
+        afterNavigation();
       return;
     }
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-engine-settings], [data-engine-toggle], [data-uci]');
@@ -5101,7 +5391,9 @@ function wireEvents() {
   inputEl('fenInput').addEventListener('keydown', (event) => {
     if ((event as KeyboardEvent).key === 'Enter') loadFen();
   });
-  el('analysisRestoreDismiss').addEventListener('click', () => { el('analysisRestoreNotice').hidden = true; });
+  el('analysisRestoreDismiss').addEventListener('click', () => {
+    el('analysisRestoreNotice').hidden = true;
+  });
   el('analysisRestoreNew').addEventListener('click', () => el('reset').click());
   el('reset').addEventListener('click', () => {
     clearAnalysisWorkspace();
@@ -5251,11 +5543,23 @@ function wireEvents() {
   criticalPanel = mountCriticalMomentsPanel({
     broker: resourceBroker,
     suspended: () => !!retry,
-    baseline: () => lastReview && lastReviewSignature === reviewSignature() ? {
-      review: lastReview, fens: lastReviewNodes.map((node) => node.fen), signature: lastReviewSignature,
-      source: el('reviewGraphSource').textContent ?? 'CPU review',
-    } : undefined,
-    settings: () => [activeEngineRows(), selectedLc0Runtime(), multiPv(), selectEl('reviewEngine').value, selectEl('reviewDepth').value, resourceBroker.getDial()],
+    baseline: () =>
+      lastReview && lastReviewSignature === reviewSignature()
+        ? {
+            review: lastReview,
+            fens: lastReviewNodes.map((node) => node.fen),
+            signature: lastReviewSignature,
+            source: el('reviewGraphSource').textContent ?? 'CPU review',
+          }
+        : undefined,
+    settings: () => [
+      activeEngineRows(),
+      selectedLc0Runtime(),
+      multiPv(),
+      selectEl('reviewEngine').value,
+      selectEl('reviewDepth').value,
+      resourceBroker.getDial(),
+    ],
     pauseAnalysis: () => {
       cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
       analysisAbort = null;
@@ -5297,19 +5601,24 @@ function wireEvents() {
     void runGameReview();
   });
   el('reviewStop').addEventListener('click', () => stopGameReview());
-  for (const id of ['reviewEngine', 'reviewDepth']) el(id).addEventListener('change', () => {
-    stopGameReview('Review cancelled after review settings changed.');
-    clearReviewState('Review settings changed. Review the mainline again.');
-  });
+  for (const id of ['reviewEngine', 'reviewDepth'])
+    el(id).addEventListener('change', () => {
+      stopGameReview('Review cancelled after review settings changed.');
+      clearReviewState('Review settings changed. Review the mainline again.');
+    });
   el('reviewDownloadPgn').addEventListener('click', () => {
     const pgn = reviewedPgn();
     if (pgn) downloadTextFile('reviewed-game.pgn', pgn, 'application/x-chess-pgn');
   });
-  for (const [id, direction] of [['reviewPrevious', -1], ['reviewNext', 1]] as const) el(id).addEventListener('click', () => {
-    if (!lastReview) return;
-    const ply = adjacentCriticalPly(lastReview, lastReviewNodes.indexOf(tree.current), direction);
-    if (ply !== undefined) jumpReviewPly(ply);
-  });
+  for (const [id, direction] of [
+    ['reviewPrevious', -1],
+    ['reviewNext', 1],
+  ] as const)
+    el(id).addEventListener('click', () => {
+      if (!lastReview) return;
+      const ply = adjacentCriticalPly(lastReview, lastReviewNodes.indexOf(tree.current), direction);
+      if (ply !== undefined) jumpReviewPly(ply);
+    });
   el('reviewChart').addEventListener('click', (event) => {
     if (!lastReview) return;
     const rect = el('reviewChart').getBoundingClientRect();
@@ -5321,8 +5630,9 @@ function wireEvents() {
     event.preventDefault();
     event.stopPropagation();
     const ply = lastReviewNodes.indexOf(tree.current);
-    jumpReviewPly(event.key === 'Home' ? 0 : event.key === 'End' ? lastReview.moves.length
-      : ply + (event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 1));
+    jumpReviewPly(
+      event.key === 'Home' ? 0 : event.key === 'End' ? lastReview.moves.length : ply + (event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 1),
+    );
   });
   el('reviewCopyPgn').addEventListener('click', () => {
     void copyReviewPgn();
@@ -5373,10 +5683,15 @@ function wireEvents() {
     container.addEventListener('mouseleave', clearPreview);
     container.addEventListener('focusout', clearPreview);
   }
-  el('openingExplorer').addEventListener('toggle', () => { fitMoveList(); keepCurrentMoveInView(); });
+  el('openingExplorer').addEventListener('toggle', () => {
+    fitMoveList();
+    keepCurrentMoveInView();
+  });
   el('openingComparison').addEventListener('toggle', renderExplorerComparison);
   el('explorerRating').addEventListener('change', renderExplorerComparison);
-  el('importGames').addEventListener('click', () => { void runPgnTask(importGames); });
+  el('importGames').addEventListener('click', () => {
+    void runPgnTask(importGames);
+  });
   el('collectionImport').addEventListener('toggle', () => {
     if (!(el('collectionImport') as HTMLDetailsElement).open) el('confirmPgnDbName').hidden = true;
   });
@@ -5443,7 +5758,9 @@ function wireEvents() {
     el('confirmPgnDbName').hidden = false;
     inputEl('pgnDbName').focus();
   });
-  el('confirmPgnDbName').addEventListener('click', () => { void runPgnTask(renameSelectedPgnCollection); });
+  el('confirmPgnDbName').addEventListener('click', () => {
+    void runPgnTask(renameSelectedPgnCollection);
+  });
   el('duplicatePgnDb').addEventListener('click', () => {
     void runPgnTask(duplicateSelectedPgnCollection);
   });
@@ -5488,7 +5805,15 @@ function wireEvents() {
   analysisKeydownHandler = (event: KeyboardEvent) => {
     if (retry || el('evalCompareDetails').matches(':popover-open')) return;
     // Results and evaluation details own arrow keys; scrolling must never change the game.
-    if (event.defaultPrevented || (event.target as HTMLElement).closest('#keyboardBoard, #engineSummaries, #evalCompareDetails, dialog[open]') || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target as HTMLElement).isContentEditable) return;
+    if (
+      event.defaultPrevented ||
+      (event.target as HTMLElement).closest('#keyboardBoard, #engineSummaries, #evalCompareDetails, dialog[open]') ||
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLTextAreaElement ||
+      event.target instanceof HTMLSelectElement ||
+      (event.target as HTMLElement).isContentEditable
+    )
+      return;
     if (event.key === 'ArrowLeft') {
       tree.back();
       afterNavigation();
@@ -5908,37 +6233,59 @@ export function mountAnalysisBrowser(): () => void {
   rail.addEventListener('pointerenter', openEvalDetails, { signal: controller.signal });
   rail.addEventListener('focus', openEvalDetails, { signal: controller.signal });
   // Do not let a focus-open immediately toggle closed on the following click.
-  rail.addEventListener('click', (event) => {
-    event.preventDefault();
-    if (!details.matches(':popover-open')) {
-      renderEvalBar();
-      showEvalDetails();
-    }
-  }, { signal: controller.signal });
+  rail.addEventListener(
+    'click',
+    (event) => {
+      event.preventDefault();
+      if (!details.matches(':popover-open')) {
+        renderEvalBar();
+        showEvalDetails();
+      }
+    },
+    { signal: controller.signal },
+  );
   // A hover open can precede click focus. Native dismissal otherwise restores
   // the pre-hover control, rather than the bar the user subsequently entered.
-  details.addEventListener('beforetoggle', (event) => {
-    if ((event as ToggleEvent).newState === 'closed') {
-      restoringEvalFocus = true;
-      restoreEvalFocus = details.contains(document.activeElement) || document.activeElement === rail;
-    }
-  }, { signal: controller.signal });
-  details.addEventListener('toggle', (event) => {
-    if ((event as ToggleEvent).newState === 'closed') {
-      if (restoreEvalFocus && rail.isConnected) rail.focus({ preventScroll: true });
-      restoreEvalFocus = false;
-      restoringEvalFocus = false;
-    }
-  }, { signal: controller.signal });
+  details.addEventListener(
+    'beforetoggle',
+    (event) => {
+      if ((event as ToggleEvent).newState === 'closed') {
+        restoringEvalFocus = true;
+        restoreEvalFocus = details.contains(document.activeElement) || document.activeElement === rail;
+      }
+    },
+    { signal: controller.signal },
+  );
+  details.addEventListener(
+    'toggle',
+    (event) => {
+      if ((event as ToggleEvent).newState === 'closed') {
+        if (restoreEvalFocus && rail.isConnected) rail.focus({ preventScroll: true });
+        restoreEvalFocus = false;
+        restoringEvalFocus = false;
+      }
+    },
+    { signal: controller.signal },
+  );
   const closeOnLeave = () => {
-    if (details.matches(':popover-open') && !rail.matches(':hover') && !details.matches(':hover')
-      && !details.contains(document.activeElement) && document.activeElement !== rail) details.hidePopover();
+    if (
+      details.matches(':popover-open') &&
+      !rail.matches(':hover') &&
+      !details.matches(':hover') &&
+      !details.contains(document.activeElement) &&
+      document.activeElement !== rail
+    )
+      details.hidePopover();
   };
   rail.addEventListener('pointerleave', () => setTimeout(closeOnLeave, 150), { signal: controller.signal });
   details.addEventListener('pointerleave', closeOnLeave, { signal: controller.signal });
-  window.addEventListener('scroll', () => {
-    if (details.matches(':popover-open')) details.hidePopover();
-  }, { signal: controller.signal, passive: true });
+  window.addEventListener(
+    'scroll',
+    () => {
+      if (details.matches(':popover-open')) details.hidePopover();
+    },
+    { signal: controller.signal, passive: true },
+  );
   void init(controller.signal);
   return () => {
     pvResize.disconnect();

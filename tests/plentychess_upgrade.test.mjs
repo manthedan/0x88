@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { test } from 'node:test';
+import fs from 'node:fs';
 import path from 'node:path';
+import { test } from 'node:test';
 import { PLENTYCHESS_MAIN_NETWORK, PLENTYCHESS_SOURCE_NETWORK_URL } from '../src/lc0/plentychessVariants.ts';
 
 const lock = JSON.parse(fs.readFileSync(new URL('../engines/plentychess/upstream.lock.json', import.meta.url), 'utf8'));

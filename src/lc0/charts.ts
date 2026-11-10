@@ -95,7 +95,9 @@ export function lineChartSvg(series: readonly ChartSeries[], options: LineChartO
       const [cx, cy] = coord.split(',');
       parts.push(`<circle cx="${cx}" cy="${cy}" r="2" fill="${entry.color}"/>`);
     } else {
-      parts.push(`<polyline points="${coords.join(' ')}" fill="none" stroke="${entry.color}" stroke-width="1.5"${entry.dashed ? ' stroke-dasharray="4 3"' : ''}/>`);
+      parts.push(
+        `<polyline points="${coords.join(' ')}" fill="none" stroke="${entry.color}" stroke-width="1.5"${entry.dashed ? ' stroke-dasharray="4 3"' : ''}/>`,
+      );
     }
   }
   parts.push('</svg>');

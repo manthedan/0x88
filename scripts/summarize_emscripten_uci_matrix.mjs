@@ -23,12 +23,18 @@ export function summarizeMatrix(report) {
           else mismatches.push({ round: cell.round, position: row.position, baseline: base ?? null, candidate: row });
         }
         if (cell.rows.length !== report.positions || ref.rows.length !== report.positions) throw Error('Incomplete suite');
-        return { exact, pairs: cell.rows.length, mismatches,
+        return {
+          exact,
+          pairs: cell.rows.length,
+          mismatches,
           wallGainPct: (cell.summary.wallNps / ref.summary.wallNps - 1) * 100,
-          engineGainPct: (cell.summary.engineNps / ref.summary.engineNps - 1) * 100 };
+          engineGainPct: (cell.summary.engineNps / ref.summary.engineNps - 1) * 100,
+        };
       });
-      out[engine][label] = { runs: group.length,
-        exact: comparisons.reduce((s, c) => s + c.exact, 0), pairs: comparisons.reduce((s, c) => s + c.pairs, 0),
+      out[engine][label] = {
+        runs: group.length,
+        exact: comparisons.reduce((s, c) => s + c.exact, 0),
+        pairs: comparisons.reduce((s, c) => s + c.pairs, 0),
         mismatches: comparisons.flatMap((c) => c.mismatches),
         wallNps: spread(group.map((c) => c.summary.wallNps)),
         engineNps: spread(group.map((c) => c.summary.engineNps)),
@@ -36,7 +42,8 @@ export function summarizeMatrix(report) {
         wallGainPct: spread(comparisons.map((c) => c.wallGainPct)),
         engineGainPct: spread(comparisons.map((c) => c.engineGainPct)),
         compileMs: spread(group.map((c) => c.compileMs)),
-        startupMs: spread(group.map((c) => c.startupMs)) };
+        startupMs: spread(group.map((c) => c.startupMs)),
+      };
     }
   }
   return out;

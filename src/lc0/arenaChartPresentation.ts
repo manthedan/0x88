@@ -11,7 +11,12 @@ export function arenaChartGroups<T extends { engineId: string; engineName: strin
     // Exact self-play shares a worker ID. Search parity preserves both traces,
     // including custom Black-to-move roots, without assuming parity means White.
     return ids.length === 1 && parities.length === 2
-      ? parities.map((parity) => ({ id, color, label: `${name} · ${parity === 0 ? 'first' : 'alternate'} moves`, samples: own.filter((sample) => sample.ply % 2 === parity) }))
+      ? parities.map((parity) => ({
+          id,
+          color,
+          label: `${name} · ${parity === 0 ? 'first' : 'alternate'} moves`,
+          samples: own.filter((sample) => sample.ply % 2 === parity),
+        }))
       : [{ id, color, label: name, samples: own }];
   });
   return groups.map((group, index) => ({ ...group, dashed: groups.slice(0, index).some((other) => other.color === group.color) }));

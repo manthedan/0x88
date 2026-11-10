@@ -1,4 +1,4 @@
-import { ROTATED_FEN_SUITE, exactSearch, parseInfo, roundOrder, summarizeCell } from './emscripten_uci_protocol.mjs';
+import { exactSearch, parseInfo, ROTATED_FEN_SUITE, roundOrder, summarizeCell } from './emscripten_uci_protocol.mjs';
 
 export async function runStockfishBrowserMatrix(config, { depth = 12, rounds = 5, positions = 20, threads = 1, onProgress = () => {} } = {}) {
   if (!crossOriginIsolated) throw Error('Stockfish pthread audit requires COOP/COEP');
@@ -11,20 +11,42 @@ export async function runStockfishBrowserMatrix(config, { depth = 12, rounds = 5
       const pending = new Set();
       let cursor = 0;
       let error;
-      worker.onmessage = ({ data }) => { if (typeof data === 'string') { lines.push(data); for (const fn of pending) fn(); } };
-      worker.onerror = (e) => { error = Error(e.message); for (const fn of pending) fn(); };
+      worker.onmessage = ({ data }) => {
+        if (typeof data === 'string') {
+          lines.push(data);
+          for (const fn of pending) fn();
+        }
+      };
+      worker.onerror = (e) => {
+        error = Error(e.message);
+        for (const fn of pending) fn();
+      };
       const send = (text) => worker.postMessage(text);
-      const wait = (predicate) => new Promise((accept, reject) => {
-        const timer = setTimeout(() => { pending.delete(check); reject(Error(`Timeout ${cell.label}: ${lines.slice(-4).join('\n')}`)); }, 180000);
-        const check = () => {
-          for (; cursor < lines.length; cursor += 1) {
-            if (predicate(lines[cursor])) { const line = lines[cursor++]; clearTimeout(timer); pending.delete(check); accept(line); return; }
-          }
-          if (error) { clearTimeout(timer); pending.delete(check); reject(error); }
-        };
-        pending.add(check);
-        check();
-      });
+      const wait = (predicate) =>
+        new Promise((accept, reject) => {
+          const timer = setTimeout(() => {
+            pending.delete(check);
+            reject(Error(`Timeout ${cell.label}: ${lines.slice(-4).join('\n')}`));
+          }, 180000);
+          const check = () => {
+            for (; cursor < lines.length; cursor += 1) {
+              if (predicate(lines[cursor])) {
+                const line = lines[cursor++];
+                clearTimeout(timer);
+                pending.delete(check);
+                accept(line);
+                return;
+              }
+            }
+            if (error) {
+              clearTimeout(timer);
+              pending.delete(check);
+              reject(error);
+            }
+          };
+          pending.add(check);
+          check();
+        });
       try {
         send('uci');
         await wait((l) => l === 'uciok');
@@ -38,7 +60,8 @@ export async function runStockfishBrowserMatrix(config, { depth = 12, rounds = 5
         const shift = round % suite.length;
         // Search once to warm up generated code and network caches.
         const search = async ([position, fen]) => {
-          send('ucinewgame'); send('isready');
+          send('ucinewgame');
+          send('isready');
           await wait((l) => l === 'readyok');
           send(`position fen ${fen}`);
           const from = lines.length;
@@ -46,7 +69,10 @@ export async function runStockfishBrowserMatrix(config, { depth = 12, rounds = 5
           send(`go depth ${depth}`);
           const best = await wait((l) => l.startsWith('bestmove '));
           const wallMs = performance.now() - t;
-          const info = lines.slice(from).filter((l) => l.startsWith('info ') && l.includes(' pv ')).at(-1);
+          const info = lines
+            .slice(from)
+            .filter((l) => l.startsWith('info ') && l.includes(' pv '))
+            .at(-1);
           if (!info) throw Error(`Missing info ${position}`);
           return { position, bestmove: best.split(/\s+/)[1], ...parseInfo(info), wallMs };
         };
@@ -54,7 +80,9 @@ export async function runStockfishBrowserMatrix(config, { depth = 12, rounds = 5
         for (const entry of [...suite.slice(shift), ...suite.slice(0, shift)]) rows.push(await search(entry));
         report.cells.push({ ...cell, round, startupMs, rows, summary: summarizeCell(rows) });
         onProgress(report);
-      } finally { worker.terminate(); }
+      } finally {
+        worker.terminate();
+      }
     }
   }
   // Different releases/networks are deliberately NOT treated as parity pairs.

@@ -185,7 +185,8 @@ const CONFIGS = {
         name: 'sandhi-s2-b200.nnue.zst',
         sourceUrl: 'https://github.com/cosmobobak/viridithas-networks/releases/download/v109/sandhi-s2-b200.nnue.zst',
         rawSha256: '066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585',
-        licenseNote: 'sandhi-s2-b200.nnue.zst is CC0-1.0 (cosmobobak/viridithas-networks LICENSE at 1040c3ee, 2026-06-08, before the v109 release). The engine source is MIT.',
+        licenseNote:
+          'sandhi-s2-b200.nnue.zst is CC0-1.0 (cosmobobak/viridithas-networks LICENSE at 1040c3ee, 2026-06-08, before the v109 release). The engine source is MIT.',
         embeddedIn: 'public/viridithas/viridithas.wasm, public/viridithas/viridithas-simd128.wasm, and public/viridithas/viridithas-relaxed-simd128.wasm',
       },
     ],
@@ -213,7 +214,8 @@ const CONFIGS = {
       defaultCompilerFlags: { baseline: '-O3 -flto=full', relaxed: '-O3 -flto=full -mrelaxed-simd' },
     },
     artifacts: stockfishArtifactBases.flatMap((base) => ['js', 'wasm'].map((ext) => `public/stockfish/${base}.${ext}`)),
-    assets: STOCKFISH_RELEASE.nets.map((net) => ({ ...net,
+    assets: STOCKFISH_RELEASE.nets.map((net) => ({
+      ...net,
       sourceUrl: `https://tests.stockfishchess.org/api/nn/${net.name}`,
       licenseNote: 'Required embedded GPL network, included in the corresponding-source archive.',
     })),

@@ -19,8 +19,11 @@ export function engineSetupRuntime(runtime: BrowserLc0Runtime, developerMode: bo
 /** Storage and JSON backups use the same validation; row policy stays with the engine catalog caller. */
 export function normalizeEngineProfiles(parsed: unknown, sanitizeRow: (raw: unknown, index: number) => EngineRow | null): EngineAnalysisProfile[] {
   const backup = parsed as { kind?: unknown; version?: unknown; profiles?: unknown } | null;
-  const entries = Array.isArray(parsed) ? parsed
-    : backup?.kind === ENGINE_PROFILE_BACKUP_KIND && backup.version === 1 && Array.isArray(backup.profiles) ? backup.profiles : [];
+  const entries = Array.isArray(parsed)
+    ? parsed
+    : backup?.kind === ENGINE_PROFILE_BACKUP_KIND && backup.version === 1 && Array.isArray(backup.profiles)
+      ? backup.profiles
+      : [];
   const profiles = new Map<string, EngineAnalysisProfile>();
   for (const entry of entries) {
     if (!entry || typeof entry !== 'object') continue;
@@ -30,7 +33,8 @@ export function normalizeEngineProfiles(parsed: unknown, sanitizeRow: (raw: unkn
     const rows = raw.rows.map(sanitizeRow).filter((row): row is EngineRow => !!row);
     if (!rows.length) continue;
     profiles.set(name, {
-      name, rows,
+      name,
+      rows,
       multiPv: Math.max(1, Math.min(10, Math.floor(Number(raw.multiPv) || 3))),
       lc0Runtime: normalizeLc0Runtime(typeof raw.lc0Runtime === 'string' ? raw.lc0Runtime : 'onnx'),
     });

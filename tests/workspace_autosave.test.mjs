@@ -1,14 +1,22 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { START_FEN, boardToFen } from '../src/chess/board.ts';
+import { boardToFen, START_FEN } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
-import { parsePgnGame, gameTreeToPgn } from '../src/chess/pgn.ts';
+import { gameTreeToPgn, parsePgnGame } from '../src/chess/pgn.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
-import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
 import { replayPlayPosition } from '../src/lc0/playPosition.ts';
+import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
 import {
-  WORKSPACE_MAX_CHARS, WORKSPACE_VERSION, createWorkspaceAutosave, decodeAnalysisSnapshot,
-  decodePlaySnapshot, hasExplicitWorkspaceInput, readWorkspace, restoreTree, serializeTree, workspaceStorageKey,
+  createWorkspaceAutosave,
+  decodeAnalysisSnapshot,
+  decodePlaySnapshot,
+  hasExplicitWorkspaceInput,
+  readWorkspace,
+  restoreTree,
+  serializeTree,
+  WORKSPACE_MAX_CHARS,
+  WORKSPACE_VERSION,
+  workspaceStorageKey,
 } from '../src/lc0/workspaceAutosave.ts';
 
 const engineIds = new Set(['maia3', 'sf-lite']);
@@ -16,15 +24,30 @@ const envelope = (kind, data, version = WORKSPACE_VERSION) => JSON.stringify({ k
 const analysisData = () => ({ tree: serializeTree(new GameTree()), headers: {}, result: '*' });
 const resultSignature = (tree) => [tree.root, ...tree.mainlineFrom()].map((node) => `${node.fen}\u0000${node.move ? moveToUci(node.move) : ''}`).join('\u0001');
 const playData = (changes = {}) => ({
-  startFen: START_FEN, moves: ['e2e4'], humanColor: 'w', orientation: 'black',
+  startFen: START_FEN,
+  moves: ['e2e4'],
+  humanColor: 'w',
+  orientation: 'black',
   preferences: { ...DEFAULT_PLAY_PREFERENCES, color: 'random', maiaElo: 1900, maiaTemperature: 0.8, maiaTopP: 0.9 },
-  gameOver: null, started: true, ...changes,
+  gameOver: null,
+  started: true,
+  ...changes,
 });
 const storage = () => {
   const values = new Map();
   let writes = 0;
-  return { values, get writes() { return writes; }, getItem: (key) => values.get(key) ?? null,
-    setItem(key, value) { writes++; values.set(key, value); }, removeItem: (key) => values.delete(key) };
+  return {
+    values,
+    get writes() {
+      return writes;
+    },
+    getItem: (key) => values.get(key) ?? null,
+    setItem(key, value) {
+      writes++;
+      values.set(key, value);
+    },
+    removeItem: (key) => values.delete(key),
+  };
 };
 
 test('analysis round trip retains nested variations, comments, headers, result and selected non-mainline node', () => {
@@ -92,11 +115,21 @@ test('analysis rejects truncated JSON, mismatched/old schemas, bad FEN, indices 
   }
   const good = analysisData();
   for (const patch of [
-    { startFen: 'garbage' }, { current: -1 }, { current: 1 }, { current: 0.5 },
-    { nodes: [{ parent: 1, uci: 'e2e4' }] }, { nodes: [{ parent: 0, uci: 'e2e5' }] },
-    { nodes: [{ parent: 0, uci: 'e2e4' }, { parent: 0, uci: 'e2e4' }] },
+    { startFen: 'garbage' },
+    { current: -1 },
+    { current: 1 },
+    { current: 0.5 },
+    { nodes: [{ parent: 1, uci: 'e2e4' }] },
+    { nodes: [{ parent: 0, uci: 'e2e5' }] },
+    {
+      nodes: [
+        { parent: 0, uci: 'e2e4' },
+        { parent: 0, uci: 'e2e4' },
+      ],
+    },
     { nodes: [{ parent: 0, uci: 'e2e4', comment: {} }] },
-  ]) assert.equal(decodeAnalysisSnapshot(envelope('analysis', { ...good, tree: { ...good.tree, ...patch } })), null);
+  ])
+    assert.equal(decodeAnalysisSnapshot(envelope('analysis', { ...good, tree: { ...good.tree, ...patch } })), null);
   assert.equal(decodeAnalysisSnapshot(envelope('analysis', { ...good, headers: { White: 12 } })), null);
   assert.equal(decodeAnalysisSnapshot(' '.repeat(WORKSPACE_MAX_CHARS + 1)), null);
 });
@@ -165,9 +198,12 @@ test('clearing cancels pending writes and Analysis and Play never overwrite each
   const store = storage();
   const analysis = createWorkspaceAutosave('analysis', store, 10);
   const play = createWorkspaceAutosave('play', store, 10);
-  analysis.schedule(analysisData()); analysis.flush();
-  play.schedule(playData()); play.flush();
-  analysis.schedule(analysisData()); analysis.clear();
+  analysis.schedule(analysisData());
+  analysis.flush();
+  play.schedule(playData());
+  play.flush();
+  analysis.schedule(analysisData());
+  analysis.clear();
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
   assert.ok(store.getItem(workspaceStorageKey('play')));
@@ -175,30 +211,55 @@ test('clearing cancels pending writes and Analysis and Play never overwrite each
 });
 
 test('denied/full storage fails safely and invalid saved data is removed', () => {
-  const denied = { getItem() { throw Error('denied'); }, setItem() { throw Error('denied'); }, removeItem() { throw Error('denied'); } };
+  const denied = {
+    getItem() {
+      throw Error('denied');
+    },
+    setItem() {
+      throw Error('denied');
+    },
+    removeItem() {
+      throw Error('denied');
+    },
+  };
   assert.equal(readWorkspace('analysis', decodeAnalysisSnapshot, denied), null);
   const saver = createWorkspaceAutosave('analysis', denied);
-  saver.schedule(analysisData()); saver.flush(); saver.clear();
+  saver.schedule(analysisData());
+  saver.flush();
+  saver.clear();
   const store = storage();
   store.setItem(workspaceStorageKey('analysis'), '{broken');
   assert.equal(readWorkspace('analysis', decodeAnalysisSnapshot, store), null);
   assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
   store.setItem(workspaceStorageKey('play'), envelope('play', playData()));
-  const full = createWorkspaceAutosave('play', { ...store, setItem() { throw Error('quota'); } });
-  full.schedule(playData()); full.flush();
+  const full = createWorkspaceAutosave('play', {
+    ...store,
+    setItem() {
+      throw Error('quota');
+    },
+  });
+  full.schedule(playData());
+  full.flush();
   assert.equal(store.getItem(workspaceStorageKey('play')), null, 'old game must not survive a failed replacement');
 });
 
 test('oversized work cannot leave a stale saved game behind', () => {
   const store = storage();
   const saver = createWorkspaceAutosave('analysis', store);
-  saver.schedule(analysisData()); saver.flush();
-  saver.schedule({ ...analysisData(), headers: { Event: 'x'.repeat(WORKSPACE_MAX_CHARS) } }); saver.flush();
+  saver.schedule(analysisData());
+  saver.flush();
+  saver.schedule({ ...analysisData(), headers: { Event: 'x'.repeat(WORKSPACE_MAX_CHARS) } });
+  saver.flush();
   assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
 });
 
 test('explicit FEN and handoff URLs take precedence without consuming the handoff', () => {
-  for (const [search, hash] of [['?fen=abc', ''], ['?handoff=token', ''], ['?fromAnalysis=1', ''], ['', '#game=payload']]) {
+  for (const [search, hash] of [
+    ['?fen=abc', ''],
+    ['?handoff=token', ''],
+    ['?fromAnalysis=1', ''],
+    ['', '#game=payload'],
+  ]) {
     assert.equal(hasExplicitWorkspaceInput(search, hash), true);
   }
   assert.equal(hasExplicitWorkspaceInput('?dev&model=local&perfDial=eco'), false);
@@ -226,12 +287,23 @@ test('Play from here retains its restart position with imported history or a zer
     for (const extraMoves of [[], ['g1f3']]) {
       const store = storage();
       const saver = createWorkspaceAutosave('play', store);
-      saver.schedule(playData({ startFen: practicePosition.startFen, moves: [...practicePosition.moves, ...extraMoves],
-        started: extraMoves.length > 0, practiceBoundary: practicePosition.moves.length, practicePosition }));
+      saver.schedule(
+        playData({
+          startFen: practicePosition.startFen,
+          moves: [...practicePosition.moves, ...extraMoves],
+          started: extraMoves.length > 0,
+          practiceBoundary: practicePosition.moves.length,
+          practicePosition,
+        }),
+      );
       saver.flush();
       const restored = readWorkspace('play', (raw) => decodePlaySnapshot(raw, engineIds), store);
       assert.deepEqual(restored.practicePosition, practicePosition);
-      assert.equal(boardToFen(replayPlayPosition(restored.practicePosition).board), boardToFen(restored.positions[restored.practiceBoundary]), 'side changes and restarts replay the imported setup, not the current or normal start');
+      assert.equal(
+        boardToFen(replayPlayPosition(restored.practicePosition).board),
+        boardToFen(restored.positions[restored.practiceBoundary]),
+        'side changes and restarts replay the imported setup, not the current or normal start',
+      );
     }
   }
   assert.equal(decodePlaySnapshot(envelope('play', playData()), engineIds).practicePosition, null, 'ordinary legacy games remain ordinary');
@@ -239,7 +311,8 @@ test('Play from here retains its restart position with imported history or a zer
     { startFen: START_FEN, moves: ['d2d4'] },
     { startFen: START_FEN, moves: ['e2e4', 'e7e5'] },
     { startFen: 'bad', moves: [] },
-  ]) assert.equal(decodePlaySnapshot(envelope('play', playData({ practiceBoundary: 1, practicePosition })), engineIds), null);
+  ])
+    assert.equal(decodePlaySnapshot(envelope('play', playData({ practiceBoundary: 1, practicePosition })), engineIds), null);
 });
 
 test('Copy PGN drops an imported result once the mainline no longer owns it', async () => {

@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { START_FEN } from '../src/chess/board.ts';
+import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 
 class WorkerStub extends EventTarget {
   terminated = false;
-  postMessage(message) { this.lastMessage = message; }
-  terminate() { this.terminated = true; }
+  postMessage(message) {
+    this.lastMessage = message;
+  }
+  terminate() {
+    this.terminated = true;
+  }
 }
 
 test('Maia worker initialization can be aborted without waiting for ready', async () => {

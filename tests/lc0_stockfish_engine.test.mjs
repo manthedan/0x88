@@ -3,11 +3,11 @@ import { test } from 'node:test';
 import { CPU_ENGINE_HASH_MB_BY_SURFACE, cpuEngineHashMbForSurface, DEFAULT_CPU_ENGINE_HASH_MB } from '../src/lc0/cpuEngineMemory.ts';
 import {
   DEFAULT_STOCKFISH_HASH_MB,
-  STOCKFISH_INIT_TIMEOUT_MS,
   defaultStockfishUrl,
   normalizeStockfishFlavor,
   parseBestMove,
   parseStockfishInfo,
+  STOCKFISH_INIT_TIMEOUT_MS,
   StockfishEngine,
   stockfishFlavorRequiresIsolation,
   stockfishFlavorUrl,
@@ -35,7 +35,9 @@ class MockStockfishWorker {
     else if (message === 'isready') queueMicrotask(() => this.onmessage?.({ data: 'readyok' }));
   }
 
-  terminate() { this.terminated = true; }
+  terminate() {
+    this.terminated = true;
+  }
 }
 
 test('parseBestMove extracts the UCI move and handles (none)', () => {
@@ -353,7 +355,9 @@ test('StockfishEngine disposal rejects queued searches without restarting a work
 test('StockfishEngine bounds silent initialization failures and can retry', async (t) => {
   const previousWorker = globalThis.Worker;
   class SilentWorker extends MockStockfishWorker {
-    postMessage(cmd) { this.messages.push(cmd); }
+    postMessage(cmd) {
+      this.messages.push(cmd);
+    }
   }
   t.mock.timers.enable({ apis: ['setTimeout'] });
   globalThis.Worker = SilentWorker;
@@ -379,7 +383,9 @@ test('StockfishEngine bounds silent initialization failures and can retry', asyn
 test('StockfishEngine clears initialization deadlines on disposal and constructor failure', async (t) => {
   const previousWorker = globalThis.Worker;
   class SilentWorker extends MockStockfishWorker {
-    postMessage(cmd) { this.messages.push(cmd); }
+    postMessage(cmd) {
+      this.messages.push(cmd);
+    }
   }
   t.mock.timers.enable({ apis: ['setTimeout'] });
   globalThis.Worker = SilentWorker;
@@ -390,7 +396,11 @@ test('StockfishEngine clears initialization deadlines on disposal and constructo
     engine.dispose();
     await disposed;
     t.mock.timers.tick(STOCKFISH_INIT_TIMEOUT_MS);
-    globalThis.Worker = class { constructor() { throw Error('constructor failed'); } };
+    globalThis.Worker = class {
+      constructor() {
+        throw Error('constructor failed');
+      }
+    };
     const retry = new StockfishEngine({}, '/stockfish/stockfish-19-lite-single.js');
     await assert.rejects(retry.prewarm(), /constructor failed/);
     globalThis.Worker = MockStockfishWorker;

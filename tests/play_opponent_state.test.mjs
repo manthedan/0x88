@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import ts from 'typescript';
 import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
 import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
 
 const preferences = { ...DEFAULT_PLAY_PREFERENCES, level: 4, maiaElo: 1700, maiaTemperature: 0.8 };
-const edit = (state, patch, gameInProgress = true) => transitionPlayOpponent(state, {
-  type: 'edit', gameInProgress, preferences: { ...(state.pending ?? state.active), ...patch },
-});
+const edit = (state, patch, gameInProgress = true) =>
+  transitionPlayOpponent(state, {
+    type: 'edit',
+    gameInProgress,
+    preferences: { ...(state.pending ?? state.active), ...patch },
+  });
 
 for (const patch of [{ engineId: 'sf-lite' }, { color: 'black' }, { color: 'random' }, { engineId: 'lqo', color: 'black' }]) {
   test(`engine/colour edit ${JSON.stringify(patch)} commits only outside a game`, () => {
@@ -47,7 +50,10 @@ test('returning the draft to the active identity discards draft tuning', () => {
 
 test('live strength changes keep their existing policy and cannot change opponent identity', () => {
   const initial = committedPlayOpponent(preferences);
-  const state = transitionPlayOpponent(initial, { type: 'tune', preferences: { ...preferences, engineId: 'sf-lite', color: 'black', maiaElo: 1900, level: 1 } });
+  const state = transitionPlayOpponent(initial, {
+    type: 'tune',
+    preferences: { ...preferences, engineId: 'sf-lite', color: 'black', maiaElo: 1900, level: 1 },
+  });
   assert.equal(state.tag, 'committed');
   assert.equal(state.active.engineId, 'maia3');
   assert.equal(state.active.color, 'white');
@@ -59,7 +65,9 @@ test('Stormphrax residency is retired at commit, never while restart consent is 
   const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
   const setter = source.slice(source.indexOf('function ctxSetOpponent('), source.indexOf('function ctxRestoreOpponentControls('));
   const disposed = [];
-  const setOpponent = new Function('disposeCachedCpuEngine', ts.transpile(`${setter}; return ctxSetOpponent;`, { target: ts.ScriptTarget.ESNext }))((id) => disposed.push(id));
+  const setOpponent = new Function('disposeCachedCpuEngine', ts.transpile(`${setter}; return ctxSetOpponent;`, { target: ts.ScriptTarget.ESNext }))((id) =>
+    disposed.push(id),
+  );
   const ctx = { opponent: committedPlayOpponent({ ...preferences, engineId: 'stormphrax' }) };
   setOpponent(ctx, edit(ctx.opponent, { engineId: 'maia3' }));
   assert.deepEqual(disposed, []);

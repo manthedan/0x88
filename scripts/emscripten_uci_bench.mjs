@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ROTATED_FEN_SUITE, exactSearch, parseBestmove, parseInfo, parseUciSearch } from './emscripten_uci_protocol.mjs';
+import { exactSearch, parseBestmove, parseInfo, parseUciSearch, ROTATED_FEN_SUITE } from './emscripten_uci_protocol.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {

@@ -26,9 +26,12 @@ const uciMove = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 
 export function parseBestmove(line) {
   const tokens = line.trim().split(/\s+/);
-  if (tokens[0] !== 'bestmove' || ![2, 4].includes(tokens.length)
-    || (!uciMove.test(tokens[1]) && !['0000', '(none)'].includes(tokens[1]))
-    || (tokens.length === 4 && (tokens[2] !== 'ponder' || !uciMove.test(tokens[3])))) {
+  if (
+    tokens[0] !== 'bestmove' ||
+    ![2, 4].includes(tokens.length) ||
+    (!uciMove.test(tokens[1]) && !['0000', '(none)'].includes(tokens[1])) ||
+    (tokens.length === 4 && (tokens[2] !== 'ponder' || !uciMove.test(tokens[3])))
+  ) {
     throw new Error(`Malformed bestmove record: ${line}`);
   }
   return tokens[1];
@@ -59,8 +62,7 @@ export function parseInfo(line) {
   const pvIndex = tokens.indexOf('pv');
   const moves = pvIndex >= 0 ? tokens.slice(pvIndex + 1) : null;
   if (moves && (!moves.length || moves.some((move) => !uciMove.test(move)))) throw new Error(`Malformed UCI PV record: ${line}`);
-  return { depth: get('depth'), nodes: get('nodes'), nps: get('nps'), timeMs: get('time'),
-    score, pv: moves ? moves.join(' ') : null };
+  return { depth: get('depth'), nodes: get('nodes'), nps: get('nps'), timeMs: get('time'), score, pv: moves ? moves.join(' ') : null };
 }
 
 export function parseUciSearch(lines, depth) {
@@ -97,8 +99,14 @@ export function summarizeCell(rows) {
   const nodesTotal = rows.reduce((sum, r) => sum + r.nodes, 0);
   const wallMs = rows.reduce((sum, r) => sum + r.wallMs, 0);
   const engineMs = rows.reduce((sum, r) => sum + r.timeMs, 0);
-  return { nodesTotal, wallMs, engineMs, wallNps: nodesTotal * 1000 / wallMs,
-    engineNps: nodesTotal * 1000 / engineMs, npsMedian: median(rows.map((r) => r.nps)) };
+  return {
+    nodesTotal,
+    wallMs,
+    engineMs,
+    wallNps: (nodesTotal * 1000) / wallMs,
+    engineNps: (nodesTotal * 1000) / engineMs,
+    npsMedian: median(rows.map((r) => r.nps)),
+  };
 }
 
 // These artifacts expose synchronous search. Measuring around ccall includes

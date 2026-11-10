@@ -14,18 +14,29 @@ const browser = await browserType.launch({ headless: true });
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('console', (m) => {
+  if (m.type() === 'error') errors.push(m.text());
+});
 try {
   await page.goto(args.get('url'), { waitUntil: 'load' });
   const config = JSON.parse(readFileSync(args.get('config'), 'utf8'));
-  const options = { depth: Number(args.get('depth') || 12), rounds: Number(args.get('rounds') || 5),
-    positions: Number(args.get('positions') || 20), threads: Number(args.get('threads') || 1) };
-  const report = await page.evaluate(async ({ config, options }) => {
-    const { runStockfishBrowserMatrix } = await import('./stockfish_upgrade_browser_matrix.mjs');
-    return runStockfishBrowserMatrix(config, options);
-  }, { config, options });
+  const options = {
+    depth: Number(args.get('depth') || 12),
+    rounds: Number(args.get('rounds') || 5),
+    positions: Number(args.get('positions') || 20),
+    threads: Number(args.get('threads') || 1),
+  };
+  const report = await page.evaluate(
+    async ({ config, options }) => {
+      const { runStockfishBrowserMatrix } = await import('./stockfish_upgrade_browser_matrix.mjs');
+      return runStockfishBrowserMatrix(config, options);
+    },
+    { config, options },
+  );
   report.errors = errors;
   writeFileSync(args.get('json'), `${JSON.stringify(report, null, 2)}\n`);
   for (const cell of report.cells) console.log(`${cell.round} ${cell.label}: ${Math.round(cell.summary.wallNps)} NPS, startup=${Math.round(cell.startupMs)}ms`);
   if (errors.length || report.parity.some((p) => p.exact !== p.pairs)) process.exitCode = 1;
-} finally { await browser.close(); }
+} finally {
+  await browser.close();
+}

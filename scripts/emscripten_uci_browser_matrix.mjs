@@ -7,11 +7,24 @@ export async function runMatrix(config, { depth = 11, hash = 16, positions = 20,
     if (!Number.isInteger(value) || value < 1 || (key === 'positions' && value > 20)) throw Error(`Invalid ${key}`);
   }
   if (!crossOriginIsolated) throw Error('Production bench requires COOP/COEP isolation');
-  const report = { startedAt: new Date().toISOString(), browser: navigator.userAgent, hardwareConcurrency: navigator.hardwareConcurrency,
-    crossOriginIsolated, depth, hash, positions, rounds, threads: 1, cells: [] };
+  const report = {
+    startedAt: new Date().toISOString(),
+    browser: navigator.userAgent,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    crossOriginIsolated,
+    depth,
+    hash,
+    positions,
+    rounds,
+    threads: 1,
+    cells: [],
+  };
   for (let round = 0; round < rounds; round += 1) {
     for (const engine of [...new Set(config.map((c) => c.engine))]) {
-      for (const cell of roundOrder(config.filter((c) => c.engine === engine), round)) {
+      for (const cell of roundOrder(
+        config.filter((c) => c.engine === engine),
+        round,
+      )) {
         const worker = new Worker(new URL('./emscripten_uci_matrix_worker.js', import.meta.url));
         const started = performance.now();
         let timer;
@@ -27,7 +40,10 @@ export async function runMatrix(config, { depth = 11, hash = 16, positions = 20,
           });
           report.cells.push({ round, ...measured, workerTotalMs: performance.now() - started });
           onProgress(report);
-        } finally { clearTimeout(timer); worker.terminate(); }
+        } finally {
+          clearTimeout(timer);
+          worker.terminate();
+        }
       }
     }
   }

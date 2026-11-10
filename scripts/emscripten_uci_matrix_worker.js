@@ -18,7 +18,9 @@ self.onmessage = async ({ data: { cell, depth, hash, positions, nonce } }) => {
     const payload = new TextEncoder().encode(`\u0000${nonce}`); // zero-length section name
     if (payload.length >= 128) throw Error('Nonce too long');
     const bytes = new Uint8Array(wasm.length + 2 + payload.length);
-    bytes.set(wasm); bytes.set([0, payload.length], wasm.length); bytes.set(payload, wasm.length + 2);
+    bytes.set(wasm);
+    bytes.set([0, payload.length], wasm.length);
+    bytes.set(payload, wasm.length + 2);
     const compileStarted = performance.now();
     const compiled = await WebAssembly.compile(bytes);
     const compileMs = performance.now() - compileStarted;
@@ -30,7 +32,7 @@ self.onmessage = async ({ data: { cell, depth, hash, positions, nonce } }) => {
         self.postMessage({ type: 'line', line: String(line), stream: 'stdout' });
       },
       printErr: (line) => self.postMessage({ type: 'line', line: String(line), stream: 'stderr' }),
-      locateFile: (file) => file.endsWith('.data') ? cell.data : cell.js.replace(/\.js$/, '.wasm'),
+      locateFile: (file) => (file.endsWith('.data') ? cell.data : cell.js.replace(/\.js$/, '.wasm')),
       getPreloadedPackage: () => data.buffer,
       instantiateWasm(imports, receive) {
         const t = performance.now();
@@ -42,7 +44,8 @@ self.onmessage = async ({ data: { cell, depth, hash, positions, nonce } }) => {
     });
     const startupMs = performance.now() - started;
     const rows = runSuite(module, stdout, { depth, hash, positions });
-    self.postMessage({ ...cell, depth, hash, threads: 1, fetchMs, compileMs, instantiateMs, startupMs,
-      rows, summary: summarizeCell(rows) });
-  } catch (error) { self.postMessage({ error: String(error.stack ?? error) }); }
+    self.postMessage({ ...cell, depth, hash, threads: 1, fetchMs, compileMs, instantiateMs, startupMs, rows, summary: summarizeCell(rows) });
+  } catch (error) {
+    self.postMessage({ error: String(error.stack ?? error) });
+  }
 };

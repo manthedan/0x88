@@ -2,8 +2,8 @@
 import { onMount } from 'svelte';
 import { afterNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
-import SiteHeader from '$lib/components/SiteHeader.svelte';
 import RestoreNotice from '$lib/components/RestoreNotice.svelte';
+import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 let mountedUrl: URL | null = null;
 afterNavigate(({ to }) => {

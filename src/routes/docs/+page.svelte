@@ -78,11 +78,15 @@ const toc: TocGroup[] = [
     id: 'under-the-hood',
     items: [
       { id: 'neural-runtimes', label: 'Neural browser runtimes', children: [{ id: 'neural-stable-baseline', label: 'Stable baseline' }] },
-      { id: 'cpu-wasm', label: 'CPU WASM runtimes', children: [
-        { id: 'cpu-build-lanes', label: 'Two build lanes' },
-        { id: 'cpu-wasm-relaxed-simd', label: 'Relaxed SIMD' },
-        { id: 'simd-benchmark-context', label: 'Benchmark context' },
-      ] },
+      {
+        id: 'cpu-wasm',
+        label: 'CPU WASM runtimes',
+        children: [
+          { id: 'cpu-build-lanes', label: 'Two build lanes' },
+          { id: 'cpu-wasm-relaxed-simd', label: 'Relaxed SIMD' },
+          { id: 'simd-benchmark-context', label: 'Benchmark context' },
+        ],
+      },
       { id: 'cdn', label: 'Artifact CDN & caching', children: [{ id: 'cdn-two-planes', label: 'Two-plane model' }] },
     ],
   },
@@ -136,7 +140,7 @@ function keepActiveVisible(): void {
   if (!railList || (narrow && !tocOpen)) return;
   const link = railList.querySelector<HTMLElement>('a[aria-current="location"]');
   if (!link) return;
-  const scroller = narrow ? railList : link.closest<HTMLElement>('.toc-group > ul') ?? railList;
+  const scroller = narrow ? railList : (link.closest<HTMLElement>('.toc-group > ul') ?? railList);
   const box = scroller.getBoundingClientRect();
   const item = link.getBoundingClientRect();
   if (item.top < box.top + 8) scroller.scrollTop -= box.top + 8 - item.top;
@@ -166,7 +170,8 @@ let resultList: HTMLElement | null = null;
 $: hits = searchDocs(query, index);
 $: searching = query.trim().length > 0;
 
-const CONTAINERS = '.page-block, .analysis-topic, .task-reference, .callout, .engine-entry, .trouble, .opponents, .runtime-block, .runtime-subsection, .source-links, .removal-block';
+const CONTAINERS =
+  '.page-block, .analysis-topic, .task-reference, .callout, .engine-entry, .trouble, .opponents, .runtime-block, .runtime-subsection, .source-links, .removal-block';
 
 function cleanText(node: Element): string {
   const clone = node.cloneNode(true) as Element;
@@ -203,7 +208,17 @@ function buildIndex(): SearchEntry[] {
     const el = document.getElementById(link.id);
     if (!el) return [];
     const text = blockText(el);
-    return [{ id: link.id, title: link.label, group: group.label, parent: top.id === link.id ? '' : top.label, text, titleLc: link.label.toLowerCase(), textLc: text.toLowerCase() }];
+    return [
+      {
+        id: link.id,
+        title: link.label,
+        group: group.label,
+        parent: top.id === link.id ? '' : top.label,
+        text,
+        titleLc: link.label.toLowerCase(),
+        textLc: text.toLowerCase(),
+      },
+    ];
   });
 }
 

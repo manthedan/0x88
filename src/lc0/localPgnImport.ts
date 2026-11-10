@@ -1,5 +1,5 @@
 import { parsePgnGame, splitPgnGames } from '../chess/pgn.ts';
-import { buildOpeningPositionIndex, mergeOpeningMoveStats, type ImportedGame, type OpeningPositionIndex } from './openingStats.ts';
+import { buildOpeningPositionIndex, type ImportedGame, mergeOpeningMoveStats, type OpeningPositionIndex } from './openingStats.ts';
 
 export const MAX_PGN_BYTES = 1024 * 1024;
 export const MAX_PGN_GAMES = 200;
@@ -11,7 +11,8 @@ export function boundedPgnChunks(raw: string): string[] {
   const chunks = splitPgnGames(raw);
   if (!chunks.length) throw new Error('Paste PGN or choose a .pgn file first.');
   if (chunks.length > MAX_PGN_GAMES) throw new Error('A collection can contain at most 200 games. Split this batch.');
-  if (chunks.some((chunk) => new TextEncoder().encode(chunk).length > MAX_PGN_GAME_BYTES)) throw new Error('One game exceeds 32 KiB. Remove large comments or split the game.');
+  if (chunks.some((chunk) => new TextEncoder().encode(chunk).length > MAX_PGN_GAME_BYTES))
+    throw new Error('One game exceeds 32 KiB. Remove large comments or split the game.');
   return chunks;
 }
 
@@ -20,7 +21,8 @@ export function storedPgnChunks(raw: string): string[] {
   if (new TextEncoder().encode(raw).length > MAX_BACKUP_BYTES) throw new Error('Collection exceeds 16 MiB.');
   const chunks = splitPgnGames(raw);
   if (!chunks.length) throw new Error('Collection has no PGN games.');
-  if (chunks.some((chunk) => new TextEncoder().encode(chunk).length > MAX_PGN_GAME_BYTES)) throw new Error('One game exceeds 32 KiB. Remove large comments or split the game.');
+  if (chunks.some((chunk) => new TextEncoder().encode(chunk).length > MAX_PGN_GAME_BYTES))
+    throw new Error('One game exceeds 32 KiB. Remove large comments or split the game.');
   return chunks;
 }
 

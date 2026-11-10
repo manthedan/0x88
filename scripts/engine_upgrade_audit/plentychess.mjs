@@ -11,8 +11,13 @@ export function parsePlentyChessFens(source) {
 }
 
 export function plentyChessScript(fens) {
-  return ['uci', 'setoption name Threads value 1', 'setoption name Hash value 16', 'ucinewgame',
-    ...fens.flatMap((fen, index) => [...(index === 44 ? ['setoption name UCI_Chess960 value true'] : []), `position fen ${fen}`, 'go depth 13'])];
+  return [
+    'uci',
+    'setoption name Threads value 1',
+    'setoption name Hash value 16',
+    'ucinewgame',
+    ...fens.flatMap((fen, index) => [...(index === 44 ? ['setoption name UCI_Chess960 value true'] : []), `position fen ${fen}`, 'go depth 13']),
+  ];
 }
 
 export function plentyChessDefaults(fens) {
@@ -23,11 +28,21 @@ export function plentyChessDefaults(fens) {
 
 export default {
   tiers: (context) => emscriptenTiers(context, ['', 'sse41', 'relaxed-simd128']),
-  prepare: async (context) => { context.defaults = plentyChessDefaults(parsePlentyChessFens(await benchSource(context, 'src/bench.h'))); },
-  native: async (context) => context.options.nativeCmd ?
-    { ...await runReplay(context, nativeCell(context.options.nativeCmd), context.defaults, 13), source: '--native-cmd', command: context.options.nativeCmd } : null,
-  bench: async (context, tier) => ({ ...await runReplay(context, stageEmscripten(context, tier), context.defaults, 13),
-    method: 'full 46-position depth-13 replay (built-in bench deadlocks); Chess960 before index 44' }),
+  prepare: async (context) => {
+    context.defaults = plentyChessDefaults(parsePlentyChessFens(await benchSource(context, 'src/bench.h')));
+  },
+  native: async (context) =>
+    context.options.nativeCmd
+      ? {
+          ...(await runReplay(context, nativeCell(context.options.nativeCmd), context.defaults, 13)),
+          source: '--native-cmd',
+          command: context.options.nativeCmd,
+        }
+      : null,
+  bench: async (context, tier) => ({
+    ...(await runReplay(context, stageEmscripten(context, tier), context.defaults, 13)),
+    method: 'full 46-position depth-13 replay (built-in bench deadlocks); Chess960 before index 44',
+  }),
   nativeBuild: 'make -j3 (locked upstream source; process the matching net first; not run automatically)',
   // Replay includes the source's "moves ..." suffixes. Upstream's built-in
   // bench only constructs a board from the FEN, so its commit signature is a

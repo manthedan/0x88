@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/build_opening_names.mjs
 // Optional first argument: directory containing a.tsv … e.tsv for offline regeneration.
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { parsePgnGame } from '../src/chess/pgn.ts';
 import { openingPositionKey } from '../src/lc0/openingNames.ts';
 
@@ -20,7 +20,10 @@ for (const volume of ['a', 'b', 'c', 'd', 'e']) {
     if (!/^[A-E]\d\d$/.test(eco) || !name || !pgn) throw new Error(`Invalid opening: ${row}`);
     const { tree } = parsePgnGame(pgn);
     tree.toEnd();
-    const expected = pgn.replace(/\d+\.(?:\.\.)?/g, '').trim().split(/\s+/).length;
+    const expected = pgn
+      .replace(/\d+\.(?:\.\.)?/g, '')
+      .trim()
+      .split(/\s+/).length;
     if (tree.current.ply !== expected) throw new Error(`Incomplete PGN: ${eco} ${name}`);
     index[openingPositionKey(tree.current.fen)] = [eco, name];
     entries++;

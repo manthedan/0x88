@@ -32,16 +32,20 @@ export function stageEmscripten(context, tier, stockfish = false) {
     // Some glue hardcodes the shared URL rather than its own variant basename.
     if (`${context.engine}-emscripten.data` !== `${base}.data`) copyFileSync(data, join(dir, `${context.engine}-emscripten.data`));
   }
-  return { label: tier.name, command: process.execPath,
-    args: stockfish ? [js] : [worker('emscripten_worker.mjs'), js] };
+  return { label: tier.name, command: process.execPath, args: stockfish ? [js] : [worker('emscripten_worker.mjs'), js] };
 }
 
 export async function runReplay(context, cell, defaults, depth, nativeBench = false, parity = false) {
   const dir = workspace(context, 'replay');
   const spec = join(dir, 'spec.json');
   const result = join(dir, 'result.json');
-  writeFileSync(spec, JSON.stringify({ cell: { ...cell, nativeBench },
-    options: { defaults, benchDepth: depth, depth: 9, threads: 1, positions: parity ? 20 : 0, timeout: context.options.timeout } }));
+  writeFileSync(
+    spec,
+    JSON.stringify({
+      cell: { ...cell, nativeBench },
+      options: { defaults, benchDepth: depth, depth: 9, threads: 1, positions: parity ? 20 : 0, timeout: context.options.timeout },
+    }),
+  );
   await runProcess(process.execPath, [worker('replay_worker.mjs'), spec, result], { timeout: context.options.timeout });
   return JSON.parse(readFileSync(result, 'utf8'));
 }
@@ -86,6 +90,7 @@ export async function runEmscriptenBuiltin(context, tier) {
   if (output.timedOut) throw new Error('command("bench") timed out; supported built-in bench did not complete');
   if (output.code !== 0) throw new Error(`bench process exit ${output.code}: ${output.stderr.slice(-1000)}`);
   const text = `${output.stdout}\n${output.stderr}`;
-  if (/unknown command[^\n]*bench/i.test(text)) return { skip: 'facade explicitly rejects command("bench"); replay not validated in v1', diagnostic: text.slice(-500) };
+  if (/unknown command[^\n]*bench/i.test(text))
+    return { skip: 'facade explicitly rejects command("bench"); replay not validated in v1', diagnostic: text.slice(-500) };
   return { ...parseBenchOutput(text, builtinParserOptions(context.engine)), method: 'command("bench")' };
 }

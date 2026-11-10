@@ -1,10 +1,14 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import type { runSimulTrial } from '../../../lc0/arenaSimulRunner.ts';
 import { measureSimulMemory, simulHelps4, simulMemoryPending, subscribeSimulMemory } from '../../../lc0/arenaSimulGate.ts';
+import type { runSimulTrial } from '../../../lc0/arenaSimulRunner.ts';
 
 type Row = Awaited<ReturnType<typeof runSimulTrial>> & {
-  index: number; control: boolean; physical: number; modelUrl: string; occupancy: number;
+  index: number;
+  control: boolean;
+  physical: number;
+  modelUrl: string;
+  occupancy: number;
   memory?: { bytes: number | null; note: string };
 };
 type Result = { n: number; visits: number; maxPlies: number; pairs: number; rows: Row[]; [key: string]: unknown };
@@ -40,12 +44,17 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
   worker.onmessage = (event) => {
     const message = event.data;
     if (message.generation) generation = message.generation;
-    if (message.type === 'phase') status = `Trial ${message.index + 1}: ${message.concurrency} game(s), physical batch ${message.physical}${message.control ? ', numerical control' : ''}. ${message.phase === 'memory' ? 'Sampling memory outside the timing interval.' : 'Loading and warming up.'}`;
+    if (message.type === 'phase')
+      status = `Trial ${message.index + 1}: ${message.concurrency} game(s), physical batch ${message.physical}${message.control ? ', numerical control' : ''}. ${message.phase === 'memory' ? 'Sampling memory outside the timing interval.' : 'Loading and warming up.'}`;
     if (message.type === 'memory') {
       const target = worker;
       const measure = (performance as Performance & { measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory;
-      const sample = measure ? measureSimulMemory(() => measure.call(performance)).then(({ bytes }) => ({ bytes, note: 'Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency' }),
-        (failure) => ({ bytes: null, note: String(failure) })) : Promise.resolve({ bytes: null, note: 'UASM unavailable' });
+      const sample = measure
+        ? measureSimulMemory(() => measure.call(performance)).then(
+            ({ bytes }) => ({ bytes, note: 'Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency' }),
+            (failure) => ({ bytes: null, note: String(failure) }),
+          )
+        : Promise.resolve({ bytes: null, note: 'UASM unavailable' });
       void sample.then((value) => target?.postMessage({ type: 'memory', generation: message.generation, sample: value }));
     }
     if (message.type === 'progress') {
@@ -58,13 +67,35 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
       busy = false;
       status = 'Gate complete. Export the raw evidence before leaving this page.';
     }
-    if (message.type === 'error') { busy = false; error = message.error; status = 'Stopped. Incomplete games are not results.'; }
+    if (message.type === 'error') {
+      busy = false;
+      error = message.error;
+      status = 'Stopped. Incomplete games are not results.';
+    }
   };
-  worker.onerror = (event) => { busy = false; error = event.message; status = 'Worker failed.'; worker?.terminate(); };
-  worker.postMessage({ type: 'start', n: count, visits: effectiveVisits, maxPlies: effectivePlies, pairs: options.pairs ?? 3, runId: crypto.randomUUID(), allow8: helps4(effectiveVisits, effectivePlies) });
+  worker.onerror = (event) => {
+    busy = false;
+    error = event.message;
+    status = 'Worker failed.';
+    worker?.terminate();
+  };
+  worker.postMessage({
+    type: 'start',
+    n: count,
+    visits: effectiveVisits,
+    maxPlies: effectivePlies,
+    pairs: options.pairs ?? 3,
+    runId: crypto.randomUUID(),
+    allow8: helps4(effectiveVisits, effectivePlies),
+  });
 }
-function stop() { worker?.postMessage({ type: 'stop' }); status = 'Stopping after the in-flight GPU run settles.'; }
-function cancelGame(game?: number, token = generation) { worker?.postMessage({ type: 'cancelGame', game, generation: token }); }
+function stop() {
+  worker?.postMessage({ type: 'stop' });
+  status = 'Stopping after the in-flight GPU run settles.';
+}
+function cancelGame(game?: number, token = generation) {
+  worker?.postMessage({ type: 'cancelGame', game, generation: token });
+}
 function download() {
   const url = URL.createObjectURL(new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' }));
   const anchor = document.createElement('a');
@@ -75,11 +106,17 @@ function download() {
 }
 
 onMount(() => {
-  const unsubscribeMemory = subscribeSimulMemory((pending) => { memoryPending = pending; });
+  const unsubscribeMemory = subscribeSimulMemory((pending) => {
+    memoryPending = pending;
+  });
   // Explicit lab automation only. No autostart query, product import or persisted setting.
   const api = { start, stop, cancelGame, snapshot: () => ({ busy, memoryPending, status, error, generation, currentGame, rows, results, helps4: helps4() }) };
   Object.assign(window, { __arenaSimul: api });
-  return () => { unsubscribeMemory(); worker?.terminate(); delete (window as unknown as Record<string, unknown>).__arenaSimul; };
+  return () => {
+    unsubscribeMemory();
+    worker?.terminate();
+    delete (window as unknown as Record<string, unknown>).__arenaSimul;
+  };
 });
 </script>
 

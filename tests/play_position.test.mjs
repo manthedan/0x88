@@ -5,8 +5,13 @@ import { parsePgnGame } from '../src/chess/pgn.ts';
 import { gameOutcome } from '../src/lc0/engineBattle.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import {
-  playFromHereUnavailableReason, playGameToPgn, playMoveLabel, playMoveRows,
-  playPositionFromTree, playTakebackPly, replayPlayPosition,
+  playFromHereUnavailableReason,
+  playGameToPgn,
+  playMoveLabel,
+  playMoveRows,
+  playPositionFromTree,
+  playTakebackPly,
+  replayPlayPosition,
 } from '../src/lc0/playPosition.ts';
 
 function line(moves, startFen = START_FEN) {
@@ -45,9 +50,16 @@ test('history preserves castling and en-passant rights and applies special moves
 });
 
 test('invalid roots, malformed UCI and illegal history are rejected rather than partially loaded', () => {
-  for (const value of [null, {}, { startFen: 'nonsense', moves: [] }, { startFen: '8/8/8/8/8/8/8/8 w - - 0 1', moves: [] },
-    { startFen: START_FEN, moves: ['e2e5'] }, { startFen: START_FEN, moves: ['e2e4', 'e2e3'] },
-    { startFen: START_FEN, moves: ['E2E4'] }, { startFen: START_FEN, moves: Array(2001).fill('e2e4') }]) {
+  for (const value of [
+    null,
+    {},
+    { startFen: 'nonsense', moves: [] },
+    { startFen: '8/8/8/8/8/8/8/8 w - - 0 1', moves: [] },
+    { startFen: START_FEN, moves: ['e2e5'] },
+    { startFen: START_FEN, moves: ['e2e4', 'e2e3'] },
+    { startFen: START_FEN, moves: ['E2E4'] },
+    { startFen: START_FEN, moves: Array(2001).fill('e2e4') },
+  ]) {
     assert.throws(() => replayPlayPosition(value));
   }
 });
@@ -91,7 +103,8 @@ test('custom-root PGN has FEN and SetUp headers with Black-to-move numbering, in
 test('move rows and browsing labels use custom-root fullmove and turn', () => {
   const replay = replayPlayPosition(playPositionFromTree(line(['e8d7', 'e2e4', 'd7c6'], customFen)));
   assert.deepEqual(playMoveRows(replay.positions, replay.sans), [
-    { number: 37, white: null, black: 0 }, { number: 38, white: 1, black: 2 },
+    { number: 37, white: null, black: 0 },
+    { number: 38, white: 1, black: 2 },
   ]);
   assert.equal(playMoveLabel(replay.positions[0], replay.sans[0]), '37… Kd7');
   assert.equal(playMoveLabel(replay.positions[1], replay.sans[1]), '38. e4');

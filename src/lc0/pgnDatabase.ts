@@ -7,7 +7,14 @@
  */
 
 import { importStoredPgn, MAX_BACKUP_BYTES, parseLocalPgnGame, storedPgnChunks } from './localPgnImport.ts';
-import { buildOpeningPositionIndex, OPENING_INDEX_VERSION, type OpeningMoveStat, type OpeningPositionIndex, openingSummary, positionKey } from './openingStats.ts';
+import {
+  buildOpeningPositionIndex,
+  OPENING_INDEX_VERSION,
+  type OpeningMoveStat,
+  type OpeningPositionIndex,
+  openingSummary,
+  positionKey,
+} from './openingStats.ts';
 
 export type PgnCollectionSource = 'manual' | 'lichess' | 'chesscom';
 
@@ -87,7 +94,10 @@ function openDatabase(): Promise<IDBDatabase> {
       reject(new Error('Local storage is blocked by another tab. Close other tabs and retry.'));
     };
     request.onupgradeneeded = () => {
-      if (abandoned) { request.transaction?.abort(); return; }
+      if (abandoned) {
+        request.transaction?.abort();
+        return;
+      }
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) {
         const store = db.createObjectStore(STORE, { keyPath: 'id' });
@@ -97,7 +107,10 @@ function openDatabase(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => {
       clearTimeout(timer);
-      if (abandoned) { request.result.close(); return; }
+      if (abandoned) {
+        request.result.close();
+        return;
+      }
       request.result.onversionchange = () => request.result.close();
       resolve(request.result);
     };
@@ -339,7 +352,11 @@ export function rebuildPgnCollectionIndex(collection: SavePgnCollectionInput): S
   };
 }
 
-export async function importPgnDatabaseBackup(input: unknown, onProgress: (done: number, total: number) => void = () => {}, signal?: AbortSignal): Promise<number> {
+export async function importPgnDatabaseBackup(
+  input: unknown,
+  onProgress: (done: number, total: number) => void = () => {},
+  signal?: AbortSignal,
+): Promise<number> {
   // Validate/rebuild everything before an atomic write; a bad game cannot cause a partial restore.
   const inputs = normalizePgnDatabaseBackup(input);
   const collections: PgnCollectionRecord[] = [];
@@ -348,9 +365,17 @@ export async function importPgnDatabaseBackup(input: unknown, onProgress: (done:
     const input = inputs[i];
     const batch = await importStoredPgn(input.pgn, () => {}, signal);
     const now = Date.now();
-    collections.push({ ...input, id: newId(), source: input.source ?? 'manual', gameCount: batch.games.length,
-      positionIndex: batch.positionIndex, indexVersion: OPENING_INDEX_VERSION,
-      indexedPositionCount: Object.keys(batch.positionIndex).length, createdAt: now, updatedAt: now });
+    collections.push({
+      ...input,
+      id: newId(),
+      source: input.source ?? 'manual',
+      gameCount: batch.games.length,
+      positionIndex: batch.positionIndex,
+      indexVersion: OPENING_INDEX_VERSION,
+      indexedPositionCount: Object.keys(batch.positionIndex).length,
+      createdAt: now,
+      updatedAt: now,
+    });
   }
   signal?.throwIfAborted();
   const db = await openDatabase();
@@ -359,7 +384,9 @@ export async function importPgnDatabaseBackup(input: unknown, onProgress: (done:
     const done = transactionDone(tx);
     for (const collection of collections) tx.objectStore(STORE).put(collection);
     await done;
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
   onProgress(inputs.length, inputs.length);
   return collections.length;
 }

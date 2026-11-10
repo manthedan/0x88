@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import { ENGINE_PROFILE_BACKUP_KIND, engineSetupRuntime, normalizeEngineProfiles } from '../src/lc0/engineSetups.ts';
 
 const row = { family: 'sf', variant: 'lite', strength: 8 };
-const sanitize = (value) => value?.family === 'sf' && value.variant !== 'custom' ? { ...value } : null;
+const sanitize = (value) => (value?.family === 'sf' && value.variant !== 'custom' ? { ...value } : null);
 const profile = (name, extra = {}) => ({ name, rows: [row], multiPv: 3, lc0Runtime: 'onnx', ...extra });
 
 test('saved setups and version-one backups use the same normalization', () => {
@@ -16,13 +16,30 @@ test('saved setups and version-one backups use the same normalization', () => {
 });
 
 test('setup imports reject invalid envelopes, rows and reserved names', () => {
-  for (const input of [null, 3, {}, { kind: 'other', version: 1, profiles: [profile('A')] }, { kind: ENGINE_PROFILE_BACKUP_KIND, version: 2, profiles: [profile('A')] }]) {
+  for (const input of [
+    null,
+    3,
+    {},
+    { kind: 'other', version: 1, profiles: [profile('A')] },
+    { kind: ENGINE_PROFILE_BACKUP_KIND, version: 2, profiles: [profile('A')] },
+  ]) {
     assert.deepEqual(normalizeEngineProfiles(input, sanitize), []);
   }
-  assert.deepEqual(normalizeEngineProfiles([
-    null, {}, profile(''), profile('builtin:probe'), profile('Custom', { rows: [{ ...row, variant: 'custom' }] }),
-    profile('Invalid', { rows: [{}] }), profile('Good', { lc0Runtime: {}, multiPv: -3 }),
-  ], sanitize), [profile('Good', { multiPv: 1 })]);
+  assert.deepEqual(
+    normalizeEngineProfiles(
+      [
+        null,
+        {},
+        profile(''),
+        profile('builtin:probe'),
+        profile('Custom', { rows: [{ ...row, variant: 'custom' }] }),
+        profile('Invalid', { rows: [{}] }),
+        profile('Good', { lc0Runtime: {}, multiPv: -3 }),
+      ],
+      sanitize,
+    ),
+    [profile('Good', { multiPv: 1 })],
+  );
 });
 
 test('duplicate names are unambiguous and valid row policy is delegated', () => {

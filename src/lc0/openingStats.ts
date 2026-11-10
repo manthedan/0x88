@@ -27,15 +27,19 @@ export function positionKey(fen: string): string {
   const [placement, turn, rights = '-', ep = '-'] = fen.trim().split(/\s+/);
   const board = parseFen(fen);
   const homes = { K: [4, 7, 'w'], Q: [4, 0, 'w'], k: [60, 63, 'b'], q: [60, 56, 'b'] } as const;
-  const castling = Object.entries(homes).filter(([right, [king, rook, color]]) =>
-    rights.includes(right) && board.squares[king] === `${color}k` && board.squares[rook] === `${color}r`,
-  ).map(([right]) => right).join('') || '-';
+  const castling =
+    Object.entries(homes)
+      .filter(([right, [king, rook, color]]) => rights.includes(right) && board.squares[king] === `${color}k` && board.squares[rook] === `${color}r`)
+      .map(([right]) => right)
+      .join('') || '-';
   const target = board.epSquare;
-  const legalEp = ep !== '-' && target !== null && Math.floor(target / 8) === (turn === 'w' ? 5 : 2)
-    && !board.squares[target] && board.squares[target + (turn === 'w' ? -8 : 8)] === (turn === 'w' ? 'bp' : 'wp')
-    && legalMoves(board).some((move) =>
-      move.to === target && board.squares[move.from] === `${turn}p` && move.from % 8 !== move.to % 8,
-    );
+  const legalEp =
+    ep !== '-' &&
+    target !== null &&
+    Math.floor(target / 8) === (turn === 'w' ? 5 : 2) &&
+    !board.squares[target] &&
+    board.squares[target + (turn === 'w' ? -8 : 8)] === (turn === 'w' ? 'bp' : 'wp') &&
+    legalMoves(board).some((move) => move.to === target && board.squares[move.from] === `${turn}p` && move.from % 8 !== move.to % 8);
   return `${placement} ${turn} ${castling} ${legalEp ? squareName(board.epSquare!) : '-'}`;
 }
 
@@ -66,7 +70,7 @@ export function buildOpeningPositionIndex(games: ImportedGame[]): OpeningPositio
       if (child.move && !seen.has(key)) {
         seen.add(key);
         let byUci = byPosition.get(key);
-        if (!byUci) byPosition.set(key, byUci = new Map());
+        if (!byUci) byPosition.set(key, (byUci = new Map()));
         const uci = moveToUci(child.move);
         const stat = byUci.get(uci) ?? { uci, san: child.san ?? uci, count: 0, whiteWins: 0, blackWins: 0, draws: 0, unknown: 0 };
         stat.count++;

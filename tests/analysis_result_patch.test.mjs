@@ -10,13 +10,19 @@ function fixture({ focus = false, oldKey = 'fen|sf|1', newKey = oldKey, left = 1
   let focusOptions;
   const newTarget = {
     dataset: oldTarget.dataset,
-    focus: (options) => { focusOptions = options; },
+    focus: (options) => {
+      focusOptions = options;
+    },
     closest: () => newScroll,
     getBoundingClientRect: () => ({ left, right }),
   };
   const container = {
-    get innerHTML() { return markup; },
-    set innerHTML(value) { markup = value; },
+    get innerHTML() {
+      return markup;
+    },
+    set innerHTML(value) {
+      markup = value;
+    },
     contains: (node) => node === oldTarget,
     querySelectorAll: (selector) => {
       if (selector === '[data-result-scroll-key]') return [markup === 'before' ? oldScroll : newScroll];
@@ -26,8 +32,9 @@ function fixture({ focus = false, oldKey = 'fen|sf|1', newKey = oldKey, left = 1
   };
   const previousDocument = globalThis.document;
   globalThis.document = { activeElement: focus ? oldTarget : null };
-  try { patchAnalysisResults(container, 'after'); }
-  finally {
+  try {
+    patchAnalysisResults(container, 'after');
+  } finally {
     if (previousDocument === undefined) delete globalThis.document;
     else globalThis.document = previousDocument;
   }

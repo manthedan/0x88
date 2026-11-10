@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loadArenaResource } from '../src/lc0/arenaResourceLoad.ts';
+
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 test('Arena resource loading returns a live resource without disposing it', async () => {

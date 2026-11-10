@@ -10,8 +10,7 @@ export function openingPositionKey(fen: string): string {
   const fields = fen.split(/\s+/).slice(0, 4);
   if (fields[3] !== '-') {
     const board = parseFen(fen);
-    const legalEp = legalMoves(board).some((move) => move.to === board.epSquare
-      && board.squares[move.from]?.endsWith('p') && move.from % 8 !== move.to % 8);
+    const legalEp = legalMoves(board).some((move) => move.to === board.epSquare && board.squares[move.from]?.endsWith('p') && move.from % 8 !== move.to % 8);
     if (!legalEp) fields[3] = '-';
   }
   return fields.join(' ');

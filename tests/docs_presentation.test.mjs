@@ -17,10 +17,14 @@ function walk(node, ancestors = []) {
 }
 walk(ast.html);
 const attr = (node, name) => node.attributes?.find((a) => a.type === 'Attribute' && a.name === name);
-const textAttr = (node, name) => attr(node, name)?.value?.map((v) => v.data ?? '').join('');
+const textAttr = (node, name) =>
+  attr(node, name)
+    ?.value?.map((v) => v.data ?? '')
+    .join('');
 const hasClass = (node, name) => textAttr(node, 'class')?.split(/\s+/).includes(name);
 const byId = (id) => elements.find(({ node }) => textAttr(node, 'id') === id)?.node;
-const descendants = (parent, name) => elements.filter(({ node, ancestors }) => ancestors.includes(parent) && (!name || node.name === name)).map(({ node }) => node);
+const descendants = (parent, name) =>
+  elements.filter(({ node, ancestors }) => ancestors.includes(parent) && (!name || node.name === name)).map(({ node }) => node);
 const markup = (node) => source.slice(node.start, node.end);
 function literal(node) {
   if (node.type === 'Literal') return node.value;
@@ -34,14 +38,22 @@ const toc = literal(tocDeclaration.init);
 test('the outline and article agree on seven peer sections and every topic is navigable in page order', () => {
   const sectionIds = elements.filter(({ node }) => node.name === 'section').map(({ node }) => textAttr(node, 'id'));
   assert.deepEqual(sectionIds, ['pages', 'analysis-in-depth', 'review-and-train', 'troubleshooting', 'engines', 'under-the-hood', 'licenses']);
-  assert.deepEqual(toc.map((group) => group.id), sectionIds);
+  assert.deepEqual(
+    toc.map((group) => group.id),
+    sectionIds,
+  );
   const ids = elements.map(({ node }) => textAttr(node, 'id')).filter(Boolean);
   assert.equal(new Set(ids).size, ids.length, 'anchor IDs must be unique');
   for (const group of toc) {
     const section = byId(group.id);
     assert.equal(section.children.find((node) => node.name === 'h2')?.name, 'h2');
-    const headingIds = descendants(section).filter((node) => /^h[34]$/.test(node.name)).map((node) => textAttr(node, 'id'));
-    assert.deepEqual(group.items.flatMap((item) => [item.id, ...(item.children ?? []).map((child) => child.id)]), headingIds);
+    const headingIds = descendants(section)
+      .filter((node) => /^h[34]$/.test(node.name))
+      .map((node) => textAttr(node, 'id'));
+    assert.deepEqual(
+      group.items.flatMap((item) => [item.id, ...(item.children ?? []).map((child) => child.id)]),
+      headingIds,
+    );
   }
 });
 
@@ -77,7 +89,10 @@ test('one topic group opens at a time while common problems remain linked outsid
   assert.match(source, /\.toc-group > ul\{min-height:0; overflow-y:auto\}/);
   assert.match(source, /link.closest<HTMLElement>\('\.toc-group > ul'\)/, 'scroll-spy reveals topics inside their own scroller');
   const intro = elements.find(({ node }) => hasClass(node, 'doc-intro')).node;
-  assert.deepEqual(descendants(intro, 'a').map((node) => textAttr(node, 'href')), ['#trouble-webgpu', '#trouble-downloads', '#trouble-cache']);
+  assert.deepEqual(
+    descendants(intro, 'a').map((node) => textAttr(node, 'href')),
+    ['#trouble-webgpu', '#trouble-downloads', '#trouble-cache'],
+  );
   for (const link of descendants(intro, 'a')) assert.ok(byId(textAttr(link, 'href').slice(1)));
 });
 
@@ -97,7 +112,9 @@ test('mobile search is outside the collapsed panel and shares the desktop search
 test('all workspace launch links are with the title, ahead of the four-step procedure', () => {
   for (const workspace of ['analysis', 'arena', 'play']) {
     const heading = byId(`pages-${workspace}`);
-    const card = elements.find(({ node, ancestors }) => node === heading && ancestors.some((parent) => hasClass(parent, 'page-block'))).ancestors.find((node) => hasClass(node, 'page-block'));
+    const card = elements
+      .find(({ node, ancestors }) => node === heading && ancestors.some((parent) => hasClass(parent, 'page-block')))
+      .ancestors.find((node) => hasClass(node, 'page-block'));
     const launch = descendants(card, 'a').find((node) => textAttr(node, 'href') === `/app/${workspace}/`);
     const steps = descendants(card, 'ol')[0];
     assert.ok(launch.end < steps.start);
@@ -116,10 +133,17 @@ test('all workspace launch links are with the title, ahead of the four-step proc
   }
   for (const id of ['explore-own-games', 'compare-critical-moments']) {
     const topic = elements.find(({ node }) => node.children?.includes(byId(id))).node;
-    assert.deepEqual(topic.children.filter((node) => node.type === 'Element').map((node) => node.name), ['h3', 'p', 'ol', 'p', 'p'], 'purpose, steps and two notes');
+    assert.deepEqual(
+      topic.children.filter((node) => node.type === 'Element').map((node) => node.name),
+      ['h3', 'p', 'ol', 'p', 'p'],
+      'purpose, steps and two notes',
+    );
     assert.equal(descendants(topic, 'li').length, 4);
   }
-  const links = elements.filter(({ node }) => node.name === 'a').map(({ node }) => textAttr(node, 'href')).filter((href) => /^https?:/.test(href));
+  const links = elements
+    .filter(({ node }) => node.name === 'a')
+    .map(({ node }) => textAttr(node, 'href'))
+    .filter((href) => /^https?:/.test(href));
   assert.equal(links.length, 76, 'all external link instances are retained');
   assert.equal(new Set(links).size, 41, 'all unique external destinations are retained');
   assert.ok(!elements.some(({ node }) => hasClass(node, 'not-yet')), 'obsolete availability note is removed');
@@ -166,7 +190,10 @@ test('Analysis terminology and mobile paths match the workspace without changing
 });
 
 test('subsection search containers exclude adjacent topics', () => {
-  const containerNames = source.match(/const CONTAINERS = '([^']+)'/)[1].split(', ').map((name) => name.slice(1));
+  const containerNames = source
+    .match(/const CONTAINERS = '([^']+)'/)[1]
+    .split(', ')
+    .map((name) => name.slice(1));
   for (const [id, className, excluded, included] of [
     ['cpu-wasm-relaxed-simd', 'runtime-subsection', /wasm32-wasip1/, /i32x4_relaxed_dot_i8x16_i7x16_add/],
     ['licenses-per-engine', 'source-links', /rights holders/, /corresponding-source\.tar\.gz/],

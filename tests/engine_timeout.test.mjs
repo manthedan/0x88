@@ -6,10 +6,16 @@ import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test('cancelled cold review startups release both broker slots before initialization drains', async () => {
-  const broker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: 2, environment: () => ({ hardwareConcurrency: 8, crossOriginIsolated: true }) });
+  const broker = new EngineResourceBroker({
+    policy: 'bounded',
+    maxConcurrentCpu: 2,
+    environment: () => ({ hardwareConcurrency: 8, crossOriginIsolated: true }),
+  });
   for (const id of ['sf', 'other']) broker.register(id, { resourceClass: 'cpu', maxThreads: 1 });
   let finishInit;
-  const coldInit = new Promise((resolve) => { finishInit = resolve; });
+  const coldInit = new Promise((resolve) => {
+    finishInit = resolve;
+  });
   let searches = 0;
   const run = async (signal) => {
     const lease = await broker.acquire({ engineId: 'sf', signal });
@@ -41,10 +47,13 @@ test('cancelled cold review startups release both broker slots before initializa
 
 test('engine timeout also bounds a startup that ignores AbortSignal', async () => {
   let workSignal;
-  await assert.rejects(withEngineTimeout('Cold engine', new AbortController().signal, 5, (signal) => {
-    workSignal = signal;
-    return new Promise(() => {});
-  }), /Cold engine timed out/);
+  await assert.rejects(
+    withEngineTimeout('Cold engine', new AbortController().signal, 5, (signal) => {
+      workSignal = signal;
+      return new Promise(() => {});
+    }),
+    /Cold engine timed out/,
+  );
   assert.equal(workSignal.aborted, true);
 });
 
@@ -53,6 +62,11 @@ test('engine timeout returns successful work and does not start already-aborted 
   const controller = new AbortController();
   controller.abort();
   let started = false;
-  await assert.rejects(withEngineTimeout('Stopped engine', controller.signal, 100, async () => { started = true; }), { name: 'AbortError' });
+  await assert.rejects(
+    withEngineTimeout('Stopped engine', controller.signal, 100, async () => {
+      started = true;
+    }),
+    { name: 'AbortError' },
+  );
   assert.equal(started, false);
 });

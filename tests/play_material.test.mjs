@@ -39,7 +39,12 @@ test('recapture shows captures on both sides but no lead; browsing the start cle
 
 test('a non-capturing promotion is not a captured pawn and keeps the material lead accurate', () => {
   const root = parseFen('7k/P7/8/8/8/8/8/7K w - - 0 1');
-  for (const [role, value] of [['Q', 9], ['R', 5], ['B', 3], ['N', 3]]) {
+  for (const [role, value] of [
+    ['Q', 9],
+    ['R', 5],
+    ['B', 3],
+    ['N', 3],
+  ]) {
     const positions = replay([`a8=${role}`], root);
     assert.deepEqual(playMaterial(positions, 'b'), { html: '', label: 'No captures' });
     assert.equal(playMaterial(positions, 'w').label, `No captures; ahead by ${value} material points`);

@@ -1,6 +1,6 @@
 <script lang="ts">
-import { ARROW_GEOMETRY, arrowHeadPath, arrowLayout } from '../../lc0/arrowGeometry.ts';
 import { CHESSGROUND_SHAPES_LAYER_OPACITY, ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH } from '../../lc0/analysisFormat.ts';
+import { ARROW_GEOMETRY, arrowHeadPath, arrowLayout } from '../../lc0/arrowGeometry.ts';
 
 type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
 type Piece = { color: 'white' | 'black'; role: PieceRole; square: string };
@@ -14,16 +14,19 @@ const FILES = 'abcdefgh';
 
 function fenPieces(fen: string): Piece[] {
   const out: Piece[] = [];
-  fen.split(' ')[0].split('/').forEach((row, r) => {
-    let f = 0;
-    for (const ch of row) {
-      if (/\d/.test(ch)) f += Number(ch);
-      else {
-        out.push({ color: ch === ch.toUpperCase() ? 'white' : 'black', role: ROLE[ch.toLowerCase()], square: `${FILES[f]}${8 - r}` });
-        f += 1;
+  fen
+    .split(' ')[0]
+    .split('/')
+    .forEach((row, r) => {
+      let f = 0;
+      for (const ch of row) {
+        if (/\d/.test(ch)) f += Number(ch);
+        else {
+          out.push({ color: ch === ch.toUpperCase() ? 'white' : 'black', role: ROLE[ch.toLowerCase()], square: `${FILES[f]}${8 - r}` });
+          f += 1;
+        }
       }
-    }
-  });
+    });
   return out;
 }
 
@@ -49,13 +52,23 @@ const pieces = fenPieces(FEN);
 const lastMove = ['b5', 'b4'];
 const engines = [
   {
-    id: 'lc0', name: 'Lc0 Small', color: '#7a4fd6', meta: '365 visits',
-    evalText: '+0.25', best: 'Ne2', line: 'Nh5 14. Ng3 Nf4 15. h4 a5',
+    id: 'lc0',
+    name: 'Lc0 Small',
+    color: '#7a4fd6',
+    meta: '365 visits',
+    evalText: '+0.25',
+    best: 'Ne2',
+    line: 'Nh5 14. Ng3 Nf4 15. h4 a5',
     arrow: ['c3', 'e2'],
   },
   {
-    id: 'sf', name: 'Stockfish Lite', color: '#1f5fcf', meta: 'depth 12',
-    evalText: '+0.55', best: 'gxf6', line: 'bxc3 14. Qxc3 Nxf6 15. Na5 Rc8',
+    id: 'sf',
+    name: 'Stockfish Lite',
+    color: '#1f5fcf',
+    meta: 'depth 12',
+    evalText: '+0.55',
+    best: 'gxf6',
+    line: 'bxc3 14. Qxc3 Nxf6 15. Na5 Rc8',
     arrow: ['g5', 'f6'],
   },
 ];

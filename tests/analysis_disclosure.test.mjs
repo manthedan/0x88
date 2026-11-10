@@ -1,20 +1,33 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { mountAnalysisDisclosure } from '../src/lc0/analysisDisclosure.ts';
 
 class Element extends EventTarget {
   hidden = false;
   attrs = {};
   children = [];
-  constructor(doc) { super(); this.ownerDocument = doc; }
-  contains(node) { return node === this || this.children.some((child) => child.contains(node)); }
-  setAttribute(key, value) { this.attrs[key] = value; }
-  focus() { this.ownerDocument.activeElement = this; }
-  closest() { return this; }
+  constructor(doc) {
+    super();
+    this.ownerDocument = doc;
+  }
+  contains(node) {
+    return node === this || this.children.some((child) => child.contains(node));
+  }
+  setAttribute(key, value) {
+    this.attrs[key] = value;
+  }
+  focus() {
+    this.ownerDocument.activeElement = this;
+  }
+  closest() {
+    return this;
+  }
 }
 function fixture(enabled) {
   const doc = new EventTarget();
-  const root = new Element(doc), trigger = new Element(doc), panel = new Element(doc);
+  const root = new Element(doc),
+    trigger = new Element(doc),
+    panel = new Element(doc);
   root.children = [trigger, panel];
   const controller = new AbortController();
   const disclosure = mountAnalysisDisclosure({ root, trigger, panel, signal: controller.signal, enabled });

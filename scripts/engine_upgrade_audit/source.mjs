@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fetchUpstream, sha256 } from './provenance.mjs';
 import { runProcess } from './process.mjs';
+import { fetchUpstream, sha256 } from './provenance.mjs';
 
 export class Unavailable extends Error {}
 

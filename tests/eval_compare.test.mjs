@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { arenaComparisonStatus, arenaLaneOutput, compactEvalSpread, compareArenaEvals, compareEvals, evalPercent, fenPly, searchAge, searchAgeLabel } from '../src/lc0/evalCompare.ts';
+import {
+  arenaComparisonStatus,
+  arenaLaneOutput,
+  compactEvalSpread,
+  compareArenaEvals,
+  compareEvals,
+  evalPercent,
+  fenPly,
+  searchAge,
+  searchAgeLabel,
+} from '../src/lc0/evalCompare.ts';
+
 const fen = (ply, pieces = '8/8/8/8/8/8/8/K6k') => `${pieces} ${ply % 2 ? 'b' : 'w'} - - 0 ${1 + Math.floor(ply / 2)}`;
 const score = (ply, cp = 20) => ({ fen: fen(ply), scoreCp: cp });
 
@@ -49,7 +60,12 @@ test('freshness follows the most recent completed search, not board turn', () =>
   assert.equal(result.adjacent, true);
 });
 test('missing, old, widely separated and future results are not comparable', () => {
-  for (const scores of [[{}, score(31)], [score(28), score(29)], [score(29), score(31)], [score(32), score(33)]]) {
+  for (const scores of [
+    [{}, score(31)],
+    [score(28), score(29)],
+    [score(29), score(31)],
+    [score(32), score(33)],
+  ]) {
     assert.equal(compareArenaEvals(scores, fen(32)).fair, false);
     assert.equal(compareArenaEvals(scores, fen(32)).comparison, undefined);
   }
@@ -78,7 +94,12 @@ test('age labels preserve exact ply units in accessible details', () => {
   assert.match(searchAgeLabel(undefined), /No search/);
 });
 test('Arena status states adjacent positions rather than claiming agreement', () => {
-  const status = (scores) => arenaComparisonStatus(compareArenaEvals(scores, fen(2)), scores.map((s) => evalPercent(s) !== undefined), ['Lc0', 'SF']);
+  const status = (scores) =>
+    arenaComparisonStatus(
+      compareArenaEvals(scores, fen(2)),
+      scores.map((s) => evalPercent(s) !== undefined),
+      ['Lc0', 'SF'],
+    );
   assert.equal(status([{}, {}]).text, 'Waiting for first search');
   assert.match(status([score(0), {}]).text, /Black.*search/);
   assert.match(status([{}, score(1)]).text, /White.*search/);
@@ -89,7 +110,10 @@ test('Arena status states adjacent positions rather than claiming agreement', ()
   assert.equal(status([score(1), score(1)]).text, 'similar, same position');
 });
 test('unfair age is explained only in the not-comparable status', () => {
-  assert.deepEqual(arenaComparisonStatus(compareArenaEvals([score(2), score(5)], fen(6)), [true, true], ['Lc0', 'SF']), { text: 'not comparable, Lc0’s eval is 4 plies old', emphasis: false });
+  assert.deepEqual(arenaComparisonStatus(compareArenaEvals([score(2), score(5)], fen(6)), [true, true], ['Lc0', 'SF']), {
+    text: 'not comparable, Lc0’s eval is 4 plies old',
+    emphasis: false,
+  });
 });
 test('self-play retains each side’s own result and resets at game/engine boundaries', () => {
   const white = { engineId: 'lc0-small', ...score(0, 20) };

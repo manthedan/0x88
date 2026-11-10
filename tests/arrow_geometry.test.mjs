@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { ARROW_GEOMETRY, arrowLayout } from '../src/lc0/arrowGeometry.ts';
 import { CHESSGROUND_SVG_PATCH_MARKER, patchChessgroundSvg } from '../src/lc0/chessgroundArrowPatch.ts';
 
@@ -9,7 +9,8 @@ const close = (actual, expected, message) => assert.ok(Math.abs(actual - expecte
 const along = (_layout, from, x, y) => Math.hypot(x - from[0], y - from[1]);
 
 test('arrow tip sits on the target centre with the head base 0.10 inside the target square', () => {
-  const from = [4.5, 6.5], to = [4.5, 4.5]; // e2 → e4
+  const from = [4.5, 6.5],
+    to = [4.5, 4.5]; // e2 → e4
   const a = arrowLayout(from, to, false, ARROW_GEOMETRY);
   assert.deepEqual(a.tip, to);
   close(along(a, from, a.x1, a.y1), 0.42, 'tail starts near the origin square edge');
@@ -20,7 +21,10 @@ test('arrow tip sits on the target centre with the head base 0.10 inside the tar
 });
 
 test('arrow geometry does not depend on line width; brushes only change the shaft', () => {
-  assert.equal(Object.keys(ARROW_GEOMETRY).some((key) => /width/i.test(key) && key !== 'headWidth'), false);
+  assert.equal(
+    Object.keys(ARROW_GEOMETRY).some((key) => /width/i.test(key) && key !== 'headWidth'),
+    false,
+  );
   const patched = patchChessgroundSvg(readFileSync(chessgroundSvg(), 'utf8'));
   const marker = patched.slice(patched.indexOf('function renderMarker'), patched.indexOf('function renderLabel'));
   assert.doesNotMatch(marker, /lineWidth/);

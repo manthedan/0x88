@@ -17,10 +17,7 @@
     "rawSha256": "663e0531ac71c6c7c6d3bc4f1fac923bf69136f9786fa1da5c4ac25382aee54b",
     "processedBytes": 53111616,
     "processedSha256": "5cedef19778f1bb784e181fc013543127d1fdcde227795710b1a48f6e53d79cd",
-    "identicalHelpers": [
-      "Mac arm64",
-      "Yukon SSSE3"
-    ]
+    "identicalHelpers": ["Mac arm64", "Yukon SSSE3"]
   },
   "buildDefaults": {
     "optimization": "-O2",
@@ -41,10 +38,7 @@
   },
   "parity": {
     "positions": 20,
-    "depths": [
-      9,
-      11
-    ],
+    "depths": [9, 11],
     "nativeUniqueSearches": 40,
     "nativeComparisons": 240,
     "wasmCrossFlags": 200,
@@ -61,22 +55,12 @@
     "elo": 2.78,
     "error95": 11.32,
     "losPct": 68.5,
-    "pentanomial": [
-      3,
-      119,
-      251,
-      121,
-      6
-    ],
+    "pentanomial": [3, 119, 251, 121, 6],
     "timeControl": "8+0.08",
     "threads": 1,
     "hashMiB": 16,
     "concurrency": 3,
-    "cores": [
-      3,
-      4,
-      5
-    ],
+    "cores": [3, 4, 5],
     "compiler": "GCC 13.3",
     "architecture": "avx2",
     "optimization": "-O3 + LTO, no PGO",

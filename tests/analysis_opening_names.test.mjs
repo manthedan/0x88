@@ -39,7 +39,8 @@ test('current ply gets its deepest opening, never a future name, and keeps it of
 test('transpositions ignore clocks and resolve by position, not move sequence', () => {
   const first = parsePgnGame('1. d4 d5 2. Nf3 Nf6').tree;
   const second = parsePgnGame('1. Nf3 Nf6 2. d4 d5').tree;
-  first.toEnd(); second.toEnd();
+  first.toEnd();
+  second.toEnd();
   assert.equal(openingPositionKey(first.current.fen), openingPositionKey(second.current.fen));
   assert.deepEqual(openingNameAt(index, first.current), openingNameAt(index, second.current));
   assert.ok(openingNameAt(index, first.current));
@@ -52,7 +53,8 @@ test('variation ancestry never borrows the mainline opening or another game’s 
   tree.addUci('e7e5');
   const index = { [openingPositionKey(e4.fen)]: ['B00', 'Test mainline'] };
   assert.deepEqual(openingNameAt(index, tree.current), ['B00', 'Test mainline']);
-  tree.toStart(); tree.addUci('d2d4');
+  tree.toStart();
+  tree.addUci('d2d4');
   assert.equal(openingNameAt(index, tree.current), null);
   assert.equal(openingNameAt(index, new GameTree().root), null);
 });

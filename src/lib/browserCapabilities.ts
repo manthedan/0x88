@@ -22,10 +22,7 @@ async function probeWebGpu(): Promise<boolean | null> {
   const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
   if (!gpu) return false;
   try {
-    const adapter = await Promise.race([
-      gpu.requestAdapter(),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), ADAPTER_TIMEOUT_MS)),
-    ]);
+    const adapter = await Promise.race([gpu.requestAdapter(), new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), ADAPTER_TIMEOUT_MS))]);
     return adapter === 'timeout' ? null : !!adapter;
   } catch {
     return false;

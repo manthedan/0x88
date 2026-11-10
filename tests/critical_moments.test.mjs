@@ -1,16 +1,44 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
-import { stockfishAnalysisLines, lc0AnalysisLines } from '../src/lc0/analysisFormat.ts';
+import { lc0AnalysisLines, stockfishAnalysisLines } from '../src/lc0/analysisFormat.ts';
+import {
+  CriticalAnalysisRefresh,
+  createCriticalReport,
+  criticalMomentCacheKey,
+  criticalMoments,
+  criticalReportIsStale,
+  criticalReportSignature,
+  runCriticalReport,
+} from '../src/lc0/criticalMoments.ts';
 import { criticalAgreement, criticalPositionLines, criticalReportMarkup } from '../src/lc0/criticalMomentsPresentation.ts';
-import { CriticalAnalysisRefresh, createCriticalReport, criticalMomentCacheKey, criticalMoments, criticalReportIsStale, criticalReportSignature, runCriticalReport } from '../src/lc0/criticalMoments.ts';
 import { reviewGame } from '../src/lc0/gameReview.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 
-const line = (uci = 'e2e4', scoreCp = 20, engine = 'Stockfish Lite') => ({ engine, multipv: 1, pvUci: [uci], pvSan: uci === 'e2e4' ? 'e4' : 'd4', scoreCp, scoreText: '+0.20', detail: 'depth 12' });
-const provenance = (engine = 'Stockfish Lite') => ({ engine, model: 'test-model', build: 'pinned-build', budget: 'depth 12', runtime: 'test-runtime', options: 'MultiPV 1; threads 1' });
+const line = (uci = 'e2e4', scoreCp = 20, engine = 'Stockfish Lite') => ({
+  engine,
+  multipv: 1,
+  pvUci: [uci],
+  pvSan: uci === 'e2e4' ? 'e4' : 'd4',
+  scoreCp,
+  scoreText: '+0.20',
+  detail: 'depth 12',
+});
+const provenance = (engine = 'Stockfish Lite') => ({
+  engine,
+  model: 'test-model',
+  build: 'pinned-build',
+  budget: 'depth 12',
+  runtime: 'test-runtime',
+  options: 'MultiPV 1; threads 1',
+});
 const moment = () => ({ move: { ply: 1, san: 'd4', uci: 'd2d4', side: 'w', class: 'mistake', moverLoss: 0.15 }, fen: START_FEN, history: [START_FEN] });
-const lane = (id = 'sf', evaluate = async () => ({ cacheKey: '', provenance: provenance(), line: line() })) => ({ id, provenance: provenance(id === 'sf' ? 'Stockfish Lite' : id), row: { family: id === 'sf' ? 'sf' : 'lc0', variant: id === 'sf' ? 'lite' : id, strength: 12 }, evaluate });
+const lane = (id = 'sf', evaluate = async () => ({ cacheKey: '', provenance: provenance(), line: line() })) => ({
+  id,
+  provenance: provenance(id === 'sf' ? 'Stockfish Lite' : id),
+  row: { family: id === 'sf' ? 'sf' : 'lc0', variant: id === 'sf' ? 'lite' : id, strength: 12 },
+  evaluate,
+});
 const run = async (lanes, moments = [moment()], cache = new Map(), signal = new AbortController().signal) => {
   const report = createCriticalReport('snapshot', 'Stockfish Lite · depth 8', moments, lanes);
   await runCriticalReport(report, lanes, cache, signal, () => {});
@@ -62,18 +90,33 @@ test('critical positions are ranked, capped at five, and BEFORE each error with 
   const game = new GameTree();
   for (const uci of ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4', 'g8f6', 'd2d3']) game.addUci(uci);
   const nodes = game.lineTo();
-  const review = reviewGame([0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1].map((winWhite) => ({ winWhite, bestUci: null })), nodes.slice(1).map((n) => ({ san: n.san, uci: '' })));
-  const moments = criticalMoments(review, nodes.map((node) => node.fen));
+  const review = reviewGame(
+    [0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1].map((winWhite) => ({ winWhite, bestUci: null })),
+    nodes.slice(1).map((n) => ({ san: n.san, uci: '' })),
+  );
+  const moments = criticalMoments(
+    review,
+    nodes.map((node) => node.fen),
+  );
   assert.equal(moments.length, 5);
   for (const m of moments) {
     assert.equal(m.fen, nodes[m.move.ply - 1].fen);
-    assert.deepEqual(m.history, nodes.slice(0, m.move.ply).map((node) => node.fen));
+    assert.deepEqual(
+      m.history,
+      nodes.slice(0, m.move.ply).map((node) => node.fen),
+    );
   }
 });
 
 test('partial engine failures preserve other lanes and earlier completed results', async () => {
   let calls = 0;
-  const lanes = [lane(), lane('lc0', async () => { if (++calls === 2) throw new Error('GPU lost'); return { line: line('d2d4', 22, 'Lc0 Small'), provenance: provenance('Lc0 Small') }; })];
+  const lanes = [
+    lane(),
+    lane('lc0', async () => {
+      if (++calls === 2) throw new Error('GPU lost');
+      return { line: line('d2d4', 22, 'Lc0 Small'), provenance: provenance('Lc0 Small') };
+    }),
+  ];
   const report = await run(lanes, [moment(), { ...moment(), history: [START_FEN, START_FEN] }]);
   assert.equal(report.state, 'complete');
   assert.equal(report.cells.sf[1].status, 'complete');
@@ -87,12 +130,19 @@ test('history-specific cache keys separate identical-FEN transpositions and reta
   const histories = [
     ['g1f3', 'g8f6', 'f3g1', 'f6g8', 'g1f3', 'g8f6', 'f3g1', 'f6g8'],
     ['g1f3', 'g8f6', 'f3h4', 'f6h5', 'h4f3', 'h5f6', 'f3g1', 'f6g8'],
-  ].map((moves) => { const game = new GameTree(); for (const move of moves) game.addUci(move); return game.lineTo().map((node) => node.fen); });
+  ].map((moves) => {
+    const game = new GameTree();
+    for (const move of moves) game.addUci(move);
+    return game.lineTo().map((node) => node.fen);
+  });
   assert.equal(histories[0].at(-1), histories[1].at(-1));
   const moments = histories.map((history) => ({ ...moment(), fen: history.at(-1), history }));
   assert.notEqual(criticalMomentCacheKey(moments[0], lane()), criticalMomentCacheKey(moments[1], lane()));
   let calls = 0;
-  const engine = lane('sf', async () => { calls++; return { line: line(), provenance: provenance() }; });
+  const engine = lane('sf', async () => {
+    calls++;
+    return { line: line(), provenance: provenance() };
+  });
   const cache = new Map();
   await run([engine], moments, cache);
   const report = await run([engine], moments, cache);
@@ -111,7 +161,12 @@ test('stale reports detect mainline, rating and engine settings changes, not boa
   const signature = criticalReportSignature('mainline', settings);
   const report = { signature, stale: false };
   assert.equal(criticalReportIsStale(report, criticalReportSignature('mainline', { ...settings })), false);
-  for (const signature of [criticalReportSignature('edited', settings), criticalReportSignature('mainline', { ...settings, rating: 1900 }), criticalReportSignature('mainline', { ...settings, depth: 8 })]) assert.equal(criticalReportIsStale(report, signature), true);
+  for (const signature of [
+    criticalReportSignature('edited', settings),
+    criticalReportSignature('mainline', { ...settings, rating: 1900 }),
+    criticalReportSignature('mainline', { ...settings, depth: 8 }),
+  ])
+    assert.equal(criticalReportIsStale(report, signature), true);
   assert.equal(criticalReportIsStale({ ...report, stale: true }, signature), true, 'invalidated reports stay stale even after reverting settings');
 });
 
@@ -123,7 +178,12 @@ test('cancellation retains completed cells, discards late work and starts no fur
     if (calls === 2) controller.abort();
     return { line: line(), provenance: provenance() };
   });
-  const report = await run([engine], [moment(), { ...moment(), history: [START_FEN, START_FEN] }, { ...moment(), history: [START_FEN, START_FEN, START_FEN] }], new Map(), controller.signal);
+  const report = await run(
+    [engine],
+    [moment(), { ...moment(), history: [START_FEN, START_FEN] }, { ...moment(), history: [START_FEN, START_FEN, START_FEN] }],
+    new Map(),
+    controller.signal,
+  );
   assert.equal(report.state, 'cancelled');
   assert.equal(calls, 2);
   assert.equal(report.cells.sf[0].status, 'complete');

@@ -21,7 +21,9 @@ export class CriticalAnalysisRefresh {
     return pending?.key === key ? { force: pending.force } : undefined;
   }
 
-  clear(): void { this.pending = undefined; }
+  clear(): void {
+    this.pending = undefined;
+  }
 }
 
 export interface CriticalMoment {
@@ -100,54 +102,72 @@ export function criticalMomentCacheKey(moment: CriticalMoment, lane: Pick<Critic
 
 export function createCriticalReport(signature: string, baseline: string, moments: CriticalMoment[], lanes: CriticalLane[]): CriticalReport {
   return {
-    signature, baseline, moments, stale: false, state: 'running',
+    signature,
+    baseline,
+    moments,
+    stale: false,
+    state: 'running',
     lanes: lanes.map(({ id, provenance }) => ({ id, provenance: { ...provenance }, completed: 0, progress: 'Waiting' })),
     cells: Object.fromEntries(lanes.map(({ id }) => [id, moments.map(() => ({ status: 'pending' as const }))])),
   };
 }
 
 /** Serial within each engine; independent failures never discard another engine's results. */
-export async function runCriticalReport(report: CriticalReport, lanes: CriticalLane[], cache: Map<string, CriticalResult>, signal: AbortSignal, changed: () => void): Promise<void> {
-  await Promise.all(lanes.map(async (lane, laneIndex) => {
-    const state = report.lanes[laneIndex];
-    for (let i = 0; i < report.moments.length; i++) {
-      if (signal.aborted) break;
-      const cell = report.cells[lane.id][i];
-      const moment = report.moments[i];
-      const key = criticalMomentCacheKey(moment, lane);
-      cell.status = 'running';
-      state.progress = `Moment ${i + 1} of ${report.moments.length}`;
-      changed();
-      try {
-        const cached = cache.get(key);
-        const result = cached ?? await lane.evaluate(moment, signal, (text) => {
-          if (!signal.aborted) { state.progress = `Moment ${i + 1} of ${report.moments.length} · ${text}`; changed(); }
-        });
+export async function runCriticalReport(
+  report: CriticalReport,
+  lanes: CriticalLane[],
+  cache: Map<string, CriticalResult>,
+  signal: AbortSignal,
+  changed: () => void,
+): Promise<void> {
+  await Promise.all(
+    lanes.map(async (lane, laneIndex) => {
+      const state = report.lanes[laneIndex];
+      for (let i = 0; i < report.moments.length; i++) {
         if (signal.aborted) break;
-        if (!result.line?.pvUci[0] && !result.policy) throw new Error('No scored best move returned.');
-        if (result.line && (result.line.error || (!Number.isFinite(result.line.scoreCp) && !Number.isFinite(result.line.mateIn)))) throw new Error('Engine returned no finite evaluation.');
-        result.cacheKey = key;
-        cell.result = result;
-        cell.cached = !!cached;
-        cell.status = 'complete';
-        cache.set(key, result);
-        if (cache.size > 128) cache.delete(cache.keys().next().value!);
-      } catch (error) {
-        if (signal.aborted) break;
-        cell.status = 'failed';
-        cell.error = error instanceof Error ? error.message : String(error);
+        const cell = report.cells[lane.id][i];
+        const moment = report.moments[i];
+        const key = criticalMomentCacheKey(moment, lane);
+        cell.status = 'running';
+        state.progress = `Moment ${i + 1} of ${report.moments.length}`;
+        changed();
+        try {
+          const cached = cache.get(key);
+          const result =
+            cached ??
+            (await lane.evaluate(moment, signal, (text) => {
+              if (!signal.aborted) {
+                state.progress = `Moment ${i + 1} of ${report.moments.length} · ${text}`;
+                changed();
+              }
+            }));
+          if (signal.aborted) break;
+          if (!result.line?.pvUci[0] && !result.policy) throw new Error('No scored best move returned.');
+          if (result.line && (result.line.error || (!Number.isFinite(result.line.scoreCp) && !Number.isFinite(result.line.mateIn))))
+            throw new Error('Engine returned no finite evaluation.');
+          result.cacheKey = key;
+          cell.result = result;
+          cell.cached = !!cached;
+          cell.status = 'complete';
+          cache.set(key, result);
+          if (cache.size > 128) cache.delete(cache.keys().next().value!);
+        } catch (error) {
+          if (signal.aborted) break;
+          cell.status = 'failed';
+          cell.error = error instanceof Error ? error.message : String(error);
+        }
+        state.completed++;
+        changed();
+        // Cached work also yields so the cancel control remains usable.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
-      state.completed++;
+      const cells = report.cells[lane.id];
+      for (const cell of cells) if (cell.status === 'pending' || cell.status === 'running') cell.status = 'cancelled';
+      const failures = cells.filter((cell) => cell.status === 'failed').length;
+      state.progress = signal.aborted ? 'Cancelled' : failures ? `Finished with ${failures} ${failures === 1 ? 'failure' : 'failures'}` : 'Finished';
       changed();
-      // Cached work also yields so the cancel control remains usable.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
-    const cells = report.cells[lane.id];
-    for (const cell of cells) if (cell.status === 'pending' || cell.status === 'running') cell.status = 'cancelled';
-    const failures = cells.filter((cell) => cell.status === 'failed').length;
-    state.progress = signal.aborted ? 'Cancelled' : failures ? `Finished with ${failures} ${failures === 1 ? 'failure' : 'failures'}` : 'Finished';
-    changed();
-  }));
+    }),
+  );
   report.state = signal.aborted ? 'cancelled' : 'complete';
   changed();
 }

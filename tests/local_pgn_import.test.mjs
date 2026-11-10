@@ -6,19 +6,41 @@ afterEach(() => {
   if (originalIdb) Object.defineProperty(globalThis, 'indexedDB', originalIdb);
   else delete globalThis.indexedDB;
 });
+
 import { START_FEN } from '../src/chess/board.ts';
-import { boundedPgnChunks, importLocalPgn, importStoredPgn, MAX_PGN_BYTES, MAX_BACKUP_BYTES } from '../src/lc0/localPgnImport.ts';
-import { openingStatsFromIndex, OPENING_INDEX_VERSION } from '../src/lc0/openingStats.ts';
-import { deletePgnCollection, duplicatePgnCollection, exportPgnDatabaseBackup, importPgnDatabaseBackup, listPgnCollections, loadPgnCollection, renamePgnCollection, savePgnCollection, searchPgnCollectionsByPosition, serializePgnDatabaseBackup } from '../src/lc0/pgnDatabase.ts';
+import { boundedPgnChunks, importLocalPgn, importStoredPgn, MAX_BACKUP_BYTES, MAX_PGN_BYTES } from '../src/lc0/localPgnImport.ts';
+import { OPENING_INDEX_VERSION, openingStatsFromIndex } from '../src/lc0/openingStats.ts';
+import {
+  deletePgnCollection,
+  duplicatePgnCollection,
+  exportPgnDatabaseBackup,
+  importPgnDatabaseBackup,
+  listPgnCollections,
+  loadPgnCollection,
+  renamePgnCollection,
+  savePgnCollection,
+  searchPgnCollectionsByPosition,
+  serializePgnDatabaseBackup,
+} from '../src/lc0/pgnDatabase.ts';
 
 const pgn = '[Result "*"]\n\n1. Nf3 (1. d4 d5) Nf6 2. Ng1 Ng8 3. e4 *';
 
 test('local import reports incremental progress and indexes mainlines only', async () => {
   const progress = [];
   const batch = await importLocalPgn(`${pgn}\n\n[Result "1-0"]\n\n1. e4 e5 1-0`, (done, total) => progress.push([done, total]));
-  assert.deepEqual(progress, [[0, 2], [1, 2], [2, 2]]);
+  assert.deepEqual(progress, [
+    [0, 2],
+    [1, 2],
+    [2, 2],
+  ]);
   assert.equal(batch.games.length, 2);
-  assert.deepEqual(openingStatsFromIndex(batch.positionIndex, START_FEN).map((s) => [s.san, s.count]), [['e4', 1], ['Nf3', 1]]);
+  assert.deepEqual(
+    openingStatsFromIndex(batch.positionIndex, START_FEN).map((s) => [s.san, s.count]),
+    [
+      ['e4', 1],
+      ['Nf3', 1],
+    ],
+  );
 });
 
 test('valid zero-move records are skipped without losing playable games or progress', async () => {
@@ -28,7 +50,12 @@ test('valid zero-move records are skipped without losing playable games or progr
     const batch = await importer(raw, (done, total) => progress.push([done, total]));
     assert.equal(batch.games.length, 1);
     assert.equal(batch.skippedGames, 2);
-    assert.deepEqual(progress, [[0, 3], [1, 3], [2, 3], [3, 3]]);
+    assert.deepEqual(progress, [
+      [0, 3],
+      [1, 3],
+      [2, 3],
+      [3, 3],
+    ]);
     assert.deepEqual(batch.positionIndex, (await importLocalPgn(pgn)).positionIndex);
     await assert.rejects(importer('[Result "*"]\n*\n\n[Result "0-1"]\n0-1'), /No playable moves/);
     await assert.rejects(importer(`${raw}\n\n[Event "Broken"]\nnotamove *`), /Game 4: Invalid PGN move/);
@@ -69,14 +96,20 @@ test('repeated-move RAVs cannot replace or extend the literal mainline', async (
   const batch = await importLocalPgn('[Result "*"]\n1. e4 (1. e4 c5) e5 *\n\n[Result "*"]\n1. e4 (1. e4 c5) *');
   const afterE4 = batch.games[0].tree.root.children[0].fen;
   const stats = openingStatsFromIndex(batch.positionIndex, afterE4);
-  assert.deepEqual(stats.map((s) => [s.san, s.count]), [['e5', 1]]);
+  assert.deepEqual(
+    stats.map((s) => [s.san, s.count]),
+    [['e5', 1]],
+  );
   assert.equal(batch.games[1].tree.root.children[0].children.length, 0);
 });
 
 test('multiline brace comments containing PGN annotation directives stay in the same game', async () => {
   const batch = await importLocalPgn('[Result "*"]\n\n1. e4 {\n[%eval 0.2]\n[%clk 0:05:00]\n} e5 *\n\n[Result "1-0"]\n\n1. d4 d5 1-0');
   assert.equal(batch.games.length, 2);
-  assert.deepEqual(batch.games[0].tree.mainlineFrom().map((node) => node.san), ['e4', 'e5']);
+  assert.deepEqual(
+    batch.games[0].tree.mainlineFrom().map((node) => node.san),
+    ['e4', 'e5'],
+  );
 });
 
 test('oversized backups are rejected before download with a selected-collection fallback', () => {
@@ -89,7 +122,9 @@ test('oversized backups are rejected before download with a selected-collection 
 test('legacy 201–300-game collections load, rebuild and round-trip through the backup contract', async (t) => {
   installMemoryIdb(t);
   for (const count of [201, 300]) {
-    const raw = Array(count).fill(`[Result "1-0"]\n\n1. e4 {${'x'.repeat(4096)}} e5 1-0`).join('\n\n');
+    const raw = Array(count)
+      .fill(`[Result "1-0"]\n\n1. e4 {${'x'.repeat(4096)}} e5 1-0`)
+      .join('\n\n');
     assert.throws(() => boundedPgnChunks(raw), count === 300 ? /1 MiB/ : /200 games/, 'new-input bounds remain in force');
     const progress = [];
     const batch = await importStoredPgn(raw, (done, total) => progress.push([done, total]));
@@ -104,7 +139,9 @@ test('legacy 201–300-game collections load, rebuild and round-trip through the
     let backup;
     try {
       backup = JSON.parse(serializePgnDatabaseBackup(await exportPgnDatabaseBackup()));
-    } finally { clearInterval(timer); }
+    } finally {
+      clearInterval(timer);
+    }
     assert.ok(ticks >= count, 'export replay validation yields between games');
     await deletePgnCollection(record.id);
     assert.equal(await importPgnDatabaseBackup(backup), 1);
@@ -118,8 +155,12 @@ test('legacy 201–300-game collections load, rebuild and round-trip through the
 test('stored collection and uploaded backup replay retain the per-game safety bound', async (t) => {
   installMemoryIdb(t);
   const oversizedGame = `1. e4 {${'x'.repeat(32768)}} e5 *`;
-  const backup = { kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: '',
-    collections: [{ name: 'Oversized game', pgn: oversizedGame, gameCount: 1 }] };
+  const backup = {
+    kind: 'lc0-analysis-pgn-database-backup',
+    version: 1,
+    exportedAt: '',
+    collections: [{ name: 'Oversized game', pgn: oversizedGame, gameCount: 1 }],
+  };
   await assert.rejects(importStoredPgn(oversizedGame), /32 KiB/);
   await assert.rejects(importPgnDatabaseBackup(backup), /32 KiB/);
   assert.throws(() => serializePgnDatabaseBackup(backup), /32 KiB/);
@@ -129,7 +170,10 @@ test('stored collection and uploaded backup replay retain the per-game safety bo
 test('backup export rejects records that restore cannot legally replay', async (t) => {
   installMemoryIdb(t);
   const record = await savePgnCollection({ name: 'Invalid', pgn: '1. e4 e5 2. e4 *', gameCount: 1 });
-  assert.doesNotThrow(() => serializePgnDatabaseBackup({ kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: '', collections: [record] }), 'serialization does not repeat legal replay synchronously');
+  assert.doesNotThrow(
+    () => serializePgnDatabaseBackup({ kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: '', collections: [record] }),
+    'serialization does not repeat legal replay synchronously',
+  );
   await assert.rejects(exportPgnDatabaseBackup(), /Invalid PGN move/);
 });
 
@@ -146,7 +190,10 @@ test('headerless games split on top-level results before the game-count cap', as
 
 test('adjacent numeric annotation glyphs do not change strict-import moves', async () => {
   const batch = await importLocalPgn('[Result "*"]\n\n1.e4$1 e5$2 2.Nf3$10 Nc6 *');
-  assert.deepEqual(batch.games[0].tree.mainlineFrom().map((node) => node.san), ['e4', 'e5', 'Nf3', 'Nc6']);
+  assert.deepEqual(
+    batch.games[0].tree.mainlineFrom().map((node) => node.san),
+    ['e4', 'e5', 'Nf3', 'Nc6'],
+  );
 });
 
 test('CR-only and CRLF PGN line endings preserve semicolon-comment boundaries and games', async () => {
@@ -154,14 +201,32 @@ test('CR-only and CRLF PGN line endings preserve semicolon-comment boundaries an
     const raw = ['[Result "1-0"]', '1. e4 ; comment', 'e5 1-0', '[Result "0-1"]', '1. d4 ; another', 'd5 0-1'].join(newline);
     const batch = await importLocalPgn(raw);
     assert.equal(batch.games.length, 2);
-    assert.deepEqual(batch.games.map((game) => game.tree.mainlineFrom().map((node) => node.san)), [['e4', 'e5'], ['d4', 'd5']]);
-    assert.deepEqual(batch.games.map((game) => game.result), ['1-0', '0-1']);
+    assert.deepEqual(
+      batch.games.map((game) => game.tree.mainlineFrom().map((node) => node.san)),
+      [
+        ['e4', 'e5'],
+        ['d4', 'd5'],
+      ],
+    );
+    assert.deepEqual(
+      batch.games.map((game) => game.result),
+      ['1-0', '0-1'],
+    );
   }
 });
 
 test('local import cancellation prevents publication', async () => {
   const controller = new AbortController();
-  await assert.rejects(importLocalPgn(`${pgn}\n\n${pgn}`, (done) => { if (done === 1) controller.abort(); }, controller.signal), { name: 'AbortError' });
+  await assert.rejects(
+    importLocalPgn(
+      `${pgn}\n\n${pgn}`,
+      (done) => {
+        if (done === 1) controller.abort();
+      },
+      controller.signal,
+    ),
+    { name: 'AbortError' },
+  );
 });
 
 // Minimal asynchronous IDB contract for storage tests. Browser verification also exercises real IndexedDB.
@@ -171,12 +236,24 @@ function memoryDatabase() {
     close() {},
     transaction() {
       const tx = {
-        objectStore() { return {
-          get(id) { return request(records.get(id)); },
-          getAll() { return request([...records.values()]); },
-          put(record) { records.set(record.id, structuredClone(record)); return request(record.id); },
-          delete(id) { records.delete(id); return request(undefined); },
-        }; },
+        objectStore() {
+          return {
+            get(id) {
+              return request(records.get(id));
+            },
+            getAll() {
+              return request([...records.values()]);
+            },
+            put(record) {
+              records.set(record.id, structuredClone(record));
+              return request(record.id);
+            },
+            delete(id) {
+              records.delete(id);
+              return request(undefined);
+            },
+          };
+        },
       };
       setTimeout(() => tx.oncomplete?.(), 0);
       return tx;
@@ -184,38 +261,78 @@ function memoryDatabase() {
   };
   function request(value) {
     const req = {};
-    queueMicrotask(() => { req.result = structuredClone(value); req.onsuccess?.(); });
+    queueMicrotask(() => {
+      req.result = structuredClone(value);
+      req.onsuccess?.();
+    });
     return req;
   }
-  return { records, open() { const req = {}; queueMicrotask(() => { req.result = db; req.onsuccess?.(); }); return req; } };
+  return {
+    records,
+    open() {
+      const req = {};
+      queueMicrotask(() => {
+        req.result = db;
+        req.onsuccess?.();
+      });
+      return req;
+    },
+  };
 }
 
 // The database itself contains functions, so its open request must not structuredClone it.
 function installMemoryIdb(t) {
   const database = memoryDatabase();
-  Object.defineProperty(globalThis, 'indexedDB', { value: { open() {
-    const req = {};
-    queueMicrotask(() => {
-      const connection = database.open();
-      connection.onsuccess = () => { req.result = connection.result; req.onsuccess?.(); };
-    });
-    return req;
-  } }, configurable: true });
+  Object.defineProperty(globalThis, 'indexedDB', {
+    value: {
+      open() {
+        const req = {};
+        queueMicrotask(() => {
+          const connection = database.open();
+          connection.onsuccess = () => {
+            req.result = connection.result;
+            req.onsuccess?.();
+          };
+        });
+        return req;
+      },
+    },
+    configurable: true,
+  });
   return database;
 }
 
 test('IndexedDB denied, missing, and blocked failures settle without hanging', async (t) => {
   Object.defineProperty(globalThis, 'indexedDB', { value: undefined, configurable: true });
   await assert.rejects(listPgnCollections(), /unavailable/);
-  Object.defineProperty(globalThis, 'indexedDB', { value: { open() { throw new DOMException('Denied', 'SecurityError'); } }, configurable: true });
+  Object.defineProperty(globalThis, 'indexedDB', {
+    value: {
+      open() {
+        throw new DOMException('Denied', 'SecurityError');
+      },
+    },
+    configurable: true,
+  });
   await assert.rejects(listPgnCollections(), /Denied/);
   let closed = false;
-  Object.defineProperty(globalThis, 'indexedDB', { value: { open() {
-    const req = {};
-    queueMicrotask(() => req.onblocked());
-    setTimeout(() => { req.result = { close() { closed = true; } }; req.onsuccess(); }, 0);
-    return req;
-  } }, configurable: true });
+  Object.defineProperty(globalThis, 'indexedDB', {
+    value: {
+      open() {
+        const req = {};
+        queueMicrotask(() => req.onblocked());
+        setTimeout(() => {
+          req.result = {
+            close() {
+              closed = true;
+            },
+          };
+          req.onsuccess();
+        }, 0);
+        return req;
+      },
+    },
+    configurable: true,
+  });
   await assert.rejects(listPgnCollections(), /blocked by another tab/);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(closed, true, 'late connection is closed after rejection');

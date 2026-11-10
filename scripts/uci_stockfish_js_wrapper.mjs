@@ -13,7 +13,10 @@ const variant = aliases[raw] || raw;
 const path = require('stockfish').findEngine(variant);
 const child = spawn(process.execPath, [path], { stdio: 'inherit' });
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(signal));
-child.on('error', (error) => { console.error(error); process.exitCode = 1; });
+child.on('error', (error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 child.on('exit', (code, signal) => {
   process.exitCode = code ?? (signal ? 1 : 0);
 });

@@ -18,9 +18,12 @@ export function committedPlayOpponent(preferences: PlayPreferences): PlayOpponen
 /** Controls are a draft, never the source of a live game's opponent or tuning. */
 export function transitionPlayOpponent(state: PlayOpponentState, event: PlayOpponentEvent): PlayOpponentState {
   switch (event.type) {
-    case 'reset': return committedPlayOpponent(event.preferences);
-    case 'confirm': return committedPlayOpponent(state.pending ?? state.active);
-    case 'dismiss': return committedPlayOpponent(state.active);
+    case 'reset':
+      return committedPlayOpponent(event.preferences);
+    case 'confirm':
+      return committedPlayOpponent(state.pending ?? state.active);
+    case 'dismiss':
+      return committedPlayOpponent(state.active);
     case 'tune': {
       // Strength changes remain live unless the form is proposing a new game.
       // A tuning event cannot change identity, even if controls were refreshed.

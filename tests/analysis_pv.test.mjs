@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { createPvPreview, insertPvPrefix } from '../src/lc0/analysisPv.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
@@ -26,7 +26,10 @@ test('PV preview checks every move and leaves the game and source PV untouched',
 
 test('preview retains the full PV, including more than twelve plies', () => {
   const source = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
-  const preview = createPvPreview(START_FEN, Array.from({ length: 20 }, (_, i) => source[i % 4]));
+  const preview = createPvPreview(
+    START_FEN,
+    Array.from({ length: 20 }, (_, i) => source[i % 4]),
+  );
   assert.equal(preview.steps.length, 20);
   assert.equal(preview.steps[19].label, '10… Ng8');
 });

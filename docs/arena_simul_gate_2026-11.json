@@ -24,44 +24,22 @@
       "openings": [
         {
           "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
-          "moves": [
-            "e2e4",
-            "e7e5",
-            "g1f3",
-            "b8c6",
-            "f1c4"
-          ],
+          "moves": ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4"],
           "name": "Italian Game"
         },
         {
           "fen": "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
-          "moves": [
-            "e2e4",
-            "e7e6",
-            "d2d4",
-            "d7d5",
-            "e4e5"
-          ],
+          "moves": ["e2e4", "e7e6", "d2d4", "d7d5", "e4e5"],
           "name": "French Advance"
         },
         {
           "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq e3 0 4",
-          "moves": [
-            "d2d4",
-            "g8f6",
-            "c2c4",
-            "g7g6",
-            "b1c3",
-            "f8g7",
-            "e2e4"
-          ],
+          "moves": ["d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4"],
           "name": "King's Indian"
         },
         {
           "fen": "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1",
-          "moves": [
-            "c2c4"
-          ],
+          "moves": ["c2c4"],
           "name": "English Opening"
         }
       ],
@@ -758,16 +736,8 @@
           "max": 217.0900000333786
         }
       },
-      "pairedGamesPerHourRatios": [
-        1.2105155271248544,
-        1.3351973751140493,
-        1.400920669957659
-      ],
-      "pairedEvalsPerSecondRatios": [
-        1.5771562776442984,
-        1.7396017439420386,
-        1.8252312998852522
-      ],
+      "pairedGamesPerHourRatios": [1.2105155271248544, 1.3351973751140493, 1.400920669957659],
+      "pairedEvalsPerSecondRatios": [1.5771562776442984, 1.7396017439420386, 1.8252312998852522],
       "allowsN8": false
     },
     {
@@ -793,44 +763,22 @@
       "openings": [
         {
           "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
-          "moves": [
-            "e2e4",
-            "e7e5",
-            "g1f3",
-            "b8c6",
-            "f1c4"
-          ],
+          "moves": ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4"],
           "name": "Italian Game"
         },
         {
           "fen": "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
-          "moves": [
-            "e2e4",
-            "e7e6",
-            "d2d4",
-            "d7d5",
-            "e4e5"
-          ],
+          "moves": ["e2e4", "e7e6", "d2d4", "d7d5", "e4e5"],
           "name": "French Advance"
         },
         {
           "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq e3 0 4",
-          "moves": [
-            "d2d4",
-            "g8f6",
-            "c2c4",
-            "g7g6",
-            "b1c3",
-            "f8g7",
-            "e2e4"
-          ],
+          "moves": ["d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4"],
           "name": "King's Indian"
         },
         {
           "fen": "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1",
-          "moves": [
-            "c2c4"
-          ],
+          "moves": ["c2c4"],
           "name": "English Opening"
         }
       ],
@@ -1551,16 +1499,8 @@
           "max": 225.1799999475479
         }
       },
-      "pairedGamesPerHourRatios": [
-        2.034344470243788,
-        2.405807537801061,
-        2.3698520762141664
-      ],
-      "pairedEvalsPerSecondRatios": [
-        2.6505064001587386,
-        3.134478142596813,
-        3.0876324965173647
-      ],
+      "pairedGamesPerHourRatios": [2.034344470243788, 2.405807537801061, 2.3698520762141664],
+      "pairedEvalsPerSecondRatios": [2.6505064001587386, 3.134478142596813, 3.0876324965173647],
       "allowsN8": true
     },
     {
@@ -1586,44 +1526,22 @@
       "openings": [
         {
           "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
-          "moves": [
-            "e2e4",
-            "e7e5",
-            "g1f3",
-            "b8c6",
-            "f1c4"
-          ],
+          "moves": ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4"],
           "name": "Italian Game"
         },
         {
           "fen": "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
-          "moves": [
-            "e2e4",
-            "e7e6",
-            "d2d4",
-            "d7d5",
-            "e4e5"
-          ],
+          "moves": ["e2e4", "e7e6", "d2d4", "d7d5", "e4e5"],
           "name": "French Advance"
         },
         {
           "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq e3 0 4",
-          "moves": [
-            "d2d4",
-            "g8f6",
-            "c2c4",
-            "g7g6",
-            "b1c3",
-            "f8g7",
-            "e2e4"
-          ],
+          "moves": ["d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4"],
           "name": "King's Indian"
         },
         {
           "fen": "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1",
-          "moves": [
-            "c2c4"
-          ],
+          "moves": ["c2c4"],
           "name": "English Opening"
         }
       ],
@@ -2350,16 +2268,8 @@
           "max": 511.78000009059906
         }
       },
-      "pairedGamesPerHourRatios": [
-        1.6147929500968226,
-        1.8625377747572063,
-        2.2744376399512602
-      ],
-      "pairedEvalsPerSecondRatios": [
-        2.103881182251272,
-        2.4266629200411667,
-        2.963318950959338
-      ],
+      "pairedGamesPerHourRatios": [1.6147929500968226, 1.8625377747572063, 2.2744376399512602],
+      "pairedEvalsPerSecondRatios": [2.103881182251272, 2.4266629200411667, 2.963318950959338],
       "allowsN8": false
     }
   ],
@@ -2379,22 +2289,9 @@
       ],
       "initializers": 375,
       "sameInitializerNames": true,
-      "differentInitializers": [
-        "/const/pos_encoding_shape"
-      ],
+      "differentInitializers": ["/const/pos_encoding_shape"],
       "shapeValues": {
-        "/const/pos_encoding_shape": [
-          [
-            1,
-            64,
-            64
-          ],
-          [
-            4,
-            64,
-            64
-          ]
-        ]
+        "/const/pos_encoding_shape": [[1, 64, 64], [4, 64, 64]]
       },
       "nodes": 552,
       "identicalSerializedNodes": true
@@ -2414,22 +2311,9 @@
       ],
       "initializers": 375,
       "sameInitializerNames": true,
-      "differentInitializers": [
-        "/const/pos_encoding_shape"
-      ],
+      "differentInitializers": ["/const/pos_encoding_shape"],
       "shapeValues": {
-        "/const/pos_encoding_shape": [
-          [
-            1,
-            64,
-            64
-          ],
-          [
-            8,
-            64,
-            64
-          ]
-        ]
+        "/const/pos_encoding_shape": [[1, 64, 64], [8, 64, 64]]
       },
       "nodes": 552,
       "identicalSerializedNodes": true

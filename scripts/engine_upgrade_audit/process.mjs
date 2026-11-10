@@ -12,27 +12,49 @@ export function runProcess(command, args, { cwd, input, env, timeout = 600000, a
     let stderr = '';
     let timedOut = false;
     const kill = () => {
-      try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, 'SIGKILL'); } catch {}
+      try {
+        process.kill(process.platform === 'win32' ? child.pid : -child.pid, 'SIGKILL');
+      } catch {}
     };
-    const onSignal = () => { interrupted = true; kill(); };
+    const onSignal = () => {
+      interrupted = true;
+      kill();
+    };
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, onSignal);
     const cleanup = () => {
       clearTimeout(timer);
       for (const signal of ['SIGINT', 'SIGTERM']) process.removeListener(signal, onSignal);
     };
-    const timer = setTimeout(() => { timedOut = true; kill(); }, timeout);
-    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
-    child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill();
+    }, timeout);
+    child.stdout.setEncoding('utf8').on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => {
+      stderr += chunk;
+    });
     child.stdin.on('error', () => {}); // EPIPE is reported through the exit status.
     child.stdin.end(input);
-    child.on('error', (error) => { kill(); cleanup(); reject(error); });
+    child.on('error', (error) => {
+      kill();
+      cleanup();
+      reject(error);
+    });
     child.on('close', (code, signal) => {
       // A launcher may exit after forking a descendant with redirected stdio.
       // The group remains ours even when its leader/streams have closed.
       kill();
       cleanup();
       const result = { code, signal, timedOut, stdout, stderr };
-      if (interrupted || (!allowFailure && (code !== 0 || timedOut))) reject(Object.assign(new Error(`${command}: ${interrupted ? 'audit interrupted' : timedOut ? 'timeout' : `exit ${code} (${signal})`}: ${stderr.slice(-1500)}`), { result }));
+      if (interrupted || (!allowFailure && (code !== 0 || timedOut)))
+        reject(
+          Object.assign(
+            new Error(`${command}: ${interrupted ? 'audit interrupted' : timedOut ? 'timeout' : `exit ${code} (${signal})`}: ${stderr.slice(-1500)}`),
+            { result },
+          ),
+        );
       else resolve(result);
     });
   });

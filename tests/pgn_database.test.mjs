@@ -70,7 +70,10 @@ test('PGN database backup import normalizes collection records', () => {
 
 test('PGN database backup import rejects invalid backups', () => {
   assert.throws(() => normalizePgnDatabaseBackup({}), /collections array/);
-  assert.throws(() => normalizePgnDatabaseBackup({ kind: 'lc0-analysis-pgn-database-backup', version: 1, collections: [{ name: 'empty', pgn: '' }] }), /has no PGN/);
+  assert.throws(
+    () => normalizePgnDatabaseBackup({ kind: 'lc0-analysis-pgn-database-backup', version: 1, collections: [{ name: 'empty', pgn: '' }] }),
+    /has no PGN/,
+  );
 });
 
 test('PGN database import rebuilds position indexes from raw PGN', () => {

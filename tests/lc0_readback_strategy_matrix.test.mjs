@@ -34,7 +34,11 @@ test('readback matrix retains unavailable native kernel profiling in cells and t
 });
 
 test('readback matrix retains disabled and real-event kernel profiling without losing measured zero', () => {
-  for (const [status, gpuMs] of [['disabled', null], ['available', 1.5], ['available', 0]]) {
+  for (const [status, gpuMs] of [
+    ['disabled', null],
+    ['available', 1.5],
+    ['available', 0],
+  ]) {
     const summary = compactResult('ort-cpu-outputs', {
       lastBackendTiming: { ortKernelProfileStatus: status, ortKernelGpuMs: gpuMs },
     });

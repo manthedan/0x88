@@ -29,10 +29,19 @@ export function compareEvals(scores: readonly EvalScore[]) {
   const spread = max - min;
   const oppositeSides = min <= 50 - SIDE_THRESHOLD && max >= 50 + SIDE_THRESHOLD;
   const allCp = results.every(({ score }) => score.mateIn === undefined && Number.isFinite(score.scoreCp));
-  const pawnSpread = allCp ? (Math.max(...results.map(({ score }) => score.scoreCp!)) - Math.min(...results.map(({ score }) => score.scoreCp!))) / 100 : undefined;
-  return { min, max, spread, pawnSpread, oppositeSides, meaningful: spread >= MEANINGFUL_SPREAD,
+  const pawnSpread = allCp
+    ? (Math.max(...results.map(({ score }) => score.scoreCp!)) - Math.min(...results.map(({ score }) => score.scoreCp!))) / 100
+    : undefined;
+  return {
+    min,
+    max,
+    spread,
+    pawnSpread,
+    oppositeSides,
+    meaningful: spread >= MEANINGFUL_SPREAD,
     // Never subtract mate distances as though they were pawns.
-    label: pawnSpread === undefined ? `${spread.toFixed(0)} points on bar` : `${pawnSpread.toFixed(2)} pawns` };
+    label: pawnSpread === undefined ? `${spread.toFixed(0)} points on bar` : `${pawnSpread.toFixed(2)} pawns`,
+  };
 }
 
 /** Zero-based position ply, including custom starting positions. */
@@ -43,7 +52,9 @@ export function fenPly(fen: string): number | undefined {
   return (fullmove - 1) * 2 + (fields[1] === 'b' ? 1 : 0);
 }
 
-function position(fen: string): string { return fen.trim().split(/\s+/).slice(0, 4).join(' '); }
+function position(fen: string): string {
+  return fen.trim().split(/\s+/).slice(0, 4).join(' ');
+}
 
 export function searchAge(fen: string | undefined, currentFen: string): number | undefined {
   if (!fen) return undefined;
@@ -71,13 +82,15 @@ export function searchAgeLabel(age: number | undefined): string {
  * Full strength belongs to the current/most recent search, never an old pair.
  */
 export function compareArenaEvals(scores: readonly (EvalScore & { fen?: string })[], currentFen: string) {
-  const ages = scores.map((score) => evalPercent(score) === undefined ? undefined : searchAge(score.fen, currentFen));
+  const ages = scores.map((score) => (evalPercent(score) === undefined ? undefined : searchAge(score.fen, currentFen)));
   const recent = ages.filter((age): age is number => age !== undefined && age >= 0 && age <= 2);
   const freshest = recent.length ? Math.min(...recent) : undefined;
   const fresh = ages.map((age) => age !== undefined && age === freshest);
-  const fair = scores.length === 2 && ages.every((age) => age !== undefined && age >= 0 && age <= 2)
-    && Math.abs(ages[0]! - ages[1]!) <= 1
-    && (ages[0] !== ages[1] || position(scores[0].fen!) === position(scores[1].fen!));
+  const fair =
+    scores.length === 2 &&
+    ages.every((age) => age !== undefined && age >= 0 && age <= 2) &&
+    Math.abs(ages[0]! - ages[1]!) <= 1 &&
+    (ages[0] !== ages[1] || position(scores[0].fen!) === position(scores[1].fen!));
   // Only a completed, ineligible pair gets the old-lane treatment. An ordinary
   // alternating search (or a missing first result) must retain full contrast.
   // Equally aged but unrelated positions have no authoritative lane: dim both.
@@ -112,7 +125,12 @@ export function arenaComparisonStatus(state: ReturnType<typeof compareArenaEvals
  * A missing latest output resets the lane: Arena clears its output map before
  * rendering a new game (even when both seats keep the same IDs).
  */
-export function arenaLaneOutput<T extends { engineId: string; fen: string }>(previous: T | undefined, latest: T | undefined, engineId: string | null, side: 'w' | 'b'): T | undefined {
+export function arenaLaneOutput<T extends { engineId: string; fen: string }>(
+  previous: T | undefined,
+  latest: T | undefined,
+  engineId: string | null,
+  side: 'w' | 'b',
+): T | undefined {
   if (!engineId || !latest) return undefined;
   if (latest.engineId === engineId && latest.fen.split(/\s+/)[1] === side) return latest;
   return previous?.engineId === engineId && previous.fen.split(/\s+/)[1] === side ? previous : undefined;

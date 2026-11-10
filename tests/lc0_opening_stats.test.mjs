@@ -86,14 +86,20 @@ test('different move orders transpose into the same mainline position', () => {
 test('repeated positions count only the first departure in a game, even when the next move changes', () => {
   const games = parsePgnGames('1. Nf3 Nf6 2. Ng1 Ng8 3. e4 e5 *');
   const stats = openingStatsFromIndex(buildOpeningPositionIndex(games), START_FEN);
-  assert.deepEqual(stats.map((s) => [s.san, s.count]), [['Nf3', 1]]);
+  assert.deepEqual(
+    stats.map((s) => [s.san, s.count]),
+    [['Nf3', 1]],
+  );
   assert.equal(openingSummary(stats).total, 1);
 });
 
 test('variations never contribute games or override the mainline result', () => {
   const games = parsePgnGames('1. e4 (1. d4 d5 0-1) e5 1-0');
   const stats = openingStatsFromIndex(buildOpeningPositionIndex(games), START_FEN);
-  assert.deepEqual(stats.map((s) => [s.san, s.count, s.whiteWins]), [['e4', 1, 1]]);
+  assert.deepEqual(
+    stats.map((s) => [s.san, s.count, s.whiteWins]),
+    [['e4', 1, 1]],
+  );
 });
 
 test('unknown results reconcile every move count and the summary total', () => {

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 // Run under benchlock. Fresh subprocess per cell avoids retained heaps/code.
 // --config matrix.json --rounds 5 --depth 11 --json results.json
 // Each config cell: {engine,label,js,data,factory}; paths are repo-relative.
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { createHash } from 'node:crypto';
 import { brotliCompressSync, constants } from 'node:zlib';
 import { roundOrder, runSuite, summarizeCell } from './emscripten_uci_protocol.mjs';
 
@@ -38,7 +38,8 @@ if (args.has('cell')) {
     const stdout = [];
     let instantiateMs;
     const module = await factory({
-      print: (line) => stdout.push(String(line)), printErr: () => {},
+      print: (line) => stdout.push(String(line)),
+      printErr: () => {},
       locateFile: (file) => path.resolve(file.endsWith('.data') ? cell.data : wasmPath),
       getPreloadedPackage: () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
       instantiateWasm(imports, receive) {
@@ -51,21 +52,47 @@ if (args.has('cell')) {
     });
     const startupMs = performance.now() - started;
     const rows = runSuite(module, stdout, { depth, hash, positions });
-    const result = { ...cell, runtime: process.version, v8: process.versions.v8, depth, hash, threads: 1,
-      compileMs, instantiateMs, startupMs, rows, summary: summarizeCell(rows) };
+    const result = {
+      ...cell,
+      runtime: process.version,
+      v8: process.versions.v8,
+      depth,
+      hash,
+      threads: 1,
+      compileMs,
+      instantiateMs,
+      startupMs,
+      rows,
+      summary: summarizeCell(rows),
+    };
     fs.writeFileSync(args.get('json'), `${JSON.stringify(result)}\n`);
-  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 } else {
   const config = JSON.parse(fs.readFileSync(args.get('config'), 'utf8'));
   const rounds = Number(args.get('rounds') ?? 5);
   if (!Number.isInteger(rounds) || rounds < 1) throw Error('Invalid rounds');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emscripten-matrix-report-'));
-  const report = { startedAt: new Date().toISOString(), depth, hash, threads: 1, positions, rounds, machine: { platform: process.platform,
-    arch: process.arch, cpu: os.cpus()[0].model, os: os.release() }, artifacts: [], cells: [] };
+  const report = {
+    startedAt: new Date().toISOString(),
+    depth,
+    hash,
+    threads: 1,
+    positions,
+    rounds,
+    machine: { platform: process.platform, arch: process.arch, cpu: os.cpus()[0].model, os: os.release() },
+    artifacts: [],
+    cells: [],
+  };
   try {
     for (const cell of config) {
       const identity = { ...cell };
-      for (const [key, file] of [['js', cell.js], ['wasm', cell.js.replace(/\.js$/, '.wasm')], ['data', cell.data]]) {
+      for (const [key, file] of [
+        ['js', cell.js],
+        ['wasm', cell.js.replace(/\.js$/, '.wasm')],
+        ['data', cell.data],
+      ]) {
         const bytes = fs.readFileSync(file);
         identity[key] = { path: file, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
         if (key === 'wasm') identity[key].brotliBytes = brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }).length;
@@ -74,11 +101,28 @@ if (args.has('cell')) {
     }
     for (let round = 0; round < rounds; round += 1) {
       for (const engine of [...new Set(config.map((c) => c.engine))]) {
-        for (const cell of roundOrder(config.filter((c) => c.engine === engine), round)) {
+        for (const cell of roundOrder(
+          config.filter((c) => c.engine === engine),
+          round,
+        )) {
           const json = path.join(tmp, 'cell.json');
-          const result = spawnSync(process.execPath, [import.meta.filename, '--cell', JSON.stringify(cell),
-            '--depth', String(depth), '--hash', String(hash), '--positions', String(positions), '--json', json],
-          { encoding: 'utf8', timeout: 300000 });
+          const result = spawnSync(
+            process.execPath,
+            [
+              import.meta.filename,
+              '--cell',
+              JSON.stringify(cell),
+              '--depth',
+              String(depth),
+              '--hash',
+              String(hash),
+              '--positions',
+              String(positions),
+              '--json',
+              json,
+            ],
+            { encoding: 'utf8', timeout: 300000 },
+          );
           if (result.status !== 0) throw Error(`${engine}/${cell.label}: ${result.stderr || result.error}`);
           const measured = { round, ...JSON.parse(fs.readFileSync(json, 'utf8')) };
           report.cells.push(measured);
@@ -89,5 +133,7 @@ if (args.has('cell')) {
     }
     report.finishedAt = new Date().toISOString();
     fs.writeFileSync(args.get('json'), `${JSON.stringify(report, null, 2)}\n`);
-  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }

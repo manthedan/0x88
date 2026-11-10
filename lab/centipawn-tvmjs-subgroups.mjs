@@ -1,10 +1,10 @@
 import { parseFen } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
-import { searchRoot } from '../src/search/puct.ts';
-import { SquareformerTvmjsWebgpuEvaluator } from '../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
-import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
-import * as ort from '../src/nn/ortRuntime.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../src/nn/browserRuntimeEvaluator.ts';
+import * as ort from '../src/nn/ortRuntime.ts';
+import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
+import { SquareformerTvmjsWebgpuEvaluator } from '../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
+import { searchRoot } from '../src/search/puct.ts';
 
 const root = '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/';
 const variants = ['v2-shape-k16', 'v3-subgroups'];

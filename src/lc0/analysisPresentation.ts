@@ -1,13 +1,16 @@
 import { parseFen, START_FEN } from '../chess/board.ts';
 import { uciLineToSan } from '../chess/san.ts';
 import { type AnalysisLine, engineBrushes } from './analysisFormat.ts';
-import type { EngineRow } from './engineCatalog.ts';
 import { htmlEscape } from './browserDom.ts';
+import type { EngineRow } from './engineCatalog.ts';
 import type { GameNode } from './gameTree.ts';
 
 /** Fresh rows on every mount/reset; saved manual lists and profiles take precedence. */
 export function defaultAnalysisEngineRows(): EngineRow[] {
-  return [{ family: 'lc0', variant: 'small', strength: 400 }, { family: 'sf', variant: 'lite', strength: 12 }];
+  return [
+    { family: 'lc0', variant: 'small', strength: 400 },
+    { family: 'sf', variant: 'lite', strength: 12 },
+  ];
 }
 
 /**
@@ -16,9 +19,13 @@ export function defaultAnalysisEngineRows(): EngineRow[] {
  * every backing engine's identity (in engine order) so the board can mark the
  * agreement instead of letting one engine's choice vanish under another's.
  */
-export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean, focusedEngine: string | null = null): { uci: string; brush: string; shared?: string[] }[] {
-  const usable = lines.filter((line) => !line.error && line.pvUci[0] && (line.multipv === 1 || showAll)
-    && (!focusedEngine || analysisEngineName(line.engine) === focusedEngine))
+export function analysisArrowCandidates(
+  lines: AnalysisLine[],
+  showAll: boolean,
+  focusedEngine: string | null = null,
+): { uci: string; brush: string; shared?: string[] }[] {
+  const usable = lines
+    .filter((line) => !line.error && line.pvUci[0] && (line.multipv === 1 || showAll) && (!focusedEngine || analysisEngineName(line.engine) === focusedEngine))
     .sort((a, b) => a.multipv - b.multipv);
   const backers = new Map<string, string[]>();
   for (const line of usable) {
@@ -27,15 +34,17 @@ export function analysisArrowCandidates(lines: AnalysisLine[], showAll: boolean,
     backers.set(key, [...new Set([...(backers.get(key) ?? []), line.engine])]);
   }
   const seen = new Set<string>();
-  return usable.flatMap((line) => {
-    const uci = line.pvUci[0];
-    const key = uci.slice(0, 4);
-    if (seen.has(key)) return [];
-    seen.add(key);
-    const brushes = engineBrushes(line.engine);
-    const shared = line.multipv === 1 ? backers.get(key) ?? [] : [];
-    return [{ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt, ...(shared.length > 1 ? { shared } : {}) }];
-  }).reverse(); // Alternatives sit underneath best moves; all brushes share the owner's arrow width.
+  return usable
+    .flatMap((line) => {
+      const uci = line.pvUci[0];
+      const key = uci.slice(0, 4);
+      if (seen.has(key)) return [];
+      seen.add(key);
+      const brushes = engineBrushes(line.engine);
+      const shared = line.multipv === 1 ? (backers.get(key) ?? []) : [];
+      return [{ uci, brush: line.multipv === 1 ? brushes.primary : brushes.alt, ...(shared.length > 1 ? { shared } : {}) }];
+    })
+    .reverse(); // Alternatives sit underneath best moves; all brushes share the owner's arrow width.
 }
 
 /** Analysis-only chip fills: keep arrow colours intact and white monograms AA-readable. */
@@ -66,23 +75,32 @@ export function sharedArrowMarkerSvg(engines: string[], position: [number, numbe
  * Return origin-square coordinates for Chessground's customSvg center='orig'.
  */
 export function sharedMarkerPosition(uci: string, orientation: 'white' | 'black', fen: string, engines: string[]): [number, number] {
-  const screen = (file: number, rank: number): [number, number] => orientation === 'white' ? [file + .5, 7.5 - rank] : [7.5 - file, rank + .5];
+  const screen = (file: number, rank: number): [number, number] => (orientation === 'white' ? [file + 0.5, 7.5 - rank] : [7.5 - file, rank + 0.5]);
   const from = screen(uci.charCodeAt(0) - 97, Number(uci[1]) - 1);
   const to = screen(uci.charCodeAt(2) - 97, Number(uci[3]) - 1);
-  const dx = to[0] - from[0], dy = to[1] - from[1], length = Math.hypot(dx, dy) || 1;
+  const dx = to[0] - from[0],
+    dy = to[1] - from[1],
+    length = Math.hypot(dx, dy) || 1;
   const halfWidth = (sharedArrowMarkerText(engines).length * 13.2 + 18) / 200;
-  const halfHeight = .16;
-  const pieces = parseFen(fen).squares.flatMap((piece, index) => piece ? [screen(index % 8, Math.floor(index / 8))] : []);
+  const halfHeight = 0.16;
+  const pieces = parseFen(fen).squares.flatMap((piece, index) => (piece ? [screen(index % 8, Math.floor(index / 8))] : []));
   const overlap = (x: number, y: number, piece: [number, number], radius: number) =>
-    Math.max(0, Math.min(x + halfWidth, piece[0] + radius) - Math.max(x - halfWidth, piece[0] - radius))
-    * Math.max(0, Math.min(y + halfHeight, piece[1] + radius) - Math.max(y - halfHeight, piece[1] - radius));
-  const candidates = [.35, .5, .15].flatMap((fraction) => [.55, -.55, .8, -.8, 1.05, -1.05].map((offset) => {
-    const x = Math.max(halfWidth + .02, Math.min(8 - halfWidth - .02, from[0] + dx * fraction - dy / length * offset));
-    const y = Math.max(halfHeight + .02, Math.min(8 - halfHeight - .02, from[1] + dy * fraction + dx / length * offset));
-    const score = overlap(x, y, to, .6) * 1000 + pieces.reduce((sum, piece) => sum + overlap(x, y, piece, .43), 0) * 100
-      + Math.abs(offset) + Math.abs(fraction - .35);
-    return { x, y, score };
-  })).sort((a, b) => a.score - b.score);
+    Math.max(0, Math.min(x + halfWidth, piece[0] + radius) - Math.max(x - halfWidth, piece[0] - radius)) *
+    Math.max(0, Math.min(y + halfHeight, piece[1] + radius) - Math.max(y - halfHeight, piece[1] - radius));
+  const candidates = [0.35, 0.5, 0.15]
+    .flatMap((fraction) =>
+      [0.55, -0.55, 0.8, -0.8, 1.05, -1.05].map((offset) => {
+        const x = Math.max(halfWidth + 0.02, Math.min(8 - halfWidth - 0.02, from[0] + dx * fraction - (dy / length) * offset));
+        const y = Math.max(halfHeight + 0.02, Math.min(8 - halfHeight - 0.02, from[1] + dy * fraction + (dx / length) * offset));
+        const score =
+          overlap(x, y, to, 0.6) * 1000 +
+          pieces.reduce((sum, piece) => sum + overlap(x, y, piece, 0.43), 0) * 100 +
+          Math.abs(offset) +
+          Math.abs(fraction - 0.35);
+        return { x, y, score };
+      }),
+    )
+    .sort((a, b) => a.score - b.score);
   return [50 + (candidates[0].x - from[0]) * 100, 50 + (candidates[0].y - from[1]) * 100];
 }
 
@@ -150,7 +168,11 @@ export function analysisShortEngineNames(engines: string[]): Map<string, string>
 }
 
 const ENGINE_MONOGRAMS: [RegExp, string][] = [
-  [/^lc0/i, 'Lc0'], [/^(sf|stockfish)\b/i, 'SF'], [/^plentychess/i, 'PC'], [/^centipawn/i, 'CP'], [/^maia/i, 'MA'],
+  [/^lc0/i, 'Lc0'],
+  [/^(sf|stockfish)\b/i, 'SF'],
+  [/^plentychess/i, 'PC'],
+  [/^centipawn/i, 'CP'],
+  [/^maia/i, 'MA'],
 ];
 
 /** Two-character uppercase monogram for the engine's colour avatar (one rule for every engine). */
@@ -179,11 +201,13 @@ export function analysisPvText(fen: string, line: AnalysisLine): string {
   const board = parseFen(fen);
   const sans = uciLineToSan(board, line.pvUci).split(/\s+/).filter(Boolean);
   const startPly = (board.fullmove - 1) * 2 + (board.turn === 'b' ? 1 : 0);
-  return sans.map((san, index) => {
-    const ply = startPly + index;
-    const number = Math.floor(ply / 2) + 1;
-    return ply % 2 === 0 ? `${number}. ${san}` : index === 0 ? `${number}… ${san}` : san;
-  }).join(' ');
+  return sans
+    .map((san, index) => {
+      const ply = startPly + index;
+      const number = Math.floor(ply / 2) + 1;
+      return ply % 2 === 0 ? `${number}. ${san}` : index === 0 ? `${number}… ${san}` : san;
+    })
+    .join(' ');
 }
 
 export function analysisConsensus(lines: AnalysisLine[]): string {
@@ -198,15 +222,16 @@ export function analysisConsensus(lines: AnalysisLine[]): string {
   }
   const ranked = [...moves.values()].sort((a, b) => b.count - a.count);
   const best = ranked[0];
-  const agreement = !best ? 'No best move yet.' : ranked.length === 1
-    ? `Engines agree: ${best.san}`
-    : best.count > lines.length / 2
-      ? `${best.count}/${lines.length} engines prefer ${best.san}`
-      : `Engines disagree: ${ranked.map((move) => move.san).join(' / ')}`;
+  const agreement = !best
+    ? 'No best move yet.'
+    : ranked.length === 1
+      ? `Engines agree: ${best.san}`
+      : best.count > lines.length / 2
+        ? `${best.count}/${lines.length} engines prefer ${best.san}`
+        : `Engines disagree: ${ranked.map((move) => move.san).join(' / ')}`;
   // Mate scores cannot be compared with finite centipawn scores.
-  const scores = lines.flatMap((line) => line.mateIn === undefined && line.scoreCp !== undefined ? [line.scoreCp] : []);
-  const spread = scores.length === lines.length && scores.length >= 2
-    ? ` · ${Math.round(Math.max(...scores) - Math.min(...scores))} cp spread` : '';
+  const scores = lines.flatMap((line) => (line.mateIn === undefined && line.scoreCp !== undefined ? [line.scoreCp] : []));
+  const spread = scores.length === lines.length && scores.length >= 2 ? ` · ${Math.round(Math.max(...scores) - Math.min(...scores))} cp spread` : '';
   return agreement + spread;
 }
 
@@ -228,10 +253,11 @@ export function fitAnalysisPvRows(container: HTMLElement): void {
 /** Preserve keyboard position and full-line disclosures while other engines finish. */
 export function patchAnalysisResults(container: HTMLElement, markup: string): void {
   if (container.innerHTML === markup) return;
-  const active = container.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+  const active = container.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
   const focusKey = active?.dataset.focusKey;
-  const scrollPositions = new Map([...container.querySelectorAll<HTMLElement>('[data-result-scroll-key]')]
-    .map((node) => [node.dataset.resultScrollKey, node.scrollLeft]));
+  const scrollPositions = new Map(
+    [...container.querySelectorAll<HTMLElement>('[data-result-scroll-key]')].map((node) => [node.dataset.resultScrollKey, node.scrollLeft]),
+  );
   const expanded = new Set([...container.querySelectorAll<HTMLDetailsElement>('details[open][data-result-key]')].map((node) => node.dataset.resultKey));
   container.innerHTML = markup;
   fitAnalysisPvRows(container);
@@ -291,5 +317,7 @@ export function analysisMoveMarkup(root: GameNode, current: GameNode): string {
     flush();
     return html;
   };
-  return root.children[0] ? branch(root.children[0], true) : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game or position below.</p><label for="quickPgn">PGN game or FEN position</label><textarea id="quickPgn" class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" placeholder="Paste your game or position"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load</button><span class="quick-pgn-hint">PGN or FEN, detected automatically</span></div></div>';
+  return root.children[0]
+    ? branch(root.children[0], true)
+    : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game or position below.</p><label for="quickPgn">PGN game or FEN position</label><textarea id="quickPgn" class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" placeholder="Paste your game or position"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load</button><span class="quick-pgn-hint">PGN or FEN, detected automatically</span></div></div>';
 }

@@ -26,12 +26,16 @@ function factory() {
 
 test('Play Retry evicts a fatally failed Maia cache once, even with concurrent callers', async () => {
   const Maia = factory();
-  const ensure = compile(`
+  const ensure = compile(
+    `
     let maia3Promise = null, maia3Status = null;
     const ctxAsyncUiIsCurrent = () => false;
     ${extracted('../src/lc0/playBrowser.ts', 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
     return ctxEnsureMaia3;
-  `, ['Maia3BrowserEvaluator'], [Maia]);
+  `,
+    ['Maia3BrowserEvaluator'],
+    [Maia],
+  );
   const ctx = { opponent: { active: DEFAULT_PLAY_PREFERENCES }, enginePreparationGeneration: 0 };
   const first = await ensure(ctx);
   first.failure = new Error('runtime crash');
@@ -44,7 +48,8 @@ test('Play Retry evicts a fatally failed Maia cache once, even with concurrent c
 
 test('Analysis Maia failure removes the failed owner, settles task ownership and re-enables a clean retry', async () => {
   const Maia = factory();
-  const api = compile(`
+  const api = compile(
+    `
     let maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelLoadGeneration = 0;
     let maia3PanelTask = null, maia3PanelTimer = null, explorerMaia = null;
     const elements = new Map();
@@ -55,7 +60,10 @@ test('Analysis Maia failure removes the failed owner, settles task ownership and
     const maia3PanelStatus = (text) => { el('maia3PanelStatus').textContent = text; };
     ${extracted('../src/lc0/analysisBrowser.ts', 'async function enableMaia3Panel(', 'function scheduleMaia3Panel(')}
     return { enableMaia3Panel, el, snapshot: () => ({ evaluator: maia3PanelEvaluator, task: maia3PanelTask }) };
-  `, ['Maia3BrowserEvaluator', 'LatestOnlyTask'], [Maia, LatestOnlyTask]);
+  `,
+    ['Maia3BrowserEvaluator', 'LatestOnlyTask'],
+    [Maia, LatestOnlyTask],
+  );
   await api.enableMaia3Panel();
   const first = api.snapshot().evaluator;
   const firstTask = api.snapshot().task;

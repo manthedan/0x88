@@ -20,7 +20,7 @@ import {
 import { openingFromUciMoves } from '../src/lc0/arenaOpenings.ts';
 import { runArenaSchedule } from '../src/lc0/arenaScheduleRunner.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
-import { buildSchedule, tournamentPairings, TournamentStandings } from '../src/lc0/tournament.ts';
+import { buildSchedule, TournamentStandings, tournamentPairings } from '../src/lc0/tournament.ts';
 
 function fixture(mode = 'match', openings = [{ name: 'Start', fen: START_FEN }], games = 2) {
   const controls = Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, '1']));

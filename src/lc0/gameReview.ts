@@ -152,8 +152,12 @@ export function criticalReviewPlies(review: GameReview, limit = 5): number[] {
 /** Walk the selected largest swings in game order, wrapping at either end. */
 export function adjacentCriticalPly(review: GameReview, current: number, direction: -1 | 1): number | undefined {
   const plies = criticalReviewPlies(review).sort((a, b) => a - b);
-  return direction === 1 ? plies.find((ply) => ply > current) ?? plies[0]
-    : plies.slice().reverse().find((ply) => ply < current) ?? plies.at(-1);
+  return direction === 1
+    ? (plies.find((ply) => ply > current) ?? plies[0])
+    : (plies
+        .slice()
+        .reverse()
+        .find((ply) => ply < current) ?? plies.at(-1));
 }
 
 /**
@@ -165,8 +169,9 @@ export function reviewRepetitionKey(fen: string): string {
   const fields = fen.trim().split(/\s+/).slice(0, 4);
   if (fields[3] && fields[3] !== '-') {
     const board = parseFen(fen);
-    const canCapture = legalMoves(board).some((move) => move.to === board.epSquare
-      && board.squares[move.from] === `${board.turn}p` && move.from % 8 !== move.to % 8);
+    const canCapture = legalMoves(board).some(
+      (move) => move.to === board.epSquare && board.squares[move.from] === `${board.turn}p` && move.from % 8 !== move.to % 8,
+    );
     if (!canCapture) fields[3] = '-';
   }
   return fields.join(' ');
@@ -213,7 +218,11 @@ export interface AnnotatedPgnOptions {
 export function annotatedPgn(review: GameReview, options: AnnotatedPgnOptions = {}): string {
   const result = ['1-0', '0-1', '1/2-1/2', '*'].includes(options.result ?? '') ? options.result! : '*';
   const tags = { Event: 'Game review', ...options.tags, Result: result };
-  const escapeTag = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]/g, ' ');
+  const escapeTag = (value: string) =>
+    value
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/[\r\n]/g, ' ');
   const header = Object.entries(tags)
     .filter(([key]) => /^\w+$/.test(key))
     .map(([key, value]) => `[${key} "${escapeTag(value)}"]`)

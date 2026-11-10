@@ -33,15 +33,21 @@ test('home position retains its chessground board, coordinates and FEN deep link
   assert.match(html, /class="black knight[^\"]*" style="transform:translate\(500%,200%\)"/);
   const ranks = html.match(/class="ranks[^\"]*"[^>]*>(.*?)<\/div>/s)[1];
   const files = html.match(/class="files[^\"]*"[^>]*>(.*?)<\/div>/s)[1];
-  assert.deepEqual([...ranks.matchAll(/<span[^>]*>(\d)<\/span>/g)].map(m => m[1]), [...'87654321']);
-  assert.deepEqual([...files.matchAll(/<span[^>]*>([a-h])<\/span>/g)].map(m => m[1]), [...'abcdefgh']);
+  assert.deepEqual(
+    [...ranks.matchAll(/<span[^>]*>(\d)<\/span>/g)].map((m) => m[1]),
+    [...'87654321'],
+  );
+  assert.deepEqual(
+    [...files.matchAll(/<span[^>]*>([a-h])<\/span>/g)].map((m) => m[1]),
+    [...'abcdefgh'],
+  );
   const link = html.match(/href="(\/app\/analysis\/\?fen=[^\"]+)"/)[1];
   const fen = new URL(link, 'https://0x88.app').searchParams.get('fen');
   assert.equal(fen, 'r2q1rk1/3nbppp/p2pbn2/4p1P1/1p2P3/1NN1BP2/PPPQ3P/2KR1B1R w - - 0 13');
 });
 
 test('home arrows keep one best move per engine at the owner’s uniform width', () => {
-  const arrows = [...html.matchAll(/<line\b[^>]+>/g)].map(m => m[0]);
+  const arrows = [...html.matchAll(/<line\b[^>]+>/g)].map((m) => m[0]);
   assert.equal(arrows.length, 2);
   for (const arrow of arrows) {
     assert.match(arrow, /stroke-width="0\.171875"/, '11 / 64 on one-unit squares, as chessground draws them');

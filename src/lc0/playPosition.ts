@@ -19,7 +19,13 @@ export interface ReplayedPlayPosition {
 }
 
 export function playPositionFromTree(tree: GameTree): PlayPosition {
-  return { startFen: tree.root.fen, moves: tree.lineTo().slice(1).map((node) => moveToUci(node.move!)) };
+  return {
+    startFen: tree.root.fen,
+    moves: tree
+      .lineTo()
+      .slice(1)
+      .map((node) => moveToUci(node.move!)),
+  };
 }
 
 /** Validate untrusted roots and replay every move, retaining neural/repetition history. */
@@ -44,7 +50,13 @@ export function replayPlayPosition(value: unknown): ReplayedPlayPosition {
 }
 
 export function playFromHereUnavailableReason(tree: GameTree): string | null {
-  const reason = gameOutcome(tree.currentBoard(), tree.lineTo().slice(0, -1).map((node) => node.fen))?.reason;
+  const reason = gameOutcome(
+    tree.currentBoard(),
+    tree
+      .lineTo()
+      .slice(0, -1)
+      .map((node) => node.fen),
+  )?.reason;
   if (reason === 'insufficientMaterial') return 'insufficient material';
   if (reason === 'threefold') return 'threefold repetition';
   if (reason === 'fiftyMove') return 'fifty-move rule';
@@ -70,7 +82,9 @@ export function playMoveRows(positions: BoardState[], sans: string[]): Array<{ n
 export function playTakebackPly(positions: BoardState[], human: 'w' | 'b', boundary: number): number {
   let ply = positions.length - 1;
   if (ply <= boundary) return ply;
-  do { ply--; } while (ply > boundary && positions[ply].turn !== human);
+  do {
+    ply--;
+  } while (ply > boundary && positions[ply].turn !== human);
   return ply;
 }
 

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { ROTATED_FEN_SUITE, exactSearch, parseInfo } from './emscripten_uci_protocol.mjs';
+import { exactSearch, parseInfo, ROTATED_FEN_SUITE } from './emscripten_uci_protocol.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i].replace(/^--/, ''), process.argv[i + 1]);

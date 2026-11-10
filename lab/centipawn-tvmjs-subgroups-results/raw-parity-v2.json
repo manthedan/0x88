@@ -10,43 +10,35 @@
         "allFinite": true,
         "expectedLength": 131072,
         "length": 131072,
-        "maxAbsDiff": 1.931190490722656e-05,
-        "meanAbsDiff": 2.5812655075618807e-06
+        "maxAbsDiff": 1.931190490722656e-5,
+        "meanAbsDiff": 2.5812655075618807e-6
       },
       "policy": {
         "allFinite": true,
         "expectedLength": 327680,
         "length": 327680,
-        "maxAbsDiff": 5.14984130859375e-05,
-        "meanAbsDiff": 8.674618584336713e-06
+        "maxAbsDiff": 5.14984130859375e-5,
+        "meanAbsDiff": 8.674618584336713e-6
       },
       "q": {
         "allFinite": true,
         "expectedLength": 16,
         "length": 16,
-        "maxAbsDiff": 1.430511474609375e-06,
-        "meanAbsDiff": 5.364418029785156e-07
+        "maxAbsDiff": 1.430511474609375e-6,
+        "meanAbsDiff": 5.364418029785156e-7
       },
       "wdl": {
         "allFinite": true,
         "expectedLength": 48,
         "length": 48,
-        "maxAbsDiff": 2.6702880859375e-05,
-        "meanAbsDiff": 5.622704823811849e-06
+        "maxAbsDiff": 2.6702880859375e-5,
+        "meanAbsDiff": 5.622704823811849e-6
       }
     },
-    "parityOutputs": [
-      "policy",
-      "wdl",
-      "q",
-      "hidden"
-    ],
+    "parityOutputs": ["policy", "wdl", "q", "hidden"],
     "repeats": 1,
     "schema": "lc0_browser.centipawn_tvmjs_webgpu_bench.v1",
-    "timedOutputs": [
-      "policy",
-      "wdl"
-    ],
+    "timedOutputs": ["policy", "wdl"],
     "timing": {
       "ort": {
         "count": 1,
@@ -63,11 +55,7 @@
         "minMs": 14.979999899864197
       }
     },
-    "timingIncludes": [
-      "gpu-input-upload",
-      "model-execution",
-      "policy-wdl-readback"
-    ],
+    "timingIncludes": ["gpu-input-upload", "model-execution", "policy-wdl-readback"],
     "tvmPipelineMs": 106.67999994754793,
     "tvmToOrtMeanRatio": 0.5761538423024691,
     "warmup": 2
