@@ -251,46 +251,48 @@ export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number):
   const existing = inFlightPreopenBytes.get(dedupeKey);
   if (existing) return existing;
   const request = (async () => {
-    const response = await engineArtifacts.response(url);
-    const decodedBytes = validatedDecodedLength(response, url, expectedBytes);
-    const limitBytes = preopenLimit(expectedBytes, decodedBytes);
-    const totalBytes = preopenProgressTotal(expectedBytes, decodedBytes);
-    if (!response.body) {
-      if (expectedBytes !== undefined) throw preopenLengthMismatch(url, 0, expectedBytes);
-      throw new Error(`preopen asset ${url} returned no response body`);
-    }
-    const reader = response.body.getReader();
-    let bytes: Uint8Array<ArrayBuffer> = new Uint8Array(initialPreopenCapacity(decodedBytes, limitBytes));
-    let loadedBytes = 0;
-    let lastReport = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const requiredBytes = loadedBytes + value.byteLength;
-      if (requiredBytes > limitBytes) {
-        await reader.cancel().catch(() => undefined);
-        throw preopenOverflow(url, requiredBytes, limitBytes);
+    let cacheable = expectedBytes !== undefined;
+    const verified = await engineArtifacts.bytes(url, async (response) => {
+      const decodedBytes = validatedDecodedLength(response, url, expectedBytes);
+      cacheable = expectedBytes !== undefined || decodedBytes !== undefined;
+      const limitBytes = preopenLimit(expectedBytes, decodedBytes);
+      const totalBytes = preopenProgressTotal(expectedBytes, decodedBytes);
+      if (!response.body) {
+        if (expectedBytes !== undefined) throw preopenLengthMismatch(url, 0, expectedBytes);
+        throw new Error(`preopen asset ${url} returned no response body`);
       }
-      if (requiredBytes > bytes.byteLength) bytes = growPreopenBuffer(bytes, requiredBytes, loadedBytes, limitBytes);
-      bytes.set(value, loadedBytes);
-      loadedBytes += value.byteLength;
-      const now = Date.now();
-      if (now - lastReport > 250) {
-        lastReport = now;
-        post({ type: 'preopen-progress', url, loadedBytes, totalBytes });
+      const reader = response.body.getReader();
+      let bytes: Uint8Array<ArrayBuffer> = new Uint8Array(initialPreopenCapacity(decodedBytes, limitBytes));
+      let loadedBytes = 0;
+      let lastReport = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const requiredBytes = loadedBytes + value.byteLength;
+        if (requiredBytes > limitBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw preopenOverflow(url, requiredBytes, limitBytes);
+        }
+        if (requiredBytes > bytes.byteLength) bytes = growPreopenBuffer(bytes, requiredBytes, loadedBytes, limitBytes);
+        bytes.set(value, loadedBytes);
+        loadedBytes += value.byteLength;
+        const now = Date.now();
+        if (now - lastReport > 250) {
+          lastReport = now;
+          post({ type: 'preopen-progress', url, loadedBytes, totalBytes });
+        }
       }
-    }
-    if (expectedBytes !== undefined && loadedBytes !== expectedBytes) {
-      throw preopenLengthMismatch(url, loadedBytes, expectedBytes);
-    }
-    if (decodedBytes !== undefined && loadedBytes !== decodedBytes) {
-      throw preopenLengthMismatch(url, loadedBytes, decodedBytes);
-    }
-    post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
-    const buffer = bytes.buffer as ArrayBuffer;
-    const verified = loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
-    await engineArtifacts.verify(url, verified);
-    if (expectedBytes !== undefined || decodedBytes !== undefined) cacheVerifiedPreopenBytes(dedupeKey, verified);
+      if (expectedBytes !== undefined && loadedBytes !== expectedBytes) {
+        throw preopenLengthMismatch(url, loadedBytes, expectedBytes);
+      }
+      if (decodedBytes !== undefined && loadedBytes !== decodedBytes) {
+        throw preopenLengthMismatch(url, loadedBytes, decodedBytes);
+      }
+      post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
+      const buffer = bytes.buffer as ArrayBuffer;
+      return loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
+    });
+    if (cacheable) cacheVerifiedPreopenBytes(dedupeKey, verified);
     return verified;
   })();
   inFlightPreopenBytes.set(dedupeKey, request);

@@ -398,7 +398,7 @@ test('WASI rejects a pinned corrupt module before compilation and evicts it for 
   bad[bad.length - 1] ^= 1;
   let downloads = 0;
   let compiles = 0;
-  t.mock.method(globalThis, 'fetch', async () => new Response(downloads++ === 0 ? bad : good));
+  t.mock.method(globalThis, 'fetch', async () => new Response(downloads++ < 2 ? bad : good));
   t.mock.method(WebAssembly, 'compile', async () => {
     compiles++;
     return 'verified module';
@@ -407,5 +407,5 @@ test('WASI rejects a pinned corrupt module before compilation and evicts it for 
   assert.equal(compiles, 0);
   assert.equal(await worker.recklessWasiWorkerInternalsForTests.compileModule(path), 'verified module');
   assert.equal(compiles, 1);
-  assert.equal(downloads, 2);
+  assert.equal(downloads, 3);
 });

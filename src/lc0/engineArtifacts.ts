@@ -62,16 +62,34 @@ export function createEngineArtifactLoader(
     if (hash !== entry.sha256) throw failure(url, 'SHA-256 mismatch');
     return bytes;
   }
-  async function response(url: string): Promise<Response> {
+  async function response(url: string, cache: RequestCache = 'default'): Promise<Response> {
     expected(url);
-    // Unverified network bytes must never enter the HTTP cache. Workers retain
-    // only verified modules/data; a failed load is evicted by each adapter.
-    const result = await fetch(resolveUrl(url), { mode: 'cors', credentials: 'omit', cache: 'no-store' });
+    // Match Analysis prefetch's default mode/credentials so both requests use
+    // the same HTTP cache entry, including cross-origin asset-base URLs.
+    const result = await fetch(resolveUrl(url), { mode: 'cors', credentials: 'same-origin', cache });
     if (!result.ok) throw new Error(`Failed to fetch engine artifact ${url}: HTTP ${result.status}`);
     return result;
   }
-  async function bytes(url: string): Promise<ArrayBuffer> {
-    return verify(url, await (await response(url)).arrayBuffer());
+  async function bytes(url: string, read: (response: Response) => Promise<ArrayBuffer> = (response) => response.arrayBuffer()): Promise<ArrayBuffer> {
+    async function readVerified(result: Response): Promise<ArrayBuffer> {
+      let buffer: ArrayBuffer;
+      try {
+        buffer = await read(result);
+      } catch (error) {
+        if (!pin(url)) throw error;
+        throw failure(url, error instanceof Error ? error.message : String(error));
+      }
+      return verify(url, buffer);
+    }
+    const result = await response(url);
+    try {
+      return await readVerified(result);
+    } catch (error) {
+      if (!pin(url)) throw error;
+      // Replace a corrupt cached body once. The replacement is verified too;
+      // persistent corruption still reaches the adapter's retryable error path.
+      return readVerified(await response(url, 'reload'));
+    }
   }
   return { pin, verify, response, bytes };
 }

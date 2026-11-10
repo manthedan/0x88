@@ -245,9 +245,7 @@ export async function fetchNnue(nnueUrl: string, id: number, rawExpectedBytes?: 
   const started = nowMs();
   postStatus(id, 'nnue-fetch', { url: nnueUrl, totalBytes: expectedBytes });
   const request = (async () => {
-    const response = await engineArtifacts.response(nnueUrl);
-    const bytes = await readNnueResponseWithProgress(response, id, 'nnue-fetch', nnueUrl, started, expectedBytes);
-    return engineArtifacts.verify(nnueUrl, bytes);
+    return engineArtifacts.bytes(nnueUrl, (response) => readNnueResponseWithProgress(response, id, 'nnue-fetch', nnueUrl, started, expectedBytes));
   })();
   nnueCache.set(cacheKey, request);
   try {

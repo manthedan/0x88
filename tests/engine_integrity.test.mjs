@@ -44,15 +44,27 @@ test('missing pins fail closed before fetching on production and warn only on lo
   assert.ok(warnings.length);
   assert.equal(fetches, 1);
 });
-test('fetch verifies once, never retains corrupt bytes, and permits retry', async (t) => {
-  at(t, 'https://0x88.app');
-  let count = 0;
-  t.mock.method(globalThis, 'fetch', async (_url, options) => {
-    assert.equal(options.cache, 'no-store');
-    count++;
-    return new Response(count === 1 ? good.map((v) => v ^ 1) : good);
+for (const corrupt of [good.map((v) => v ^ 1), new Uint8Array(1)]) {
+  test(`a cached ${corrupt.length === 1 ? 'size' : 'hash'} mismatch is replaced once with reload`, async (t) => {
+    at(t, 'https://0x88.app');
+    const modes = [];
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      modes.push(options.cache);
+      return new Response(modes.length === 1 ? corrupt : good);
+    });
+    assert.deepEqual(new Uint8Array(await loader.bytes('/engine.wasm')), good);
+    assert.deepEqual(modes, ['default', 'reload']);
   });
-  await assert.rejects(loader.bytes('/engine.wasm'), /SHA-256 mismatch/);
+}
+test('persistent corruption fails after one reload and a later clean retry succeeds', async (t) => {
+  at(t, 'https://0x88.app');
+  const modes = [];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    modes.push(options.cache);
+    return new Response(modes.length <= 2 ? good.map((v) => v ^ 1) : good);
+  });
+  await assert.rejects(loader.bytes('/engine.wasm'), /SHA-256 mismatch.*Retry/);
+  assert.deepEqual(modes, ['default', 'reload']);
   assert.deepEqual(new Uint8Array(await loader.bytes('/engine.wasm')), good);
-  assert.equal(count, 2);
+  assert.deepEqual(modes, ['default', 'reload', 'default']);
 });
