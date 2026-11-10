@@ -311,8 +311,8 @@ export interface Node {
   expanded: boolean;
   terminalValue: number | null;
   edges: Edge[];
-  /** Non-terminal model evaluation used to expand this node, retained for diagnostics/UI only. */
-  evaluation?: Evaluation;
+  /** WDL retained on every node because a child may become the next root. */
+  evaluation?: Pick<Evaluation, 'wdl'>;
   /** Number of completed simulations that reached this node. For reused roots,
    * this preserves the inbound edge visit count so a target-visit search does
    * not add a full fresh budget on top of already-reached nodes. */
@@ -1151,20 +1151,61 @@ function nodeSearchValueCompatible(node: Node, key: string): boolean {
   return node.searchValueKey === key || (node.searchValueKey === undefined && key === 'drawScore=0;scLimit=0');
 }
 
+// History links contain positions only, never ancestor search nodes. Advancing
+// the root can therefore release the discarded tree while keeping game history.
+interface SharedNodeHistory {
+  previous?: SharedNodeHistory;
+  board: BoardState;
+  fen: string;
+  depth: number;
+  baseFens: string[];
+  baseBoards: readonly BoardState[];
+}
+
+const sharedNodeHistories = new WeakMap<Node, SharedNodeHistory>();
+
+function materializeHistoryFens(history: SharedNodeHistory): string[] {
+  const fens = new Array<string>(history.depth + history.baseFens.length);
+  let i = 0;
+  for (let link: SharedNodeHistory | undefined = history; link; link = link.previous) fens[i++] = link.fen;
+  for (const fen of history.baseFens) fens[i++] = fen;
+  return fens;
+}
+
+function materializeHistoryBoards(history: SharedNodeHistory): BoardState[] {
+  const boards = new Array<BoardState>(history.depth + history.baseBoards.length);
+  let i = 0;
+  for (let link: SharedNodeHistory | undefined = history; link; link = link.previous) boards[i++] = link.board;
+  for (const board of history.baseBoards) boards[i++] = board;
+  return boards;
+}
+
 function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, Node>, stats?: SearchStats): Node {
   const childBoard = makeMove(parent.board, move);
-  const childHistory = [boardToFen(parent.board), ...parent.historyFens];
-  const key = searchNodeKey(childBoard, childHistory);
-  const cached = transpositionTable?.get(key);
+  const previous = sharedNodeHistories.get(parent);
+  const history: SharedNodeHistory = {
+    previous,
+    board: parent.board,
+    fen: boardToFen(parent.board),
+    depth: (previous?.depth ?? 0) + 1,
+    baseFens: previous?.baseFens ?? parent.historyFens,
+    baseBoards: previous?.baseBoards ?? parent.historyBoards,
+  };
+  const key = transpositionTable ? searchNodeKey(childBoard, materializeHistoryFens(history)) : undefined;
+  const cached = key === undefined ? undefined : transpositionTable?.get(key);
   if (cached && (!parent.searchValueKey || nodeSearchValueCompatible(cached, parent.searchValueKey))) {
     if (stats) stats.transpositionHits = (stats.transpositionHits ?? 0) + 1;
     cached.isRoot = false;
     return cached;
   }
-  const child = {
+  const child: Node = {
     board: childBoard,
-    historyFens: childHistory,
-    historyBoards: [parent.board, ...parent.historyBoards],
+    get historyFens() {
+      return materializeHistoryFens(history);
+    },
+    get historyBoards() {
+      return materializeHistoryBoards(history);
+    },
     explicitHistory: true,
     expanded: false,
     terminalValue: null,
@@ -1173,7 +1214,8 @@ function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, No
     searchValueKey: parent.searchValueKey,
     isRoot: false,
   };
-  transpositionTable?.set(key, child);
+  sharedNodeHistories.set(child, history);
+  if (key !== undefined) transpositionTable?.set(key, child);
   return child;
 }
 
@@ -1359,7 +1401,7 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
   }
   // Like LC0's ExtendNode, draws by rule end interior nodes only: a root that is
   // already a claimable draw is still searched, since choosing its move is the point.
-  if (!isSearchRoot && automaticDrawReason(node.board, node.historyFens)) {
+  if (!isSearchRoot && automaticDrawReason(node.board, node.historyFens, node.historyBoards)) {
     node.expanded = true;
     node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
@@ -1531,7 +1573,7 @@ function prepareExpansion(node: Node, stats: SearchStats, context: SearchPolicyC
     stats.terminalHits += 1;
     return node.terminalValue;
   }
-  if (automaticDrawReason(node.board, node.historyFens)) {
+  if (automaticDrawReason(node.board, node.historyFens, node.historyBoards)) {
     node.expanded = true;
     node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
@@ -1591,7 +1633,7 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   const raw = moves.map((move) => Math.max(0, evaln.policy.get(moveToActionId(move)) ?? 0));
   const total = raw.reduce((a, b) => a + b, 0);
   const fallback = 1 / moves.length;
-  node.evaluation = evaln;
+  node.evaluation = { wdl: evaln.wdl };
   if (Number.isFinite(evaln.movesLeft)) node.m = evaln.movesLeft;
   node.edges = moves.map((move, i) => {
     const actionId = moveToActionId(move);

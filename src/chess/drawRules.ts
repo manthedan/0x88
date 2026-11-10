@@ -75,12 +75,24 @@ export function rootRepetitionKey(board: BoardState): string {
  * keyed as given (see rootRepetitionKeyFromFen). Oldest-first callers are
  * unaffected: their last entry has the other side to move and never matches.
  */
-export function repetitionCount(board: BoardState, historyFens: string[] = []): number {
+export function repetitionCount(board: BoardState, historyFens: string[] = [], historyBoards?: readonly BoardState[]): number {
   const key = repetitionKey(board);
   let count = 1;
-  for (let i = 0; i < historyFens.length; i++) {
-    const fen = historyFens[i];
-    if ((i === historyFens.length - 1 ? rootRepetitionKeyFromFen(fen) : repetitionKeyFromFen(fen)) === key) count += 1;
+  const boards = historyBoards?.length === historyFens.length ? historyBoards : undefined;
+  // Search-owned board histories are chronological game positions. Earlier
+  // positions cannot recur across a pawn move or capture; FEN-only callers keep
+  // the historical unbounded behavior (including arbitrary diagnostic inputs).
+  const length = boards ? Math.min(historyFens.length, board.halfmove) : historyFens.length;
+  for (let i = 0; i < length; i++) {
+    const isRoot = i === historyFens.length - 1;
+    const earlierKey = boards
+      ? isRoot
+        ? rootRepetitionKey(boards[i])
+        : repetitionKey(boards[i])
+      : isRoot
+        ? rootRepetitionKeyFromFen(historyFens[i])
+        : repetitionKeyFromFen(historyFens[i]);
+    if (earlierKey === key) count += 1;
   }
   return count;
 }
@@ -118,9 +130,9 @@ export function insufficientMaterial(board: BoardState): boolean {
   return false;
 }
 
-export function automaticDrawReason(board: BoardState, historyFens: string[] = []): AutomaticDrawReason | null {
+export function automaticDrawReason(board: BoardState, historyFens: string[] = [], historyBoards?: readonly BoardState[]): AutomaticDrawReason | null {
   if (board.halfmove >= 100) return 'fiftyMove';
-  if (repetitionCount(board, historyFens) >= 3) return 'threefold';
+  if (repetitionCount(board, historyFens, historyBoards) >= 3) return 'threefold';
   if (insufficientMaterial(board)) return 'insufficientMaterial';
   return null;
 }

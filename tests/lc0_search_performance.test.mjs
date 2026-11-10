@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseFen, START_FEN } from '../src/chess/board.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { repetitionKey, rootRepetitionKey } from '../src/chess/drawRules.ts';
+import { moveToActionId } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
+import { prepareLc0EvaluatorInput } from '../src/lc0/onnxEvaluator.ts';
+import { advanceSearchRoot, searchRoot } from '../src/search/puct.ts';
 
 const ALL = (1n << 64n) - 1n;
 
@@ -47,4 +50,103 @@ test('cached board repetition keys survive synchronous legality make/undo', () =
   legalMoves(board);
   assert.deepEqual([repetitionKey(board), rootRepetitionKey(board)], keys);
   assert.deepEqual(encodeLc0Classical112({ positions: [board] }), before);
+});
+
+class StableEvaluator {
+  evaluate(board, context = {}) {
+    const moves = context.legalMoves ?? legalMoves(board);
+    return {
+      policy: new Map(moves.map((move, i) => [moveToActionId(move), i === 0 ? 1 : 0])),
+      wdl: [0, 1, 0],
+      movesLeft: 60,
+      timing: { inputBuildMs: 1, totalEvalMs: 2 },
+    };
+  }
+  evaluateBatch(boards, contexts = []) {
+    return boards.map((board, i) => this.evaluate(board, contexts[i]));
+  }
+}
+
+test('expanded nodes retain WDL for tree reuse without retaining policy or timing', async () => {
+  const evaluator = new StableEvaluator();
+  const first = await searchRoot(parseFen(START_FEN), evaluator, { visits: 32 });
+  const seen = new Set();
+  function inspect(node) {
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (node.evaluation) assert.deepEqual(Object.keys(node.evaluation), ['wdl']);
+    for (const edge of node.edges) if (edge.child) inspect(edge.child);
+  }
+  inspect(first.root);
+  const edge = first.root.edges.find((edge) => edge.child?.evaluation);
+  assert.ok(edge);
+  const child = edge.child;
+  const root = advanceSearchRoot(first.root, edge.move, child.board, child.historyFens);
+  assert.equal(root, child);
+  const next = await searchRoot(child.board, evaluator, { visits: 40, root, historyFens: child.historyFens, historyBoards: child.historyBoards });
+  assert.equal(next.stats.rootReused, true);
+  assert.deepEqual(next.root.evaluation, { wdl: [0, 1, 0] });
+  assert.ok(first.stats.evalBackendTimingSamples > 0, 'timing is still aggregated before dropping it');
+});
+
+test('prepared cache keys bound irrelevant ancient history while keeping recent and short histories', () => {
+  const positions = buildBoardHistoryFromMoves([
+    ...Array(4).fill(['g1f3', 'g8f6', 'f3g1', 'f6g8']).flat(),
+    'e2e4',
+    'e7e5',
+    'd2d4',
+    'd7d5',
+    'c2c4',
+    'c7c5',
+    'b2b4',
+    'b7b5',
+    'a2a4',
+  ]);
+  function prepare(positions) {
+    return prepareLc0EvaluatorInput(positions.at(-1), positions.slice(0, -1).reverse());
+  }
+  const original = prepare(positions);
+  const ancientChanged = prepare([{ ...positions[0], fullmove: 99 }, ...positions.slice(1)]);
+  assert.deepEqual(encodeLc0Classical112(original).planes, encodeLc0Classical112(ancientChanged).planes);
+  assert.equal(original.prepared.cacheKey, ancientChanged.prepared.cacheKey);
+  assert.ok(original.prepared.cacheKey.length < positions.map(boardToFen).join('\n').length / 2);
+  const recent = positions.slice();
+  recent[recent.length - 2] = { ...recent.at(-2), halfmove: 3 };
+  assert.notEqual(prepare(recent).prepared.cacheKey, original.prepared.cacheKey);
+  const shortA = prepare(positions.slice(-3));
+  const differentOldest = positions.slice(-3);
+  differentOldest[0] = positions[0];
+  const shortB = prepare(differentOldest);
+  assert.notEqual(shortA.prepared.cacheKey, shortB.prepared.cacheKey, 'oldest short-history board controls synthetic fill');
+  assert.notDeepEqual(encodeLc0Classical112(shortA).planes, encodeLc0Classical112(shortB).planes);
+});
+
+test('shared search history exposes complete newest-first arrays with and without board context', async () => {
+  const positions = buildBoardHistoryFromMoves(['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1b5']);
+  const board = positions.at(-1);
+  const historyFens = positions.slice(0, -1).reverse().map(boardToFen);
+  for (const historyBoards of [positions.slice(0, -1).reverse(), []]) {
+    const result = await searchRoot(board, new StableEvaluator(), { visits: 40, batchSize: 4, historyFens, historyBoards });
+    function inspect(node, fens, boards) {
+      assert.deepEqual(node.historyFens, fens);
+      assert.deepEqual(node.historyBoards, boards);
+      for (const edge of node.edges) {
+        if (edge.child) inspect(edge.child, [boardToFen(node.board), ...fens], [node.board, ...boards]);
+      }
+    }
+    inspect(result.root, historyFens, historyBoards);
+  }
+});
+
+test('prepared cache keys keep repetition history for slots before a recent pawn move', () => {
+  const fen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
+  const moves = ['g8f6', 'g1f3', 'f6g8', 'f3g1', 'g8f6', 'g1f3', 'f6g8', 'f3g1', 'e7e5'];
+  const positions = buildBoardHistoryFromMoves(moves, fen);
+  const changed = [{ ...positions[0], epSquare: null }, ...positions.slice(1)];
+  const prepare = (boards) => prepareLc0EvaluatorInput(boards.at(-1), boards.slice(0, -1).reverse());
+  const a = prepare(positions);
+  const b = prepare(changed);
+  assert.equal(positions.at(-1).halfmove, 0);
+  assert.notDeepEqual(encodeLc0Classical112(a).planes, encodeLc0Classical112(b).planes);
+  assert.notEqual(a.prepared.cacheKey, b.prepared.cacheKey, 'previous slot still needs the original FEN-root en-passant key');
 });
