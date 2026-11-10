@@ -25,6 +25,7 @@ import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPo
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
 import { arenaChartGroups } from './arenaChartPresentation.ts';
+import { arenaSideTimeMs } from './arenaTiming.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import {
   appendCpuArenaTrail,
@@ -502,8 +503,6 @@ const MAX_ENGINE_OUTPUT_HISTORY = 1000;
 const thinkingEngineIds = new Set<string>();
 /** When the engine on move started thinking (performance.now()), for the live strip clock. */
 const thinkingSince = new Map<string, number>();
-/** Search time used by each side in the game on the board. */
-const sideTimeMs = { w: 0, b: 0 };
 let arenaClockTimer: ReturnType<typeof setInterval> | null = null;
 let arenaChartResizeObserver: ResizeObserver | null = null;
 interface ArenaGameResultChip {
@@ -1376,6 +1375,9 @@ function renderStrips(): void {
   const sides = stripSides();
   const turn = board.turn;
   const now = performance.now();
+  const sideTimeMs = liveTrail
+    ? arenaSideTimeMs(liveTrail.charts, parseFen(liveTrail.entries[liveTrail.openingPlies].fen).turn)
+    : { w: 0, b: 0 };
   const update = (nodeId: string, color: 'w' | 'b', side: StripSide) => {
     const node = el(nodeId);
     const colorName = color === 'w' ? 'White' : 'Black';
@@ -3471,8 +3473,6 @@ function formatCompactNumber(value: number): string {
 
 function resetGameCharts(): void {
   gameChartSamples = [];
-  sideTimeMs.w = 0;
-  sideTimeMs.b = 0;
   rootChartContext = null;
   el('chartsPanel').hidden = false;
   selectChart('evalChart');
@@ -3583,8 +3583,6 @@ function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'na
   const snapshot = engineOutputs.get(engine.id);
   const lc0 = lastLc0SearchResults.get(engine.id);
   const nps = snapshot?.nps ?? (lc0 && moveMs > 0 ? Math.round((lc0.visits / moveMs) * 1000) : undefined);
-  // `board` is still the position the engine searched, so its side to move is the mover.
-  if (display) sideTimeMs[board.turn] += moveMs;
   if (snapshot && snapshot.elapsedMs == null) snapshot.elapsedMs = moveMs;
   if (snapshot && snapshot.nps == null && nps !== undefined) snapshot.nps = nps;
   samples.push(captured ?? { ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
