@@ -923,6 +923,10 @@ export class SquareFormerEvaluator implements Evaluator {
   private meta: SquareFormerMeta;
   private inputCache = new Map<string, SquareFormerEncodedInput>();
   private destroyed = false;
+  // ORT-web does not guard a session against overlapping run() calls or a
+  // release() while a run is suspended (WebGPU/asyncify), so runs are queued
+  // and destroy() releases the session only after the queue drains.
+  private runTail: Promise<unknown> = Promise.resolve();
   constructor(session: ort.InferenceSession, meta: SquareFormerMeta) {
     this.session = session;
     this.meta = meta;
@@ -1015,7 +1019,10 @@ export class SquareFormerEvaluator implements Evaluator {
     const tLegal = ort.tinyLeelaNowMs();
     const fetches = selectedSquareformerOutputs(this.session);
     const tRun0 = ort.tinyLeelaNowMs();
-    const outputs = fetches ? await this.session.run(feeds, fetches) : await this.session.run(feeds);
+    const outputs = await this.runExclusive(() => {
+      if (this.destroyed) throw new Error('SquareFormer evaluator is destroyed');
+      return fetches ? this.session.run(feeds, fetches) : this.session.run(feeds);
+    });
     const tRun1 = ort.tinyLeelaNowMs();
     const policyRaw = requiredFloatOutput(outputs, 'policy');
     const wdlRaw = requiredFloatOutput(outputs, 'wdl');
@@ -1071,10 +1078,17 @@ export class SquareFormerEvaluator implements Evaluator {
     return out;
   }
 
+  private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.runTail.then(fn, fn);
+    this.runTail = run.catch(() => undefined);
+    return run;
+  }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
     this.inputCache.clear();
-    void ort.releaseOrtSession(this.session).catch(() => undefined);
+    const release = () => ort.releaseOrtSession(this.session).catch(() => undefined);
+    void this.runTail.then(release, release);
   }
 }

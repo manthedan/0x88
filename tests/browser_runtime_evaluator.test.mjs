@@ -260,3 +260,72 @@ test('SquareFormer evaluator releases its ORT session once', async () => {
   await Promise.resolve();
   assert.equal(releases, 1);
 });
+
+const SQUAREFORMER_META = {
+  kind: 'squareformer_v2',
+  input_dim: 112,
+  token_features: 24,
+  input_mode: 'embedding',
+  input_format: 'compact_uint8_embeddings',
+  policy_size: 20480,
+  history_plies: 7,
+  board_normalization: 'stm_white_rankflip_v1',
+};
+
+function controlledSession() {
+  const state = { active: 0, maxActive: 0, runs: 0, releases: 0, releasedWhileActive: 0, pending: [] };
+  const session = {
+    run() {
+      state.runs += 1;
+      state.active += 1;
+      state.maxActive = Math.max(state.maxActive, state.active);
+      return new Promise((resolve) => {
+        state.pending.push(() => {
+          state.active -= 1;
+          resolve({ policy: { data: new Float32Array(20480) }, wdl: { data: new Float32Array([0, 0, 0]) } });
+        });
+      });
+    },
+    release() {
+      state.releases += 1;
+      if (state.active) state.releasedWhileActive += 1;
+    },
+  };
+  const settleNext = async () => {
+    while (!state.pending.length) await new Promise((resolve) => setTimeout(resolve, 0));
+    state.pending.shift()();
+  };
+  return { session, state, settleNext };
+}
+
+test('SquareFormer evaluator never overlaps session.run calls', async () => {
+  const { session, state, settleNext } = controlledSession();
+  const evaluator = new SquareFormerEvaluator(session, SQUAREFORMER_META);
+  const board = parseFen(START_FEN);
+  const evaluations = [evaluator.evaluate(board), evaluator.evaluate(board), evaluator.evaluateBatch([board])];
+  for (let i = 0; i < evaluations.length; i++) await settleNext();
+  const [a, b, c] = await Promise.all(evaluations);
+  for (const evaluation of [a, b, c[0]]) assert.deepEqual(evaluation.wdl, [1 / 3, 1 / 3, 1 / 3]);
+  assert.equal(state.runs, 3);
+  assert.equal(state.maxActive, 1);
+});
+
+test('SquareFormer evaluator releases its ORT session only after in-flight runs settle', async () => {
+  const { session, state, settleNext } = controlledSession();
+  const evaluator = new SquareFormerEvaluator(session, SQUAREFORMER_META);
+  const board = parseFen(START_FEN);
+  const running = evaluator.evaluate(board);
+  const queued = evaluator.evaluate(board);
+  while (!state.pending.length) await new Promise((resolve) => setTimeout(resolve, 0));
+  evaluator.destroy();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(state.releases, 0);
+  await settleNext();
+  assert.deepEqual((await running).wdl, [1 / 3, 1 / 3, 1 / 3]);
+  await assert.rejects(queued, /destroyed/);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(state.runs, 1, 'a run queued behind destroy() never reaches the session');
+  assert.equal(state.releases, 1);
+  assert.equal(state.releasedWhileActive, 0);
+  await assert.rejects(evaluator.evaluate(board), /destroyed/);
+});
