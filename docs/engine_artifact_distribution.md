@@ -8,7 +8,9 @@ This policy applies before publishing or deploying generated artifacts for third
 
 - Berserk Emscripten artifacts under `/berserk/`
 - PlentyChess Emscripten artifacts under `/plentychess/`
+- Stormphrax Emscripten artifacts under `/stormphrax/`
 - Viridithas WASI artifacts under `/viridithas/`
+- Reckless WASI artifacts under `/reckless/`
 - Stockfish.js artifacts under `/stockfish/`
 - future C/C++/Rust engine browser ports that bundle or require engine/network assets
 
@@ -135,11 +137,12 @@ re-add a `public/berserk/` block to `.gitignore` and drop the LFS rules from
 `.gitattributes`, remove the Berserk targets from
 `scripts/r2_brotli_publish_assets.mjs` and the manifest from
 `DEFAULT_SOURCE_MANIFESTS` in `scripts/write_artifact_release_manifests.mjs`,
-strip the artifact entries from `public/artifact-index.json` and the release
-manifest, and delete the objects from R2. The engine stays buildable throughout:
-`scripts/build_berserk_emscripten.mjs` fetches and hash-verifies the network
-from upstream when it is absent, so a user always has a working path that does
-not depend on this project redistributing anything.
+drop the Berserk row from `scripts/write_artifact_index.mjs` and regenerate
+`public/artifact-index.json` with `npm run artifact-index`, strip the artifact
+entries from the release manifest, and delete the objects from R2. The engine
+stays buildable throughout: `scripts/build_berserk_emscripten.mjs` fetches and hash-verifies the network from upstream when it is absent, so a
+user always has a working path that does not depend on this project
+redistributing anything.
 
 ### PlentyChess Emscripten
 
@@ -183,14 +186,25 @@ not depend on this project redistributing anything.
 - Raw network SHA-256: `066c172e22c25ee3d3b4084ad44ff761426f906a9c536cabd0127d17413d0585`
 - Distribution status: source/provenance archive and manifest are committed beside the deployed WASI binaries.
 
+### Reckless WASI
+
+- License: AGPL-3.0 upstream (see `public/reckless/NOTICE.md` and the AGPL note in `NOTICE.md`).
+- Upstream: `https://github.com/codedeliveryservice/Reckless.git`
+- Pin: commit `0010617448bdef4c8cd7d4f4825b7e42c8bc262a` (no upstream release tag is pinned).
+- Patches: applied by `scripts/build_reckless_wasi.mjs` and `scripts/build_reckless_browser_api.mjs`, plus `engines/reckless/src/*.rs`.
+- Build: `npm run reckless:build-release` (scalar, SIMD, relaxed-SIMD, external-NNUE prototype and browser-API builds, then the release manifest).
+- Network: `v60-7f587dfb.nnue`, embedded in the WASI binaries and extracted as `reckless-v60-7f587dfb.nnue` for the external-NNUE prototypes; raw SHA-256 `7f587dfb1fe5d74d53909328afa6fd51650c8c7f45907602db7fbb1e52948c61`. The manifest records it as distributed with the AGPL-3.0 engine source.
+- Distribution status: the four `public/reckless/*-corresponding-source.tar.gz` archives and `public/reckless/reckless-wasip1.manifest.json` are committed; the WASM binaries and the extracted NNUE are gitignored and built locally before publishing.
+
 ### Stockfish.js
 
-- License: GPL-3.0 upstream/package.
+- License: GPL-3.0 upstream/package (engine code GPL v3 with source notices allowing later versions; non-engine Stockfish.js code MIT; see `public/stockfish/README.md`).
 - Upstream: `https://github.com/nmrugg/stockfish.js.git`
-- Package: `stockfish@18.0.7`
-- Pin: npm `gitHead`/upstream commit `32d4b5ae40c01db88219bfbe2b82dbe6dec93832`
-- Build: upstream `npm ci && node build.js --all -f`; relaxed-SIMD candidates use `scripts/build_stockfish_relaxed_simd.mjs` variants (`lite-single`, `single`, `lite-threaded`, `threaded`) against the same corresponding source.
-- Distribution status: release archive and manifest are committed beside the deployed Stockfish.js assets, including the separate feature-detected relaxed-SIMD candidates.
+- Package: `stockfish@19.0.1` (exact version in `package.json`)
+- Pin: tag `v19.0.1`, commit `0d5dd7944f88c817c07a26bc4fb1905d5f9c46d6`; native reference `sf_19`, commit `edb0d9db6731067ec50ce619ff372b463bc4dd5d`. `scripts/stockfish_release_config.mjs` is the single build/provenance source for these values.
+- Networks: full `nn-1a298aa575a0.nnue`, lite `nn-61e7af4bb97d.nnue`; both files are inside the corresponding-source archive.
+- Build: the full and pthread baseline pairs are staged from the pinned npm package; `npm run stockfish:build-relaxed-simd:lite-single` rebuilds the relaxed lite single-thread pair with `scripts/build_stockfish_relaxed_simd.mjs` (other `--variant` values: `single`, `lite-threaded`, `threaded`) against the same corresponding source. See `docs/stockfish_19_upgrade.md`.
+- Distribution status: `public/stockfish/stockfish-19.0.1-corresponding-source.tar.gz` and `public/stockfish/stockfish-19.0.1.manifest.json` are committed beside the deployed Stockfish.js assets, including the feature-detected relaxed-SIMD lite single-thread pair.
 
 ## Manifest helper
 
@@ -199,13 +213,18 @@ Use the checked-in helpers to draft manifests and source archives from local gen
 ```sh
 npm run berserk:artifact-manifest
 npm run plentychess:artifact-manifest
+npm run stormphrax:artifact-manifest
 npm run viridithas:artifact-manifest
+npm run reckless:artifact-manifest
 npm run stockfish:artifact-manifest
 npm run berserk:source-archive
 npm run plentychess:source-archive
+npm run stormphrax:source-archive
 npm run viridithas:source-archive
 npm run stockfish:source-archive
 ```
+
+Reckless has no `:source-archive` script: `npm run reckless:build-production` (part of `npm run reckless:build-release`) writes its four corresponding-source archives while it builds each variant.
 
 The artifact-manifest helper writes ignored JSON under `artifacts/engine-manifests/`, including artifact sizes, SHA-256 hashes, and local gzip/brotli transfer-size estimates. The source-archive helper writes `*corresponding-source.tar.gz` files beside the generated engine artifacts under `public/<engine>/`. Deployed GPL engines should commit these release archives and manifests with the deployed binaries.
 
@@ -214,9 +233,14 @@ For a distribution-ready manifest that records the source archive hash and relat
 ```sh
 npm run berserk:release-manifest
 npm run plentychess:release-manifest
+npm run stormphrax:release-manifest
 npm run viridithas:release-manifest
+npm run reckless:release-manifest
 npm run stockfish:release-manifest
+npm run artifact-index
 ```
+
+`npm run artifact-index` regenerates `public/artifact-index.json` from the committed manifests; `tests/artifact_index.test.mjs` fails when the committed index is stale.
 
 Pass `ENGINE_ARTIFACT_TOOLCHAIN='...'` or `-- --toolchain '...'` when writing a release manifest if the auto-detected/default toolchain text is not exact enough for the generated artifacts. `npm run build:netlify` uses `scripts/precompress_engine_artifacts.mjs` to emit `.br`/`.gz` sidecars in `dist-client/`; see `docs/netlify_engine_artifacts.md`. A manifest generated without a source archive URL and exact toolchain remains a draft, not a public-distribution clearance.
 
