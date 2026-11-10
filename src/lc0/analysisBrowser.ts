@@ -458,13 +458,16 @@ function restoreAnalysisWorkspace(): void {
       }
       el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
       saveAnalysisWorkspace();
-      const consumedUrl = new URL(location.href);
-      for (const key of ['fen', 'pgn']) {
-        consumedUrl.searchParams.delete(key);
-        params.delete(key);
+      // A quota failure or oversized analysis must remain reloadable from the link.
+      if (workspaceAutosave?.flush()) {
+        const consumedUrl = new URL(location.href);
+        for (const key of ['fen', 'pgn']) {
+          consumedUrl.searchParams.delete(key);
+          params.delete(key);
+        }
+        history.replaceState(history.state, '', consumedUrl);
+        lastAnalysisMountHref = location.href;
       }
-      history.replaceState(history.state, '', consumedUrl);
-      lastAnalysisMountHref = location.href;
       return;
     } catch (error) {
       linkedInputError = `Could not load linked analysis: ${(error as Error).message}`;

@@ -6,7 +6,7 @@ import { START_FEN } from '../src/chess/board.ts';
 import { parseFirstPgnGame } from '../src/chess/pgn.ts';
 import { analysisUrlFen } from '../src/lc0/analysisUrlInput.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
-import { hasExplicitWorkspaceInput } from '../src/lc0/workspaceAutosave.ts';
+import { createWorkspaceAutosave, hasExplicitWorkspaceInput, serializeTree, WORKSPACE_MAX_CHARS } from '../src/lc0/workspaceAutosave.ts';
 
 test('missing and valid URL FENs initialize safely', () => {
   assert.deepEqual(analysisUrlFen(null), { fen: START_FEN, error: null });
@@ -82,5 +82,43 @@ test('linked PGN rejection and backup failure remain visible after fallback stat
     assert.equal(actual.tree, saved.tree);
     assert.match(actual.text, /Could not load linked analysis/);
     assert.match(actual.text, pgn.startsWith('1.') ? /Export it before replacing/ : /PGN|game/i);
+  }
+});
+
+test('linked inputs stay in the URL until a recoverable snapshot is written', () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const save = source.slice(source.indexOf('function saveAnalysisWorkspace()'), source.indexOf('function clearAnalysisWorkspace()'));
+  const restore = source.slice(source.indexOf('function restoreAnalysisWorkspace()'), source.indexOf('let searcher:'));
+  for (const mode of ['quota', 'too-large', 'success']) {
+    const values = new Map();
+    const storage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem(key, value) {
+        if (mode === 'quota') throw Error('quota');
+        values.set(key, value);
+      },
+      removeItem: (key) => values.delete(key),
+    };
+    const saver = createWorkspaceAutosave('analysis', storage);
+    const linked = mode === 'too-large' ? '{' + 'x'.repeat(WORKSPACE_MAX_CHARS) + '} 1. e4 *' : '1. e4 *';
+    const url = new URL('https://example.test/app/analysis/?dev&pgn=' + encodeURIComponent(linked) + '#board');
+    const dependencies = { GameTree, START_FEN, analysisUrlFen, hasExplicitWorkspaceInput, parseFirstPgnGame, serializeTree, saver, url };
+    const code = `
+      let tree = new GameTree(), analysisGameTree = tree, workspaceHeaders = {}, workspaceResult = '*', lastAnalysisMountHref;
+      const workspaceAutosave = saver, reviewMetadata = new Map(), reviewSignature = () => '';
+      const params = new URLSearchParams(url.search), location = url;
+      const history = {state: {}, replaceState(state, title, next) {url.href = next.href;}};
+      const takeAnalysisHandoff = () => null, hasPreviousAnalysis = () => false, preservePreviousAnalysis = () => true;
+      const clearAnalysisWorkspace = () => saver.clear(), readWorkspace = () => null, decodeAnalysisSnapshot = () => {};
+      const el = () => ({}), inputEl = el, renderPgnImportNotice = () => {};
+      ${stripTypeScriptTypes(save + restore)}
+      restoreAnalysisWorkspace();
+    `;
+    new Function(...Object.keys(dependencies), code)(...Object.values(dependencies));
+    assert.equal(url.searchParams.has('pgn'), mode !== 'success', mode);
+    assert.equal(values.has('0x88-analysis-workspace'), mode === 'success', mode);
+    assert.equal(url.searchParams.has('dev'), true);
+    assert.equal(url.hash, '#board');
+    saver.clear();
   }
 });

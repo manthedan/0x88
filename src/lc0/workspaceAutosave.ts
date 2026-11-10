@@ -299,23 +299,25 @@ export function createWorkspaceAutosave(
       /* Storage denied. */
     }
   };
-  const flush = () => {
+  const flush = (): boolean => {
     clearTimeout(timer);
     timer = undefined;
-    if (pending === undefined) return;
+    if (pending === undefined) return false;
     try {
       const raw = `{"kind":${JSON.stringify(kind)},"version":${WORKSPACE_VERSION},"savedAt":${Date.now()},"data":${pending}}`;
       if (raw.length > WORKSPACE_MAX_CHARS) {
         pause('too-large');
-        return;
+        return false;
       }
       if (!storage) throw new Error('Storage unavailable');
       storage.setItem(workspaceStorageKey(kind), raw);
       resume();
+      pending = undefined;
+      return true;
     } catch {
       pause('storage');
+      return false;
     }
-    pending = undefined;
   };
   const clear = () => {
     clearTimeout(timer);
