@@ -23,7 +23,7 @@ export function resolveEngineArtifactUrl(pathOrUrl: string): string {
   const resolved = resolvePublicAssetUrl(path);
   if (!/^https?:/.test(resolved) || (pathOrUrl !== path && new URL(pathOrUrl, 'http://localhost/').origin !== new URL(resolved).origin)) return pathOrUrl;
   const url = new URL(resolved);
-  if (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.hostname.endsWith('.localhost')) return pathOrUrl;
+  if (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.hostname.endsWith('.localhost')) return resolved;
   return resolvePublicAssetUrl(`/artifacts/sha256/${pin.sha256}/${pin.br ? `br/${pin.br}` : 'identity'}`);
 }
 

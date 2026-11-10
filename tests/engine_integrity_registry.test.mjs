@@ -66,3 +66,17 @@ test('generation fails if a release representation no longer matches its manifes
   writeFileSync(path, JSON.stringify(manifest));
   assert.throws(() => enginePins(root), /no manifest pin/);
 });
+
+test('loopback asset bases retain their configured host and port', (t) => {
+  const previousLocation = globalThis.location;
+  const previousBase = globalThis.LC0_BROWSER_ASSET_BASE_URL;
+  t.after(() => {
+    globalThis.location = previousLocation;
+    globalThis.LC0_BROWSER_ASSET_BASE_URL = previousBase;
+  });
+  globalThis.location = new URL('http://localhost:5173/app/play/');
+  for (const base of ['http://127.0.0.1:8787', 'http://assets.localhost:8787', 'http://[::1]:8787']) {
+    globalThis.LC0_BROWSER_ASSET_BASE_URL = base;
+    assert.equal(resolveEngineArtifactUrl('/berserk/berserk-emscripten.wasm'), `${base}/berserk/berserk-emscripten.wasm`);
+  }
+});
