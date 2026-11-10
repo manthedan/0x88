@@ -1,4 +1,5 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export type BerserkVariantKey = 'emscripten' | 'emscripten-simd' | 'emscripten-relaxed' | 'default' | 'simd' | 'custom';
@@ -19,8 +20,8 @@ export interface BerserkVariant {
   sourceNetworkUrl?: string;
 }
 
-export const BERSERK_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.js');
-export const BERSERK_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.wasm');
+export const BERSERK_EMSCRIPTEN_JS_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten.js');
+export const BERSERK_EMSCRIPTEN_WASM_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten.wasm');
 /**
  * Canonical preload `.data` shared by every Berserk SIMD tier.
  *
@@ -32,11 +33,11 @@ export const BERSERK_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/berserk/berse
  * cache instead of refetching it. Emscripten resolves the package through
  * `Module.locateFile`, so the name baked into each glue file is irrelevant.
  */
-export const BERSERK_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.data');
-export const BERSERK_EMSCRIPTEN_SIMD_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.js');
-export const BERSERK_EMSCRIPTEN_SIMD_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.wasm');
-export const BERSERK_EMSCRIPTEN_RELAXED_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.js');
-export const BERSERK_EMSCRIPTEN_RELAXED_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.wasm');
+export const BERSERK_EMSCRIPTEN_DATA_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten.data');
+export const BERSERK_EMSCRIPTEN_SIMD_JS_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten-simd128.js');
+export const BERSERK_EMSCRIPTEN_SIMD_WASM_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten-simd128.wasm');
+export const BERSERK_EMSCRIPTEN_RELAXED_JS_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten-relaxed-simd128.js');
+export const BERSERK_EMSCRIPTEN_RELAXED_WASM_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten-relaxed-simd128.wasm');
 export const BERSERK_DEFAULT_WASM_URL = resolvePublicAssetUrl('/berserk/berserk.wasm');
 export const BERSERK_SIMD_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-simd128.wasm');
 export const BERSERK_MAIN_NETWORK = 'berserk-9b84c340af7e.nn';
@@ -69,8 +70,7 @@ function isLocalDevelopmentOrigin(): boolean {
 
 function assetPathname(raw: string): string {
   try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
+    return engineArtifactPathname(raw);
   } catch {
     return raw;
   }

@@ -1,4 +1,4 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
@@ -19,8 +19,8 @@ export interface PlentyChessVariant {
   note: string;
 }
 
-export const PLENTYCHESS_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.js');
-export const PLENTYCHESS_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.wasm');
+export const PLENTYCHESS_EMSCRIPTEN_JS_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten.js');
+export const PLENTYCHESS_EMSCRIPTEN_WASM_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten.wasm');
 /**
  * Canonical preload `.data` shared by every PlentyChess SIMD tier.
  *
@@ -33,11 +33,11 @@ export const PLENTYCHESS_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/plentyche
  * Emscripten resolves the package through `Module.locateFile`, so the name
  * baked into each glue file is irrelevant.
  */
-export const PLENTYCHESS_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.data');
-export const PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-sse41.js');
-export const PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-sse41.wasm');
-export const PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.js');
-export const PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.wasm');
+export const PLENTYCHESS_EMSCRIPTEN_DATA_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten.data');
+export const PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten-sse41.js');
+export const PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten-sse41.wasm');
+export const PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten-relaxed-simd128.js');
+export const PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten-relaxed-simd128.wasm');
 export const PLENTYCHESS_MAIN_NETWORK = '0178r.bin';
 export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0178r/${PLENTYCHESS_MAIN_NETWORK}`;
 
@@ -62,8 +62,7 @@ function isLocalDevelopmentOrigin(): boolean {
 
 function assetPathname(raw: string): string {
   try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
+    return engineArtifactPathname(raw);
   } catch {
     return raw;
   }

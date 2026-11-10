@@ -1,5 +1,4 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { isV0DeployProfile } from './engineCatalog.ts';
+import { resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export type StormphraxVariantKey = 'emscripten' | 'emscripten-relaxed' | 'custom';
@@ -15,24 +14,14 @@ export interface StormphraxVariant {
   note: string;
 }
 
-const STORMPHRAX_JS_PATH = isV0DeployProfile()
-  ? '/artifacts/sha256/4c95a359f1c09760611d09ea6a3fa4a451407c699d14ef559940d37365a4bfec/stormphrax-emscripten.js'
-  : '/stormphrax/stormphrax-emscripten.js';
-const STORMPHRAX_WASM_PATH = isV0DeployProfile()
-  ? '/artifacts/sha256/92149aeeeefbc7bac74ec9b6ebf24384599bf35e8f8f404bf26518f53f6f93e1/stormphrax-emscripten.wasm'
-  : '/stormphrax/stormphrax-emscripten.wasm';
-const STORMPHRAX_DATA_PATH = isV0DeployProfile()
-  ? '/artifacts/sha256/04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf/stormphrax-emscripten.data'
-  : '/stormphrax/stormphrax-emscripten.data';
-const STORMPHRAX_RELAXED_JS_PATH = isV0DeployProfile()
-  ? '/artifacts/sha256/1a57e31fdfe4df209f0bfd1bddf250e5a9f621ea74c033091dfa7376a88f9f0f/stormphrax-emscripten-relaxed-simd128.js'
-  : '/stormphrax/stormphrax-emscripten-relaxed-simd128.js';
-const STORMPHRAX_RELAXED_WASM_PATH = isV0DeployProfile()
-  ? '/artifacts/sha256/409e973092412289576c0ae67b982fbb512d9aead2cfe3a81554d2f46994003d/stormphrax-emscripten-relaxed-simd128.wasm'
-  : '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm';
+const STORMPHRAX_JS_PATH = '/stormphrax/stormphrax-emscripten.js';
+const STORMPHRAX_WASM_PATH = '/stormphrax/stormphrax-emscripten.wasm';
+const STORMPHRAX_DATA_PATH = '/stormphrax/stormphrax-emscripten.data';
+const STORMPHRAX_RELAXED_JS_PATH = '/stormphrax/stormphrax-emscripten-relaxed-simd128.js';
+const STORMPHRAX_RELAXED_WASM_PATH = '/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm';
 
-export const STORMPHRAX_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl(STORMPHRAX_JS_PATH);
-export const STORMPHRAX_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl(STORMPHRAX_WASM_PATH);
+export const STORMPHRAX_EMSCRIPTEN_JS_URL = resolveEngineArtifactUrl(STORMPHRAX_JS_PATH);
+export const STORMPHRAX_EMSCRIPTEN_WASM_URL = resolveEngineArtifactUrl(STORMPHRAX_WASM_PATH);
 /**
  * Canonical preload `.data` shared by both Stormphrax SIMD tiers.
  *
@@ -45,9 +34,9 @@ export const STORMPHRAX_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl(STORMPHRAX_W
  * the package through `Module.locateFile`, so the name baked into each glue
  * file is irrelevant.
  */
-export const STORMPHRAX_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl(STORMPHRAX_DATA_PATH);
-export const STORMPHRAX_RELAXED_JS_URL = resolvePublicAssetUrl(STORMPHRAX_RELAXED_JS_PATH);
-export const STORMPHRAX_RELAXED_WASM_URL = resolvePublicAssetUrl(STORMPHRAX_RELAXED_WASM_PATH);
+export const STORMPHRAX_EMSCRIPTEN_DATA_URL = resolveEngineArtifactUrl(STORMPHRAX_DATA_PATH);
+export const STORMPHRAX_RELAXED_JS_URL = resolveEngineArtifactUrl(STORMPHRAX_RELAXED_JS_PATH);
+export const STORMPHRAX_RELAXED_WASM_URL = resolveEngineArtifactUrl(STORMPHRAX_RELAXED_WASM_PATH);
 export const STORMPHRAX_MAIN_NETWORK = 'undertown.nnue';
 export const STORMPHRAX_SOURCE_NETWORK_URL = `https://github.com/Ciekce/stormphrax-nets/releases/download/undertown/${STORMPHRAX_MAIN_NETWORK}`;
 

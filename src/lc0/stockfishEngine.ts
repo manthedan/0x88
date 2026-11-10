@@ -7,7 +7,7 @@ import {
   type BrowserUciSearchOptions,
   uciPositionCommand,
 } from './browserUciEngine.ts';
-import { engineArtifactWorkerScript } from './engineArtifacts.ts';
+import { engineArtifactWorkerScript, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
 
 /**
@@ -118,6 +118,14 @@ function stockfishWasmUrl(jsUrl: string): string {
   return jsUrl.replace(/\.js(?:[?#].*)?$/, '.wasm');
 }
 
+function pinnedStockfishAsset(url: string): string {
+  try {
+    return resolveEngineArtifactUrl(url);
+  } catch {
+    return url;
+  }
+}
+
 /** Verified glue is also the pthread entry point; children reuse the compiled
  * module and never fetch an unverified second copy of the script. */
 export function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string } {
@@ -130,8 +138,8 @@ const pending = [];
 self.onmessage = (event) => pending.push(event);
 (async () => {
   let [glue, wasm] = await Promise.all([
-    engineArtifacts.bytes(${JSON.stringify(resolvedJsUrl)}),
-    engineArtifacts.bytes(${JSON.stringify(wasmUrl)}),
+    engineArtifacts.bytes(${JSON.stringify(pinnedStockfishAsset(resolvedJsUrl))}),
+    engineArtifacts.bytes(${JSON.stringify(pinnedStockfishAsset(wasmUrl))}),
   ]);
   const glueUrl = URL.createObjectURL(new Blob([glue], { type: 'text/javascript' }));
   // Stockfish's facade fetches the WASM URL encoded in the worker hash.

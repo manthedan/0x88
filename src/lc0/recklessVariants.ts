@@ -1,4 +1,5 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -29,7 +30,7 @@ export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing'
 
 const assetStatuses = new Map<string, RecklessAssetStatus>();
 const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
-const recklessAsset = (path: string) => resolvePublicAssetUrl(path);
+const recklessAsset = (path: string) => resolveEngineArtifactUrl(path);
 
 export const RECKLESS_V60_NNUE_BYTES = 63_266_880;
 
@@ -51,8 +52,7 @@ function isLocalDevelopmentOrigin(): boolean {
 
 function assetPathname(raw: string): string {
   try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
+    return engineArtifactPathname(raw);
   } catch {
     return raw;
   }
@@ -94,7 +94,7 @@ export const RECKLESS_RELAXED_SIMD_VARIANT: RecklessVariant = {
 export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   key: 'lite',
   label: 'Reckless Lite',
-  wasmUrl: recklessAsset('/reckless/reckless-v53-l1-512.wasm'),
+  wasmUrl: resolvePublicAssetUrl('/reckless/reckless-v53-l1-512.wasm'),
   note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
 };
 
