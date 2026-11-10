@@ -59,7 +59,7 @@ function request(path, { mode = 'cors', method = 'GET', headers = {} } = {}) {
   return { url: new URL(path, ORIGIN).href, method, mode, headers: new Headers(headers) };
 }
 
-function loadWorker({ version = '1794286670477', fetch = async () => basic('') } = {}) {
+function loadWorker({ version = '1794286670477', fetch = async () => basic(''), caches: sharedCaches } = {}) {
   const listeners = {};
   const state = { skipped: false, fetches: [] };
   const fetchSpy = async (input, init) => {
@@ -67,7 +67,7 @@ function loadWorker({ version = '1794286670477', fetch = async () => basic('') }
     return state.fetch(input, init);
   };
   state.fetch = fetch;
-  const caches = new FakeCacheStorage(fetchSpy);
+  const caches = sharedCaches ?? new FakeCacheStorage(fetchSpy);
   const self = {
     location: new URL(`${ORIGIN}/sw.js?v=${encodeURIComponent(version)}`),
     addEventListener: (type, listener) => {
@@ -143,10 +143,12 @@ test('the cache is named after the build version from the script URL', () => {
 });
 
 test('activate deletes earlier builds and the legacy shell caches, never the model cache', async () => {
-  const worker = loadWorker({ version: '200' });
+  const worker = loadWorker({ version: '200', fetch: async () => basic(SHELL_HTML, { contentType: 'text/html' }) });
   for (const name of ['0x88-app-shell-v2', 'lc0-app-shell-v1', '0x88-app-100', '0x88-app-200', 'lc0-browser-models-v1', 'other-cache']) {
     await worker.caches.open(name);
   }
+  await dispatchLifecycle(worker, 'install');
+  assert.equal(worker.state.skipped, true);
   await dispatchLifecycle(worker, 'activate');
   assert.deepEqual(await worker.caches.keys(), ['0x88-app-200', 'lc0-browser-models-v1', 'other-cache']);
 });
@@ -192,14 +194,70 @@ test('the shell page is precached with its build chunks and shell files', async 
   ]);
 });
 
-test('install still completes when the network is unavailable', async () => {
-  const worker = loadWorker({
+const failedPrecaches = [
+  {
+    name: 'network failure',
     fetch: async () => {
       throw new TypeError('offline');
+    },
+  },
+  { name: 'HTTP 503', fetch: async () => basic('unavailable', { status: 503, contentType: 'text/html' }) },
+  { name: 'non-HTML response', fetch: async () => basic('not a shell') },
+  { name: 'redirected response', fetch: async () => basic(SHELL_HTML, { contentType: 'text/html', redirected: true }) },
+  {
+    name: 'cache storage failure',
+    fetch: async () => basic(SHELL_HTML, { contentType: 'text/html' }),
+    failPut: true,
+  },
+];
+
+for (const failure of failedPrecaches) {
+  test(`failed essential precache on update keeps the old worker and offline shell: ${failure.name}`, async () => {
+    const old = loadWorker({ version: 'old', fetch: async () => basic(SHELL_HTML, { contentType: 'text/html' }) });
+    await dispatchLifecycle(old, 'install');
+    await dispatchLifecycle(old, 'activate');
+    const oldCache = await old.caches.open(old.context.CACHE_NAME);
+    const update = loadWorker({ version: 'new', fetch: failure.fetch, caches: old.caches });
+    if (failure.failPut) {
+      const newCache = await update.caches.open(update.context.CACHE_NAME);
+      newCache.put = async () => {
+        throw new Error('storage full');
+      };
+    }
+    await assert.rejects(dispatchLifecycle(update, 'install'));
+    assert.equal(update.state.skipped, false, 'a rejected install cannot replace the active worker');
+    assert.equal(old.caches.stores.get(old.context.CACHE_NAME), oldCache);
+    old.state.fetch = async () => {
+      throw new TypeError('offline');
+    };
+    const response = await old.context.networkFirst(request('/app/analysis/', { mode: 'navigate' }));
+    assert.equal(await response.text(), SHELL_HTML);
+  });
+
+  test(`first install rejects an unusable essential precache: ${failure.name}`, async () => {
+    const worker = loadWorker({ fetch: failure.fetch });
+    if (failure.failPut) {
+      const cache = await worker.caches.open(worker.context.CACHE_NAME);
+      cache.put = async () => {
+        throw new Error('storage full');
+      };
+    }
+    await assert.rejects(dispatchLifecycle(worker, 'install'));
+    assert.equal(worker.state.skipped, false);
+  });
+}
+
+test('linked chunk precaching is best-effort once the essential navigation shell is stored', async () => {
+  const worker = loadWorker({
+    fetch: async (input) => {
+      if (input === '/app/play/') return basic(SHELL_HTML, { contentType: 'text/html' });
+      throw new TypeError('chunk unavailable');
     },
   });
   await dispatchLifecycle(worker, 'install');
   assert.equal(worker.state.skipped, true);
+  const cache = await worker.caches.open(worker.context.CACHE_NAME);
+  assert.equal(await (await cache.match('/app/play/')).text(), SHELL_HTML);
 });
 
 test('heavy and cross-origin requests are not intercepted', () => {
@@ -241,6 +299,56 @@ test('a slow navigation falls back to the cached page after the timeout', async 
   release();
   await Promise.all(background);
   assert.equal(await (await cache.match(`${ORIGIN}/app/analysis/`)).text(), 'fresh');
+});
+
+for (const [path, mode, contentType] of [
+  ['/app/analysis/', 'navigate', 'text/html'],
+  ['/app-shell.css', 'cors', 'text/css'],
+]) {
+  test(`network response headers return before a slow body is cached: ${contentType}`, async (t) => {
+    let stream;
+    const body = new ReadableStream({
+      start(controller) {
+        stream = controller;
+        controller.enqueue(new TextEncoder().encode('fresh'));
+      },
+    });
+    let closed = false;
+    t.after(() => {
+      if (!closed) stream.close();
+    });
+    const fresh = basic(body, { contentType });
+    const worker = loadWorker({ fetch: async () => fresh });
+    const cache = await worker.caches.open(worker.context.CACHE_NAME);
+    await cache.put(path, basic('cached', { contentType }));
+    const put = cache.put.bind(cache);
+    cache.put = async (req, response) => put(req, basic(await response.text(), { contentType }));
+    const event = fetchEvent(request(path, { mode }));
+    const response = await Promise.race([
+      worker.context.networkFirst(event.request, { timeoutMs: 20, waitUntil: (promise) => event.waitUntil(promise) }),
+      new Promise((done) => setTimeout(() => done('still waiting for the body'), 100)),
+    ]);
+    assert.equal(response, fresh, 'received headers must win the navigation timeout even while the body is streaming');
+    assert.equal(await (await cache.match(path)).text(), 'cached');
+    assert.equal(event.pending.length, 1, 'the cache write must extend the fetch event lifetime');
+    stream.close();
+    closed = true;
+    await Promise.all(event.pending);
+    assert.equal(await (await cache.match(path)).text(), 'fresh');
+  });
+}
+
+test('fetch events keep failed cache writes alive without rejecting the network response', async () => {
+  const worker = loadWorker({ fetch: async () => basic('fresh', { contentType: 'text/html' }) });
+  const cache = await worker.caches.open(worker.context.CACHE_NAME);
+  cache.put = async () => {
+    throw new Error('storage full');
+  };
+  const event = fetchEvent(request('/app/play/', { mode: 'navigate' }));
+  worker.listeners.fetch(event);
+  assert.equal(await (await event.response).text(), 'fresh');
+  assert.equal(event.pending.length, 1);
+  await Promise.all(event.pending);
 });
 
 test('a slow navigation with nothing cached keeps waiting for the network', async () => {

@@ -92,10 +92,13 @@ function isHtml(response) {
 async function precacheShell() {
   const cache = await caches.open(CACHE_NAME);
   const response = await fetch(APP_SHELL_FALLBACK, { cache: 'no-cache' });
-  if (!cacheable(response) || !isHtml(response)) return;
+  // The fallback navigation HTML is essential: installing without it would
+  // replace the old worker and let activate delete its working offline shell.
+  if (!cacheable(response) || !isHtml(response)) throw new Error('Offline navigation shell could not be precached');
   const html = await response.clone().text();
   await cache.put(APP_SHELL_FALLBACK, response);
-  // Without its chunks the cached page renders but cannot hydrate offline.
+  // Linked chunks/styles are best-effort. They improve offline hydration, but
+  // a failed chunk fetch must not discard an otherwise usable HTML fallback.
   await Promise.all(shellSubresourceUrls(html, new URL(APP_SHELL_FALLBACK, self.location.origin).href).map((url) => cache.add(url).catch(() => undefined)));
 }
 
@@ -124,10 +127,9 @@ async function networkFirst(request, { timeoutMs = NAVIGATION_TIMEOUT_MS, waitUn
     // Only pages are kept for navigations: a navigation to a source tarball or
     // another download must not land in the shell cache.
     if (cacheable(response) && (request.mode !== 'navigate' || isHtml(response))) {
-      return cache
-        .put(request, response.clone())
-        .catch(() => undefined)
-        .then(() => response);
+      // Hand headers/body to the browser immediately; the timeout races the
+      // response headers, never consumption of a slow/streaming cache clone.
+      waitUntil(cache.put(request, response.clone()).catch(() => undefined));
     }
     return response;
   });
@@ -152,19 +154,11 @@ async function networkFirst(request, { timeoutMs = NAVIGATION_TIMEOUT_MS, waitUn
 }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    precacheShell()
-      .catch(() => undefined)
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(precacheShell().then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((names) => Promise.all(staleCacheNames(names).map((name) => caches.delete(name)))),
-  );
+  event.waitUntil(caches.keys().then((names) => Promise.all(staleCacheNames(names).map((name) => caches.delete(name)))));
 });
 
 self.addEventListener('fetch', (event) => {
