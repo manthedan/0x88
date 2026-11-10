@@ -117,6 +117,7 @@ export class ViridithasEngine implements BrowserUciEngine {
   private persistentThreadsCommand: string | null = null;
   private persistentMultipvCommand: string | null = null;
   private queueTail: Promise<void> = Promise.resolve();
+  private disposed = false;
   private lastInfoLines: StockfishInfoLine[] = [];
 
   private options: RecklessOptions;
@@ -135,6 +136,7 @@ export class ViridithasEngine implements BrowserUciEngine {
 
   private ensureOneShotWorker(): Worker {
     if (this.worker && this.workerMode === 'oneshot') return this.worker;
+    if (this.disposed) throw abortError();
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'viridithas-wasi' });
     worker.onmessage = (event: MessageEvent) => {
@@ -155,6 +157,7 @@ export class ViridithasEngine implements BrowserUciEngine {
 
   private ensurePersistentWorker(): Worker {
     if (this.worker && this.workerMode === 'persistent' && this.sharedInput) return this.worker;
+    if (this.disposed) throw abortError();
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'viridithas-wasi-persistent' });
     const sharedInput = createSharedInput();
@@ -245,6 +248,8 @@ export class ViridithasEngine implements BrowserUciEngine {
     );
     await previous.catch(() => undefined);
     try {
+      // Work queued before dispose() must not recreate (and leak) a worker.
+      if (this.disposed) throw abortError();
       return await fn();
     } finally {
       release();
@@ -549,6 +554,7 @@ export class ViridithasEngine implements BrowserUciEngine {
   }
 
   dispose(): void {
+    this.disposed = true;
     const error = abortError();
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();

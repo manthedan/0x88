@@ -152,6 +152,7 @@ export class StormphraxEngine implements BrowserUciEngine {
   private initialized = false;
   private appliedOptions = new Map<string, string>();
   private queueTail: Promise<void> = Promise.resolve();
+  private disposed = false;
   private lastInfoLines: StormphraxInfoLine[] = [];
   private readonly jsUrl: string;
   private readonly wasmUrl?: string;
@@ -182,6 +183,8 @@ export class StormphraxEngine implements BrowserUciEngine {
       .catch(() => undefined)
       .then(async () => {
         try {
+          // Work queued before dispose() must not recreate (and leak) a worker.
+          if (this.disposed) throw abortError('Stormphrax engine disposed');
           return await fn();
         } finally {
           release();
@@ -191,6 +194,7 @@ export class StormphraxEngine implements BrowserUciEngine {
 
   private makeWorker(): Worker {
     if (this.worker) return this.worker;
+    if (this.disposed) throw abortError('Stormphrax engine disposed');
     this.workerObjectUrl = URL.createObjectURL(new Blob([workerScript()], { type: 'text/javascript' }));
     const worker = new Worker(this.workerObjectUrl);
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.handleMessage(event.data);
@@ -488,6 +492,7 @@ export class StormphraxEngine implements BrowserUciEngine {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.failAll(abortError('Stormphrax engine disposed'));
     this.stdout = [];
     this.stderr = [];
