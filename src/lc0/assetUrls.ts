@@ -1,9 +1,9 @@
-type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
+type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | boolean | undefined> };
 
 const env = (import.meta as ImportMetaWithEnv).env ?? {};
 
-function cleanBase(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
+function cleanBase(raw: string | boolean | undefined): string | undefined {
+  if (typeof raw !== 'string') return undefined;
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
   try {
@@ -15,10 +15,43 @@ function cleanBase(raw: string | undefined): string | undefined {
   }
 }
 
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** Dev server builds, and production-like builds served from this machine. */
+function isLocalDevelopment(): boolean {
+  if (env.DEV === true) return true;
+  try {
+    const hostname = location.hostname;
+    return LOCAL_HOSTNAMES.has(hostname) || hostname.endsWith('.localhost');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ?assetBase= / ?modelBase= decide where WASM, NNUE, ONNX and model manifests
+ * are fetched from, and a manifest from an arbitrary origin brings its own
+ * sha256, so verification would pass for whatever it serves. On a deployed
+ * site an override is therefore honoured only when it names the build-time
+ * asset host or this page's own origin; any origin is allowed locally.
+ */
+function overrideAllowed(base: string, allowModelBaseAlias: boolean): boolean {
+  if (isLocalDevelopment()) return true;
+  try {
+    const origin = new URL(base).origin;
+    if (origin === location.origin) return true;
+    const trusted = trustedConfiguredAssetBase(allowModelBaseAlias);
+    return trusted !== undefined && origin === new URL(trusted).origin;
+  } catch {
+    return false;
+  }
+}
+
 function queryAssetBase(allowModelBaseAlias: boolean): string | undefined {
   try {
     const params = new URLSearchParams(location.search);
-    return cleanBase(params.get('assetBase') ?? (allowModelBaseAlias ? params.get('modelBase') : undefined) ?? undefined);
+    const base = cleanBase(params.get('assetBase') ?? (allowModelBaseAlias ? params.get('modelBase') : undefined) ?? undefined);
+    return base && overrideAllowed(base, allowModelBaseAlias) ? base : undefined;
   } catch {
     return undefined;
   }

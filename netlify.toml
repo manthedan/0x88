@@ -14,44 +14,46 @@
   status = 200
   force = true
 
+# Legacy and short URLs point straight at the trailing-slash page URL: the
+# directory form (/app/play) would cost a second 301 from Netlify.
 [[redirects]]
   from = "/lc0-play.html"
-  to = "/app/play"
+  to = "/app/play/"
   status = 301
 
 [[redirects]]
   from = "/lc0-analysis.html"
-  to = "/app/analysis"
+  to = "/app/analysis/"
   status = 301
 
 [[redirects]]
   from = "/lc0-arena.html"
-  to = "/app/arena"
+  to = "/app/arena/"
   status = 301
 
 [[redirects]]
   from = "/play"
-  to = "/app/play"
+  to = "/app/play/"
   status = 301
 
 [[redirects]]
   from = "/analysis"
-  to = "/app/analysis"
+  to = "/app/analysis/"
   status = 301
 
 [[redirects]]
   from = "/arena"
-  to = "/app/arena"
+  to = "/app/arena/"
   status = 301
 
 [[redirects]]
   from = "/docs.html"
-  to = "/docs"
+  to = "/docs/"
   status = 301
 
 [[redirects]]
   from = "/lc0-policy-only.html"
-  to = "/single-engine"
+  to = "/single-engine/"
   status = 301
 
 # Keep engine pages eligible for WebAssembly threads/SAB experiments and WebGPU
@@ -62,12 +64,53 @@
     Cross-Origin-Opener-Policy = "same-origin"
     Cross-Origin-Embedder-Policy = "require-corp"
     Cross-Origin-Resource-Policy = "same-origin"
-    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://assets.0x88.app https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self'; manifest-src 'self'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # Only features nothing on this site uses. Clipboard, WebGPU, wake lock
+    # and cross-origin isolation are deliberately left at their defaults.
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    # connect-src names every origin the product fetches from: the asset host
+    # (engines, models, channels, releases), the Lichess and Chess.com game
+    # import APIs (src/lc0/gameImport.ts), and the Cloudflare Web Analytics
+    # beacon endpoint. svelte.config.js keeps `https:` in the meta policy for
+    # local ?assetBase= overrides; both policies apply here, so this one decides.
+    # R2 builds COPY public/_headers unchanged; generation is a separate
+    # maintenance command, not a build step. Keep this default policy and its
+    # generated mirror identical (Netlify accepts both). Custom build-time
+    # VITE_LC0_BROWSER_ASSET_BASE_URL / VITE_LC0_ARTIFACT_CHANNEL_URL origins
+    # must be added to connect-src here; executable asset hosts also need
+    # script-src. Then run `npm run deploy:generate-headers`. svelte.config.js
+    # adds the configured executable origin to the meta script-src automatically.
+    # The CSP gate fails with the exact missing origin before building/releasing.
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://assets.0x88.app https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://assets.0x88.app https://lichess.org https://api.chess.com https://cloudflareinsights.com; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self'; manifest-src 'self'"
 
 # Root/product HTML should revalidate so app-shell changes and channel pointer
-# changes are visible without waiting out a long browser TTL.
+# changes are visible without waiting out a long browser TTL. Pages are served
+# at pretty URLs (/app/play/ -> app/play/index.html), which `/*.html` does not
+# match, so every page directory is listed; `/*.html` covers direct .html
+# requests. These directories hold nothing but prerendered index.html files.
 [[headers]]
   for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/app/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/docs/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/lab/*"
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
@@ -98,6 +141,7 @@
   for = "/single-engine/*"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow, noarchive"
+    Cache-Control = "public, max-age=0, must-revalidate"
 
 [[headers]]
   for = "/ort/*"
@@ -144,6 +188,10 @@
 # Stable engine/model URLs must not use immutable because their bytes may change
 # while older browser HTTP-cache entries remain fresh. CORP must be cross-origin
 # here so hashed blobs stay loadable under the site-wide COEP: require-corp.
+# The configured R2 build publishes no /artifacts/ or /engines/ files (the asset
+# host serves them; prepare_netlify_r2_public_assets.mjs skips artifacts/). The
+# rules stay, and the deploy gate requires them, so that a profile publishing
+# the full public/ tree (npm run build:netlify) cannot serve them unsafely.
 [[headers]]
   for = "/artifacts/sha256/*"
   [headers.values]
@@ -178,8 +226,11 @@
     Access-Control-Expose-Headers = "Age, Cache-Status, CF-Cache-Status, Content-Length, ETag"
     Timing-Allow-Origin = "*"
 
-# Engine artifacts served from this origin rather than the asset host. These
-# are logical names whose bytes change between builds, so they revalidate.
+# Reckless engine artifacts, for profiles that publish them from this origin
+# (npm run build:netlify). The configured R2 build does not: /reckless/ is an
+# asset-host prefix in src/lc0/assetUrls.ts and these files are pruned from the
+# published tree, so in production these rules match nothing. Logical names
+# whose bytes change between builds, so the browser TTL stays short.
 [[headers]]
   for = "/reckless/*.wasm"
   [headers.values]
@@ -197,6 +248,11 @@
   [headers.values]
     Content-Type = "application/gzip"
     Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
 
 [[headers]]
   for = "/sw.js"

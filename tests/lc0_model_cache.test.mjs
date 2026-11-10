@@ -37,10 +37,11 @@ test('verifyLc0ModelBytes rejects a sha256 mismatch', async () => {
   assert.match(check.reason, /sha256 mismatch/);
 });
 
-test('verifyLc0ModelBytes accepts bytes with no expected sha256 (length-only)', async () => {
+test('verifyLc0ModelBytes requires an explicit opt-out for length-only checks', async () => {
   const check = await verifyLc0ModelBytes(bytesOf('abc'), { expectedBytes: 3 });
-  assert.equal(check.ok, true);
+  assert.equal(check.ok, false);
   assert.equal(check.sha256Checked, false);
+  assert.equal((await verifyLc0ModelBytes(bytesOf('abc'), { expectedBytes: 3 }, true)).ok, true);
 });
 
 // --- loadLc0ModelForOrt integration with a fake Cache Storage + fetch ---
@@ -185,17 +186,18 @@ test('loadLc0ModelForOrt resolves stable model URLs through manifest artifactUrl
   await withMockedEnv(
     async (fetchLog) => {
       const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: '/models/lc0/manifest.json' });
-      assert.equal(direct.mode, 'url');
-      assert.equal(direct.model, MODEL_ARTIFACT_URL);
+      assert.equal(direct.mode, 'memory');
+      assert.deepEqual(direct.model, bytesOf('abc'));
+      assert.equal(direct.sha256Valid, true);
       assert.equal(direct.url, MODEL_ARTIFACT_URL);
       assert.equal(direct.logicalUrl, MODEL_URL);
-      assert.equal(fetchLog.model, 0, 'URL mode resolves the immutable URL without downloading bytes');
+      assert.equal(fetchLog.model, 1, 'cache-disabled loads verify the immutable bytes before returning them');
 
       const cached = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL });
       assert.equal(cached.url, MODEL_ARTIFACT_URL);
       assert.equal(cached.logicalUrl, MODEL_URL);
       assert.equal(cached.telemetry.requestCache, 'force-cache');
-      assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache']);
+      assert.deepEqual(fetchLog.modelRequestCaches, ['default', 'force-cache']);
     },
     {
       serveBytes: () => bytesOf('abc'),
@@ -211,7 +213,8 @@ test('loadLc0ModelForOrt keeps default model manifest lookups on the app shell o
     async (fetchLog) => {
       const assetModelUrl = 'https://assets.0x88.app/models/lc0/test.onnx';
       const direct = await loadLc0ModelForOrt(assetModelUrl, { cache: false, channelUrl: '/channels/stable.json' });
-      assert.equal(direct.model, MODEL_ARTIFACT_URL);
+      assert.equal(direct.url, MODEL_ARTIFACT_URL);
+      assert.equal(direct.sha256Valid, true);
       assert(fetchLog.urls.includes('/models/lc0/manifest.json'));
       assert(!fetchLog.urls.includes('https://assets.0x88.app/models/lc0/manifest.json'));
     },
@@ -235,13 +238,14 @@ test('loadLc0ModelForOrt resolves stable model URLs through channel release mani
   await withMockedEnv(
     async (fetchLog) => {
       const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: '/channels/stable.json' });
-      assert.equal(direct.model, MODEL_ARTIFACT_URL);
+      assert.equal(direct.url, MODEL_ARTIFACT_URL);
+      assert.equal(direct.sha256Valid, true);
       assert.equal(direct.logicalUrl, MODEL_URL);
 
       const cached = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
       assert.equal(cached.url, MODEL_ARTIFACT_URL);
       assert.equal(cached.logicalUrl, MODEL_URL);
-      assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache']);
+      assert.deepEqual(fetchLog.modelRequestCaches, ['default', 'force-cache']);
     },
     {
       serveBytes: () => bytesOf('abc'),
@@ -263,12 +267,13 @@ test('loadLc0ModelForOrt resolves v2 channels to immutable Brotli bodies with de
   await withMockedEnv(
     async (fetchLog) => {
       const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
-      assert.equal(direct.model, MODEL_V2_BR_URL);
+      assert.equal(direct.url, MODEL_V2_BR_URL);
+      assert.equal(direct.sha256Valid, true);
 
       const cached = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
       assert.equal(cached.url, MODEL_V2_BR_URL);
       assert.equal(cached.sha256Valid, true);
-      assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache']);
+      assert.deepEqual(fetchLog.modelRequestCaches, ['default', 'force-cache']);
     },
     {
       serveBytes: () => bytesOf('abc'),
@@ -298,7 +303,8 @@ test('loadLc0ModelForOrt does not resolve ambiguous name-only v2 basenames', asy
   await withMockedEnv(
     async () => {
       const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
-      assert.equal(direct.model, MODEL_URL);
+      assert.equal(direct.url, MODEL_URL);
+      assert.equal(direct.sha256Valid, true);
     },
     {
       serveBytes: () => bytesOf('abc'),
@@ -350,7 +356,8 @@ test('loadLc0ModelForOrt resolves artifact URLs even when Cache Storage is unava
         delete globalThis.caches;
         const result = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
         assert.equal(result.cacheStatus, 'unavailable');
-        assert.equal(result.model, MODEL_ARTIFACT_URL);
+        assert.equal(result.url, MODEL_ARTIFACT_URL);
+        assert.equal(result.sha256Valid, true);
         assert.equal(result.logicalUrl, MODEL_URL);
       } finally {
         globalThis.caches = savedCaches;
@@ -396,11 +403,12 @@ test('loadLc0ModelForOrt skips Cache Storage admission when quota is too low', a
           requestPersistentStorage: true,
           minimumFreeBytesAfterCache: 128,
         });
-        assert.equal(result.mode, 'url');
+        assert.equal(result.mode, 'memory');
         assert.equal(result.cacheStatus, 'quota-limited');
-        assert.equal(result.model, MODEL_URL);
-        assert.equal(fetchLog.model, 0, 'quota fallback does not fetch bytes into memory');
-        assert.equal(persistCalls, 1);
+        assert.deepEqual(result.model, bytesOf('abc'));
+        assert.equal(result.sha256Valid, true);
+        assert.equal(fetchLog.model, 1, 'quota fallback still verifies the bytes in memory');
+        assert.equal(persistCalls, 0);
       } finally {
         if (prevNavigator) Object.defineProperty(globalThis, 'navigator', prevNavigator);
         else delete globalThis.navigator;

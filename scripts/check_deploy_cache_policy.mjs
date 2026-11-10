@@ -8,6 +8,8 @@
 // deploy takes, so a violation cannot reach production.
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { loadEnv } from 'vite';
+import { executableAssetSources } from './csp_asset_origins.mjs';
 import { checkHeadersFileUpToDate } from './generate_netlify_headers_file.mjs';
 import {
   cacheControlDirectives,
@@ -26,11 +28,12 @@ const INVARIANTS = [
   'no forced .br redirects',
   'no custom Content-Encoding headers',
   'one-year immutable only on write-once paths (content-addressed artifacts, release manifests, Vite immutable bundles)',
-  'HTML and channel pointers revalidate',
+  'HTML (including pretty page URLs) and channel pointers revalidate',
   'no path declared twice',
   'content-addressed artifacts carry cross-origin CORP under COEP',
   'cross-origin isolation (COOP/COEP) is declared site-wide',
   'content security policy is declared site-wide',
+  'MIME sniffing is disabled and a referrer policy is declared site-wide',
   'mutable model and engine aliases revalidate',
   'the configured build command runs this gate',
   'no forced .br rewrite in publish-directory _redirects',
@@ -45,7 +48,7 @@ const ONE_YEAR_SECONDS = 31536000;
 
 const immutableAllowed = (path) => path === '/artifacts/sha256/*' || path === '/_app/immutable/*' || path === '/releases/*';
 const CONTENT_SECURITY_POLICY =
-  "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://assets.0x88.app https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self'; manifest-src 'self'";
+  "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://assets.0x88.app https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://assets.0x88.app https://lichess.org https://api.chess.com https://cloudflareinsights.com; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self'; manifest-src 'self'";
 
 // Directive order and case are not significant in these token-list headers, so
 // requirements compare the directive set rather than one exact spelling.
@@ -100,7 +103,17 @@ const REQUIRED = [
   ['/*', 'cross-origin-opener-policy', 'same-origin', 'cross-origin isolation COOP'],
   ['/*', 'cross-origin-embedder-policy', 'require-corp', 'cross-origin isolation COEP'],
   ['/*', 'content-security-policy', CONTENT_SECURITY_POLICY, 'site-wide Content-Security-Policy'],
+  // nosniff matters here: the asset Worker and this origin serve script with
+  // ACAO/CORP, and a mislabelled response must not execute as script.
+  ['/*', 'x-content-type-options', 'nosniff', 'site-wide X-Content-Type-Options'],
+  ['/*', 'referrer-policy', 'strict-origin-when-cross-origin', 'site-wide Referrer-Policy'],
   ['/*.html', 'cache-control', 'public, max-age=0, must-revalidate', 'HTML revalidation Cache-Control'],
+  // Pages are served at pretty URLs, which `/*.html` does not match.
+  ['/', 'cache-control', 'public, max-age=0, must-revalidate', 'root page revalidation Cache-Control'],
+  ['/app/*', 'cache-control', 'public, max-age=0, must-revalidate', 'app page revalidation Cache-Control'],
+  ['/docs/*', 'cache-control', 'public, max-age=0, must-revalidate', 'docs page revalidation Cache-Control'],
+  ['/lab/*', 'cache-control', 'public, max-age=0, must-revalidate', 'lab page revalidation Cache-Control'],
+  ['/single-engine/*', 'cache-control', 'public, max-age=0, must-revalidate', 'single-engine page revalidation Cache-Control'],
   ['/channels/*', 'cache-control', 'public, max-age=0, no-cache', 'channel revalidation Cache-Control'],
   ['/artifacts/sha256/*', 'cache-control', 'public, max-age=31536000, immutable', 'content-addressed immutable Cache-Control'],
   // The site sets COEP: require-corp on /*, so hashed blobs need an explicit
@@ -114,7 +127,7 @@ const REQUIRED = [
   ['/engines/*', 'cache-control', 'public, max-age=0, must-revalidate', 'engine alias revalidation Cache-Control'],
 ];
 
-export function checkDeployCachePolicy(rootPath = process.cwd()) {
+export function checkDeployCachePolicy(rootPath = process.cwd(), env = loadEnv('production', rootPath, 'VITE_')) {
   const failures = [];
   const fail = (message) => failures.push(message);
   const netlify = readFileSync(resolve(rootPath, 'netlify.toml'), 'utf8');
@@ -169,6 +182,15 @@ export function checkDeployCachePolicy(rootPath = process.cwd()) {
     const actual = block ? effectiveValue(headers.get(block), name) : undefined;
     if (actual === undefined) {
       fail(`netlify.toml missing ${description} on ${path}`);
+      continue;
+    }
+    if (name === 'content-security-policy') {
+      // connect-src is validated by check_csp_policy.mjs on every deploy path.
+      // Only the configured executable asset origin may extend script-src;
+      // keep its other sources and every other directive fixed.
+      const withoutConnect = (policy) => policy.replace(/(^|;)\s*connect-src\s+[^;]*/i, '$1 connect-src');
+      const configured = expected.replace('https://assets.0x88.app', executableAssetSources(env).join(' '));
+      if (directiveSet(withoutConnect(actual)) !== directiveSet(withoutConnect(configured))) fail(`netlify.toml missing ${description} on ${path}`);
       continue;
     }
     if (name !== 'cache-control') {

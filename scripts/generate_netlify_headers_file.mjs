@@ -15,6 +15,8 @@ const BANNER = [
   '# Do not edit by hand: edit the [[headers]] tables in netlify.toml and run',
   '#   npm run deploy:generate-headers',
   '# The deploy cache policy check fails if this file is out of date.',
+  '# R2 builds copy this file unchanged. For custom asset/channel hosts, update',
+  '# netlify.toml connect-src and regenerate; the CSP gate checks build-time origins.',
 ].join('\n');
 
 // `_headers` is line-oriented: a path sits at column 0 and its headers are

@@ -84,6 +84,8 @@ export interface Lc0ModelVerificationMetadataStore {
 
 export interface Lc0ModelLoadOptions {
   cache?: boolean;
+  /** Lab/dev only: allow models without hash verification. Unverified bytes are never persisted. */
+  allowUnverified?: boolean;
   cacheName?: string;
   manifestUrl?: string;
   /** Already-validated entry from another model family's manifest (e.g. TVMJS). */
@@ -91,9 +93,8 @@ export interface Lc0ModelLoadOptions {
   /** Optional channel manifest whose release manifest maps stable URLs to immutable artifact URLs. */
   channelUrl?: string | null;
   /**
-   * Network download progress. Providing it forces the load to fetch the bytes
-   * itself (streamed) even when cache=false, so the caller gets bytes in
-   * memory ('memory' mode) instead of a URL for the runtime to fetch opaquely.
+   * Network download progress. Even with allowUnverified, providing it forces
+   * a streamed byte load ('memory' mode) rather than an opaque runtime URL fetch.
    * Not called for cache hits. `total` is the decoded Content-Length or the
    * manifest byte count and may be undefined.
    */
@@ -521,14 +522,21 @@ export async function sha256Hex(bytes: ArrayBuffer | Uint8Array, subtle: SubtleC
 }
 
 /** Validate model bytes against the manifest's decoded byte length and SHA-256. */
-export async function verifyLc0ModelBytes(bytes: ArrayBuffer, expectation: Lc0ModelBytesExpectation = {}): Promise<Lc0ModelBytesCheck> {
+export async function verifyLc0ModelBytes(
+  bytes: ArrayBuffer,
+  expectation: Lc0ModelBytesExpectation = {},
+  allowUnverified = false,
+): Promise<Lc0ModelBytesCheck> {
   const byteLength = bytes.byteLength;
   if (expectation.expectedBytes !== undefined && byteLength !== expectation.expectedBytes) {
     return { ok: false, byteLength, sha256Checked: false, reason: `byte length mismatch: got ${byteLength}, expected ${expectation.expectedBytes}` };
   }
-  if (!expectation.expectedSha256) return { ok: true, byteLength, sha256Checked: false };
+  if (!expectation.expectedSha256) {
+    return { ok: allowUnverified, byteLength, sha256Checked: false, reason: 'Model integrity metadata is unavailable. Please retry loading the model.' };
+  }
   const subtle = globalThis.crypto?.subtle;
-  if (!subtle) return { ok: true, byteLength, sha256Checked: false };
+  if (!subtle)
+    return { ok: allowUnverified, byteLength, sha256Checked: false, reason: 'SHA-256 verification is unavailable. Please retry in a secure browser context.' };
   const hashStarted = nowMs();
   const sha256 = await sha256Hex(bytes, subtle);
   const hashMs = nowMs() - hashStarted;
@@ -633,6 +641,7 @@ async function requestPersistentStorage(enabled: boolean | undefined): Promise<b
   if (!enabled || typeof navigator === 'undefined' || !navigator.storage) return undefined;
   try {
     if (await navigator.storage.persisted?.()) return true;
+    if (!navigator.userActivation?.isActive) return undefined;
     return await navigator.storage.persist?.();
   } catch {
     return undefined;
@@ -689,6 +698,7 @@ function modelLoadFlightKey(modelUrl: string, options: Lc0ModelLoadOptions): str
     absoluteUrl(options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)),
     options.manifestEntry ?? null,
     options.channelUrl ?? configuredChannelUrl() ?? null,
+    options.allowUnverified ?? false,
     options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS,
     options.requestPersistentStorage ?? false,
     options.minimumFreeBytesAfterCache ?? DEFAULT_CACHE_FREE_BYTES_RESERVE,
@@ -755,60 +765,16 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
   const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
   const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
-
-  if (!options.cache) {
-    if (!options.onProgress) {
-      return {
-        model: resolved.url,
-        url: resolved.url,
-        logicalUrl: logicalUrlField(modelUrl, resolved.url),
-        mode: 'url',
-        cacheStatus: 'disabled',
-        verification: 'unchecked',
-        elapsedMs: nowMs() - started,
-        telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs }),
-      };
-    }
-    const download = await fetchModelBytes(new Request(resolved.url, { signal: options.signal }), resolved.url, expectation.expectedBytes, options.onProgress);
-    options.signal?.throwIfAborted();
-    const check = await verifyLc0ModelBytes(download.bytes, expectation);
-    options.signal?.throwIfAborted();
-    if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
-    return {
-      model: download.bytes,
-      url: resolved.url,
-      logicalUrl: logicalUrlField(modelUrl, resolved.url),
-      mode: 'memory',
-      cacheStatus: 'disabled',
-      bytes: download.bytes.byteLength,
-      expectedBytes: expectation.expectedBytes,
-      sha256: check.sha256,
-      expectedSha256: expectation.expectedSha256,
-      sha256Valid: check.sha256Checked ? true : undefined,
-      verification: verificationMode(check),
-      downloadMs: download.downloadMs,
-      hashMs: check.hashMs ?? 0,
-      elapsedMs: nowMs() - started,
-      telemetry: telemetry(started, 'memory', {
-        manifestMs: manifest.elapsedMs,
-        downloadMs: download.downloadMs,
-        hashMs: check.hashMs,
-        preallocatedDownload: download.preallocated,
-      }),
-    };
+  if (!options.allowUnverified && !/^[a-f0-9]{64}$/i.test(expectation.expectedSha256 ?? '')) {
+    throw new Error(`LC0 model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
   }
 
-  if (!cacheApiAvailable()) {
-    return {
-      model: resolved.url,
-      url: resolved.url,
-      logicalUrl: logicalUrlField(modelUrl, resolved.url),
-      mode: 'url',
-      cacheStatus: 'unavailable',
-      verification: 'unchecked',
-      elapsedMs: nowMs() - started,
-      telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs }),
-    };
+  if (!options.cache) {
+    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs, 'disabled');
+  }
+
+  if (!cacheApiAvailable() || !expectation.expectedSha256) {
+    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs);
   }
 
   const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
@@ -862,9 +828,9 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
       };
     }
 
-    const check = await verifyLc0ModelBytes(bytes, expectation);
+    const check = await verifyLc0ModelBytes(bytes, expectation, options.allowUnverified);
     options.signal?.throwIfAborted();
-    if (check.ok) {
+    if (check.ok && check.sha256Checked) {
       await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, resolved.url, expectation, check)) : undefined);
       options.signal?.throwIfAborted();
       return {
@@ -894,16 +860,9 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     if (!(await cacheQuotaAllows(expectation.expectedBytes, options))) {
       options.signal?.throwIfAborted();
       return {
-        model: resolved.url,
-        url: resolved.url,
-        logicalUrl: logicalUrlField(modelUrl, resolved.url),
-        mode: 'url',
-        cacheStatus: 'quota-limited',
-        verification: 'unchecked',
-        storagePersistent,
+        ...(await fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs, 'quota-limited', storagePersistent)),
         revalidated: true,
-        elapsedMs: nowMs() - started,
-        telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs, cacheReadMs, hashMs: check.hashMs }),
+        cacheReadMs,
       };
     }
     const reloadRequest = new Request(resolved.url, { cache: 'reload', signal: options.signal });
@@ -931,17 +890,7 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
 
   if (!(await cacheQuotaAllows(expectation.expectedBytes, options))) {
     options.signal?.throwIfAborted();
-    return {
-      model: resolved.url,
-      url: resolved.url,
-      logicalUrl: logicalUrlField(modelUrl, resolved.url),
-      mode: 'url',
-      cacheStatus: 'quota-limited',
-      verification: 'unchecked',
-      storagePersistent,
-      elapsedMs: nowMs() - started,
-      telemetry: telemetry(started, 'url', { manifestMs: manifest.elapsedMs }),
-    };
+    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs, 'quota-limited', storagePersistent);
   }
 
   return fetchAndCacheModel(cache, cacheKey, fetchRequest, modelUrl, resolved.url, expectation, started, cacheName, key, store, options, storagePersistent, {
@@ -955,11 +904,26 @@ async function fetchUncachedVerifiedModel(
   options: Lc0ModelLoadOptions,
   started: number,
   manifestMs: number,
+  cacheStatus: 'disabled' | 'unavailable' | 'quota-limited' = 'unavailable',
+  storagePersistent?: boolean,
 ): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
+  if (options.allowUnverified && !options.onProgress) {
+    return {
+      model: resolved.url,
+      url: resolved.url,
+      logicalUrl: logicalUrlField(modelUrl, resolved.url),
+      mode: 'url',
+      cacheStatus,
+      verification: 'unchecked',
+      storagePersistent,
+      elapsedMs: nowMs() - started,
+      telemetry: telemetry(started, 'url', { manifestMs }),
+    };
+  }
   const download = await fetchModelBytes(new Request(resolved.url, { signal: options.signal }), resolved.url, resolved.expectedBytes, options.onProgress);
   options.signal?.throwIfAborted();
-  const check = await verifyLc0ModelBytes(download.bytes, resolved);
+  const check = await verifyLc0ModelBytes(download.bytes, resolved, options.allowUnverified);
   // ResolvedModelArtifact uses expectedBytes/expectedSha256, just like the verifier.
   options.signal?.throwIfAborted();
   if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
@@ -968,7 +932,8 @@ async function fetchUncachedVerifiedModel(
     url: resolved.url,
     logicalUrl: logicalUrlField(modelUrl, resolved.url),
     mode: 'memory',
-    cacheStatus: 'unavailable',
+    cacheStatus,
+    storagePersistent,
     bytes: download.bytes.byteLength,
     expectedBytes: resolved.expectedBytes,
     expectedSha256: resolved.expectedSha256,
@@ -999,16 +964,18 @@ async function fetchAndCacheModel(
 ): Promise<Lc0ModelLoadResult> {
   const download = await fetchModelBytes(fetchRequest, fetchModelUrl, expectation.expectedBytes, options.onProgress);
   options.signal?.throwIfAborted();
-  const check = await verifyLc0ModelBytes(download.bytes, expectation);
+  const check = await verifyLc0ModelBytes(download.bytes, expectation, options.allowUnverified);
   options.signal?.throwIfAborted();
   if (!check.ok) throw new Error(`LC0 model validation failed for ${fetchModelUrl}: ${check.reason}`);
 
   const cacheWriteStarted = nowMs();
-  let cacheWritable = true;
-  try {
-    await cache.put(cacheKey, new Response(download.bytes));
-  } catch {
-    cacheWritable = false;
+  let cacheWritable = check.sha256Checked;
+  if (cacheWritable) {
+    try {
+      await cache.put(cacheKey, new Response(download.bytes));
+    } catch {
+      cacheWritable = false;
+    }
   }
   options.signal?.throwIfAborted();
   const cacheWriteMs = nowMs() - cacheWriteStarted;

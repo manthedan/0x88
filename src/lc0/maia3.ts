@@ -226,6 +226,8 @@ export function chooseFromMaia3Policy(policy: Maia3MovePolicyEntry[], options: M
 }
 
 export interface Maia3BrowserEvaluatorOptions {
+  /** Lab-only opt-out for arbitrary custom models. Unverified bytes are never cached. */
+  allowUnverifiedModel?: boolean;
   /** Abort model loading and terminate this evaluator's worker, including pending inference. */
   signal?: AbortSignal;
   /** Optional owner-supplied CPU reservation; ordinary Human/Play defaults are unchanged. */
@@ -291,6 +293,7 @@ export class Maia3BrowserEvaluator {
     const load = (url: string) =>
       loadLc0ModelForOrt(url, {
         cache: true,
+        allowUnverified: options.allowUnverifiedModel,
         manifestUrl: MAIA3_MODEL_MANIFEST_URL,
         cacheName: 'maia3-browser-models-v1',
         onProgress: options.onProgress,

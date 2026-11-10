@@ -124,7 +124,7 @@ async function main(): Promise<void> {
   };
   for (let cycle = 0; cycle < cycles; cycle++) {
     el('status').textContent = `Loading Maia3 cycle ${cycle + 1}/${cycles}…`;
-    const evaluator = await Maia3BrowserEvaluator.create({ selfElo, oppoElo, ep, modelUrl });
+    const evaluator = await Maia3BrowserEvaluator.create({ selfElo, oppoElo, ep, modelUrl, allowUnverifiedModel: !!modelUrl });
     result.backend = evaluator.backend;
     result.model ??= {
       url: evaluator.modelLoad.url,

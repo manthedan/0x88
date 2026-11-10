@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { checkCspPolicy } from './check_csp_policy.mjs';
 import { checkDeployCachePolicy } from './check_deploy_cache_policy.mjs';
 import { checkSvelteKitRuntimeId } from './check_sveltekit_runtime_id.mjs';
 import { cleanSvelteKitBuild } from './clean_sveltekit_build.mjs';
@@ -12,6 +13,13 @@ import { prepareNetlifyR2PublicAssets } from './prepare_netlify_r2_public_assets
 const dist = resolve(process.env.NETLIFY_R2_RELEASE_DIST || process.argv[2] || 'dist-client');
 const precompressCacheDir = resolve(process.env.NETLIFY_R2_PRECOMPRESS_CACHE_DIR || '.local-dev-artifacts/precompress-r2');
 const deployProfile = process.env.VITE_BROWSER_CHESS_DEPLOY_PROFILE || 'v0';
+// Use exactly the same effective configuration for Vite and the CSP gate;
+// subprocess-only defaults would otherwise be invisible to the checker.
+const buildEnv = {
+  ...process.env,
+  VITE_LC0_ARTIFACT_CHANNEL_URL: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || 'https://assets.0x88.app/channels/stable.json',
+  VITE_LC0_BROWSER_ASSET_BASE_URL: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || 'https://assets.0x88.app',
+};
 
 function formatMs(ms) {
   return `${(ms / 1000).toFixed(2)}s`;
@@ -38,7 +46,8 @@ async function main() {
   // This is the command `netlify.toml` configures, so it is the path every
   // automatic Netlify build takes. The gate has to live here to cover them;
   // checking only in netlify_r2_release.mjs would leave CI deploys ungated.
-  await timed('check deploy cache policy', () => checkDeployCachePolicy(), timings);
+  await timed('check configured CSP origins', () => checkCspPolicy(process.cwd(), undefined, buildEnv), timings);
+  await timed('check deploy cache policy', () => checkDeployCachePolicy(process.cwd(), buildEnv), timings);
   const publicDir = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-public-'));
   try {
     const prep = await timed('prepare pruned public assets', () => prepareNetlifyR2PublicAssets('public', publicDir), timings);
@@ -51,10 +60,8 @@ async function main() {
       () => {
         run('vite', ['build', '--outDir', dist], {
           env: {
-            ...process.env,
+            ...buildEnv,
             BUILD_SCOPE: process.env.BUILD_SCOPE || 'product',
-            VITE_LC0_ARTIFACT_CHANNEL_URL: process.env.VITE_LC0_ARTIFACT_CHANNEL_URL || 'https://assets.0x88.app/channels/stable.json',
-            VITE_LC0_BROWSER_ASSET_BASE_URL: process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || 'https://assets.0x88.app',
             VITE_BROWSER_CHESS_DEPLOY_PROFILE: deployProfile,
             NETLIFY_R2_RELEASE_DIST: dist,
             NETLIFY_R2_PUBLIC_ASSETS: publicDir,
@@ -64,6 +71,9 @@ async function main() {
       timings,
     );
     await timed('verify SvelteKit runtime id', () => checkSvelteKitRuntimeId(dist), timings);
+    // Both CSPs (netlify.toml header, SvelteKit meta) must allow every inline
+    // script on every built page, or that page fails to theme or hydrate.
+    await timed('check content security policy', () => checkCspPolicy(process.cwd(), dist, buildEnv), timings);
     await timed(
       'prune external assets',
       () => {

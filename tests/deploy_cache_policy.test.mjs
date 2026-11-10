@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { checkHeadersFileUpToDate, generateHeadersFile, renderHeadersFile } from '../scripts/generate_netlify_headers_file.mjs';
-import { parseHeaderBlocks } from '../scripts/netlify_headers.mjs';
+import { parseBuildTable, parseHeaderBlocks } from '../scripts/netlify_headers.mjs';
+import svelteConfig from '../svelte.config.js';
 
 const repoRoot = process.cwd();
 const checker = resolve(repoRoot, 'scripts/check_deploy_cache_policy.mjs');
@@ -71,6 +72,55 @@ test('the shipped deploy cache policy passes', async () => {
   const result = await runChecker(repoRoot);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).ok, true);
+});
+
+test('every supported Netlify build and deploy entry point runs the CSP gate', async (t) => {
+  const { scripts } = JSON.parse(await readFile('package.json', 'utf8'));
+  const r2Build = await readFile('scripts/build_netlify_r2.mjs', 'utf8');
+  const r2Release = await readFile('scripts/netlify_r2_release.mjs', 'utf8');
+  const buildCommand = parseBuildTable(await readFile('netlify.toml', 'utf8')).command;
+  for (const [entry, command] of [
+    ['build:netlify', scripts['build:netlify']],
+    ['build:netlify:r2', scripts['build:netlify:r2']],
+    ['netlify.toml [build].command', buildCommand],
+    ['release:netlify-r2', scripts['release:netlify-r2']],
+    ['deploy:netlify-prod-r2', scripts['deploy:netlify-prod-r2']],
+  ]) {
+    await t.test(entry, () => {
+      function runsCspGate(command) {
+        if (/npm run deploy:csp-check(?:\s|$)/.test(command)) return true;
+        if (/node scripts\/build_netlify_r2\.mjs(?:\s|$)/.test(command)) return /checkCspPolicy\(process\.cwd\(\)/.test(r2Build);
+        if (/node scripts\/netlify_r2_release\.mjs(?:\s|$)/.test(command)) return /checkCspPolicy\(process\.cwd\(\)/.test(r2Release);
+        const target = /npm run ([\w:-]+)/.exec(command)?.[1];
+        return target !== undefined && scripts[target] !== undefined && runsCspGate(scripts[target]);
+      }
+      assert.ok(runsCspGate(command), `${entry} bypasses check_csp_policy.mjs: ${command}`);
+    });
+  }
+});
+
+test("the non-R2 build rejects connect-src 'none' with regenerated headers before building", async (t) => {
+  const dir = await fixture((toml) => toml.replace(/connect-src 'self'[^;]*/, "connect-src 'none'"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { scripts } = JSON.parse(await readFile('package.json', 'utf8'));
+  await writeFile(join(dir, 'svelte.config.js'), `export default ${JSON.stringify(svelteConfig)};`);
+  await writeFile(
+    join(dir, 'package.json'),
+    JSON.stringify({
+      type: 'module',
+      scripts: {
+        'build:netlify': scripts['build:netlify'],
+        'deploy:cache-policy-check': `node ${checker}`,
+        'deploy:csp-check': `node ${resolve(repoRoot, 'scripts/check_csp_policy.mjs')}`,
+        'build:client': 'node -e "console.log(\'UNEXPECTED_VITE_BUILD\')"',
+        'engine-artifacts:precompress-dist': 'node -e "process.exit(0)"',
+      },
+    }),
+  );
+  const result = spawnSync('npm', ['run', 'build:netlify'], { cwd: dir, encoding: 'utf8' });
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /header connect-src blocks https:\/\/lichess.org/);
+  assert.ok(!result.stdout.includes('UNEXPECTED_VITE_BUILD'), result.stdout);
 });
 
 test('public/_headers is generated from netlify.toml and matches it', async () => {
@@ -471,6 +521,43 @@ test('weakening COEP from require-corp is rejected', async () => {
   assert.equal(result.status, 1);
   assert.ok(
     failures(result).some((entry) => entry.includes('missing cross-origin isolation COEP on /*')),
+    result.stderr,
+  );
+});
+
+test('dropping nosniff or the referrer policy from /* is rejected', async () => {
+  const dir = await fixture((toml) =>
+    replaceOnce(
+      replaceOnce(toml, '    X-Content-Type-Options = "nosniff"\n', ''),
+      '    Referrer-Policy = "strict-origin-when-cross-origin"',
+      '    Referrer-Policy = "unsafe-url"',
+    ),
+  );
+  const result = await runChecker(dir);
+  assert.equal(result.status, 1);
+  assert.ok(
+    failures(result).some((entry) => entry.includes('missing site-wide X-Content-Type-Options on /*')),
+    result.stderr,
+  );
+  assert.ok(
+    failures(result).some((entry) => entry.includes('missing site-wide Referrer-Policy on /*')),
+    result.stderr,
+  );
+});
+
+// `/*.html` never matches /app/play/, so each page directory is held separately.
+test('a page directory that stops revalidating is rejected', async () => {
+  const dir = await fixture((toml) =>
+    replaceOnce(
+      toml,
+      '  for = "/app/*"\n  [headers.values]\n    Cache-Control = "public, max-age=0, must-revalidate"',
+      '  for = "/app/*"\n  [headers.values]\n    Cache-Control = "public, max-age=3600"',
+    ),
+  );
+  const result = await runChecker(dir);
+  assert.equal(result.status, 1);
+  assert.ok(
+    failures(result).some((entry) => entry.includes('missing app page revalidation Cache-Control on /app/*')),
     result.stderr,
   );
 });

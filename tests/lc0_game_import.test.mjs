@@ -5,7 +5,9 @@ import {
   chessComGameColor,
   clampMax,
   fetchChessComPgn,
+  fetchGameHistoryPgn,
   fetchLichessPgn,
+  IMPORT_REQUEST_TIMEOUT_MS,
   lichessGamesUrl,
   selectChessComPgns,
 } from '../src/lc0/gameImport.ts';
@@ -71,4 +73,58 @@ test('fetchChessComPgn walks archives newest-first until max', async () => {
   const pgn = await fetchChessComPgn('me', { max: 2 }, fakeFetch);
   assert.equal(pgn, 'feb1\n\njan1', 'newest month first');
   assert.equal(calls[0], 'https://api.chess.com/pub/player/me/games/archives');
+});
+
+// A fetch that never answers until its signal aborts, like a stalled connection.
+function stalledFetch(seen = []) {
+  return (url, init) => {
+    seen.push({ url, signal: init?.signal });
+    return new Promise((_, reject) => {
+      const signal = init?.signal;
+      if (!signal) return;
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  };
+}
+
+test('a stalled import times out with a readable error', async () => {
+  assert.ok(IMPORT_REQUEST_TIMEOUT_MS >= 30_000, 'the default leaves room for a 300-game Lichess export');
+  const seen = [];
+  await assert.rejects(() => fetchGameHistoryPgn('lichess', 'user', { timeoutMs: 30 }, stalledFetch(seen)), /Lichess did not respond within/);
+  assert.ok(seen[0].signal instanceof AbortSignal, 'every request carries a signal');
+  await assert.rejects(() => fetchGameHistoryPgn('chesscom', 'user', { timeoutMs: 30 }, stalledFetch()), /Chess\.com did not respond within/);
+});
+
+test('the timeout covers each Chess.com month, not only the archive list', async () => {
+  const fakeFetch = async (url, init) => {
+    if (url.endsWith('/archives')) return { ok: true, status: 200, json: async () => ({ archives: ['url/2024/01'] }), text: async () => '' };
+    return stalledFetch()(url, init);
+  };
+  await assert.rejects(() => fetchChessComPgn('me', { timeoutMs: 30 }, fakeFetch), /Chess\.com did not respond within/);
+});
+
+test('the caller can cancel an import in flight, and the abort reason propagates', async () => {
+  const controller = new AbortController();
+  const pending = fetchGameHistoryPgn('lichess', 'user', {}, stalledFetch(), controller.signal);
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+});
+
+test('an already-cancelled import makes no request', async () => {
+  const seen = [];
+  await assert.rejects(() => fetchGameHistoryPgn('chesscom', 'user', {}, stalledFetch(seen), AbortSignal.abort()), { name: 'AbortError' });
+  assert.equal(seen.length, 0);
+});
+
+test('cancelling between Chess.com months stops the walk', async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const fakeFetch = async (url) => {
+    calls.push(url);
+    if (url.endsWith('/archives')) return { ok: true, status: 200, json: async () => ({ archives: ['url/2024/01', 'url/2024/02'] }), text: async () => '' };
+    controller.abort();
+    return { ok: true, status: 200, json: async () => ({ games: [] }), text: async () => '' };
+  };
+  await assert.rejects(() => fetchChessComPgn('me', { max: 5 }, fakeFetch, controller.signal), { name: 'AbortError' });
+  assert.deepEqual(calls, ['https://api.chess.com/pub/player/me/games/archives', 'url/2024/02']);
 });
