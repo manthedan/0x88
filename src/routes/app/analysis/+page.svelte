@@ -506,13 +506,18 @@ onMount(() => {
   .eval-ticks :global(.eval-engine-label.selected){font-weight:800}
   .eval-ticks :global(.eval-chosen-mark){position:absolute; left:-3px; right:-1px; bottom:var(--pos); height:4px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 1.5px #29251d; z-index:4}
   .eval-ticks :global(.eval-chosen-mark)::before{content:''; position:absolute; right:100%; top:-3px; border:5px solid transparent; border-left-color:var(--tick-color); transform:translateX(2px)}
-  .eval-details{--details-top:140px; --details-left:40px; position:fixed; inset: auto; top: max(8px, calc(50dvh - 100px)); left:min(var(--details-left,40px),calc(100vw - 330px)); margin:0; width:min(300px,calc(100vw - 24px)); max-height:240px; padding:10px; overflow:auto; background:var(--panel); color:var(--ink); border:1px solid var(--border-input); border-radius:9px; box-shadow:0 12px 44px #0006}
-  .eval-details header{display:flex; align-items:center; justify-content:space-between; gap:12px}
+  .eval-details{--details-top:140px; --details-left:40px; position:fixed; inset: auto; top:50dvh; transform:translateY(-50%); left:min(var(--details-left,40px),calc(100vw - 330px)); margin:0; width:min(300px,calc(100vw - 24px)); max-height:min(480px,calc(100dvh - 16px)); padding:10px; overflow:hidden; background:var(--panel); color:var(--ink); border:1px solid var(--border-input); border-radius:9px; box-shadow:0 12px 44px #0006}
+  .eval-details:popover-open{display:flex; flex-direction:column}
+  .eval-details header{display:flex; flex-shrink:0; align-items:center; justify-content:space-between; gap:12px}
+  #evalDetailList{min-height:0; overflow-y:auto; scrollbar-gutter:stable; scrollbar-color:var(--muted) var(--panel-inset)}
+  #evalDetailList::-webkit-scrollbar{width:8px}
+  #evalDetailList::-webkit-scrollbar-thumb{background:var(--muted); border-radius:4px}
+  #evalDetailList::-webkit-scrollbar-track{background:var(--panel-inset)}
   .eval-details h2{margin:0; color:var(--ink); font:650 16px var(--sans); text-transform:none; letter-spacing:0}
   .eval-details header button{height:32px; width:32px; padding:0; font-size:22px}
-  .eval-details p{margin:8px 0}
+  .eval-details p{flex-shrink:0; margin:8px 0}
   .eval-details :global(.eval-detail-row){display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--rule)}
-  .eval-details :global(.eval-detail-row strong){display:block; font:600 13px var(--sans)}
+  .eval-details :global(.eval-detail-row strong){display:block; overflow-wrap:anywhere; font:600 13px var(--sans)}
   .eval-details :global(.eval-detail-row small){display:block; margin-top:2px; color:var(--muted); font:400 12px/1.4 var(--sans)}
   .eval-details :global(.eval-detail-row>b){font:700 14px var(--mono)}
   .eval-details :global(.eval-detail-tag){display:grid; place-items:center; height:24px; border-radius:4px; background:var(--engine-color); color:#fff; font:700 10px var(--mono); font-variant-numeric:slashed-zero}
@@ -1105,7 +1110,9 @@ onMount(() => {
     .eval-ticks :global(.eval-engine-label.selected){left:-8px; top:50%; transform:translate(-100%,-50%); font-size:10px; line-height:12px}
     .eval-ticks :global(.eval-chosen-mark){left:var(--pos); right:auto; bottom:-1px; top:-2px; width:4px; height:auto; transform:translateX(-50%)}
     .eval-ticks :global(.eval-chosen-mark)::before{right:auto; left:-3px; top:-7px; border:5px solid transparent; border-top-color:var(--tick-color); transform:none}
-    .eval-details{top:var(--details-top,140px); left:8px; right:8px; width:auto; max-height:190px; padding:8px 10px}
+    .eval-details{top:var(--details-top,140px); transform:none; left:8px; right:8px; width:auto; max-height:190px; padding:8px 10px; overflow:auto}
+    .eval-details:popover-open{display:block}
+    #evalDetailList{overflow:visible; scrollbar-gutter:auto}
     @supports (top:anchor(bottom)){
       .eval-details{position-anchor:--eval-rail; top:calc(anchor(bottom) + 6px)}
     }
