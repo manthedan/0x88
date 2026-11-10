@@ -475,6 +475,43 @@ test('weakening COEP from require-corp is rejected', async () => {
   );
 });
 
+test('dropping nosniff or the referrer policy from /* is rejected', async () => {
+  const dir = await fixture((toml) =>
+    replaceOnce(
+      replaceOnce(toml, '    X-Content-Type-Options = "nosniff"\n', ''),
+      '    Referrer-Policy = "strict-origin-when-cross-origin"',
+      '    Referrer-Policy = "unsafe-url"',
+    ),
+  );
+  const result = await runChecker(dir);
+  assert.equal(result.status, 1);
+  assert.ok(
+    failures(result).some((entry) => entry.includes('missing site-wide X-Content-Type-Options on /*')),
+    result.stderr,
+  );
+  assert.ok(
+    failures(result).some((entry) => entry.includes('missing site-wide Referrer-Policy on /*')),
+    result.stderr,
+  );
+});
+
+// `/*.html` never matches /app/play/, so each page directory is held separately.
+test('a page directory that stops revalidating is rejected', async () => {
+  const dir = await fixture((toml) =>
+    replaceOnce(
+      toml,
+      '  for = "/app/*"\n  [headers.values]\n    Cache-Control = "public, max-age=0, must-revalidate"',
+      '  for = "/app/*"\n  [headers.values]\n    Cache-Control = "public, max-age=3600"',
+    ),
+  );
+  const result = await runChecker(dir);
+  assert.equal(result.status, 1);
+  assert.ok(
+    failures(result).some((entry) => entry.includes('missing app page revalidation Cache-Control on /app/*')),
+    result.stderr,
+  );
+});
+
 // `max-age=31536001` is not less dangerous than exactly one year.
 test('an immutable ttl beyond one year is rejected', async () => {
   const dir = await fixture((toml) =>

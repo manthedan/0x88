@@ -26,11 +26,12 @@ const INVARIANTS = [
   'no forced .br redirects',
   'no custom Content-Encoding headers',
   'one-year immutable only on write-once paths (content-addressed artifacts, release manifests, Vite immutable bundles)',
-  'HTML and channel pointers revalidate',
+  'HTML (including pretty page URLs) and channel pointers revalidate',
   'no path declared twice',
   'content-addressed artifacts carry cross-origin CORP under COEP',
   'cross-origin isolation (COOP/COEP) is declared site-wide',
   'content security policy is declared site-wide',
+  'MIME sniffing is disabled and a referrer policy is declared site-wide',
   'mutable model and engine aliases revalidate',
   'the configured build command runs this gate',
   'no forced .br rewrite in publish-directory _redirects',
@@ -100,7 +101,17 @@ const REQUIRED = [
   ['/*', 'cross-origin-opener-policy', 'same-origin', 'cross-origin isolation COOP'],
   ['/*', 'cross-origin-embedder-policy', 'require-corp', 'cross-origin isolation COEP'],
   ['/*', 'content-security-policy', CONTENT_SECURITY_POLICY, 'site-wide Content-Security-Policy'],
+  // nosniff matters here: the asset Worker and this origin serve script with
+  // ACAO/CORP, and a mislabelled response must not execute as script.
+  ['/*', 'x-content-type-options', 'nosniff', 'site-wide X-Content-Type-Options'],
+  ['/*', 'referrer-policy', 'strict-origin-when-cross-origin', 'site-wide Referrer-Policy'],
   ['/*.html', 'cache-control', 'public, max-age=0, must-revalidate', 'HTML revalidation Cache-Control'],
+  // Pages are served at pretty URLs, which `/*.html` does not match.
+  ['/', 'cache-control', 'public, max-age=0, must-revalidate', 'root page revalidation Cache-Control'],
+  ['/app/*', 'cache-control', 'public, max-age=0, must-revalidate', 'app page revalidation Cache-Control'],
+  ['/docs/*', 'cache-control', 'public, max-age=0, must-revalidate', 'docs page revalidation Cache-Control'],
+  ['/lab/*', 'cache-control', 'public, max-age=0, must-revalidate', 'lab page revalidation Cache-Control'],
+  ['/single-engine/*', 'cache-control', 'public, max-age=0, must-revalidate', 'single-engine page revalidation Cache-Control'],
   ['/channels/*', 'cache-control', 'public, max-age=0, no-cache', 'channel revalidation Cache-Control'],
   ['/artifacts/sha256/*', 'cache-control', 'public, max-age=31536000, immutable', 'content-addressed immutable Cache-Control'],
   // The site sets COEP: require-corp on /*, so hashed blobs need an explicit
