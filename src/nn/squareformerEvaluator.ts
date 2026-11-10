@@ -7,13 +7,18 @@ import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import * as ort from './ortRuntime.ts';
 
-const INPUT_CACHE_ENTRIES = Math.max(
-  0,
-  Math.min(
-    65536,
-    Math.floor(Number(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('evalInputCacheEntries') ?? '4096')) || 4096,
-  ),
+// Every browser surface wraps this evaluator in a CachedEvaluator whose key
+// (FEN + history + legal moves + attack mask) is a superset of this one, so this
+// cache only hits when the same position recurs with different legal moves or
+// masks. An int64 row is ~12 KB, so keep it small; `?evalInputCacheEntries=0`
+// disables it.
+const DEFAULT_INPUT_CACHE_ENTRIES = 256;
+const REQUESTED_INPUT_CACHE_ENTRIES = Math.floor(
+  Number(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('evalInputCacheEntries') ?? DEFAULT_INPUT_CACHE_ENTRIES),
 );
+const INPUT_CACHE_ENTRIES = Number.isFinite(REQUESTED_INPUT_CACHE_ENTRIES)
+  ? Math.max(0, Math.min(65536, REQUESTED_INPUT_CACHE_ENTRIES))
+  : DEFAULT_INPUT_CACHE_ENTRIES;
 type SquareFormerEncodedInput = Float32Array | BigInt64Array | Int32Array;
 type CompactIndexDtype = 'int64' | 'int32';
 type CompactIndexArray = BigInt64Array | Int32Array;
