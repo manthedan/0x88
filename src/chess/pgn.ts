@@ -57,6 +57,8 @@ function resolveSan(board: BoardState, token: string): { move: Move } | { error:
     if (squareName(move.to) !== to) return false;
     const from = squareName(move.from);
     if ((fromFile && from[0] !== fromFile) || (fromRank && from[1] !== fromRank)) return false;
+    // A pawn token without a from-file (`d6`) is a push, never a capture (not even en passant).
+    if (role === 'p' && !fromFile && from[0] !== to[0]) return false;
     if (promotion && move.promotion !== promotion.toLowerCase()) return false;
     if (mark === 'x' || mark === ':') {
       const enPassant = role === 'p' && move.to === board.epSquare && from[0] !== to[0];
@@ -210,29 +212,31 @@ type Token =
 const RESULTS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
 const NULL_MOVES = new Set(['--', 'Z0', '0000', '@@@@']);
 /** Standalone annotation glyphs some tools print as words; mapped to their standard NAGs. */
-const GLYPH_NAGS: Record<string, number> = {
-  '!': 1,
-  '?': 2,
-  '!!': 3,
-  '??': 4,
-  '!?': 5,
-  '?!': 6,
-  '□': 7,
-  '=': 10,
-  '∞': 13,
-  '+=': 14,
-  '+/=': 14,
-  '⩲': 14,
-  '=+': 15,
-  '=/+': 15,
-  '⩱': 15,
-  '+/-': 16,
-  '±': 16,
-  '-/+': 17,
-  '∓': 17,
-  '+-': 18,
-  '-+': 19,
-};
+const GLYPH_NAGS: ReadonlyMap<string, number> = new Map(
+  Object.entries({
+    '!': 1,
+    '?': 2,
+    '!!': 3,
+    '??': 4,
+    '!?': 5,
+    '?!': 6,
+    '□': 7,
+    '=': 10,
+    '∞': 13,
+    '+=': 14,
+    '+/=': 14,
+    '⩲': 14,
+    '=+': 15,
+    '=/+': 15,
+    '⩱': 15,
+    '+/-': 16,
+    '±': 16,
+    '-/+': 17,
+    '∓': 17,
+    '+-': 18,
+    '-+': 19,
+  }),
+);
 
 /** `%` in the first column escapes the rest of the line (PGN standard 6). */
 function isEscapeLine(text: string, i: number): boolean {
@@ -321,14 +325,15 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
       tokens.push({ type: 'result', value: word });
       continue;
     }
-    if (GLYPH_NAGS[word]) {
-      tokens.push({ type: 'nag', value: `$${GLYPH_NAGS[word]}` });
+    const nag = GLYPH_NAGS.get(word);
+    if (nag) {
+      tokens.push({ type: 'nag', value: `$${nag}` });
       continue;
     }
     tokens.push({ type: 'move', value: word });
     // A suffix glyph (`Nf6!?`) is the move's NAG; SAN resolution ignores it.
-    const glyph = /[!?]{1,2}$/.exec(word)?.[0];
-    if (glyph && GLYPH_NAGS[glyph]) tokens.push({ type: 'nag', value: `$${GLYPH_NAGS[glyph]}` });
+    const glyphNag = GLYPH_NAGS.get(/[!?]{1,2}$/.exec(word)?.[0] ?? '');
+    if (glyphNag) tokens.push({ type: 'nag', value: `$${glyphNag}` });
   }
   return tokens;
 }

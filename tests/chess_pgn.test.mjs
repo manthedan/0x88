@@ -67,6 +67,9 @@ test('interactive loading rejects text with no tags and no moves', () => {
     assert.throws(() => parseFirstPgnGame(text), /PGN/, text);
   }
   assert.throws(() => parseFirstPgnGame('Hello 1. e4'), /stopped at move 1\.: Hello/i);
+  for (const word of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    assert.equal(parsePgnGame(`1. e4 ${word} 2. Nf3 *`).warnings[0]?.token, word, word);
+  }
   assert.throws(() => parseFirstPgnGame('   \n'), /PGN/);
   // Tags alone (e.g. a set-up position) or a truncated game with tags still load.
   assert.equal(parseFirstPgnGame('[SetUp "1"]\n[FEN "4k3/8/8/8/8/8/8/4K3 b - - 0 1"]\n\n*').game.tree.root.fen, '4k3/8/8/8/8/8/8/4K3 b - - 0 1');
@@ -164,6 +167,9 @@ test('sanToMove still rejects ambiguous, illegal and contradictory tokens', () =
   none(START_FEN, '');
   none(START_FEN, 'Zz9');
   none(START_FEN, '--');
+  // A pawn token without a from-file is a push; it must not turn into an en-passant capture.
+  none('4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1', 'd6');
+  none('4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1', 'xd6');
   // bxc3 is a pawn capture, Bxc3 a bishop capture; neither may be read as the other.
   const fileB = 'rnbqkbnr/pppppppp/8/8/8/2p5/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   assert.equal(moveToUci(sanToMove(parseFen(fileB), 'bxc3')), 'b2c3');
