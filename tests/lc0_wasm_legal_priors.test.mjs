@@ -67,3 +67,21 @@ test('SIMD WASM legal-prior path rejects stale castling rights like JS movegen',
     assert.ok(!actual.some((entry) => invalidCastles.includes(entry.uci)), `stale castling leaked for ${fen}`);
   }
 });
+
+test('JS legal priors fail at the source on NaN, +Infinity or all -Infinity legal logits', () => {
+  const board = parseFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  const legal = legalPolicyPriors(board, logits, temperature);
+  const e2e4 = legal.find((entry) => entry.uci === 'e2e4').index;
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+    const poisoned = Float32Array.from(logits);
+    poisoned[e2e4] = bad;
+    assert.throws(() => legalPolicyPriors(board, poisoned, temperature), new RegExp(`logit for e2e4 is not finite \\(${bad}\\) in rnbqkbnr/`));
+  }
+  assert.throws(() => legalPolicyPriors(board, new Float32Array(LC0_POLICY_SIZE).fill(Number.NEGATIVE_INFINITY), temperature), /no finite legal-move logit/);
+  // A single -Infinity logit is a legitimate zero prior, not an error.
+  const masked = Float32Array.from(logits);
+  masked[e2e4] = Number.NEGATIVE_INFINITY;
+  const priors = legalPolicyPriors(board, masked, temperature);
+  assert.equal(priors.find((entry) => entry.uci === 'e2e4').prior, 0);
+  assert.ok(Math.abs(priors.reduce((sum, entry) => sum + entry.prior, 0) - 1) < 1e-9);
+});

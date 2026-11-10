@@ -260,7 +260,11 @@ export function legalPolicyPriors(
     return { uci, index, logit: Number(logits[index]) / policyTemperature };
   });
   if (legal.length === 0) return [];
+  // Same contract as softmax() in src/nn/numerics.ts: fail here rather than hand NaN priors to search.
+  const invalid = legal.find((entry) => Number.isNaN(entry.logit) || entry.logit === Infinity);
+  if (invalid) throw new Error(`LC0 policy logit for ${invalid.uci} is not finite (${invalid.logit}) in ${boardToFen(board)}`);
   const max = Math.max(...legal.map((entry) => entry.logit));
+  if (max === -Infinity) throw new Error(`LC0 policy has no finite legal-move logit in ${boardToFen(board)}`);
   const sum = legal.reduce((acc, entry) => acc + Math.exp(entry.logit - max), 0);
   return legal.map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum })).sort((a, b) => b.prior - a.prior);
 }
