@@ -123,6 +123,7 @@ function exportController() {
     `
     let tree = new GameTree(), analysisGameTree = tree, workspaceHeaders = {}, workspaceResult = '*';
     const reviewMetadata = new Map(), reviewSignature = () => 'signature';
+    const mountAbort = new AbortController(), isStaleMount = signal => signal.aborted;
     const el = id => elements.get(id), inputEl = el;
     const takeAnalysisHandoff = () => null, hasExplicitWorkspaceInput = () => false, hasPreviousAnalysis = () => false;
     const location = {search: '', hash: ''}, decodeAnalysisSnapshot = () => {}, params = new Map();
@@ -147,9 +148,9 @@ test('workspace restore survives an unexpected export error and finishes restori
   assert.match(api.elements.get('message').textContent, /PGN export failed.*export failed/);
 });
 
-test('copy PGN reports export errors without changing the existing input', () => {
+test('copy PGN reports export errors without changing the existing input', async () => {
   const api = exportController();
-  assert.doesNotThrow(() => api.copyPgn());
+  await assert.doesNotReject(api.copyPgn());
   assert.equal(api.elements.get('pgnInput').value, 'previous PGN');
   assert.match(api.elements.get('message').textContent, /PGN export failed.*export failed/);
 });
