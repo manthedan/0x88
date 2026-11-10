@@ -4,6 +4,7 @@ import {
   type BrowserUciEngine,
   type BrowserUciInfoLine,
   type BrowserUciRuntimeStatus,
+  type BrowserUciSearchOptions,
   uciPositionCommand,
 } from './browserUciEngine.ts';
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
@@ -464,17 +465,18 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     this.initialized = true;
   }
 
-  async search(fen: string, signal?: AbortSignal): Promise<string | null> {
-    return this.bestMove(fen, signal);
+  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
+    return this.bestMove(fen, signal, opts);
   }
 
-  async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
+  async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
+      const position = uciPositionCommand(fen, opts.moves);
       await this.prewarmUnlocked(signal);
       this.lastInfoLines = [];
       await this.applyOptions(signal);
       await this.sendCommand('setoption name MultiPV value 1', signal);
-      await this.sendCommand(`position fen ${fen}`, signal);
+      await this.sendCommand(position, signal);
       const searchStart = this.stdout.length;
       const commandPromise = this.sendCommand(emscriptenGoCommand(this.options), signal);
       try {

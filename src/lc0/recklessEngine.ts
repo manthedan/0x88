@@ -1,6 +1,7 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { type BrowserUciAnalysisOptions, type BrowserUciEngine, uciPositionCommand } from './browserUciEngine.ts';
+import { type BrowserUciAnalysisOptions, type BrowserUciEngine, type BrowserUciSearchOptions, uciPositionCommand } from './browserUciEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
+import { fenAfterUciMoves } from './uciGameHistory.ts';
 
 export interface RecklessOptions {
   /** Fixed search depth. Lower = faster. */
@@ -699,21 +700,23 @@ export class RecklessEngine implements BrowserUciEngine {
     return status.persistentAvailable ? 'persistent available' : 'one-shot fallback';
   }
 
-  async search(fen: string, signal?: AbortSignal): Promise<string | null> {
-    return this.bestMove(fen, signal);
+  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
+    return this.bestMove(fen, signal, opts);
   }
 
-  async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
+  async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
       if (this.runtimeOptions.backend === 'browser-api') {
+        // The direct-call API takes a bare FEN, so it searches the current
+        // position without repetition history (as it did before history).
         const result = await this.runBrowserApiMessage(
-          { type: 'search', fen, depth: this.options.depth, movetimeMs: this.options.movetimeMs, multipv: 1 },
+          { type: 'search', fen: fenAfterUciMoves(fen, opts.moves), depth: this.options.depth, movetimeMs: this.options.movetimeMs, multipv: 1 },
           signal,
         );
         this.lastInfoLines = this.browserApiResultToInfo(result);
         return result?.bestmove ?? this.lastInfoLines[0]?.pvUci[0] ?? null;
       }
-      const result = await this.runCommands(this.searchCommands(fen, this.options, 1), signal);
+      const result = await this.runCommands(this.searchCommands(fen, this.options, 1, opts.moves), signal);
       if (result.exitCode !== 0) throw new Error(`Reckless exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return parseBestMove(result.stdout.find((line) => line.startsWith('bestmove')) ?? '');

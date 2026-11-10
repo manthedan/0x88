@@ -1,5 +1,5 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { type BrowserUciAnalysisOptions, type BrowserUciEngine, uciPositionCommand } from './browserUciEngine.ts';
+import { type BrowserUciAnalysisOptions, type BrowserUciEngine, type BrowserUciSearchOptions, uciPositionCommand } from './browserUciEngine.ts';
 import type { RecklessOptions } from './recklessEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 
@@ -512,13 +512,13 @@ export class ViridithasEngine implements BrowserUciEngine {
     });
   }
 
-  async search(fen: string, signal?: AbortSignal): Promise<string | null> {
-    return this.bestMove(fen, signal);
+  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
+    return this.bestMove(fen, signal, opts);
   }
 
-  async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
+  async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
-      const result = await this.runCommands(this.searchCommands(fen, this.options, 1), signal);
+      const result = await this.runCommands(this.searchCommands(fen, this.options, 1, opts.moves), signal);
       if (result.exitCode !== 0) throw new Error(`Viridithas exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return parseBestMove(result.stdout.find((line) => line.startsWith('bestmove')) ?? '');

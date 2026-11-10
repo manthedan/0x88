@@ -17,6 +17,15 @@ export interface BrowserUciAnalysisOptions {
   moves?: readonly string[];
 }
 
+export interface BrowserUciSearchOptions {
+  /**
+   * UCI moves played from `fen`, which is then the game's start position
+   * rather than the current one. Sending the history lets the engine see
+   * repetitions (threefold draws) and the 50-move clock, as Lc0 does.
+   */
+  moves?: readonly string[];
+}
+
 export function uciPositionCommand(fen: string, moves: readonly string[] = []): string {
   if (moves.some((move) => !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move))) throw new Error('Invalid UCI move history');
   return `position fen ${fen}${moves.length ? ` moves ${moves.join(' ')}` : ''}`;
@@ -51,10 +60,14 @@ export interface BrowserUciEngine {
   setOptions(options: BrowserUciEngineOptions): void;
   /** Initialize worker/runtime state without starting a real search. */
   prewarm(signal?: AbortSignal): Promise<void>;
-  /** Search a single FEN and return the UCI bestmove, or null for no legal move. */
-  search(fen: string, signal?: AbortSignal): Promise<string | null>;
+  /**
+   * Search a position and return the UCI bestmove, or null for no legal move.
+   * With `opts.moves`, `fen` is the start position and the moves lead to the
+   * position searched.
+   */
+  search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null>;
   /** Backward-compatible alias used by existing arena/analysis wiring. */
-  bestMove(fen: string, signal?: AbortSignal): Promise<string | null>;
+  bestMove(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null>;
   /** MultiPV analysis; returns sorted UCI info/PV lines where supported. */
   analyze(fen: string, opts?: BrowserUciAnalysisOptions): Promise<BrowserUciInfoLine[]>;
   /** Reset engine state/hash for a new game and wait until ready where possible. */
