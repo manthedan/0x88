@@ -193,6 +193,58 @@ test('runtime fallback destroys ORT when creation completes after destruction', 
   assert.equal(fallbackDestroyed, true);
 });
 
+test('runtime fallback retries ORT creation after a failed attempt instead of caching the rejection', async () => {
+  let primaryEvaluations = 0;
+  let primaryDestroys = 0;
+  let fallbackCreates = 0;
+  const evaluator = new RuntimeFallbackEvaluator(
+    {
+      async evaluate() {
+        primaryEvaluations += 1;
+        throw new Error('device lost');
+      },
+      destroy() {
+        primaryDestroys += 1;
+      },
+    },
+    async () => {
+      fallbackCreates += 1;
+      if (fallbackCreates === 1) throw new Error('ORT session failed to load');
+      return { evaluate: async () => ({ policy: new Map(), wdl: [0, 1, 0] }) };
+    },
+    { source: 'test' },
+  );
+  const board = parseFen(START_FEN);
+  await assert.rejects(evaluator.evaluate(board), /ORT session failed to load/);
+  assert.deepEqual((await evaluator.evaluate(board)).wdl, [0, 1, 0]);
+  assert.deepEqual((await evaluator.evaluateBatch([board, board])).length, 2);
+  assert.equal(fallbackCreates, 2);
+  assert.equal(primaryEvaluations, 1, 'the destroyed primary is not retried');
+  assert.equal(primaryDestroys, 1);
+});
+
+test('runtime fallback batch path also retries a failed ORT creation', async () => {
+  let fallbackCreates = 0;
+  const evaluator = new RuntimeFallbackEvaluator(
+    {
+      evaluate: async () => {
+        throw new Error('device lost');
+      },
+      destroy() {},
+    },
+    async () => {
+      fallbackCreates += 1;
+      if (fallbackCreates === 1) throw new Error('ORT session failed to load');
+      return { evaluate: async () => ({ policy: new Map(), wdl: [0, 1, 0] }) };
+    },
+    { source: 'test' },
+  );
+  const boards = [parseFen(START_FEN)];
+  await assert.rejects(evaluator.evaluateBatch(boards), /ORT session failed to load/);
+  assert.deepEqual((await evaluator.evaluateBatch(boards))[0].wdl, [0, 1, 0]);
+  assert.equal(fallbackCreates, 2);
+});
+
 test('SquareFormer evaluator releases its ORT session once', async () => {
   let releases = 0;
   const evaluator = new SquareFormerEvaluator(

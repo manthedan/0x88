@@ -35,8 +35,8 @@ export class RuntimeFallbackEvaluator implements Evaluator {
   private async fallback(error: unknown): Promise<Evaluator> {
     if (isAbortError(error)) throw error;
     if (this.disposed) throw evaluatorAbortError('Centipawn runtime evaluator is destroyed');
-    this.primaryFailed = true;
-    if (!this.fallbackPromise) {
+    if (!this.primaryFailed) {
+      this.primaryFailed = true;
       const fallbackReason = error instanceof Error ? error.message : String(error);
       console.warn('TVMJS WebGPU runtime failed; switching Centipawn to ORT.', { fallbackReason });
       destroyEvaluator(this.primary);
@@ -45,10 +45,22 @@ export class RuntimeFallbackEvaluator implements Evaluator {
         resolvedRuntime: 'tvmjs-webgpu-fallback-ort',
         fallbackReason,
       });
-      this.fallbackPromise = this.createFallback().then((fallback) => {
+    }
+    return this.fallbackEvaluator();
+  }
+
+  private fallbackEvaluator(): Promise<Evaluator> {
+    if (!this.fallbackPromise) {
+      const creation = this.createFallback().then((fallback) => {
         if (!this.disposed) return fallback;
         destroyEvaluator(fallback);
         throw evaluatorAbortError('Centipawn runtime evaluator is destroyed');
+      });
+      this.fallbackPromise = creation;
+      // The primary is already destroyed, so a failed creation must not be
+      // cached: the next evaluation retries it instead of rethrowing forever.
+      creation.catch(() => {
+        if (this.fallbackPromise === creation) this.fallbackPromise = undefined;
       });
     }
     return this.fallbackPromise;
@@ -56,7 +68,7 @@ export class RuntimeFallbackEvaluator implements Evaluator {
 
   async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {
     if (this.disposed) throw evaluatorAbortError('Centipawn runtime evaluator is destroyed');
-    if (this.primaryFailed) return (await this.fallbackPromise!).evaluate(board, context);
+    if (this.primaryFailed) return (await this.fallbackEvaluator()).evaluate(board, context);
     try {
       return await this.primary.evaluate(board, context);
     } catch (error) {
@@ -67,7 +79,7 @@ export class RuntimeFallbackEvaluator implements Evaluator {
   async evaluateBatch(boards: BoardState[], contexts: EvaluationContext[] = []): Promise<Evaluation[]> {
     if (this.disposed) throw evaluatorAbortError('Centipawn runtime evaluator is destroyed');
     if (this.primaryFailed) {
-      const fallback = await this.fallbackPromise!;
+      const fallback = await this.fallbackEvaluator();
       return fallback.evaluateBatch
         ? await fallback.evaluateBatch(boards, contexts)
         : await Promise.all(boards.map((board, index) => fallback.evaluate(board, contexts[index])));
