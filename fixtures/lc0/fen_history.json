@@ -184,5 +184,70 @@
       "c1g5"
     ],
     "finalFen": "r1bqk2r/ppp2ppp/2np1n2/2b1p1B1/2B1P3/3P1N2/PPP2PPP/RN1Q1RK1 b kq - 1 6"
+  },
+  {
+    "id": "startpos-uncapturable-ep-threefold",
+    "description": "After 1.e4 the e3 square is not capturable, so the position after 1.e4 recurs (threefold) after the knight shuffles.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": [
+      "e2e4",
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1",
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1"
+    ],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 8 5"
+  },
+  {
+    "id": "startpos-capturable-ep-no-repeat",
+    "description": "After ...d5 the d6 square is capturable by e5, so that position is distinct from the later identical boards.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": [
+      "e2e4",
+      "g8f6",
+      "e4e5",
+      "d7d5",
+      "g1f3",
+      "b8c6",
+      "f3g1",
+      "c6b8",
+      "g1f3",
+      "b8c6",
+      "f3g1",
+      "c6b8"
+    ],
+    "finalFen": "rnbqkb1r/ppp1pppp/5n2/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq - 8 7"
+  },
+  {
+    "id": "fen-root-uncapturable-ep-recurs",
+    "description": "A FEN root keeps its written en-passant square (lc0 SetFromFen), so the identical board four plies later does not repeat it.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+    "moves": [
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1"
+    ],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 4 3"
+  },
+  {
+    "id": "fen-root-uncapturable-ep-recurs-twice",
+    "description": "As above, eight plies later: only the two move-generated occurrences repeat each other.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+    "moves": [
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1",
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1"
+    ],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 8 5"
   }
 ]

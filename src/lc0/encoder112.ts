@@ -1,5 +1,5 @@
 import { type BoardState, type Color, type PieceRole, parseFen, START_FEN } from '../chess/board.ts';
-import { repetitionKey } from '../chess/drawRules.ts';
+import { repetitionKey, rootRepetitionKey } from '../chess/drawRules.ts';
 
 export const LC0_CLASSICAL_112_PLANES = 112;
 export const LC0_HISTORY_PLANES = 8;
@@ -147,7 +147,7 @@ export function encodeLc0Classical112(boardOrFen: Lc0EncoderInput, options?: { h
 
   // Repetition flags come from real positions only; synthetic slots repeat the
   // oldest position, which has no earlier position to repeat.
-  const historyKeys = explicitHistory ? historyBoards.map(repetitionKey) : [];
+  const historyKeys = explicitHistory ? historyBoards.map((b, i) => (i === historyBoards.length - 1 ? rootRepetitionKey(b) : repetitionKey(b))) : [];
   const realSlots = historyBoards.length;
 
   // LC0 EncodePositionForNN: once the real history runs out it keeps encoding

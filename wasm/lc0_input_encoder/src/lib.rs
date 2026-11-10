@@ -284,8 +284,24 @@ fn encode_board_pieces(board: &Board, history_slot: usize, perspective_turn: u8)
     }
 }
 
-fn same_repetition_key(a: &Board, b: &Board) -> bool {
-    if a.turn != b.turn || a.castling != b.castling || a.ep != b.ep { return false; }
+// An en-passant square only distinguishes positions when a pawn of the side to
+// move could capture onto it (LC0 board.cc only records it then).
+fn capturable_ep(board: &Board) -> i16 {
+    if board.ep < 0 { return -1; }
+    let ep = board.ep as usize;
+    let (capturer_rank, capturer) = if board.turn == 0 { (rank_of(ep).wrapping_sub(1), WP) } else { (rank_of(ep) + 1, BP) };
+    if capturer_rank >= 8 { return -1; }
+    let f = file_of(ep);
+    if f > 0 && board.squares[f - 1 + capturer_rank * 8] == capturer { return board.ep; }
+    if f < 7 && board.squares[f + 1 + capturer_rank * 8] == capturer { return board.ep; }
+    -1
+}
+
+// `a` is an earlier position; the history root (index 0) keeps its en-passant
+// square as given, like LC0's SetFromFen for the `position fen` root.
+fn same_repetition_key(a: &Board, a_is_root: bool, b: &Board) -> bool {
+    let a_ep = if a_is_root { a.ep } else { capturable_ep(a) };
+    if a.turn != b.turn || a.castling != b.castling || a_ep != capturable_ep(b) { return false; }
     let mut sq = 0usize;
     while sq < 64 {
         if a.squares[sq] != b.squares[sq] { return false; }
@@ -338,7 +354,7 @@ fn encode_history(boards: &[Board], fen_only_fill: bool) -> Result<(), i32> {
             let source_idx = boards.len() - 1 - i;
             let mut j = 0usize;
             while j < source_idx {
-                if same_repetition_key(&boards[j], &history[i]) {
+                if same_repetition_key(&boards[j], j == 0, &history[i]) {
                     set_all(i * PLANES_PER_HISTORY + 12, 1.0);
                     break;
                 }
