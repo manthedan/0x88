@@ -191,7 +191,7 @@ test('Analysis terminology and mobile paths match the workspace without changing
 
 test('subsection search containers exclude adjacent topics', () => {
   const containerNames = source
-    .match(/const CONTAINERS = '([^']+)'/)[1]
+    .match(/const CONTAINERS =\s*'([^']+)'/)[1]
     .split(', ')
     .map((name) => name.slice(1));
   for (const [id, className, excluded, included] of [
