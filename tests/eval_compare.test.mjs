@@ -54,6 +54,16 @@ test('missing, old, widely separated and future results are not comparable', () 
     assert.equal(compareArenaEvals(scores, fen(32)).comparison, undefined);
   }
 });
+test('only a completed not-comparable pair dims its stale lanes', () => {
+  assert.deepEqual(compareArenaEvals([score(30), score(31)], fen(32)).stale, [false, false]);
+  assert.deepEqual(compareArenaEvals([score(26), score(31)], fen(32)).stale, [true, false]);
+  assert.deepEqual(compareArenaEvals([score(30), score(25)], fen(32)).stale, [false, true]);
+  assert.deepEqual(compareArenaEvals([score(27), score(28)], fen(32)).stale, [true, true]);
+  assert.deepEqual(compareArenaEvals([score(32), score(33)], fen(32)).stale, [false, true]);
+  assert.deepEqual(compareArenaEvals([score(26), {}], fen(32)).stale, [false, false]);
+  const unrelated = { ...score(31), fen: fen(31, '8/8/8/8/8/8/K7/7k') };
+  assert.deepEqual(compareArenaEvals([score(31), unrelated], fen(32)).stale, [true, true]);
+});
 test('same-ply results require matching positions; current FEN mismatch is stale', () => {
   const other = { fen: fen(31, '8/8/8/8/8/8/K7/7k'), scoreCp: 50 };
   assert.equal(compareArenaEvals([score(31), other], fen(32)).fair, false);

@@ -17,7 +17,8 @@ export function evalMarkerMarkup(ticks: readonly EvalMarker[], selectedId: strin
   const selected = ordered.find((tick) => tick.id === selectedId);
   const comparison = compareEvals(ordered);
   const label = (tick: EvalMarker, chosen = false) => `<span class="eval-engine-label${chosen ? ' selected' : ''}" style="--pos:${evalPercent(tick)}%;--tick-color:${htmlEscape(tick.color)}" aria-hidden="true">${htmlEscape(evalEngineTag(tick.name))}</span>`;
-  const labels = selected ? [label(selected, true)] : [];
+  // On phones the source chip already carries the chosen engine's identity.
+  const labels = selected && !layout.mobile ? [label(selected, true)] : [];
   // Only range ends get secondary text, and only with a full 14px of clear space
   // between labels. No displacement: every label stays at its actual value.
   if (comparison?.meaningful && selected) {

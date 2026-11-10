@@ -501,18 +501,23 @@ onMount(() => {
   .eval-spread-label[hidden], .eval-spread[hidden]{display:none}
   .eval-end{display:none}
   .eval-ticks{position:absolute; inset:0; pointer-events:none; z-index:3}
-  .eval-ticks :global(.eval-tick){position:absolute; left:-2px; right:0; bottom:var(--pos); height:2px; transform:translateY(50%); background:var(--tick-color); outline:.5px solid #f4f1e8}
+  .eval-ticks :global(.eval-tick){position:absolute; left:-2px; right:0; bottom:var(--pos); height:3px; transform:translateY(50%); background:var(--tick-color); outline:.5px solid #746c60}
   .eval-ticks :global(.eval-engine-label){position:absolute; right:calc(100% + 12px); bottom:clamp(6px,var(--pos),calc(100% - 6px)); transform:translateY(50%); color:color-mix(in srgb,var(--tick-color) 65%,var(--ink)); font:650 10px/12px var(--mono); font-variant-numeric:slashed-zero}
   .eval-ticks :global(.eval-engine-label.selected){font-weight:800}
-  .eval-ticks :global(.eval-chosen-mark){position:absolute; left:-3px; right:-1px; bottom:var(--pos); height:4px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #f4f1e8; box-shadow:0 0 0 1.5px #29251d; z-index:4}
+  .eval-ticks :global(.eval-chosen-mark){position:absolute; left:-3px; right:-1px; bottom:var(--pos); height:4px; transform:translateY(50%); background:var(--tick-color); outline:1px solid #746c60; z-index:4}
   .eval-ticks :global(.eval-chosen-mark)::before{content:''; position:absolute; right:100%; top:-3px; border:5px solid transparent; border-left-color:var(--tick-color); transform:translateX(2px)}
-  .eval-details{--details-top:140px; --details-left:40px; position:fixed; inset: auto; top: max(8px, calc(50dvh - 100px)); left:min(var(--details-left,40px),calc(100vw - 330px)); margin:0; width:min(300px,calc(100vw - 24px)); max-height:240px; padding:10px; overflow:auto; background:var(--panel); color:var(--ink); border:1px solid var(--border-input); border-radius:9px; box-shadow:0 12px 44px #0006}
-  .eval-details header{display:flex; align-items:center; justify-content:space-between; gap:12px}
+  .eval-details{--details-top:140px; --details-left:40px; position:fixed; inset: auto; top:50dvh; transform:translateY(-50%); left:min(var(--details-left,40px),calc(100vw - 330px)); margin:0; width:min(300px,calc(100vw - 24px)); max-height:min(480px,calc(100dvh - 16px)); padding:10px; overflow:hidden; background:var(--panel); color:var(--ink); border:1px solid var(--border-input); border-radius:9px; box-shadow:0 12px 44px #0006}
+  .eval-details:popover-open{display:flex; flex-direction:column}
+  .eval-details header{display:flex; flex-shrink:0; align-items:center; justify-content:space-between; gap:12px}
+  #evalDetailList{min-height:0; overflow-y:auto; scrollbar-gutter:stable; scrollbar-color:var(--muted) var(--panel-inset)}
+  #evalDetailList::-webkit-scrollbar{width:8px}
+  #evalDetailList::-webkit-scrollbar-thumb{background:var(--muted); border-radius:4px}
+  #evalDetailList::-webkit-scrollbar-track{background:var(--panel-inset)}
   .eval-details h2{margin:0; color:var(--ink); font:650 16px var(--sans); text-transform:none; letter-spacing:0}
   .eval-details header button{height:32px; width:32px; padding:0; font-size:22px}
-  .eval-details p{margin:8px 0}
+  .eval-details p{flex-shrink:0; margin:8px 0}
   .eval-details :global(.eval-detail-row){display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--rule)}
-  .eval-details :global(.eval-detail-row strong){display:block; font:600 13px var(--sans)}
+  .eval-details :global(.eval-detail-row strong){display:block; overflow-wrap:anywhere; font:600 13px var(--sans)}
   .eval-details :global(.eval-detail-row small){display:block; margin-top:2px; color:var(--muted); font:400 12px/1.4 var(--sans)}
   .eval-details :global(.eval-detail-row>b){font:700 14px var(--mono)}
   .eval-details :global(.eval-detail-tag){display:grid; place-items:center; height:24px; border-radius:4px; background:var(--engine-color); color:#fff; font:700 10px var(--mono); font-variant-numeric:slashed-zero}
@@ -1075,7 +1080,7 @@ onMount(() => {
     .copy-button{min-width:0}
   }
   @media (max-width:600px){
-    .analysis-workspace{padding:5px 4px 32px; gap:8px}
+    .analysis-workspace{padding:6px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
     /* The full-width board no longer pays for marker/counter gutters. */
     .board-readout{min-height:44px; padding:0; gap:4px}
@@ -1089,23 +1094,24 @@ onMount(() => {
     .board-wrap{grid-template-columns:1fr; gap:0}
     /* Share the existing header row: a real 44px target, a 16px track, and no
        width/height tax on the board. The source menu remains independent. */
-    .evalbar{position:absolute; right:12px; top:-44px; width:calc(100% - 252px); height:44px; margin:0; border:0; background:transparent}
+    .evalbar{position:absolute; right:12px; top:-44px; width:calc(100% - 220px); height:44px; margin:0; border:0; background:transparent}
     .evalbar:hover{background:transparent}
     .evalbar::before{content:''; position:absolute; inset:14px 0; background:#2b2722; border:1px solid #8a8172; border-radius:3px}
     .board-wrap>.board-shell{width:100%; justify-self:center}
     .eval-end{display:block; position:absolute; top:50%; transform:translateY(-50%); color:var(--muted); font:650 10px/12px var(--sans)}
-    .eval-end.w{left:-44px}
+    .eval-end.w{left:-12px}
     .eval-end.b{right:-12px}
     .evalbar .white{top:15px; bottom:15px; left:1px; right:auto; height:auto; width:calc(var(--eval-pct) - 1px)}
     .evalbar .mid{top:15px; bottom:15px; left:50%; width:1px; height:auto}
     .eval-ticks{top:15px; bottom:15px}
-    .eval-spread{left:var(--low); bottom:auto; top:7px; width:calc(var(--high) - var(--low)); height:4px; border-width:2px 2px 0}
-    .eval-ticks :global(.eval-tick){left:var(--pos); right:auto; bottom:0; top:-2px; width:2px; height:auto; transform:translateX(-50%)}
+    .eval-spread{left:var(--low); bottom:auto; top:0; width:calc(var(--high) - var(--low)); height:4px; border-width:2px 2px 0}
+    .eval-ticks :global(.eval-tick){left:var(--pos); right:auto; bottom:0; top:-2px; width:3px; height:auto; transform:translateX(-50%)}
     .eval-ticks :global(.eval-engine-label){left:clamp(12px,var(--pos),calc(100% - 12px)); right:auto; bottom:auto; top:calc(100% + 1px); transform:translateX(-50%); font-size:9px; line-height:10px}
-    .eval-ticks :global(.eval-engine-label.selected){left:-8px; top:50%; transform:translate(-100%,-50%); font-size:10px; line-height:12px}
     .eval-ticks :global(.eval-chosen-mark){left:var(--pos); right:auto; bottom:-1px; top:-2px; width:4px; height:auto; transform:translateX(-50%)}
     .eval-ticks :global(.eval-chosen-mark)::before{right:auto; left:-3px; top:-7px; border:5px solid transparent; border-top-color:var(--tick-color); transform:none}
-    .eval-details{top:var(--details-top,140px); left:8px; right:8px; width:auto; max-height:190px; padding:8px 10px}
+    .eval-details{top:var(--details-top,140px); transform:none; left:8px; right:8px; width:auto; max-height:190px; padding:8px 10px; overflow:auto}
+    .eval-details:popover-open{display:block}
+    #evalDetailList{overflow:visible; scrollbar-gutter:auto}
     @supports (top:anchor(bottom)){
       .eval-details{position-anchor:--eval-rail; top:calc(anchor(bottom) + 6px)}
     }

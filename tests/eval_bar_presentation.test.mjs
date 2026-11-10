@@ -18,10 +18,11 @@ test('every engine keeps a plain tick even at exactly the same value', () => {
   assert.equal((html.match(/class="eval-engine-label/g) ?? []).length, 1);
   assert.match(html, /class="eval-chosen-mark"[^>]*><\/span>$/);
 });
-test('selected label is always present, including one-engine mode', () => {
+test('desktop retains the selected label; mobile uses the source chip instead', () => {
   for (const layout of [desktop, mobile]) {
     const html = evalMarkerMarkup([marker('Lc0 Small', 20)], 'Lc0 Small', layout);
-    assert.match(html, /class="eval-engine-label selected"[^>]*>Lc0</);
+    if (layout.mobile) assert.doesNotMatch(html, /eval-engine-label/);
+    else assert.match(html, /class="eval-engine-label selected"[^>]*>Lc0</);
     assert.match(html, /eval-chosen-mark/);
   }
 });

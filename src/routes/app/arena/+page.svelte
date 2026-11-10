@@ -49,7 +49,7 @@ onMount(() => {
         {#each ['w', 'b'] as side}
           <div class="eval-lane unavailable" data-side={side}><div class="eval-fill"></div><span class="eval-cap"></span><span class="eval-lane-label"></span></div>
         {/each}
-        <div class="eval-midline"></div><span class="eval-gap" hidden></span><span class="eval-end w" aria-hidden="true">W</span><span class="eval-end b" aria-hidden="true">B</span>
+        <div class="eval-midline"></div><span class="eval-end w" aria-hidden="true">W</span><span class="eval-end b" aria-hidden="true">B</span>
       </div>
       <div class="board-shell"><div id="ground"></div></div>
     </div>
@@ -316,22 +316,22 @@ onMount(() => {
   .board-shell{position:relative}
   .arena-workspace :global(#ground coords){font-size:12px; font-weight:700; opacity:1}
   .arena-eval-bar{
-    --pct:0%; --low:0%; --high:100%;
+    --pct:0%;
     position:relative; display:grid; grid-template-columns:1fr 1fr; gap:2px;
     border:1px solid var(--border-input); border-radius:4px; background:var(--rule-strong);
   }
   .arena-eval-bar .eval-lane{position:relative; background:var(--eval-dark); border-radius:2px}
   .arena-eval-bar .eval-lane.unavailable{background:var(--panel-inset)}
+  .arena-eval-bar .eval-lane:global(.stale){opacity:.4}
   .arena-eval-bar .eval-fill{position:absolute; inset:auto 0 0; height:var(--pct); background:var(--eval-light); border-radius:2px; transition:height .18s ease, width .18s ease}
   .arena-eval-bar .eval-cap{position:absolute; z-index:2; inset:0 0 auto; height:3px; background:var(--eng); transition:opacity .18s ease}
   .arena-eval-bar .eval-lane-label{position:absolute; z-index:2; top:5px; left:0; right:0; background:var(--panel); color:color-mix(in srgb,var(--eng) 65%,var(--ink)); text-align:center; font:700 10px/14px var(--mono); font-variant-numeric:slashed-zero}
   .arena-eval-bar .eval-lane.unavailable :is(.eval-cap,.eval-fill){display:none}
   .arena-eval-bar .eval-lane.unavailable .eval-lane-label{color:var(--muted)}
   .arena-eval-bar :global(.eval-midline){position:absolute; z-index:1; left:0; right:0; top:50%; height:1px; background:#a77a23}
-  .arena-eval-bar .eval-lane:not(.unavailable)::after{content:''; position:absolute; z-index:2; left:0; right:0; bottom:var(--pct); height:1px; background:var(--eng)}
+  /* The coloured edge belongs to the moving fill, so they cannot diverge. */
+  .arena-eval-bar .eval-fill::after{content:''; position:absolute; z-index:2; left:0; right:0; top:0; height:1px; background:var(--eng)}
   .eval-end{display:none}
-  .arena-eval-bar :global(.eval-gap){position:absolute; z-index:4; left:calc(50% - 4px); width:8px; bottom:var(--low); height:calc(var(--high) - var(--low)); border:solid var(--warn); border-width:2px 0; background:color-mix(in srgb, var(--warn) 45%, transparent)}
-  .arena-eval-bar .eval-gap[hidden]{display:none}
   .eval-source{display:flex; align-items:center; flex-wrap:wrap; gap:4px 10px; min-width:0; min-height:18px; color:var(--muted); font:600 13px/18px var(--sans)}
   .eval-source:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
   .eval-source :global(.eval-reading){display:flex; align-items:baseline; gap:5px; min-width:0; color:color-mix(in srgb, var(--eng) 65%, var(--ink))}
@@ -688,11 +688,10 @@ onMount(() => {
     .arena-eval-bar .eval-cap{inset:0 auto 0 0; width:4px; height:auto}
     .arena-eval-bar .eval-lane-label{top:50%; left:-33px; right:auto; width:28px; transform:translateY(-50%); background:none; font-size:10px; line-height:10px; font-family:var(--mono); font-variant-numeric:slashed-zero}
     .arena-eval-bar :global(.eval-midline){inset:0 auto 0 50%; width:1px; height:auto}
-    .arena-eval-bar .eval-lane:not(.unavailable)::after{left:var(--pct); right:auto; top:0; bottom:0; width:1px; height:auto}
+    .arena-eval-bar .eval-fill::after{left:auto; right:0; top:0; bottom:0; width:1px; height:auto}
     .eval-end{display:block; position:absolute; top:50%; transform:translateY(-50%); color:var(--muted); font:650 10px/12px var(--sans)}
     .eval-end.w{left:-44px}
     .eval-end.b{right:-12px}
-    .arena-eval-bar :global(.eval-gap){left:var(--low); width:calc(var(--high) - var(--low)); bottom:4px; height:2px; border-width:0 2px}
     .eval-source{gap:8px; min-height:18px; align-items:center; line-height:17px}
     #whiteSideLabel{order:1}
     .eval-source :global(.eval-reading){gap:4px; flex-shrink:0}
