@@ -1080,7 +1080,7 @@ onMount(() => {
     .copy-button{min-width:0}
   }
   @media (max-width:600px){
-    .analysis-workspace{padding:5px 4px 32px; gap:8px}
+    .analysis-workspace{padding:6px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
     /* The full-width board no longer pays for marker/counter gutters. */
     .board-readout{min-height:44px; padding:0; gap:4px}
