@@ -51,6 +51,7 @@ interface WholeModelTensor {
   copyFromRawBytes(bytes: Uint8Array): void;
   copyFrom(other: WholeModelTensor): void;
   toRawBytes(): Uint8Array;
+  dispose(): void;
 }
 
 interface WholeModelModule {
@@ -64,6 +65,8 @@ interface WholeModelVm {
 interface WholeModelRuntime {
   beginScope(): void;
   endScope(): void;
+  detachFromCurrentScope<T>(obj: T): T;
+  dispose(): void;
   cpu(): unknown;
   webgpu(): unknown;
   initWebGPU(device: unknown): void;
@@ -96,6 +99,8 @@ interface SubmittedBatch {
   fens: string[];
   preparedLegalMoves: Array<ReturnType<typeof currentBoardAndFen>['preparedLegalMoves']>;
   staged: Array<WholeModelTensor | null>;
+  /** Tensors detached from the submit scope; released by releaseBatch once readback is decoded. */
+  owned: WholeModelTensor[];
   device: { sync(): Promise<void> };
   timing: Record<string, number>;
 }
@@ -213,28 +218,35 @@ function tensorCacheUrl(manifest: RuntimeManifest, baseUrl: URL): string | undef
   return checkedStagedRuntimeUrl(path, baseUrl, 'tensor cache').toString();
 }
 
-function batchTimingFromRowTiming(timing: unknown): Record<string, unknown> | undefined {
-  if (!timing || typeof timing !== 'object') return undefined;
-  const { legalPriorsMs: _legalPriorsMs, batchPosition: _batchPosition, ...batchTiming } = timing as Record<string, unknown>;
-  return batchTiming;
-}
-
 let batchEvalSequence = 0;
 
 export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
-  readonly evaluationTimings: Record<string, unknown>[] = [];
-  readonly positionTimings: unknown[] = [];
   readonly tensorCacheInfo?: { url: string; metadata: unknown };
   readonly startupTimings: Record<string, number>;
+  private disposed = false;
+  private readonly inFlight = new Set<Promise<unknown>>();
+  // Explicit fields rather than constructor parameter properties so the module
+  // loads under Node's strip-only TypeScript in unit tests.
+  private readonly runtime: WholeModelRuntime;
+  private readonly device: { destroy?: () => void } | null;
+  private readonly vmMod: WholeModelModule;
+  private readonly physicalBatchSize: number;
+  private readonly detachedParams: WholeModelTensor[];
 
   private constructor(
-    private readonly runtime: WholeModelRuntime,
-    private readonly vmMod: WholeModelModule,
-    private readonly physicalBatchSize: number,
-    private readonly detachedParams: WholeModelTensor[],
+    runtime: WholeModelRuntime,
+    device: { destroy?: () => void } | null,
+    vmMod: WholeModelModule,
+    physicalBatchSize: number,
+    detachedParams: WholeModelTensor[],
     startupTimings: Record<string, number>,
     tensorCacheInfo?: { url: string; metadata: unknown },
   ) {
+    this.runtime = runtime;
+    this.device = device;
+    this.vmMod = vmMod;
+    this.physicalBatchSize = physicalBatchSize;
+    this.detachedParams = detachedParams;
     this.startupTimings = startupTimings;
     this.tensorCacheInfo = tensorCacheInfo;
   }
@@ -279,11 +291,13 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const requiredFeatures = ['shader-f16'];
     for (const feature of requiredFeatures) if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
     const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
+    let ownedRuntime: WholeModelRuntime | undefined;
     try {
       options.signal?.throwIfAborted();
       const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model, options.signal));
       const runtime = await timed('runtimeInstantiateMs', () => api.instantiate(wasmBytes, api.createPolyfillWASI(), options.logger));
       options.signal?.throwIfAborted();
+      ownedRuntime = runtime;
       timedSync('runtimeInitWebGpuMs', () => runtime.initWebGPU(device));
       runtime.beginScope();
       try {
@@ -312,27 +326,40 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
           }
           if (!detachedParams.length) throw new Error('detached tensor-cache manifest but no param_N tensors loaded');
         }
-        return new Lc0WholeOnnxWebgpuEvaluator(runtime, vmMod, model.batch, detachedParams, startupTimings, tensorCacheInfo);
+        return new Lc0WholeOnnxWebgpuEvaluator(
+          runtime,
+          device as { destroy?: () => void } | null,
+          vmMod,
+          model.batch,
+          detachedParams,
+          startupTimings,
+          tensorCacheInfo,
+        );
       } catch (error) {
         runtime.endScope();
         throw error;
       }
     } catch (error) {
-      // Nothing else owns this device until create() returns; release it on
-      // any failure, including cancellation, so a superseded load frees GPU memory.
+      // Nothing else owns this runtime or device until create() returns; release
+      // them on any failure, including cancellation, so a superseded load frees
+      // wasm and GPU memory.
+      try {
+        ownedRuntime?.dispose();
+      } catch {
+        /* best effort */
+      }
       (device as { destroy?: () => void } | null)?.destroy?.();
       throw error;
     }
   }
 
   async evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
-    return (await this.remember(await this.runBatchEvaluation([input])))[0];
+    return (await this.runBatchEvaluation([input]))[0];
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     const out: Lc0Evaluation[] = [];
-    for (let i = 0; i < inputs.length; i += this.physicalBatchSize)
-      out.push(...(await this.remember(await this.runBatchEvaluation(inputs.slice(i, i + this.physicalBatchSize)))));
+    for (let i = 0; i < inputs.length; i += this.physicalBatchSize) out.push(...(await this.runBatchEvaluation(inputs.slice(i, i + this.physicalBatchSize))));
     return out;
   }
 
@@ -343,23 +370,70 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     });
     const chunkRows = await this.runBatchSequence(chunks.map((chunk) => chunk.inputs));
     const out = batches.map((): Lc0Evaluation[] => []);
-    for (let i = 0; i < chunkRows.length; i++) out[chunks[i].batchIndex].push(...(await this.remember(chunkRows[i])));
+    for (let i = 0; i < chunkRows.length; i++) out[chunks[i].batchIndex].push(...chunkRows[i]);
     return out;
   }
 
+  /**
+   * Releases the runtime once every in-flight evaluation has settled: the
+   * create()-time scope (VM, pipelines, detached params), the wasm instance and
+   * the GPUDevice this evaluator owns. Evaluations started afterwards reject.
+   */
   dispose(): void {
-    this.runtime.endScope();
+    if (this.disposed) return;
+    this.disposed = true;
+    const release = () => {
+      try {
+        this.runtime.endScope();
+      } catch {
+        /* already unwound */
+      }
+      try {
+        this.runtime.dispose();
+      } catch {
+        /* best effort */
+      }
+      try {
+        this.device?.destroy?.();
+      } catch {
+        /* best effort */
+      }
+    };
+    void Promise.allSettled([...this.inFlight]).then(release);
   }
 
-  private remember(rows: Lc0Evaluation[]): Lc0Evaluation[] {
-    const batchTiming = batchTimingFromRowTiming(rows[0]?.timing);
-    if (batchTiming) this.evaluationTimings.push(batchTiming);
-    for (const row of rows) this.positionTimings.push(row.timing);
-    return rows;
+  private track<T>(run: () => Promise<T>): Promise<T> {
+    if (this.disposed) return Promise.reject(new Error('Whole-model evaluator is disposed'));
+    const promise = run();
+    this.inFlight.add(promise);
+    const settle = () => this.inFlight.delete(promise);
+    promise.then(settle, settle);
+    return promise;
   }
 
+  private releaseBatch(submitted: SubmittedBatch): void {
+    for (const tensor of submitted.owned) tensor.dispose();
+    submitted.owned.length = 0;
+  }
+
+  /**
+   * Encodes and enqueues one physical batch. Every TVM object it allocates
+   * (packed funcs, shape tuples, tensors) lands in a scope opened and closed
+   * synchronously here, so concurrent evaluations never interleave the
+   * runtime's scope stack. The tensors the pending readback still writes into
+   * or reads from are detached and handed back in `owned`.
+   */
   private submitBatch(inputs: Lc0EvaluatorInput[]): SubmittedBatch {
     if (!inputs.length) throw new Error('cannot submit empty batch');
+    this.runtime.beginScope();
+    try {
+      return this.submitBatchInScope(inputs);
+    } finally {
+      this.runtime.endScope();
+    }
+  }
+
+  private submitBatchInScope(inputs: Lc0EvaluatorInput[]): SubmittedBatch {
     const setInput = this.vmMod.getFunction('set_input');
     const invokeStateful = this.vmMod.getFunction('invoke_stateful');
     const getOutput = this.vmMod.getFunction('get_output');
@@ -409,11 +483,18 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       return cpu;
     });
     const outputCopyEnqueueMs = performance.now() - phaseStarted;
+    // The CPU staging tensors receive the GPU readback asynchronously (at
+    // device.sync()), so they must outlive this scope; the input and output
+    // handles are kept alongside them so nothing the queued work touches is
+    // released before finishBatch has decoded the results.
+    const owned = [input, ...outs, ...staged.filter((tensor): tensor is WholeModelTensor => tensor !== null)];
+    for (const tensor of owned) this.runtime.detachFromCurrentScope(tensor);
     return {
       boards,
       fens,
       preparedLegalMoves,
       staged,
+      owned,
       device: outs[0].device,
       timing: { encodeMs, inputConvertMs, inputTensorAllocMs, inputUploadMs, setInputMs, tvmInvokeMs, outputHandleMs, outputCopyEnqueueMs },
     };
@@ -458,32 +539,45 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
 
   private async runBatchEvaluation(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     if (!inputs.length) return [];
-    const submitted = this.submitBatch(inputs);
-    const syncStarted = performance.now();
-    await submitted.device.sync();
-    const outputReadbackMs = performance.now() - syncStarted;
-    return this.finishBatch(submitted, { timingScope: 'whole-model-batch-invocation', outputReadbackMs });
+    return this.track(async () => {
+      const submitted = this.submitBatch(inputs);
+      try {
+        const syncStarted = performance.now();
+        await submitted.device.sync();
+        const outputReadbackMs = performance.now() - syncStarted;
+        return this.finishBatch(submitted, { timingScope: 'whole-model-batch-invocation', outputReadbackMs });
+      } finally {
+        this.releaseBatch(submitted);
+      }
+    });
   }
 
-  private async runBatchSequence(batchesInputs: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
-    const submitted = batchesInputs.map((inputs) => (inputs.length ? this.submitBatch(inputs) : null));
-    const device = submitted.find((batch): batch is SubmittedBatch => !!batch)?.device;
-    let syncMs = 0;
-    if (device) {
-      const syncStarted = performance.now();
-      await device.sync();
-      syncMs = performance.now() - syncStarted;
-    }
-    const inFlight = submitted.filter(Boolean).length || 1;
-    return submitted.map((batch) =>
-      batch
-        ? this.finishBatch(batch, {
-            timingScope: 'whole-model-pipelined-batch',
-            outputReadbackMs: syncMs / inFlight,
-            pipelineFlushBatches: inFlight,
-            pipelineFlushSyncMs: syncMs,
-          })
-        : [],
-    );
+  private runBatchSequence(batchesInputs: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
+    return this.track(async () => {
+      const submitted: Array<SubmittedBatch | null> = [];
+      try {
+        for (const inputs of batchesInputs) submitted.push(inputs.length ? this.submitBatch(inputs) : null);
+        const device = submitted.find((batch): batch is SubmittedBatch => !!batch)?.device;
+        let syncMs = 0;
+        if (device) {
+          const syncStarted = performance.now();
+          await device.sync();
+          syncMs = performance.now() - syncStarted;
+        }
+        const inFlight = submitted.filter(Boolean).length || 1;
+        return submitted.map((batch) =>
+          batch
+            ? this.finishBatch(batch, {
+                timingScope: 'whole-model-pipelined-batch',
+                outputReadbackMs: syncMs / inFlight,
+                pipelineFlushBatches: inFlight,
+                pipelineFlushSyncMs: syncMs,
+              })
+            : [],
+        );
+      } finally {
+        for (const batch of submitted) if (batch) this.releaseBatch(batch);
+      }
+    });
   }
 }
