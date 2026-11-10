@@ -111,6 +111,32 @@ test('equal moves with different PGN metadata preserve the complete original ana
   assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), older, 'Header order and current selection do not change the analysis');
 });
 
+test('optional equality failure backs up the saved raw snapshot and accepts an oversized linked PGN', () => {
+  const store = storage();
+  const original = envelope('analysis', analysisData());
+  store.setItem(workspaceStorageKey('analysis'), original);
+  // Legal repeating moves exceed autosave's node limit without making the PGN invalid.
+  const pgn = Array.from({ length: 1251 }, (_, i) => `${i * 2 + 1}. Nf3 Nf6 ${i * 2 + 2}. Ng1 Ng8`).join(' ') + ' *';
+  const replacement = parsePgnGame(pgn);
+  assert.throws(() => serializeTree(replacement.tree), /Tree too large/);
+  assert.equal(preservePreviousAnalysis(store, replacement.tree, replacement.tags, replacement.result), true);
+  assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), original);
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
+  assert.equal(
+    preservePreviousAnalysis(
+      {
+        ...store,
+        setItem() {
+          throw Error('quota');
+        },
+      },
+      replacement.tree,
+    ),
+    false,
+    'An actual backup failure must still reject replacement',
+  );
+});
+
 test('autosave resumes after a smaller save, recovered storage or clearing, and reports later failures', () => {
   const store = storage();
   const pauses = [];
