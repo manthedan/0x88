@@ -12,8 +12,9 @@ import {
 } from '../src/chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../src/chess/moveCodec.ts';
 
-const BLACK_TO_MOVE = '8/8/8/3pP3/8/8/8/4k2K b - e3 17 42';
-const NORMALIZED = '4K2k/8/8/8/3Pp3/8/8/8 w - e6 17 42';
+// e3 is a consistent en-passant square (White's e-pawn just double-pushed); parseFen drops impossible ones.
+const BLACK_TO_MOVE = '8/8/8/8/3pP3/8/8/4k2K b - e3 17 42';
+const NORMALIZED = '4K2k/8/8/3Pp3/8/8/8/8 w - e6 17 42';
 
 test('rank-flip square, board, and move transforms are involutions', () => {
   for (let square = 0; square < 64; square++) assert.equal(rankFlipSquare(rankFlipSquare(square)), square);

@@ -70,10 +70,25 @@ export function parseFen(fen = START_FEN): BoardState {
     squares,
     turn,
     castling,
-    epSquare: ep === '-' ? null : squareIndex(ep),
+    epSquare: ep === '-' ? null : consistentEpSquare(squares, turn, squareIndex(ep)),
     halfmove,
     fullmove,
   };
+}
+
+/**
+ * An en-passant square only means something right after the opponent's double push:
+ * it is on rank 6 with White to move (rank 3 with Black), it and the square the pawn
+ * left are empty, and that enemy pawn stands directly in front of it. Any other square
+ * is normalised to "none" rather than rejected: it can never yield an illegal capture,
+ * and FENs from other tools that set it loosely still load. A consistent square is kept
+ * even when no capture is possible, which is what boardToFen writes after every double push.
+ */
+function consistentEpSquare(squares: (Piece | null)[], turn: Color, ep: number): number | null {
+  const forward = turn === 'w' ? -8 : 8; // from the ep square towards the pawn that double-pushed
+  const rankOk = Math.floor(ep / 8) === (turn === 'w' ? 5 : 2);
+  const enemyPawn: Piece = turn === 'w' ? 'bp' : 'wp';
+  return rankOk && !squares[ep] && !squares[ep - forward] && squares[ep + forward] === enemyPawn ? ep : null;
 }
 
 export function boardToFen(board: BoardState): string {
