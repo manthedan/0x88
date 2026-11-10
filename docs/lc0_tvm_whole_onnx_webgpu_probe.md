@@ -4,7 +4,7 @@ Status: diagnostic/research artifact path only. This does **not** change the def
 
 ## Durable toolchain
 
-From the workspace root (the parent of `leelaweb/`):
+From the workspace root (the parent of this checkout, `0x88/` by default):
 
 ```bash
 export TVM_SRC="$PWD/.deps/tvm-webgpu-src"
@@ -36,7 +36,7 @@ Optional source capture:
 
 ## Reproduce b1/b4/b8 codegen
 
-From `leelaweb/`:
+From the repository root:
 
 ```bash
 CAST_INT64_INITIALIZERS_TO_INT32=1 \
@@ -88,7 +88,7 @@ executable.export_library(wasm_path, fcompile=tvm.contrib.tvmjs.create_tvmjs_was
 Check readiness first:
 
 ```bash
-cd leelaweb
+cd <path-to-this-checkout>
 ROOT=<path-to-workspace-root>
 export TVM_SRC="$ROOT/.deps/tvm-webgpu-src"
 export TVM_ENV="$ROOT/.envs/tvm-mlc-py313"
@@ -126,10 +126,13 @@ Details:
 - LLVM-enabled TVM build created under `.deps/tvm-webgpu-src/build-tvmjs/`
 - `scripts/check_tvmjs_webgpu_toolchain.py` passes when `TVM_LIBRARY_PATH` points at `build-tvmjs/lib`
 
-Use this wrapper command for the browser-loadable TVMJS wasm artifacts:
+Use this wrapper command for the browser-loadable TVMJS wasm artifacts.
+`scripts/run_lc0_tvm_whole_onnx_probe.sh` assumes the checkout is
+`$ROOT/leelaweb`; set `LC0_WEB_REPO` to the checkout path if yours has another
+name (a default clone is `0x88/`):
 
 ```bash
-cd <path-to-workspace-root>/leelaweb
+cd <path-to-this-checkout>
 CAST_INT64_INITIALIZERS_TO_INT32=1 \
 TRUST_NONNEGATIVE_GATHER_INDICES=1 \
 SANITIZE_ONNX_NAMES=1 \

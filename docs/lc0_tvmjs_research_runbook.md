@@ -47,11 +47,11 @@ It is **not promotion-ready** yet because the evidence is still smoke-derived an
 
 ## Durable local paths
 
-From the workspace root (the parent of `leelaweb/`):
+From the workspace root (the parent of this checkout, `0x88/` by default):
 
 ```bash
-export ROOT=<path-to-workspace-root>  # contains leelaweb/, .deps/, .envs/
-export WEB=$ROOT/leelaweb-lc0-top-roi   # or another up-to-date leelaweb worktree
+export ROOT=<path-to-workspace-root>  # contains this checkout, .deps/, .envs/
+export WEB=$ROOT/0x88                  # this checkout or an up-to-date worktree of it
 export TVM_SRC=$ROOT/.deps/tvm-webgpu-src
 export TVM_ENV=$ROOT/.envs/tvm-mlc-py313
 export TVM_BUILD_DIR=build-tvmjs

@@ -252,7 +252,7 @@ npm run lc0:browser-hybrid-search-bench -- --head-backend wgsl --visits 128 --ev
 npm run lc0:browser-hybrid-search-matrix -- --out /tmp/lc0_postmerge_search_matrix_local.json --timeout 240000
 node --experimental-strip-types --test tests/lc0_fen_fixtures.test.mjs tests/lc0_history_fixtures.test.mjs tests/lc0_onnx_native_fixture_parity.test.mjs tests/lc0_onnx_history_parity.test.mjs tests/lc0_search.test.mjs
 npm run lc0:browser-ci-smoke -- --out /tmp/lc0_browser_ci_smoke_fixtures16.json --fixture-limit 16 --timeout 300000
-# Mac mini: rsync current leelaweb checkout, then:
+# Second machine: rsync this checkout, then:
 #   npm run lc0:browser-hybrid-search-matrix -- --out /tmp/lc0_postmerge_search_matrix_remote.json --timeout 240000
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --dry-run --samples 2
 npm run lc0:browser-wgsl-vs-ort-webgpu -- --samples 2 --timeout 25000 --wgsl-iters 1 --ort-iters 2

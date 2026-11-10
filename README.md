@@ -22,14 +22,17 @@ drive — so the app routes stay limited to product-facing entry points.
 
 ## Engines
 
-Nine families: neural evaluators run through browser inference runtimes, while
-classical engines run as independent WebAssembly modules driven over UCI.
+Eight engine families are registered in `src/lc0/engineCatalog.ts` (the
+`EngineFamily` type): neural evaluators run through browser inference runtimes,
+while classical engines run as independent WebAssembly modules driven over UCI.
+Maia 3 is not a catalog family: Play and Analysis load it directly
+(`src/lc0/maia3.ts`), and Arena does not offer it.
 
 | Family | Kind | Runtime |
 | --- | --- | --- |
 | **Lc0** | neural (t1-256x10, t3-512, BT4) | ORT WebGPU, WASM fallback |
 | **Centipawn** | neural (SquareFormer + ThreatGraph, trained here) | TVMJS WebGPU, ORT fallback |
-| **Maia 3** | neural human model, Elo-conditioned | ORT WebGPU |
+| **Maia 3** (Play and Analysis only) | neural human model, Elo-conditioned | ORT WebGPU |
 | **Stockfish** | classical NNUE | WASM, threaded |
 | **Reckless** | classical NNUE (Rust) | WASI, relaxed SIMD |
 | **Viridithas** | classical NNUE (Rust) | WASI, relaxed SIMD |
@@ -38,8 +41,8 @@ classical engines run as independent WebAssembly modules driven over UCI.
 | **Berserk** | classical NNUE (C) | Emscripten, relaxed SIMD |
 
 Every ported engine ships a feature-detected SIMD ladder (relaxed SIMD → fixed
-SIMD → scalar), with fixed-depth parity proven against the scalar build before
-any tier is promoted to a default. The audits are in
+SIMD, then scalar where the engine has a scalar build), with fixed-depth parity
+proven against the baseline build before any tier is promoted to a default. The audits are in
 [`cpu_engines_simd_audit.md`](docs/cpu_engines_simd_audit.md),
 [`plentychess_simd_audit.md`](docs/plentychess_simd_audit.md), and
 [`reckless_simd_kernel_fixes.md`](docs/reckless_simd_kernel_fixes.md).
@@ -55,23 +58,52 @@ npm run web:client
 
 Then open `http://localhost:5173/app/analysis`.
 
-### What works from a fresh clone, and what doesn't
+### Where engine and model files come from
 
-**Works immediately:** everything except Reckless. Model and engine assets are
-fetched on demand from `assets.0x88.app`.
-
-**Needs a local build:** Reckless — `public/reckless/*.wasm` is deliberately
-untracked and needs a Rust + `wasm32-wasip1` toolchain.
+The dev server serves engine and model files from this checkout's `public/`
+directory. It does not use the artifact host unless you point it there, which
+is the quickest way to get every engine and model without staging anything:
 
 ```sh
-npm run reckless:build-wasi        # needs rustup + wasm32-wasip1
+VITE_LC0_BROWSER_ASSET_BASE_URL=https://assets.0x88.app npm run web:client
 ```
+
+With that set, `src/lc0/assetUrls.ts` resolves paths under `/models/`,
+`/stockfish/`, `/berserk/`, `/plentychess/`, `/stormphrax/`, `/viridithas/`,
+`/reckless/`, `/runtimes/centipawn-tvmjs-webgpu/`,
+`/runtimes/squareformer-tvm-hybrid/` and `/artifacts/sha256/` against that
+host. Production builds set the same variable, plus
+`VITE_LC0_ARTIFACT_CHANNEL_URL` for the model release channel, in the
+`netlify.toml` build command. A `?assetBase=<url>` query parameter redirects
+data fetches for one page load, but engine worker scripts are only accepted
+from the page's own origin or a base configured through the environment.
+
+Without the variable, a fresh clone (with Git LFS installed) has:
+
+- **Present after `npm install`:** Stockfish, Berserk, PlentyChess, Stormphrax,
+  Viridithas and Centipawn. Their binaries and the Centipawn model are tracked,
+  mostly through Git LFS; Stockfish's threaded lite and full builds are
+  symlinks into `node_modules/stockfish`.
+- **Lc0 networks (Small, t3, BT4, Leela Queen Odds):** gitignored.
+  `npm run lc0:prepare-model-assets` links them into `public/models/lc0/` from
+  a sibling `../models/lc0-bestnets/` checkout, which this repository does not
+  provide.
+- **Maia 3:** gitignored. `npm run maia3:stage-assets` downloads the pinned
+  upstream file into `../models/maia3/`, derives the QDQ8 default (needs the
+  `.venv-onnx` Python env; otherwise the fp16 file is used) and links both into
+  `public/models/maia3/`.
+- **Reckless:** gitignored; needs a Rust + `wasm32-wasip1` toolchain.
+  `npm run reckless:build-wasi` builds the scalar `public/reckless/reckless.wasm`,
+  which is enough to play. `npm run reckless:build-release` builds the full
+  ladder but also rewrites the tracked Reckless manifest and source archives.
 
 ### Threads and SharedArrayBuffer
 
-Threaded WebAssembly requires cross-origin isolation, and the dev server does
-not set those headers. For anything involving threads, build and serve the
-isolated static bundle:
+Threaded WebAssembly requires cross-origin isolation. `vite.config.ts` lists
+COOP/COEP under `server.headers`, but the dev server's SvelteKit page responses
+do not carry them (a `curl` of `http://localhost:5173/app/analysis/` shows neither),
+so pages served by `npm run web:client` are not cross-origin isolated. For
+anything involving threads, build and serve the isolated static bundle:
 
 ```sh
 npm run build:client
@@ -79,17 +111,27 @@ npm run web:isolated:static        # http://localhost:5181
 ```
 
 Production sets `Cross-Origin-Opener-Policy: same-origin` and
-`Cross-Origin-Embedder-Policy: require-corp` — see `netlify.toml`.
+`Cross-Origin-Embedder-Policy: require-corp` — see `netlify.toml` and
+`public/_headers`.
 
 ### Clone size
 
-The repository carries engine binaries and networks through Git LFS. For a
-working checkout without pulling every large object up front:
+The repository carries engine binaries, corresponding-source archives and some
+models through Git LFS (patterns in `.gitattributes`). To skip the large
+objects at clone time and fetch only what the app runs from `public/`:
 
 ```sh
-GIT_LFS_SKIP_SMUDGE=1 git clone <url>
-git lfs pull --include="public/models/bt4_soap_rem_c19000_final.onnx"
+GIT_LFS_SKIP_SMUDGE=1 git clone <url> 0x88
+cd 0x88
+git lfs pull --include="public/stockfish/*.wasm,public/berserk/*.wasm,public/berserk/*.data,public/plentychess/*.wasm,public/plentychess/*.data,public/stormphrax/*.wasm,public/stormphrax/*.data,public/viridithas/*.wasm,public/models/bt4_soap_rem_c19000_final.onnx,public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm"
 ```
+
+Until they are pulled, those files are small LFS pointer files and the engines
+that need them fail to load. The `*corresponding-source*.tar.gz` archives and
+`public/runtimes/squareformer-tvm-hybrid/**` (a legacy Centipawn runtime and
+its test fixtures) are needed only for releases and some tests. Setting
+`VITE_LC0_BROWSER_ASSET_BASE_URL` as above avoids the LFS pull for running the
+app.
 
 ## Repository map
 
@@ -127,7 +169,10 @@ Roughly:
    ladder and its feature gates.
 4. Add a UCI adapter (`src/lc0/<name>Engine.ts`) implementing the
    [browser UCI adapter contract](docs/browser_uci_adapter_contract.md).
-5. Register the family in `src/lc0/engineCatalog.ts`.
+5. Add the family to the `EngineFamily` union and `ENGINE_FAMILY_DEFINITIONS`
+   in `src/lc0/engineCatalog.ts` (`tests/engine_catalog.test.mjs` pins the
+   selector order), and add its card to
+   [`engine_catalog.md`](docs/engine_catalog.md).
 6. Prove fixed-depth parity between SIMD tiers before promoting a default, and
    publish a source archive plus release manifest — see
    [`engine_artifact_distribution.md`](docs/engine_artifact_distribution.md).
@@ -143,6 +188,11 @@ machine-readable artifact summary.
 
 ```sh
 npm test                             # typecheck + full suite
+npm run validate:quick               # typecheck, Biome and the tests your diff selects
+npm run validate:full                # Biome and the full npm test (add -- --with-build for build:client)
+npm run test:targeted -- --files src/chess/movegen.ts   # tests selected for the given paths
+npm run test:timings                 # slowest test files, one file at a time
+npm run test:stage-lc0-assets        # fetch the hash-pinned Lc0 parity models
 npm run bench:movegen                # movegen throughput
 npm run lc0:drift-sweep              # f32/f16 numerical drift
 npm run build:netlify:r2             # production build
@@ -150,6 +200,13 @@ npm run deploy:ort-wasm-dedup-check
 npm run deploy:ort-runtime-assets-check
 npm run productization:fast-gate
 ```
+
+The Lc0 model tests skip when their networks are missing.
+`npm run test:stage-lc0-assets` verifies or fetches the parity set into
+`../models/lc0-bestnets/` against the hashes in
+`public/models/lc0/manifest.json`, so those tests run instead of skipping; CI
+runs it before `npm test`. `lc0:drift-sweep` reads the same directory by
+default.
 
 The nightly production journey can be run manually with
 `npm run production:browser-smoke`. Benchmark output conforms to the schema in
