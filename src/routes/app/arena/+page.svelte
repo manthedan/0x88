@@ -322,7 +322,7 @@ onMount(() => {
   }
   .arena-eval-bar .eval-lane{position:relative; background:var(--eval-dark); border-radius:2px}
   .arena-eval-bar .eval-lane.unavailable{background:var(--panel-inset)}
-  .arena-eval-bar .eval-lane.stale{opacity:.4}
+  .arena-eval-bar .eval-lane:global(.stale){opacity:.4}
   .arena-eval-bar .eval-fill{position:absolute; inset:auto 0 0; height:var(--pct); background:var(--eval-light); border-radius:2px; transition:height .18s ease, width .18s ease}
   .arena-eval-bar .eval-cap{position:absolute; z-index:2; inset:0 0 auto; height:3px; background:var(--eng); transition:opacity .18s ease}
   .arena-eval-bar .eval-lane-label{position:absolute; z-index:2; top:5px; left:0; right:0; background:var(--panel); color:color-mix(in srgb,var(--eng) 65%,var(--ink)); text-align:center; font:700 10px/14px var(--mono); font-variant-numeric:slashed-zero}
