@@ -81,3 +81,7 @@ tiny-leela-netlify-sfaux-512.zip
 Nibbler.standalone.html
 dist/
 public/models/monty/*.network
+
+# Claude Code agent worktrees are full nested checkouts (each with its own
+# biome.json); never lint or track them from the parent checkout.
+.claude/worktrees/

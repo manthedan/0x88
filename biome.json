@@ -4,6 +4,7 @@
   "files": {
     "includes": [
       "**",
+      "!.claude",
       "!public",
       "!package-lock.json",
       "!.svelte-kit",
@@ -31,7 +32,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "style": "off",
       "complexity": "off"
     }
@@ -43,6 +44,17 @@
         "rules": {
           "correctness": {
             "noInnerDeclarations": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.svelte"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off",
+            "noUnusedImports": "off"
           }
         }
       }
