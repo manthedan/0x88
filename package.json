@@ -17,6 +17,7 @@
     "perf:canary": "node scripts/perf_canary.mjs",
     "validate:quick": "node scripts/validate_change.mjs --mode quick",
     "validate:full": "node scripts/validate_change.mjs --mode final",
+    "hooks:install": "node scripts/install_git_hooks.mjs",
     "bench:movegen": "node --experimental-strip-types scripts/bench_movegen.mjs",
     "bench:model-cache-streaming": "node --experimental-strip-types scripts/bench_model_cache_streaming.mjs",
     "web:client": "vite --host 0.0.0.0",
