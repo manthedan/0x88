@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
 import { moveToUci } from '../src/chess/moveCodec.ts';
 import { inCheck, legalMoves } from '../src/chess/movegen.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { Lc0PuctSearcher } from '../src/lc0/search.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const MODEL = '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx';
 const FIXTURES = 'fixtures/lc0/search_edge_cases.json';
@@ -44,7 +45,7 @@ test('edge-case fixtures have the expected terminal/legal structure', () => {
   }
 });
 
-test('LC0 search handles edge-case positions', { skip: !existsSync(MODEL) && 'missing ONNX model' }, async () => {
+test('LC0 search handles edge-case positions', { skip: skipUnlessAssets(MODEL) }, async () => {
   const evaluator = await Lc0OnnxEvaluator.create(readFileSync(MODEL));
   const searcher = new Lc0PuctSearcher(evaluator);
 

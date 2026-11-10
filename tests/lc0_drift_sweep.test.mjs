@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { compareEvalSweeps, runEvalSweep, sweepFixtureInput } from '../src/lc0/driftSweep.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const F32 = new URL('../../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx', import.meta.url);
 const F16 = new URL('../../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.onnx', import.meta.url);
@@ -21,7 +22,7 @@ test('sweepFixtureInput reconstructs fen-only and explicit-history inputs', () =
 });
 
 test('f16/WASM stays within f32/WASM drift tolerances across both suites', {
-  skip: (!existsSync(F32) || !existsSync(F16)) && 'missing ONNX models',
+  skip: skipUnlessAssets(F32, F16),
 }, async () => {
   const f32 = await Lc0OnnxEvaluator.create(readFileSync(F32));
   const f16 = await Lc0OnnxEvaluator.create(readFileSync(F16));

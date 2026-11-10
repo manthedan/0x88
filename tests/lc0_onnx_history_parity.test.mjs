@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 const MODEL = new URL('../../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f32.onnx', import.meta.url);
 const nativeRecords = readFileSync(new URL('../fixtures/lc0/native_history_blas.jsonl', import.meta.url), 'utf8')
@@ -15,7 +16,7 @@ function normalizeNativeUci(uci) {
 }
 
 test('LC0 f32 ONNX evaluator matches native BLAS explicit move-history fixture priors', {
-  skip: !existsSync(MODEL) ? 'missing external ONNX model' : false,
+  skip: skipUnlessAssets(MODEL),
 }, async () => {
   const evaluator = await Lc0OnnxEvaluator.create(readFileSync(MODEL));
   for (const native of nativeRecords) {

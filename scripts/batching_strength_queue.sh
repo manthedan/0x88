@@ -6,7 +6,7 @@
 # offsets from the old version and report a spurious trailing parse error.
 set -u
 cd "$(dirname "$0")/.."
-SP=/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad
+SP="${BATCHING_STRENGTH_SP:-/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad}"
 export AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---enable-unsafe-webgpu}"
 export AGENT_BROWSER_SESSION="${AGENT_BROWSER_SESSION:-batching-strength}"

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { loadLc0WebModelPack, validateLc0WebModelPackManifest } from '../src/lc0/modelPack.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -112,7 +113,7 @@ test('lc0web pack loader rejects corrupt shard bytes', async () => {
 const GENERATED_PACK_DIR = '../models/lc0-bestnets/lc0web/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web';
 
 test('generated batch-8 lc0web pack metadata and first shard verify', {
-  skip: existsSync(GENERATED_PACK_DIR) ? false : `missing ${GENERATED_PACK_DIR}`,
+  skip: skipUnlessAssets(GENERATED_PACK_DIR),
 }, async () => {
   const fetchFn = async (url) => {
     const name = String(url).split('/').pop();

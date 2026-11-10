@@ -224,7 +224,7 @@ async function playFirstMove(session, engine, fullNavigation = false) {
     level.dispatchEvent(new Event('change', { bubbles: true }));
     const restartBanner = document.querySelector('#restartBanner');
     if (restartBanner && !restartBanner.hidden) document.querySelector('#confirmRestart')?.click();
-    else if ((document.querySelector('#moveList')?.textContent?.trim() ?? '') !== 'No moves yet') document.querySelector('#newGame')?.click();
+    else if (document.querySelector('#moveList .san')) document.querySelector('#newGame')?.click();
     return { engine: engine.value, level: level.value, color: color.value };
   })()`,
   );
@@ -236,9 +236,9 @@ async function playFirstMove(session, engine, fullNavigation = false) {
     engine: document.querySelector('#engineSelect')?.value,
     color: document.querySelector('#colorSelect')?.value,
     note: document.querySelector('#engineNote')?.textContent?.trim() ?? '',
-    moves: document.querySelector('#moveList')?.textContent?.trim() ?? ''
+    played: document.querySelectorAll('#moveList .san').length
   }))()`,
-    (value) => value?.engine === engine && value?.color === 'white' && value?.note.includes('is ready') && value?.moves === 'No moves yet',
+    (value) => value?.engine === engine && value?.color === 'white' && value?.note.includes('is ready') && value?.played === 0,
     session.args.timeoutMs,
   );
   const started = await evaluate(
@@ -247,6 +247,10 @@ async function playFirstMove(session, engine, fullNavigation = false) {
     const color = document.querySelector('#colorSelect');
     color.value = 'black';
     color.dispatchEvent(new Event('change', { bubbles: true }));
+    // A started game asks to confirm the restart; a fresh one waits in the setup phase until Play (#newGame).
+    const restartBanner = document.querySelector('#restartBanner');
+    if (restartBanner && !restartBanner.hidden) document.querySelector('#confirmRestart')?.click();
+    else if (document.querySelector('#main')?.dataset.phase === 'setup') document.querySelector('#newGame')?.click();
     return { engine: document.querySelector('#engineSelect')?.value, level: document.querySelector('#levelSelect')?.value, color: color.value };
   })()`,
   );
@@ -258,9 +262,10 @@ async function playFirstMove(session, engine, fullNavigation = false) {
     engine: document.querySelector('#engineSelect')?.value,
     color: document.querySelector('#colorSelect')?.value,
     status: document.querySelector('#status')?.textContent?.trim() ?? '',
-    moves: document.querySelector('#moveList')?.textContent?.trim() ?? ''
+    moves: document.querySelector('#moveList')?.textContent?.trim() ?? '',
+    played: document.querySelectorAll('#moveList .san').length
   }))()`,
-    (value) => value?.engine === engine && value?.color === 'black' && value?.status.includes('Your move') && value?.moves && value.moves !== 'No moves yet',
+    (value) => value?.engine === engine && value?.color === 'black' && value?.status.includes('Your move') && value?.played > 0,
     session.args.timeoutMs,
   );
   await inspectBrowser(session, `Play/${engine}`);

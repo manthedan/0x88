@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import {
@@ -16,6 +16,7 @@ import {
   parseProtoFields,
 } from '../src/nn/onnxDequantFold.ts';
 import * as ort from '../src/nn/ortRuntime.ts';
+import { skipUnlessAssets } from './lib/required_assets.mjs';
 
 // ---- tiny ONNX builder (ModelProto/GraphProto/NodeProto/ValueInfoProto field numbers)
 function valueInfo(name, elemType, dims) {
@@ -315,8 +316,7 @@ test('a DequantizeLinear fed by an overridable graph input is not folded', () =>
 });
 
 const QDQ8 = process.env.LC0_QDQ8_MODEL ?? '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
-const qdq8Present = existsSync(QDQ8) && statSync(QDQ8).size > 0;
-test('shipped LC0 QDQ8 model folds completely and evaluates like the in-graph version', { skip: !qdq8Present && `missing ${QDQ8}` }, async () => {
+test('shipped LC0 QDQ8 model folds completely and evaluates like the in-graph version', { skip: skipUnlessAssets(QDQ8) }, async () => {
   const bytes = readFileSync(QDQ8);
   const folded = foldOnnxDequantizeLinear(bytes);
   assert.ok(folded.foldedNodes >= 90, `folded ${folded.foldedNodes}`);

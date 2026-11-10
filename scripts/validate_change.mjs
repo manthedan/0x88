@@ -5,8 +5,8 @@ import { parseScriptArgs } from './lib/cli.mjs';
 const USAGE = `Usage: node scripts/validate_change.mjs [options] [tests...]
 
 Codifies the fast local validation flow:
-  quick: typecheck + targeted tests in parallel
-  final: full npm test, optionally followed by a client build
+  quick: Biome + typecheck + targeted tests in parallel
+  final: Biome, full npm test, optionally followed by a client build
 
 Options:
   --mode quick|final   Validation mode (default: quick)
@@ -37,13 +37,15 @@ function parseArgs(argv) {
   return args;
 }
 
+const BIOME_STEP = { name: 'biome', command: 'npm', args: ['run', 'check:biome'] };
+
 function plan(args) {
   if (args.mode === 'final') {
-    const steps = [{ name: 'full-test', command: 'npm', args: ['test'] }];
+    const steps = [BIOME_STEP, { name: 'full-test', command: 'npm', args: ['test'] }];
     if (args.withBuild) steps.push({ name: 'build-client', command: 'npm', args: ['run', 'build:client'] });
     return steps;
   }
-  const steps = [];
+  const steps = [BIOME_STEP];
   if (!args.skipTypecheck) steps.push({ name: 'typecheck', command: 'npm', args: ['run', 'typecheck'] });
   steps.push({ name: 'targeted-tests', command: 'node', args: ['scripts/run_targeted_tests.mjs', ...args.tests] });
   return steps;

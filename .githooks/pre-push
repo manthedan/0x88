@@ -1,0 +1,22 @@
+#!/bin/sh
+# Opt-in pre-push hook, enabled with `npm run hooks:install`: blocks a push that
+# fails Biome, then hands over to Git LFS, which uploads the pushed LFS objects.
+# Bypass once with `git push --no-verify`.
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+if [ -x node_modules/.bin/biome ]; then
+  # stdin carries the refs being pushed; keep it for git lfs pre-push.
+  if ! npm run --silent check:biome </dev/null; then
+    printf >&2 '\npre-push: Biome failed. Fix with `npm run format` (or `npx biome check --write <files>`), or push with --no-verify.\n'
+    exit 1
+  fi
+else
+  printf >&2 'pre-push: node_modules/.bin/biome not found; skipping Biome (run npm ci).\n'
+fi
+
+command -v git-lfs >/dev/null 2>&1 || {
+  printf >&2 "\n%s\n\n" "This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks')."
+  exit 2
+}
+exec git lfs pre-push "$@"
