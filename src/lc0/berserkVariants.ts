@@ -1,4 +1,6 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
+import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export type BerserkVariantKey = 'emscripten' | 'emscripten-simd' | 'emscripten-relaxed' | 'default' | 'simd' | 'custom';
@@ -19,8 +21,8 @@ export interface BerserkVariant {
   sourceNetworkUrl?: string;
 }
 
-export const BERSERK_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.js');
-export const BERSERK_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.wasm');
+export const BERSERK_EMSCRIPTEN_JS_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten.js');
+export const BERSERK_EMSCRIPTEN_WASM_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten.wasm');
 /**
  * Canonical preload `.data` shared by every Berserk SIMD tier.
  *
@@ -32,11 +34,11 @@ export const BERSERK_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/berserk/berse
  * cache instead of refetching it. Emscripten resolves the package through
  * `Module.locateFile`, so the name baked into each glue file is irrelevant.
  */
-export const BERSERK_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten.data');
-export const BERSERK_EMSCRIPTEN_SIMD_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.js');
-export const BERSERK_EMSCRIPTEN_SIMD_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-simd128.wasm');
-export const BERSERK_EMSCRIPTEN_RELAXED_JS_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.js');
-export const BERSERK_EMSCRIPTEN_RELAXED_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-emscripten-relaxed-simd128.wasm');
+export const BERSERK_EMSCRIPTEN_DATA_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten.data');
+export const BERSERK_EMSCRIPTEN_SIMD_JS_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten-simd128.js');
+export const BERSERK_EMSCRIPTEN_SIMD_WASM_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten-simd128.wasm');
+export const BERSERK_EMSCRIPTEN_RELAXED_JS_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten-relaxed-simd128.js');
+export const BERSERK_EMSCRIPTEN_RELAXED_WASM_URL = resolveEngineArtifactUrl('/berserk/berserk-emscripten-relaxed-simd128.wasm');
 export const BERSERK_DEFAULT_WASM_URL = resolvePublicAssetUrl('/berserk/berserk.wasm');
 export const BERSERK_SIMD_WASM_URL = resolvePublicAssetUrl('/berserk/berserk-simd128.wasm');
 export const BERSERK_MAIN_NETWORK = 'berserk-9b84c340af7e.nn';
@@ -62,38 +64,12 @@ const DEPLOYED_BERSERK_PATHS = new Set([
   '/berserk/berserk-emscripten-relaxed-simd128.wasm',
 ]);
 
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
-  } catch {
-    return raw;
-  }
-}
-
 function shouldSkipKnownUnshippedProbe(variant: BerserkVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
   return assetUrls(variant).some((url) => {
     const pathname = assetPathname(url);
     return pathname.startsWith('/berserk/') && !DEPLOYED_BERSERK_PATHS.has(pathname);
   });
-}
-
-function sameOriginBerserkAsset(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
-    const url = new URL(raw, base);
-    if (url.origin !== base || !url.pathname.startsWith('/berserk/')) return undefined;
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return undefined;
-  }
 }
 
 function assetUrls(variant: BerserkVariant): string[] {
@@ -215,10 +191,10 @@ export function hasExplicitBerserkVariant(params: URLSearchParams): boolean {
 }
 
 export function berserkVariantFromParams(params: URLSearchParams): BerserkVariant {
-  const customJsUrl = sameOriginBerserkAsset(params.get('berserkJs'));
-  const customWasmUrl = sameOriginBerserkAsset(params.get('berserkWasm'));
-  const customDataUrl = sameOriginBerserkAsset(params.get('berserkData'));
-  const customNnueUrl = sameOriginBerserkAsset(params.get('berserkNnue'));
+  const customJsUrl = resolveAssetOverride(params.get('berserkJs'));
+  const customWasmUrl = resolveAssetOverride(params.get('berserkWasm'));
+  const customDataUrl = resolveAssetOverride(params.get('berserkData'));
+  const customNnueUrl = resolveAssetOverride(params.get('berserkNnue'));
   if (customJsUrl) {
     return {
       key: 'custom',
@@ -290,32 +266,23 @@ export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () 
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing)
-    return existing.then((status) => {
-      onChange?.();
-      return status;
-    });
+  const urls = assetUrls(variant);
+  if (existing) {
+    subscribeAssetProbeChange(urls, onChange);
+    return existing;
+  }
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
-    onChange?.();
+    notifyAssetProbeChange(urls, onChange);
     return Promise.resolve('missing');
   }
+  if (!assetProbeRetryAllowed(urls, onChange)) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
-  const promise = Promise.all(
-    assetUrls(variant).map((url) =>
-      fetch(url, { method: 'HEAD', cache: 'no-store' })
-        .then((response) => response.ok)
-        .catch(() => false),
-    ),
-  )
-    .then((results) => (results.every(Boolean) ? 'present' : 'missing') as BerserkAssetStatus)
-    .then((status) => {
-      assetStatuses.set(key, status);
-      assetChecks.delete(key);
-      onChange?.();
-      return status;
-    });
+  const promise = probeAssetUrls(urls).then((status) => {
+    assetStatuses.set(key, status);
+    assetChecks.delete(key);
+    return status;
+  });
   assetChecks.set(key, promise);
-  onChange?.();
   return promise;
 }

@@ -1,0 +1,102 @@
+import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
+import { ENGINE_ARTIFACT_PINS } from './engineArtifactPins.generated.ts';
+
+export interface EngineArtifactPin {
+  sha256: string;
+  bytes: number;
+  br?: string;
+}
+
+/** Recover the logical path when variant availability uses a deployed-path set. */
+export function engineArtifactPathname(raw: string): string {
+  const path = assetPathname(raw);
+  const hash = path.match(/^\/artifacts\/sha256\/([a-f0-9]{64})\//)?.[1];
+  return (hash ? Object.entries(ENGINE_ARTIFACT_PINS).find(([, pin]) => pin.sha256 === hash)?.[0] : undefined) ?? path;
+}
+
+/** Resolve published engine assets to immutable v2 representations. Local
+ * static/dev builds keep their ordinary paths; pins still apply to the bytes. */
+export function resolveEngineArtifactUrl(pathOrUrl: string): string {
+  const path = new URL(pathOrUrl, typeof location === 'undefined' ? 'http://localhost/' : location.href).pathname;
+  const pin: EngineArtifactPin | undefined = (ENGINE_ARTIFACT_PINS as Record<string, EngineArtifactPin>)[path];
+  if (!pin) throw new Error(`Missing engine artifact pin in build registry: ${path}`);
+  const resolved = resolvePublicAssetUrl(path);
+  if (!/^https?:/.test(resolved) || (pathOrUrl !== path && new URL(pathOrUrl, 'http://localhost/').origin !== new URL(resolved).origin)) return pathOrUrl;
+  const url = new URL(resolved);
+  if (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.hostname.endsWith('.localhost')) return resolved;
+  return resolvePublicAssetUrl(`/artifacts/sha256/${pin.sha256}/${pin.br ? `br/${pin.br}` : 'identity'}`);
+}
+
+/** Self-contained so classic blob workers can use exactly the same verifier. */
+export function createEngineArtifactLoader(
+  pins: Record<string, EngineArtifactPin>,
+  resolveUrl: (url: string) => string = (url) => url,
+  localOrigin: () => boolean = isLocalDevelopmentOrigin,
+) {
+  function pin(url: string): EngineArtifactPin | undefined {
+    const path = new URL(url, typeof location === 'undefined' ? 'http://localhost/' : location.href).pathname;
+    const hash = path.match(/^\/artifacts\/sha256\/([a-f0-9]{64})\//)?.[1];
+    return hash ? Object.values(pins).find((entry) => entry.sha256 === hash) : pins[path];
+  }
+  function failure(url: string, detail: string): Error {
+    return new Error(
+      `Engine artifact integrity check failed for ${url}: ${detail}. Retry loading the engine; if it persists, reload the app or contact the site owner.`,
+    );
+  }
+  function expected(url: string): EngineArtifactPin | undefined {
+    const entry = pin(url);
+    if (!entry) {
+      if (!localOrigin()) throw failure(url, 'this app build has no trusted SHA-256 pin');
+      console.warn(`Local engine artifact has no integrity pin: ${url}. Regenerate the engine manifest and integrity registry before publishing.`);
+    }
+    return entry;
+  }
+  async function verify(url: string, bytes: ArrayBuffer): Promise<ArrayBuffer> {
+    const entry = expected(url);
+    // Locally built, unregistered lab artifacts are allowed only on loopback.
+    // A registered artifact MUST match even locally (including static dist).
+    if (!entry) return bytes;
+    if (bytes.byteLength !== entry.bytes) throw failure(url, `expected ${entry.bytes} bytes, received ${bytes.byteLength}`);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    if (hash !== entry.sha256) throw failure(url, 'SHA-256 mismatch');
+    return bytes;
+  }
+  async function response(url: string, cache: RequestCache = 'default'): Promise<Response> {
+    expected(url);
+    // Match Analysis prefetch's default mode/credentials so both requests use
+    // the same HTTP cache entry, including cross-origin asset-base URLs.
+    const result = await fetch(resolveUrl(url), { mode: 'cors', credentials: 'same-origin', cache });
+    if (!result.ok) throw new Error(`Failed to fetch engine artifact ${url}: HTTP ${result.status}`);
+    return result;
+  }
+  async function bytes(url: string, read: (response: Response) => Promise<ArrayBuffer> = (response) => response.arrayBuffer()): Promise<ArrayBuffer> {
+    async function readVerified(result: Response): Promise<ArrayBuffer> {
+      let buffer: ArrayBuffer;
+      try {
+        buffer = await read(result);
+      } catch (error) {
+        if (!pin(url)) throw error;
+        throw failure(url, error instanceof Error ? error.message : String(error));
+      }
+      return verify(url, buffer);
+    }
+    const result = await response(url);
+    try {
+      return await readVerified(result);
+    } catch (error) {
+      if (!pin(url)) throw error;
+      // Replace a corrupt cached body once. The replacement is verified too;
+      // persistent corruption still reaches the adapter's retryable error path.
+      return readVerified(await response(url, 'reload'));
+    }
+  }
+  return { pin, verify, response, bytes };
+}
+
+export const engineArtifacts = createEngineArtifactLoader(ENGINE_ARTIFACT_PINS, (url) =>
+  engineArtifacts.pin(url) && !new URL(url, 'http://localhost/').pathname.startsWith('/artifacts/') ? resolveEngineArtifactUrl(url) : url,
+);
+export function engineArtifactWorkerScript(): string {
+  return `const engineArtifacts = (${createEngineArtifactLoader.toString()})(${JSON.stringify(ENGINE_ARTIFACT_PINS)}, undefined, (${isLocalDevelopmentOrigin.toString()}));`;
+}

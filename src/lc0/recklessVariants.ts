@@ -1,4 +1,6 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
+import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -29,7 +31,7 @@ export type RecklessAssetStatus = 'unknown' | 'checking' | 'present' | 'missing'
 
 const assetStatuses = new Map<string, RecklessAssetStatus>();
 const assetChecks = new Map<string, Promise<RecklessAssetStatus>>();
-const recklessAsset = (path: string) => resolvePublicAssetUrl(path);
+const recklessAsset = (path: string) => resolveEngineArtifactUrl(path);
 
 export const RECKLESS_V60_NNUE_BYTES = 63_266_880;
 
@@ -43,20 +45,6 @@ const DEPLOYED_RECKLESS_URLS = new Set<string>([
   '/reckless/reckless-browser-api-simd128-external.wasm',
   '/reckless/reckless-v60-7f587dfb.nnue',
 ]);
-
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
-  } catch {
-    return raw;
-  }
-}
 
 function shouldSkipKnownUnshippedProbe(variant: RecklessVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
@@ -94,7 +82,7 @@ export const RECKLESS_RELAXED_SIMD_VARIANT: RecklessVariant = {
 export const RECKLESS_LITE_VARIANT: RecklessVariant = {
   key: 'lite',
   label: 'Reckless Lite',
-  wasmUrl: recklessAsset('/reckless/reckless-v53-l1-512.wasm'),
+  wasmUrl: resolvePublicAssetUrl('/reckless/reckless-v53-l1-512.wasm'),
   note: 'v53 L1=512 candidate; smaller/faster prototype, weaker and not shipped by default.',
 };
 
@@ -192,7 +180,7 @@ export function hasExplicitRecklessVariant(params: URLSearchParams): boolean {
 }
 
 export function recklessVariantFromParams(params: URLSearchParams): RecklessVariant {
-  const customUrl = params.get('recklessWasm');
+  const customUrl = resolveAssetOverride(params.get('recklessWasm'));
   if (customUrl) return { key: 'custom', label: 'Reckless Custom', wasmUrl: customUrl, note: 'Custom Reckless WASM URL from ?recklessWasm=…' };
   const explicit = params.get('recklessVariant') ?? params.get('reckless');
   if (explicit) return recklessVariantByKey(normalizeRecklessVariant(explicit));
@@ -222,33 +210,24 @@ export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: (
   const key = assetKey(variant);
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
+  const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
   const existing = assetChecks.get(key);
-  if (existing)
-    return existing.then((status) => {
-      onChange?.();
-      return status;
-    });
+  if (existing) {
+    subscribeAssetProbeChange(urls, onChange);
+    return existing;
+  }
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
-    onChange?.();
+    notifyAssetProbeChange(urls, onChange);
     return Promise.resolve('missing');
   }
+  if (!assetProbeRetryAllowed(urls, onChange)) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
-  const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
-  const promise = Promise.all(
-    urls.map((url) =>
-      fetch(url, { method: 'HEAD', cache: 'no-store' })
-        .then((response) => response.ok)
-        .catch(() => false),
-    ),
-  )
-    .then((results) => (results.every(Boolean) ? 'present' : 'missing') as RecklessAssetStatus)
-    .then((status) => {
-      assetStatuses.set(key, status);
-      assetChecks.delete(key);
-      onChange?.();
-      return status;
-    });
+  const promise = probeAssetUrls(urls).then((status) => {
+    assetStatuses.set(key, status);
+    assetChecks.delete(key);
+    return status;
+  });
   assetChecks.set(key, promise);
   return promise;
 }

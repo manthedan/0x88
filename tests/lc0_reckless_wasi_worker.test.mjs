@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
+import { createEngineArtifactLoader, engineArtifacts } from '../src/lc0/engineArtifacts.ts';
 
 let workerModule;
 
@@ -49,34 +51,26 @@ function resetPreopenState(worker, byteBudget) {
   worker.recklessWasiWorkerInternalsForTests.resetPreopenByteCache(byteBudget);
 }
 
-test('WASI module streaming compilation consumes the original without tee and caches concurrent/sequential loads', async () => {
+test('WASI compiles a single verified buffer and caches concurrent/sequential loads', async () => {
   const previousSelf = globalThis.self;
   const previousFetch = globalThis.fetch;
   const previousStreaming = WebAssembly.compileStreaming;
   let fetches = 0;
-  let compiles = 0;
   try {
     const worker = await loadWorkerModule([]);
     const { compileModule } = worker.recklessWasiWorkerInternalsForTests;
-    const response = new Response(Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0]));
-    response.clone = () => {
-      throw new Error('must not tee');
-    };
     globalThis.fetch = async () => {
-      fetches += 1;
-      return response;
+      fetches++;
+      return new Response(Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0]));
     };
-    WebAssembly.compileStreaming = async (input) => {
-      compiles += 1;
-      assert.equal(input, response);
-      return WebAssembly.compile(await input.arrayBuffer());
+    WebAssembly.compileStreaming = () => {
+      throw new Error('must verify before compiling');
     };
-    const [first, second] = await Promise.all([compileModule('/stream-cache.wasm'), compileModule('/stream-cache.wasm')]);
+    const [first, second] = await Promise.all([compileModule('/buffer-cache.wasm'), compileModule('/buffer-cache.wasm')]);
     assert.ok(first instanceof WebAssembly.Module);
     assert.equal(first, second);
-    assert.equal(await compileModule('/stream-cache.wasm'), first);
+    assert.equal(await compileModule('/buffer-cache.wasm'), first);
     assert.equal(fetches, 1);
-    assert.equal(compiles, 1);
   } finally {
     globalThis.self = previousSelf;
     globalThis.fetch = previousFetch;
@@ -84,41 +78,26 @@ test('WASI module streaming compilation consumes the original without tee and ca
   }
 });
 
-test('WASI streaming failure after consumption refetches; fallback failures evict the module for retry', async () => {
+test('WASI download/compile failures evict modules and allow a fresh retry without a second download', async () => {
   const previousSelf = globalThis.self;
   const previousFetch = globalThis.fetch;
-  const previousStreaming = WebAssembly.compileStreaming;
-  const previousWarn = console.warn;
   let fetches = 0;
   try {
     const worker = await loadWorkerModule([]);
     const { compileModule } = worker.recklessWasiWorkerInternalsForTests;
-    const bytes = Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0]);
-    console.warn = () => {};
-    WebAssembly.compileStreaming = async (response) => {
-      await response.arrayBuffer();
-      throw new Error('forced streaming failure');
-    };
     globalThis.fetch = async () => {
-      fetches += 1;
-      if (fetches === 2) return new Response('', { status: 503 });
-      if (fetches === 4) return new Response('invalid wasm');
-      return new Response(bytes);
+      fetches++;
+      if (fetches === 1) return new Response('', { status: 503 });
+      if (fetches === 2) return new Response('invalid wasm');
+      return new Response(Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0]));
     };
-    await assert.rejects(compileModule('/stream-retry.wasm'), /failed to refetch.*HTTP 503/);
-    await assert.rejects(compileModule('/stream-retry.wasm'), WebAssembly.CompileError);
-    assert.ok((await compileModule('/stream-retry.wasm')) instanceof WebAssembly.Module);
-    assert.equal(fetches, 6);
-    await compileModule('/stream-retry.wasm');
-    assert.equal(fetches, 6);
-    WebAssembly.compileStreaming = undefined;
-    assert.ok((await compileModule('/no-streaming.wasm')) instanceof WebAssembly.Module);
-    assert.equal(fetches, 7, 'no refetch when streaming is unavailable');
+    await assert.rejects(compileModule('/buffer-retry.wasm'), /HTTP 503/);
+    await assert.rejects(compileModule('/buffer-retry.wasm'), WebAssembly.CompileError);
+    assert.ok((await compileModule('/buffer-retry.wasm')) instanceof WebAssembly.Module);
+    assert.equal(fetches, 3);
   } finally {
     globalThis.self = previousSelf;
     globalThis.fetch = previousFetch;
-    WebAssembly.compileStreaming = previousStreaming;
-    console.warn = previousWarn;
   }
 });
 
@@ -402,4 +381,31 @@ test('Reckless WASI preopen cache does not retain entries larger than its byte b
     if (previousSelf === undefined) delete globalThis.self;
     else globalThis.self = previousSelf;
   }
+});
+
+test('WASI rejects a pinned corrupt module before compilation and evicts it for retry', async (t) => {
+  const previousSelf = globalThis.self;
+  t.after(() => {
+    globalThis.self = previousSelf;
+  });
+  const worker = await loadWorkerModule([]);
+  const path = '/fixture/pinned-corrupt.wasm';
+  const good = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0);
+  const pin = { bytes: good.length, sha256: createHash('sha256').update(good).digest('hex') };
+  const loader = createEngineArtifactLoader({ [path]: pin });
+  t.mock.method(engineArtifacts, 'bytes', loader.bytes);
+  const bad = Buffer.from(good);
+  bad[bad.length - 1] ^= 1;
+  let downloads = 0;
+  let compiles = 0;
+  t.mock.method(globalThis, 'fetch', async () => new Response(downloads++ < 2 ? bad : good));
+  t.mock.method(WebAssembly, 'compile', async () => {
+    compiles++;
+    return 'verified module';
+  });
+  await assert.rejects(worker.recklessWasiWorkerInternalsForTests.compileModule(path), /SHA-256 mismatch/);
+  assert.equal(compiles, 0);
+  assert.equal(await worker.recklessWasiWorkerInternalsForTests.compileModule(path), 'verified module');
+  assert.equal(compiles, 1);
+  assert.equal(downloads, 3);
 });

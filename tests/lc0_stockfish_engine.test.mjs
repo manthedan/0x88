@@ -113,16 +113,16 @@ test('Stockfish lite-single uses relaxed SIMD when validated and falls back othe
   }
 });
 
-test('same-origin threaded Stockfish uses its native worker URL', () => {
+test('same-origin threaded Stockfish also uses the verified bootstrap', () => {
   const previousLocation = globalThis.location;
   Object.defineProperty(globalThis, 'location', {
     value: { href: 'http://localhost:5181/app/analysis/', origin: 'http://localhost:5181' },
     configurable: true,
   });
   try {
-    assert.deepEqual(stockfishWorkerUrl('/stockfish/stockfish-19-lite.js'), {
-      url: '/stockfish/stockfish-19-lite.js',
-    });
+    const worker = stockfishWorkerUrl('/stockfish/stockfish-19-lite.js');
+    assert.match(worker.url, /^blob:.*#http%3A%2F%2Flocalhost%3A5181%2Fstockfish%2Fstockfish-19-lite.wasm$/);
+    URL.revokeObjectURL(worker.objectUrl);
   } finally {
     if (previousLocation === undefined) delete globalThis.location;
     else Object.defineProperty(globalThis, 'location', { value: previousLocation, configurable: true });
@@ -139,9 +139,8 @@ test('Stockfish pthread bootstrap loads trusted external artifacts through a loc
   globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
   try {
     const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-19-lite.js');
-    assert.equal(worker.objectUrl, undefined);
-    assert.equal(worker.url, 'https://assets.0x88.app/stockfish/stockfish-19-lite.js');
-    assert.equal(worker.bootstrapWasmUrl, 'https://assets.0x88.app/stockfish/stockfish-19-lite.wasm');
+    assert.match(worker.url, /^blob:.*#https%3A%2F%2Fassets.0x88.app%2Fstockfish%2Fstockfish-19-lite.wasm$/);
+    URL.revokeObjectURL(worker.objectUrl);
     assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-19-lite.js').maxThreads(), 32);
   } finally {
     if (previousBase === undefined) delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
@@ -172,8 +171,7 @@ test('StockfishEngine starts threaded artifacts through the local pthread bootst
     const engine = new StockfishEngine({ threads: 2 }, 'https://assets.0x88.app/stockfish/stockfish-19-lite.js');
     await engine.prewarm();
     const worker = MockStockfishWorker.instances[0];
-    assert.match(worker.url, /stockfishPthreadBootstrap\.js\?no-inline#https%3A%2F%2Fassets\.0x88\.app%2Fstockfish%2Fstockfish-19-lite\.wasm$/);
-    assert.equal(worker.options.name, 'stockfish-pthread-bootstrap');
+    assert.match(worker.url, /^blob:.*#https%3A%2F%2Fassets.0x88.app%2Fstockfish%2Fstockfish-19-lite.wasm$/);
     assert.deepEqual(worker.messages.slice(0, 4), [
       'uci',
       'setoption name Threads value 2',

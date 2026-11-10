@@ -1,5 +1,7 @@
 import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from '@bjorn3/browser_wasi_shim';
 
+import { engineArtifacts } from './engineArtifacts.ts';
+
 type SearchLineJson = {
   multipv: number;
   depth: number;
@@ -25,6 +27,8 @@ type ApiExports = WebAssembly.Exports & {
   reckless_api_global_error_ptr?: () => number;
   reckless_api_global_error_len?: () => number;
   reckless_api_free(handle: number): void;
+  // This published ABI has no make-move/position-history export. Passing a
+  // final FEN cannot retain repetitions; use the WASI backend for history.
   reckless_api_set_fen(handle: number, ptr: number, len: number): number;
   reckless_api_set_multipv(handle: number, multiPv: number): number;
   reckless_api_resize_hash(handle: number, hashMb: number): number;
@@ -95,20 +99,11 @@ async function compileModule(wasmUrl: string, id: number): Promise<WebAssembly.M
   }
   const started = nowMs();
   postStatus(id, 'wasm-fetch', { url: wasmUrl });
-  const promise = fetch(wasmUrl, { cache: 'force-cache' })
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`failed to fetch Reckless browser API module ${wasmUrl}: HTTP ${response.status}`);
+  const promise = engineArtifacts
+    .bytes(wasmUrl)
+    .then((bytes) => {
       postStatus(id, 'wasm-compile', { url: wasmUrl, elapsedMs: nowMs() - started });
-      try {
-        return await WebAssembly.compileStreaming(response);
-      } catch {
-        // Avoid teeing every successful large response solely to preserve an
-        // exceptional MIME fallback. Refetch only when streaming compilation
-        // actually fails.
-        const fallback = await fetch(wasmUrl, { cache: 'force-cache' });
-        if (!fallback.ok) throw new Error(`failed to refetch Reckless browser API module ${wasmUrl}: HTTP ${fallback.status}`);
-        return WebAssembly.compile(await fallback.arrayBuffer());
-      }
+      return WebAssembly.compile(bytes);
     })
     .then((module) => {
       postStatus(id, 'wasm-ready', { url: wasmUrl, elapsedMs: nowMs() - started });
@@ -250,9 +245,7 @@ export async function fetchNnue(nnueUrl: string, id: number, rawExpectedBytes?: 
   const started = nowMs();
   postStatus(id, 'nnue-fetch', { url: nnueUrl, totalBytes: expectedBytes });
   const request = (async () => {
-    const response = await fetch(nnueUrl, { cache: 'force-cache' });
-    if (!response.ok) throw new Error(`failed to fetch Reckless NNUE asset ${nnueUrl}: HTTP ${response.status}`);
-    return readNnueResponseWithProgress(response, id, 'nnue-fetch', nnueUrl, started, expectedBytes);
+    return engineArtifacts.bytes(nnueUrl, (response) => readNnueResponseWithProgress(response, id, 'nnue-fetch', nnueUrl, started, expectedBytes));
   })();
   nnueCache.set(cacheKey, request);
   try {
@@ -303,7 +296,7 @@ async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undef
   }
   const modulePromise = compileModule(wasmUrl, id);
   const nnuePromise = nnueUrl ? fetchNnue(nnueUrl, id, nnueExpectedBytes) : undefined;
-  const module = await modulePromise;
+  const [module, nnueBytes] = await Promise.all([modulePromise, nnuePromise]);
   const wasiInstance = new WASI(['reckless-browser-api'], [], [new OpenFile(new File([])), nullStdout(), nullStdout(), new PreopenDirectory('.', new Map())], {
     debug: false,
   });
@@ -315,7 +308,7 @@ async function ensureState(wasmUrl: string, hashMb = 16, nnueUrl: string | undef
   const handle = nnueUrl
     ? await (async () => {
         if (!exports.reckless_api_new_with_network) throw new Error('Reckless browser API external-NNUE export missing: reckless_api_new_with_network');
-        const bytes = new Uint8Array(await nnuePromise!);
+        const bytes = new Uint8Array(nnueBytes!);
         postStatus(id, 'nnue-copy', { url: nnueUrl, loadedBytes: bytes.byteLength, totalBytes: bytes.byteLength });
         return withBytes(exports, bytes, (ptr, len) => exports.reckless_api_new_with_network!(hashMb, ptr, len));
       })()

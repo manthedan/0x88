@@ -8,6 +8,7 @@ import {
   uciPositionCommand,
 } from './browserUciEngine.ts';
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
+import { engineArtifactWorkerScript } from './engineArtifacts.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 
 /**
@@ -77,6 +78,7 @@ export function emscriptenUciWorkerScript(config: Pick<EmscriptenUciEngineConfig
   // engine has a rebuild hint, carry it into the worker so the failure
   // identifies the affected URLs instead of a bare "NetworkError importing script".
   return String.raw`
+${engineArtifactWorkerScript()}
 const resolveEmscriptenAssetUrl = ${resolveEmscriptenAssetUrl.toString()};
 const ENGINE_LABEL = ${label};
 const MISSING_ARTIFACT_HINT = ${JSON.stringify(config.missingArtifactHint ?? null)};
@@ -96,15 +98,8 @@ function resolveUrl(url) {
   return new URL(url, self.location.href).href;
 }
 async function importEmscriptenGlue(resolvedJsUrl, trustedJsUrl) {
-  const sameOrigin = new URL(resolvedJsUrl).origin === self.location.origin;
-  if (sameOrigin) {
-    importScripts(resolvedJsUrl);
-    return;
-  }
-  if (!trustedJsUrl) throw new Error('Refusing to execute untrusted ' + ENGINE_LABEL + ' Emscripten glue: ' + resolvedJsUrl);
-  const response = await fetch(resolvedJsUrl, { mode: 'cors', credentials: 'omit', cache: 'force-cache' });
-  if (!response.ok) throw new Error('Failed to fetch ' + ENGINE_LABEL + ' Emscripten glue: ' + response.status + ' ' + resolvedJsUrl);
-  const source = await response.text();
+  if (!trustedJsUrl && new URL(resolvedJsUrl).origin !== self.location.origin) throw new Error('Refusing to execute untrusted ' + ENGINE_LABEL + ' Emscripten glue: ' + resolvedJsUrl);
+  const source = new TextDecoder().decode(await engineArtifacts.bytes(resolvedJsUrl));
   const blobUrl = URL.createObjectURL(new Blob([source + '\n//# sourceURL=' + resolvedJsUrl], { type: 'text/javascript' }));
   try {
     importScripts(blobUrl);
@@ -116,9 +111,16 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
   if (!modulePromise) {
     const resolvedJsUrl = resolveUrl(jsUrl);
     const resolvedWasmUrl = wasmUrl ? resolveUrl(wasmUrl) : null;
-    const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : null;
+    // Default adapters use the glue's sibling preload. Variant callers still
+    // supply the canonical shared package explicitly for SIMD tiers.
+    const siblingDataUrl = new URL(resolvedJsUrl);
+    siblingDataUrl.pathname = siblingDataUrl.pathname.replace(/\.js$/, '.data');
+    const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : siblingDataUrl.href;
     artifactUrls = [resolvedJsUrl, resolvedWasmUrl, resolvedDataUrl];
     try {
+      // Verify the entire set before ANY engine glue executes or data mounts.
+      var wasmBytes = await engineArtifacts.bytes(resolvedWasmUrl || resolvedJsUrl.replace(/\.js$/, '.wasm'));
+      var dataBytes = resolvedDataUrl ? await engineArtifacts.bytes(resolvedDataUrl) : null;
       await importEmscriptenGlue(resolvedJsUrl, trustedJsUrl);
     } catch (error) {
       throw artifactLoadError(error, [resolvedJsUrl]);
@@ -126,6 +128,11 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
     factory = self.${factory} || (typeof ${factory} !== 'undefined' ? ${factory} : null);
     if (!factory) throw new Error(ENGINE_LABEL + ' Emscripten factory was not found after importScripts()');
     modulePromise = factory({
+      wasmBinary: new Uint8Array(wasmBytes),
+      getPreloadedPackage() {
+        if (!dataBytes) throw new Error('Missing verified ' + ENGINE_LABEL + ' preload data');
+        return dataBytes;
+      },
       locateFile(file) {
         return resolveEmscriptenAssetUrl(file, { jsUrl: resolvedJsUrl, wasmUrl: resolvedWasmUrl, dataUrl: resolvedDataUrl });
       },

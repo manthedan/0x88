@@ -1,3 +1,4 @@
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 // Lc0 big-net (BT4-it332, t3-512 distill) browser integration.
 //
 // Big nets are large and attention-heavy, so they are handled with care:
@@ -12,7 +13,7 @@ import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
 import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 export interface BigNetConfig {
@@ -175,20 +176,6 @@ const DEPLOYED_BIG_NET_URLS = new Set<string>([
   '/models/lc0/lqo_v2.f16.qdq8.onnx',
 ]);
 
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
-  } catch {
-    return raw;
-  }
-}
-
 function shouldSkipKnownUnhostedBigNetProbe(config: BigNetConfig): boolean {
   const pathname = assetPathname(config.modelUrl);
   return !isLocalDevelopmentOrigin() && pathname.startsWith('/models/lc0/') && !DEPLOYED_BIG_NET_URLS.has(pathname);
@@ -233,25 +220,23 @@ export function bt4AssetStatusSync(): Bt4AssetStatus {
 export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?: () => void): Promise<Bt4AssetStatus> {
   const existingStatus = assetStatuses.get(config.modelUrl);
   if (existingStatus === 'present' || existingStatus === 'missing') return existingStatus;
+  const urls = [config.modelUrl];
   const existing = assetProbes.get(config.modelUrl);
-  if (existing) return existing;
+  if (existing) {
+    subscribeAssetProbeChange(urls, onStatus);
+    return existing;
+  }
   if (shouldSkipKnownUnhostedBigNetProbe(config)) {
     assetStatuses.set(config.modelUrl, 'missing');
-    onStatus?.();
+    notifyAssetProbeChange(urls, onStatus);
     return 'missing';
   }
-  const probe = (async () => {
-    let status: Bt4AssetStatus;
-    try {
-      const response = await fetch(config.modelUrl, { method: 'HEAD', cache: 'no-store' });
-      status = response.ok ? 'present' : 'missing';
-    } catch {
-      status = 'missing';
-    }
+  if (!assetProbeRetryAllowed(urls, onStatus)) return 'unknown';
+  const probe = probeAssetUrls(urls).then((status) => {
     assetStatuses.set(config.modelUrl, status);
-    onStatus?.();
+    assetProbes.delete(config.modelUrl);
     return status;
-  })();
+  });
   assetProbes.set(config.modelUrl, probe);
   return probe;
 }

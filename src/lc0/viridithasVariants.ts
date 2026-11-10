@@ -1,7 +1,9 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
+import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
 
-export const DEFAULT_VIRIDITHAS_WASM_URL = resolvePublicAssetUrl('/viridithas/viridithas.wasm');
+export const DEFAULT_VIRIDITHAS_WASM_URL = resolveEngineArtifactUrl('/viridithas/viridithas.wasm');
 
 export type ViridithasAssetStatus = 'unknown' | 'checking' | 'ok' | 'missing';
 
@@ -25,14 +27,14 @@ export const VIRIDITHAS_DEFAULT_VARIANT: ViridithasVariant = {
 export const VIRIDITHAS_SIMD_VARIANT: ViridithasVariant = {
   key: 'simd',
   label: 'Viridithas SIMD',
-  wasmUrl: resolvePublicAssetUrl('/viridithas/viridithas-simd128.wasm'),
+  wasmUrl: resolveEngineArtifactUrl('/viridithas/viridithas-simd128.wasm'),
   note: 'Patched Viridithas wasm32-wasip1 build with wasm simd128 NNUE kernels. Default when the browser validates wasm SIMD but not Relaxed SIMD. v20.0.0 tag: 40/40 fixed-depth parity with scalar; browser persistent startpos movetime 1000ms median about 458k NPS versus 68k scalar.',
 };
 
 export const VIRIDITHAS_RELAXED_SIMD_VARIANT: ViridithasVariant = {
   key: 'relaxed-simd',
   label: 'Viridithas Relaxed SIMD',
-  wasmUrl: resolvePublicAssetUrl('/viridithas/viridithas-relaxed-simd128.wasm'),
+  wasmUrl: resolveEngineArtifactUrl('/viridithas/viridithas-relaxed-simd128.wasm'),
   note: 'Viridithas build using the relaxed integer dot for the L1 NNUE kernels (exact: QA=255/FT_SHIFT=9 keep activations in 0..127). Default when the browser validates Relaxed SIMD. v20.0.0 tag: 40/40 fixed-depth parity; browser persistent startpos movetime 1000ms median about 532k NPS, +16% over simd128.',
 };
 
@@ -43,20 +45,6 @@ const DEPLOYED_VIRIDITHAS_PATHS = new Set([
   '/viridithas/viridithas-simd128.wasm',
   '/viridithas/viridithas-relaxed-simd128.wasm',
 ]);
-
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
-  } catch {
-    return raw;
-  }
-}
 
 function shouldSkipKnownUnshippedProbe(variant: ViridithasVariant): boolean {
   if (variant.key === 'custom' || variant.allowUnshippedProbe || isLocalDevelopmentOrigin()) return false;
@@ -93,18 +81,6 @@ export async function resolveDefaultViridithasVariantAssetFallback(
 
 export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [VIRIDITHAS_SIMD_VARIANT, VIRIDITHAS_RELAXED_SIMD_VARIANT, VIRIDITHAS_DEFAULT_VARIANT];
 
-function sameOriginViridithasAsset(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
-    const url = new URL(raw, base);
-    if (url.origin !== base || !url.pathname.startsWith('/viridithas/')) return undefined;
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return undefined;
-  }
-}
-
 export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
   const value = String(raw ?? '')
     .toLowerCase()
@@ -128,7 +104,7 @@ export function hasExplicitViridithasVariant(params: URLSearchParams): boolean {
 }
 
 export function viridithasVariantFromParams(params: URLSearchParams): ViridithasVariant {
-  const customUrl = sameOriginViridithasAsset(params.get('viridithasWasm'));
+  const customUrl = resolveAssetOverride(params.get('viridithasWasm'));
   if (customUrl)
     return { key: 'custom', label: 'Viridithas Custom', wasmUrl: customUrl, note: 'Custom same-origin Viridithas WASM URL from ?viridithasWasm=…' };
   return viridithasVariantByKey(params.get('viridithas') ?? params.get('viridithasVariant') ?? defaultViridithasVariantKey());
@@ -140,31 +116,30 @@ export function viridithasVariantAssetStatus(variant: ViridithasVariant): Viridi
 
 export function checkViridithasVariantAsset(variant: ViridithasVariant, onChange?: () => void): Promise<ViridithasAssetStatus> {
   if (variant.assetStatus === 'ok' || variant.assetStatus === 'missing') return Promise.resolve(variant.assetStatus);
+  const urls = [variant.wasmUrl];
   const existing = assetChecks.get(variant.wasmUrl);
   if (existing) {
     variant.assetStatus = 'checking';
+    subscribeAssetProbeChange(urls, onChange);
     return existing.then((status) => {
       variant.assetStatus = status;
-      onChange?.();
       return status;
     });
   }
   if (shouldSkipKnownUnshippedProbe(variant)) {
     variant.assetStatus = 'missing';
-    onChange?.();
+    notifyAssetProbeChange(urls, onChange);
     return Promise.resolve(variant.assetStatus);
   }
+  if (!assetProbeRetryAllowed(urls, onChange)) return Promise.resolve('unknown');
   variant.assetStatus = 'checking';
-  const promise = fetch(variant.wasmUrl, { method: 'HEAD' })
-    .then((response) => (response.ok ? 'ok' : ('missing' as ViridithasAssetStatus)))
-    .catch(() => 'missing' as ViridithasAssetStatus)
+  const promise = probeAssetUrls(urls)
+    .then((status): ViridithasAssetStatus => (status === 'present' ? 'ok' : status))
     .then((status) => {
       variant.assetStatus = status;
       assetChecks.delete(variant.wasmUrl);
-      onChange?.();
       return status;
     });
   assetChecks.set(variant.wasmUrl, promise);
-  onChange?.();
   return promise;
 }

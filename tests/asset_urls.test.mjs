@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from '../src/lc0/assetUrls.ts';
+import { isTrustedExecutableAssetUrl, resolveAssetOverride, resolvePublicAssetUrl } from '../src/lc0/assetUrls.ts';
 
 const MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
 
@@ -13,6 +13,20 @@ function at(href, { configuredBase } = {}) {
 afterEach(() => {
   delete globalThis.location;
   delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
+});
+
+test('same-origin overrides preserve their origin when paths start with URL separators', () => {
+  at('https://0x88.app/app/play/');
+  for (const path of [
+    '//evil.example/viridithas/viridithas.wasm',
+    '/\\evil.example/viridithas/viridithas.wasm',
+    '\\\\evil.example/viridithas/viridithas.wasm',
+  ]) {
+    const resolved = resolveAssetOverride(`https://0x88.app${path}`);
+    assert.ok(resolved);
+    assert.equal(new URL(resolved, location.href).origin, location.origin);
+    assert.equal(isTrustedExecutableAssetUrl(resolved), true);
+  }
 });
 
 test('the configured asset host resolves asset-host prefixes', () => {
@@ -68,4 +82,18 @@ test('executable asset trust is limited to this origin and the configured asset 
   assert.equal(isTrustedExecutableAssetUrl('/stockfish/stockfish-19-lite.js'), true);
   assert.equal(isTrustedExecutableAssetUrl('https://assets.0x88.app/berserk/berserk-emscripten.js'), true);
   assert.equal(isTrustedExecutableAssetUrl('https://evil.example/berserk/berserk-emscripten.js'), false);
+});
+
+test('shared origin/path helpers handle loopback, blob workers and malformed paths', async () => {
+  const { assetPathname, isLocalDevelopmentOrigin } = await import('../src/lc0/assetUrls.ts');
+  for (const url of ['http://localhost:5181', 'http://dev.localhost:5181', 'http://127.0.0.1', 'http://[::1]']) {
+    at(url);
+    assert.equal(isLocalDevelopmentOrigin(), true, url);
+  }
+  globalThis.location = { href: 'blob:http://localhost:5181/worker', origin: 'http://localhost:5181', hostname: '' };
+  assert.equal(isLocalDevelopmentOrigin(), true);
+  at('https://0x88.app/app/play/');
+  assert.equal(isLocalDevelopmentOrigin(), false);
+  assert.equal(assetPathname('https://assets.0x88.app/reckless/engine.wasm?q=1'), '/reckless/engine.wasm');
+  assert.equal(assetPathname('http://['), 'http://[');
 });

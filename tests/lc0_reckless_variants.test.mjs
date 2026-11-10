@@ -76,7 +76,7 @@ test('explicit relaxed SIMD falls back when the runtime cannot validate relaxed 
 
 test('implicit SIMD default falls back to scalar when the SIMD asset is unavailable', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: false });
+  globalThis.fetch = async () => ({ ok: false, status: 404 });
   try {
     const resolved = await resolveDefaultRecklessVariantAssetFallback(RECKLESS_SIMD_VARIANT, false);
     assert.equal(resolved, RECKLESS_FULL_VARIANT);
@@ -88,7 +88,7 @@ test('implicit SIMD default falls back to scalar when the SIMD asset is unavaila
 test('implicit relaxed SIMD default falls through to scalar when both SIMD assets are unavailable', async () => {
   const originalFetch = globalThis.fetch;
   const originalValidate = WebAssembly.validate;
-  globalThis.fetch = async () => ({ ok: false });
+  globalThis.fetch = async () => ({ ok: false, status: 404 });
   WebAssembly.validate = () => true;
   try {
     const resolved = await resolveDefaultRecklessVariantAssetFallback(RECKLESS_RELAXED_SIMD_VARIANT, false);
@@ -101,7 +101,7 @@ test('implicit relaxed SIMD default falls through to scalar when both SIMD asset
 
 test('explicit SIMD does not silently downgrade during asset preflight', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: false });
+  globalThis.fetch = async () => ({ ok: false, status: 404 });
   try {
     const resolved = await resolveDefaultRecklessVariantAssetFallback(RECKLESS_SIMD_VARIANT, true);
     assert.equal(resolved, RECKLESS_SIMD_VARIANT);
@@ -116,7 +116,7 @@ test('IPv6 loopback still probes local generated Reckless assets', async () => {
   let calls = 0;
   globalThis.fetch = async () => {
     calls += 1;
-    return { ok: false };
+    return { ok: false, status: 404 };
   };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
@@ -138,7 +138,7 @@ test('production probes deployed Reckless assets and skips known-unshipped probe
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
   const requests = [];
   globalThis.fetch = async (url, options) => {
-    requests.push([url, options]);
+    requests.push([url, { method: options?.method, cache: options?.cache }]);
     return { ok: true };
   };
   Object.defineProperty(globalThis, 'location', {

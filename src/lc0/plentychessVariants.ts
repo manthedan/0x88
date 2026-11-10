@@ -1,4 +1,6 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
+import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
@@ -19,8 +21,8 @@ export interface PlentyChessVariant {
   note: string;
 }
 
-export const PLENTYCHESS_EMSCRIPTEN_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.js');
-export const PLENTYCHESS_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.wasm');
+export const PLENTYCHESS_EMSCRIPTEN_JS_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten.js');
+export const PLENTYCHESS_EMSCRIPTEN_WASM_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten.wasm');
 /**
  * Canonical preload `.data` shared by every PlentyChess SIMD tier.
  *
@@ -33,11 +35,11 @@ export const PLENTYCHESS_EMSCRIPTEN_WASM_URL = resolvePublicAssetUrl('/plentyche
  * Emscripten resolves the package through `Module.locateFile`, so the name
  * baked into each glue file is irrelevant.
  */
-export const PLENTYCHESS_EMSCRIPTEN_DATA_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten.data');
-export const PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-sse41.js');
-export const PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-sse41.wasm');
-export const PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.js');
-export const PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL = resolvePublicAssetUrl('/plentychess/plentychess-emscripten-relaxed-simd128.wasm');
+export const PLENTYCHESS_EMSCRIPTEN_DATA_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten.data');
+export const PLENTYCHESS_EMSCRIPTEN_SSE41_JS_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten-sse41.js');
+export const PLENTYCHESS_EMSCRIPTEN_SSE41_WASM_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten-sse41.wasm');
+export const PLENTYCHESS_EMSCRIPTEN_RELAXED_JS_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten-relaxed-simd128.js');
+export const PLENTYCHESS_EMSCRIPTEN_RELAXED_WASM_URL = resolveEngineArtifactUrl('/plentychess/plentychess-emscripten-relaxed-simd128.wasm');
 export const PLENTYCHESS_MAIN_NETWORK = '0178r.bin';
 export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/PlentyNetworks/releases/download/0178r/${PLENTYCHESS_MAIN_NETWORK}`;
 
@@ -55,38 +57,12 @@ const DEPLOYED_PLENTYCHESS_PATHS = new Set([
   '/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
 ]);
 
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
-  } catch {
-    return raw;
-  }
-}
-
 function shouldSkipKnownUnshippedProbe(variant: PlentyChessVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;
   return assetUrls(variant).some((url) => {
     const pathname = assetPathname(url);
     return pathname.startsWith('/plentychess/') && !DEPLOYED_PLENTYCHESS_PATHS.has(pathname);
   });
-}
-
-function sameOriginPlentyChessAsset(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
-    const url = new URL(raw, base);
-    if (url.origin !== base || !url.pathname.startsWith('/plentychess/')) return undefined;
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return undefined;
-  }
 }
 
 function assetUrls(variant: PlentyChessVariant): string[] {
@@ -218,9 +194,9 @@ export function hasExplicitPlentyChessVariant(params: URLSearchParams): boolean 
 }
 
 export function plentyChessVariantFromParams(params: URLSearchParams): PlentyChessVariant {
-  const customJsUrl = sameOriginPlentyChessAsset(params.get('plentyChessJs'));
-  const customWasmUrl = sameOriginPlentyChessAsset(params.get('plentyChessWasm'));
-  const customDataUrl = sameOriginPlentyChessAsset(params.get('plentyChessData'));
+  const customJsUrl = resolveAssetOverride(params.get('plentyChessJs'));
+  const customWasmUrl = resolveAssetOverride(params.get('plentyChessWasm'));
+  const customDataUrl = resolveAssetOverride(params.get('plentyChessData'));
   if (customJsUrl || customWasmUrl || customDataUrl) {
     return {
       key: 'custom',
@@ -244,32 +220,23 @@ export function checkPlentyChessVariantAsset(variant: PlentyChessVariant, onChan
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing)
-    return existing.then((status) => {
-      onChange?.();
-      return status;
-    });
+  const urls = assetUrls(variant);
+  if (existing) {
+    subscribeAssetProbeChange(urls, onChange);
+    return existing;
+  }
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
-    onChange?.();
+    notifyAssetProbeChange(urls, onChange);
     return Promise.resolve('missing');
   }
+  if (!assetProbeRetryAllowed(urls, onChange)) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
-  const promise = Promise.all(
-    assetUrls(variant).map((url) =>
-      fetch(url, { method: 'HEAD', cache: 'no-store' })
-        .then((response) => response.ok)
-        .catch(() => false),
-    ),
-  )
-    .then((results) => (results.every(Boolean) ? 'present' : 'missing') as PlentyChessAssetStatus)
-    .then((status) => {
-      assetStatuses.set(key, status);
-      assetChecks.delete(key);
-      onChange?.();
-      return status;
-    });
+  const promise = probeAssetUrls(urls).then((status) => {
+    assetStatuses.set(key, status);
+    assetChecks.delete(key);
+    return status;
+  });
   assetChecks.set(key, promise);
-  onChange?.();
   return promise;
 }
