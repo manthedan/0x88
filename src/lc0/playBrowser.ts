@@ -64,6 +64,7 @@ import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { defaultStormphraxVariantKey, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
 import { uciGameHistory } from './uciGameHistory.ts';
+import { createWakeLockManager } from './wakeLock.ts';
 import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './workspaceAutosave.ts';
 
 const params = new URLSearchParams(location.search);
@@ -151,21 +152,7 @@ interface CpuEngine {
 // Screen wake lock (best-effort): keeps the screen on while the engine is
 // thinking so a sleeping laptop does not abandon the move.
 // ---------------------------------------------------------------------------
-type WakeLockSentinelLike = { release: () => Promise<void> };
-let wakeLock: WakeLockSentinelLike | null = null;
-async function requestWakeLock(): Promise<void> {
-  try {
-    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<WakeLockSentinelLike> } };
-    wakeLock = await nav.wakeLock?.request('screen');
-  } catch {
-    // Surface API missing or denied; play continues without the lock.
-  }
-}
-function releaseWakeLock(): void {
-  if (!wakeLock) return;
-  void wakeLock.release().catch(() => {});
-  wakeLock = null;
-}
+const wakeLocks = createWakeLockManager(() => navigator.wakeLock?.request('screen'));
 
 /** Start FEN for the current game; odds opponents remove their own queen. */
 function startFenFor(option: PlayEngineOption, human: Color): string {
@@ -979,7 +966,6 @@ function ctxCancelEngineTurn(ctx: PlayContext): void {
   ctx.preparingEngine = false;
   ctx.enginePreparationGeneration += 1;
   ctxHideDownloadProgress();
-  releaseWakeLock();
 }
 
 function ctxPriorFens(ctx: PlayContext): string[] {
@@ -1024,7 +1010,11 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   ctx.engineThinking = true;
   ctx.lastProgressAnnouncement = -1;
   el('progressAnnouncement').textContent = '';
-  await requestWakeLock();
+  const releaseWakeLock = await wakeLocks.acquire(signal);
+  if (signal.aborted || ctx.disposed) {
+    releaseWakeLock();
+    return;
+  }
   ctxRender(ctx);
   let uci: string | null = null;
   try {
@@ -1033,7 +1023,6 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
     if (signal.aborted) return;
     ctx.engineThinking = false;
     ctx.engineReady = false;
-    releaseWakeLock();
     ctxSetEngineFailure(ctx, error);
     ctxRender(ctx);
     return;
