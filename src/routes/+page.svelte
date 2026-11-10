@@ -3,14 +3,11 @@ import { onMount } from 'svelte';
 import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
-import { HUMAN_OPPONENTS, type RosterEngine, searchEngineRoster } from '$lib/engineRoster';
 import { footerNav } from '$lib/nav';
 
 const title = '0x88 | Browser chess engine workbench';
-const description = 'Play against Maia3, compare browser chess engines on one position, or run engine tournaments. Computation stays on your device.';
+const description = 'See where chess engines disagree on one position, play human-style opponents and run engine tournaments. Computation stays on your device.';
 const github = 'https://github.com/manthedan/0x88';
-
-const searchEngines = searchEngineRoster();
 
 let caps: BrowserCapabilityReport | null = null;
 let capsFailed = false;
@@ -28,18 +25,10 @@ function summarize(report: BrowserCapabilityReport | null, failed: boolean): Dev
   if (failed) return { tone: 'warn', headline: 'Could not check this browser.', detail: 'Each engine picks a fallback runtime when it loads.' };
   if (!report) return { tone: 'neutral', headline: 'Checking this browser…', detail: 'Looking for WebGPU, WebAssembly SIMD and threads.' };
   if (!report.wasm) return { tone: 'warn', headline: 'This browser cannot run the engines.', detail: 'WebAssembly is unavailable.' };
-  if (report.webgpu === true) return { tone: 'ok', headline: 'This device runs Lc0 on WebGPU.', detail: 'Neural engines use the GPU; CPU engines run as WebAssembly.' };
+  if (report.webgpu === true) return { tone: 'ok', headline: 'Neural engines run on WebGPU here.', detail: 'Other engines run as WebAssembly on the CPU.' };
   if (report.webgpu === null)
     return { tone: 'warn', headline: 'WebGPU did not answer.', detail: 'Neural engines fall back to WebAssembly if the GPU stays unavailable.' };
   return { tone: 'warn', headline: 'No WebGPU in this browser.', detail: 'Neural engines fall back to WebAssembly and run slower. CPU engines are unaffected.' };
-}
-
-function runtimeLabel(engine: RosterEngine, report: BrowserCapabilityReport | null): { text: string; tone: Tone; title: string } {
-  if (engine.runtime === 'cpu') return { text: 'CPU', tone: 'neutral', title: 'Runs as WebAssembly on the CPU' };
-  if (!report) return { text: 'GPU', tone: 'neutral', title: 'Uses WebGPU when available' };
-  return report.webgpu === true
-    ? { text: 'GPU', tone: 'ok', title: 'Runs on WebGPU on this device' }
-    : { text: 'GPU · fallback', tone: 'warn', title: 'No WebGPU here: falls back to WebAssembly' };
 }
 
 $: summary = summarize(caps, capsFailed);
@@ -61,7 +50,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
   <div class="wrap hero-grid">
     <div class="hero-copy">
       <h1 id="hero-h1">Your chess engine workbench.</h1>
-      <p class="lede">Compare engines, play Maia3, run tournaments. In your browser. No account or install.</p>
+      <p class="lede">See where engines disagree, play human-style opponents and run tournaments in your browser, with no account or install.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="/app/analysis/">Open analysis <span aria-hidden="true">→</span></a>
         <a class="btn btn-secondary" href="/app/play/">Play a game</a>
@@ -88,56 +77,14 @@ $: readiness = capsFailed ? 'Device check unavailable'
   </div>
 </section>
 
-<section class="engines" aria-labelledby="engines-h">
-  <div class="wrap">
-    <div class="section-intro">
+<section class="principle" aria-labelledby="engines-h">
+  <div class="wrap principle-grid">
+    <div>
       <p class="eyebrow"><span></span> Engines</p>
-      <h2 id="engines-h">Engines and human-like opponents</h2>
-      <p>Each engine downloads the first time you use it, then stays cached in this browser.</p>
+      <h2 id="engines-h">Engines and opponents</h2>
     </div>
-    <div class="roster">
-      <div class="roster-group">
-        <div class="roster-head">
-          <h3>Analysis &amp; Arena</h3>
-          <span class="roster-guide">Engine guides</span>
-        </div>
-        <ul class="roster-list">
-          {#each searchEngines as engine (engine.id)}
-            {@const runtime = runtimeLabel(engine, caps)}
-            <li>
-              <a class="roster-entry" href={engine.docHref}>
-                <span class="roster-avatar" aria-hidden="true">{engine.monogram}</span>
-                <span class="roster-name">{engine.name}</span>
-                <span class="roster-runtime" data-tone={runtime.tone} title={runtime.title}>{runtime.text}</span>
-                <span class="roster-open" aria-hidden="true">→</span>
-                {#if engine.role}<p>{engine.role}</p>{/if}
-              </a>
-            </li>
-          {/each}
-        </ul>
-      </div>
-      <div class="roster-group">
-        <div class="roster-head">
-          <h3>Human-style opponents</h3>
-          <span class="roster-guide">Opponent guides</span>
-        </div>
-        <ul class="roster-list roster-list-play">
-          {#each HUMAN_OPPONENTS as engine (engine.id)}
-            {@const runtime = runtimeLabel(engine, caps)}
-            <li>
-              <a class="roster-entry" href={engine.docHref}>
-                <span class="roster-avatar" aria-hidden="true">{engine.monogram}</span>
-                <span class="roster-name">{engine.name}</span>
-                <span class="roster-runtime" data-tone={runtime.tone} title={runtime.title}>{runtime.text}</span>
-                <span class="roster-open" aria-hidden="true">→</span>
-                <p>{engine.role}</p>
-              </a>
-            </li>
-          {/each}
-        </ul>
-        <p class="roster-note">Every analysis engine is also a Play opponent, at five strength levels.</p>
-      </div>
-    </div>
+    <p>Neural networks, alpha-beta engines and human-style opponents. Licenses and source for each are in the Docs.</p>
+    <a href="/docs/#engines">Engine guides <span aria-hidden="true">→</span></a>
   </div>
 </section>
 
@@ -234,45 +181,12 @@ $: readiness = capsFailed ? 'Device check unavailable'
   .device-link{display:inline-block; margin-top:10px; color:var(--ink); font-size:13px; font-weight:650}
   .device-link span{color:var(--accent); margin-left:3px}
 
-  .section-intro{max-width:100%; margin-bottom:32px}
-  .section-intro .eyebrow{margin:0 0 10px}
-  .section-intro h2{margin:0; font-size:clamp(30px,4vw,42px); line-height:1.08; letter-spacing:-.025em}
-  .section-intro p:not(.eyebrow){margin:12px 0 0; color:var(--muted); font-size:15px; line-height:1.6}
 
-  /* Engine roster */
-  .engines{border-bottom:1px solid var(--rule)}
-  .engines .wrap{padding-top:68px; padding-bottom:72px}
-  .roster{display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:28px 40px; align-items:start}
-  .roster-head{display:flex; align-items:baseline; justify-content:space-between; gap:16px; padding-bottom:10px; border-bottom:1px solid var(--rule-strong)}
-  .roster-head h3{margin:0; font-size:20px}
-  .roster-guide{color:var(--muted); font-size:12px; white-space:nowrap}
-  .roster-list{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:28px; margin:0; padding:0; list-style:none}
-  .roster-list-play{grid-template-columns:minmax(0,1fr)}
-  .roster-list li{border-bottom:1px solid var(--rule-strong)}
-  .roster-entry{
-    display:grid; grid-template-columns:28px minmax(0,1fr) auto 14px; align-items:center;
-    column-gap:8px; row-gap:5px; height:100%; padding:14px 4px; border-radius:5px;
-    color:inherit; transition:background .15s;
-  }
-  .roster-entry:hover{background:var(--panel); text-decoration:none}
-  .roster-open{color:var(--muted); transition:transform .15s}
-  .roster-entry:hover .roster-open{color:var(--accent-soft-text); transform:translateX(2px)}
-  .roster-avatar{
-    width:28px; height:28px; display:grid; place-items:center; border-radius:6px;
-    background:var(--panel); color:var(--ink-soft); border:1px solid var(--rule-strong); font:700 12px/1 var(--mono);
-  }
-  .roster-name{color:var(--ink); font-size:15px; font-weight:650}
-  .roster-entry:hover .roster-name{text-decoration:underline; text-underline-offset:3px}
-  .roster-runtime{padding:1px 6px; border:1px solid var(--home-boundary); border-radius:999px; color:var(--ink-soft); font-family:var(--mono); font-size:12px; white-space:nowrap}
-  .roster-runtime[data-tone=ok]{color:var(--accent-soft-text); border-color:var(--home-boundary)}
-  .roster-runtime[data-tone=warn]{color:var(--warn); border-color:color-mix(in srgb, var(--warn) 50%, var(--rule))}
-  .roster-list p{grid-column:2 / -1; margin:0; color:var(--muted); font-size:14px; line-height:1.55}
-  .roster-note{margin:14px 0 0; color:var(--muted); font-size:13px; line-height:1.5}
 
   .principle{border-top:1px solid var(--rule-strong); background:var(--bg-workspace)}
   .principle-grid{
     padding-top:44px; padding-bottom:44px; display:grid;
-    grid-template-columns:minmax(250px,.8fr) minmax(280px,1fr) auto;
+    grid-template-columns:minmax(250px,.8fr) minmax(280px,1fr) 190px;
     gap:34px; align-items:center;
   }
   .principle .eyebrow{margin:0 0 7px}
@@ -284,7 +198,6 @@ $: readiness = capsFailed ? 'Device check unavailable'
   :global(.landing-footer-wrap){justify-content:flex-end}
 
   @media(max-width:1200px){
-    .roster{grid-template-columns:1fr}
   }
   @media(max-width:899px){
     .hero-grid{grid-template-columns:1fr; grid-template-areas:"copy" "preview"; grid-template-rows:none; padding-top:48px; padding-bottom:52px}
@@ -306,10 +219,6 @@ $: readiness = capsFailed ? 'Device check unavailable'
     .cta-row .btn-arena{flex:0 0 auto; min-height:34px; padding-block:4px; justify-content:flex-start}
     .device-readiness{margin-top:5px; min-height:26px; font-size:12px}
     .device{max-width:none}
-    .section-intro{margin-bottom:22px}
-    .engines .wrap{padding:48px 16px 52px}
-    .roster-list{grid-template-columns:1fr}
-    .roster-entry{padding:12px 4px}
     .principle-grid{padding:38px 16px; grid-template-columns:1fr; gap:12px}
     .principle-grid>a{grid-column:auto; margin-top:5px}
   }
