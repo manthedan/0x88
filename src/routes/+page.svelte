@@ -7,7 +7,7 @@ import { footerNav } from '$lib/nav';
 import { engineFamilyOptions } from '../lc0/engineCatalog.ts';
 
 const title = '0x88 | Browser chess engine workbench';
-const description = 'See where chess engines disagree on one position, play human-style opponents and run engine tournaments. Computation stays on your device.';
+const description = 'Run Lc0, Stockfish and other chess engines in a browser tab. Compare them on one position, play human-style opponents and run tournaments. Computation stays on your device.';
 const github = 'https://github.com/manthedan/0x88';
 const engineCount = engineFamilyOptions().length;
 
@@ -27,7 +27,7 @@ function summarize(report: BrowserCapabilityReport | null, failed: boolean): Dev
   if (failed) return { tone: 'warn', headline: 'Could not check this browser.', detail: 'Each engine picks a fallback runtime when it loads.' };
   if (!report) return { tone: 'neutral', headline: 'Checking this browser…', detail: 'Looking for WebGPU, WebAssembly SIMD and threads.' };
   if (!report.wasm) return { tone: 'warn', headline: 'This browser cannot run the engines.', detail: 'WebAssembly is unavailable.' };
-  if (report.webgpu === true) return { tone: 'ok', headline: 'Neural engines run on WebGPU here.', detail: 'Other engines run as WebAssembly on the CPU.' };
+  if (report.webgpu === true) return { tone: 'ok', headline: 'This device runs Lc0 on WebGPU.', detail: 'Neural engines use the GPU; CPU engines run as WebAssembly.' };
   if (report.webgpu === null)
     return { tone: 'warn', headline: 'WebGPU did not answer.', detail: 'Neural engines fall back to WebAssembly if the GPU stays unavailable.' };
   return { tone: 'warn', headline: 'No WebGPU in this browser.', detail: 'Neural engines fall back to WebAssembly and run slower. CPU engines are unaffected.' };
@@ -52,7 +52,7 @@ $: readiness = capsFailed ? 'Device check unavailable'
   <div class="wrap hero-grid">
     <div class="hero-copy">
       <h1 id="hero-h1">Your chess engine workbench.</h1>
-      <p class="lede">See where engines disagree, play human-style opponents and run tournaments in your browser, with no account or install.</p>
+      <p class="lede">Run Lc0 and Stockfish in a browser tab, on your own GPU and CPU. Compare engines, play human-style opponents and run tournaments, no account needed.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="/app/analysis/">Open analysis <span aria-hidden="true">→</span></a>
         <a class="btn btn-secondary" href="/app/play/">Play a game</a>
