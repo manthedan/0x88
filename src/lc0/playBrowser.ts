@@ -1454,7 +1454,7 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
 const SF_LEVEL_NAMES = ['Weakest', 'Casual', 'Club', 'Strong', 'Full strength'] as const;
 const ENGINE_MONOGRAMS: Partial<Record<PlayFamily, string>> = {
   maia3: 'M3',
-  lc0: 'L0',
+  lc0: 'Lc0',
   sf: 'SF',
   centipawn: 'CP',
   reckless: 'Rk',

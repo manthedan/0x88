@@ -255,7 +255,7 @@ onMount(() => {
   .player-avatar{
     display:grid; place-items:center; flex:0 0 34px; width:34px; height:34px; border-radius:7px;
     background:var(--accent-soft); color:var(--accent-soft-text); box-shadow:inset 0 0 0 1px var(--accent-tint-border);
-    font:700 12.5px/1 var(--sans); letter-spacing:-.01em;
+    font:700 12px/1 var(--mono); font-variant-numeric:slashed-zero; letter-spacing:-.01em;
   }
   .player-avatar.you{background:var(--panel-2); color:var(--ink); box-shadow:inset 0 0 0 1px var(--border-input-hover); font-size:11px}
   .player-id{display:flex; flex:0 1 auto; flex-direction:column; min-width:0; line-height:1.25}

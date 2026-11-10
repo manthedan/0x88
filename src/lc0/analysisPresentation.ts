@@ -57,7 +57,7 @@ export function sharedArrowMarkerSvg(engines: string[], position: [number, numbe
   const width = text.length * 13.2 + 16;
   const label = htmlEscape(`${engines.length} engines share this move: ${engines.map(analysisEngineName).join(', ')}`);
   // 22 square-local units are 10.5px on the 382px mobile board, including three-engine pills.
-  return `<g class="shared-move-marker" role="img" tabindex="0" aria-label="${label}" style="pointer-events:none"><title>${label}</title><rect x="${x - width / 2}" y="${y - 15}" width="${width}" height="30" rx="8" fill="${analysisChipColor(engines[0])}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 8}" text-anchor="middle" fill="#fff" font-family="ui-monospace,monospace" font-size="22" font-weight="750">${htmlEscape(text)}</text></g>`;
+  return `<g class="shared-move-marker" role="img" tabindex="0" aria-label="${label}" style="pointer-events:none"><title>${label}</title><rect x="${x - width / 2}" y="${y - 15}" width="${width}" height="30" rx="8" fill="${analysisChipColor(engines[0])}" stroke="#fbf8f1" stroke-width="2"/><text x="${x}" y="${y + 8}" text-anchor="middle" fill="#fff" font-family="ui-monospace,monospace" font-size="22" font-weight="750" style="font-variant-numeric:slashed-zero">${htmlEscape(text)}</text></g>`;
 }
 
 /**
@@ -150,7 +150,7 @@ export function analysisShortEngineNames(engines: string[]): Map<string, string>
 }
 
 const ENGINE_MONOGRAMS: [RegExp, string][] = [
-  [/^lc0/i, 'L0'], [/^(sf|stockfish)\b/i, 'SF'], [/^plentychess/i, 'PC'], [/^centipawn/i, 'CP'], [/^maia/i, 'MA'],
+  [/^lc0/i, 'Lc0'], [/^(sf|stockfish)\b/i, 'SF'], [/^plentychess/i, 'PC'], [/^centipawn/i, 'CP'], [/^maia/i, 'MA'],
 ];
 
 /** Two-character uppercase monogram for the engine's colour avatar (one rule for every engine). */

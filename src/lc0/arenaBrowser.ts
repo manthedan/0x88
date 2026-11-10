@@ -24,10 +24,10 @@ import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
+import { arenaChartGroups } from './arenaChartPresentation.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import {
   appendCpuArenaTrail,
-  arenaChartEngineName,
   type CpuArenaPosition,
   type CpuArenaSeat,
   captureCpuArenaDiagnostics,
@@ -42,7 +42,7 @@ import {
 } from './arenaCheckpoint.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { loadArenaResource } from './arenaResourceLoad.ts';
-import { arenaChartColorIndex, arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
+import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -491,14 +491,6 @@ const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
 type GameChartSample = ArenaChartSample;
 let gameChartSamples: GameChartSample[] = [];
-const CHART_COLORS = [
-  'var(--chart-1,#4a7a2a)',
-  'var(--chart-2,#a5461b)',
-  'var(--chart-3,#1c5f8a)',
-  'var(--chart-4,#7a4a9a)',
-  'var(--chart-5,#8a7a1c)',
-  'var(--chart-6,#5a5a5a)',
-];
 const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
 const uciTelemetry = new Map<string, UciEngineTelemetry>();
@@ -1229,7 +1221,7 @@ function renderEvalBars(): void {
     // Lc0's WDL remains in its card/charts; mixing WDL and logistic cp here would
     // manufacture a spread even when the printed evals are identical.
     const score = { fen: output?.fen, scoreCp: output?.whiteCp ?? (output?.qWhite !== undefined ? qToCentipawns(output.qWhite) : undefined), mateIn: output?.mateInWhitePov };
-    const tag = engineMonogram(name).replace('L0', 'Lc0');
+    const tag = engineMonogram(name);
     const thinking = running && !reviewing && board.turn === (index === 0 ? 'w' : 'b') && !!seat.id && thinkingEngineIds.has(seat.id);
     return { ...seat, name, tag, thinking, score, percent: evalPercent(score), text: output?.evalText ?? '—', color: engineBrushes(name).swatch };
   });
@@ -1247,7 +1239,6 @@ function renderEvalBars(): void {
   // Keep the lane DOM stable so fill/freshness changes can ease rather than flash.
   node.querySelectorAll<HTMLElement>('.eval-lane').forEach((laneNode, index) => {
     const lane = lanes[index];
-    laneNode.classList.toggle('stale', !state.fresh[index]);
     laneNode.classList.toggle('unavailable', lane.percent === undefined);
     laneNode.classList.toggle('thinking', lane.thinking);
     laneNode.style.setProperty('--eng', lane.color);
@@ -1265,10 +1256,8 @@ function renderEvalBars(): void {
   caption.title = label;
   caption.setAttribute('aria-label', label);
   const markup = lanes.map((lane, index) => {
-    const age = state.ages[index];
-    const stamp = lane.percent === undefined ? '' : age === 0 ? 'now' : age !== undefined && age > 0 ? `${age}p` : 'older';
-    return `<span class="eval-reading${lane.percent === undefined ? ' pending' : ''}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine"><span class="eval-engine-full">${htmlEscape(lane.name)}</span><span class="eval-engine-short">${htmlEscape(lane.tag)}</span></span><strong>${htmlEscape(lane.text)}</strong><span class="eval-age${state.fresh[index] ? '' : ' older'}">${htmlEscape(stamp)}</span>${lane.thinking ? '<span class="eval-searching" aria-hidden="true"></span>' : ''}</span>`;
-  }).join('') + `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}">${htmlEscape(status.text)}</span>`;
+    return `<span class="eval-reading${lane.percent === undefined ? ' pending' : ''}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine">${htmlEscape(lane.tag)}</span><strong>${htmlEscape(lane.text)}</strong></span>`;
+  }).join('') + `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}${comparison?.oppositeSides ? ' opposite' : ''}">${htmlEscape(status.text)}</span>`;
   if (caption.innerHTML !== markup) caption.innerHTML = markup;
 }
 
@@ -3480,10 +3469,6 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
   return uci ? legalMoves(current).find((m) => moveToUci(m) === uci) : undefined;
 }
 
-function chartColorFor(engineId: string): string {
-  return CHART_COLORS[arenaChartColorIndex(gameChartSamples, engineId) % CHART_COLORS.length];
-}
-
 function formatCompactNumber(value: number): string {
   if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
   if (value >= 1000) return `${Math.round(value / 1000)}k`;
@@ -3524,12 +3509,13 @@ function describeChart(id: string, summary: string): void {
 function renderGameCharts(): void {
   const chartSize = { width: Math.max(300, el('chartsPanel').clientWidth - 24), height: 64 };
   const ids = [...new Set(gameChartSamples.map((sample) => sample.engineId))];
+  const groups = arenaChartGroups(gameChartSamples);
   const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] =>
-    ids.map((id) => ({
-      label: arenaChartEngineName(gameChartSamples, id),
-      color: chartColorFor(id),
-      points: gameChartSamples
-        .filter((sample) => sample.engineId === id)
+    groups.map(({ label, color, dashed, samples }) => ({
+      label,
+      color,
+      dashed,
+      points: samples
         .flatMap((sample) => {
           const y = value(sample);
           return y === undefined || !Number.isFinite(y) ? [] : [{ x: sample.ply, y }];
@@ -3554,8 +3540,8 @@ function renderGameCharts(): void {
   describeChart('evalChart', `White expected score by ply. Latest: ${summaries((sample) => sample.whiteScore === undefined ? 'unavailable' : percent0(sample.whiteScore))}. Use the Review game position slider to explore.`);
   describeChart('timeChart', `Search time by ply. Latest: ${summaries((sample) => formatSeconds(sample.moveMs))}. Use the Review game position slider to explore.`);
   describeChart('npsChart', `Search speed by ply. Latest: ${summaries((sample) => sample.nps === undefined ? 'unavailable' : `${formatNps(sample.nps)} nodes or visits per second`)}. Use the Review game position slider to explore.`);
-  el('chartLegend').innerHTML = ids
-    .map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(arenaChartEngineName(gameChartSamples, id))}</span>`)
+  el('chartLegend').innerHTML = groups
+    .map(({ label, color, dashed }) => `<span><span class="swatch" style="background:${dashed ? `repeating-linear-gradient(90deg,${color} 0 3px,transparent 3px 5px)` : color}"></span>${htmlEscape(label)}</span>`)
     .join('');
 }
 
@@ -3593,7 +3579,7 @@ function renderSavedRootChart(data?: ArenaRootChartSample): void {
       label: child.uci,
       value: child.visits,
       detail: `Q ${signed(child.q, 2)} · P ${Math.round(child.prior * 100)}%`,
-      color: CHART_COLORS[0],
+      color: engineBrushes(data.engineName).swatch,
     })),
   );
   describeChart('rootChart', `Root search candidates by visits. ${top.map((child) => `${child.uci}: ${child.visits} ${child.visits === 1 ? 'visit' : 'visits'}`).join('; ')}. Use Preview a root search candidate to show arrows on the board.`);

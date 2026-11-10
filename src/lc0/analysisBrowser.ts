@@ -2043,8 +2043,6 @@ function evalBarLine(lines: AnalysisLine[]): AnalysisLine | undefined {
   return best.find((entry) => analysisEngineName(entry.engine) === evalSourceEngine) ?? best[0];
 }
 
-let evalDetailsInvoker: HTMLButtonElement | null = null;
-
 function renderEvalBar() {
   if (retry) {
     el('evalScore').textContent = '';
@@ -2080,55 +2078,41 @@ function renderEvalBar() {
     ? [{ ...result, id: name, name, color: engineBrushes(engine).swatch }] : []);
   const comparison = compareEvals(ticks);
   const spread = el('evalSpread');
-  spread.hidden = !comparison;
+  spread.hidden = !comparison?.meaningful;
   if (comparison) {
     spread.style.setProperty('--low', `${comparison.min}%`);
     spread.style.setProperty('--high', `${comparison.max}%`);
-    spread.style.setProperty('--mid', `${(comparison.min + comparison.max) / 2}%`);
-    spread.dataset.meaningful = String(comparison.meaningful || comparison.oppositeSides);
     spread.title = `Engine spread: ${comparison.label}. Positions use the nonlinear evaluation-bar scale, not pawn distance.`;
   }
   const spreadLabel = el('evalSpreadLabel');
-  spreadLabel.hidden = choices.length < 2;
-  spreadLabel.dataset.meaningful = String(!!comparison && (comparison.meaningful || comparison.oppositeSides));
-  spreadLabel.textContent = comparison ? `Δ ${compactEvalSpread(comparison)}` : 'Δ —';
+  spreadLabel.hidden = !comparison?.meaningful;
+  spreadLabel.textContent = comparison ? `spread ${compactEvalSpread(comparison)}` : '';
+  spreadLabel.title = comparison?.pawnSpread !== undefined
+    ? 'Largest disagreement between engines, in pawns'
+    : 'Largest disagreement between engines, in points on the bar (mate scores are not pawns)';
   const rect = bar?.getBoundingClientRect();
   const mobile = matchMedia('(max-width:600px)').matches;
   const length = (mobile ? rect?.width : rect?.height) ?? 400;
   const selectedId = line ? analysisEngineName(line.engine) : undefined;
   const tickContainer = el('evalTicks');
   const details = el('evalCompareDetails');
-  if (details.dataset.fen !== tree.current.fen || choices.length < 2) {
+  if (details.dataset.fen !== tree.current.fen) {
     if (details.matches(':popover-open')) details.hidePopover();
     details.dataset.fen = tree.current.fen;
   }
-  const focusedId = tickContainer.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focusKey : details.matches(':popover-open') ? evalDetailsInvoker?.dataset.focusKey : undefined;
-  // Results are from the CURRENT FEN cache only. No placeholder or previous-position ticks.
-  const markerMarkup = choices.length > 1 ? evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile, left: rect?.left ?? 0, viewport: innerWidth, focusedId }) : '';
-  if (details.matches(':popover-open') && evalDetailsInvoker?.isConnected) {
-    // Refresh every marker, including a newly selected default engine, but reuse
-    // the native invoker object so Escape can still return focus after regrouping.
-    const template = document.createElement('template');
-    template.innerHTML = markerMarkup;
-    const next = template.content.querySelector<HTMLButtonElement>(`[data-focus-key="${CSS.escape(evalDetailsInvoker.dataset.focusKey ?? '')}"]`);
-    if (next) {
-      for (const name of evalDetailsInvoker.getAttributeNames()) if (!next.hasAttribute(name)) evalDetailsInvoker.removeAttribute(name);
-      for (const { name, value } of next.attributes) evalDetailsInvoker.setAttribute(name, value);
-      evalDetailsInvoker.replaceChildren(...next.childNodes);
-      next.replaceWith(evalDetailsInvoker);
-      tickContainer.replaceChildren(template.content);
-    } else {
-      details.hidePopover();
-      patchAnalysisResults(tickContainer, markerMarkup);
-    }
-  } else patchAnalysisResults(tickContainer, markerMarkup);
-  el('evalDetailsSummary').textContent = comparison ? `Spread ${comparison.label} · White’s view` : `${ticks.length} of ${choices.length} results · White’s view`;
+  // The single, stable invoker survives all asynchronous result/source updates.
+  patchAnalysisResults(tickContainer, evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile }));
+  el('evalDetailsSummary').textContent = 'White’s view';
+  if (bar) {
+    details.style.setProperty('--details-top', `${Math.round((rect?.bottom ?? 0) + 6)}px`);
+    details.style.setProperty('--details-left', `${Math.max(8, Math.round((rect?.right ?? 0) + 8))}px`);
+  }
   patchAnalysisResults(el('evalDetailList'), evalDetailsMarkup(ticks, selectedId));
   const button = el('evalSourceButton');
   button.dataset.switchable = String(ready > 1);
   const comparisonLabel = comparison ? ` Engine spread: ${comparison.label}${comparison.oppositeSides ? '; prefer different sides' : ''}. ${ticks.map((tick) => `${tick.name} ${tick.scoreText}`).join('; ')}.` : '';
   const label = line ? `Eval bar: ${analysisEngineName(line.engine)} ${line.scoreText}, White's perspective.${comparisonLabel}${ready > 1 ? ' Choose the engine shown' : ''}` : 'Eval bar: no evaluation yet';
-  bar?.setAttribute('aria-label', label);
+  bar?.setAttribute('aria-label', `${label}. Open engine evaluations`);
   button.setAttribute('aria-label', label);
   button.title = label;
   if (!el('evalSourceMenu').hidden) renderEvalSourceMenu();
@@ -5906,28 +5890,61 @@ export function mountAnalysisBrowser(): () => void {
   smokeGlobal.__analysisSetHidden = setHiddenHook;
   const pvResize = new ResizeObserver(() => fitAnalysisPvRows(el('engineSummaries')));
   pvResize.observe(el('engineSummaries'));
-  // Group in screen pixels again when the rail rotates or the board resizes.
+  // Recheck the optional endpoint-label clearance when the rail rotates/resizes.
   const evalResize = new ResizeObserver(() => renderEvalBar());
   evalResize.observe(el('evalWhite').parentElement!);
-  el('evalCompareDetails').addEventListener('beforetoggle', (event) => {
-    if ((event as ToggleEvent).newState === 'open') {
-      const active = document.activeElement;
-      evalDetailsInvoker = active instanceof HTMLButtonElement && el('evalTicks').contains(active) ? active : null;
-    }
-  }, { signal: controller.signal });
-  el('evalCompareDetails').addEventListener('toggle', (event) => {
-    if ((event as ToggleEvent).newState === 'closed') {
-      evalDetailsInvoker = null;
+  const rail = el('evalWhite').parentElement!;
+  const details = el('evalCompareDetails');
+  // The DOM library predates the native source option. It keeps Tab ordering
+  // and Escape restoration attached to this one stable invoker, even on hover.
+  const showEvalDetails = () => (details.showPopover as (options: { source: HTMLElement }) => void)({ source: rail });
+  let restoringEvalFocus = false;
+  let restoreEvalFocus = false;
+  const openEvalDetails = () => {
+    if (restoringEvalFocus || retry || matchMedia('(hover:none)').matches || details.matches(':popover-open')) return;
+    renderEvalBar();
+    showEvalDetails();
+  };
+  rail.addEventListener('pointerenter', openEvalDetails, { signal: controller.signal });
+  rail.addEventListener('focus', openEvalDetails, { signal: controller.signal });
+  // Do not let a focus-open immediately toggle closed on the following click.
+  rail.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (!details.matches(':popover-open')) {
       renderEvalBar();
+      showEvalDetails();
     }
   }, { signal: controller.signal });
+  // A hover open can precede click focus. Native dismissal otherwise restores
+  // the pre-hover control, rather than the bar the user subsequently entered.
+  details.addEventListener('beforetoggle', (event) => {
+    if ((event as ToggleEvent).newState === 'closed') {
+      restoringEvalFocus = true;
+      restoreEvalFocus = details.contains(document.activeElement) || document.activeElement === rail;
+    }
+  }, { signal: controller.signal });
+  details.addEventListener('toggle', (event) => {
+    if ((event as ToggleEvent).newState === 'closed') {
+      if (restoreEvalFocus && rail.isConnected) rail.focus({ preventScroll: true });
+      restoreEvalFocus = false;
+      restoringEvalFocus = false;
+    }
+  }, { signal: controller.signal });
+  const closeOnLeave = () => {
+    if (details.matches(':popover-open') && !rail.matches(':hover') && !details.matches(':hover')
+      && !details.contains(document.activeElement) && document.activeElement !== rail) details.hidePopover();
+  };
+  rail.addEventListener('pointerleave', () => setTimeout(closeOnLeave, 150), { signal: controller.signal });
+  details.addEventListener('pointerleave', closeOnLeave, { signal: controller.signal });
+  window.addEventListener('scroll', () => {
+    if (details.matches(':popover-open')) details.hidePopover();
+  }, { signal: controller.signal, passive: true });
   void init(controller.signal);
   return () => {
     pvResize.disconnect();
     evalResize.disconnect();
     controller.abort();
     if (mountAbort === controller) {
-      evalDetailsInvoker = null;
       disposePageResources();
     }
     // Only clear the test hook if it is still ours (a newer mount may have
