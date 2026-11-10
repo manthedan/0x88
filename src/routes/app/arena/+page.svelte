@@ -281,7 +281,7 @@ onMount(() => {
       <div class="log" id="log"></div>
       <pre id="benchResult" class="small" hidden></pre>
       <div class="row"><button id="exportPgn" type="button">Export PGN</button></div>
-      <textarea id="pgnOut" spellcheck="false" placeholder="game PGNs appear here after Export PGN" hidden></textarea>
+      <textarea id="pgnOut" aria-label="Exported tournament PGNs" spellcheck="false" placeholder="game PGNs appear here after Export PGN" hidden></textarea>
     </details>
     <details class="section-block runtime-block">
       <summary>Runtime status</summary>

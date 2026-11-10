@@ -24,6 +24,7 @@ import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
+import { arenaAdjudicationLabel, arenaAdjudicationTags } from './arenaAdjudication.ts';
 import { arenaChartGroups } from './arenaChartPresentation.ts';
 import {
   ARENA_CONTROL_IDS,
@@ -520,6 +521,7 @@ let arenaClockTimer: ReturnType<typeof setInterval> | null = null;
 let arenaChartResizeObserver: ResizeObserver | null = null;
 interface ArenaGameResultChip {
   index: number;
+  reason: string;
   result: GameResultCode;
   whiteName: string;
   blackName: string;
@@ -3397,7 +3399,7 @@ function renderGameResultChips(): void {
       const outcome =
         chip.aPoints === null ? (chip.result === '1/2-1/2' ? 'draw' : 'decisive') : chip.aPoints === 1 ? 'win' : chip.aPoints === 0 ? 'loss' : 'draw';
       const text = chip.result === '1/2-1/2' ? '½–½' : chip.result.replace('-', '–');
-      return `<button type="button" class="sb-chip ${outcome}" data-game="${chip.index}" title="Game ${chip.index + 1}: ${htmlEscape(displayEngineName(chip.whiteName))} (White) vs ${htmlEscape(displayEngineName(chip.blackName))} (Black), ${chip.result}. Click to replay."><span class="sb-chip-n">G${chip.index + 1}</span>${text}</button>`;
+      return `<button type="button" class="sb-chip ${outcome}" data-game="${chip.index}" title="Game ${chip.index + 1}: ${htmlEscape(displayEngineName(chip.whiteName))} (White) vs ${htmlEscape(displayEngineName(chip.blackName))} (Black), ${chip.result}${arenaAdjudicationLabel(chip.reason) ? `, ${arenaAdjudicationLabel(chip.reason)}` : ''}. Click to replay."><span class="sb-chip-n">G${chip.index + 1}</span>${text}${arenaAdjudicationLabel(chip.reason) ? ` · ${arenaAdjudicationLabel(chip.reason)}` : ''}</button>`;
     })
     .join('');
 }
@@ -3999,6 +4001,7 @@ function showCheckpointResults(saved: ArenaCheckpoint): void {
     finishedTrails[game.scheduleIndex] = trail;
     gameResultChips.push({
       index: game.scheduleIndex,
+      reason: game.reason,
       result: game.result,
       whiteName,
       blackName,
@@ -4262,7 +4265,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       }
     }
     const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
-    const pgn = gameTreeToPgn(tree, tags, result);
+    const pgn = gameTreeToPgn(tree, { ...tags, ...arenaAdjudicationTags(reason) }, result);
     const completed: ArenaCompletedGame = {
       pgn,
       scheduleIndex: i,
@@ -4288,6 +4291,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     }
     gameResultChips.push({
       index: i,
+      reason,
       result,
       whiteName: white.name,
       blackName: black.name,

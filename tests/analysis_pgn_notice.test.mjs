@@ -11,7 +11,7 @@ const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta
 const template = readFileSync(new URL('../src/routes/app/analysis/+page.svelte', import.meta.url), 'utf8');
 const statusStart = source.includes('let pgnImportNotice:') ? source.indexOf('let pgnImportNotice:') : source.indexOf('function renderAnalysisStatus()');
 const statusFunctions = source.slice(statusStart, source.indexOf('function activeEngineNames()'));
-const loadFunction = source.slice(source.indexOf('function loadPgn()'), source.indexOf('function copyFen()'));
+const loadFunction = source.slice(source.indexOf('function loadPgn()'), source.indexOf('async function copyFen()'));
 
 function controller() {
   const elements = new Map();
@@ -118,7 +118,7 @@ function exportController() {
     ['message', 'pgnInput', 'analysisRestoreNotice', 'restorePreviousAnalysis'].map((id) => [id, { value: 'previous PGN', textContent: '', hidden: true }]),
   );
   const restore = source.slice(source.indexOf('function restoreAnalysisWorkspace()'), source.indexOf('let searcher:'));
-  const copy = source.slice(source.indexOf('function copyPgn()'), source.indexOf('function closePvPreview()'));
+  const copy = source.slice(source.indexOf('async function copyPgn()'), source.indexOf('function closePvPreview()'));
   const code = ts.transpile(
     `
     let tree = new GameTree(), analysisGameTree = tree, workspaceHeaders = {}, workspaceResult = '*';

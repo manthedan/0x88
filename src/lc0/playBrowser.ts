@@ -35,6 +35,7 @@ import {
   probeBt4Support,
   T3_NET,
 } from './bt4Engine.ts';
+import { writeClipboard } from './clipboard.ts';
 import { inactiveCpuEnginesToEvict } from './cpuEngineResidency.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
@@ -2022,11 +2023,14 @@ function ctxInit(ctx: PlayContext): void {
     ctxRender(ctx);
   });
   trackListener(ctx, el('copyPgn'), 'click', () => {
-    void navigator.clipboard.writeText(ctxExportPgn(ctx)).then(() => {
+    void writeClipboard(ctxExportPgn(ctx)).then((copied) => {
+      if (ctx.disposed) return;
       const btn = buttonEl('copyPgn');
-      setButtonLabel(btn, 'Copied');
-      btn.dataset.copied = 'true';
+      setButtonLabel(btn, copied ? 'Copied' : 'Copy failed');
+      btn.dataset.copied = String(copied);
+      if (!copied) el('gameAnnouncement').textContent = 'Could not copy PGN to the clipboard. Use Download PGN to keep the game.';
       setTimeout(() => {
+        if (ctx.disposed) return;
         setButtonLabel(btn, 'Copy PGN');
         btn.dataset.copied = 'false';
       }, 1500);

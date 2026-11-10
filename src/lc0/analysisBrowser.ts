@@ -35,6 +35,7 @@ import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
 import { analysisUrlFen } from './analysisUrlInput.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
+import { writeClipboard } from './clipboard.ts';
 import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
 import { criticalPositionLines } from './criticalMomentsPresentation.ts';
@@ -4879,22 +4880,25 @@ function loadPgn() {
   }
 }
 
-function copyFen() {
+async function copyFen(): Promise<boolean> {
   const fen = tree.current.fen;
   inputEl('fenInput').value = fen;
-  void navigator.clipboard?.writeText(fen).catch(() => undefined);
-  el('message').textContent = 'FEN copied to the clipboard.';
+  const copied = await writeClipboard(fen);
+  el('message').textContent = copied ? 'FEN copied to the clipboard.' : 'Could not copy FEN to the clipboard. Copy it from the FEN box.';
+  return copied;
 }
 
-function copyPgn() {
+async function copyPgn(): Promise<boolean> {
   try {
     const exported = pgnResultForExport(workspaceHeaders, workspaceResult, reviewMetadata.get(tree)?.signature === reviewSignature());
     const pgn = gameTreeToPgn(tree, exported.headers, exported.result);
     inputEl('pgnInput').value = pgn;
-    void navigator.clipboard?.writeText(pgn).catch(() => undefined);
-    el('message').textContent = 'PGN copied to the box and clipboard.';
+    const copied = await writeClipboard(pgn);
+    el('message').textContent = copied ? 'PGN copied to the box and clipboard.' : 'Could not copy PGN to the clipboard. Copy it from the PGN box.';
+    return copied;
   } catch (error) {
     el('message').textContent = `PGN export failed: ${(error as Error).message}`;
+    return false;
   }
 }
 
@@ -5184,13 +5188,11 @@ function wireEvents() {
     { signal: mountAbort.signal },
   );
   el('ground').addEventListener('pointerleave', () => el('ground').querySelector('cg-board')?.removeAttribute('title'), { signal: mountAbort.signal });
-  el('quickCopyFen').addEventListener('click', () => {
-    copyFen();
-    flashCopied(el('quickCopyFen'));
+  el('quickCopyFen').addEventListener('click', async () => {
+    if (await copyFen()) flashCopied(el('quickCopyFen'));
   });
-  el('quickCopyPgn').addEventListener('click', () => {
-    copyPgn();
-    flashCopied(el('quickCopyPgn'));
+  el('quickCopyPgn').addEventListener('click', async () => {
+    if (await copyPgn()) flashCopied(el('quickCopyPgn'));
   });
   el('playFromHere').addEventListener('click', () => {
     if (playFromHereUnavailableReason(tree)) return;
