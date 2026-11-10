@@ -385,16 +385,27 @@ async function handleInit(message: InitMessage): Promise<void> {
   });
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   const baseEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model, { physicalBatchMode });
-  const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
-  const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
-  const diagnostics = await collectOrtRuntimeDiagnostics();
+  let nextEvaluator: WorkerEvaluator;
+  let nextSearcher: Lc0PuctSearcher;
+  let diagnostics: OrtRuntimeDiagnostics;
+  let nextModelCacheStatus: string;
+  try {
+    nextEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
+    nextSearcher = new Lc0PuctSearcher(nextEvaluator);
+    diagnostics = await collectOrtRuntimeDiagnostics();
+    nextModelCacheStatus = `${describeLc0ModelLoad(modelLoad)}${cacheLabel}`;
+  } catch (error) {
+    await baseEvaluator.dispose?.();
+    throw error;
+  }
+  // Keep the working session if replacement creation or diagnostics fail.
   const previousEvaluator = evaluator;
   evaluator = nextEvaluator;
   searcher = nextSearcher;
   configuredModelUrl = message.modelUrl;
   configuredInitKey = initKey;
   configuredBackend = diagnostics.describe;
-  configuredModelCacheStatus = `${describeLc0ModelLoad(modelLoad)}${cacheLabel}`;
+  configuredModelCacheStatus = nextModelCacheStatus;
   configuredOrtWasm = diagnostics.wasm;
   configuredOrtFallback = diagnostics.fallback;
   await previousEvaluator?.dispose?.();
