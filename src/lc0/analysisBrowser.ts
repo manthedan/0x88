@@ -31,7 +31,7 @@ import {
   lc0AnalysisLines,
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
-import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
+import { acknowledgeInputTransfer, takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
 import { analysisUrlFen } from './analysisUrlInput.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
@@ -60,7 +60,7 @@ import {
   openingSummary,
   positionKey,
 } from './openingStats.ts';
-import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
+import { type InputTransfer, type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import {
   defaultPgnCollectionName,
   deletePgnCollection,
@@ -411,13 +411,14 @@ let tree = new GameTree(START_FEN);
 let workspaceHeaders: Record<string, string> = {};
 let workspaceResult = '*';
 let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
-let completeAnalysisHandoff: (() => void) | undefined;
 let pendingAnalysisInput: PendingInput | null = null;
 
 function updatePendingAnalysisInput(event: PendingInputEvent): void {
   const { pending, acknowledged } = transitionPendingInput(pendingAnalysisInput, event);
   pendingAnalysisInput = pending;
-  if (!acknowledged?.urlKeys.length) return;
+  if (!acknowledged) return;
+  for (const transfer of acknowledged.transfers) acknowledgeInputTransfer(transfer);
+  if (!acknowledged.urlKeys.length) return;
   const consumedUrl = new URL(location.href);
   for (const key of acknowledged.urlKeys) {
     consumedUrl.searchParams.delete(key);
@@ -450,9 +451,9 @@ function clearAnalysisWorkspace(discard = true): void {
 }
 
 function restoreAnalysisWorkspace(): void {
-  let consumeHandoff: (() => void) | undefined;
-  const handoffPgn = takeAnalysisHandoff(Date.now(), (consume) => {
-    consumeHandoff = consume;
+  let handoffTransfer: InputTransfer | undefined;
+  const handoffPgn = takeAnalysisHandoff(Date.now(), (_consume, transfer) => {
+    handoffTransfer = transfer;
   });
   let linkedInputError = '';
   el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
@@ -477,10 +478,12 @@ function restoreAnalysisWorkspace(): void {
         reviewMetadata.set(tree, { tags: parsed.tags, result: parsed.result, signature: reviewSignature() });
         if (parsed.warnings.length) renderPgnImportNotice(describePgnWarning(parsed.warnings[0]));
       }
-      if (!params.has('fen') && !params.has('pgn')) completeAnalysisHandoff = consumeHandoff;
       updatePendingAnalysisInput({
         type: 'applied',
-        input: { urlKeys: ['fen', 'pgn'].filter((key) => params.has(key)) as Array<'fen' | 'pgn'>, transfers: [] },
+        input: {
+          urlKeys: ['fen', 'pgn'].filter((key) => params.has(key)) as Array<'fen' | 'pgn'>,
+          transfers: handoffTransfer ? [handoffTransfer] : [],
+        },
       });
       el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
       saveAnalysisWorkspace();
@@ -6245,7 +6248,6 @@ export function mountAnalysisBrowser(): () => void {
   }
   lastAnalysisMountHref = href;
   resetAnalysisPageState();
-  completeAnalysisHandoff = undefined;
   pendingAnalysisInput = null;
   workspaceAutosave = createWorkspaceAutosave(
     'analysis',
@@ -6262,8 +6264,6 @@ export function mountAnalysisBrowser(): () => void {
     },
     (type) => {
       updatePendingAnalysisInput({ type });
-      completeAnalysisHandoff?.();
-      completeAnalysisHandoff = undefined;
     },
   );
   analysisWorkerProgressMessages = 0;

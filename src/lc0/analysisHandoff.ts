@@ -4,6 +4,7 @@
 
 import { boardToFen } from '../chess/board.ts';
 import { gameOutcome } from './engineBattle.ts';
+import { type InputTransfer } from './pendingInput.ts';
 import { type PlayPosition, replayPlayPosition } from './playPosition.ts';
 
 const HANDOFF_KEY = '0x88-analysis-handoff-pgn-v1';
@@ -72,8 +73,13 @@ function acknowledgeHandoff(storage: Storage, key: string, raw: string): () => v
   };
 }
 
+export function acknowledgeInputTransfer(transfer: InputTransfer): void {
+  const storage = handoffStorage();
+  if (storage) acknowledgeHandoff(storage, transfer.key, transfer.id)();
+}
+
 /** Read before saved-game restore; callers can acknowledge valid input after a durable save. */
-export function takePlayHandoff(now = Date.now(), defer?: (consume: () => void) => void): PlayHandoffResult {
+export function takePlayHandoff(now = Date.now(), defer?: (consume: () => void, transfer: InputTransfer) => void): PlayHandoffResult {
   try {
     const storage = handoffStorage();
     if (!storage) return { status: 'none' };
@@ -81,7 +87,7 @@ export function takePlayHandoff(now = Date.now(), defer?: (consume: () => void) 
     const handoff = decodePlayHandoff(raw, now);
     if (raw !== null) {
       const consume = acknowledgeHandoff(storage, PLAY_HANDOFF_KEY, raw);
-      if (handoff.status === 'ready' && defer) defer(consume);
+      if (handoff.status === 'ready' && defer) defer(consume, { key: PLAY_HANDOFF_KEY, id: raw });
       else consume();
     }
     return handoff;
@@ -91,7 +97,7 @@ export function takePlayHandoff(now = Date.now(), defer?: (consume: () => void) 
 }
 
 /** Returns a fresh PGN; callers can defer acknowledgement until their workspace is saved. */
-export function takeAnalysisHandoff(now = Date.now(), defer?: (consume: () => void) => void): string | null {
+export function takeAnalysisHandoff(now = Date.now(), defer?: (consume: () => void, transfer: InputTransfer) => void): string | null {
   const storage = handoffStorage();
   if (!storage) return null;
   try {
@@ -109,7 +115,7 @@ export function takeAnalysisHandoff(now = Date.now(), defer?: (consume: () => vo
       consume();
       return null;
     }
-    if (defer) defer(consume);
+    if (defer) defer(consume, { key: HANDOFF_KEY, id: raw });
     else consume();
     return parsed.pgn;
   } catch {

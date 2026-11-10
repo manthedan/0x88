@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
-import { gameTreeToPgn, parseFirstPgnGame } from '../src/chess/pgn.ts';
-import { takeAnalysisHandoff } from '../src/lc0/analysisHandoff.ts';
+import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame } from '../src/chess/pgn.ts';
+import { acknowledgeInputTransfer, takeAnalysisHandoff } from '../src/lc0/analysisHandoff.ts';
 import { analysisUrlFen } from '../src/lc0/analysisUrlInput.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { transitionPendingInput } from '../src/lc0/pendingInput.ts';
@@ -46,9 +46,11 @@ function analysisHarness(query, run) {
     ...autosave,
     GameTree,
     START_FEN,
+    describePgnWarning,
     gameTreeToPgn,
     parseFirstPgnGame,
     takeAnalysisHandoff,
+    acknowledgeInputTransfer,
     analysisUrlFen,
     transitionPendingInput,
     url,
@@ -60,16 +62,25 @@ function analysisHarness(query, run) {
     source.indexOf('  analysisWorkerProgressMessages = 0;', source.indexOf('  workspaceAutosave = createWorkspaceAutosave(')),
   );
   const reset = source.slice(source.indexOf("  el('reset').addEventListener"), source.indexOf("  el('loadPgn').addEventListener"));
+  const load = source.slice(source.indexOf('function loadFen()'), source.indexOf('async function copyFen()'));
+  const previousHandler = source.slice(
+    source.indexOf("  el('restorePreviousAnalysis').addEventListener"),
+    source.indexOf("  el('analysisRestoreDismiss').addEventListener"),
+  );
   const code = `
     const location = url, params = new URLSearchParams(url.search), inputEl = el;
     let lastAnalysisMountHref = url.href;
     const history = {state: {}, replaceState(state, title, next) {url.href = next.href;}};
     const reviewMetadata = new Map(), reviewSignature = () => '';
     const renderPgnImportNotice = () => {}, lineCache = new Map(), completeAnalysisKeys = new Set();
+    const cancelActiveAnalysisRun = () => {};
     const afterNavigation = () => saveAnalysisWorkspace();
-    ${stripTypeScriptTypes(state + mount + reset)}
+    ${stripTypeScriptTypes(state + mount + reset + load + previousHandler)}
     return {restore: restoreAnalysisWorkspace, save: saveAnalysisWorkspace, flush: () => workspaceAutosave.flush(),
-      reset: () => el('reset').click(), tree: () => tree, dispose: () => workspaceAutosave.pause('storage')};
+      reset: () => el('reset').click(),
+      loadFen: raw => {el('fenInput').value = raw; loadFen();},
+      loadPgn: raw => {el('pgnInput').value = raw; loadPgn();},
+      previous: () => el('restorePreviousAnalysis').click(), tree: () => tree, dispose: () => workspaceAutosave.pause('storage')};
   `;
   let controller;
   try {
@@ -118,3 +129,70 @@ test('Analysis empty clear failure retains the URL until a later clear succeeds'
     assert.equal(h.url.searchParams.has('fen'), false);
   });
 });
+
+test('Analysis URL supersedes and retires the captured older handoff after saving', () => {
+  for (const query of ['pgn=' + encodeURIComponent('1. d4 *'), 'fen=' + encodeURIComponent(START_FEN)]) {
+    analysisHarness(query, (h) => {
+      const key = '0x88-analysis-handoff-pgn-v1';
+      h.values.set(key, JSON.stringify({ pgn: '1. e4 *', at: Date.now() }));
+      h.restore();
+      assert.equal(h.values.has(key), false, 'The old handoff must not replace the URL-selected workspace on reload');
+      assert.equal(h.url.searchParams.has('pgn') || h.url.searchParams.has('fen'), false);
+    });
+  }
+});
+
+test('Analysis Reset explicitly retires a handoff after a failed save even when clearing storage fails', () => {
+  analysisHarness('', (h) => {
+    const key = '0x88-analysis-handoff-pgn-v1';
+    h.values.set(key, JSON.stringify({ pgn: '1. e4 *', at: Date.now() }));
+    h.faults.write = true;
+    h.restore();
+    assert.equal(h.values.has(key), true);
+    // Only workspace removal fails; handoff retirement remains available.
+    const remove = h.storage.removeItem;
+    h.storage.removeItem = (k) => {
+      if (k === '0x88-analysis-workspace') throw Error('denied');
+      remove(k);
+    };
+    h.reset();
+    assert.equal(h.values.has(key), false, 'Reset must not resurrect the discarded game on reload');
+    assert.equal(h.tree().root.children.length, 0);
+  });
+});
+
+test('Analysis acknowledgement never retires a newer handoff', () => {
+  analysisHarness('pgn=' + encodeURIComponent('1. d4 *'), (h) => {
+    const key = '0x88-analysis-handoff-pgn-v1';
+    h.values.set(key, JSON.stringify({ pgn: '1. e4 *', at: Date.now() }));
+    h.faults.write = true;
+    h.restore();
+    const newer = JSON.stringify({ pgn: '1. c4 *', at: Date.now() });
+    h.values.set(key, newer);
+    h.faults.write = false;
+    h.save();
+    h.flush();
+    assert.equal(h.values.get(key), newer);
+  });
+});
+
+for (const action of ['reset', 'loadFen', 'loadPgn', 'previous']) {
+  test(`Analysis ${action} retires pending handoff and URL after failed saving`, () => {
+    analysisHarness('pgn=' + encodeURIComponent('1. d4 *'), (h) => {
+      const key = '0x88-analysis-handoff-pgn-v1';
+      h.values.set(key, JSON.stringify({ pgn: '1. e4 *', at: Date.now() }));
+      h.faults.write = true;
+      h.restore();
+      if (action === 'previous') {
+        h.values.set(
+          autosave.PREVIOUS_ANALYSIS_KEY,
+          JSON.stringify({ kind: 'analysis', version: 1, savedAt: 1, data: { tree: autosave.serializeTree(new GameTree()), headers: {}, result: '*' } }),
+        );
+        h.faults.write = false;
+      }
+      h[action](action === 'loadFen' ? START_FEN : '1. c4 *');
+      assert.equal(h.values.has(key), false);
+      assert.equal(h.url.searchParams.has('pgn'), false);
+    });
+  });
+}

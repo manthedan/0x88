@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { parseFirstPgnGame } from '../src/chess/pgn.ts';
+import { acknowledgeInputTransfer } from '../src/lc0/analysisHandoff.ts';
 import { analysisUrlFen } from '../src/lc0/analysisUrlInput.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { transitionPendingInput } from '../src/lc0/pendingInput.ts';
@@ -115,6 +116,7 @@ test('linked inputs stay in the URL until a recoverable snapshot is written', ()
       saver,
       url,
       transitionPendingInput,
+      acknowledgeInputTransfer,
       setCommit: (fn) => {
         commit = fn;
       },
