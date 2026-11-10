@@ -1526,7 +1526,7 @@ function playCtaLabel(): string {
   return `Play as ${choice === 'black' ? 'Black' : 'White'}`;
 }
 
-function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shown: BoardState, phase: PlayPhase): void {
+function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: number, phase: PlayPhase): void {
   const strip = el(id);
   const option = ctxSelectedEngine(ctx);
   const isHuman = color === ctx.humanColor;
@@ -1538,7 +1538,7 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shown: Board
   avatar.classList.toggle('you', isHuman);
   q('[data-name]').textContent = isHuman ? 'You' : ctxOpponentName(option);
   q('[data-meta]').textContent = isHuman ? side : `${ctxOpponentMeta(ctx)} · ${side}`;
-  const material = playMaterial(parseFen(ctx.startFen), shown, color);
+  const material = playMaterial(ctx.positions, color, shownPly);
   const materialSlot = q('[data-material]');
   materialSlot.innerHTML = material.html;
   materialSlot.title = material.label;
@@ -1574,8 +1574,8 @@ function ctxRenderChrome(ctx: PlayContext, shownBoard: BoardState, shownPly: num
   const option = ctxSelectedEngine(ctx);
   const opponent = ctxOpponentName(option);
   const topColor: Color = ctx.orientation === 'white' ? 'b' : 'w';
-  ctxRenderStrip(ctx, 'topStrip', topColor, shownBoard, phase);
-  ctxRenderStrip(ctx, 'bottomStrip', topColor === 'w' ? 'b' : 'w', shownBoard, phase);
+  ctxRenderStrip(ctx, 'topStrip', topColor, shownPly, phase);
+  ctxRenderStrip(ctx, 'bottomStrip', topColor === 'w' ? 'b' : 'w', shownPly, phase);
 
   // Setup controls mirror the hidden selects so preferences and listeners stay single-sourced.
   const colorChoice = selectEl('colorSelect').value;

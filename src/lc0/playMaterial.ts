@@ -17,17 +17,25 @@ function materialCounts(board: BoardState): Record<Color, Record<string, number>
   return counts;
 }
 
-/** Presentation of the displayed position, not necessarily the live game.
- * Compare captures with the game's start so queen odds aren't shown as a capture.
+/** Count captures only through the displayed ply, using the existing board history.
+ * Enemy material lost on this side's turn is a capture; a pawn disappearing on
+ * the enemy's own turn is a promotion. Custom-root odds aren't captures either.
  */
-export function playMaterial(start: BoardState, board: BoardState, color: Color): { html: string; label: string } {
-  const before = materialCounts(start);
-  const now = materialCounts(board);
+export function playMaterial(positions: readonly BoardState[], color: Color, ply = positions.length - 1): { html: string; label: string } {
   const enemy: Color = color === 'w' ? 'b' : 'w';
+  const takenCounts: Record<string, number> = { p: 0, n: 0, b: 0, r: 0, q: 0 };
+  let now = materialCounts(positions[0]);
+  for (let i = 1; i <= ply; i++) {
+    const before = now;
+    now = materialCounts(positions[i]);
+    if (positions[i - 1].turn === color) {
+      for (const role of Object.keys(takenCounts)) takenCounts[role] += before[enemy][role] - now[enemy][role];
+    }
+  }
   let glyphs = '';
   const captured: string[] = [];
   for (const role of ['p', 'n', 'b', 'r', 'q']) {
-    const taken = Math.max(0, before[enemy][role] - now[enemy][role]);
+    const taken = takenCounts[role];
     glyphs += CAPTURED_GLYPHS[enemy][role].repeat(taken);
     if (taken) captured.push(`${taken} ${PIECE_NAMES[role]}${taken > 1 ? 's' : ''}`);
   }
