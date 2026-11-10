@@ -192,14 +192,9 @@ async function main() {
   const timings = [];
   // Deploy header policy is a property of the source config, so check it before
   // spending a build on a tree that must not ship.
-  const cachePolicy = await timed('check deploy cache policy', timings, () => checkDeployCachePolicy());
-  await timed('check configured CSP origins', timings, () =>
-    checkCspPolicy(process.cwd(), undefined, {
-      ...process.env,
-      VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl,
-      VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase,
-    }),
-  );
+  const buildEnv = { ...process.env, VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl, VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase };
+  await timed('check configured CSP origins', timings, () => checkCspPolicy(process.cwd(), undefined, buildEnv));
+  const cachePolicy = await timed('check deploy cache policy', timings, () => checkDeployCachePolicy(process.cwd(), buildEnv));
   const desired = await timed('compute desired build stamp', timings, () => desiredStamp(args));
   const existing = await timed('read existing build stamp', timings, () => readStamp(dist));
   const stampMatches = JSON.stringify(comparableStamp(existing)) === JSON.stringify(comparableStamp(desired));

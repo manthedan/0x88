@@ -46,8 +46,8 @@ async function main() {
   // This is the command `netlify.toml` configures, so it is the path every
   // automatic Netlify build takes. The gate has to live here to cover them;
   // checking only in netlify_r2_release.mjs would leave CI deploys ungated.
-  await timed('check deploy cache policy', () => checkDeployCachePolicy(), timings);
   await timed('check configured CSP origins', () => checkCspPolicy(process.cwd(), undefined, buildEnv), timings);
+  await timed('check deploy cache policy', () => checkDeployCachePolicy(process.cwd(), buildEnv), timings);
   const publicDir = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-public-'));
   try {
     const prep = await timed('prepare pruned public assets', () => prepareNetlifyR2PublicAssets('public', publicDir), timings);

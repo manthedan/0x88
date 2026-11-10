@@ -8,6 +8,8 @@
 // deploy takes, so a violation cannot reach production.
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { loadEnv } from 'vite';
+import { executableAssetSources } from './csp_asset_origins.mjs';
 import { checkHeadersFileUpToDate } from './generate_netlify_headers_file.mjs';
 import {
   cacheControlDirectives,
@@ -125,7 +127,7 @@ const REQUIRED = [
   ['/engines/*', 'cache-control', 'public, max-age=0, must-revalidate', 'engine alias revalidation Cache-Control'],
 ];
 
-export function checkDeployCachePolicy(rootPath = process.cwd()) {
+export function checkDeployCachePolicy(rootPath = process.cwd(), env = loadEnv('production', rootPath, 'VITE_')) {
   const failures = [];
   const fail = (message) => failures.push(message);
   const netlify = readFileSync(resolve(rootPath, 'netlify.toml'), 'utf8');
@@ -183,10 +185,12 @@ export function checkDeployCachePolicy(rootPath = process.cwd()) {
       continue;
     }
     if (name === 'content-security-policy') {
-      // connect-src follows build-time asset/channel configuration and is
-      // validated by check_csp_policy.mjs. Keep every other directive fixed.
+      // connect-src is validated by check_csp_policy.mjs on every deploy path.
+      // Only the configured executable asset origin may extend script-src;
+      // keep its other sources and every other directive fixed.
       const withoutConnect = (policy) => policy.replace(/(^|;)\s*connect-src\s+[^;]*/i, '$1 connect-src');
-      if (directiveSet(withoutConnect(actual)) !== directiveSet(withoutConnect(expected))) fail(`netlify.toml missing ${description} on ${path}`);
+      const configured = expected.replace('https://assets.0x88.app', executableAssetSources(env).join(' '));
+      if (directiveSet(withoutConnect(actual)) !== directiveSet(withoutConnect(configured))) fail(`netlify.toml missing ${description} on ${path}`);
       continue;
     }
     if (name !== 'cache-control') {
