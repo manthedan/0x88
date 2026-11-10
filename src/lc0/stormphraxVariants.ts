@@ -1,5 +1,5 @@
 import { probeAssetUrls } from './assetProbe.ts';
-import { resolveAssetOverride } from './assetUrls.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
 import { resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -44,11 +44,6 @@ export const STORMPHRAX_SOURCE_NETWORK_URL = `https://github.com/Ciekce/stormphr
 
 const assetStatuses = new Map<string, StormphraxAssetStatus>();
 const assetChecks = new Map<string, Promise<StormphraxAssetStatus>>();
-
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
 
 function assetUrls(variant: StormphraxVariant): string[] {
   return [variant.jsUrl, variant.wasmUrl, variant.dataUrl];

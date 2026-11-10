@@ -69,3 +69,17 @@ test('executable asset trust is limited to this origin and the configured asset 
   assert.equal(isTrustedExecutableAssetUrl('https://assets.0x88.app/berserk/berserk-emscripten.js'), true);
   assert.equal(isTrustedExecutableAssetUrl('https://evil.example/berserk/berserk-emscripten.js'), false);
 });
+
+test('shared origin/path helpers handle loopback, blob workers and malformed paths', async () => {
+  const { assetPathname, isLocalDevelopmentOrigin } = await import('../src/lc0/assetUrls.ts');
+  for (const url of ['http://localhost:5181', 'http://dev.localhost:5181', 'http://127.0.0.1', 'http://[::1]']) {
+    at(url);
+    assert.equal(isLocalDevelopmentOrigin(), true, url);
+  }
+  globalThis.location = { href: 'blob:http://localhost:5181/worker', origin: 'http://localhost:5181', hostname: '' };
+  assert.equal(isLocalDevelopmentOrigin(), true);
+  at('https://0x88.app/app/play/');
+  assert.equal(isLocalDevelopmentOrigin(), false);
+  assert.equal(assetPathname('https://assets.0x88.app/reckless/engine.wasm?q=1'), '/reckless/engine.wasm');
+  assert.equal(assetPathname('http://['), 'http://[');
+});

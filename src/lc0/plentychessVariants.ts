@@ -1,6 +1,6 @@
 import { probeAssetUrls } from './assetProbe.ts';
-import { resolveAssetOverride } from './assetUrls.ts';
-import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
+import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
@@ -56,19 +56,6 @@ const DEPLOYED_PLENTYCHESS_PATHS = new Set([
   '/plentychess/plentychess-emscripten-relaxed-simd128.js',
   '/plentychess/plentychess-emscripten-relaxed-simd128.wasm',
 ]);
-
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    return engineArtifactPathname(raw);
-  } catch {
-    return raw;
-  }
-}
 
 function shouldSkipKnownUnshippedProbe(variant: PlentyChessVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;

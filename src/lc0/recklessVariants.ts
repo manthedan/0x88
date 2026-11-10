@@ -1,6 +1,6 @@
 import { probeAssetUrls } from './assetProbe.ts';
-import { resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
-import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
+import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -45,19 +45,6 @@ const DEPLOYED_RECKLESS_URLS = new Set<string>([
   '/reckless/reckless-browser-api-simd128-external.wasm',
   '/reckless/reckless-v60-7f587dfb.nnue',
 ]);
-
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    return engineArtifactPathname(raw);
-  } catch {
-    return raw;
-  }
-}
 
 function shouldSkipKnownUnshippedProbe(variant: RecklessVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;

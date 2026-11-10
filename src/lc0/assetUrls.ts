@@ -15,17 +15,28 @@ function cleanBase(raw: string | boolean | undefined): string | undefined {
   }
 }
 
-const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
-
-/** Dev server builds, and production-like builds served from this machine. */
-function isLocalDevelopment(): boolean {
-  if (env.DEV === true) return true;
+/** Loopback dev servers, static builds and lab pages; also usable in workers. */
+export function isLocalDevelopmentOrigin(): boolean {
+  if (typeof location === 'undefined') return true;
   try {
-    const hostname = location.hostname;
-    return LOCAL_HOSTNAMES.has(hostname) || hostname.endsWith('.localhost');
+    const hostname = location.hostname || new URL(location.origin).hostname;
+    return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname) || hostname.endsWith('.localhost');
   } catch {
     return false;
   }
+}
+
+export function assetPathname(raw: string): string {
+  try {
+    return new URL(raw, typeof location === 'undefined' ? 'http://localhost/' : location.href).pathname;
+  } catch {
+    return raw;
+  }
+}
+
+/** Dev-server query overrides also honour the build's DEV flag. */
+function isLocalDevelopment(): boolean {
+  return env.DEV === true || isLocalDevelopmentOrigin();
 }
 
 /**

@@ -13,7 +13,7 @@ import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
 import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 export interface BigNetConfig {
@@ -175,20 +175,6 @@ const DEPLOYED_BIG_NET_URLS = new Set<string>([
   '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx',
   '/models/lc0/lqo_v2.f16.qdq8.onnx',
 ]);
-
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
-    return new URL(raw, base).pathname;
-  } catch {
-    return raw;
-  }
-}
 
 function shouldSkipKnownUnhostedBigNetProbe(config: BigNetConfig): boolean {
   const pathname = assetPathname(config.modelUrl);

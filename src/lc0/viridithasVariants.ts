@@ -1,6 +1,6 @@
 import { probeAssetUrls } from './assetProbe.ts';
-import { resolveAssetOverride } from './assetUrls.ts';
-import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
+import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
 
 export const DEFAULT_VIRIDITHAS_WASM_URL = resolveEngineArtifactUrl('/viridithas/viridithas.wasm');
@@ -45,19 +45,6 @@ const DEPLOYED_VIRIDITHAS_PATHS = new Set([
   '/viridithas/viridithas-simd128.wasm',
   '/viridithas/viridithas-relaxed-simd128.wasm',
 ]);
-
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    return engineArtifactPathname(raw);
-  } catch {
-    return raw;
-  }
-}
 
 function shouldSkipKnownUnshippedProbe(variant: ViridithasVariant): boolean {
   if (variant.key === 'custom' || variant.allowUnshippedProbe || isLocalDevelopmentOrigin()) return false;

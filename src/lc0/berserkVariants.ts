@@ -1,6 +1,6 @@
 import { probeAssetUrls } from './assetProbe.ts';
-import { resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
-import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
+import { isLocalDevelopmentOrigin, resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
+import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
 export type BerserkVariantKey = 'emscripten' | 'emscripten-simd' | 'emscripten-relaxed' | 'default' | 'simd' | 'custom';
@@ -63,19 +63,6 @@ const DEPLOYED_BERSERK_PATHS = new Set([
   '/berserk/berserk-emscripten-relaxed-simd128.js',
   '/berserk/berserk-emscripten-relaxed-simd128.wasm',
 ]);
-
-function isLocalDevelopmentOrigin(): boolean {
-  if (typeof location === 'undefined') return true;
-  return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function assetPathname(raw: string): string {
-  try {
-    return engineArtifactPathname(raw);
-  } catch {
-    return raw;
-  }
-}
 
 function shouldSkipKnownUnshippedProbe(variant: BerserkVariant): boolean {
   if (variant.key === 'custom' || isLocalDevelopmentOrigin()) return false;

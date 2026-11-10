@@ -1,4 +1,4 @@
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { ENGINE_ARTIFACT_PINS } from './engineArtifactPins.generated.ts';
 
 export interface EngineArtifactPin {
@@ -9,7 +9,7 @@ export interface EngineArtifactPin {
 
 /** Recover the logical path when variant availability uses a deployed-path set. */
 export function engineArtifactPathname(raw: string): string {
-  const path = new URL(raw, typeof location === 'undefined' ? 'http://localhost/' : location.href).pathname;
+  const path = assetPathname(raw);
   const hash = path.match(/^\/artifacts\/sha256\/([a-f0-9]{64})\//)?.[1];
   return (hash ? Object.entries(ENGINE_ARTIFACT_PINS).find(([, pin]) => pin.sha256 === hash)?.[0] : undefined) ?? path;
 }
@@ -28,16 +28,15 @@ export function resolveEngineArtifactUrl(pathOrUrl: string): string {
 }
 
 /** Self-contained so classic blob workers can use exactly the same verifier. */
-export function createEngineArtifactLoader(pins: Record<string, EngineArtifactPin>, resolveUrl: (url: string) => string = (url) => url) {
+export function createEngineArtifactLoader(
+  pins: Record<string, EngineArtifactPin>,
+  resolveUrl: (url: string) => string = (url) => url,
+  localOrigin: () => boolean = isLocalDevelopmentOrigin,
+) {
   function pin(url: string): EngineArtifactPin | undefined {
     const path = new URL(url, typeof location === 'undefined' ? 'http://localhost/' : location.href).pathname;
     const hash = path.match(/^\/artifacts\/sha256\/([a-f0-9]{64})\//)?.[1];
     return hash ? Object.values(pins).find((entry) => entry.sha256 === hash) : pins[path];
-  }
-  function local(): boolean {
-    if (typeof location === 'undefined') return true;
-    const hostname = new URL(location.origin).hostname;
-    return ['localhost', '127.0.0.1', '[::1]'].includes(hostname) || hostname.endsWith('.localhost');
   }
   function failure(url: string, detail: string): Error {
     return new Error(
@@ -47,7 +46,7 @@ export function createEngineArtifactLoader(pins: Record<string, EngineArtifactPi
   function expected(url: string): EngineArtifactPin | undefined {
     const entry = pin(url);
     if (!entry) {
-      if (!local()) throw failure(url, 'this app build has no trusted SHA-256 pin');
+      if (!localOrigin()) throw failure(url, 'this app build has no trusted SHA-256 pin');
       console.warn(`Local engine artifact has no integrity pin: ${url}. Regenerate the engine manifest and integrity registry before publishing.`);
     }
     return entry;
@@ -81,5 +80,5 @@ export const engineArtifacts = createEngineArtifactLoader(ENGINE_ARTIFACT_PINS, 
   engineArtifacts.pin(url) && !new URL(url, 'http://localhost/').pathname.startsWith('/artifacts/') ? resolveEngineArtifactUrl(url) : url,
 );
 export function engineArtifactWorkerScript(): string {
-  return `const engineArtifacts = (${createEngineArtifactLoader.toString()})(${JSON.stringify(ENGINE_ARTIFACT_PINS)});`;
+  return `const engineArtifacts = (${createEngineArtifactLoader.toString()})(${JSON.stringify(ENGINE_ARTIFACT_PINS)}, undefined, (${isLocalDevelopmentOrigin.toString()}));`;
 }
