@@ -1,17 +1,23 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import { afterNavigate, beforeNavigate } from '$app/navigation';
+import { beforeNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 let mountedUrl: URL | null = null;
 let isRunActive = () => false;
 let leaveMessage = () => '';
-beforeNavigate(({ cancel, willUnload }) => {
+let allowLeave = () => {};
+beforeNavigate(({ cancel, willUnload, to }) => {
+  if (mountedUrl && to?.url.origin === mountedUrl.origin && to.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) {
+    // Reload this controller only after deciding to leave, while its original URL is still current.
+    cancel();
+    if (isRunActive() && !window.confirm(leaveMessage())) return;
+    allowLeave();
+    location.assign(to.url.href);
+    return;
+  }
   if (isRunActive() && !willUnload && !window.confirm(leaveMessage())) cancel();
-});
-afterNavigate(({ to }) => {
-  if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
 });
 const title = '0x88 Chess — engine arena';
 const description =
@@ -26,6 +32,7 @@ onMount(() => {
       if (!mounted) return;
       isRunActive = module.isArenaRunActive;
       leaveMessage = module.arenaLeaveMessage;
+      allowLeave = module.allowArenaUnload;
       cleanup = module.mountArenaBrowser();
     })
     .catch((error) => {

@@ -5283,6 +5283,12 @@ export function arenaLeaveMessage(): string {
     : 'Leave this tournament? The current game will be lost. Completed games are saved.';
 }
 
+let arenaUnloadConfirmed = false;
+
+export function allowArenaUnload(): void {
+  arenaUnloadConfirmed = true;
+}
+
 export function mountArenaBrowser(): () => void {
   const href = location.href;
   if (lastArenaMountHref !== null && lastArenaMountHref !== href) {
@@ -5291,10 +5297,11 @@ export function mountArenaBrowser(): () => void {
   }
   lastArenaMountHref = href;
   resetArenaPageState();
+  arenaUnloadConfirmed = false;
   const controller = new AbortController();
   mountAbort = controller;
   arenaMountedCallbackCache = new WeakMap();
-  window.addEventListener('beforeunload', (event) => guardArenaUnload(event, isArenaRunActive()), { signal: controller.signal });
+  window.addEventListener('beforeunload', (event) => guardArenaUnload(event, isArenaRunActive() && !arenaUnloadConfirmed), { signal: controller.signal });
   void init(controller.signal).catch((error) => {
     if (controller.signal.aborted || mountAbort !== controller) return;
     hideEngineWarmupStatus();

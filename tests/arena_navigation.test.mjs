@@ -8,7 +8,7 @@ test('Arena leave confirmation reports checkpoint failure instead of promising s
   const route = readFileSync(new URL('../src/routes/app/arena/+page.svelte', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
   const getter = source.includes('export function arenaLeaveMessage()')
-    ? source.slice(source.indexOf('export function arenaLeaveMessage()'), source.indexOf('export function mountArenaBrowser()')).replace('export ', '')
+    ? source.slice(source.indexOf('export function arenaLeaveMessage()'), source.indexOf('export function mountArenaBrowser()')).replaceAll('export ', '')
     : '';
   for (const problem of ['', 'Not saved: IndexedDB unavailable']) {
     const code = `
@@ -52,6 +52,45 @@ test('unload is guarded only for an active run', () => {
     guardArenaUnload(event, active);
     assert.equal(event.prevented, active);
     assert.equal(event.returnValue, active ? '' : undefined);
+  }
+});
+
+test('query-only Arena navigation is cancelled before the URL changes and confirmed reload bypasses unload', () => {
+  const route = readFileSync(new URL('../src/routes/app/arena/+page.svelte', import.meta.url), 'utf8');
+  for (const confirmed of [false, true]) {
+    let navigate;
+    const events = [];
+    const target = new URL('https://example.test/app/arena/');
+    const code = `
+      ${stripTypeScriptTypes(route.slice(route.indexOf('let mountedUrl:'), route.indexOf('const title =')))}
+      mountedUrl = new URL('https://example.test/app/arena/?dev');
+      isRunActive = () => true;
+      leaveMessage = () => 'Leave?';
+      if (typeof allowLeave !== 'undefined') allowLeave = () => events.push('allow-unload');
+      invoke({to: {url: target}, willUnload: false, cancel() {events.push('cancel');}});
+    `;
+    new Function('URL', 'target', 'events', 'window', 'location', 'beforeNavigate', 'afterNavigate', 'invoke', code)(
+      URL,
+      target,
+      events,
+      {
+        confirm() {
+          events.push('confirm');
+          return confirmed;
+        },
+      },
+      {
+        assign(url) {
+          events.push(url);
+        },
+      },
+      (callback) => {
+        navigate = callback;
+      },
+      () => {},
+      (event) => navigate(event),
+    );
+    assert.deepEqual(events, confirmed ? ['cancel', 'confirm', 'allow-unload', target.href] : ['cancel', 'confirm']);
   }
 });
 
