@@ -2517,7 +2517,7 @@ async function setImportedPgn(raw: string, messagePrefix = 'Imported', savedColl
   databasePositionCollectionCount = 0;
   pgnDatabaseSearchKey = '';
   bookCache.clear();
-  el('importInfo').textContent = `${messagePrefix} ${games.length} games`;
+  el('importInfo').textContent = `${messagePrefix} ${games.length} playable game${games.length === 1 ? '' : 's'}${batch.skippedGames ? `; skipped ${batch.skippedGames} without moves` : ''}`;
   renderOpening();
   renderLines(); // refresh the legend so the Book key appears
   setShapes(bestShapes());

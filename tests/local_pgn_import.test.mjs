@@ -21,6 +21,34 @@ test('local import reports incremental progress and indexes mainlines only', asy
   assert.deepEqual(openingStatsFromIndex(batch.positionIndex, START_FEN).map((s) => [s.san, s.count]), [['e4', 1], ['Nf3', 1]]);
 });
 
+test('valid zero-move records are skipped without losing playable games or progress', async () => {
+  const raw = `[Event "Aborted"]\n[Result "*"]\n\n*\n\n${pgn}\n\n[Event "Forfeit"]\n\n0-1 {no play}`;
+  for (const importer of [importLocalPgn, importStoredPgn]) {
+    const progress = [];
+    const batch = await importer(raw, (done, total) => progress.push([done, total]));
+    assert.equal(batch.games.length, 1);
+    assert.equal(batch.skippedGames, 2);
+    assert.deepEqual(progress, [[0, 3], [1, 3], [2, 3], [3, 3]]);
+    assert.deepEqual(batch.positionIndex, (await importLocalPgn(pgn)).positionIndex);
+    await assert.rejects(importer('[Result "*"]\n*\n\n[Result "0-1"]\n0-1'), /No playable moves/);
+    await assert.rejects(importer(`${raw}\n\n[Event "Broken"]\nnotamove *`), /Game 4: Invalid PGN move/);
+    await assert.rejects(importer(`${pgn}\n\n[Event "Missing result"]`), /Game 2: No playable moves/);
+  }
+});
+
+test('stored zero-move records survive index rebuild, export and restore with playable counts', async (t) => {
+  installMemoryIdb(t);
+  const raw = `[Result "0-1"]\n0-1\n\n${pgn}`;
+  const record = await savePgnCollection({ name: 'With forfeit', pgn: raw, gameCount: 2 });
+  assert.equal((await searchPgnCollectionsByPosition(START_FEN))[0].total, 1);
+  const backup = await exportPgnDatabaseBackup();
+  await deletePgnCollection(record.id);
+  assert.equal(await importPgnDatabaseBackup(backup), 1);
+  const [restored] = await listPgnCollections();
+  assert.equal(restored.gameCount, 1);
+  assert.deepEqual((await loadPgnCollection(restored.id)).positionIndex, (await importStoredPgn(pgn)).positionIndex);
+});
+
 test('local PGN caps reject before parsing and invalid moves cannot silently become games', async () => {
   assert.throws(() => boundedPgnChunks('x'.repeat(MAX_PGN_BYTES + 1)), /1 MiB/);
   assert.throws(() => boundedPgnChunks(Array(201).fill('[Result "*"]\n1. e4 *').join('\n\n')), /200 games/);
