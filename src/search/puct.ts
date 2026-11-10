@@ -322,6 +322,8 @@ export interface Node {
   /** Search-context compatibility key for reusable trees (draw/search contempt). */
   searchValueKey?: string;
   isRoot?: boolean;
+  /** Expanded despite a draw by rule at the root; must be replaced when reached as a child. */
+  rootDrawExempt?: boolean;
   /** Search-contempt frozen child-visit weights (opponent nodes past ScLimit). */
   scFrozenWeights?: number[];
 }
@@ -1206,7 +1208,7 @@ function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, No
   };
   const key = transpositionTable ? searchNodeKey(childBoard, materializeHistoryFens(history)) : undefined;
   const cached = key === undefined ? undefined : transpositionTable?.get(key);
-  if (cached && (!parent.searchValueKey || nodeSearchValueCompatible(cached, parent.searchValueKey))) {
+  if (cached && !cached.rootDrawExempt && (!parent.searchValueKey || nodeSearchValueCompatible(cached, parent.searchValueKey))) {
     if (stats) stats.transpositionHits = (stats.transpositionHits ?? 0) + 1;
     cached.isRoot = false;
     return cached;
@@ -1455,7 +1457,7 @@ async function simulate(
     return node.terminalValue;
   }
   const best = selectBestEdge(node, searchPolicy, context);
-  if (!best.child) best.child = makeChild(node, best.move, transpositionTable, stats);
+  if (!best.child || best.child.rootDrawExempt) best.child = makeChild(node, best.move, transpositionTable, stats);
   const childValue = await simulate(best.child, evaluator, searchPolicy, context, stats, transpositionTable);
   searchPolicy.backup([best], childValue, context);
   return -childValue;
@@ -1569,7 +1571,7 @@ function selectLeaf(
   while (current.expanded && current.terminalValue === null) {
     const best = selectBestEdge(current, searchPolicy, context);
     best.virtualVisits += 1;
-    if (!best.child) best.child = makeChild(current, best.move, transpositionTable, stats);
+    if (!best.child || best.child.rootDrawExempt) best.child = makeChild(current, best.move, transpositionTable, stats);
     path.push(best);
     current = best.child;
   }
@@ -2008,6 +2010,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   } else {
     rootValue = await expand(root, evaluator, context, stats, true);
   }
+  if (root.edges.length && automaticDrawReason(root.board, root.historyFens, root.historyBoards)) root.rootDrawExempt = true;
   if (!root.edges.length) {
     finalizeEvaluationTimingStats(stats);
     logSearchLatency('puct.search', {
