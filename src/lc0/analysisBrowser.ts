@@ -60,6 +60,7 @@ import {
   openingSummary,
   positionKey,
 } from './openingStats.ts';
+import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import {
   defaultPgnCollectionName,
   deletePgnCollection,
@@ -411,6 +412,20 @@ let workspaceHeaders: Record<string, string> = {};
 let workspaceResult = '*';
 let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
 let completeAnalysisHandoff: (() => void) | undefined;
+let pendingAnalysisInput: PendingInput | null = null;
+
+function updatePendingAnalysisInput(event: PendingInputEvent): void {
+  const { pending, acknowledged } = transitionPendingInput(pendingAnalysisInput, event);
+  pendingAnalysisInput = pending;
+  if (!acknowledged?.urlKeys.length) return;
+  const consumedUrl = new URL(location.href);
+  for (const key of acknowledged.urlKeys) {
+    consumedUrl.searchParams.delete(key);
+    params.delete(key);
+  }
+  history.replaceState(history.state, '', consumedUrl);
+  lastAnalysisMountHref = location.href;
+}
 
 function saveAnalysisWorkspace(): void {
   try {
@@ -426,7 +441,8 @@ function saveAnalysisWorkspace(): void {
   }
 }
 
-function clearAnalysisWorkspace(): void {
+function clearAnalysisWorkspace(discard = true): void {
+  if (discard) updatePendingAnalysisInput({ type: 'discarded' });
   workspaceAutosave?.clear();
   workspaceHeaders = {};
   workspaceResult = '*';
@@ -450,7 +466,7 @@ function restoreAnalysisWorkspace(): void {
       const replacement = parsed?.tree ?? new GameTree(linkedFen.fen);
       if (!preservePreviousAnalysis(undefined, replacement, parsed?.tags, parsed?.result))
         throw new Error('Could not keep the previous analysis. Export it before replacing it.');
-      clearAnalysisWorkspace();
+      clearAnalysisWorkspace(false);
       tree = replacement;
       tree.toStart();
       analysisGameTree = tree;
@@ -462,18 +478,13 @@ function restoreAnalysisWorkspace(): void {
         if (parsed.warnings.length) renderPgnImportNotice(describePgnWarning(parsed.warnings[0]));
       }
       if (!params.has('fen') && !params.has('pgn')) completeAnalysisHandoff = consumeHandoff;
+      updatePendingAnalysisInput({
+        type: 'applied',
+        input: { urlKeys: ['fen', 'pgn'].filter((key) => params.has(key)) as Array<'fen' | 'pgn'>, transfers: [] },
+      });
       el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
       saveAnalysisWorkspace();
-      // A quota failure or oversized analysis must remain reloadable from the link.
-      if (workspaceAutosave?.flush()) {
-        const consumedUrl = new URL(location.href);
-        for (const key of ['fen', 'pgn']) {
-          consumedUrl.searchParams.delete(key);
-          params.delete(key);
-        }
-        history.replaceState(history.state, '', consumedUrl);
-        lastAnalysisMountHref = location.href;
-      }
+      workspaceAutosave?.flush();
       return;
     } catch (error) {
       linkedInputError = `Could not load linked analysis: ${(error as Error).message}`;
@@ -5430,6 +5441,7 @@ function wireEvents() {
       renderPgnImportNotice('Could not restore previous analysis. Storage may be unavailable.');
       return;
     }
+    updatePendingAnalysisInput({ type: 'discarded' });
     cancelActiveAnalysisRun();
     tree = saved.tree;
     workspaceHeaders = saved.headers;
@@ -6234,6 +6246,7 @@ export function mountAnalysisBrowser(): () => void {
   lastAnalysisMountHref = href;
   resetAnalysisPageState();
   completeAnalysisHandoff = undefined;
+  pendingAnalysisInput = null;
   workspaceAutosave = createWorkspaceAutosave(
     'analysis',
     undefined,
@@ -6247,7 +6260,8 @@ export function mountAnalysisBrowser(): () => void {
     () => {
       el('autosaveNotice').textContent = '';
     },
-    () => {
+    (type) => {
+      updatePendingAnalysisInput({ type });
       completeAnalysisHandoff?.();
       completeAnalysisHandoff = undefined;
     },

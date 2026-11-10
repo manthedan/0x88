@@ -6,6 +6,7 @@ import { START_FEN } from '../src/chess/board.ts';
 import { parseFirstPgnGame } from '../src/chess/pgn.ts';
 import { analysisUrlFen } from '../src/lc0/analysisUrlInput.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
+import { transitionPendingInput } from '../src/lc0/pendingInput.ts';
 import { createWorkspaceAutosave, hasExplicitWorkspaceInput, serializeTree, WORKSPACE_MAX_CHARS } from '../src/lc0/workspaceAutosave.ts';
 
 test('missing and valid URL FENs initialize safely', () => {
@@ -87,7 +88,8 @@ test('linked PGN rejection and backup failure remain visible after fallback stat
 
 test('linked inputs stay in the URL until a recoverable snapshot is written', () => {
   const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
-  const save = source.slice(source.indexOf('function saveAnalysisWorkspace()'), source.indexOf('function clearAnalysisWorkspace()'));
+  const lifecycle = source.slice(source.indexOf('let pendingAnalysisInput:'), source.indexOf('function saveAnalysisWorkspace()'));
+  const save = source.slice(source.indexOf('function saveAnalysisWorkspace()'), source.indexOf('function clearAnalysisWorkspace('));
   const restore = source.slice(source.indexOf('function restoreAnalysisWorkspace()'), source.indexOf('let searcher:'));
   for (const mode of ['quota', 'too-large', 'success']) {
     const values = new Map();
@@ -99,10 +101,24 @@ test('linked inputs stay in the URL until a recoverable snapshot is written', ()
       },
       removeItem: (key) => values.delete(key),
     };
-    const saver = createWorkspaceAutosave('analysis', storage);
+    let commit = () => {};
+    const saver = createWorkspaceAutosave('analysis', storage, 400, undefined, undefined, (type) => commit(type));
     const linked = mode === 'too-large' ? '{' + 'x'.repeat(WORKSPACE_MAX_CHARS) + '} 1. e4 *' : '1. e4 *';
     const url = new URL('https://example.test/app/analysis/?dev&pgn=' + encodeURIComponent(linked) + '#board');
-    const dependencies = { GameTree, START_FEN, analysisUrlFen, hasExplicitWorkspaceInput, parseFirstPgnGame, serializeTree, saver, url };
+    const dependencies = {
+      GameTree,
+      START_FEN,
+      analysisUrlFen,
+      hasExplicitWorkspaceInput,
+      parseFirstPgnGame,
+      serializeTree,
+      saver,
+      url,
+      transitionPendingInput,
+      setCommit: (fn) => {
+        commit = fn;
+      },
+    };
     const code = `
       let tree = new GameTree(), analysisGameTree = tree, workspaceHeaders = {}, workspaceResult = '*', lastAnalysisMountHref;
       const workspaceAutosave = saver, reviewMetadata = new Map(), reviewSignature = () => '';
@@ -111,7 +127,8 @@ test('linked inputs stay in the URL until a recoverable snapshot is written', ()
       const takeAnalysisHandoff = () => null, hasPreviousAnalysis = () => false, preservePreviousAnalysis = () => true;
       const clearAnalysisWorkspace = () => saver.clear(), readWorkspace = () => null, decodeAnalysisSnapshot = () => {};
       const el = () => ({}), inputEl = el, renderPgnImportNotice = () => {};
-      ${stripTypeScriptTypes(save + restore)}
+      ${stripTypeScriptTypes(lifecycle + save + restore)}
+      setCommit(type => updatePendingAnalysisInput({type}));
       restoreAnalysisWorkspace();
     `;
     new Function(...Object.keys(dependencies), code)(...Object.values(dependencies));

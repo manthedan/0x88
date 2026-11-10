@@ -26,7 +26,7 @@ test('restoring an identical mainline retires review nodes from the discarded tr
     let tree = oldTree, analysisGameTree = tree, lastReviewNodes = [tree.root, tree.current];
     let workspaceHeaders = {}, workspaceResult = '*', handler;
     const workspaceAutosave = {flush() {}}, restorePreviousAnalysis = () => ({tree: restoredTree, headers: {}, result: '*'});
-    const cancelActiveAnalysisRun = () => {}, reviewMetadata = new Map(), reviewSignature = () => '';
+    const updatePendingAnalysisInput = () => {}, cancelActiveAnalysisRun = () => {}, reviewMetadata = new Map(), reviewSignature = () => '';
     const lineCache = new Map(), completeAnalysisKeys = new Set(), renderPgnImportNotice = () => {};
     const el = () => ({addEventListener(event, fn) {handler = fn;}, focus() {}}), inputEl = el;
     const gameTreeToPgn = () => '';
@@ -51,7 +51,7 @@ test('serialization failure preserves the last autosave, including an empty tree
   saver.flush();
   const previous = values.get('0x88-analysis-workspace');
   tree.root.children = [];
-  const save = source.slice(source.indexOf('function saveAnalysisWorkspace()'), source.indexOf('function clearAnalysisWorkspace()'));
+  const save = source.slice(source.indexOf('function saveAnalysisWorkspace()'), source.indexOf('function clearAnalysisWorkspace('));
   const dependencies = { tree, workspaceAutosave: saver, workspaceHeaders: {}, workspaceResult: '*', reviewMetadata: new Map(), serializeTree, START_FEN };
   new Function(...Object.keys(dependencies), `${stripTypeScriptTypes(save)}; saveAnalysisWorkspace();`)(...Object.values(dependencies));
   saver.flush();

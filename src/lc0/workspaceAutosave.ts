@@ -277,7 +277,7 @@ export function createWorkspaceAutosave(
   delay = 400,
   onPause?: (reason: 'too-large' | 'storage') => void,
   onResume?: () => void,
-  onSave?: () => void,
+  onCommit?: (type: 'saved' | 'cleared') => void,
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: string | undefined;
@@ -298,13 +298,6 @@ export function createWorkspaceAutosave(
     pauseReason = undefined;
     onResume?.();
   };
-  const remove = () => {
-    try {
-      storage?.removeItem(workspaceStorageKey(kind));
-    } catch {
-      /* Storage denied. */
-    }
-  };
   const flush = (): boolean => {
     clearTimeout(timer);
     timer = undefined;
@@ -319,7 +312,7 @@ export function createWorkspaceAutosave(
       storage.setItem(workspaceStorageKey(kind), raw);
       resume();
       pending = undefined;
-      onSave?.();
+      onCommit?.('saved');
       return true;
     } catch {
       pause('storage');
@@ -331,8 +324,14 @@ export function createWorkspaceAutosave(
     timer = undefined;
     pending = undefined;
     last = undefined;
-    remove();
-    resume();
+    try {
+      if (!storage) throw new Error('Storage unavailable');
+      storage.removeItem(workspaceStorageKey(kind));
+      resume();
+      onCommit?.('cleared');
+    } catch {
+      pause('storage');
+    }
   };
   return {
     schedule(data: AnalysisSnapshot | PlaySnapshot | null) {
