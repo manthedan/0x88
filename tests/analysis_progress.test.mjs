@@ -24,6 +24,6 @@ test('warm CPU engine preparation uses search progress without reopening startup
 
 test('warm Centipawn analysis skips its evaluator preparation indicator', async () => {
   const source = await readFile(analysisSourceUrl, 'utf8');
-  assert.match(source, /const evaluatorPrepared = centipawnEvaluatorPromises\.has\(evaluatorKey\);/);
+  assert.match(source, /const evaluatorPrepared = centipawnCache\.has\(evaluatorKey\);/);
   assert.match(source, /if \(evaluatorPrepared\) beginSearch\(\);\s*else showLoadingProgressItem/);
 });

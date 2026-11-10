@@ -9,7 +9,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { uciLineToSan, uciToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import type { Evaluator } from '../nn/evaluator.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
@@ -103,6 +103,7 @@ import {
   checkBigNetAsset,
   probeBt4Support,
 } from './bt4Engine.ts';
+import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
@@ -470,11 +471,7 @@ const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (varia
 const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) =>
   createStormphraxEngine(variant, ARENA_CPU_ENGINE_OPTIONS),
 );
-const centipawnEvaluatorPromises = new Map<string, Promise<Evaluator>>();
-const centipawnEvaluatorLoadTokens = new Map<string, symbol>();
-const centipawnEvaluators = new Set<CachedEvaluator>();
-const centipawnEvaluatorsByKey = new Map<string, CachedEvaluator>();
-let centipawnEvaluatorGeneration = 0;
+const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
@@ -706,7 +703,7 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
   void renderRuntimeBadge();
 }
 
-function centipawnModelForVariant(_variant: string): { modelId: string; onnx: string; meta: string } {
+function centipawnModel(): { modelId: string; onnx: string; meta: string } {
   return LEGACY_CENTIPAWN_OVERRIDE
     ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
     : { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
@@ -715,7 +712,7 @@ function centipawnModelForVariant(_variant: string): { modelId: string; onnx: st
 function centipawnEvaluatorCacheKey(variant: string): string {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
-  const model = centipawnModelForVariant(variant);
+  const model = centipawnModel();
   return `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
 }
 
@@ -727,18 +724,15 @@ function activeCentipawnEvaluatorKeys(): Set<string> {
   );
 }
 
-async function centipawnEvaluator(variant: string): Promise<Evaluator> {
+function centipawnEvaluator(variant: string): Promise<Evaluator> {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
-  const model = centipawnModelForVariant(variant);
+  const model = centipawnModel();
   const key = centipawnEvaluatorCacheKey(variant);
-  const existing = centipawnEvaluatorPromises.get(key);
-  if (existing) return existing;
-  const loadToken = Symbol(key);
-  const generation = centipawnEvaluatorGeneration;
-  const created = (async () => {
-    const loaded = await createBrowserSquareformerRuntimeEvaluator(
-      {
+  return centipawnCache.get(
+    key,
+    {
+      spec: {
         id: model.modelId,
         modelId: model.modelId,
         label: centipawnEngineLabel(variant),
@@ -747,71 +741,22 @@ async function centipawnEvaluator(variant: string): Promise<Evaluator> {
         runtime,
         manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
       },
-      {
+      options: {
         params,
         runtime,
         manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
         fallback,
         audit: { surface: 'arena', searchBudget: 'visits=seat strength' },
       },
-    );
-    console.info('[lc0-arena] loaded Centipawn evaluator', {
-      requestedRuntime: loaded.requestedRuntime,
-      resolvedRuntime: loaded.resolvedRuntime,
-      runtimeConfigId: loaded.runtimeConfigId,
-      manifestUrl: loaded.manifestUrl,
-      fallbackReason: loaded.fallbackReason,
-    });
-    const cached = new CachedEvaluator(loaded.evaluator, {
       maxEntries: arenaCacheEntries(),
-      includeHistory: true,
-      includeLegalMoves: true,
       label: `centipawn-arena:${runtime}`,
-    });
-    if (centipawnEvaluatorGeneration !== generation || centipawnEvaluatorLoadTokens.get(key) !== loadToken) {
-      destroyCentipawnEvaluator(cached);
-      const error = new Error('Centipawn evaluator was disposed before it finished loading');
-      error.name = 'AbortError';
-      throw error;
-    }
-    centipawnEvaluators.add(cached);
-    centipawnEvaluatorsByKey.set(key, cached);
-    return cached;
-  })();
-  centipawnEvaluatorPromises.set(key, created);
-  centipawnEvaluatorLoadTokens.set(key, loadToken);
-  try {
-    return await created;
-  } catch (error) {
-    if (centipawnEvaluatorPromises.get(key) === created) {
-      centipawnEvaluatorPromises.delete(key);
-      if (centipawnEvaluatorLoadTokens.get(key) === loadToken) centipawnEvaluatorLoadTokens.delete(key);
-    }
-    throw error;
-  }
-}
-
-function destroyCentipawnEvaluator(evaluator: CachedEvaluator): void {
-  evaluator.clear();
-  const destroy = (evaluator.inner as Evaluator & { destroy?: () => void }).destroy;
-  if (typeof destroy === 'function') destroy.call(evaluator.inner);
+    },
+    () => activeCentipawnEvaluatorKeys().has(key),
+  );
 }
 
 function disposeUnusedCentipawnEvaluators(): void {
-  const activeKeys = activeCentipawnEvaluatorKeys();
-  for (const key of [...centipawnEvaluatorPromises.keys()]) {
-    if (activeKeys.has(key)) continue;
-    centipawnEvaluatorPromises.delete(key);
-    centipawnEvaluatorLoadTokens.delete(key);
-  }
-  for (const [key, evaluator] of [...centipawnEvaluatorsByKey]) {
-    if (activeKeys.has(key)) continue;
-    destroyCentipawnEvaluator(evaluator);
-    centipawnEvaluators.delete(evaluator);
-    centipawnEvaluatorsByKey.delete(key);
-    centipawnEvaluatorPromises.delete(key);
-    centipawnEvaluatorLoadTokens.delete(key);
-  }
+  centipawnCache.retain(activeCentipawnEvaluatorKeys());
 }
 
 function centipawnHistoryFens(positions: BoardState[]): string[] {
@@ -1855,7 +1800,7 @@ function activeSeatRows(): EngineRow[] {
 
 function runtimeAuditIdentityForRow(row: EngineRow): string | null {
   if (row.family === 'centipawn') {
-    const model = centipawnModelForVariant(row.variant);
+    const model = centipawnModel();
     return browserRuntimeAuditIdentity({
       source: 'active-arena-engine',
       surface: 'arena',
@@ -4501,12 +4446,7 @@ function disposeRuntimeResources(): void {
   arenaSearchProgress.clear();
   hideDownloadProgress();
   disposeLc0Resources();
-  centipawnEvaluatorGeneration++;
-  for (const evaluator of centipawnEvaluators) destroyCentipawnEvaluator(evaluator);
-  centipawnEvaluators.clear();
-  centipawnEvaluatorsByKey.clear();
-  centipawnEvaluatorPromises.clear();
-  centipawnEvaluatorLoadTokens.clear();
+  centipawnCache.clear();
   disposeStockfish();
   for (const engine of isolatedCpuEngines) engine.dispose();
   isolatedCpuEngines.clear();
