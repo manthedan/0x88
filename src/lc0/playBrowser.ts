@@ -1800,8 +1800,8 @@ function ctxTuneOpponent(ctx: PlayContext): void {
 // ---------------------------------------------------------------------------
 
 /** Import before any autosaved-game restore; callers must skip restore when this returns true. */
-function ctxApplyPlayHandoffForMount(ctx: PlayContext): boolean {
-  const handoff = takePlayHandoff();
+function ctxApplyPlayHandoffForMount(ctx: PlayContext, defer: (consume: () => void) => void): boolean {
+  const handoff = takePlayHandoff(Date.now(), defer);
   if (handoff.status === 'ready') {
     ctx.practicePosition = handoff.position;
     return true;
@@ -1851,7 +1851,10 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 
 function ctxInit(ctx: PlayContext): void {
   // Only a decoded storage position handoff replaces a saved game. URL options never contain a Play game.
-  const handedOff = ctxApplyPlayHandoffForMount(ctx);
+  let completeHandoff: (() => void) | undefined;
+  const handedOff = ctxApplyPlayHandoffForMount(ctx, (consume) => {
+    completeHandoff = consume;
+  });
   const validEngineIds = new Set(ENGINE_OPTIONS.map((option) => option.id));
   const saved = handedOff ? null : readWorkspace('play', (raw) => decodePlaySnapshot(raw, validEngineIds));
   ctx.restoredGame = !!saved;
@@ -1879,8 +1882,10 @@ function ctxInit(ctx: PlayContext): void {
     Object.assign(ctx, game);
     el('playRestoreNotice').hidden = false;
   }
-  ctx.autosave = createWorkspaceAutosave('play');
-  if (handedOff) ctx.autosave.clear();
+  ctx.autosave = createWorkspaceAutosave('play', undefined, 400, undefined, undefined, () => {
+    completeHandoff?.();
+    completeHandoff = undefined;
+  });
   trackListener(ctx, window, 'pagehide', () => ctx.autosave?.flush());
   trackListener(ctx, document, 'visibilitychange', () => {
     if (document.hidden) ctx.autosave?.flush();

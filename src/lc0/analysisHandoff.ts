@@ -1,6 +1,6 @@
 // Independent one-shot handoffs: Play → Analysis PGN and Analysis → Play position/history.
 // localStorage rather than sessionStorage also reaches a new tab. Both entries
-// expire quickly and are removed as soon as the destination reads them.
+// expire quickly; destinations can defer consumption until their workspace is saved.
 
 import { boardToFen } from '../chess/board.ts';
 import { gameOutcome } from './engineBattle.ts';
@@ -61,14 +61,30 @@ export function writePlayHandoff(position: PlayPosition, now = Date.now()): bool
   }
 }
 
-/** Consume before saved-game restore. Even an invalid explicit handoff wins over a saved game. */
-export function takePlayHandoff(now = Date.now()): PlayHandoffResult {
+/** Only acknowledge the input that this destination read, never a newer transfer. */
+function acknowledgeHandoff(storage: Storage, key: string, raw: string): () => void {
+  return () => {
+    try {
+      if (storage.getItem(key) === raw) storage.removeItem(key);
+    } catch {
+      // A retained transfer is safer than losing an input when storage is blocked.
+    }
+  };
+}
+
+/** Read before saved-game restore; callers can acknowledge valid input after a durable save. */
+export function takePlayHandoff(now = Date.now(), defer?: (consume: () => void) => void): PlayHandoffResult {
   try {
     const storage = handoffStorage();
     if (!storage) return { status: 'none' };
     const raw = storage.getItem(PLAY_HANDOFF_KEY);
-    if (raw !== null) storage.removeItem(PLAY_HANDOFF_KEY);
-    return decodePlayHandoff(raw, now);
+    const handoff = decodePlayHandoff(raw, now);
+    if (raw !== null) {
+      const consume = acknowledgeHandoff(storage, PLAY_HANDOFF_KEY, raw);
+      if (handoff.status === 'ready' && defer) defer(consume);
+      else consume();
+    }
+    return handoff;
   } catch {
     return { status: 'invalid' };
   }

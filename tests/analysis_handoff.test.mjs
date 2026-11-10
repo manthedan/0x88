@@ -10,6 +10,7 @@ import {
   writeAnalysisHandoff,
   writePlayHandoff,
 } from '../src/lc0/analysisHandoff.ts';
+import { createWorkspaceAutosave } from '../src/lc0/workspaceAutosave.ts';
 
 const now = 1_000_000;
 const position = { startFen: START_FEN, moves: ['e2e4', 'e7e5'] };
@@ -85,6 +86,55 @@ test('blocked storage fails safely rather than navigating with a missing handoff
   try {
     assert.equal(writePlayHandoff(position, now), false);
     assert.deepEqual(takePlayHandoff(now), { status: 'none' });
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else delete globalThis.localStorage;
+  }
+});
+
+test('Play handoff is retained until its replacement workspace has been saved', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map();
+  let quota = false,
+    consume;
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem(key, value) {
+      if (quota) throw Error('quota');
+      values.set(key, value);
+    },
+    removeItem: (key) => values.delete(key),
+  };
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  try {
+    writePlayHandoff(position, now);
+    const raw = values.get(PLAY_HANDOFF_KEY);
+    assert.deepEqual(
+      takePlayHandoff(now, (ready) => {
+        consume = ready;
+      }),
+      { status: 'ready', position },
+    );
+    assert.equal(values.get(PLAY_HANDOFF_KEY), raw, 'Reading a handoff before autosave is durable must not consume it');
+    const saver = createWorkspaceAutosave('play', storage, 400, undefined, undefined, () => consume());
+    const data = { startFen: START_FEN, moves: position.moves, practicePosition: position };
+    quota = true;
+    saver.schedule(data);
+    saver.flush();
+    assert.equal(values.get(PLAY_HANDOFF_KEY), raw, 'Quota failure keeps imported history reloadable');
+    quota = false;
+    saver.schedule(data);
+    saver.flush();
+    assert.equal(values.has(PLAY_HANDOFF_KEY), false, 'Successful autosave acknowledges the handoff');
+    assert.deepEqual(JSON.parse(values.get('0x88-play-workspace')).data, data);
+    writePlayHandoff(position, now);
+    takePlayHandoff(now, (ready) => {
+      consume = ready;
+    });
+    writePlayHandoff({ ...position, moves: ['d2d4'] }, now);
+    consume();
+    assert.equal(takePlayHandoff(now).position.moves[0], 'd2d4', 'An old acknowledgement must not consume a newer handoff');
+    saver.clear();
   } finally {
     if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
     else delete globalThis.localStorage;

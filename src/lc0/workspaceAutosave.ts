@@ -277,6 +277,7 @@ export function createWorkspaceAutosave(
   delay = 400,
   onPause?: (reason: 'too-large' | 'storage') => void,
   onResume?: () => void,
+  onSave?: () => void,
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: string | undefined;
@@ -318,6 +319,7 @@ export function createWorkspaceAutosave(
       storage.setItem(workspaceStorageKey(kind), raw);
       resume();
       pending = undefined;
+      onSave?.();
       return true;
     } catch {
       pause('storage');
