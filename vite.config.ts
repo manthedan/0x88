@@ -34,9 +34,7 @@ export default defineConfig({
   server: {
     headers: crossOriginIsolationHeaders,
     fs: {
-      // node_modules is a symlink to the sibling leelaweb workspace in this checkout;
-      // allow it so ORT's WASM sidecar can be served by the dev server.
-      allow: ['.', '../leelaweb/node_modules'],
+      allow: ['.'],
     },
   },
   preview: {
