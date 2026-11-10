@@ -69,7 +69,12 @@
     # Only features nothing on this site uses. Clipboard, WebGPU, wake lock
     # and cross-origin isolation are deliberately left at their defaults.
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://assets.0x88.app https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self'; manifest-src 'self'"
+    # connect-src names every origin the product fetches from: the asset host
+    # (engines, models, channels, releases), the Lichess and Chess.com game
+    # import APIs (src/lc0/gameImport.ts), and the Cloudflare Web Analytics
+    # beacon endpoint. svelte.config.js keeps `https:` in the meta policy for
+    # local ?assetBase= overrides; both policies apply here, so this one decides.
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://assets.0x88.app https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://assets.0x88.app https://lichess.org https://api.chess.com https://cloudflareinsights.com; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self'; manifest-src 'self'"
 
 # Root/product HTML should revalidate so app-shell changes and channel pointer
 # changes are visible without waiting out a long browser TTL. Pages are served

@@ -120,11 +120,17 @@ test('policy drift between svelte.config.js and netlify.toml is rejected', async
 
 test('connect-src in the header may be narrower than the meta policy but never wider', () => {
   const meta = parseCsp("connect-src 'self' https:");
-  assert.deepEqual(checkPolicyConsistency(parseCsp("connect-src 'self' https://a.example"), meta), [
-    'header connect-src allows https://a.example that the meta policy does not',
-  ]);
+  assert.deepEqual(checkPolicyConsistency(parseCsp("connect-src 'self' https://a.example https://b.example"), meta), []);
   assert.deepEqual(checkPolicyConsistency(parseCsp("connect-src 'self'"), meta), []);
-  assert.deepEqual(checkPolicyConsistency(parseCsp("connect-src 'self' http:"), meta), ['header connect-src allows http: that the meta policy does not']);
+  assert.deepEqual(checkPolicyConsistency(parseCsp("connect-src 'self' http://a.example wss://b.example"), meta), [
+    'header connect-src allows http://a.example wss://b.example that the meta policy does not',
+  ]);
+  assert.deepEqual(checkPolicyConsistency(parseCsp("connect-src 'self' *"), meta), ['header connect-src allows * that the meta policy does not']);
+  // Only connect-src is allowed to be narrower; elsewhere a scheme is not a host.
+  assert.deepEqual(checkPolicyConsistency(parseCsp("img-src 'self' https://a.example"), parseCsp("img-src 'self' https:")), [
+    'header img-src allows https://a.example that the meta policy does not',
+    'meta img-src allows https: that the header policy does not',
+  ]);
 });
 
 test('svelte.config.js keywords are quoted the way SvelteKit emits them', () => {

@@ -79,6 +79,14 @@ const HEADER_ONLY_DIFFERENCES = {
   'connect-src': { subset: true },
 };
 
+// Whether a source list allows everything `source` allows: listed verbatim, or
+// a host source under a scheme source (`https:` covers `https://a.example`).
+function sourceCovered(source, sources) {
+  if (sources.has(source)) return true;
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(source)?.[1];
+  return scheme !== undefined && sources.has(`${scheme.toLowerCase()}:`);
+}
+
 /** Directives that differ between the header and meta policies beyond the documented exceptions. */
 export function checkPolicyConsistency(header, meta) {
   const failures = [];
@@ -97,7 +105,9 @@ export function checkPolicyConsistency(header, meta) {
     }
     const headerSet = new Set(headerSources);
     const metaSet = new Set(metaSources);
-    const extraInHeader = [...headerSet].filter((source) => !metaSet.has(source) && !(rule.extra ?? []).includes(source));
+    const extraInHeader = [...headerSet].filter(
+      (source) => !(rule.subset ? sourceCovered(source, metaSet) : metaSet.has(source)) && !(rule.extra ?? []).includes(source),
+    );
     const missingFromHeader = [...metaSet].filter((source) => !headerSet.has(source));
     if (extraInHeader.length) failures.push(`header ${name} allows ${extraInHeader.join(' ')} that the meta policy does not`);
     if (missingFromHeader.length && !rule.subset) failures.push(`meta ${name} allows ${missingFromHeader.join(' ')} that the header policy does not`);
