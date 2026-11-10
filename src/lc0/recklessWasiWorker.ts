@@ -1,5 +1,7 @@
 import { ConsoleStdout, Fd, File, OpenFile, PreopenDirectory, WASI, wasi } from '@bjorn3/browser_wasi_shim';
 
+import { engineArtifacts } from './engineArtifacts.ts';
+
 /** Extra file fetched over HTTP and exposed to the engine via the WASI preopened cwd (e.g. an external NNUE file). */
 type PreopenFileSpec = { name: string; url: string; expectedBytes?: number };
 
@@ -124,22 +126,8 @@ export class SharedStopFlag extends Fd {
 }
 
 async function fetchAndCompileModule(wasmUrl: string): Promise<WebAssembly.Module> {
-  const response = await fetch(wasmUrl);
-  if (!response.ok) throw new Error(`failed to fetch WASI module ${wasmUrl}: HTTP ${response.status}`);
-
-  // Do not tee a large successful response merely to retain fallback bytes:
-  // an unread clone branch can buffer the entire decoded module (Viridithas).
-  if (typeof WebAssembly.compileStreaming === 'function') {
-    try {
-      return await WebAssembly.compileStreaming(response);
-    } catch (error) {
-      console.warn('Reckless WASM compileStreaming failed; falling back to ArrayBuffer compile', error);
-      const fallback = await fetch(wasmUrl);
-      if (!fallback.ok) throw new Error(`failed to refetch WASI module ${wasmUrl}: HTTP ${fallback.status}`);
-      return WebAssembly.compile(await fallback.arrayBuffer());
-    }
-  }
-  return WebAssembly.compile(await response.arrayBuffer());
+  // Buffer once: verification must finish before compilation/instantiation.
+  return WebAssembly.compile(await engineArtifacts.bytes(wasmUrl));
 }
 
 async function compileModule(wasmUrl: string): Promise<WebAssembly.Module> {
@@ -263,8 +251,7 @@ export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number):
   const existing = inFlightPreopenBytes.get(dedupeKey);
   if (existing) return existing;
   const request = (async () => {
-    const response = await fetch(url, { cache: 'force-cache' });
-    if (!response.ok) throw new Error(`failed to fetch preopen asset ${url}: HTTP ${response.status}`);
+    const response = await engineArtifacts.response(url);
     const decodedBytes = validatedDecodedLength(response, url, expectedBytes);
     const limitBytes = preopenLimit(expectedBytes, decodedBytes);
     const totalBytes = preopenProgressTotal(expectedBytes, decodedBytes);
@@ -302,6 +289,7 @@ export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number):
     post({ type: 'preopen-progress', url, loadedBytes, totalBytes: totalBytes || loadedBytes });
     const buffer = bytes.buffer as ArrayBuffer;
     const verified = loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
+    await engineArtifacts.verify(url, verified);
     if (expectedBytes !== undefined || decodedBytes !== undefined) cacheVerifiedPreopenBytes(dedupeKey, verified);
     return verified;
   })();

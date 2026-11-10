@@ -7,6 +7,7 @@ import {
   type BrowserUciSearchOptions,
   uciPositionCommand,
 } from './browserUciEngine.ts';
+import { engineArtifactWorkerScript } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
 
 /**
@@ -117,34 +118,42 @@ function stockfishWasmUrl(jsUrl: string): string {
   return jsUrl.replace(/\.js(?:[?#].*)?$/, '.wasm');
 }
 
-function isStockfishPthreadScriptUrl(jsUrl: string): boolean {
-  try {
-    const pathname = new URL(jsUrl, typeof location === 'undefined' ? 'http://localhost/' : location.href).pathname;
-    return /\/stockfish-(?:18|19)(?:-lite)?\.js$/.test(pathname);
-  } catch {
-    return false;
-  }
-}
-
-export function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string; bootstrapWasmUrl?: string } {
-  if (isStockfishPthreadScriptUrl(jsUrl)) {
-    // Same-origin Stockfish builds already know how to locate their sibling
-    // WASM and pthread worker script. Wrapping them in our bootstrap changes
-    // self.location.pathname, so every pthread points back at the bootstrap
-    // and can recursively initialize another top-level engine.
-    if (sameOriginUrl(jsUrl)) return { url: jsUrl };
-    if (!isTrustedExecutableAssetUrl(jsUrl)) {
-      throw new Error(`Refusing untrusted Stockfish worker URL: ${jsUrl}`);
-    }
-    return { url: jsUrl, bootstrapWasmUrl: stockfishWasmUrl(jsUrl) };
-  }
-  if (sameOriginUrl(jsUrl)) return { url: jsUrl };
-  if (!isTrustedExecutableAssetUrl(jsUrl)) throw new Error(`Refusing untrusted Stockfish worker URL: ${jsUrl}`);
-  const wasmUrl = stockfishWasmUrl(jsUrl);
-  // nmrugg/stockfish.js reads self.location.hash as "<wasm-url>" for the UCI
-  // worker. The ",worker" suffix is reserved for pthread helper workers and
-  // makes the top-level UCI worker skip its onmessage initialization.
-  const script = `importScripts(${JSON.stringify(jsUrl)});`;
+/** Verified glue is also the pthread entry point; children reuse the compiled
+ * module and never fetch an unverified second copy of the script. */
+export function stockfishWorkerUrl(jsUrl: string): { url: string; objectUrl?: string } {
+  if (!sameOriginUrl(jsUrl) && !isTrustedExecutableAssetUrl(jsUrl)) throw new Error(`Refusing untrusted Stockfish worker URL: ${jsUrl}`);
+  const resolvedJsUrl = new URL(jsUrl, typeof location === 'undefined' ? 'http://localhost/' : location.href).href;
+  const wasmUrl = stockfishWasmUrl(resolvedJsUrl);
+  const script = `
+${engineArtifactWorkerScript()}
+const pending = [];
+self.onmessage = (event) => pending.push(event);
+(async () => {
+  let [glue, wasm] = await Promise.all([
+    engineArtifacts.bytes(${JSON.stringify(resolvedJsUrl)}),
+    engineArtifacts.bytes(${JSON.stringify(wasmUrl)}),
+  ]);
+  const glueUrl = URL.createObjectURL(new Blob([glue], { type: 'text/javascript' }));
+  // Stockfish's facade fetches the WASM URL encoded in the worker hash.
+  // Supply our verified bytes, preserving its streaming instantiate interface.
+  const networkFetch = self.fetch;
+  self.fetch = async (url, options) => {
+    if (new URL(url, self.location.href).href !== new URL(${JSON.stringify(wasmUrl)}, self.location.href).href) return networkFetch(url, options);
+    if (!wasm) throw new Error('Verified Stockfish WASM was already consumed');
+    const response = new Response(wasm, { headers: { 'Content-Type': 'application/wasm' } });
+    wasm = null;
+    return response;
+  };
+  glue = null;
+  const NativeWorker = self.Worker;
+  self.Worker = class extends NativeWorker {
+    constructor(url, options) { super(glueUrl, options); }
+  };
+  self.onmessage = null;
+  importScripts(glueUrl);
+  for (const event of pending) self.onmessage(event);
+})().catch((error) => { setTimeout(() => { throw error; }); });
+`;
   const objectUrl = URL.createObjectURL(new Blob([script], { type: 'text/javascript' }));
   return { url: `${objectUrl}#${encodeURIComponent(wasmUrl)}`, objectUrl };
 }
@@ -330,14 +339,7 @@ export class StockfishEngine implements BrowserUciEngine {
       try {
         const workerUrl = stockfishWorkerUrl(this.url);
         this.workerObjectUrl = workerUrl.objectUrl ?? null;
-        let worker: Worker;
-        if (workerUrl.bootstrapWasmUrl) {
-          const bootstrapUrl = new URL('./stockfishPthreadBootstrap.js?no-inline', import.meta.url);
-          bootstrapUrl.hash = encodeURIComponent(workerUrl.bootstrapWasmUrl);
-          worker = new Worker(bootstrapUrl, { name: 'stockfish-pthread-bootstrap' });
-        } else {
-          worker = new Worker(workerUrl.url);
-        }
+        const worker = new Worker(workerUrl.url);
         this.worker = worker;
         worker.onmessage = (event: MessageEvent) => {
           const line = typeof event.data === 'string' ? event.data : String(event.data);

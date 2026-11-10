@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash, webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { workerScript as berserkWorkerScript } from '../src/lc0/berserkEngine.ts';
 import { resolveEmscriptenAssetUrl } from '../src/lc0/emscriptenLocateFile.ts';
+import { ENGINE_ARTIFACT_PINS } from '../src/lc0/engineArtifactPins.generated.ts';
 import { workerScript as plentyChessWorkerScript } from '../src/lc0/plentychessEngine.ts';
 import { workerScript as stormphraxWorkerScript } from '../src/lc0/stormphraxEngine.ts';
 
@@ -54,7 +56,21 @@ async function exerciseWorkerScript(script, factoryName) {
     };
     return Promise.resolve({ ccall() {} });
   };
-  runInNewContext(script, { self, URL, importScripts() {} });
+  const bytes = new TextEncoder().encode('verified fixture');
+  const pin = { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
+  const pins = Object.fromEntries(['/engine/variant.js', '/engine/variant.wasm', '/engine/canonical.data'].map((path) => [path, pin]));
+  script = script.replace(JSON.stringify(ENGINE_ARTIFACT_PINS), JSON.stringify(pins));
+  runInNewContext(script, {
+    self,
+    location: self.location,
+    URL,
+    Blob,
+    TextDecoder,
+    Uint8Array,
+    crypto: webcrypto,
+    fetch: async () => new Response(bytes),
+    importScripts() {},
+  });
   self.onmessage({
     data: {
       type: 'init',
@@ -65,7 +81,7 @@ async function exerciseWorkerScript(script, factoryName) {
       trustedJsUrl: false,
     },
   });
-  await new Promise((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 100 && !messages.length; i++) await new Promise((resolve) => setTimeout(resolve, 1));
   return { located, messages };
 }
 
