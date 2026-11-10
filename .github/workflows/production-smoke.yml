@@ -25,24 +25,56 @@ jobs:
     env:
       PRODUCTION_BASE_URL: ${{ inputs.base_url || 'https://0x88.app' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           lfs: false
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
+      # The journey only needs Playwright (pinned by the lockfile). Skipping
+      # lifecycle scripts keeps `prepare` (svelte-kit sync, which walks public/)
+      # from failing a probe of the deployed site; ci.yml covers repo installs.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
       - name: Run production browser journey
         run: node scripts/production_browser_smoke.mjs --base-url "$PRODUCTION_BASE_URL" --out artifacts/production-browser-smoke.json
       - name: Upload smoke report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: production-browser-smoke-${{ github.run_id }}
           path: artifacts/production-browser-smoke.json
           if-no-files-found: warn
           retention-days: 30
+
+  # A red nightly went unnoticed for two months. Scheduled failures (including
+  # timeouts) open one tracking issue, then comment on it while it stays open.
+  report-failure:
+    needs: browser-journey
+    if: ${{ always() && github.event_name == 'schedule' && needs.browser-journey.result != 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RESULT: ${{ needs.browser-journey.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the tracking issue
+        run: |
+          title='Nightly production smoke is failing'
+          label='production-smoke'
+          gh label create "$label" --color B60205 --description 'Nightly production-smoke failures' 2>/dev/null || true
+          number=$(gh issue list --state open --label "$label" --limit 100 --json number,title \
+            --jq "map(select(.title == \"$title\")) | first | .number // empty")
+          body="Scheduled run $RESULT on $(date -u +%F): $RUN_URL"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --label "$label" --body "$body"
+          fi
