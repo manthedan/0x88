@@ -126,7 +126,9 @@ For transformer/LC0 browser work, start quantization with the largest dense, lea
 
 ## Standard analysis tool
 
-Use:
+`eval/model_efficiency_report.py` was removed in the 2026-06-11 cleanup (commit
+`004504e`; recover it with `git show 004504e^:eval/model_efficiency_report.py`).
+The historical invocation was:
 
 ```bash
 .venv-onnx/bin/python eval/model_efficiency_report.py \

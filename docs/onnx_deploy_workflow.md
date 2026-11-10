@@ -24,7 +24,9 @@ Keep training artifacts untouched and write a deploy sibling:
   --meta-out artifacts/path/model.sim.meta.json
 ```
 
-Then run semantic parity:
+Then run semantic parity. `eval/onnx_parity_check.mjs` and
+`eval/puct_batch_benchmark.mjs` below were removed in the 2026-06-11 cleanup
+(commit `004504e`; recover with `git show 004504e^:<path>`):
 
 ```bash
 node --experimental-strip-types eval/onnx_parity_check.mjs \

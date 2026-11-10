@@ -84,7 +84,8 @@ within print precision), plus sign/guard/parity/tree-reuse behavior.
 
 ### Calibration vs Maia3's learned contempt (2026-06-11)
 
-`scripts/maia3_vs_elo_contempt.mjs` compares the analytic transform with
+`scripts/maia3_vs_elo_contempt.mjs` (removed in commit `460c2a4`, 2026-06-18; recover with `git show 460c2a4^:scripts/maia3_vs_elo_contempt.mjs`)
+compared the analytic transform with
 Maia3's rating-conditioned value head — the *learned* expected outcome
 between players of the conditioned ratings — over 120 playout positions,
 mean rating held fixed:
@@ -120,7 +121,8 @@ Maia3 directly rather than scaling a strong-engine WDL.
 
 ### Rating inference status (for the Elo-contempt Play mode)
 
-`scripts/maia_elo_probe.mjs` infers a player's rating from their moves.
+`scripts/maia_elo_probe.mjs` (removed in commit `460c2a4`, 2026-06-18; recover with `git show 460c2a4^:scripts/maia_elo_probe.mjs`)
+inferred a player's rating from their moves.
 Two scorers:
 
 - `--scorer ladder` (5 discrete Maia nets): 3/3 correct buckets by ~20
@@ -156,7 +158,8 @@ All mechanisms off (`0`) ⇒ bit-identical search (puct/lc0 parity suites).
 
 ## Empirical results (Maia as the human stand-in)
 
-`scripts/contempt_vs_maia.mjs` plays Lc0 small (t1, fixed visits) against
+`scripts/contempt_vs_maia.mjs` (removed in commit `460c2a4`, 2026-06-18; recover with `git show 460c2a4^:scripts/contempt_vs_maia.mjs`)
+played Lc0 small (t1, fixed visits) against
 a Maia net sampling from its human-move distribution — the same opponent
 model the Play page ships. Arms are `--draw-scores` zipped with
 `--sc-limits`. Queen odds (the Lc0 side starts without its queen) vs

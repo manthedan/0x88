@@ -152,7 +152,12 @@ npm run lc0:tvmjs-webgpu-summary -- \
   --out artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_b8_v16_ortf16_report.json
 ```
 
-Research-only fixed-suite bridge, using the same fixed FEN input style as `lc0_browser_runtime_fixed_suite.mjs` but without adding TVMJS to the stable runtime registry/UI:
+Research-only fixed-suite bridge, using the same fixed FEN input style as `lc0_browser_runtime_fixed_suite.mjs` but without adding TVMJS to the stable runtime registry/UI.
+The UHO-lite opening suites (`eval/opening_suite_uho_lite_v1.fen` and `_v2`)
+are no longer in this repository; they were removed in commit `004504e`
+(2026-06-11). Recover one with
+`git show 004504e^:eval/opening_suite_uho_lite_v2.fen > <file>` (v2 corrects an
+impossible row 9 in v1) and pass that file to `--fens`.
 
 ```bash
 npm run lc0:tvmjs-webgpu-fixed-suite -- \

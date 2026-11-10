@@ -38,7 +38,9 @@ Each browser UCI adapter should implement `BrowserUciEngine`:
 | `StockfishEngine` | Implements the standard method set. | `prewarm()` initializes the JS/WASM worker. `newGame()` sends `ucinewgame` then waits on `isready`. Abort sends UCI `stop`. Stockfish assets are package/public assets rather than dynamic variant downloads. |
 | `RecklessEngine` | Implements the standard method set. | Supports WASI one-shot, persistent WASI, and experimental browser API. Persistent prewarm and `newGame()` are implemented; abort terminates/recreates runtimes when graceful stop cannot preserve state. Variant modules own artifact checks. |
 | `ViridithasEngine` | Implements the standard method set. | Persistent prewarm is implemented when SAB/isolation is available. One-shot mode has no resident process to warm. Stop/abort still terminates the worker; robust graceful stop remains open. Variant modules own artifact checks. |
-| `BerserkEngine` | Not implemented yet. | Must satisfy this contract before arena/analysis selector promotion. Start with one-shot WASI UCI smoke, then decide whether persistent WASI is worth adding. |
+| `BerserkEngine` | Implements the standard method set. | Single-thread Emscripten UCI worker that stays resident: `prewarm()` runs `uci`/`isready`, `newGame()` sends `ucinewgame` then waits on `isready`. Abort terminates the worker, which is recreated on the next call. Hash/option commands are deduplicated per worker because Berserk's Hash handler clears the TT. |
+| `PlentyChessEngine` | Implements the standard method set. | Same single-thread Emscripten worker lifecycle as Berserk: resident after `prewarm()`, `ucinewgame`/`isready` on `newGame()`, abort terminates and recreates the worker. |
+| `StormphraxEngine` | Implements the standard method set. | Same single-thread Emscripten worker lifecycle as Berserk and PlentyChess (synchronous search build); abort terminates and recreates the worker. |
 
 ## Promotion checklist for a new UCI engine
 

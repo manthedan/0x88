@@ -250,7 +250,9 @@ codebook/NF4-style quant or outlier-aware schemes).
   reply); native SF tolerates it; it is also why this exact row has been
   search-unstable since the t1 campaign. Corrected suite staged at
   `eval/opening_suite_uho_lite_v2.fen` (v1 left untouched in
-  leelaweb-arena-diagnostics for historical comparability); the page scorer
+  leelaweb-arena-diagnostics for historical comparability; both suites were
+  later removed in commit `004504e`, recover v2 with
+  `git show 004504e^:eval/opening_suite_uho_lite_v2.fen`); the page scorer
   now annotates null replies with a reason.
 - **`requiredLimits` adopted** (Tiny-lane pattern): the smoke page now
   requests the adapter's storage/buffer/workgroup limits ahead of non-Apple

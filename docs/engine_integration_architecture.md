@@ -85,9 +85,9 @@ Do not restore blanket `lfs: true` checkout unless tests genuinely require every
 4. Add standard construction/cache-key wiring to `engineProvision.ts` when applicable.
 5. Use `DisposableVariantPool` on Analysis/Arena rather than adding another family-specific `Map` lifecycle.
 6. Add artifact inventory and preparation metadata to `engine_artifact_registry.mjs`.
-7. Add targeted-test mappings in `scripts/run_targeted_tests.mjs`.
+7. Add targeted-test mappings to `EXACT_TESTS` (and the family to `ENGINE_TOKENS`) in `scripts/lib/targeted_tests.mjs`, which `scripts/run_targeted_tests.mjs` uses.
 8. Validate typecheck, the full Node suite, the R2-pruned build, ORT deduplication, and browser smokes.
-9. For distributed third-party binaries, follow `docs/engine_artifact_distribution.md` and publish matching immutable artifacts, manifests, notices, and corresponding source.
+9. For distributed third-party binaries, follow `docs/engine_artifact_distribution.md` and publish matching immutable artifacts, manifests, notices, and corresponding source. Pin the upstream in `engines/<name>/upstream.lock.json` (add the engine to `tests/engine_upstream_locks.test.mjs`) and add its row to `scripts/write_artifact_index.mjs`, then run `npm run artifact-index`.
 
 ## Validation commands
 
