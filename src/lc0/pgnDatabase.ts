@@ -328,7 +328,8 @@ export async function exportPgnDatabaseBackup(now = new Date(), collectionId?: s
 }
 
 export function rebuildPgnCollectionIndex(collection: SavePgnCollectionInput): SavePgnCollectionInput {
-  const games = storedPgnChunks(collection.pgn).map((chunk, i) => parseLocalPgnGame(chunk, i + 1));
+  const games = storedPgnChunks(collection.pgn).flatMap((chunk, i) => parseLocalPgnGame(chunk, i + 1) ?? []);
+  if (!games.length) throw new Error('No playable moves in this collection.');
   const positionIndex = buildOpeningPositionIndex(games);
   return {
     ...collection,

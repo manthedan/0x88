@@ -8,6 +8,8 @@ export interface PgnGame {
   tags: Record<string, string>;
   tree: GameTree;
   result: string;
+  /** An explicit valid result, rather than the parser's default for unfinished input. */
+  hasResult: boolean;
 }
 
 /** Strip check/mate/annotation glyphs and normalize castling so SAN compares cleanly. */
@@ -183,6 +185,7 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
   let last: GameNode = tree.root;
   const stack: GameNode[] = [];
   let result = tags.Result || '*';
+  let hasResult = RESULTS.has(tags.Result);
   for (const token of tokens) {
     if (token.type === 'open') {
       stack.push(last);
@@ -198,7 +201,10 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
     // a RAV shares moves with its parent line. The authoritative PGN retains RAVs.
     if (options.mainlineOnly && stack.length) continue;
     if (token.type === 'result') {
-      if (!stack.length) result = token.value;
+      if (!stack.length) {
+        result = token.value;
+        hasResult = true;
+      }
       continue;
     }
     if (token.type === 'nag') {
@@ -219,7 +225,7 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
   }
   if (options.strict && stack.length) throw new Error('Unclosed PGN variation');
   tree.current = tree.root;
-  return { tags, tree, result };
+  return { tags, tree, result, hasResult };
 }
 
 /** Parse every game in a multi-game PGN string. */

@@ -24,10 +24,14 @@ export function storedPgnChunks(raw: string): string[] {
   return chunks;
 }
 
-export function parseLocalPgnGame(chunk: string, number: number): ImportedGame {
+/** Null means a valid aborted/forfeited record; malformed records must still throw. */
+export function parseLocalPgnGame(chunk: string, number: number): ImportedGame | null {
   try {
     const game = parsePgnGame(chunk, { strict: true, mainlineOnly: true });
-    if (!game.tree.root.children.length) throw new Error('No playable moves');
+    if (!game.tree.root.children.length) {
+      if (!game.hasResult) throw new Error('No playable moves');
+      return null;
+    }
     return { tree: game.tree, result: game.result };
   } catch (error) {
     throw new Error(`Game ${number}: ${(error as Error).message}`);
@@ -36,6 +40,7 @@ export function parseLocalPgnGame(chunk: string, number: number): ImportedGame {
 
 export interface LocalPgnBatch {
   games: ImportedGame[];
+  skippedGames: number;
   positionIndex: OpeningPositionIndex;
 }
 
@@ -56,10 +61,13 @@ async function importPgnChunks(chunks: string[], onProgress: (done: number, tota
     await new Promise((resolve) => setTimeout(resolve, 0));
     signal?.throwIfAborted();
     const game = parseLocalPgnGame(chunks[i], i + 1);
-    const index = buildOpeningPositionIndex([game]);
-    for (const [key, stats] of Object.entries(index)) positionIndex[key] = mergeOpeningMoveStats([positionIndex[key] ?? [], stats]);
-    games.push(game);
+    if (game) {
+      const index = buildOpeningPositionIndex([game]);
+      for (const [key, stats] of Object.entries(index)) positionIndex[key] = mergeOpeningMoveStats([positionIndex[key] ?? [], stats]);
+      games.push(game);
+    }
     onProgress(i + 1, chunks.length);
   }
-  return { games, positionIndex };
+  if (!games.length) throw new Error('No playable moves in this collection.');
+  return { games, positionIndex, skippedGames: chunks.length - games.length };
 }
