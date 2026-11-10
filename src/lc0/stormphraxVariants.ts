@@ -1,4 +1,4 @@
-import { probeAssetUrls } from './assetProbe.ts';
+import { assetProbeRetryAllowed, probeAssetUrls } from './assetProbe.ts';
 import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
 import { resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
@@ -155,6 +155,7 @@ export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange
     onChange?.();
     return Promise.resolve('missing');
   }
+  if (!assetProbeRetryAllowed(assetUrls(variant))) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
   const promise = probeAssetUrls(assetUrls(variant), { timeoutMs }).then((status) => {
     assetStatuses.set(key, status);

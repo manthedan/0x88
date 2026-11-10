@@ -1,4 +1,4 @@
-import { probeAssetUrls } from './assetProbe.ts';
+import { assetProbeRetryAllowed, probeAssetUrls } from './assetProbe.ts';
 import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
 import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
@@ -130,6 +130,7 @@ export function checkViridithasVariantAsset(variant: ViridithasVariant, onChange
     onChange?.();
     return Promise.resolve(variant.assetStatus);
   }
+  if (!assetProbeRetryAllowed([variant.wasmUrl])) return Promise.resolve('unknown');
   variant.assetStatus = 'checking';
   const promise = probeAssetUrls([variant.wasmUrl])
     .then((status): ViridithasAssetStatus => (status === 'present' ? 'ok' : status))

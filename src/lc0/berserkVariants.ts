@@ -1,4 +1,4 @@
-import { probeAssetUrls } from './assetProbe.ts';
+import { assetProbeRetryAllowed, probeAssetUrls } from './assetProbe.ts';
 import { isLocalDevelopmentOrigin, resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
 import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
@@ -276,6 +276,7 @@ export function checkBerserkVariantAsset(variant: BerserkVariant, onChange?: () 
     onChange?.();
     return Promise.resolve('missing');
   }
+  if (!assetProbeRetryAllowed(assetUrls(variant))) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
   const promise = probeAssetUrls(assetUrls(variant)).then((status) => {
     assetStatuses.set(key, status);

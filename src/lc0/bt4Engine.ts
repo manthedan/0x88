@@ -1,4 +1,4 @@
-import { probeAssetUrls } from './assetProbe.ts';
+import { assetProbeRetryAllowed, probeAssetUrls } from './assetProbe.ts';
 // Lc0 big-net (BT4-it332, t3-512 distill) browser integration.
 //
 // Big nets are large and attention-heavy, so they are handled with care:
@@ -227,6 +227,7 @@ export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?
     onStatus?.();
     return 'missing';
   }
+  if (!assetProbeRetryAllowed([config.modelUrl])) return 'unknown';
   const probe = probeAssetUrls([config.modelUrl]).then((status) => {
     assetStatuses.set(config.modelUrl, status);
     assetProbes.delete(config.modelUrl);
