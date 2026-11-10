@@ -22,6 +22,10 @@ export interface GameNode {
   ply: number;
   children: GameNode[];
   comment?: string;
+  /** PGN comment before this variation's first move, rather than after its parent. */
+  beforeComment?: string;
+  /** PGN numeric annotation glyphs ($1 = !, $2 = ?, ...) in source order. */
+  nags?: number[];
 }
 
 export class GameTree {

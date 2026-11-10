@@ -295,6 +295,18 @@ test('quoted and backslash opening names round-trip as PGN tags, never as expose
   assert.equal(parsePgnGames(gameTreeToPgn(tree, { Opening: 'Line one\nLine two' }, '*'))[0].tags.Opening, 'Line one Line two');
 });
 
+test('a PGN that only parses tolerantly (truncated line or junk variation) is not a valid checkpoint game', () => {
+  const checkpoint = fixture('match', [openingFromUciMoves('Italian', ['e2e4', 'e7e5', 'g1f3'])]);
+  const saved = commitArenaGame(checkpoint, completed(checkpoint, 0));
+  assert.doesNotThrow(() => decodeArenaCheckpoint(structuredClone(saved)));
+  for (const junk of [' Zz9', ' (2. Bc4 Zz9)', ' --']) {
+    const c = structuredClone(saved);
+    c.completed[0].pgn = c.completed[0].pgn.replace(/ 1\/2-1\/2$/, `${junk} 1/2-1/2`);
+    assert.notEqual(c.completed[0].pgn, saved.completed[0].pgn);
+    assert.throws(() => decodeArenaCheckpoint(c), /PGN/, junk);
+  }
+});
+
 test('duplicate completed indices, invalid results and unfinished PGNs cannot inflate standings', () => {
   const checkpoint = fixture();
   const saved = commitArenaGame(checkpoint, completed(checkpoint, 0));

@@ -295,7 +295,8 @@ export function decodeArenaCheckpoint(input: unknown): ArenaCheckpoint {
       'game lost opening history',
     );
     const parsed = parsePgnGames(game.pgn);
-    check(parsed.length === 1 && parsed[0].result === game.result && parsed[0].tree.root.fen === tree.root.fen, 'PGN result or root mismatch');
+    check(parsed.length === 1 && !parsed[0].warnings.length, 'PGN does not parse cleanly');
+    check(parsed[0].result === game.result && parsed[0].tree.root.fen === tree.root.fen, 'PGN result or root mismatch');
     check(
       JSON.stringify(parsed[0].tree.mainlineFrom(parsed[0].tree.root).map((node) => moveToUci(node.move!))) === JSON.stringify(game.moves),
       'PGN moves mismatch',

@@ -68,6 +68,121 @@ test('analysis round trip retains nested variations, comments, headers, result a
   assert.equal(new Set(restored.tree.lineTo().map((node) => node.id)).size, 5, 'new nodes get unique ids');
 });
 
+test('autosave persists NAGs and variation-leading comments through a page refresh', () => {
+  const { tree } = parsePgnGame('{Intro} 1. e4! ({d4 only} 1. d4 $6) e5 $2 *');
+  // Assign explicitly as well, so persistence is tested independently of parsing.
+  tree.root.children[1].beforeComment = 'd4 only';
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  saver.schedule({ tree: serializeTree(tree), headers: {}, result: '*' });
+  saver.flush();
+  const restored = readWorkspace('analysis', decodeAnalysisSnapshot, store);
+  assert.ok(restored);
+  assert.deepEqual(
+    restored.tree.mainlineFrom().map((node) => node.nags),
+    [[1], [2]],
+  );
+  assert.deepEqual(restored.tree.root.children[1].nags, [6]);
+  assert.equal(restored.tree.root.children[1].beforeComment, 'd4 only');
+  assert.equal(gameTreeToPgn(restored.tree), gameTreeToPgn(tree));
+});
+
+test('33 shallow PGN cycles import, autosave, restore and export merged deep branches', () => {
+  const { tree } = parsePgnGame(`${'Nf3 (Nf3 Nc6) Nf6 (Nf6 Nc3) Ng1 (Ng1 Nc6) Ng8 (Ng8 Nc3) '.repeat(33)}*`, { strict: true });
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  const snapshot = serializeTree(tree);
+  saver.schedule({ tree: snapshot, headers: {}, result: '*' });
+  saver.flush();
+  const restored = readWorkspace('analysis', decodeAnalysisSnapshot, store);
+  assert.ok(restored);
+  assert.deepEqual(serializeTree(restored.tree), snapshot);
+  const reparsed = parsePgnGame(gameTreeToPgn(restored.tree), { strict: true });
+  assert.deepEqual(reparsed.warnings, []);
+  assert.deepEqual(serializeTree(reparsed.tree), snapshot);
+});
+
+test('5000-node nested GameTree autosaves and restores without recursive walks', () => {
+  const tree = new GameTree();
+  const cycle = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
+  const alternatives = ['b1c3', 'b8c6', 'b1c3', 'b8c6'];
+  for (let i = 0; i < 2500; i++) {
+    const parent = tree.current;
+    assert.ok(tree.addUci(alternatives[i % 4]));
+    tree.goTo(parent);
+    assert.ok(tree.addUci(cycle[i % 4]));
+  }
+  const snapshot = serializeTree(tree);
+  assert.equal(snapshot.nodes.length, 5000);
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  saver.schedule({ tree: snapshot, headers: {}, result: '*' });
+  saver.flush();
+  const restored = readWorkspace('analysis', decodeAnalysisSnapshot, store);
+  assert.ok(restored);
+  assert.deepEqual(serializeTree(restored.tree), snapshot);
+  const reparsed = parsePgnGame(gameTreeToPgn(restored.tree), { strict: true });
+  assert.deepEqual(serializeTree(reparsed.tree).nodes, snapshot.nodes);
+});
+
+test('old-format version-1 analysis fixture decodes without optional annotations', () => {
+  const raw = JSON.stringify({
+    kind: 'analysis',
+    version: 1,
+    savedAt: 1,
+    data: {
+      headers: { White: 'Legacy' },
+      result: '*',
+      tree: {
+        startFen: START_FEN,
+        current: 2,
+        rootComment: 'Intro',
+        nodes: [
+          { parent: 0, uci: 'e2e4', comment: 'Centre' },
+          { parent: 1, uci: 'e7e5' },
+        ],
+      },
+    },
+  });
+  const restored = decodeAnalysisSnapshot(raw);
+  assert.ok(restored);
+  assert.equal(restored.tree.current.san, 'e5');
+  assert.equal(restored.tree.root.comment, 'Intro');
+  assert.equal(restored.tree.root.children[0].comment, 'Centre');
+  assert.equal(restored.tree.root.children[0].nags, undefined);
+  assert.equal(restored.tree.root.children[0].beforeComment, undefined);
+});
+
+test('snapshot annotation validation and size limits remain enforced', () => {
+  const data = analysisData();
+  for (const patch of [
+    { nags: '1' },
+    { nags: [-1] },
+    { nags: [256] },
+    { nags: [1.5] },
+    { nags: [null] },
+    { nags: Array(257).fill(1) },
+    { beforeComment: {} },
+  ]) {
+    const tree = { ...data.tree, nodes: [{ parent: 0, uci: 'e2e4', ...patch }] };
+    assert.equal(decodeAnalysisSnapshot(envelope('analysis', { ...data, tree })), null);
+  }
+  const { tree } = parsePgnGame('1. e4! e5 $2 *');
+  tree.root.children[0].beforeComment = 'x'.repeat(WORKSPACE_MAX_CHARS);
+  const oversized = { ...data, tree: serializeTree(tree) };
+  assert.equal(decodeAnalysisSnapshot(envelope('analysis', oversized)), null);
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  saver.schedule(data);
+  saver.flush();
+  assert.ok(store.getItem(workspaceStorageKey('analysis')));
+  saver.schedule(oversized);
+  saver.flush();
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
+  const tooManyNodes = { ...data.tree, nodes: Array(5001).fill({ parent: 0, uci: 'e2e4', nags: [1] }) };
+  assert.equal(decodeAnalysisSnapshot(envelope('analysis', { ...data, tree: tooManyNodes })), null);
+});
+
 test('Analysis autosave never gives an edited mainline ownership of an imported result', () => {
   const { tree, tags: headers, result } = parsePgnGame('[Result "1-0"]\n\n1. e4 1-0');
   const signature = resultSignature(tree);
