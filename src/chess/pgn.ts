@@ -4,12 +4,28 @@ import { type Move } from './moveCodec.ts';
 import { legalMoves } from './movegen.ts';
 import { moveToSan } from './san.ts';
 
+export type PgnWarningReason = 'invalid-move' | 'null-move' | 'after-result';
+
+/** Where tolerant parsing stopped a line. Strict parsing throws instead. */
+export interface PgnWarning {
+  /** Ply the rejected move would have had (root = 0). */
+  ply: number;
+  /** Move number as PGN prints it before that move, e.g. `12.` or `12...`. */
+  label: string;
+  token: string;
+  reason: PgnWarningReason;
+  /** True when the stopped line is a variation; the parent line carried on. */
+  variation: boolean;
+}
+
 export interface PgnGame {
   tags: Record<string, string>;
   tree: GameTree;
   result: string;
   /** An explicit valid result, rather than the parser's default for unfinished input. */
   hasResult: boolean;
+  /** Lines tolerant parsing stopped early; always empty for strict parsing. */
+  warnings: PgnWarning[];
 }
 
 /** Strip check/mate/annotation glyphs and normalize castling so SAN compares cleanly. */
@@ -57,7 +73,7 @@ export function splitPgnGames(text: string): string[] {
       i = end === -1 ? text.length : end + 1;
       continue;
     }
-    if (ch === ';') {
+    if (ch === ';' || isEscapeLine(text, i)) {
       const end = text.indexOf('\n', i + 1);
       i = end === -1 ? text.length : end + 1;
       continue;
@@ -97,7 +113,7 @@ export function splitPgnGames(text: string): string[] {
       i++;
       continue;
     } // Malformed punctuation is rejected by the parser, never a loop.
-    const word = text.slice(i, j).replace(/^\d+\.(\.\.)?/, '');
+    const word = stripMoveNumber(text.slice(i, j));
     sawMovetext = true;
     if (!depth && RESULTS.has(word)) ended = true;
     i = j;
@@ -126,6 +142,46 @@ type Token =
   | { type: 'result'; value: string };
 
 const RESULTS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
+const NULL_MOVES = new Set(['--', 'Z0', '0000', '@@@@']);
+/** Standalone annotation glyphs some tools print as words; mapped to their standard NAGs. */
+const GLYPH_NAGS: Record<string, number> = {
+  '!': 1,
+  '?': 2,
+  '!!': 3,
+  '??': 4,
+  '!?': 5,
+  '?!': 6,
+  '□': 7,
+  '=': 10,
+  '∞': 13,
+  '+=': 14,
+  '+/=': 14,
+  '⩲': 14,
+  '=+': 15,
+  '=/+': 15,
+  '⩱': 15,
+  '+/-': 16,
+  '±': 16,
+  '-/+': 17,
+  '∓': 17,
+  '+-': 18,
+  '-+': 19,
+};
+
+/** `%` in the first column escapes the rest of the line (PGN standard 6). */
+function isEscapeLine(text: string, i: number): boolean {
+  return text[i] === '%' && (i === 0 || text[i - 1] === '\n');
+}
+
+/** Remove a move number such as `12.`, `12...` or `12…`, possibly fused to the SAN. */
+function stripMoveNumber(word: string): string {
+  return word.replace(/^\d+(?:\.+|…)/, '');
+}
+
+/** Words that carry no move: ellipses, detached check marks, and a detached `e.p.`. */
+function isIgnorableWord(word: string): boolean {
+  return !word || /^(?:\.+|…|[+#]+|e\.p\.)$/i.test(word);
+}
 
 /** Tokenize movetext, handling {comments}, (variations), $NAGs, move numbers, and results. */
 function tokenizeMovetext(movetext: string, strict = false): Token[] {
@@ -157,7 +213,7 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
       i++;
       continue;
     }
-    if (ch === ';') {
+    if (ch === ';' || isEscapeLine(movetext, i)) {
       const end = movetext.indexOf('\n', i);
       i = end === -1 ? n : end + 1;
       continue;
@@ -179,10 +235,14 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
       continue;
     }
     // Strip a leading move number like "12." or "12..." possibly fused to the SAN.
-    word = word.replace(/^\d+\.(\.\.)?/, '');
-    if (!word || word === '...') continue;
+    word = stripMoveNumber(word);
+    if (isIgnorableWord(word)) continue;
     if (RESULTS.has(word)) {
       tokens.push({ type: 'result', value: word });
+      continue;
+    }
+    if (GLYPH_NAGS[word]) {
+      tokens.push({ type: 'nag', value: `$${GLYPH_NAGS[word]}` });
       continue;
     }
     tokens.push({ type: 'move', value: word });
@@ -204,7 +264,29 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
   const stack: GameNode[] = [];
   let result = tags.Result || '*';
   let hasResult = RESULTS.has(tags.Result);
+  const warnings: PgnWarning[] = [];
+  // Tolerant mode never skips a token and plays on from the wrong position: it stops the
+  // current line (keeping what parsed) and resumes after that variation's `)`, if any.
+  let stoppedAt = -1; // stack depth of the stopped line; -1 while parsing
+  let stoppedNesting = 0;
+  let ended = false; // a top-level result was read; a following move is another game
+  const stop = (token: string, reason: PgnWarningReason) => {
+    const board = parseFen(last.fen);
+    const label = `${board.fullmove}${board.turn === 'w' ? '.' : '...'}`;
+    warnings.push({ ply: last.ply + 1, label, token, reason, variation: stack.length > 0 });
+    stoppedAt = stack.length;
+    stoppedNesting = 0;
+  };
   for (const token of tokens) {
+    if (stoppedAt >= 0) {
+      if (token.type === 'open') stoppedNesting++;
+      else if (token.type === 'close' && stoppedNesting) stoppedNesting--;
+      else if (token.type === 'close' && stoppedAt > 0) {
+        stoppedAt = -1;
+        last = stack.pop() ?? tree.root;
+      }
+      continue;
+    }
     if (token.type === 'open') {
       stack.push(last);
       if (!options.mainlineOnly) last = last.parent ?? tree.root;
@@ -212,7 +294,8 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
     }
     if (token.type === 'close') {
       if (options.strict && !stack.length) throw new Error('Unmatched closing PGN variation');
-      last = stack.pop() ?? tree.root;
+      // A stray `)` must not restart the line from the root position.
+      last = stack.pop() ?? last;
       continue;
     }
     // Aggregation must use the literal mainline, not child insertion order when
@@ -222,6 +305,7 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       if (!stack.length) {
         result = token.value;
         hasResult = true;
+        ended = true;
       }
       continue;
     }
@@ -233,17 +317,49 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       continue;
     }
     // move
+    if (!options.strict && ended && !stack.length) {
+      stop(token.value, 'after-result');
+      continue;
+    }
     tree.current = last;
     const move = sanToMove(parseFen(last.fen), token.value);
     if (!move) {
       if (options.strict) throw new Error(`Invalid PGN move: ${token.value}`);
-      continue; // Interactive single-game loading remains tolerant.
+      // Interactive single-game loading remains tolerant, but never fabricates a game.
+      stop(token.value, NULL_MOVES.has(token.value) ? 'null-move' : 'invalid-move');
+      continue;
     }
     last = tree.addMove(move);
   }
   if (options.strict && stack.length) throw new Error('Unclosed PGN variation');
   tree.current = tree.root;
-  return { tags, tree, result, hasResult };
+  return { tags, tree, result, hasResult, warnings };
+}
+
+const WARNING_TEXT: Record<PgnWarningReason, string> = {
+  'invalid-move': 'not a legal move here',
+  'null-move': 'null moves are not supported',
+  'after-result': 'moves after the game result',
+};
+
+/** One-line explanation of where and why a tolerant parse stopped a line. */
+export function describePgnWarning(warning: PgnWarning): string {
+  return `${warning.variation ? 'A variation stopped' : 'Stopped'} at move ${warning.label}: ${warning.token} (${WARNING_TEXT[warning.reason]})`;
+}
+
+/**
+ * Interactive loading of pasted text: the first game only, with the number of games
+ * found so the caller can say the rest were ignored. Text that yields neither tags nor
+ * moves is rejected rather than loaded as an empty game.
+ */
+export function parseFirstPgnGame(text: string): { game: PgnGame; gameCount: number } {
+  const chunks = splitPgnGames(text);
+  if (!chunks.length) throw new Error('No PGN found');
+  const game = parsePgnGame(chunks[0]);
+  if (!game.tree.root.children.length && !Object.keys(game.tags).length) {
+    throw new Error(game.warnings.length ? `No PGN moves found. ${describePgnWarning(game.warnings[0])}` : 'No PGN tags or moves found');
+  }
+  return { game, gameCount: chunks.length };
 }
 
 /** Parse every game in a multi-game PGN string. */

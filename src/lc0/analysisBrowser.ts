@@ -4,7 +4,7 @@ import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { gameTreeToPgn, parsePgnGame } from '../chess/pgn.ts';
+import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame, parsePgnGame } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
@@ -4865,7 +4865,9 @@ function loadPgn() {
   const raw = inputEl('pgnInput').value.trim();
   if (!raw) return;
   try {
-    const { tree: parsed, tags, result } = parsePgnGame(raw);
+    // Parse (and reject empty or non-PGN text) before the saved workspace is cleared.
+    const { game, gameCount } = parseFirstPgnGame(raw);
+    const { tree: parsed, tags, result, warnings } = game;
     clearAnalysisWorkspace();
     workspaceHeaders = tags;
     workspaceResult = result;
@@ -4874,7 +4876,13 @@ function loadPgn() {
     reviewMetadata.set(tree, { tags, result, signature: reviewSignature() });
     lineCache.clear();
     completeAnalysisKeys.clear();
-    el('message').textContent = `Loaded PGN${tags.White ? `: ${tags.White} – ${tags.Black}` : ''}.`;
+    const notes = [`Loaded PGN${tags.White ? `: ${tags.White} – ${tags.Black}` : ''}.`];
+    if (warnings.length) {
+      const more = warnings.length > 1 ? ` (${warnings.length - 1} more line${warnings.length > 2 ? 's' : ''} also stopped early)` : '';
+      notes.push(`${describePgnWarning(warnings[0])}; the rest of that line was not loaded${more}.`);
+    }
+    if (gameCount > 1) notes.push(`Only the first of ${gameCount} games was loaded; use Import PGN in the opening explorer for a collection.`);
+    el('message').textContent = notes.join(' ');
     afterNavigation();
   } catch (error) {
     el('message').textContent = `PGN parse failed: ${(error as Error).message}`;
