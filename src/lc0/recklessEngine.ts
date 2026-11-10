@@ -233,6 +233,9 @@ export class RecklessEngine implements BrowserUciEngine {
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-wasi' });
     worker.onmessage = (event: MessageEvent) => {
+      // Request ids are engine-wide, so a terminated worker's late reply could
+      // otherwise resolve the replacement worker's request.
+      if (this.worker !== worker) return;
       const message = event.data as {
         type: string;
         id: number;
@@ -254,7 +257,9 @@ export class RecklessEngine implements BrowserUciEngine {
       if (message.type === 'error') pending.reject(new Error(message.error ?? 'Reckless WASI worker error'));
       else pending.resolve({ stdout: message.stdout ?? [], stderr: message.stderr ?? [], exitCode: message.exitCode ?? 0 });
     };
-    worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Reckless WASI worker error'));
+    worker.onerror = (event) => {
+      if (this.worker === worker) this.rejectAllAndDispose(new Error(event.message || 'Reckless WASI worker error'));
+    };
     this.worker = worker;
     this.workerMode = 'oneshot';
     return worker;
@@ -267,6 +272,7 @@ export class RecklessEngine implements BrowserUciEngine {
     const worker = new Worker(new URL('./recklessBrowserApiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-browser-api' });
     this.browserApiLoadStatus = null;
     worker.onmessage = (event: MessageEvent) => {
+      if (this.worker !== worker) return;
       const message = event.data as BrowserApiWorkerMessage;
       if (message.type === 'status') {
         this.browserApiLoadStatus = {
@@ -286,7 +292,9 @@ export class RecklessEngine implements BrowserUciEngine {
       if (message.type === 'error') pending.reject(new Error(message.error ?? 'Reckless browser API worker error'));
       else pending.resolve(message.result ?? null);
     };
-    worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Reckless browser API worker error'));
+    worker.onerror = (event) => {
+      if (this.worker === worker) this.rejectAllAndDispose(new Error(event.message || 'Reckless browser API worker error'));
+    };
     this.worker = worker;
     this.workerMode = 'browser-api';
     return worker;
@@ -298,9 +306,14 @@ export class RecklessEngine implements BrowserUciEngine {
     this.disposeWorker();
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-wasi-persistent' });
     const sharedInput = createSharedInput();
-    worker.onmessage = (event: MessageEvent) =>
+    worker.onmessage = (event: MessageEvent) => {
+      // A replaced worker's late line/exit must not resolve or tear down the new one.
+      if (this.worker !== worker) return;
       this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string });
-    worker.onerror = (event) => this.rejectAllAndDispose(new Error(event.message || 'Reckless persistent WASI worker error'));
+    };
+    worker.onerror = (event) => {
+      if (this.worker === worker) this.rejectAllAndDispose(new Error(event.message || 'Reckless persistent WASI worker error'));
+    };
     this.worker = worker;
     this.workerMode = 'persistent';
     this.sharedInput = sharedInput;
@@ -371,8 +384,9 @@ export class RecklessEngine implements BrowserUciEngine {
   }
 
   private disposeWorker(): void {
+    const wasBrowserApi = this.workerMode === 'browser-api';
     if (this.sharedInput) closeSharedInput(this.sharedInput);
-    if (this.workerMode === 'browser-api') this.worker?.postMessage({ type: 'dispose' });
+    if (wasBrowserApi) this.worker?.postMessage({ type: 'dispose' });
     this.worker?.terminate();
     this.worker = null;
     this.workerMode = null;
@@ -382,7 +396,7 @@ export class RecklessEngine implements BrowserUciEngine {
     this.persistentMultipvCommand = null;
     this.persistentMinimalCommand = null;
     this.persistentPositionCommand = null;
-    if (this.workerMode !== 'browser-api') this.browserApiLoadStatus = null;
+    if (!wasBrowserApi) this.browserApiLoadStatus = null;
   }
 
   private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -647,6 +661,12 @@ export class RecklessEngine implements BrowserUciEngine {
     return this.runExclusive(async () => {
       if (this.runtimeOptions.backend === 'browser-api') {
         await this.runBrowserApiMessage({ type: 'new-game' }, signal);
+        this.lastInfoLines = [];
+        return;
+      }
+      if (this.runtimeOptions.forceOneShot || this.persistentDisabled || !canUsePersistentRecklessWasi()) {
+        // Every one-shot search already starts a fresh WASI process, so
+        // there is no hash or game state to reset.
         this.lastInfoLines = [];
         return;
       }
