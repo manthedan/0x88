@@ -122,6 +122,7 @@ export interface BrokeredEvaluatorMetrics {
   positionsEvaluated: number;
   maxQueueDepth: number;
   batchSizes: Record<number, number>;
+  /** Most recent 1024 samples; counters and batchSizes cover the full lifetime. */
   waitMs: number[];
   runMs: number[];
 }
@@ -355,7 +356,10 @@ export class BrokeredEvaluator implements Evaluator {
         const now = currentMs();
         const boards = batch.flatMap((p) => p.boards);
         const contexts = batch.flatMap((p) => p.boards.map((_, i) => p.contexts[i] ?? {}));
-        for (const p of batch) this.metricsState.waitMs.push(now - p.enqueuedAt);
+        for (const p of batch) {
+          this.metricsState.waitMs.push(now - p.enqueuedAt);
+          if (this.metricsState.waitMs.length > 1024) this.metricsState.waitMs.shift();
+        }
         const t0 = currentMs();
         try {
           const evals = this.inner.evaluateBatch
@@ -365,6 +369,7 @@ export class BrokeredEvaluator implements Evaluator {
           this.metricsState.positionsEvaluated += boards.length;
           this.metricsState.batchSizes[boards.length] = (this.metricsState.batchSizes[boards.length] ?? 0) + 1;
           this.metricsState.runMs.push(currentMs() - t0);
+          if (this.metricsState.runMs.length > 1024) this.metricsState.runMs.shift();
           let offset = 0;
           for (const p of batch) {
             const slice = evals.slice(offset, offset + p.boards.length).map(cloneEvaluation);
