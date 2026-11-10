@@ -229,7 +229,9 @@ the opponent** (validated across ±1000) and has a `Contempt_Analysis`
 mode that reports the *practical* best move against that opponent model
 rather than the objective one.
 
-**The now-retired wasm32-wasip1 lab port was built and gated** (2026-06-11):
+**The wasm32-wasip1 lab port was built and gated** (2026-06-11). It was never
+deployed and was retired and removed 2026-11 (`montyEngine.ts`, the smoke page
+and `public/monty/monty.wasm` are gone); the record below is historical:
 
 - The local patch and build harness added inline-execution shims for the four
   `std::thread::scope` sites (search loop, go/stop stdin poll, tree init/clear),
@@ -284,11 +286,11 @@ Decision — Monty's three roles split by where they run, with outcomes
    Monty present. The deeper calibration question ("does the transform
    match real human outcomes?") is now answered by **Maia3**, not Monty
    — see the learned-vs-analytic table above.
-2. **Browser lane — lab only, never product** (unchanged).
-   `lab/monty-smoke.html` / `MontyEngine` stay lab-scoped. The raw network
-   files were removed from tracked public assets; local tests must stage
-   ignored copies/symlinks under `public/models/monty/`. If ever surfaced:
-   explicit ~950MB opt-in + AGPL corresponding-source archive +
+2. **Browser lane — lab only, never product; retired and removed 2026-11.**
+   `lab/monty-smoke.html` / `MontyEngine` were lab-scoped and are now
+   deleted, along with `public/monty/monty.wasm`. It was never deployed and
+   never had an AGPL corresponding-source archive. If
+   ever revived: explicit ~950MB opt-in + AGPL corresponding-source archive +
    stream-into-wasm memory hardening.
 3. **Contempt_Analysis — rehosted Monty-free, in a stronger form.** The
    practical-vs-objective lane is covered by (a) our own PUCT with

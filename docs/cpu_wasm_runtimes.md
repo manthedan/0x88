@@ -16,9 +16,9 @@ threads rather than by neural rating conditioning.
 
 | Runtime path | Best fit | Current engines | Notes |
 | --- | --- | --- | --- |
-| Stockfish.js package | Mature baseline and strongest CPU opponent | Stockfish 18 | Emscripten-derived package with tested UCI worker wrappers and single/threaded flavors. |
-| Emscripten UCI worker | C/C++ engine intake | Berserk, PlentyChess | Exports `command(const char*)`, `isReady()`, and `isSearching()` to JS; starts single-threaded before any pthread work. |
-| WASI UCI worker | Rust engines with minimal JS glue | Reckless, Viridithas, Monty lab | Compiles to `wasm32-wasip1`; browser shim supplies filesystem/stdin/stdout enough for UCI. |
+| Stockfish.js package | Mature baseline and strongest CPU opponent | Stockfish 19 | Emscripten-derived package with tested UCI worker wrappers and single/threaded flavors. |
+| Emscripten UCI worker | C/C++ engine intake | Berserk, PlentyChess, Stormphrax | Exports `command(const char*)`, `isReady()`, and `isSearching()` to JS; starts single-threaded before any pthread work. |
+| WASI UCI worker | Rust engines with minimal JS glue | Reckless, Viridithas (formerly also the Monty lab port, retired and removed 2026-11) | Compiles to `wasm32-wasip1`; browser shim supplies filesystem/stdin/stdout enough for UCI. |
 | Direct browser API | Control-plane experiments | Reckless browser-api variants | Bypasses UCI text where useful, but must earn a latency/lifecycle win before promotion. |
 
 ## Execution modes
@@ -43,7 +43,7 @@ threads rather than by neural rating conditioning.
 | PlentyChess | C++ via Emscripten | scalar-ish single-thread JS/WASM/data | SSE4.1-shaped wasm SIMD, relaxed SIMD | `npm run plentychess:build-emscripten`, `plentychess:build-sse41-emscripten`, `plentychess:build-relaxed-simd-emscripten` |
 | Reckless | Rust `wasm32-wasip1` | scalar WASI/UCI | `+simd128`, `+simd128,+relaxed-simd`; browser API variants | `npm run reckless:build-wasi`, `reckless:build-simd-wasi`, `reckless:build-relaxed-simd-wasi`, `reckless:build-browser-api*` |
 | Viridithas | Rust `wasm32-wasip1` | scalar WASI/UCI | `simd128`, relaxed SIMD | `npm run viridithas:build-wasi`, `viridithas:build-simd-wasi`, `viridithas:build-relaxed-simd-wasi` |
-| Monty | Rust `wasm32-wasip1` | retired lab-only WASI/UCI port | not productized | No maintained build target; the ~950MB network pair made browser delivery impractical |
+| Monty | Rust `wasm32-wasip1` | retired and removed 2026-11 (lab-only WASI/UCI port) | never productized or deployed | No maintained build target; the ~950MB network pair made browser delivery impractical |
 
 ## Emscripten target policy
 

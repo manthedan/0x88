@@ -58,9 +58,10 @@ Product meaning:
 - **Analysis value**: "what is the best practical move against this class of
   opponent?" rather than "what would that opponent actually play?"
 
-Monty itself remains a lab/reference engine rather than a product dependency:
-its network pair is roughly a gigabyte resident, so the shippable version is the
-Monty-shaped math and search behavior inside our existing PUCT lane.
+Monty itself was never a product dependency: its network pair is roughly a
+gigabyte resident, so the shippable version is the Monty-shaped math and search
+behavior inside our existing PUCT lane. The browser lab port was retired and
+removed 2026-11.
 
 ## Comparison
 

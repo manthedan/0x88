@@ -134,9 +134,11 @@ Two things people usually miss:
   you find one that is unexplained, documenting it is a good first PR.
 - Don't commit generated engine binaries unless the distribution policy says
   that family is deploy-tracked.
-- Documentation belongs in `docs/` only when it is durable product, runtime,
-  provenance, or license documentation — add it to the index in
-  [`docs/README.md`](docs/README.md). Working notes, one-off audits, and
+- Documentation belongs in `docs/` when it is durable product, runtime,
+  provenance, or license documentation, or a dated decision record (an
+  investigation or upgrade audit whose verdict or evidence the code relies on).
+  Link every new doc from the index in [`docs/README.md`](docs/README.md);
+  `tests/docs_index.test.mjs` enforces this. Working notes, agent handoffs, and
   cleanup inventories stay in the gitignored `.local-dev-docs/`. Tracked files
   should never reference your local machine paths or personal tooling.
 
