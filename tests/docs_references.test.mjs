@@ -20,8 +20,6 @@ const ABSENT_SCRIPTS = {
   // Removed tooling; each mention is annotated as removed with its recovery commit.
   'analysis:model-manifest': 'removed',
   'lc0:puct-wasm-feasibility-audit': 'removed',
-  // Opt-in pre-push hook installer added alongside this documentation.
-  'hooks:install': 'pending',
 };
 
 test('tracked docs contain no personal machine paths', () => {
@@ -41,7 +39,7 @@ test('every `npm run <script>` in tracked Markdown exists in package.json', () =
   const missing = new Map();
   for (const file of tracked('*.md')) {
     for (const [, name] of readFileSync(join(root, file), 'utf8').matchAll(/npm run ([a-z0-9][\w:.-]*[\w])/gi)) {
-      if (scripts.has(name) || ABSENT_SCRIPTS[name] === 'pending') continue;
+      if (scripts.has(name)) continue;
       if (!missing.has(name)) missing.set(name, []);
       missing.get(name).push(file);
     }
