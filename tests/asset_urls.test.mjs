@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { isTrustedExecutableAssetUrl, resolvePublicAssetUrl } from '../src/lc0/assetUrls.ts';
+import { isTrustedExecutableAssetUrl, resolveAssetOverride, resolvePublicAssetUrl } from '../src/lc0/assetUrls.ts';
 
 const MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
 
@@ -13,6 +13,20 @@ function at(href, { configuredBase } = {}) {
 afterEach(() => {
   delete globalThis.location;
   delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
+});
+
+test('same-origin overrides preserve their origin when paths start with URL separators', () => {
+  at('https://0x88.app/app/play/');
+  for (const path of [
+    '//evil.example/viridithas/viridithas.wasm',
+    '/\\evil.example/viridithas/viridithas.wasm',
+    '\\\\evil.example/viridithas/viridithas.wasm',
+  ]) {
+    const resolved = resolveAssetOverride(`https://0x88.app${path}`);
+    assert.ok(resolved);
+    assert.equal(new URL(resolved, location.href).origin, location.origin);
+    assert.equal(isTrustedExecutableAssetUrl(resolved), true);
+  }
 });
 
 test('the configured asset host resolves asset-host prefixes', () => {

@@ -121,7 +121,9 @@ export function resolveAssetOverride(raw: string | null | undefined): string | u
     const url = new URL(raw, base);
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
     if (typeof location === 'undefined' ? url.origin !== 'http://localhost' : !overrideAllowed(url.href, false)) return undefined;
-    return url.origin === new URL(base).origin ? `${url.pathname}${url.search}` : url.href;
+    // A double-slash pathname becomes a different host if shortened to a
+    // relative URL. The parser also normalises backslashes into these paths.
+    return url.origin === new URL(base).origin && !url.pathname.startsWith('//') ? `${url.pathname}${url.search}` : url.href;
   } catch {
     return undefined;
   }
