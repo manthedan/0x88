@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
+import { createEngineArtifactLoader, engineArtifacts } from '../src/lc0/engineArtifacts.ts';
 
 let workerModule;
 
@@ -386,10 +388,12 @@ test('WASI rejects a pinned corrupt module before compilation and evicts it for 
   t.after(() => {
     globalThis.self = previousSelf;
   });
-  const { readFileSync } = await import('node:fs');
   const worker = await loadWorkerModule([]);
-  const path = '/berserk/berserk-emscripten-relaxed-simd128.wasm';
-  const good = readFileSync(`public${path}`);
+  const path = '/fixture/pinned-corrupt.wasm';
+  const good = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0);
+  const pin = { bytes: good.length, sha256: createHash('sha256').update(good).digest('hex') };
+  const loader = createEngineArtifactLoader({ [path]: pin });
+  t.mock.method(engineArtifacts, 'bytes', loader.bytes);
   const bad = Buffer.from(good);
   bad[bad.length - 1] ^= 1;
   let downloads = 0;
