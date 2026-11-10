@@ -98,6 +98,7 @@ export function parseProtoFields(buf: Uint8Array, start = 0, end = buf.length): 
       const [len, next] = readVarint(buf, p);
       valueStart = next;
       valueEnd = next + len;
+      if (len < 0 || valueEnd > buf.length) throw new Error('onnx: invalid protobuf length');
     } else {
       throw new Error(`onnx: unsupported protobuf wire type ${wire} for field ${field}`);
     }
