@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
+import { automaticDrawReason } from '../src/chess/drawRules.ts';
 import { makeMove } from '../src/chess/movegen.ts';
 import { UniformEvaluator } from '../src/nn/evaluator.ts';
 import { squareformerCompactInput } from '../src/nn/squareformerEvaluator.ts';
@@ -44,8 +45,11 @@ test('repetition uses full game history independently of the neural window', asy
   const board = parseFen(START_FEN);
   const otherFen = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2';
   const historyFens = [...Array(16).fill(otherFen), START_FEN, START_FEN];
+  assert.equal(automaticDrawReason(board, historyFens), 'threefold', 'two occurrences outside the neural window still cause a draw');
+  assert.equal(automaticDrawReason(board, historyFens.slice(0, 16)), null, 'the neural window alone misses the repetition');
   const result = await chooseMove(board, new UniformEvaluator(), { visits: 8, historyFens });
-  assert.equal(result.move, null, 'two occurrences outside the neural window still cause a draw');
+  assert.ok(result.move, 'a drawn root still searches for a move');
+  assert.equal(result.visits, 8);
   const meta = { history_plies: 7, token_features: 24 };
   assert.deepEqual(squareformerCompactInput(board, meta, historyFens), squareformerCompactInput(board, meta, historyFens.slice(0, 16)));
 });

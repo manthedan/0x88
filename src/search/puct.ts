@@ -311,8 +311,8 @@ export interface Node {
   expanded: boolean;
   terminalValue: number | null;
   edges: Edge[];
-  /** Non-terminal model evaluation used to expand this node, retained for diagnostics/UI only. */
-  evaluation?: Evaluation;
+  /** WDL retained on every node because a child may become the next root. */
+  evaluation?: Pick<Evaluation, 'wdl'>;
   /** Number of completed simulations that reached this node. For reused roots,
    * this preserves the inbound edge visit count so a target-visit search does
    * not add a full fresh budget on top of already-reached nodes. */
@@ -322,6 +322,8 @@ export interface Node {
   /** Search-context compatibility key for reusable trees (draw/search contempt). */
   searchValueKey?: string;
   isRoot?: boolean;
+  /** Expanded despite a draw by rule at the root; must be replaced when reached as a child. */
+  rootDrawExempt?: boolean;
   /** Search-contempt frozen child-visit weights (opponent nodes past ScLimit). */
   scFrozenWeights?: number[];
 }
@@ -965,12 +967,16 @@ function rootVisitDominanceStop(root: Node, maxRootVisits: number): boolean {
   return visits[0] > visits[1] + remaining;
 }
 
-interface KldEarlyStopState {
+interface EarlyStopIntervalState {
+  lastCheckVisits: number;
+}
+
+interface KldEarlyStopState extends EarlyStopIntervalState {
   lastDistribution?: number[];
   lastBest?: number;
   stableChecks: number;
 }
-interface BestStableEarlyStopState {
+interface BestStableEarlyStopState extends EarlyStopIntervalState {
   lastBest?: number;
   lastBestQ?: number;
   stableChecks: number;
@@ -1001,12 +1007,21 @@ function kld(current: number[], previous: number[]): number {
   return out;
 }
 
+function crossedEarlyStopInterval(visits: number, minVisits: number, interval: number, state: EarlyStopIntervalState): boolean {
+  // Use absolute interval boundaries so serial searches keep their old schedule,
+  // while batches can cross a boundary without landing exactly on its multiple.
+  const lastBoundary = Math.max(Math.floor(state.lastCheckVisits / interval), Math.floor((minVisits - 1) / interval));
+  if (visits < minVisits || Math.floor(visits / interval) <= lastBoundary) return false;
+  state.lastCheckVisits = visits;
+  return true;
+}
+
 function rootKldEarlyStop(root: Node, options: SearchOptions, state: KldEarlyStopState): boolean {
   if (options.earlyStop !== 'kld-stable') return false;
   const visits = rootVisitCount(root);
   const minVisits = Math.max(1, Math.floor(options.kldMinVisits ?? Math.min(options.visits ?? visits, 32)));
   const interval = Math.max(1, Math.floor(options.kldCheckInterval ?? 8));
-  if (visits < minVisits || visits % interval !== 0) return false;
+  if (!crossedEarlyStopInterval(visits, minVisits, interval, state)) return false;
   const current = rootVisitDistribution(root);
   const best = rootBestEdgeIndex(root);
   if (!state.lastDistribution || state.lastDistribution.length !== current.length) {
@@ -1029,7 +1044,7 @@ function rootBestStableEarlyStop(root: Node, context: SearchPolicyContext, optio
   const visits = rootVisitCount(root);
   const minVisits = Math.max(1, Math.floor(options.bestStableMinVisits ?? 32));
   const interval = Math.max(1, Math.floor(options.bestStableCheckInterval ?? 8));
-  if (visits < minVisits || visits % interval !== 0) return false;
+  if (!crossedEarlyStopInterval(visits, minVisits, interval, state)) return false;
   const best = rootBestEdgeIndex(root);
   if (best === undefined) return false;
   const sorted = root.edges
@@ -1151,20 +1166,61 @@ function nodeSearchValueCompatible(node: Node, key: string): boolean {
   return node.searchValueKey === key || (node.searchValueKey === undefined && key === 'drawScore=0;scLimit=0');
 }
 
+// History links contain positions only, never ancestor search nodes. Advancing
+// the root can therefore release the discarded tree while keeping game history.
+interface SharedNodeHistory {
+  previous?: SharedNodeHistory;
+  board: BoardState;
+  fen: string;
+  depth: number;
+  baseFens: string[];
+  baseBoards: readonly BoardState[];
+}
+
+const sharedNodeHistories = new WeakMap<Node, SharedNodeHistory>();
+
+function materializeHistoryFens(history: SharedNodeHistory): string[] {
+  const fens = new Array<string>(history.depth + history.baseFens.length);
+  let i = 0;
+  for (let link: SharedNodeHistory | undefined = history; link; link = link.previous) fens[i++] = link.fen;
+  for (const fen of history.baseFens) fens[i++] = fen;
+  return fens;
+}
+
+function materializeHistoryBoards(history: SharedNodeHistory): BoardState[] {
+  const boards = new Array<BoardState>(history.depth + history.baseBoards.length);
+  let i = 0;
+  for (let link: SharedNodeHistory | undefined = history; link; link = link.previous) boards[i++] = link.board;
+  for (const board of history.baseBoards) boards[i++] = board;
+  return boards;
+}
+
 function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, Node>, stats?: SearchStats): Node {
   const childBoard = makeMove(parent.board, move);
-  const childHistory = [boardToFen(parent.board), ...parent.historyFens];
-  const key = searchNodeKey(childBoard, childHistory);
-  const cached = transpositionTable?.get(key);
-  if (cached && (!parent.searchValueKey || nodeSearchValueCompatible(cached, parent.searchValueKey))) {
+  const previous = sharedNodeHistories.get(parent);
+  const history: SharedNodeHistory = {
+    previous,
+    board: parent.board,
+    fen: boardToFen(parent.board),
+    depth: (previous?.depth ?? 0) + 1,
+    baseFens: previous?.baseFens ?? parent.historyFens,
+    baseBoards: previous?.baseBoards ?? parent.historyBoards,
+  };
+  const key = transpositionTable ? searchNodeKey(childBoard, materializeHistoryFens(history)) : undefined;
+  const cached = key === undefined ? undefined : transpositionTable?.get(key);
+  if (cached && !cached.rootDrawExempt && (!parent.searchValueKey || nodeSearchValueCompatible(cached, parent.searchValueKey))) {
     if (stats) stats.transpositionHits = (stats.transpositionHits ?? 0) + 1;
     cached.isRoot = false;
     return cached;
   }
-  const child = {
+  const child: Node = {
     board: childBoard,
-    historyFens: childHistory,
-    historyBoards: [parent.board, ...parent.historyBoards],
+    get historyFens() {
+      return materializeHistoryFens(history);
+    },
+    get historyBoards() {
+      return materializeHistoryBoards(history);
+    },
     explicitHistory: true,
     expanded: false,
     terminalValue: null,
@@ -1173,7 +1229,8 @@ function makeChild(parent: Node, move: Move, transpositionTable?: Map<string, No
     searchValueKey: parent.searchValueKey,
     isRoot: false,
   };
-  transpositionTable?.set(key, child);
+  sharedNodeHistories.set(child, history);
+  if (key !== undefined) transpositionTable?.set(key, child);
   return child;
 }
 
@@ -1344,7 +1401,7 @@ function buildSearchProgress(
   };
 }
 
-async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyContext, stats?: SearchStats): Promise<number> {
+async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyContext, stats?: SearchStats, isSearchRoot = false): Promise<number> {
   const moves = legalMoves(node.board);
   if (!moves.length) {
     node.expanded = true;
@@ -1357,7 +1414,9 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
     }
     return node.terminalValue;
   }
-  if (automaticDrawReason(node.board, node.historyFens)) {
+  // Like LC0's ExtendNode, draws by rule end interior nodes only: a root that is
+  // already a claimable draw is still searched, since choosing its move is the point.
+  if (!isSearchRoot && automaticDrawReason(node.board, node.historyFens, node.historyBoards)) {
     node.expanded = true;
     node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
@@ -1398,7 +1457,7 @@ async function simulate(
     return node.terminalValue;
   }
   const best = selectBestEdge(node, searchPolicy, context);
-  if (!best.child) best.child = makeChild(node, best.move, transpositionTable, stats);
+  if (!best.child || best.child.rootDrawExempt) best.child = makeChild(node, best.move, transpositionTable, stats);
   const childValue = await simulate(best.child, evaluator, searchPolicy, context, stats, transpositionTable);
   searchPolicy.backup([best], childValue, context);
   return -childValue;
@@ -1512,7 +1571,7 @@ function selectLeaf(
   while (current.expanded && current.terminalValue === null) {
     const best = selectBestEdge(current, searchPolicy, context);
     best.virtualVisits += 1;
-    if (!best.child) best.child = makeChild(current, best.move, transpositionTable, stats);
+    if (!best.child || best.child.rootDrawExempt) best.child = makeChild(current, best.move, transpositionTable, stats);
     path.push(best);
     current = best.child;
   }
@@ -1529,7 +1588,7 @@ function prepareExpansion(node: Node, stats: SearchStats, context: SearchPolicyC
     stats.terminalHits += 1;
     return node.terminalValue;
   }
-  if (automaticDrawReason(node.board, node.historyFens)) {
+  if (automaticDrawReason(node.board, node.historyFens, node.historyBoards)) {
     node.expanded = true;
     node.terminalValue = contemptDrawValue(context, node.board.turn);
     node.edges = [];
@@ -1589,7 +1648,7 @@ function finishExpansion(node: Node, moves: Move[], evaln: Evaluation, context: 
   const raw = moves.map((move) => Math.max(0, evaln.policy.get(moveToActionId(move)) ?? 0));
   const total = raw.reduce((a, b) => a + b, 0);
   const fallback = 1 / moves.length;
-  node.evaluation = evaln;
+  node.evaluation = { wdl: evaln.wdl };
   if (Number.isFinite(evaln.movesLeft)) node.m = evaln.movesLeft;
   node.edges = moves.map((move, i) => {
     const actionId = moveToActionId(move);
@@ -1910,6 +1969,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const reusableRoot =
     !options.rootMoves &&
     options.root &&
+    // A reused child may have been cut off as a draw by rule; the root must be searched afresh.
+    options.root.terminalValue === null &&
     boardToFen(options.root.board) === boardToFen(board) &&
     sameHistory(options.root.historyFens, requestedHistory) &&
     nodeSearchValueCompatible(options.root, currentSearchValueKey)
@@ -1932,13 +1993,6 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       stats.expansions += 1;
       stats.terminalHits += 1;
       rootValue = root.terminalValue;
-    } else if (automaticDrawReason(root.board, root.historyFens)) {
-      root.expanded = true;
-      root.terminalValue = contemptDrawValue(context, root.board.turn);
-      root.edges = [];
-      stats.expansions += 1;
-      stats.terminalHits += 1;
-      rootValue = root.terminalValue;
     } else {
       const beforeMetrics = evaluatorMetrics(evaluator);
       stats.evalCalls += 1;
@@ -1954,8 +2008,9 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
       stats.expansions += 1;
     }
   } else {
-    rootValue = await expand(root, evaluator, context, stats);
+    rootValue = await expand(root, evaluator, context, stats, true);
   }
+  if (root.edges.length && automaticDrawReason(root.board, root.historyFens, root.historyBoards)) root.rootDrawExempt = true;
   if (!root.edges.length) {
     finalizeEvaluationTimingStats(stats);
     logSearchLatency('puct.search', {
@@ -1982,8 +2037,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const visitsToRun = reusableRoot ? Math.max(0, visits - priorRootVisits) : visits;
   const budgetMode = options.budgetMode ?? 'visits';
   stats.budgetMode = budgetMode;
-  const kldState: KldEarlyStopState = { stableChecks: 0 };
-  const bestStableState: BestStableEarlyStopState = { stableChecks: 0 };
+  const kldState: KldEarlyStopState = { stableChecks: 0, lastCheckVisits: rootVisitCount(root) };
+  const bestStableState: BestStableEarlyStopState = { stableChecks: 0, lastCheckVisits: rootVisitCount(root) };
   const fixedVisitTarget = Math.max(visits, rootVisitCount(root));
   const progressEveryMs = Math.max(50, Math.floor(options.progressEveryMs ?? 250));
   let lastProgressMs = -Infinity;

@@ -1,0 +1,253 @@
+[
+  {
+    "id": "fen-italian-one-ply",
+    "description": "Non-startpos FEN root plus one move: seven history slots must repeat the FEN root.",
+    "startFen": "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 7",
+    "moves": [
+      "c1g5"
+    ],
+    "finalFen": "r1bq1rk1/ppp2ppp/2np1n2/2b1p1B1/2B1P3/2NP1N2/PPP2PPP/R2Q1RK1 b - - 1 7"
+  },
+  {
+    "id": "fen-italian-three-ply",
+    "description": "Non-startpos FEN root plus three moves: four filled slots.",
+    "startFen": "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 7",
+    "moves": [
+      "c1g5",
+      "h7h6",
+      "g5h4"
+    ],
+    "finalFen": "r1bq1rk1/ppp2pp1/2np1n1p/2b1p3/2B1P2B/2NP1N2/PPP2PPP/R2Q1RK1 b - - 1 8"
+  },
+  {
+    "id": "fen-rook-endgame-one-ply",
+    "description": "Late-middlegame FEN root (halfmove 0) plus a king move.",
+    "startFen": "2r3k1/pp3ppp/4pn2/3p4/3P4/2P1PN2/P4PPP/2R3K1 w - - 0 20",
+    "moves": [
+      "g1f1"
+    ],
+    "finalFen": "2r3k1/pp3ppp/4pn2/3p4/3P4/2P1PN2/P4PPP/2R2K2 b - - 1 20"
+  },
+  {
+    "id": "fen-scheveningen-two-ply",
+    "description": "FEN root plus two pawn moves; current side is the FEN side to move.",
+    "startFen": "r2q1rk1/1b2bppp/p2ppn2/1p6/3NPP2/1BN5/PPP3PP/R1BQ1R1K w - - 0 12",
+    "moves": [
+      "f4f5",
+      "e6e5"
+    ],
+    "finalFen": "r2q1rk1/1b2bppp/p2p1n2/1p2pP2/3NP3/1BN5/PPP3PP/R1BQ1R1K w - - 0 13"
+  },
+  {
+    "id": "fen-black-root-one-ply",
+    "description": "Black-to-move FEN root plus one move: filled slots are the root seen from white.",
+    "startFen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+    "moves": [
+      "b8c6"
+    ],
+    "finalFen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
+  },
+  {
+    "id": "fen-black-root-two-ply",
+    "description": "Black-to-move FEN root plus two moves.",
+    "startFen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+    "moves": [
+      "b8c6",
+      "f1b5"
+    ],
+    "finalFen": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3"
+  },
+  {
+    "id": "fen-white-ep-root-one-ply",
+    "description": "FEN root with a capturable en-passant square: filled slots undo the double push.",
+    "startFen": "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3",
+    "moves": [
+      "g1f3"
+    ],
+    "finalFen": "rnbqkbnr/ppp1p1pp/8/3pPp2/8/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 3"
+  },
+  {
+    "id": "fen-white-ep-root-capture",
+    "description": "FEN root with a capturable en-passant square, followed by the en-passant capture.",
+    "startFen": "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3",
+    "moves": [
+      "e5f6"
+    ],
+    "finalFen": "rnbqkbnr/ppp1p1pp/5P2/3p4/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 3"
+  },
+  {
+    "id": "fen-black-ep-root-uncapturable",
+    "description": "Black-to-move FEN root after 1.e4 (ep square not capturable) plus one move.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+    "moves": [
+      "e7e5"
+    ],
+    "finalFen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2"
+  },
+  {
+    "id": "fen-black-ep-root-two-ply",
+    "description": "Black-to-move FEN root after 1.e4 (ep square not capturable) plus two moves.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+    "moves": [
+      "e7e5",
+      "g1f3"
+    ],
+    "finalFen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"
+  },
+  {
+    "id": "fen-black-ep-root-capture",
+    "description": "Black-to-move FEN root with a capturable d3 en-passant square, then the capture.",
+    "startFen": "rnbqkbnr/pppp1ppp/8/8/3Pp3/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 3",
+    "moves": [
+      "e4d3"
+    ],
+    "finalFen": "rnbqkbnr/pppp1ppp/8/8/8/3p4/PPP1PPPP/RNBQKBNR w KQkq - 0 4"
+  },
+  {
+    "id": "fen-startpos-board-late-counters",
+    "description": "Startpos board with non-default move counters: lc0 compares boards only, so no fill.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 5",
+    "moves": [
+      "e2e4"
+    ],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 5"
+  },
+  {
+    "id": "fen-startpos-board-late-counters-bare",
+    "description": "Bare startpos board with non-default move counters.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 6 9",
+    "moves": [],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 6 9"
+  },
+  {
+    "id": "fen-startpos-board-reduced-castling",
+    "description": "Startpos pieces with reduced castling rights is not the startpos board, so it fills.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w Kkq - 0 1",
+    "moves": [
+      "g1f3"
+    ],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b Kkq - 1 1"
+  },
+  {
+    "id": "fen-italian-repeat-root",
+    "description": "Knight shuffle back to a FEN root: the current slot carries the repetition flag; the real root slot and its filled copies do not.",
+    "startFen": "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 7",
+    "moves": [
+      "c3b1",
+      "c6b8",
+      "b1c3",
+      "b8c6"
+    ],
+    "finalFen": "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 4 9"
+  },
+  {
+    "id": "fen-italian-repeat-root-twice",
+    "description": "Knight shuffle reaching the FEN root a third time.",
+    "startFen": "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 7",
+    "moves": [
+      "c3b1",
+      "c6b8",
+      "b1c3",
+      "b8c6",
+      "c3b1",
+      "c6b8",
+      "b1c3",
+      "b8c6"
+    ],
+    "finalFen": "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 8 11"
+  },
+  {
+    "id": "fen-six-ply-one-fill",
+    "description": "FEN root plus six moves: exactly one filled slot.",
+    "startFen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+    "moves": [
+      "f1c4",
+      "g8f6",
+      "d2d3",
+      "f8c5",
+      "e1g1",
+      "d7d6"
+    ],
+    "finalFen": "r1bqk2r/ppp2ppp/2np1n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQ1RK1 w kq - 0 6"
+  },
+  {
+    "id": "fen-seven-ply-no-fill",
+    "description": "FEN root plus seven moves: all eight slots are real positions.",
+    "startFen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+    "moves": [
+      "f1c4",
+      "g8f6",
+      "d2d3",
+      "f8c5",
+      "e1g1",
+      "d7d6",
+      "c1g5"
+    ],
+    "finalFen": "r1bqk2r/ppp2ppp/2np1n2/2b1p1B1/2B1P3/3P1N2/PPP2PPP/RN1Q1RK1 b kq - 1 6"
+  },
+  {
+    "id": "startpos-uncapturable-ep-threefold",
+    "description": "After 1.e4 the e3 square is not capturable, so the position after 1.e4 recurs (threefold) after the knight shuffles.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": [
+      "e2e4",
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1",
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1"
+    ],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 8 5"
+  },
+  {
+    "id": "startpos-capturable-ep-no-repeat",
+    "description": "After ...d5 the d6 square is capturable by e5, so that position is distinct from the later identical boards.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "moves": [
+      "e2e4",
+      "g8f6",
+      "e4e5",
+      "d7d5",
+      "g1f3",
+      "b8c6",
+      "f3g1",
+      "c6b8",
+      "g1f3",
+      "b8c6",
+      "f3g1",
+      "c6b8"
+    ],
+    "finalFen": "rnbqkb1r/ppp1pppp/5n2/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq - 8 7"
+  },
+  {
+    "id": "fen-root-uncapturable-ep-recurs",
+    "description": "A FEN root keeps its written en-passant square (lc0 SetFromFen), so the identical board four plies later does not repeat it.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+    "moves": [
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1"
+    ],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 4 3"
+  },
+  {
+    "id": "fen-root-uncapturable-ep-recurs-twice",
+    "description": "As above, eight plies later: only the two move-generated occurrences repeat each other.",
+    "startFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+    "moves": [
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1",
+      "g8f6",
+      "g1f3",
+      "f6g8",
+      "f3g1"
+    ],
+    "finalFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 8 5"
+  }
+]

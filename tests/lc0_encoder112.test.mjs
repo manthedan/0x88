@@ -125,3 +125,84 @@ test('LC0 classical 112 explicit history sets repetition planes for repeated pos
 test('LC0 classical 112 rejects corrupt history FENs', () => {
   assert.throws(() => encodeLc0Classical112({ positions: ['not-a-fen', START_FEN] }, { historyFill: 'fen_only' }), /Invalid FEN/);
 });
+
+const ITALIAN_FEN = 'r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 7';
+
+function slotMasks(encoded, slot) {
+  return encoded.masks.slice(slot * LC0_PLANES_PER_HISTORY, slot * LC0_PLANES_PER_HISTORY + 12);
+}
+
+test('LC0 classical 112 fen_only fills slots past a short FEN-rooted history with the FEN root', () => {
+  // LC0 encoder.cc keeps encoding history[0] once history_idx < 0, so search
+  // nodes below a bare FEN root see the root in every slot the moves don't reach.
+  const positions = buildBoardHistoryFromMoves(['c1g5', 'h7h6'], ITALIAN_FEN);
+  const encoded = encodeLc0Classical112({ positions }, { historyFill: 'fen_only' });
+  const root = slotMasks(encoded, 2);
+  assert.ok(
+    root.some((mask) => mask !== 0n),
+    'oldest real slot is the FEN root',
+  );
+  for (let slot = 3; slot < 8; slot++) {
+    assert.deepEqual(slotMasks(encoded, slot), root, `slot ${slot} repeats the FEN root`);
+    assert.equal(encoded.masks[slot * LC0_PLANES_PER_HISTORY + 12], 0n, `slot ${slot} carries no repetition flag`);
+  }
+  assert.equal(encodeLc0Classical112({ positions }, { historyFill: 'no' }).masks[3 * LC0_PLANES_PER_HISTORY + 5], 0n, "'no' leaves the rest empty");
+});
+
+test('LC0 classical 112 bare FEN and single-position explicit history encode identically', () => {
+  for (const fen of [
+    ITALIAN_FEN,
+    START_FEN,
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 6 9',
+    'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1',
+    'rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3',
+  ]) {
+    for (const historyFill of ['fen_only', 'no']) {
+      const bare = encodeLc0Classical112(fen, { historyFill });
+      const explicit = encodeLc0Classical112({ positions: [fen] }, { historyFill });
+      assert.deepEqual(explicit.masks, bare.masks, `${fen} ${historyFill}`);
+      assert.deepEqual(explicit.planes, bare.planes, `${fen} ${historyFill}`);
+    }
+  }
+});
+
+test('LC0 classical 112 treats the startpos board as startpos regardless of move counters', () => {
+  // ChessBoard == kStartposBoard ignores rule50/game ply, so LC0 does not fill.
+  for (const input of [
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 6 9',
+    { positions: buildBoardHistoryFromMoves(['e2e4'], 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 5') },
+  ]) {
+    const encoded = encodeLc0Classical112(input);
+    const real = typeof input === 'string' ? 1 : 2;
+    for (let plane = real * LC0_PLANES_PER_HISTORY; plane < LC0_AUX_PLANE_BASE; plane++) assert.equal(encoded.masks[plane], 0n, `plane ${plane}`);
+  }
+  // Startpos pieces with reduced castling rights are a different board and do fill.
+  const reduced = encodeLc0Classical112('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w Kkq - 0 1');
+  assert.equal(reduced.masks[7 * LC0_PLANES_PER_HISTORY + 5], bit('e1'));
+});
+
+test("LC0 classical 112 'no' fill still writes the one pre-en-passant board LC0 can infer", () => {
+  // encoder.cc: under NO, history_idx == -1 is still encoded when the oldest
+  // position has an en-passant square, because the previous move is known.
+  const encoded = encodeLc0Classical112('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', { historyFill: 'no' });
+  // Black to move: white's pawn is "theirs" and mirrored, so e2 shows as e7.
+  assert.equal((encoded.masks[6] & bit('e5')) !== 0n, true, 'current e4 pawn');
+  assert.equal((encoded.masks[13 + 6] & bit('e7')) !== 0n, true, 'synthetic slot has the pawn back on e2');
+  assert.equal((encoded.masks[13 + 6] & bit('e5')) !== 0n, false, 'synthetic slot has no e4 pawn');
+  for (let plane = 2 * LC0_PLANES_PER_HISTORY; plane < LC0_AUX_PLANE_BASE; plane++) assert.equal(encoded.masks[plane], 0n, `plane ${plane}`);
+  const positions = buildBoardHistoryFromMoves(['e7e5'], 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1');
+  const history = encodeLc0Classical112({ positions }, { historyFill: 'no' });
+  assert.equal((history.masks[2 * 13 + 0] & bit('e2')) !== 0n, true, 'one synthetic slot after the real FEN root');
+  for (let plane = 3 * LC0_PLANES_PER_HISTORY; plane < LC0_AUX_PLANE_BASE; plane++) assert.equal(history.masks[plane], 0n, `plane ${plane}`);
+});
+
+test('LC0 classical 112 repetition flags ignore the synthetic copies of a repeated FEN root', () => {
+  const positions = buildBoardHistoryFromMoves(['c3b1', 'c6b8', 'b1c3', 'b8c6'], ITALIAN_FEN);
+  const encoded = encodeLc0Classical112({ positions });
+  assert.equal(encoded.masks[12], ALL, 'current position repeats the root');
+  assert.equal(encoded.masks[4 * 13 + 12], 0n, 'the root itself has no earlier occurrence');
+  for (let slot = 5; slot < 8; slot++) {
+    assert.deepEqual(slotMasks(encoded, slot), slotMasks(encoded, 4), `slot ${slot} repeats the root`);
+    assert.equal(encoded.masks[slot * 13 + 12], 0n, `slot ${slot} carries no repetition flag`);
+  }
+});

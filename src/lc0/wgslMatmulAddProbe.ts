@@ -7339,7 +7339,7 @@ function buildInitialEncoderPlanesWasm(
 ): { planes: Float32Array<ArrayBufferLike>; timing: Lc0WasmInputEncoderTiming } {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     const fens = input.positions.map(boardStateToFen);
-    const result = encoder.encodeFenHistoryTimed(fens);
+    const result = encoder.encodeFenHistoryTimed(fens, { historyFill: historyFill !== 'no' });
     return { planes: result.encoded.planes, timing: result.timing };
   }
   const result = encoder.encodeFenTimed(boardStateToFen(input), { historyFill: historyFill !== 'no' });

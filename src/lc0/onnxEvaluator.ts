@@ -213,9 +213,18 @@ export function prepareLc0EvaluatorInput(
     return { move, uci, actionId: moveToActionId(move), policyIndex };
   });
   const chronological = [...historyNewestFirst].reverse();
+  // Keep all eight real slots and each slot's own reversible repetition
+  // horizon. Short histories stay whole: their oldest board controls FEN fill.
+  let cacheLength = Math.max(7, board.halfmove);
+  for (let i = 0; i < Math.min(7, historyNewestFirst.length); i++) {
+    const position = historyNewestFirst[i];
+    const previous = typeof position === 'string' ? parseFen(position) : position;
+    cacheLength = Math.max(cacheLength, i + 1 + previous.halfmove);
+  }
+  const cacheStart = Math.max(0, chronological.length - cacheLength);
   const cacheHistory = historyFensNewestFirst
-    ? [...historyFensNewestFirst].reverse()
-    : chronological.map((position) => (typeof position === 'string' ? boardToFen(parseFen(position)) : boardToFen(position)));
+    ? historyFensNewestFirst.slice(0, chronological.length - cacheStart).reverse()
+    : chronological.slice(cacheStart).map((position) => (typeof position === 'string' ? boardToFen(parseFen(position)) : boardToFen(position)));
   return {
     positions: chronological.concat(board),
     prepared: {
@@ -223,7 +232,7 @@ export function prepareLc0EvaluatorInput(
       fen,
       legalMoves: mappedMoves,
       explicitHistory,
-      cacheKey: `history:${cacheHistory.length + 1}\n${cacheHistory.concat(fen).join('\n')}`,
+      cacheKey: `history:${chronological.length + 1}:${explicitHistory}:${cacheStart}\n${cacheHistory.concat(fen).join('\n')}`,
     },
   };
 }
