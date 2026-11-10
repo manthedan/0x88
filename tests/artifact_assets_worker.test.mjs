@@ -55,7 +55,7 @@ class FakeCache {
     this.store = new Map();
   }
   async match(request) {
-    return this.store.get(request.url);
+    return this.store.get(request.url)?.clone();
   }
   async put(request, response) {
     this.store.set(request.url, response);
@@ -77,6 +77,7 @@ test('artifact assets worker serves full immutable artifacts with required heade
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
   assert.equal(response.headers.get('Cross-Origin-Resource-Policy'), 'cross-origin');
+  assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
   assert.equal(response.headers.get('Timing-Allow-Origin'), 'https://0x88.app');
   assert.match(response.headers.get('Access-Control-Expose-Headers'), /Content-Length/);
   assert.match(response.headers.get('Access-Control-Expose-Headers'), /X-Artifact-Content-Length/);
@@ -545,6 +546,27 @@ test('artifact assets worker negotiates a v2 Brotli representation with decoded 
   assert.equal(response.headers.get('X-Artifact-Decoded-SHA256'), V2_RAW_SHA);
   assert.equal(response.headers.get('X-Artifact-Encoded-SHA256'), V2_BR_SHA);
   assert.equal(await text(response), 'compressed-body');
+});
+
+test('artifact assets worker preserves precompressed bytes and headers across body cache hits', async () => {
+  await withFakeEdgeCache(async () => {
+    const env = fakeV2Env();
+    const request = new Request('https://assets.example/models/lc0/model-a.onnx', { headers: { 'Accept-Encoding': 'br' } });
+    const pending = [];
+    const ctx = { waitUntil: (operation) => pending.push(operation) };
+    for (const status of ['miss', 'hit', 'hit']) {
+      const response = await handleArtifactRequest(request, env, ctx);
+      await Promise.all(pending);
+      assert.equal(response.headers.get('Cache-Status'), `lc0-artifact-worker; ${status}`);
+      assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
+      assert.equal(response.headers.get('Content-Encoding'), 'br');
+      assert.equal(response.headers.get('Content-Length'), String(V2_BR_BODY.byteLength));
+      assert.equal(response.headers.get('X-Artifact-Content-Length'), String(BODY.byteLength));
+      assert.equal(response.headers.get('X-Artifact-Encoded-SHA256'), V2_BR_SHA);
+      assert.deepEqual(new Uint8Array(await response.arrayBuffer()), V2_BR_BODY);
+    }
+    assert.equal(env.counts.get.get(V2_BR_KEY), 1);
+  });
 });
 
 test('artifact assets worker rejects malformed v2 artifacts instead of falling back to legacy fields', async () => {

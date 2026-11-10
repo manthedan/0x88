@@ -14,6 +14,7 @@ function artifactHeaders(env, extra = {}) {
   const headers = new Headers(extra);
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Timing-Allow-Origin', env.TIMING_ALLOW_ORIGIN || DEFAULT_APP_ORIGIN);
   headers.set('Access-Control-Expose-Headers', EXPOSED_HEADERS);
   headers.set('Cache-Control', headers.get('Cache-Control') || 'no-store');
