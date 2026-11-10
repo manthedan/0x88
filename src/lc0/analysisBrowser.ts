@@ -444,7 +444,8 @@ function restoreAnalysisWorkspace(): void {
       const rawPgn = params.get('pgn') ?? handoffPgn;
       const parsed = params.has('fen') ? null : parseFirstPgnGame(rawPgn ?? '').game;
       const replacement = parsed?.tree ?? new GameTree(linkedFen.fen);
-      if (!preservePreviousAnalysis(undefined, replacement)) throw new Error('Could not keep the previous analysis. Export it before replacing it.');
+      if (!preservePreviousAnalysis(undefined, replacement, parsed?.tags, parsed?.result))
+        throw new Error('Could not keep the previous analysis. Export it before replacing it.');
       clearAnalysisWorkspace();
       tree = replacement;
       tree.toStart();

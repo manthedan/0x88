@@ -67,6 +67,50 @@ test('reopening an equal linked workspace never overwrites the previous analysis
   assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), original);
 });
 
+test('equal moves with different PGN metadata preserve the complete original analysis', () => {
+  const base = parsePgnGame('[Event "Original"]\n[White "Alice"]\n[Result "1-0"]\n\n1. e4! {centre} e5 (1... c5) 1-0');
+  const snapshot = (parsed) => ({
+    tree: serializeTree(parsed.tree),
+    headers: parsed.tags,
+    result: parsed.result,
+    resultSignature: resultSignature(parsed.tree),
+  });
+  for (const change of [
+    (parsed) => {
+      parsed.tags.White = 'Bob';
+    },
+    (parsed) => {
+      parsed.result = '0-1';
+    },
+    (parsed) => {
+      parsed.tree.root.children[0].comment = 'different';
+    },
+    (parsed) => {
+      parsed.tree.root.children[0].nags = [2];
+    },
+    (parsed) => {
+      parsed.tree.root.children[0].children.pop();
+    },
+  ]) {
+    const store = storage();
+    const original = envelope('analysis', snapshot(base));
+    store.setItem(workspaceStorageKey('analysis'), original);
+    store.setItem(PREVIOUS_ANALYSIS_KEY, envelope('analysis', analysisData()));
+    const replacement = { tree: restoreTree(serializeTree(base.tree)), tags: { ...base.tags }, result: base.result };
+    change(replacement);
+    assert.equal(preservePreviousAnalysis(store, replacement.tree, replacement.tags, replacement.result), true);
+    assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), original, 'All persisted content must participate in equality');
+  }
+  const store = storage();
+  store.setItem(workspaceStorageKey('analysis'), envelope('analysis', snapshot(base)));
+  const older = envelope('analysis', analysisData());
+  store.setItem(PREVIOUS_ANALYSIS_KEY, older);
+  const equal = { tree: restoreTree(serializeTree(base.tree)), tags: { ...base.tags }, result: base.result };
+  equal.tree.toEnd();
+  assert.equal(preservePreviousAnalysis(store, equal.tree, Object.fromEntries(Object.entries(equal.tags).reverse()), equal.result), true);
+  assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), older, 'Header order and current selection do not change the analysis');
+});
+
 test('autosave resumes after a smaller save, recovered storage or clearing, and reports later failures', () => {
   const store = storage();
   const pauses = [];

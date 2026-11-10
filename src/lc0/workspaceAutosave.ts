@@ -228,14 +228,15 @@ export function hasExplicitWorkspaceInput(search: string, _hash = '', kind: Work
 export const PREVIOUS_ANALYSIS_KEY = '0x88-analysis-previous-workspace';
 
 /** Back up before replacement; a failed backup must leave the current workspace intact. */
-export function preservePreviousAnalysis(storage = workspaceStorage(), replacement?: GameTree): boolean {
+export function preservePreviousAnalysis(storage = workspaceStorage(), replacement?: GameTree, headers: Record<string, string> = {}, result = '*'): boolean {
   try {
     const raw = storage?.getItem(workspaceStorageKey('analysis'));
     const saved = raw ? decodeAnalysisSnapshot(raw) : null;
     if (saved && replacement) {
       // Selection is not a different workspace. Keep the older recovery slot on a repeated link.
-      const snapshot = (tree: GameTree) => JSON.stringify({ ...serializeTree(tree), current: 0 });
-      if (snapshot(saved.tree) === snapshot(replacement)) return true;
+      const snapshot = (tree: GameTree, headers: Record<string, string>, result: string) =>
+        JSON.stringify({ tree: { ...serializeTree(tree), current: 0 }, headers: Object.entries(headers).sort(([a], [b]) => a.localeCompare(b)), result });
+      if (snapshot(saved.tree, saved.headers, saved.result) === snapshot(replacement, headers, result)) return true;
     }
     if (raw && saved) storage?.setItem(PREVIOUS_ANALYSIS_KEY, raw);
     return true;
