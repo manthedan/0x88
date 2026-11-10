@@ -187,6 +187,7 @@ import {
   stormphraxVariantUnsupportedReason,
 } from './stormphraxVariants.ts';
 import { buildSchedule, type ScheduledGame, type TournamentMode, TournamentStandings, tournamentPairings } from './tournament.ts';
+import { uciGameHistory } from './uciGameHistory.ts';
 import { canUsePersistentViridithasWasi, ViridithasEngine } from './viridithasEngine.ts';
 import {
   checkViridithasVariantAsset,
@@ -3047,8 +3048,9 @@ function buildEngines() {
         if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads });
         else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads });
         const fen = boardToFen(positions[positions.length - 1]);
+        const history = uciGameHistory(positions);
         const started = performance.now();
-        const move = await engine.bestMove(fen, signal);
+        const move = await engine.bestMove(history.fen, signal, { moves: history.moves });
         const elapsedMs = performance.now() - started;
         recordStockfishOutput(
           engineId,
@@ -3069,8 +3071,9 @@ function buildEngines() {
       if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
       else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
       const fen = boardToFen(positions[positions.length - 1]);
+      const history = uciGameHistory(positions);
       const started = performance.now();
-      const move = await engine.bestMove(fen, signal);
+      const move = await engine.bestMove(history.fen, signal, { moves: history.moves });
       const elapsedMs = performance.now() - started;
       recordRecklessOutput(engineId, engines.get(engineId)?.name ?? 'Reckless', fen, move, engine.lastInfo(), elapsedMs);
       renderRecklessRuntimeInfo();
@@ -3082,8 +3085,9 @@ function buildEngines() {
       if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs() });
       else engine.setOptions({ depth: row.strength, movetimeMs: undefined });
       const fen = boardToFen(positions[positions.length - 1]);
+      const history = uciGameHistory(positions);
       const started = performance.now();
-      const move = await engine.bestMove(fen, signal);
+      const move = await engine.bestMove(history.fen, signal, { moves: history.moves });
       const elapsedMs = performance.now() - started;
       recordViridithasOutput(engineId, engines.get(engineId)?.name ?? 'Viridithas', fen, move, engine.lastInfo(), elapsedMs);
       renderViridithasRuntimeInfo();
@@ -3095,8 +3099,9 @@ function buildEngines() {
       if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
       else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
       const fen = boardToFen(positions[positions.length - 1]);
+      const history = uciGameHistory(positions);
       const started = performance.now();
-      const move = await engine.bestMove(fen, signal);
+      const move = await engine.bestMove(history.fen, signal, { moves: history.moves });
       const elapsedMs = performance.now() - started;
       recordBerserkOutput(engineId, engines.get(engineId)?.name ?? 'Berserk', fen, move, engine.lastInfo(), elapsedMs);
       renderBerserkRuntimeInfo();
@@ -3108,8 +3113,9 @@ function buildEngines() {
       if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
       else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
       const fen = boardToFen(positions[positions.length - 1]);
+      const history = uciGameHistory(positions);
       const started = performance.now();
-      const move = await engine.bestMove(fen, signal);
+      const move = await engine.bestMove(history.fen, signal, { moves: history.moves });
       const elapsedMs = performance.now() - started;
       recordPlentyChessOutput(engineId, engines.get(engineId)?.name ?? 'PlentyChess', fen, move, engine.lastInfo(), elapsedMs);
       renderPlentyChessRuntimeInfo();
@@ -3121,8 +3127,9 @@ function buildEngines() {
       if (arenaBudgetMode() === 'movetime') engine.setOptions({ depth: undefined, movetimeMs: arenaMovetimeMs(), threads: 1 });
       else engine.setOptions({ depth: row.strength, movetimeMs: undefined, threads: 1 });
       const fen = boardToFen(positions[positions.length - 1]);
+      const history = uciGameHistory(positions);
       const started = performance.now();
-      const move = await engine.bestMove(fen, signal);
+      const move = await engine.bestMove(history.fen, signal, { moves: history.moves });
       const elapsedMs = performance.now() - started;
       recordStormphraxOutput(engineId, engines.get(engineId)?.name ?? 'Stormphrax', fen, move, engine.lastInfo(), elapsedMs);
       renderStormphraxRuntimeInfo();

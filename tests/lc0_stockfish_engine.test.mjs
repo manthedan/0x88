@@ -138,11 +138,11 @@ test('Stockfish pthread bootstrap loads trusted external artifacts through a loc
   });
   globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
   try {
-    const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-18-lite.js');
+    const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-19-lite.js');
     assert.equal(worker.objectUrl, undefined);
-    assert.equal(worker.url, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js');
-    assert.equal(worker.bootstrapWasmUrl, 'https://assets.0x88.app/stockfish/stockfish-18-lite.wasm');
-    assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js').maxThreads(), 32);
+    assert.equal(worker.url, 'https://assets.0x88.app/stockfish/stockfish-19-lite.js');
+    assert.equal(worker.bootstrapWasmUrl, 'https://assets.0x88.app/stockfish/stockfish-19-lite.wasm');
+    assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-19-lite.js').maxThreads(), 32);
   } finally {
     if (previousBase === undefined) delete globalThis.LC0_BROWSER_ASSET_BASE_URL;
     else globalThis.LC0_BROWSER_ASSET_BASE_URL = previousBase;
@@ -152,9 +152,9 @@ test('Stockfish pthread bootstrap loads trusted external artifacts through a loc
 });
 
 test('StockfishEngine reports thread capacity from the resolved worker URL', () => {
-  assert.equal(new StockfishEngine({}, '/stockfish/stockfish-18-lite-single.js').maxThreads(), 1);
-  assert.equal(new StockfishEngine({}, '/stockfish/stockfish-18-lite.js').maxThreads(), 32);
-  assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js').maxThreads(), 1);
+  assert.equal(new StockfishEngine({}, '/stockfish/stockfish-19-lite-single.js').maxThreads(), 1);
+  assert.equal(new StockfishEngine({}, '/stockfish/stockfish-19-lite.js').maxThreads(), 32);
+  assert.equal(new StockfishEngine({}, 'https://assets.0x88.app/stockfish/stockfish-19-lite.js').maxThreads(), 1);
 });
 
 test('StockfishEngine starts threaded artifacts through the local pthread bootstrap', async () => {
@@ -169,10 +169,10 @@ test('StockfishEngine starts threaded artifacts through the local pthread bootst
   });
   globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
   try {
-    const engine = new StockfishEngine({ threads: 2 }, 'https://assets.0x88.app/stockfish/stockfish-18-lite.js');
+    const engine = new StockfishEngine({ threads: 2 }, 'https://assets.0x88.app/stockfish/stockfish-19-lite.js');
     await engine.prewarm();
     const worker = MockStockfishWorker.instances[0];
-    assert.match(worker.url, /stockfishPthreadBootstrap\.js\?no-inline#https%3A%2F%2Fassets\.0x88\.app%2Fstockfish%2Fstockfish-18-lite\.wasm$/);
+    assert.match(worker.url, /stockfishPthreadBootstrap\.js\?no-inline#https%3A%2F%2Fassets\.0x88\.app%2Fstockfish%2Fstockfish-19-lite\.wasm$/);
     assert.equal(worker.options.name, 'stockfish-pthread-bootstrap');
     assert.deepEqual(worker.messages.slice(0, 4), [
       'uci',
@@ -201,7 +201,7 @@ test('StockfishEngine always sends a Hash setoption instead of the 16 MB built-i
   });
   try {
     MockStockfishWorker.instances = [];
-    const engine = new StockfishEngine({ depth: 14 }, '/stockfish/stockfish-18-lite-single.js');
+    const engine = new StockfishEngine({ depth: 14 }, '/stockfish/stockfish-19-lite-single.js');
     await engine.prewarm();
     const worker = MockStockfishWorker.instances[0];
     assert.deepEqual(worker.messages, ['uci', `setoption name Hash value ${DEFAULT_STOCKFISH_HASH_MB}`, 'isready']);
@@ -213,7 +213,7 @@ test('StockfishEngine always sends a Hash setoption instead of the 16 MB built-i
     engine.dispose();
 
     MockStockfishWorker.instances = [];
-    const explicit = new StockfishEngine({ depth: 4, threads: 1, hashMb: 128 }, '/stockfish/stockfish-18-lite-single.js');
+    const explicit = new StockfishEngine({ depth: 4, threads: 1, hashMb: 128 }, '/stockfish/stockfish-19-lite-single.js');
     await explicit.prewarm();
     assert.deepEqual(MockStockfishWorker.instances[0].messages, ['uci', 'setoption name Threads value 1', 'setoption name Hash value 128', 'isready']);
     explicit.dispose();
@@ -236,9 +236,9 @@ test('cross-origin Stockfish wrapper hash initializes the UCI worker, not a pthr
   globalThis.LC0_BROWSER_ASSET_BASE_URL = 'https://assets.0x88.app';
   URL.createObjectURL = () => 'blob:https://0x88.app/stockfish-wrapper';
   try {
-    const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-18-lite-single-relaxed.js');
+    const worker = stockfishWorkerUrl('https://assets.0x88.app/stockfish/stockfish-19-lite-single-relaxed.js');
     assert.equal(worker.objectUrl, 'blob:https://0x88.app/stockfish-wrapper');
-    assert.equal(worker.url, 'blob:https://0x88.app/stockfish-wrapper#https%3A%2F%2Fassets.0x88.app%2Fstockfish%2Fstockfish-18-lite-single-relaxed.wasm');
+    assert.equal(worker.url, 'blob:https://0x88.app/stockfish-wrapper#https%3A%2F%2Fassets.0x88.app%2Fstockfish%2Fstockfish-19-lite-single-relaxed.wasm');
     assert.equal(worker.url.includes(',worker'), false);
   } finally {
     URL.createObjectURL = previousCreateObjectUrl;

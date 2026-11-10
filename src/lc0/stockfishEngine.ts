@@ -4,6 +4,7 @@ import {
   type BrowserUciEngine,
   type BrowserUciInfoLine,
   type BrowserUciRuntimeStatus,
+  type BrowserUciSearchOptions,
   uciPositionCommand,
 } from './browserUciEngine.ts';
 import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
@@ -475,12 +476,13 @@ export class StockfishEngine implements BrowserUciEngine {
   }
 
   /** Best move for a FEN. Aborting sends `stop`, so Stockfish returns its current best. */
-  async search(fen: string, signal?: AbortSignal): Promise<string | null> {
-    return this.bestMove(fen, signal);
+  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
+    return this.bestMove(fen, signal, opts);
   }
 
-  async bestMove(fen: string, signal?: AbortSignal): Promise<string | null> {
+  async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
+      const position = uciPositionCommand(fen, opts.moves);
       await this.init();
       if (!this.worker || signal?.aborted) return null;
       this.lastInfoLines = [];
@@ -510,7 +512,7 @@ export class StockfishEngine implements BrowserUciEngine {
           reject(error);
         };
         signal?.addEventListener('abort', onAbort);
-        this.worker!.postMessage(`position fen ${fen}`);
+        this.worker!.postMessage(position);
         this.worker!.postMessage(stockfishGoCommand(this.options));
       });
     });

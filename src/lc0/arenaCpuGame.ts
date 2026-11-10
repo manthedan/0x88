@@ -5,6 +5,7 @@ import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import type { GameTree } from './gameTree.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
+import { uciGameHistory } from './uciGameHistory.ts';
 
 export interface CpuArenaSeat {
   /** Game- and seat-namespaced broker/telemetry identity. */
@@ -98,7 +99,8 @@ export async function playCpuArenaGame(options: {
       try {
         options.beforeMove?.(seat);
         const started = performance.now();
-        uci = await seat.engine.bestMove(fen, signal);
+        const history = uciGameHistory(positions);
+        uci = await seat.engine.bestMove(history.fen, signal, { moves: history.moves });
         if (signal.aborted) return cancelled();
         options.afterMove?.(seat, fen, uci, performance.now() - started);
       } finally {

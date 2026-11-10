@@ -26,6 +26,7 @@ const CONFIGS = {
     smokeHtml: 'lab/berserk-smoke.html',
     adapterFiles: [
       'src/lc0/berserkEngine.ts',
+      'src/lc0/emscriptenUciEngine.ts',
       'src/lc0/berserkSmoke.ts',
       'src/lc0/berserkVariants.ts',
       'src/lc0/emscriptenLocateFile.ts',
@@ -69,6 +70,7 @@ const CONFIGS = {
     smokeHtml: 'lab/plentychess-smoke.html',
     adapterFiles: [
       'src/lc0/plentychessEngine.ts',
+      'src/lc0/emscriptenUciEngine.ts',
       'src/lc0/plentychessSmoke.ts',
       'src/lc0/plentychessVariants.ts',
       'src/lc0/emscriptenLocateFile.ts',
@@ -115,6 +117,7 @@ const CONFIGS = {
     smokeScript: 'scripts/stormphrax_emscripten_smoke.mjs',
     adapterFiles: [
       'src/lc0/stormphraxEngine.ts',
+      'src/lc0/emscriptenUciEngine.ts',
       'src/lc0/stormphraxVariants.ts',
       'src/lc0/emscriptenLocateFile.ts',
       'src/lc0/browserUciEngine.ts',

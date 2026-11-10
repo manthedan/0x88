@@ -62,6 +62,7 @@ import { DEFAULT_PLAY_PREFERENCES, loadPlayPreferences, type PlayPreferences, ty
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { defaultStormphraxVariantKey, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
+import { uciGameHistory } from './uciGameHistory.ts';
 import { createWorkspaceAutosave, decodePlaySnapshot, hasExplicitWorkspaceInput, readWorkspace } from './workspaceAutosave.ts';
 
 const params = new URLSearchParams(location.search);
@@ -141,7 +142,7 @@ let maia3Status: string | null = null;
 
 interface CpuEngine {
   setOptions(options: { depth?: number; movetimeMs?: number; threads?: number; skillLevel?: number }): void;
-  bestMove(fen: string, signal?: AbortSignal): Promise<string | null>;
+  bestMove(fen: string, signal?: AbortSignal, opts?: { moves?: readonly string[] }): Promise<string | null>;
   dispose?(): void;
 }
 
@@ -885,7 +886,10 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
   } else {
     engine.setOptions({ depth: visitsOrDepth, movetimeMs: undefined });
   }
-  return engine.bestMove(boardToFen(ctx.board), signal);
+  // ctx.positions runs from the game's start to ctx.board; sending it as moves
+  // lets the engine see repetitions and the 50-move clock.
+  const history = uciGameHistory(ctx.positions);
+  return engine.bestMove(history.fen, signal, { moves: history.moves });
 }
 async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   if (ctx.disposed || ctx.board.turn !== ctx.humanColor) return;
