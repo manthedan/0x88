@@ -12,20 +12,23 @@ const Runtime = runInNewContext(`${stripTypeScriptTypes(classSource)}; Lc0WebHyb
   nowMs: () => performance.now(),
 });
 
-const headHelpers = source.slice(
-  source.indexOf('async function mapWgslPolicyValueHeadOutputs('),
-  source.indexOf('\nasync function runCachedWgslPolicyValueHeads('),
-);
-const f32Helper = source.slice(source.indexOf('async function readF32OutputOnce('), source.indexOf('\nasync function measureGpuTimestampMs('));
-const readers = runInNewContext(
-  `${stripTypeScriptTypes(headHelpers + '\n' + f32Helper)}; ({ mapWgslPolicyValueHeadOutputs, mapWgslLegalPriorsOutputs, readF32OutputOnce })`,
-  {
-    nowMs: () => performance.now(),
-    gpuGlobals: () => ({ GPUMapMode: { READ: 1 } }),
-    DEFAULT_POLICY_MAPPED_OUTPUTS: 1858,
-    WGSL_GPU_LEGAL_OUTPUT_FLOATS: 768,
-  },
-);
+// Extract whole top-level declarations by name rather than slicing up to
+// whichever (possibly since-removed) helper happened to follow them.
+function topLevelFunction(name) {
+  const start = source.search(new RegExp(`^(?:async )?function ${name}\\(`, 'm'));
+  assert.ok(start >= 0, `Missing runtime helper ${name}`);
+  const end = source.indexOf('\n}\n', start);
+  assert.ok(end > start, `Unterminated runtime helper ${name}`);
+  return source.slice(start, end + 2);
+}
+const readerNames = ['mapWgslPolicyValueHeadOutputs', 'mapWgslLegalPriorsOutputs', 'readF32OutputOnce'];
+const helpers = [...readerNames, 'legalPriorsFromGpuOutput'].map(topLevelFunction).join('\n');
+const readers = runInNewContext(`${stripTypeScriptTypes(helpers)}; ({ ${readerNames.join(', ')} })`, {
+  nowMs: () => performance.now(),
+  gpuGlobals: () => ({ GPUMapMode: { READ: 1 } }),
+  DEFAULT_POLICY_MAPPED_OUTPUTS: 1858,
+  WGSL_GPU_LEGAL_OUTPUT_FLOATS: 768,
+});
 
 for (const name of Object.keys(readers)) {
   test(`${name} unmaps after a failed range read and permits reuse`, async () => {
