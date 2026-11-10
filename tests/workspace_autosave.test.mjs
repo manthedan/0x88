@@ -11,7 +11,10 @@ import {
   decodeAnalysisSnapshot,
   decodePlaySnapshot,
   hasExplicitWorkspaceInput,
+  hasPreviousAnalysis,
+  preservePreviousAnalysis,
   readWorkspace,
+  restorePreviousAnalysis,
   restoreTree,
   serializeTree,
   WORKSPACE_MAX_CHARS,
@@ -368,19 +371,53 @@ test('oversized work cannot leave a stale saved game behind', () => {
   assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
 });
 
-test('explicit FEN and handoff URLs take precedence without consuming the handoff', () => {
-  for (const [search, hash] of [
-    ['?fen=abc', ''],
-    ['?handoff=token', ''],
-    ['?fromAnalysis=1', ''],
-    ['', '#game=payload'],
-  ]) {
-    assert.equal(hasExplicitWorkspaceInput(search, hash), true);
+test('only consumed Analysis search keys classify as URL workspace input', () => {
+  for (const key of ['fen', 'pgn']) assert.equal(hasExplicitWorkspaceInput(`?${key}=abc`), true);
+  for (const key of ['game', 'position', 'handoff', 'playhandoff', 'playfrom', 'fromanalysis', 'startfen', 'from', 'play', 'FEN']) {
+    assert.equal(hasExplicitWorkspaceInput(`?${key}=payload`), false, key);
   }
-  assert.equal(hasExplicitWorkspaceInput('?dev&model=local&perfDial=eco'), false);
-  assert.equal(hasExplicitWorkspaceInput('?ep=wasm&lc0Runtime=hybrid&pack=local&recklessVariant=simd'), false);
-  assert.equal(hasExplicitWorkspaceInput('?utm_source=docs', '#moves'), false);
-  assert.equal(hasExplicitWorkspaceInput(''), false);
+  assert.equal(hasExplicitWorkspaceInput('', '#fen=abc'), false);
+  assert.equal(hasExplicitWorkspaceInput('?fen=abc&pgn=abc', '', 'play'), false);
+  assert.equal(hasExplicitWorkspaceInput('?dev&model=local'), false);
+});
+
+test('save, explicit replacement and restore retain the full previous analysis', () => {
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  const { tree } = parsePgnGame('1. e4! {keep} e5 (1... c5 2. Nf3) *');
+  tree.toEnd();
+  saver.schedule({ tree: serializeTree(tree), headers: { Event: 'Original' }, result: '*' });
+  saver.flush();
+  const original = store.getItem(workspaceStorageKey('analysis'));
+  assert.equal(preservePreviousAnalysis(store), true);
+  saver.clear();
+  saver.schedule(analysisData());
+  saver.flush();
+  assert.equal(hasPreviousAnalysis(store), true);
+  const restored = restorePreviousAnalysis(store);
+  assert.deepEqual(serializeTree(restored.tree), serializeTree(tree));
+  assert.equal(restored.headers.Event, 'Original');
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
+  assert.equal(hasPreviousAnalysis(store), false);
+});
+
+test('failed backup or restore does not delete the current or previous save', () => {
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  saver.schedule(analysisData());
+  saver.flush();
+  const original = store.getItem(workspaceStorageKey('analysis'));
+  const denied = {
+    ...store,
+    setItem() {
+      throw Error('quota');
+    },
+  };
+  assert.equal(preservePreviousAnalysis(denied), false);
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
+  assert.equal(preservePreviousAnalysis(store), true);
+  assert.equal(restorePreviousAnalysis(denied), null);
+  assert.equal(hasPreviousAnalysis(store), true);
 });
 
 test('play practice boundary (Play from here) round-trips and is validated against the move count', () => {

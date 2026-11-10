@@ -4,7 +4,7 @@ import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame, parsePgnGame } from '../chess/pgn.ts';
+import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
@@ -83,8 +83,11 @@ import {
   createWorkspaceAutosave,
   decodeAnalysisSnapshot,
   hasExplicitWorkspaceInput,
+  hasPreviousAnalysis,
   pgnResultForExport,
+  preservePreviousAnalysis,
   readWorkspace,
+  restorePreviousAnalysis,
   serializeTree,
 } from './workspaceAutosave.ts';
 
@@ -426,25 +429,31 @@ function clearAnalysisWorkspace(): void {
 
 function restoreAnalysisWorkspace(): void {
   const handoffPgn = takeAnalysisHandoff();
-  if (hasExplicitWorkspaceInput(location.search, location.hash) || handoffPgn) {
-    clearAnalysisWorkspace();
-    if (!params.has('fen') && handoffPgn) {
-      try {
-        const parsed = parsePgnGame(handoffPgn);
-        tree = parsed.tree;
-        tree.toStart();
-        // Same game identity as the restore path, so the first navigation doesn't treat it as a new game and clear its review.
-        analysisGameTree = tree;
+  el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
+  if (hasExplicitWorkspaceInput(location.search) || handoffPgn) {
+    try {
+      // Decode before touching either saved slot. URL FEN takes precedence over PGN/handoff.
+      const rawPgn = params.get('pgn') ?? handoffPgn;
+      const parsed = params.has('fen') ? null : parseFirstPgnGame(rawPgn ?? '').game;
+      const replacement = parsed?.tree ?? new GameTree(params.get('fen')!);
+      if (!preservePreviousAnalysis()) throw new Error('Could not keep the previous analysis. Export it before replacing it.');
+      clearAnalysisWorkspace();
+      tree = replacement;
+      tree.toStart();
+      analysisGameTree = tree;
+      if (parsed) {
         workspaceHeaders = parsed.tags;
         workspaceResult = parsed.result;
-        inputEl('pgnInput').value = handoffPgn;
+        inputEl('pgnInput').value = rawPgn!;
         reviewMetadata.set(tree, { tags: parsed.tags, result: parsed.result, signature: reviewSignature() });
-      } catch {
-        /* Invalid handoffs leave the explicit starting position alone. */
+        if (parsed.warnings.length) renderPgnImportNotice(describePgnWarning(parsed.warnings[0]));
       }
+      el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
+      saveAnalysisWorkspace();
+      return;
+    } catch (error) {
+      renderPgnImportNotice(`Could not load linked analysis: ${(error as Error).message}`);
     }
-    saveAnalysisWorkspace();
-    return;
   }
   const saved = readWorkspace('analysis', decodeAnalysisSnapshot);
   if (!saved) return;
@@ -5425,6 +5434,32 @@ function wireEvents() {
   el('loadFen').addEventListener('click', loadFen);
   inputEl('fenInput').addEventListener('keydown', (event) => {
     if ((event as KeyboardEvent).key === 'Enter') loadFen();
+  });
+  el('restorePreviousAnalysis').addEventListener('click', () => {
+    workspaceAutosave?.flush();
+    const saved = restorePreviousAnalysis();
+    if (!saved) {
+      renderPgnImportNotice('Could not restore previous analysis. Storage may be unavailable.');
+      return;
+    }
+    cancelActiveAnalysisRun();
+    tree = saved.tree;
+    analysisGameTree = tree;
+    workspaceHeaders = saved.headers;
+    workspaceResult = saved.result;
+    reviewMetadata.set(tree, { tags: workspaceHeaders, result: workspaceResult, signature: reviewSignature() });
+    el('restorePreviousAnalysis').hidden = true;
+    el('analysisRestoreNotice').hidden = false;
+    lineCache.clear();
+    completeAnalysisKeys.clear();
+    afterNavigation();
+    renderPgnImportNotice('Previous analysis restored.');
+    try {
+      inputEl('pgnInput').value = gameTreeToPgn(tree, workspaceHeaders, workspaceResult);
+    } catch (error) {
+      renderPgnImportNotice(`Previous analysis restored. PGN export failed: ${(error as Error).message}`);
+    }
+    el('quickCopyPgn').focus();
   });
   el('analysisRestoreDismiss').addEventListener('click', () => {
     el('analysisRestoreNotice').hidden = true;

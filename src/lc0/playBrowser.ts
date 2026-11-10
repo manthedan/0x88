@@ -63,7 +63,7 @@ import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { defaultStormphraxVariantKey, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
 import { uciGameHistory } from './uciGameHistory.ts';
-import { createWorkspaceAutosave, decodePlaySnapshot, hasExplicitWorkspaceInput, readWorkspace } from './workspaceAutosave.ts';
+import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './workspaceAutosave.ts';
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
@@ -1815,7 +1815,7 @@ function ctxApplyPlayHandoffForMount(ctx: PlayContext): boolean {
   }
   if (handoff.status === 'invalid') {
     ctx.handoffNotice = 'That position could not be loaded or is finished. Set up a normal game instead.';
-    return true;
+    return false;
   }
   return false;
 }
@@ -1857,11 +1857,10 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 }
 
 function ctxInit(ctx: PlayContext): void {
-  // Handoff (including rejected transfers) takes precedence over saved-game restore; explicit URLs also skip restore.
+  // Only a decoded storage position handoff replaces a saved game. URL options never contain a Play game.
   const handedOff = ctxApplyPlayHandoffForMount(ctx);
   const validEngineIds = new Set(ENGINE_OPTIONS.map((option) => option.id));
-  const saved =
-    handedOff || hasExplicitWorkspaceInput(location.search, location.hash) ? null : readWorkspace('play', (raw) => decodePlaySnapshot(raw, validEngineIds));
+  const saved = handedOff ? null : readWorkspace('play', (raw) => decodePlaySnapshot(raw, validEngineIds));
   ctx.restoredGame = !!saved;
   if (saved) ctx.practicePosition = saved.practicePosition;
   ctxRefreshEngineOptions(ctx);
@@ -1888,7 +1887,7 @@ function ctxInit(ctx: PlayContext): void {
     el('playRestoreNotice').hidden = false;
   }
   ctx.autosave = createWorkspaceAutosave('play');
-  if (handedOff || hasExplicitWorkspaceInput(location.search, location.hash)) ctx.autosave.clear();
+  if (handedOff) ctx.autosave.clear();
   trackListener(ctx, window, 'pagehide', () => ctx.autosave?.flush());
   trackListener(ctx, document, 'visibilitychange', () => {
     if (document.hidden) ctx.autosave?.flush();

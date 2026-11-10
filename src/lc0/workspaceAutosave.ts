@@ -219,11 +219,44 @@ export function readWorkspace<T>(kind: WorkspaceKind, decode: (raw: string) => T
   }
 }
 
-/** Recognize game inputs, not runtime/debug options or ordinary anchors. Never consume a handoff here. */
-export function hasExplicitWorkspaceInput(search: string, hash = ''): boolean {
-  const gameParams = new Set(['fen', 'pgn', 'game', 'position', 'handoff', 'playhandoff', 'playfrom', 'fromanalysis', 'startfen', 'from', 'play']);
-  const hasGameInput = (input: string) => [...new URLSearchParams(input).keys()].some((key) => gameParams.has(key.toLowerCase()));
-  return hasGameInput(search) || hasGameInput(hash.replace(/^#/, ''));
+/** Only Analysis consumes URL workspace inputs: exact search keys fen and pgn. Play uses a storage handoff. */
+export function hasExplicitWorkspaceInput(search: string, _hash = '', kind: WorkspaceKind = 'analysis'): boolean {
+  const params = new URLSearchParams(search);
+  return kind === 'analysis' && (params.has('fen') || params.has('pgn'));
+}
+
+export const PREVIOUS_ANALYSIS_KEY = '0x88-analysis-previous-workspace';
+
+/** Back up before replacement; a failed backup must leave the current workspace intact. */
+export function preservePreviousAnalysis(storage = workspaceStorage()): boolean {
+  try {
+    const raw = storage?.getItem(workspaceStorageKey('analysis'));
+    if (raw && decodeAnalysisSnapshot(raw)) storage?.setItem(PREVIOUS_ANALYSIS_KEY, raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function hasPreviousAnalysis(storage = workspaceStorage()): boolean {
+  try {
+    return !!decodeAnalysisSnapshot(storage?.getItem(PREVIOUS_ANALYSIS_KEY) ?? '');
+  } catch {
+    return false;
+  }
+}
+
+export function restorePreviousAnalysis(storage = workspaceStorage()): ReturnType<typeof decodeAnalysisSnapshot> {
+  try {
+    const raw = storage?.getItem(PREVIOUS_ANALYSIS_KEY);
+    const saved = raw ? decodeAnalysisSnapshot(raw) : null;
+    if (!saved || !raw) return null;
+    storage?.setItem(workspaceStorageKey('analysis'), raw);
+    storage?.removeItem(PREVIOUS_ANALYSIS_KEY);
+    return saved;
+  } catch {
+    return null;
+  }
 }
 
 /** One small local slot per surface. Only changed committed state resets the debounce. */

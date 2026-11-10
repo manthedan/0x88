@@ -114,7 +114,9 @@ test('template notice is scoped, accessible, bounded and placed across the mobil
 });
 
 function exportController() {
-  const elements = new Map(['message', 'pgnInput', 'analysisRestoreNotice'].map((id) => [id, { value: 'previous PGN', textContent: '', hidden: true }]));
+  const elements = new Map(
+    ['message', 'pgnInput', 'analysisRestoreNotice', 'restorePreviousAnalysis'].map((id) => [id, { value: 'previous PGN', textContent: '', hidden: true }]),
+  );
   const restore = source.slice(source.indexOf('function restoreAnalysisWorkspace()'), source.indexOf('let searcher:'));
   const copy = source.slice(source.indexOf('function copyPgn()'), source.indexOf('function closePvPreview()'));
   const code = ts.transpile(
@@ -122,7 +124,7 @@ function exportController() {
     let tree = new GameTree(), analysisGameTree = tree, workspaceHeaders = {}, workspaceResult = '*';
     const reviewMetadata = new Map(), reviewSignature = () => 'signature';
     const el = id => elements.get(id), inputEl = el;
-    const takeAnalysisHandoff = () => null, hasExplicitWorkspaceInput = () => false;
+    const takeAnalysisHandoff = () => null, hasExplicitWorkspaceInput = () => false, hasPreviousAnalysis = () => false;
     const location = {search: '', hash: ''}, decodeAnalysisSnapshot = () => {}, params = new Map();
     const readWorkspace = () => ({ tree: new GameTree(), headers: {}, result: '*' });
     const renderPgnImportNotice = text => { el('message').textContent = text; };

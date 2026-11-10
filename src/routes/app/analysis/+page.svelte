@@ -141,6 +141,7 @@ onMount(() => {
       </div>
     </header>
     <div id="message" aria-live="polite">Loading model…</div>
+    <button id="restorePreviousAnalysis" type="button" hidden>Restore previous analysis</button>
     <div id="pgnImportNotice" role="status" aria-live="polite"></div>
     <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
@@ -1068,6 +1069,7 @@ onMount(() => {
     .app-sidebar #pgnImportNotice{grid-column:1 / -1; grid-row:calc(5 + var(--restore-row))}
     .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:calc(6 + var(--restore-row))}
     .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:calc(7 + var(--restore-row))}
+    .app-sidebar #restorePreviousAnalysis{grid-column:1 / -1; grid-row:calc(8 + var(--restore-row)); justify-self:start; margin:4px 12px}
     .engine-summaries{max-height:none; overflow:visible}
     .history-panel :global(.movelist){max-height:260px}
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}
