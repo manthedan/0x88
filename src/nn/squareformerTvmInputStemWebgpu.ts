@@ -276,9 +276,11 @@ export class SquareformerTvmInputStemWebgpuBlock {
 
   async readOutput(): Promise<Float32Array> {
     await this.readback.mapAsync(GPUMapMode.READ);
-    const copy = new Float32Array(this.readback.getMappedRange().slice(0));
-    this.readback.unmap();
-    return copy;
+    try {
+      return new Float32Array(this.readback.getMappedRange().slice(0));
+    } finally {
+      this.readback.unmap();
+    }
   }
 
   async run(tokens: Uint32Array, attackSummary: Float32Array, options: { readback?: boolean } = {}): Promise<Float32Array | GPUBuffer> {

@@ -213,9 +213,11 @@ export class SquareformerTvmAttentionWebgpuBlock {
 
   async readOutput(): Promise<Float32Array> {
     await this.readback.mapAsync(GPUMapMode.READ);
-    const copy = new Float32Array(this.readback.getMappedRange().slice(0));
-    this.readback.unmap();
-    return copy;
+    try {
+      return new Float32Array(this.readback.getMappedRange().slice(0));
+    } finally {
+      this.readback.unmap();
+    }
   }
 
   async run(qkv: Float32Array, bias: Float32Array, options: { readback?: boolean } = {}): Promise<Float32Array | GPUBuffer> {

@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import type { BoardState } from '../chess/board.ts';
+import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
 import { encodeLc0Classical112 } from './encoder112.ts';
 import {
   currentBoardAndFen,
@@ -51,6 +52,7 @@ interface WholeModelTensor {
   copyFromRawBytes(bytes: Uint8Array): void;
   copyFrom(other: WholeModelTensor): void;
   toRawBytes(): Uint8Array;
+  dispose(): void;
 }
 
 interface WholeModelModule {
@@ -64,6 +66,8 @@ interface WholeModelVm {
 interface WholeModelRuntime {
   beginScope(): void;
   endScope(): void;
+  detachFromCurrentScope<T>(obj: T): T;
+  dispose(): void;
   cpu(): unknown;
   webgpu(): unknown;
   initWebGPU(device: unknown): void;
@@ -96,6 +100,8 @@ interface SubmittedBatch {
   fens: string[];
   preparedLegalMoves: Array<ReturnType<typeof currentBoardAndFen>['preparedLegalMoves']>;
   staged: Array<WholeModelTensor | null>;
+  /** Tensors detached from the submit scope; released by releaseBatch once readback is decoded. */
+  owned: WholeModelTensor[];
   device: { sync(): Promise<void> };
   timing: Record<string, number>;
 }
@@ -110,37 +116,6 @@ export interface Lc0WholeOnnxWebgpuEvaluatorOptions {
 
 function sumFinite(values: Array<number | undefined>): number {
   return values.reduce<number>((sum, value) => sum + (Number.isFinite(value) ? (value as number) : 0), 0);
-}
-
-function f32ToF16Bits(value: number): number {
-  if (Number.isNaN(value)) return 0x7e00;
-  if (value === Infinity) return 0x7c00;
-  if (value === -Infinity) return 0xfc00;
-  const sign = value < 0 || Object.is(value, -0) ? 0x8000 : 0;
-  const abs = Math.abs(value);
-  if (abs === 0) return sign;
-  if (abs >= 65504) return sign | 0x7bff;
-  if (abs < 2 ** -24) return sign;
-  if (abs < 2 ** -14) return sign | Math.round(abs / 2 ** -24);
-  const exponent = Math.floor(Math.log2(abs));
-  const fraction = abs / 2 ** exponent - 1;
-  let halfExponent = exponent + 15;
-  let halfFraction = Math.round(fraction * 1024);
-  if (halfFraction === 1024) {
-    halfExponent += 1;
-    halfFraction = 0;
-  }
-  if (halfExponent >= 31) return sign | 0x7bff;
-  return sign | (halfExponent << 10) | (halfFraction & 0x03ff);
-}
-
-function f16BitsToF32(bits: number): number {
-  const sign = bits & 0x8000 ? -1 : 1;
-  const exponent = (bits >>> 10) & 0x1f;
-  const fraction = bits & 0x03ff;
-  if (exponent === 0) return sign * (fraction === 0 ? 0 : 2 ** -14 * (fraction / 1024));
-  if (exponent === 0x1f) return fraction === 0 ? sign * Infinity : NaN;
-  return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
 }
 
 function float32ToFloat16Bytes(values: Float32Array): Uint8Array {
@@ -213,28 +188,45 @@ function tensorCacheUrl(manifest: RuntimeManifest, baseUrl: URL): string | undef
   return checkedStagedRuntimeUrl(path, baseUrl, 'tensor cache').toString();
 }
 
-function batchTimingFromRowTiming(timing: unknown): Record<string, unknown> | undefined {
-  if (!timing || typeof timing !== 'object') return undefined;
-  const { legalPriorsMs: _legalPriorsMs, batchPosition: _batchPosition, ...batchTiming } = timing as Record<string, unknown>;
-  return batchTiming;
+/**
+ * WebGPU buffer copies must be 4-byte multiples, and tvmjs reads a tensor back
+ * at its exact byte size. The f16 policy [b,1858] always qualifies, but WDL
+ * [b,3] (6b bytes) and MLH [b,1] (2b bytes) only do for even physical batches.
+ */
+function readbackAlignedBatch(batch: number): boolean {
+  return (batch * 3 * 2) % 4 === 0 && (batch * 2) % 4 === 0;
 }
 
 let batchEvalSequence = 0;
 
 export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
-  readonly evaluationTimings: Record<string, unknown>[] = [];
-  readonly positionTimings: unknown[] = [];
   readonly tensorCacheInfo?: { url: string; metadata: unknown };
   readonly startupTimings: Record<string, number>;
+  private disposed = false;
+  private readbackDrainFailed = false;
+  private readonly inFlight = new Set<Promise<unknown>>();
+  // Explicit fields rather than constructor parameter properties so the module
+  // loads under Node's strip-only TypeScript in unit tests.
+  private readonly runtime: WholeModelRuntime;
+  private readonly device: { destroy?: () => void } | null;
+  private readonly vmMod: WholeModelModule;
+  private readonly physicalBatchSize: number;
+  private readonly detachedParams: WholeModelTensor[];
 
   private constructor(
-    private readonly runtime: WholeModelRuntime,
-    private readonly vmMod: WholeModelModule,
-    private readonly physicalBatchSize: number,
-    private readonly detachedParams: WholeModelTensor[],
+    runtime: WholeModelRuntime,
+    device: { destroy?: () => void } | null,
+    vmMod: WholeModelModule,
+    physicalBatchSize: number,
+    detachedParams: WholeModelTensor[],
     startupTimings: Record<string, number>,
     tensorCacheInfo?: { url: string; metadata: unknown },
   ) {
+    this.runtime = runtime;
+    this.device = device;
+    this.vmMod = vmMod;
+    this.physicalBatchSize = physicalBatchSize;
+    this.detachedParams = detachedParams;
     this.startupTimings = startupTimings;
     this.tensorCacheInfo = tensorCacheInfo;
   }
@@ -267,6 +259,13 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const requestedBatch = Math.max(1, Math.floor(options.batch ?? 8));
     const model = manifest.models.find((item) => item.batch === requestedBatch);
     if (!model) throw new Error(`Batch ${requestedBatch} not in manifest`);
+    if (!readbackAlignedBatch(model.batch)) {
+      const usable = manifest.models.map((item) => item.batch).filter(readbackAlignedBatch);
+      throw new Error(
+        `Whole-model batch ${model.batch} is unsupported: its f16 WDL/MLH outputs (${model.batch * 6}/${model.batch * 2} bytes) cannot be read back ` +
+          `because WebGPU copies need 4-byte multiples; use an even batch${usable.length ? ` (${usable.join(', ')})` : ''}`,
+      );
+    }
     const bundle = manifest.runtime?.['tvm' + 'jsBundle'] ?? DEFAULT_BUNDLE;
     const bundleFile = manifest.files?.find((entry) => entry.path === bundle);
     if (!bundleFile?.sha256) throw new Error(`Runtime bundle integrity metadata missing for ${bundle}`);
@@ -279,11 +278,13 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const requiredFeatures = ['shader-f16'];
     for (const feature of requiredFeatures) if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
     const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
+    let ownedRuntime: WholeModelRuntime | undefined;
     try {
       options.signal?.throwIfAborted();
       const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model, options.signal));
       const runtime = await timed('runtimeInstantiateMs', () => api.instantiate(wasmBytes, api.createPolyfillWASI(), options.logger));
       options.signal?.throwIfAborted();
+      ownedRuntime = runtime;
       timedSync('runtimeInitWebGpuMs', () => runtime.initWebGPU(device));
       runtime.beginScope();
       try {
@@ -312,27 +313,40 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
           }
           if (!detachedParams.length) throw new Error('detached tensor-cache manifest but no param_N tensors loaded');
         }
-        return new Lc0WholeOnnxWebgpuEvaluator(runtime, vmMod, model.batch, detachedParams, startupTimings, tensorCacheInfo);
+        return new Lc0WholeOnnxWebgpuEvaluator(
+          runtime,
+          device as { destroy?: () => void } | null,
+          vmMod,
+          model.batch,
+          detachedParams,
+          startupTimings,
+          tensorCacheInfo,
+        );
       } catch (error) {
         runtime.endScope();
         throw error;
       }
     } catch (error) {
-      // Nothing else owns this device until create() returns; release it on
-      // any failure, including cancellation, so a superseded load frees GPU memory.
+      // Nothing else owns this runtime or device until create() returns; release
+      // them on any failure, including cancellation, so a superseded load frees
+      // wasm and GPU memory.
+      try {
+        ownedRuntime?.dispose();
+      } catch {
+        /* best effort */
+      }
       (device as { destroy?: () => void } | null)?.destroy?.();
       throw error;
     }
   }
 
   async evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
-    return (await this.remember(await this.runBatchEvaluation([input])))[0];
+    return (await this.runBatchEvaluation([input]))[0];
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     const out: Lc0Evaluation[] = [];
-    for (let i = 0; i < inputs.length; i += this.physicalBatchSize)
-      out.push(...(await this.remember(await this.runBatchEvaluation(inputs.slice(i, i + this.physicalBatchSize)))));
+    for (let i = 0; i < inputs.length; i += this.physicalBatchSize) out.push(...(await this.runBatchEvaluation(inputs.slice(i, i + this.physicalBatchSize))));
     return out;
   }
 
@@ -343,23 +357,90 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     });
     const chunkRows = await this.runBatchSequence(chunks.map((chunk) => chunk.inputs));
     const out = batches.map((): Lc0Evaluation[] => []);
-    for (let i = 0; i < chunkRows.length; i++) out[chunks[i].batchIndex].push(...(await this.remember(chunkRows[i])));
+    for (let i = 0; i < chunkRows.length; i++) out[chunks[i].batchIndex].push(...chunkRows[i]);
     return out;
   }
 
+  /**
+   * Releases the runtime once every in-flight evaluation has settled: the
+   * create()-time scope (VM, pipelines, detached params), the wasm instance and
+   * the GPUDevice this evaluator owns. Evaluations started afterwards reject.
+   */
   dispose(): void {
-    this.runtime.endScope();
+    if (this.disposed) return;
+    this.disposed = true;
+    const release = () => {
+      // A rejected sync does not prove that all mapAsync continuations have
+      // stopped writing to WASM. Retain the runtime and its allocations.
+      if (this.readbackDrainFailed) return;
+      try {
+        this.runtime.endScope();
+      } catch {
+        /* already unwound */
+      }
+      try {
+        this.runtime.dispose();
+      } catch {
+        /* best effort */
+      }
+      try {
+        this.device?.destroy?.();
+      } catch {
+        /* best effort */
+      }
+    };
+    void Promise.allSettled([...this.inFlight]).then(release);
   }
 
-  private remember(rows: Lc0Evaluation[]): Lc0Evaluation[] {
-    const batchTiming = batchTimingFromRowTiming(rows[0]?.timing);
-    if (batchTiming) this.evaluationTimings.push(batchTiming);
-    for (const row of rows) this.positionTimings.push(row.timing);
-    return rows;
+  private track<T>(run: () => Promise<T>): Promise<T> {
+    if (this.disposed) return Promise.reject(new Error('Whole-model evaluator is disposed'));
+    const promise = run();
+    this.inFlight.add(promise);
+    const settle = () => this.inFlight.delete(promise);
+    promise.then(settle, settle);
+    return promise;
   }
 
-  private submitBatch(inputs: Lc0EvaluatorInput[]): SubmittedBatch {
+  private releaseBatch(submitted: SubmittedBatch): void {
+    for (const tensor of submitted.owned) tensor.dispose();
+    submitted.owned.length = 0;
+  }
+
+  private async syncReadbacks(device: SubmittedBatch['device']): Promise<void> {
+    try {
+      await device.sync();
+    } catch (error) {
+      this.readbackDrainFailed = true;
+      throw error;
+    }
+  }
+
+  private async drainBatches(submitted: Array<SubmittedBatch | null>): Promise<number> {
+    const device = submitted.find((batch): batch is SubmittedBatch => !!batch)?.device;
+    if (!device) return 0;
+    const started = performance.now();
+    await this.syncReadbacks(device);
+    return performance.now() - started;
+  }
+
+  /**
+   * Encodes and enqueues one physical batch. Every TVM object it allocates
+   * (packed funcs, shape tuples, tensors) lands in a scope opened and closed
+   * synchronously here, so concurrent evaluations never interleave the
+   * runtime's scope stack. The tensors the pending readback still writes into
+   * or reads from are detached and handed back in `owned`.
+   */
+  private submitBatch(inputs: Lc0EvaluatorInput[], pending: Array<SubmittedBatch | null>): SubmittedBatch {
     if (!inputs.length) throw new Error('cannot submit empty batch');
+    this.runtime.beginScope();
+    try {
+      return this.submitBatchInScope(inputs, pending);
+    } finally {
+      this.runtime.endScope();
+    }
+  }
+
+  private submitBatchInScope(inputs: Lc0EvaluatorInput[], pending: Array<SubmittedBatch | null>): SubmittedBatch {
     const setInput = this.vmMod.getFunction('set_input');
     const invokeStateful = this.vmMod.getFunction('invoke_stateful');
     const getOutput = this.vmMod.getFunction('get_output');
@@ -404,19 +485,29 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       const elementCount = out.shape.reduce((a, b) => a * b, 1);
       const rawBytes = elementCount * (out.dtype === 'float16' ? 2 : out.dtype === 'float32' ? 4 : 1);
       if (rawBytes % 4 !== 0) return null;
-      const cpu = this.runtime.empty(out.shape, out.dtype, this.runtime.cpu());
-      cpu.copyFrom(out);
-      return cpu;
+      return this.runtime.empty(out.shape, out.dtype, this.runtime.cpu());
     });
-    const outputCopyEnqueueMs = performance.now() - phaseStarted;
-    return {
+    // The CPU staging tensors receive the GPU readback asynchronously (at
+    // device.sync()), so they must outlive this scope; the input and output
+    // handles are kept alongside them so nothing the queued work touches is
+    // released before finishBatch has decoded the results.
+    const owned = [input, ...outs, ...staged.filter((tensor): tensor is WholeModelTensor => tensor !== null)];
+    for (const tensor of owned) this.runtime.detachFromCurrentScope(tensor);
+    const submitted: SubmittedBatch = {
       boards,
       fens,
       preparedLegalMoves,
       staged,
+      owned,
       device: outs[0].device,
-      timing: { encodeMs, inputConvertMs, inputTensorAllocMs, inputUploadMs, setInputMs, tvmInvokeMs, outputHandleMs, outputCopyEnqueueMs },
+      timing: { encodeMs, inputConvertMs, inputTensorAllocMs, inputUploadMs, setInputMs, tvmInvokeMs, outputHandleMs },
     };
+    // Register detached destinations before the first copy can enqueue a
+    // readback, including when a later copy throws within this submission.
+    pending.push(submitted);
+    for (let i = 0; i < outs.length; i++) staged[i]?.copyFrom(outs[i]);
+    submitted.timing.outputCopyEnqueueMs = performance.now() - phaseStarted;
+    return submitted;
   }
 
   private finishBatch(submitted: SubmittedBatch, timingExtra: Record<string, number | string>): Lc0Evaluation[] {
@@ -425,7 +516,8 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const policyRaw = staged[0]?.toRawBytes();
     if (!policyRaw) throw new Error('Whole-model policy output readback unavailable');
     const policy = f16BytesToFloat32Array(policyRaw);
-    const wdl = staged[1] ? f16BytesToFloat32Array(staged[1].toRawBytes()) : undefined;
+    if (!staged[1]) throw new Error('Whole-model WDL output readback unavailable');
+    const wdl = f16BytesToFloat32Array(staged[1].toRawBytes());
     const mlh = staged[2] ? f16BytesToFloat32Array(staged[2].toRawBytes()) : undefined;
     const outputDecodeMs = performance.now() - phaseStarted;
     const phases: Record<string, number | string> = { ...timing, outputDecodeMs, ...timingExtra };
@@ -438,7 +530,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       logicalBatchSize: boards.length,
     };
     return boards.map((board, i) => {
-      const rawWdl = wdl ? Array.from(wdl.subarray(i * 3, i * 3 + 3)) : [];
+      const rawWdl = Array.from(wdl.subarray(i * 3, i * 3 + 3));
       const wdlSlice: [number, number, number] = [rawWdl[0] ?? NaN, rawWdl[1] ?? NaN, rawWdl[2] ?? NaN];
       const logits = policy.subarray(i * LC0_POLICY_SIZE, (i + 1) * LC0_POLICY_SIZE);
       const legalStarted = performance.now();
@@ -458,32 +550,55 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
 
   private async runBatchEvaluation(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     if (!inputs.length) return [];
-    const submitted = this.submitBatch(inputs);
-    const syncStarted = performance.now();
-    await submitted.device.sync();
-    const outputReadbackMs = performance.now() - syncStarted;
-    return this.finishBatch(submitted, { timingScope: 'whole-model-batch-invocation', outputReadbackMs });
+    return this.track(async () => {
+      const pending: Array<SubmittedBatch | null> = [];
+      let drained = false;
+      try {
+        let submitted: SubmittedBatch;
+        let outputReadbackMs: number;
+        try {
+          submitted = this.submitBatch(inputs, pending);
+        } finally {
+          outputReadbackMs = await this.drainBatches(pending);
+          drained = true;
+        }
+        return this.finishBatch(submitted, { timingScope: 'whole-model-batch-invocation', outputReadbackMs });
+      } finally {
+        if (drained) for (const batch of pending) if (batch) this.releaseBatch(batch);
+      }
+    });
   }
 
-  private async runBatchSequence(batchesInputs: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
-    const submitted = batchesInputs.map((inputs) => (inputs.length ? this.submitBatch(inputs) : null));
-    const device = submitted.find((batch): batch is SubmittedBatch => !!batch)?.device;
-    let syncMs = 0;
-    if (device) {
-      const syncStarted = performance.now();
-      await device.sync();
-      syncMs = performance.now() - syncStarted;
-    }
-    const inFlight = submitted.filter(Boolean).length || 1;
-    return submitted.map((batch) =>
-      batch
-        ? this.finishBatch(batch, {
-            timingScope: 'whole-model-pipelined-batch',
-            outputReadbackMs: syncMs / inFlight,
-            pipelineFlushBatches: inFlight,
-            pipelineFlushSyncMs: syncMs,
-          })
-        : [],
-    );
+  private runBatchSequence(batchesInputs: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
+    return this.track(async () => {
+      const submitted: Array<SubmittedBatch | null> = [];
+      let drained = false;
+      let syncMs = 0;
+      try {
+        try {
+          for (const inputs of batchesInputs) {
+            if (inputs.length) this.submitBatch(inputs, submitted);
+            else submitted.push(null);
+          }
+        } finally {
+          // A later submission can throw after earlier batches queued copies.
+          syncMs = await this.drainBatches(submitted);
+          drained = true;
+        }
+        const inFlight = submitted.filter(Boolean).length || 1;
+        return submitted.map((batch) =>
+          batch
+            ? this.finishBatch(batch, {
+                timingScope: 'whole-model-pipelined-batch',
+                outputReadbackMs: syncMs / inFlight,
+                pipelineFlushBatches: inFlight,
+                pipelineFlushSyncMs: syncMs,
+              })
+            : [],
+        );
+      } finally {
+        if (drained) for (const batch of submitted) if (batch) this.releaseBatch(batch);
+      }
+    });
   }
 }

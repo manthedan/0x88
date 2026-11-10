@@ -1365,3 +1365,40 @@ export async function releaseOrtSession(session: ort.InferenceSession): Promise<
   if (typeof maybe.release === 'function') await maybe.release();
   releasedOrtSessions += 1;
 }
+
+type OrtOutputTensor = Pick<ort.Tensor, 'location' | 'data' | 'getData' | 'dispose'>;
+
+function ortTensorOnDevice(tensor: OrtOutputTensor): boolean {
+  return tensor.location === 'gpu-buffer' || tensor.location === 'texture' || tensor.location === 'ml-tensor';
+}
+
+/**
+ * Reads a session output on the CPU. With `preferredOutputLocation:
+ * 'gpu-buffer'` (?ortGpuOutputs, ?preferredOutputLocation) ORT WebGPU returns
+ * GPU-located outputs whose `.data` throws and whose GPU buffer lives until
+ * the tensor is disposed; getData(true) downloads and then releases it.
+ */
+export async function ortTensorData(tensor: OrtOutputTensor): Promise<ort.Tensor['data']> {
+  return ortTensorOnDevice(tensor) ? await tensor.getData(true) : tensor.data;
+}
+
+/** Releases the GPU buffers of outputs that were not (or not yet fully) read. CPU outputs are left untouched. */
+export function releaseOrtGpuOutputs(outputs: Record<string, OrtOutputTensor>): void {
+  for (const tensor of Object.values(outputs)) {
+    if (!ortTensorOnDevice(tensor)) continue;
+    try {
+      tensor.dispose();
+    } catch {
+      /* still downloading: getData(true) releases it when the download completes */
+    }
+  }
+}
+
+/** Brings every GPU-located output to the CPU in place (so `.data` works) and releases its GPU buffer. */
+export async function downloadOrtOutputs(outputs: Record<string, OrtOutputTensor>): Promise<void> {
+  try {
+    for (const tensor of Object.values(outputs)) if (ortTensorOnDevice(tensor)) await tensor.getData(true);
+  } finally {
+    releaseOrtGpuOutputs(outputs);
+  }
+}

@@ -20,7 +20,7 @@ import { SquareFormerEvaluator, type SquareFormerMeta } from './squareformerEval
 import { SquareformerTvmHybridEvaluator } from './squareformerTvmHybridEvaluator.ts';
 import { SquareformerTvmjsWebgpuEvaluator } from './squareformerTvmjsWebgpuEvaluator.ts';
 
-type NavigatorGpu = Navigator & { gpu?: { requestAdapter(opts?: unknown): Promise<{ requestDevice(): Promise<unknown> } | null> } };
+type NavigatorGpu = Navigator & { gpu?: { requestAdapter(opts?: unknown): Promise<{ requestDevice(): Promise<{ destroy(): void }> } | null> } };
 
 export type BrowserSquareformerRuntimeSpec = {
   id?: string;
@@ -74,7 +74,13 @@ async function createHybridEvaluator(
   const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('WebGPU adapter unavailable for custom WebGPU runtime');
   const device = await adapter.requestDevice();
-  return await SquareformerTvmHybridEvaluator.create(device as never, meta, { manifestUrl, kernelBase, fixtureRoot });
+  try {
+    // On success the evaluator owns the device and destroys it in destroy().
+    return await SquareformerTvmHybridEvaluator.create(device as never, meta, { manifestUrl, kernelBase, fixtureRoot });
+  } catch (error) {
+    device.destroy();
+    throw error;
+  }
 }
 
 export async function createBrowserSquareformerRuntimeEvaluator(
@@ -166,7 +172,10 @@ export async function createBrowserSquareformerRuntimeEvaluator(
 
   if (customRequested) {
     try {
-      const evaluator = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot);
+      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot);
+      const evaluator = fallback
+        ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), auditBase, 'custom-webgpu-fallback-ort')
+        : primary;
       const result = {
         evaluator,
         meta,

@@ -193,11 +193,16 @@ export class SquareformerTvmValueHeadWebgpuBlock {
   }
 
   async readOutput(): Promise<{ wdl: Float32Array; q: Float32Array }> {
-    await Promise.all([this.wdlReadback.mapAsync(GPUMapMode.READ), this.qReadback.mapAsync(GPUMapMode.READ)]);
-    const wdl = new Float32Array(this.wdlReadback.getMappedRange().slice(0));
-    const q = new Float32Array(this.qReadback.getMappedRange().slice(0));
-    this.wdlReadback.unmap();
-    this.qReadback.unmap();
+    const [wdl, q] = await Promise.all(
+      [this.wdlReadback, this.qReadback].map(async (readback) => {
+        await readback.mapAsync(GPUMapMode.READ);
+        try {
+          return new Float32Array(readback.getMappedRange().slice(0));
+        } finally {
+          readback.unmap();
+        }
+      }),
+    );
     return { wdl, q };
   }
 

@@ -7,13 +7,18 @@ import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import * as ort from './ortRuntime.ts';
 
-const INPUT_CACHE_ENTRIES = Math.max(
-  0,
-  Math.min(
-    65536,
-    Math.floor(Number(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('evalInputCacheEntries') ?? '4096')) || 4096,
-  ),
+// Every browser surface wraps this evaluator in a CachedEvaluator whose key
+// (FEN + history + legal moves + attack mask) is a superset of this one, so this
+// cache only hits when the same position recurs with different legal moves or
+// masks. An int64 row is ~12 KB, so keep it small; `?evalInputCacheEntries=0`
+// disables it.
+const DEFAULT_INPUT_CACHE_ENTRIES = 256;
+const REQUESTED_INPUT_CACHE_ENTRIES = Math.floor(
+  Number(new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('evalInputCacheEntries') ?? DEFAULT_INPUT_CACHE_ENTRIES),
 );
+const INPUT_CACHE_ENTRIES = Number.isFinite(REQUESTED_INPUT_CACHE_ENTRIES)
+  ? Math.max(0, Math.min(65536, REQUESTED_INPUT_CACHE_ENTRIES))
+  : DEFAULT_INPUT_CACHE_ENTRIES;
 type SquareFormerEncodedInput = Float32Array | BigInt64Array | Int32Array;
 type CompactIndexDtype = 'int64' | 'int32';
 type CompactIndexArray = BigInt64Array | Int32Array;
@@ -923,6 +928,10 @@ export class SquareFormerEvaluator implements Evaluator {
   private meta: SquareFormerMeta;
   private inputCache = new Map<string, SquareFormerEncodedInput>();
   private destroyed = false;
+  // ORT-web does not guard a session against overlapping run() calls or a
+  // release() while a run is suspended (WebGPU/asyncify), so runs are queued
+  // and destroy() releases the session only after the queue drains.
+  private runTail: Promise<unknown> = Promise.resolve();
   constructor(session: ort.InferenceSession, meta: SquareFormerMeta) {
     this.session = session;
     this.meta = meta;
@@ -1015,7 +1024,13 @@ export class SquareFormerEvaluator implements Evaluator {
     const tLegal = ort.tinyLeelaNowMs();
     const fetches = selectedSquareformerOutputs(this.session);
     const tRun0 = ort.tinyLeelaNowMs();
-    const outputs = fetches ? await this.session.run(feeds, fetches) : await this.session.run(feeds);
+    const outputs = await this.runExclusive(async () => {
+      if (this.destroyed) throw new Error('SquareFormer evaluator is destroyed');
+      const result = fetches ? await this.session.run(feeds, fetches) : await this.session.run(feeds);
+      // GPU-located outputs (?ortGpuOutputs) are read before the session can be released.
+      await ort.downloadOrtOutputs(result);
+      return result;
+    });
     const tRun1 = ort.tinyLeelaNowMs();
     const policyRaw = requiredFloatOutput(outputs, 'policy');
     const wdlRaw = requiredFloatOutput(outputs, 'wdl');
@@ -1071,10 +1086,17 @@ export class SquareFormerEvaluator implements Evaluator {
     return out;
   }
 
+  private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.runTail.then(fn, fn);
+    this.runTail = run.catch(() => undefined);
+    return run;
+  }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
     this.inputCache.clear();
-    void ort.releaseOrtSession(this.session).catch(() => undefined);
+    const release = () => ort.releaseOrtSession(this.session).catch(() => undefined);
+    void this.runTail.then(release, release);
   }
 }

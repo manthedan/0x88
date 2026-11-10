@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
@@ -67,6 +68,59 @@ function matmul(x, rows, cols, w, n) {
   return y;
 }
 const wasmSession = (bytes) => ort.InferenceSession.create(bytes, ort.sessionOptions(['wasm']));
+
+test('corrupt protobuf lengths reject without looping', () => {
+  // -11 rewinds this 11-byte field to its tag. Isolate it so a regression
+  // cannot hang the test runner's event loop and defeat its timeout.
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--experimental-strip-types',
+      '--input-type=module',
+      '-e',
+      `import assert from 'node:assert/strict';
+       import { parseProtoFields } from ${JSON.stringify(new URL('../src/nn/onnxDequantFold.ts', import.meta.url).href)};
+       assert.throws(() => parseProtoFields(Uint8Array.of(10, 245, 255, 255, 255, 255, 255, 255, 255, 255, 1)), /protobuf.*length/);`,
+    ],
+    { encoding: 'utf8', timeout: 2000 },
+  );
+  assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stderr}`);
+  assert.throws(() => parseProtoFields(Uint8Array.of(10, 4, 1)), /protobuf.*length/);
+  assert.throws(() => parseProtoFields(Uint8Array.of(10, 1, 0), 0, 20), /protobuf.*length|truncated/);
+  assert.throws(() => parseProtoFields(Uint8Array.of(10, 3, 0), 0, 20), /protobuf.*length/);
+});
+
+test('ORT diagnostics report the original model after rejecting its folded rewrite', async (t) => {
+  const bytes = model({
+    nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'])],
+    initializers: [encodeTensorProto('Wq', ONNX_INT8, [1], int8Bytes([1])), encodeTensorProto('Ws', ONNX_FLOAT, [], f32Bytes([0.5]))],
+    inputs: [],
+    outputs: [valueInfo('W', ONNX_FLOAT, [1])],
+  });
+  const attempts = [];
+  const session = { release() {} };
+  t.mock.method(ort.InferenceSession, 'create', async (input) => {
+    attempts.push(input);
+    if (attempts.length === 1) throw new Error('folded model rejected');
+    return session;
+  });
+  ort.setOrtDequantFoldForCurrentThread(true);
+  try {
+    assert.equal(await ort.createOrtSession(bytes), session);
+    assert.equal(attempts.length, 2);
+    assert.notEqual(attempts[0], bytes);
+    assert.equal(attempts[1], bytes);
+    const summary = ort.lastOrtDequantFoldSummary();
+    assert.equal(summary.foldedNodes, 0);
+    assert.equal(summary.removedInitializers, 0);
+    assert.equal(summary.bytesAfter, bytes.byteLength);
+    assert.equal(summary.discardedAfter, 'folded model rejected');
+    assert.equal((await ort.collectOrtRuntimeDiagnostics()).dequantFold.discardedAfter, 'folded model rejected');
+    await ort.releaseOrtSession(session);
+  } finally {
+    ort.setOrtDequantFoldForCurrentThread(null);
+  }
+});
 
 test('f16 conversion round-trips and rounds to nearest even', () => {
   for (const v of [0, 1, -1, 0.5, 65504, 6.1035e-5, 3.0517578e-5, 1e-8, -2.5, 1024.5]) {

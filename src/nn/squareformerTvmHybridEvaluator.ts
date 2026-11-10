@@ -36,6 +36,8 @@ type GPUBuffer = { destroy(): void };
 type GPUDevice = {
   queue: { submit(commandBuffers: unknown[]): void };
   createCommandEncoder(descriptor?: unknown): { finish(): unknown };
+  lost?: Promise<{ message?: string }>;
+  destroy(): void;
 };
 
 type KernelSummaryRow = { label: string; epilogue?: string; file: string };
@@ -115,11 +117,6 @@ type FixtureSummary = {
   layerNormEpsilon?: number;
   arrays: Record<FixtureArrayKey, { file: string }>;
 };
-type LoadedLayer = {
-  block: SquareformerTvmFullLayerWebgpuBlock;
-  attentionBias: Float32Array;
-};
-
 async function loadBytes(url: string, verifier?: ArtifactVerifier): Promise<ArrayBuffer> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`fetch ${url}: ${res.status} ${res.statusText}`);
@@ -231,17 +228,43 @@ async function loadKernels(kernelBase: string, verifier?: ArtifactVerifier): Pro
 
 export class SquareformerTvmHybridEvaluator implements Evaluator {
   private runTail: Promise<unknown> = Promise.resolve();
+  private destroyed = false;
+  private failureReason: string | undefined;
+  private device: GPUDevice;
+  private meta: SquareFormerMeta;
+  private stem: SquareformerTvmInputStemWebgpuBlock;
+  private layers: SquareformerTvmFullLayerWebgpuBlock[];
+  private policy: SquareformerTvmPolicyHeadWebgpuBlock;
+  private value: SquareformerTvmValueHeadWebgpuBlock;
+  private legal: SquareformerTvmLegalPolicyGatherWebgpuBlock;
 
   private constructor(
-    private device: GPUDevice,
-    private meta: SquareFormerMeta,
-    private stem: SquareformerTvmInputStemWebgpuBlock,
-    private layers: LoadedLayer[],
-    private policy: SquareformerTvmPolicyHeadWebgpuBlock,
-    private value: SquareformerTvmValueHeadWebgpuBlock,
-    private legal: SquareformerTvmLegalPolicyGatherWebgpuBlock,
-  ) {}
+    device: GPUDevice,
+    meta: SquareFormerMeta,
+    stem: SquareformerTvmInputStemWebgpuBlock,
+    layers: SquareformerTvmFullLayerWebgpuBlock[],
+    policy: SquareformerTvmPolicyHeadWebgpuBlock,
+    value: SquareformerTvmValueHeadWebgpuBlock,
+    legal: SquareformerTvmLegalPolicyGatherWebgpuBlock,
+  ) {
+    this.device = device;
+    this.meta = meta;
+    this.stem = stem;
+    this.layers = layers;
+    this.policy = policy;
+    this.value = value;
+    this.legal = legal;
+    // Surface a lost device as an evaluation error so a wrapping
+    // RuntimeFallbackEvaluator can switch to ORT.
+    void this.device.lost?.then((info) => {
+      this.failureReason = info?.message || 'WebGPU device lost';
+    });
+  }
 
+  /**
+   * Builds the evaluator on `device`. On success the evaluator owns the device
+   * and destroys it in destroy(); on failure the caller still owns it.
+   */
   static async create(
     device: GPUDevice,
     meta: SquareFormerMeta,
@@ -290,7 +313,9 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
           { ...summary.shape, heads: 8 },
           { n1: summary.n1LayerNormEpsilon ?? 1e-5, n2: summary.layerNormEpsilon ?? 1e-5 },
         );
-        return { summary, base, block, attentionBias: await loadF32(`${base}/${summary.arrays.staticAttentionBias.file}`, verifier) };
+        // The static attention bias is a read-only per-layer buffer: upload it once here, not per evaluation.
+        block.uploadAttentionBias(await loadF32(`${base}/${summary.arrays.staticAttentionBias.file}`, verifier));
+        return { summary, base, block };
       }),
     );
     layerFixtures.sort((a, b) => a.summary.layer - b.summary.layer);
@@ -335,7 +360,7 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
       device,
       meta,
       stem,
-      layerFixtures.map(({ block, attentionBias }) => ({ block, attentionBias })),
+      layerFixtures.map(({ block }) => block),
       policy,
       value,
       legal,
@@ -356,16 +381,17 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
 
   async evaluateEncoded(tokens: Uint32Array, attackSummary: Float32Array, legalIndices: Uint32Array): Promise<SquareformerTvmHybridRawOutput> {
     return this.runExclusive(async () => {
+      if (this.destroyed) throw new Error('Custom WebGPU evaluator is destroyed');
+      if (this.failureReason) throw new Error(`Custom WebGPU runtime is unavailable: ${this.failureReason}`);
       const effectiveLegal = legalIndices.length ? legalIndices : new Uint32Array([0]);
       await this.ensureLegalCapacity(effectiveLegal.length);
       const t0 = nowMs();
       this.stem.upload(tokens, attackSummary);
       this.legal.uploadIndices(effectiveLegal);
-      for (const layer of this.layers) layer.block.uploadAttentionBias(layer.attentionBias);
       const tUpload = nowMs();
       const commandEncoder = this.device.createCommandEncoder({ label: 'squareformer-tvm-hybrid-evaluate' });
       let inputBuffer = this.stem.encode(commandEncoder as never) as GPUBuffer;
-      for (const layer of this.layers) inputBuffer = layer.block.encode(commandEncoder as never, inputBuffer as never) as GPUBuffer;
+      for (const layer of this.layers) inputBuffer = layer.encode(commandEncoder as never, inputBuffer as never) as GPUBuffer;
       const policyBuffer = this.policy.encode(commandEncoder as never, inputBuffer as never) as GPUBuffer;
       this.legal.encode(commandEncoder as never, policyBuffer as never);
       this.value.encode(commandEncoder as never, inputBuffer as never);
@@ -374,6 +400,7 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
       this.device.queue.submit([commandEncoder.finish()]);
       const tSubmit = nowMs();
       const [legalPolicy, valueOut] = await Promise.all([this.legal.readOutput(), this.value.readOutput()]);
+      if (this.failureReason) throw new Error(`Custom WebGPU runtime failed: ${this.failureReason}`);
       const tDone = nowMs();
       return {
         legalPolicy: legalIndices.length ? legalPolicy : legalPolicy.subarray(0, 0),
@@ -416,11 +443,24 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
     return out;
   }
 
+  /** Frees the GPU buffers and the owned device once in-flight evaluations have settled. */
   destroy(): void {
-    this.stem.destroy();
-    for (const layer of this.layers) layer.block.destroy();
-    this.policy.destroy();
-    this.value.destroy();
-    this.legal.destroy();
+    if (this.destroyed) return;
+    this.destroyed = true;
+    const release = () => {
+      for (const block of [this.stem, ...this.layers, this.policy, this.value, this.legal]) {
+        try {
+          block.destroy();
+        } catch {
+          /* best effort */
+        }
+      }
+      try {
+        this.device.destroy();
+      } catch {
+        /* best effort */
+      }
+    };
+    void this.runTail.then(release, release);
   }
 }
