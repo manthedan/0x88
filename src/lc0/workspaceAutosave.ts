@@ -129,6 +129,11 @@ export function pgnResultForExport(headers: Record<string, string>, result: stri
   return { headers: 'Result' in headers ? { ...headers, Result: '*' } : headers, result: '*' };
 }
 
+/** Persisted and incoming PGNs use the same movetext-authoritative Result header. */
+function normalizedAnalysisHeaders(headers: Record<string, string>, result: string): Record<string, string> {
+  return 'Result' in headers ? { ...headers, Result: result } : headers;
+}
+
 export function decodeAnalysisSnapshot(raw: string): { tree: GameTree; headers: Record<string, string>; result: string } | null {
   try {
     const data = decodeEnvelope(raw, 'analysis');
@@ -138,8 +143,7 @@ export function decodeAnalysisSnapshot(raw: string): { tree: GameTree; headers: 
     const signature = [tree.root, ...tree.mainlineFrom()].map((node) => `${node.fen}\u0000${node.move ? moveToUci(node.move) : ''}`).join('\u0001');
     // Missing provenance in legacy saves is not evidence that the edited line owns a result.
     const result = data.resultSignature === signature ? savedResult : '*';
-    if ('Result' in headers) headers.Result = result;
-    return { tree, headers, result };
+    return { tree, headers: normalizedAnalysisHeaders(headers, result), result };
   } catch {
     return null;
   }
@@ -236,7 +240,11 @@ export function preservePreviousAnalysis(storage = workspaceStorage(), replaceme
       try {
         // Selection is not a different workspace. Keep the older recovery slot on a repeated link.
         const snapshot = (tree: GameTree, headers: Record<string, string>, result: string) =>
-          JSON.stringify({ tree: { ...serializeTree(tree), current: 0 }, headers: Object.entries(headers).sort(([a], [b]) => a.localeCompare(b)), result });
+          JSON.stringify({
+            tree: { ...serializeTree(tree), current: 0 },
+            headers: Object.entries(normalizedAnalysisHeaders(headers, result)).sort(([a], [b]) => a.localeCompare(b)),
+            result,
+          });
         if (snapshot(saved.tree, saved.headers, saved.result) === snapshot(replacement, headers, result)) return true;
       } catch {
         // Equality is optional: a large linked PGN can still replace a recoverable save.

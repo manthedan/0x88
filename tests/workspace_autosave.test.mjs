@@ -111,6 +111,39 @@ test('equal moves with different PGN metadata preserve the complete original ana
   assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), older, 'Header order and current selection do not change the analysis');
 });
 
+test('save then reopen identical PGN corpus never writes the recovery slot after normalization', () => {
+  const corpus = [
+    '[Result "*"]\n\n1. e4 1-0',
+    '[Result "0-1"]\n\n1. e4 1/2-1/2',
+    '[Event "Commented"]\n\n{intro} 1. e4! {centre} e5 $2 *',
+    '1. e4 (1. d4 $6 d5) e5 (1... c5 {Sicilian} 2. Nf3) *',
+    '[SetUp "1"]\n[FEN "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 23"]\n\n23. exd6 *',
+    '[SetUp "1"]\n[FEN "4k3/P7/8/8/8/8/8/6K1 w - - 0 1"]\n\n1. a8=N *',
+    '[SetUp "1"]\n[FEN "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 20"]\n\n20. O-O O-O-O *',
+    ...['*', '1-0', '0-1', '1/2-1/2'].flatMap((header) =>
+      ['*', '1-0', '0-1', '1/2-1/2'].map((result) => `[Result "${header}"]\n\n1. e4 $1 {keep} e5 (1... c5 $6) ${result}`),
+    ),
+  ];
+  for (const pgn of corpus) {
+    const store = storage();
+    const older = envelope('analysis', analysisData());
+    store.setItem(PREVIOUS_ANALYSIS_KEY, older);
+    const parsed = parsePgnGame(pgn);
+    const saver = createWorkspaceAutosave('analysis', store);
+    saver.schedule({ tree: serializeTree(parsed.tree), headers: parsed.tags, result: parsed.result, resultSignature: resultSignature(parsed.tree) });
+    assert.equal(saver.flush(), true);
+    for (const selectEnd of [false, true, false]) {
+      const identical = parsePgnGame(pgn);
+      if (selectEnd) identical.tree.toEnd();
+      else identical.tree.toStart();
+      const writes = store.writes;
+      assert.equal(preservePreviousAnalysis(store, identical.tree, identical.tags, identical.result), true);
+      assert.equal(store.writes, writes, pgn);
+      assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), older, pgn);
+    }
+  }
+});
+
 test('optional equality failure backs up the saved raw snapshot and accepts an oversized linked PGN', () => {
   const store = storage();
   const original = envelope('analysis', analysisData());
