@@ -47,12 +47,26 @@ export function rootRepetitionKeyFromFen(fen: string): string {
   return fen.trim().split(/\s+/).slice(0, 4).join(' ');
 }
 
+// Published board states are immutable; movegen's legality make/undo is synchronous
+// and never calls these helpers while the board is temporarily modified.
+const boardRepetitionKeys = new WeakMap<BoardState, { normal: string; root: string }>();
+
+function cachedBoardRepetitionKeys(board: BoardState): { normal: string; root: string } {
+  let keys = boardRepetitionKeys.get(board);
+  if (!keys) {
+    const fen = boardToFen(board);
+    keys = { normal: repetitionKeyFromFen(fen), root: rootRepetitionKeyFromFen(fen) };
+    boardRepetitionKeys.set(board, keys);
+  }
+  return keys;
+}
+
 export function repetitionKey(board: BoardState): string {
-  return repetitionKeyFromFen(boardToFen(board));
+  return cachedBoardRepetitionKeys(board).normal;
 }
 
 export function rootRepetitionKey(board: BoardState): string {
-  return rootRepetitionKeyFromFen(boardToFen(board));
+  return cachedBoardRepetitionKeys(board).root;
 }
 
 /**
