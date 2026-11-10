@@ -293,31 +293,48 @@ export function analysisMoveMarkup(root: GameNode, current: GameNode): string {
     const label = `${before.fullmove}${before.turn === 'w' ? '.' : '...'} ${node.san ?? ''}`;
     return `<button type="button" class="mv${node === current ? ' current' : ''}" data-node="${node.id}" aria-label="${htmlEscape(label)}"${node === current ? ' aria-current="step"' : ''}>${htmlEscape(node.san ?? '')}</button>`;
   };
-  const branch = (first: GameNode, includeSiblings: boolean): string => {
-    let html = '';
-    let pair: GameNode[] = [];
-    const flush = () => {
-      if (!pair.length) return;
-      const before = parseFen(pair[0].parent!.fen);
-      html += `<div class="move-pair"><span class="move-number">${before.fullmove}.</span>${before.turn === 'b' ? '<span class="missing-ply">…</span>' : ''}${pair.map(token).join('')}</div>`;
-      pair = [];
-    };
-    let node: GameNode | undefined = first;
-    while (node) {
-      const before = parseFen(node.parent!.fen);
-      if (before.turn === 'w') flush();
-      pair.push(node);
-      const siblings = includeSiblings || node !== first ? node.parent!.children.slice(1) : [];
-      if (siblings.length) {
-        flush();
-        html += siblings.map((variation) => `<div class="variation"><span class="variation-label">Variation</span>${branch(variation, false)}</div>`).join('');
-      } else if (before.turn === 'b') flush();
-      node = node.children[0];
-    }
-    flush();
-    return html;
+  type Branch = {
+    first: GameNode;
+    node: GameNode | undefined;
+    pair: GameNode[];
+    siblings: GameNode[];
+    nextSibling: number;
+    includeSiblings: boolean;
   };
-  return root.children[0]
-    ? branch(root.children[0], true)
+  const branch = (first: GameNode, includeSiblings: boolean): Branch => ({ first, node: first, pair: [], siblings: [], nextSibling: 0, includeSiblings });
+  const html: string[] = [];
+  const flush = (frame: Branch) => {
+    if (!frame.pair.length) return;
+    const before = parseFen(frame.pair[0].parent!.fen);
+    html.push(
+      `<div class="move-pair"><span class="move-number">${before.fullmove}.</span>${before.turn === 'b' ? '<span class="missing-ply">…</span>' : ''}${frame.pair.map(token).join('')}</div>`,
+    );
+    frame.pair = [];
+  };
+  const pending = root.children[0] ? [branch(root.children[0], true)] : [];
+  while (pending.length) {
+    const frame = pending[pending.length - 1];
+    if (frame.nextSibling < frame.siblings.length) {
+      html.push('<div class="variation"><span class="variation-label">Variation</span>');
+      pending.push(branch(frame.siblings[frame.nextSibling++], false));
+      continue;
+    }
+    const node = frame.node;
+    if (!node) {
+      flush(frame);
+      pending.pop();
+      if (pending.length) html.push('</div>');
+      continue;
+    }
+    const before = parseFen(node.parent!.fen);
+    if (before.turn === 'w') flush(frame);
+    frame.pair.push(node);
+    frame.siblings = frame.includeSiblings || node !== frame.first ? node.parent!.children.slice(1) : [];
+    frame.nextSibling = 0;
+    if (frame.siblings.length || before.turn === 'b') flush(frame);
+    frame.node = node.children[0];
+  }
+  return html.length
+    ? html.join('')
     : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game or position below.</p><label for="quickPgn">PGN game or FEN position</label><textarea id="quickPgn" class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" placeholder="Paste your game or position"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load</button><span class="quick-pgn-hint">PGN or FEN, detected automatically</span></div></div>';
 }

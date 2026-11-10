@@ -452,7 +452,13 @@ function restoreAnalysisWorkspace(): void {
   analysisGameTree = tree;
   workspaceHeaders = saved.headers;
   workspaceResult = saved.result;
-  inputEl('pgnInput').value = gameTreeToPgn(tree, workspaceHeaders, workspaceResult);
+  try {
+    inputEl('pgnInput').value = gameTreeToPgn(tree, workspaceHeaders, workspaceResult);
+  } catch (error) {
+    const message = `Workspace restored. PGN export failed: ${(error as Error).message}`;
+    el('message').textContent = message;
+    renderPgnImportNotice(message);
+  }
   // Review export keeps the restored game's headers; the signature still guards its result tag.
   reviewMetadata.set(tree, { tags: workspaceHeaders, result: workspaceResult, signature: reviewSignature() });
   el('analysisRestoreNotice').hidden = false;
@@ -2238,19 +2244,9 @@ let pgnImportNotice: { tree: GameTree; node: GameNode; text: string } | null = n
 function renderPgnImportNotice(text?: string): void {
   if (text !== undefined) pgnImportNotice = text ? { tree, node: tree.current, text } : null;
   if (pgnImportNotice && (pgnImportNotice.tree !== tree || pgnImportNotice.node !== tree.current)) pgnImportNotice = null;
-  let notice = document.getElementById('pgnImportNotice');
-  if (!pgnImportNotice) {
-    notice?.remove();
-    return;
-  }
-  if (!notice) {
-    notice = document.createElement('div');
-    notice.id = 'pgnImportNotice';
-    notice.setAttribute('role', 'status');
-    notice.style.cssText = 'margin:6px 12px; font-size:12px; line-height:1.5';
-    el('message').after(notice);
-  }
-  if (notice.textContent !== pgnImportNotice.text) notice.textContent = pgnImportNotice.text;
+  const notice = el('pgnImportNotice');
+  const content = pgnImportNotice?.text ?? '';
+  if (notice.textContent !== content) notice.textContent = content;
 }
 
 /** Labelled run state beside the turn pip: running, complete, or waiting — never an unexplained glyph. */
@@ -2555,11 +2551,12 @@ function renderMoveList() {
   if (retry) return;
   renderOpeningName();
   nodeIndex.clear();
-  const collect = (n: GameNode) => {
-    nodeIndex.set(n.id, n);
-    n.children.forEach(collect);
-  };
-  collect(tree.root);
+  const pending = [tree.root];
+  while (pending.length) {
+    const node = pending.pop()!;
+    nodeIndex.set(node.id, node);
+    for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]);
+  }
   el('main').toggleAttribute('data-empty-game', isEmptyAnalysisGame(tree.root));
   const list = el('movelist');
   const hadFocus = list.contains(document.activeElement);
@@ -4921,11 +4918,15 @@ function copyFen() {
 }
 
 function copyPgn() {
-  const exported = pgnResultForExport(workspaceHeaders, workspaceResult, reviewMetadata.get(tree)?.signature === reviewSignature());
-  const pgn = gameTreeToPgn(tree, exported.headers, exported.result);
-  inputEl('pgnInput').value = pgn;
-  void navigator.clipboard?.writeText(pgn).catch(() => undefined);
-  el('message').textContent = 'PGN copied to the box and clipboard.';
+  try {
+    const exported = pgnResultForExport(workspaceHeaders, workspaceResult, reviewMetadata.get(tree)?.signature === reviewSignature());
+    const pgn = gameTreeToPgn(tree, exported.headers, exported.result);
+    inputEl('pgnInput').value = pgn;
+    void navigator.clipboard?.writeText(pgn).catch(() => undefined);
+    el('message').textContent = 'PGN copied to the box and clipboard.';
+  } catch (error) {
+    el('message').textContent = `PGN export failed: ${(error as Error).message}`;
+  }
 }
 
 function closePvPreview(): void {

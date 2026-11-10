@@ -13,8 +13,9 @@ export type PgnWarningReason =
   | 'unmatched-comment'
   | 'variation-depth';
 
-// Bound recursive export and hostile imports consistently, well below the JS stack limit.
-const MAX_VARIATION_DEPTH = 128;
+// Parsing is iterative. Bound hostile external nesting while allowing every shape
+// within the workspace's 5000-move budget, including branches merged during import.
+const MAX_VARIATION_DEPTH = 5000;
 
 /** Where tolerant parsing stopped a line. Strict parsing throws instead. */
 export interface PgnWarning {
@@ -489,7 +490,8 @@ const WARNING_TEXT: Record<PgnWarningReason, string> = {
 
 /** One-line explanation of where and why a tolerant parse stopped a line. */
 export function describePgnWarning(warning: PgnWarning): string {
-  return `${warning.variation ? 'A variation stopped' : 'Stopped'} at move ${warning.label}: ${warning.token} (${WARNING_TEXT[warning.reason]})`;
+  const token = warning.token.length > 60 ? `${warning.token.slice(0, 60)}…` : warning.token;
+  return `${warning.variation ? 'A variation stopped' : 'Stopped'} at move ${warning.label}: ${token} (${WARNING_TEXT[warning.reason]})`;
 }
 
 /**
@@ -527,28 +529,35 @@ function serializeNode(node: GameNode, withNumber: boolean): string {
 }
 
 /** Tokens for the line continuing from `from`: its mainline, with each variation nested where it branches. */
-function serializeLine(from: GameNode, forceNumber: boolean, depth = 0): string[] {
-  if (depth > MAX_VARIATION_DEPTH) throw new Error(`PGN variation depth exceeds ${MAX_VARIATION_DEPTH}`);
+function serializeLine(from: GameNode, forceNumber: boolean): string {
   const out: string[] = [];
-  let node = from;
-  // A black move number is re-printed at the start of a line and after a comment or a variation.
-  let force = forceNumber;
-  while (node.children.length) {
-    const [main, ...variations] = node.children;
-    out.push(serializeNode(main, force));
-    for (const variation of variations) {
-      out.push(`(${[serializeNode(variation, true), ...serializeLine(variation, !!variation.comment, depth + 1)].join(' ')})`);
+  const pending: Array<string | { from: GameNode; force: boolean }> = [{ from, force: forceNumber }];
+  while (pending.length) {
+    const task = pending.pop()!;
+    if (typeof task === 'string') {
+      out.push(task);
+      continue;
     }
-    force = variations.length > 0 || !!main.comment;
-    node = main;
+    const [main, ...variations] = task.from.children;
+    if (!main) continue;
+    out.push(serializeNode(main, task.force));
+    // A black move number is re-printed after a comment or a variation.
+    if (main.children.length) pending.push({ from: main, force: variations.length > 0 || !!main.comment }, ' ');
+    // Reverse the pending work so each variation precedes the mainline continuation.
+    for (let i = variations.length - 1; i >= 0; i--) {
+      const variation = variations[i];
+      pending.push(')');
+      if (variation.children.length) pending.push({ from: variation, force: !!variation.comment }, ' ');
+      pending.push(serializeNode(variation, true), ' (');
+    }
   }
-  return out;
+  return out.join('');
 }
 
-/** Serialize a variation tree to PGN movetext: the pre-game comment, then every line recursively. */
+/** Serialize every branch without using the call stack for nested variations. */
 export function serializeMovetext(tree: GameTree): string {
   const intro = tree.root.comment ? [serializeComment(tree.root.comment)] : [];
-  return [...intro, ...serializeLine(tree.root, true)].join(' ');
+  return [...intro, serializeLine(tree.root, true)].filter(Boolean).join(' ');
 }
 
 /** Serialize a full PGN (tags + movetext + result). */

@@ -141,6 +141,7 @@ onMount(() => {
       </div>
     </header>
     <div id="message" aria-live="polite">Loading model…</div>
+    <div id="pgnImportNotice" role="status" aria-live="polite"></div>
     <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
     <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
@@ -618,13 +619,13 @@ onMount(() => {
   :global(.search-activity-row .search-progress-text){
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .app-sidebar #message{
+  .app-sidebar #message, .app-sidebar #pgnImportNotice{
     margin:6px 12px; padding:4px 8px; max-height:44px; overflow:auto;
     border:0; border-radius:var(--radius-sm);
     background:var(--panel-inset); color:var(--text-soft);
-    font-size:12px; line-height:1.5;
+    font-size:12px; line-height:1.5; overflow-wrap:anywhere;
   }
-  .app-sidebar #message:empty{display:none}
+  .app-sidebar #message:empty, .app-sidebar #pgnImportNotice:empty{display:none}
   .app-sidebar :global(#message[data-routine=true]){position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%)}
   .app-sidebar :global(.model-load-progress){margin:6px 12px 0}
   /* Per-engine progress lives in the summary rows (meter + stats) and on the Stop button. */
@@ -914,7 +915,7 @@ onMount(() => {
   .retry-solution{font:600 14px/1.5 var(--sans)}
   .retry-human{margin-top:16px}
   .retry-human select{margin-right:6px}
-  :global(.analysis-workspace[data-retrying]) .analysis-overview, :global(.analysis-workspace[data-retrying]) .add-engine-inline, :global(.analysis-workspace[data-retrying]) #message{display:none}
+  :global(.analysis-workspace[data-retrying]) .analysis-overview, :global(.analysis-workspace[data-retrying]) .add-engine-inline, :global(.analysis-workspace[data-retrying]) #message, :global(.analysis-workspace[data-retrying]) #pgnImportNotice{display:none}
   :global(.analysis-workspace[data-retrying]) .evalbar, :global(.analysis-workspace[data-retrying]) #evalSourceButton{visibility:hidden}
   :global(.analysis-workspace[data-retrying]) .board-tools>:not(#flip){display:none}
   :global(.analysis-workspace[data-retrying]) .review-panel{flex:0 0 auto; min-height:0; max-height:none}
@@ -1064,8 +1065,9 @@ onMount(() => {
     /* Keep the existing mobile engine actions in their first row while Review is open. */
     :global(.analysis-content[data-view=review]) .add-engine-inline{display:flex}
     .app-sidebar #message{grid-column:1 / -1; grid-row:calc(4 + var(--restore-row))}
-    .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:calc(5 + var(--restore-row))}
-    .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:calc(6 + var(--restore-row))}
+    .app-sidebar #pgnImportNotice{grid-column:1 / -1; grid-row:calc(5 + var(--restore-row))}
+    .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:calc(6 + var(--restore-row))}
+    .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:calc(7 + var(--restore-row))}
     .engine-summaries{max-height:none; overflow:visible}
     .history-panel :global(.movelist){max-height:260px}
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}
@@ -1151,7 +1153,7 @@ onMount(() => {
     .history-panel :global(.movelist:has(.move-pair)){max-height:120px}
     :global(.movelist .mv){min-height:30px}
     :global(.move-pair){grid-template-columns:32px repeat(2,minmax(0,1fr))}
-    .app-sidebar #message{margin:4px 10px}
+    .app-sidebar #message, .app-sidebar #pgnImportNotice{margin:4px 10px}
     :global(.analysis-workspace #ground coords){font-size:11px}
     :global(.insight-action){min-height:44px; padding:2px 10px; gap:0}
     :global(.insight-headline){font-size:16px}

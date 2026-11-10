@@ -26,6 +26,22 @@ import { GameTree } from '../src/lc0/gameTree.ts';
 
 const line = (engine, move, san, scoreCp, mateIn) => ({ engine, pvUci: [move], pvSan: san, scoreCp, mateIn, multipv: 1, scoreText: '', detail: '' });
 
+test('history renders all branches of a maximally nested 5000-node tree without overflowing', () => {
+  const tree = new GameTree();
+  const cycle = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
+  const alternatives = ['b1c3', 'b8c6', 'b1c3', 'b8c6'];
+  for (let i = 0; i < 2500; i++) {
+    const parent = tree.current;
+    assert.ok(tree.addUci(alternatives[i % 4]));
+    tree.goTo(parent);
+    assert.ok(tree.addUci(cycle[i % 4]));
+  }
+  const html = analysisMoveMarkup(tree.root, tree.current);
+  assert.equal((html.match(/data-node=/g) ?? []).length, 5000);
+  assert.equal((html.match(/class="variation"/g) ?? []).length, 2500);
+  assert.equal((html.match(/aria-current="step"/g) ?? []).length, 1);
+});
+
 test('first visit and reset compare two small engines without sharing mutable rows', () => {
   const rows = defaultAnalysisEngineRows();
   assert.deepEqual(rows, [

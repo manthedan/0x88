@@ -87,6 +87,44 @@ test('autosave persists NAGs and variation-leading comments through a page refre
   assert.equal(gameTreeToPgn(restored.tree), gameTreeToPgn(tree));
 });
 
+test('33 shallow PGN cycles import, autosave, restore and export merged deep branches', () => {
+  const { tree } = parsePgnGame(`${'Nf3 (Nf3 Nc6) Nf6 (Nf6 Nc3) Ng1 (Ng1 Nc6) Ng8 (Ng8 Nc3) '.repeat(33)}*`, { strict: true });
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  const snapshot = serializeTree(tree);
+  saver.schedule({ tree: snapshot, headers: {}, result: '*' });
+  saver.flush();
+  const restored = readWorkspace('analysis', decodeAnalysisSnapshot, store);
+  assert.ok(restored);
+  assert.deepEqual(serializeTree(restored.tree), snapshot);
+  const reparsed = parsePgnGame(gameTreeToPgn(restored.tree), { strict: true });
+  assert.deepEqual(reparsed.warnings, []);
+  assert.deepEqual(serializeTree(reparsed.tree), snapshot);
+});
+
+test('5000-node nested GameTree autosaves and restores without recursive walks', () => {
+  const tree = new GameTree();
+  const cycle = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
+  const alternatives = ['b1c3', 'b8c6', 'b1c3', 'b8c6'];
+  for (let i = 0; i < 2500; i++) {
+    const parent = tree.current;
+    assert.ok(tree.addUci(alternatives[i % 4]));
+    tree.goTo(parent);
+    assert.ok(tree.addUci(cycle[i % 4]));
+  }
+  const snapshot = serializeTree(tree);
+  assert.equal(snapshot.nodes.length, 5000);
+  const store = storage();
+  const saver = createWorkspaceAutosave('analysis', store);
+  saver.schedule({ tree: snapshot, headers: {}, result: '*' });
+  saver.flush();
+  const restored = readWorkspace('analysis', decodeAnalysisSnapshot, store);
+  assert.ok(restored);
+  assert.deepEqual(serializeTree(restored.tree), snapshot);
+  const reparsed = parsePgnGame(gameTreeToPgn(restored.tree), { strict: true });
+  assert.deepEqual(serializeTree(reparsed.tree).nodes, snapshot.nodes);
+});
+
 test('old-format version-1 analysis fixture decodes without optional annotations', () => {
   const raw = JSON.stringify({
     kind: 'analysis',

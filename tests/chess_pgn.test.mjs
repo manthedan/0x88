@@ -412,23 +412,23 @@ test('unmatched closing comment braces warn tolerantly and reject strictly', () 
   assert.equal(variation.warnings[0].variation, true);
 });
 
-test('5000 nested PGN variations hit a clear depth limit instead of overflowing', () => {
+test('hostile PGN nesting beyond the workspace budget rejects strictly and warns tolerantly', () => {
   const alternatives = ['Nc3', 'Nc6', 'Nc3', 'Nc6'];
   const cycle = ['Nf3', 'Nf6', 'Ng1', 'Ng8'];
-  const pgn = `${Array.from({ length: 5000 }, (_, i) => `${alternatives[i % 4]} (${cycle[i % 4]} `).join('')}${')'.repeat(5000)} Nf6 *`;
-  assert.throws(() => parsePgnGame(pgn, { strict: true }), /PGN variation depth exceeds 128/);
+  const pgn = `${Array.from({ length: 6000 }, (_, i) => `${alternatives[i % 4]} (${cycle[i % 4]} `).join('')}${')'.repeat(6000)} Nf6 *`;
+  assert.throws(() => parsePgnGame(pgn, { strict: true }), /PGN variation depth exceeds 5000/);
   const game = parsePgnGame(pgn);
   assert.equal(game.warnings.length, 1);
   assert.equal(game.warnings[0].reason, 'variation-depth');
-  assert.match(describePgnWarning(game.warnings[0]), /variation depth exceeds 128/i);
+  assert.match(describePgnWarning(game.warnings[0]), /variation depth exceeds 5000/i);
   assert.deepEqual(mainline(game), ['Nc3', 'Nf6']);
-  assert.throws(() => parsePgnGame(pgn, { strict: true, mainlineOnly: true }), /PGN variation depth exceeds 128/);
+  assert.throws(() => parsePgnGame(pgn, { strict: true, mainlineOnly: true }), /PGN variation depth exceeds 5000/);
 });
 
-test('export round-trips 128 variation levels and bounds a 5000-level tree', () => {
+test('export round-trips every branch of a maximally nested 5000-node GameTree', () => {
   const alternatives = ['b1c3', 'b8c6', 'b1c3', 'b8c6'];
   const cycle = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
-  for (const limit of [128, 5000]) {
+  for (const limit of [128, 2500]) {
     const tree = new GameTree();
     for (let depth = 0; depth < limit; depth++) {
       const parent = tree.current;
@@ -436,11 +436,27 @@ test('export round-trips 128 variation levels and bounds a 5000-level tree', () 
       tree.goTo(parent);
       assert.ok(tree.addUci(cycle[depth % 4]));
     }
-    if (limit === 128) {
-      const game = parsePgnGame(serializeMovetext(tree), { strict: true });
-      assert.deepEqual(shape(game.tree.root), shape(tree.root));
-    } else {
-      assert.throws(() => serializeMovetext(tree), /PGN variation depth exceeds 128/);
+    const game = parsePgnGame(gameTreeToPgn(tree), { strict: true });
+    assert.deepEqual(game.warnings, []);
+    const pending = [[tree.root, game.tree.root]];
+    let count = 0;
+    while (pending.length) {
+      const [expected, actual] = pending.pop();
+      assert.equal(actual.san, expected.san);
+      assert.equal(actual.fen, expected.fen);
+      assert.equal(actual.children.length, expected.children.length);
+      count++;
+      for (let i = 0; i < expected.children.length; i++) pending.push([expected.children[i], actual.children[i]]);
     }
+    assert.equal(count, limit * 2 + 1);
   }
+});
+
+test('long malformed PGN command warnings abbreviate the token and retain the reason', () => {
+  const command = `[%clk ${'Nf3 Nf6 Ng1 Ng8 '.repeat(1000)}`;
+  const { warnings } = parsePgnGame(`1. e4 ${command}`);
+  assert.equal(warnings[0].token, command, 'the parser retains the original diagnostic token');
+  const message = describePgnWarning(warnings[0]);
+  assert.ok(message.length < 180, `warning has ${message.length} characters`);
+  assert.match(message, /\[%clk .*… \(unclosed bracket command\)$/);
 });
