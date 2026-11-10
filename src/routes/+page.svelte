@@ -4,10 +4,25 @@ import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import { footerNav } from '$lib/nav';
+import { engineFamilyOptions } from '../lc0/engineCatalog.ts';
 
 const title = '0x88 | Browser chess engine workbench';
 const description = 'See where chess engines disagree on one position, play human-style opponents and run engine tournaments. Computation stays on your device.';
 const github = 'https://github.com/manthedan/0x88';
+const engineCount = engineFamilyOptions().length;
+
+// Alphabetical, so the order implies no ranking. 0x88's own Centipawn isn't credited here.
+const credits = [
+  ['Berserk', 'berserk'],
+  ['Leela Chess Zero', 'lc0'],
+  ['Leela Queen Odds', 'lqo'],
+  ['Maia3', 'maia3'],
+  ['PlentyChess', 'plentychess'],
+  ['Reckless', 'reckless'],
+  ['Stockfish', 'stockfish'],
+  ['Stormphrax', 'stormphrax'],
+  ['Viridithas', 'viridithas'],
+];
 
 let caps: BrowserCapabilityReport | null = null;
 let capsFailed = false;
@@ -77,14 +92,35 @@ $: readiness = capsFailed ? 'Device check unavailable'
   </div>
 </section>
 
-<section class="principle" aria-labelledby="engines-h">
-  <div class="wrap principle-grid">
-    <div>
-      <p class="eyebrow"><span></span> Engines</p>
-      <h2 id="engines-h">Engines and opponents</h2>
+<section class="engines" aria-labelledby="engines-h">
+  <div class="wrap">
+    <p class="eyebrow"><span></span> Engines</p>
+    <h2 id="engines-h">{engineCount} engines, plus human-style opponents</h2>
+    <div class="kinds">
+      <a class="kind" href="/app/analysis/">
+        <h3>Neural networks</h3>
+        <span class="kind-runtime">GPU</span>
+        <p>A trained network judges each position, and the search stays narrow and selective.</p>
+        <span class="kind-go">Open analysis <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="kind" href="/app/arena/">
+        <h3>Alpha-beta engines</h3>
+        <span class="kind-runtime">CPU</span>
+        <p>These search far more positions and evaluate each one quickly.</p>
+        <span class="kind-go">Run a tournament <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="kind" href="/app/play/">
+        <h3>Human-style opponents</h3>
+        <span class="kind-runtime">GPU</span>
+        <p>Play the move a person at your chosen rating would, from 600 to 2600, or face a bot that starts without its queen.</p>
+        <span class="kind-go">Play a game <span aria-hidden="true">→</span></span>
+      </a>
     </div>
-    <p>Neural networks, alpha-beta engines and human-style opponents. Licenses and source for each are in the Docs.</p>
-    <a href="/docs/#engines">Engine guides <span aria-hidden="true">→</span></a>
+    <p class="credits">
+      Built with open-source work from
+      {#each credits as [name, anchor], i (anchor)}<a href={`/docs/#engines-${anchor}`}>{name}</a>{i < credits.length - 2 ? ', ' : i === credits.length - 2 ? ' and ' : ''}{/each}.
+      Thanks to their authors. <a href="/docs/#licenses">Licenses and source</a>
+    </p>
   </div>
 </section>
 
@@ -183,6 +219,25 @@ $: readiness = capsFailed ? 'Device check unavailable'
 
 
 
+  .engines .wrap{padding-top:56px; padding-bottom:52px}
+  .engines .eyebrow{margin:0 0 10px}
+  .engines h2{margin:0 0 26px; font-size:clamp(28px,3.4vw,38px); line-height:1.1; letter-spacing:-.02em}
+  .kinds{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px}
+  .kind{display:grid; grid-template-columns:1fr auto; align-content:start; gap:8px 12px; padding:18px; border:1px solid var(--rule-strong); border-radius:12px; color:inherit; text-decoration:none}
+  .kind:hover{background:var(--panel); text-decoration:none}
+  .kind h3{margin:0; font-size:20px; line-height:1.2}
+  .kind-runtime{align-self:center; padding:1px 6px; border:1px solid var(--rule-strong); border-radius:999px; color:var(--ink-soft); font-family:var(--mono); font-size:12px}
+  .kind p{grid-column:1 / -1; margin:0; color:var(--muted); font-size:14px; line-height:1.55}
+  .kind-go{grid-column:1 / -1; margin-top:4px; color:var(--ink); font-size:13px; font-weight:650}
+  .kind-go span{color:var(--accent); margin-left:3px}
+  .credits{margin:18px 0 0; color:var(--muted); font-size:13px; line-height:1.6}
+  .credits a{color:inherit; text-decoration:underline; text-decoration-color:var(--rule-strong); text-underline-offset:3px}
+  .credits a:hover{color:var(--ink)}
+  @media (max-width:760px){
+    .engines .wrap{padding:44px 16px 40px}
+    .kinds{grid-template-columns:1fr; gap:10px}
+    .kind{padding:14px}
+  }
   .principle{border-top:1px solid var(--rule-strong); background:var(--bg-workspace)}
   .principle-grid{
     padding-top:44px; padding-bottom:44px; display:grid;
