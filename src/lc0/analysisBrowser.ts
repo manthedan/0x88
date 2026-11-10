@@ -32,6 +32,7 @@ import {
   stockfishAnalysisLines,
 } from './analysisFormat.ts';
 import { takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
+import { analysisUrlFen } from './analysisUrlInput.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
@@ -403,7 +404,7 @@ function renderOpeningName(): void {
   label.title = opening ? `${opening[0]} ${opening[1]} · Lichess opening names (CC0)` : label.textContent;
 }
 
-let tree = new GameTree(params.get('fen') ?? START_FEN);
+let tree = new GameTree(START_FEN);
 let workspaceHeaders: Record<string, string> = {};
 let workspaceResult = '*';
 let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
@@ -429,13 +430,16 @@ function clearAnalysisWorkspace(): void {
 
 function restoreAnalysisWorkspace(): void {
   const handoffPgn = takeAnalysisHandoff();
+  let linkedInputError = '';
   el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
   if (hasExplicitWorkspaceInput(location.search) || handoffPgn) {
     try {
       // Decode before touching either saved slot. URL FEN takes precedence over PGN/handoff.
+      const linkedFen = analysisUrlFen(params.get('fen'));
+      if (linkedFen.error) throw new Error(linkedFen.error);
       const rawPgn = params.get('pgn') ?? handoffPgn;
       const parsed = params.has('fen') ? null : parseFirstPgnGame(rawPgn ?? '').game;
-      const replacement = parsed?.tree ?? new GameTree(params.get('fen')!);
+      const replacement = parsed?.tree ?? new GameTree(linkedFen.fen);
       if (!preservePreviousAnalysis()) throw new Error('Could not keep the previous analysis. Export it before replacing it.');
       clearAnalysisWorkspace();
       tree = replacement;
@@ -452,11 +456,14 @@ function restoreAnalysisWorkspace(): void {
       saveAnalysisWorkspace();
       return;
     } catch (error) {
-      renderPgnImportNotice(`Could not load linked analysis: ${(error as Error).message}`);
+      linkedInputError = `Could not load linked analysis: ${(error as Error).message}`;
     }
   }
   const saved = readWorkspace('analysis', decodeAnalysisSnapshot);
-  if (!saved) return;
+  if (!saved) {
+    if (linkedInputError) renderPgnImportNotice(linkedInputError);
+    return;
+  }
   tree = saved.tree;
   analysisGameTree = tree;
   workspaceHeaders = saved.headers;
@@ -471,6 +478,7 @@ function restoreAnalysisWorkspace(): void {
   // Review export keeps the restored game's headers; the signature still guards its result tag.
   reviewMetadata.set(tree, { tags: workspaceHeaders, result: workspaceResult, signature: reviewSignature() });
   el('analysisRestoreNotice').hidden = false;
+  if (linkedInputError) renderPgnImportNotice(linkedInputError);
 }
 let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0EvaluationProvider | null = null;
@@ -6189,7 +6197,7 @@ async function init(mountSignal: AbortSignal) {
 let lastAnalysisMountHref: string | null = null;
 
 function resetAnalysisPageState(): void {
-  tree = new GameTree(params.get('fen') ?? START_FEN);
+  tree = new GameTree(START_FEN);
   workspaceHeaders = {};
   workspaceResult = '*';
   analysisGameTree = tree;
