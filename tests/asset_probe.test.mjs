@@ -8,6 +8,26 @@ import { checkRecklessVariantAsset } from '../src/lc0/recklessVariants.ts';
 import { checkStormphraxVariantAsset } from '../src/lc0/stormphraxVariants.ts';
 import { checkViridithasVariantAsset } from '../src/lc0/viridithasVariants.ts';
 
+for (const code of [404, 410]) {
+  test(`confirmed ${code} resolves missing even when another required HEAD hangs`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let hangingSignal;
+    let result;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+      if (url.includes('missing')) return new Response(null, { status: code });
+      hangingSignal = options.signal;
+      return new Promise(() => {});
+    });
+    const probe = probeAssetUrls([`/missing-${code}`, `/hang-${code}`], { timeoutMs: 10 }).then((status) => (result = status));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    assert.equal(result, 'missing', 'missing resolves without waiting for timeout');
+    assert.equal(hangingSignal.aborted, true, 'cancel the remaining HEAD');
+    t.mock.timers.tick(10);
+    await probe;
+    assert.equal(result, 'missing');
+  });
+}
+
 test('shared probe classifies HTTP status, network errors and bounded aborts', async (t) => {
   for (const [status, expected] of [
     [200, 'present'],

@@ -34,7 +34,12 @@ export async function probeAssetUrls(
         try {
           const response = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
           if (response.ok) return 'present';
-          return response.status === 404 || response.status === 410 ? 'missing' : 'unknown';
+          if (response.status === 404 || response.status === 410) {
+            finish('missing');
+            controller.abort();
+            return 'missing';
+          }
+          return 'unknown';
         } catch {
           return 'unknown';
         }
