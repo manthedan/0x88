@@ -6,8 +6,9 @@ import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 let mountedUrl: URL | null = null;
 let isRunActive = () => false;
+let leaveMessage = () => '';
 beforeNavigate(({ cancel, willUnload }) => {
-  if (isRunActive() && !willUnload && !window.confirm('Leave this tournament? The current game will be lost. Completed games are saved.')) cancel();
+  if (isRunActive() && !willUnload && !window.confirm(leaveMessage())) cancel();
 });
 afterNavigate(({ to }) => {
   if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
@@ -24,6 +25,7 @@ onMount(() => {
     .then((module) => {
       if (!mounted) return;
       isRunActive = module.isArenaRunActive;
+      leaveMessage = module.arenaLeaveMessage;
       cleanup = module.mountArenaBrowser();
     })
     .catch((error) => {

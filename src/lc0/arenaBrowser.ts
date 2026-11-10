@@ -5277,6 +5277,12 @@ export function isArenaRunActive(): boolean {
   return running;
 }
 
+export function arenaLeaveMessage(): string {
+  return checkpointProblem
+    ? 'Leave this tournament? The current game will be lost. Completed games could not be saved. Export the PGN before leaving.'
+    : 'Leave this tournament? The current game will be lost. Completed games are saved.';
+}
+
 export function mountArenaBrowser(): () => void {
   const href = location.href;
   if (lastArenaMountHref !== null && lastArenaMountHref !== href) {
