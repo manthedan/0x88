@@ -1,10 +1,14 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import { afterNavigate } from '$app/navigation';
+import { afterNavigate, beforeNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 let mountedUrl: URL | null = null;
+let isRunActive = () => false;
+beforeNavigate(({ cancel, willUnload }) => {
+  if (isRunActive() && !willUnload && !window.confirm('Leave this tournament? The current game will be lost. Completed games are saved.')) cancel();
+});
 afterNavigate(({ to }) => {
   if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
 });
@@ -19,6 +23,7 @@ onMount(() => {
   void import('../../../lc0/arenaBrowser')
     .then((module) => {
       if (!mounted) return;
+      isRunActive = module.isArenaRunActive;
       cleanup = module.mountArenaBrowser();
     })
     .catch((error) => {
@@ -29,6 +34,7 @@ onMount(() => {
     });
   return () => {
     mounted = false;
+    isRunActive = () => false;
     cleanup();
   };
 });

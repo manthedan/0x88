@@ -55,6 +55,7 @@ import {
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
+import { arenaMoveDelay, guardArenaUnload } from './arenaNavigation.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { loadArenaResource } from './arenaResourceLoad.ts';
 import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
@@ -3752,7 +3753,7 @@ async function playArenaGame(
     const node = tree.addUci(lastUci);
     liveTrail?.entries.push({ fen: boardToFen(board), uci: lastUci, san: node?.san ?? null });
     renderBoard();
-    await sleep(delay, signal);
+    await arenaMoveDelay(delay, signal, document);
   }
   return { result: '1/2-1/2', reason: 'max plies', tree };
 }
@@ -3913,7 +3914,7 @@ async function runIsolatedCpuTournament(
               live.set(index, { position, white, black, trail });
               show(index);
             },
-            delay: () => sleep(delayMs, gameSignal),
+            delay: () => arenaMoveDelay(delayMs, gameSignal, document),
           });
           return { ...outcome, trail, diagnostics: captureCpuArenaDiagnostics(seats, cpuEngineHashMbForSurface('arena'), searchTelemetryText) };
         } finally {
@@ -5325,6 +5326,10 @@ function resetArenaPageState(): void {
   seatRows.splice(0, seatRows.length, { family: 'lc0', variant: 'small', strength: 100 }, { family: 'sf', variant: 'lite', strength: 8 });
 }
 
+export function isArenaRunActive(): boolean {
+  return running;
+}
+
 export function mountArenaBrowser(): () => void {
   const href = location.href;
   if (lastArenaMountHref !== null && lastArenaMountHref !== href) {
@@ -5336,6 +5341,7 @@ export function mountArenaBrowser(): () => void {
   const controller = new AbortController();
   mountAbort = controller;
   arenaMountedCallbackCache = new WeakMap();
+  window.addEventListener('beforeunload', (event) => guardArenaUnload(event, isArenaRunActive()), { signal: controller.signal });
   void init(controller.signal).catch((error) => {
     if (controller.signal.aborted || mountAbort !== controller) return;
     hideEngineWarmupStatus();
