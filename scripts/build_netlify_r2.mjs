@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { checkCspPolicy } from './check_csp_policy.mjs';
 import { checkDeployCachePolicy } from './check_deploy_cache_policy.mjs';
 import { checkSvelteKitRuntimeId } from './check_sveltekit_runtime_id.mjs';
 import { cleanSvelteKitBuild } from './clean_sveltekit_build.mjs';
@@ -64,6 +65,9 @@ async function main() {
       timings,
     );
     await timed('verify SvelteKit runtime id', () => checkSvelteKitRuntimeId(dist), timings);
+    // Both CSPs (netlify.toml header, SvelteKit meta) must allow every inline
+    // script on every built page, or that page fails to theme or hydrate.
+    await timed('check content security policy', () => checkCspPolicy(process.cwd(), dist), timings);
     await timed(
       'prune external assets',
       () => {
