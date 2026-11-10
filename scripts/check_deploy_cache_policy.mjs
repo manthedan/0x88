@@ -182,6 +182,13 @@ export function checkDeployCachePolicy(rootPath = process.cwd()) {
       fail(`netlify.toml missing ${description} on ${path}`);
       continue;
     }
+    if (name === 'content-security-policy') {
+      // connect-src follows build-time asset/channel configuration and is
+      // validated by check_csp_policy.mjs. Keep every other directive fixed.
+      const withoutConnect = (policy) => policy.replace(/(^|;)\s*connect-src\s+[^;]*/i, '$1 connect-src');
+      if (directiveSet(withoutConnect(actual)) !== directiveSet(withoutConnect(expected))) fail(`netlify.toml missing ${description} on ${path}`);
+      continue;
+    }
     if (name !== 'cache-control') {
       // Single-token policy headers: any deviation is a different policy.
       if (directiveSet(actual) !== directiveSet(expected)) fail(`netlify.toml missing ${description} on ${path}`);

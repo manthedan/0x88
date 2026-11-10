@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import {
   checkBuiltPage,
@@ -13,6 +15,8 @@ import {
   metaDirectivesFromSvelteConfig,
   parseCsp,
 } from '../scripts/check_csp_policy.mjs';
+import { checkDeployCachePolicy } from '../scripts/check_deploy_cache_policy.mjs';
+import { renderHeadersFile } from '../scripts/generate_netlify_headers_file.mjs';
 import svelteConfig from '../svelte.config.js';
 
 const repoRoot = process.cwd();
@@ -38,6 +42,102 @@ function builtPage({ theme = 'theme()', boot = 'boot()', metaScriptSrc } = {}) {
 
 test('the shipped header and svelte.config.js policies agree', async () => {
   assert.deepEqual(await checkCspPolicy(repoRoot), { ok: true, checked: ['netlify.toml', 'svelte.config.js'] });
+});
+
+const defaultEnv = {
+  VITE_LC0_BROWSER_ASSET_BASE_URL: 'https://assets.0x88.app',
+  VITE_LC0_ARTIFACT_CHANNEL_URL: 'https://assets.0x88.app/channels/stable.json',
+};
+
+async function policyFixture(t, mutate) {
+  const dir = await mkdtemp(join(tmpdir(), 'csp-policy-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const toml = mutate(await readFile(resolve(repoRoot, 'netlify.toml'), 'utf8'));
+  await mkdir(join(dir, 'public'));
+  await writeFile(join(dir, 'package.json'), '{"type":"module"}');
+  await writeFile(join(dir, 'svelte.config.js'), `export default ${JSON.stringify(svelteConfig)};`);
+  await writeFile(join(dir, 'netlify.toml'), toml);
+  await writeFile(join(dir, 'public/_headers'), renderHeadersFile(toml));
+  return dir;
+}
+
+function missingOrigin(origin, setting) {
+  return `header connect-src blocks ${origin} required by ${setting}; add ${origin} to Content-Security-Policy connect-src in netlify.toml [[headers]] for "/*", then run \`npm run deploy:generate-headers\` to update public/_headers`;
+}
+
+test('default build-time asset and channel configuration passes the CSP gate', async () => {
+  assert.equal((await checkCspPolicy(repoRoot, undefined, defaultEnv)).ok, true);
+});
+
+for (const [setting, url, origin] of [
+  ['VITE_LC0_BROWSER_ASSET_BASE_URL', 'https://models.example.com/weights/', 'https://models.example.com'],
+  ['VITE_LC0_ARTIFACT_CHANNEL_URL', 'https://channels.example.com/channels/stable.json', 'https://channels.example.com'],
+]) {
+  test(`custom ${setting} without a header change fails with the exact origin and edit location`, async () => {
+    await assert.rejects(checkCspPolicy(repoRoot, undefined, { ...defaultEnv, [setting]: url }), (error) => {
+      assert.deepEqual(error.failures, [missingOrigin(origin, setting)]);
+      return true;
+    });
+  });
+
+  test(`custom ${setting} with a matching header passes both deploy gates`, async (t) => {
+    const root = await policyFixture(t, (toml) => toml.replace("connect-src 'self'", `connect-src 'self' ${origin}`));
+    assert.equal((await checkCspPolicy(root, undefined, { ...defaultEnv, [setting]: url })).ok, true);
+    assert.equal(checkDeployCachePolicy(root).ok, true);
+  });
+}
+
+test('fixed game-import and analytics origins are required even without custom build configuration', async (t) => {
+  for (const origin of ['https://lichess.org', 'https://api.chess.com', 'https://cloudflareinsights.com']) {
+    const root = await policyFixture(t, (toml) => toml.replace(` ${origin}`, ''));
+    await assert.rejects(checkCspPolicy(root, undefined, defaultEnv), (error) => {
+      assert.equal(error.failures.length, 1);
+      assert.ok(error.failures[0].startsWith(`header connect-src blocks ${origin} required by `));
+      return true;
+    });
+  }
+});
+
+test('the release --asset-base option is checked before a missing build stamp', () => {
+  const result = spawnSync(process.execPath, ['scripts/netlify_r2_release.mjs', '--check', '--asset-base', 'https://models.example.com'], {
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 1);
+  assert.ok(result.stderr.includes(missingOrigin('https://models.example.com', 'VITE_LC0_BROWSER_ASSET_BASE_URL')), result.stderr);
+});
+
+test('the R2 build checks its effective asset configuration before invoking Vite', () => {
+  const result = spawnSync(process.execPath, ['scripts/build_netlify_r2.mjs'], {
+    encoding: 'utf8',
+    env: { ...process.env, ...defaultEnv, VITE_LC0_BROWSER_ASSET_BASE_URL: 'https://models.example.com' },
+  });
+  assert.equal(result.status, 1);
+  assert.ok(result.stderr.includes(missingOrigin('https://models.example.com', 'VITE_LC0_BROWSER_ASSET_BASE_URL')), result.stderr);
+  assert.ok(!result.stderr.includes('[netlify-r2-build] vite build:'));
+});
+
+test('the standalone gate reads Vite production environment files', async (t) => {
+  const root = await policyFixture(t, (toml) => toml);
+  await writeFile(join(root, '.env.production'), 'VITE_LC0_BROWSER_ASSET_BASE_URL=https://models.example.com\n');
+  await assert.rejects(checkCspPolicy(root), (error) => {
+    assert.deepEqual(error.failures, [missingOrigin('https://models.example.com', 'VITE_LC0_BROWSER_ASSET_BASE_URL')]);
+    return true;
+  });
+});
+
+test('a relative artifact channel remains covered by self', async () => {
+  assert.equal((await checkCspPolicy(repoRoot, undefined, { ...defaultEnv, VITE_LC0_ARTIFACT_CHANNEL_URL: '/channels/stable.json' })).ok, true);
+});
+
+test('allowing custom connect origins does not loosen other CSP directives in either gate', async (t) => {
+  const root = await policyFixture(t, (toml) =>
+    toml.replace("connect-src 'self'", "connect-src 'self' https://models.example.com").replace(" 'unsafe-eval'", ''),
+  );
+  await assert.rejects(checkCspPolicy(root, undefined, { ...defaultEnv, VITE_LC0_BROWSER_ASSET_BASE_URL: 'https://models.example.com' }), (error) => {
+    assert.deepEqual(error.failures, ["meta script-src allows 'unsafe-eval' that the header policy does not"]);
+    return true;
+  });
+  assert.throws(() => checkDeployCachePolicy(root), /missing site-wide Content-Security-Policy/);
 });
 
 // This is what makes the meta policy unable to block the theme script: a meta

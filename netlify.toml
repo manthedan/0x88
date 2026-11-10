@@ -74,6 +74,12 @@
     # import APIs (src/lc0/gameImport.ts), and the Cloudflare Web Analytics
     # beacon endpoint. svelte.config.js keeps `https:` in the meta policy for
     # local ?assetBase= overrides; both policies apply here, so this one decides.
+    # R2 builds COPY public/_headers unchanged; generation is a separate
+    # maintenance command, not a build step. Keep this default policy and its
+    # generated mirror identical (Netlify accepts both). Custom build-time
+    # VITE_LC0_BROWSER_ASSET_BASE_URL / VITE_LC0_ARTIFACT_CHANNEL_URL origins
+    # must be added to connect-src here, then `npm run deploy:generate-headers`.
+    # The CSP gate fails with the exact missing origin before building/releasing.
     Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://assets.0x88.app https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://assets.0x88.app https://lichess.org https://api.chess.com https://cloudflareinsights.com; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self'; manifest-src 'self'"
 
 # Root/product HTML should revalidate so app-shell changes and channel pointer

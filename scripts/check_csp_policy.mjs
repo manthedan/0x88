@@ -27,6 +27,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { loadEnv } from 'vite';
 import { effectiveValue, parseHeaderBlocks, valuesByName } from './netlify_headers.mjs';
 
 const KEYWORDS = new Set(['self', 'none', 'unsafe-inline', 'unsafe-eval', 'wasm-unsafe-eval', 'strict-dynamic', 'unsafe-hashes', 'report-sample']);
@@ -85,6 +86,33 @@ function sourceCovered(source, sources) {
   if (sources.has(source)) return true;
   const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(source)?.[1];
   return scheme !== undefined && sources.has(`${scheme.toLowerCase()}:`);
+}
+
+/** Required fetch origins from the same public environment Vite bakes into the app. */
+function checkConnectOrigins(header, env) {
+  const required = new Map([
+    ['https://lichess.org', 'Lichess game imports'],
+    ['https://api.chess.com', 'Chess.com game imports'],
+    ['https://cloudflareinsights.com', 'Cloudflare Web Analytics'],
+  ]);
+  for (const [setting, fallback] of [
+    ['VITE_LC0_BROWSER_ASSET_BASE_URL', 'https://assets.0x88.app'],
+    ['VITE_LC0_ARTIFACT_CHANNEL_URL', 'https://assets.0x88.app/channels/stable.json'],
+  ]) {
+    const value = env[setting]?.trim() || fallback;
+    // Channel URLs may be relative to the app; those use the existing 'self'.
+    const url = setting === 'VITE_LC0_ARTIFACT_CHANNEL_URL' ? new URL(value, 'https://same-origin.invalid/') : new URL(value);
+    const origin = url.origin === 'https://same-origin.invalid' ? "'self'" : url.origin;
+    required.set(origin, setting);
+  }
+  const sources = new Set(header.get('connect-src') ?? header.get('default-src') ?? []);
+  return [...required].flatMap(([origin, setting]) =>
+    sourceCovered(origin, sources) || sources.has('*')
+      ? []
+      : [
+          `header connect-src blocks ${origin} required by ${setting}; add ${origin} to Content-Security-Policy connect-src in netlify.toml [[headers]] for "/*", then run \`npm run deploy:generate-headers\` to update public/_headers`,
+        ],
+  );
 }
 
 /** Directives that differ between the header and meta policies beyond the documented exceptions. */
@@ -166,13 +194,14 @@ function htmlFiles(dir) {
     .sort();
 }
 
-export async function checkCspPolicy(rootPath = process.cwd(), distDir = undefined) {
+export async function checkCspPolicy(rootPath = process.cwd(), distDir = undefined, env = loadEnv('production', rootPath, 'VITE_')) {
   const failures = [];
   const headerText = headerPolicyFromNetlifyToml(readFileSync(resolve(rootPath, 'netlify.toml'), 'utf8'));
   if (headerText === undefined) throw new Error('netlify.toml declares no Content-Security-Policy on /*');
   const header = parseCsp(headerText);
   const svelteConfig = (await import(pathToFileURL(resolve(rootPath, 'svelte.config.js')).href)).default;
   failures.push(...checkPolicyConsistency(header, metaDirectivesFromSvelteConfig(svelteConfig)));
+  failures.push(...checkConnectOrigins(header, env));
   const pages = [];
   if (distDir !== undefined) {
     const dist = resolve(rootPath, distDir);

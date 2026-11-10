@@ -5,6 +5,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { checkCspPolicy } from './check_csp_policy.mjs';
 import { checkDeployCachePolicy } from './check_deploy_cache_policy.mjs';
 import { checkOrtRuntimeAssets } from './check_ort_runtime_assets.mjs';
 import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
@@ -120,6 +121,7 @@ async function desiredStamp(args) {
       netlifyHeadersModelSha256: await sha256Path('scripts/netlify_headers.mjs'),
       generateNetlifyHeadersSha256: await sha256Path('scripts/generate_netlify_headers_file.mjs'),
       checkDeployCachePolicySha256: await sha256Path('scripts/check_deploy_cache_policy.mjs'),
+      checkCspPolicySha256: await sha256Path('scripts/check_csp_policy.mjs'),
       buildNetlifyR2Sha256: await sha256Path('scripts/build_netlify_r2.mjs'),
       prepareNetlifyR2PublicAssetsSha256: await sha256Path('scripts/prepare_netlify_r2_public_assets.mjs'),
       pruneExternalModelAssetsSha256: await sha256Path('scripts/prune_external_model_assets.mjs'),
@@ -191,6 +193,13 @@ async function main() {
   // Deploy header policy is a property of the source config, so check it before
   // spending a build on a tree that must not ship.
   const cachePolicy = await timed('check deploy cache policy', timings, () => checkDeployCachePolicy());
+  await timed('check configured CSP origins', timings, () =>
+    checkCspPolicy(process.cwd(), undefined, {
+      ...process.env,
+      VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl,
+      VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase,
+    }),
+  );
   const desired = await timed('compute desired build stamp', timings, () => desiredStamp(args));
   const existing = await timed('read existing build stamp', timings, () => readStamp(dist));
   const stampMatches = JSON.stringify(comparableStamp(existing)) === JSON.stringify(comparableStamp(desired));
