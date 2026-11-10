@@ -25,6 +25,7 @@ import { Lc0OnnxEvaluator } from '/src/lc0/onnxEvaluator.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from '/src/lc0/policyMap.ts';
 import { Lc0PuctSearcher } from '/src/lc0/search.ts';
 import { StockfishEngine } from '/src/lc0/stockfishEngine.ts';
+import { f16BitsToF32, f32ToF16Bits } from '/src/nn/float16.ts';
 import { setRequestedOrtExecutionProviderForCurrentThread } from '/src/nn/ortRuntime.ts';
 
 const LC0_POLICY_TEMPERATURE = 1.359;
@@ -257,32 +258,6 @@ async function diagnoseShader(tvm, sys, entryName, device) {
   }
 }
 
-function f32ToF16Bits(value) {
-  if (Number.isNaN(value)) return 0x7e00;
-  if (value === Infinity) return 0x7c00;
-  if (value === -Infinity) return 0xfc00;
-  const sign = value < 0 || Object.is(value, -0) ? 0x8000 : 0;
-  const abs = Math.abs(value);
-  if (abs === 0) return sign;
-  if (abs >= 65504) return sign | 0x7bff;
-  if (abs < 2 ** -24) return sign;
-  if (abs < 2 ** -14) return sign | Math.round(abs / 2 ** -24);
-  const exponent = Math.floor(Math.log2(abs));
-  const fraction = abs / 2 ** exponent - 1;
-  let halfExponent = exponent + 15;
-  let halfFraction = Math.round(fraction * 1024);
-  if (halfFraction === 1024) { halfExponent += 1; halfFraction = 0; }
-  if (halfExponent >= 31) return sign | 0x7bff;
-  return sign | (halfExponent << 10) | (halfFraction & 0x03ff);
-}
-function f16BitsToF32(bits) {
-  const sign = (bits & 0x8000) ? -1 : 1;
-  const exponent = (bits >>> 10) & 0x1f;
-  const fraction = bits & 0x03ff;
-  if (exponent === 0) return sign * (fraction === 0 ? 0 : 2 ** -14 * (fraction / 1024));
-  if (exponent === 0x1f) return fraction === 0 ? sign * Infinity : NaN;
-  return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
-}
 function float32ToFloat16Bytes(values) {
   const out = new Uint16Array(values.length);
   for (let i = 0; i < values.length; i++) out[i] = f32ToF16Bits(values[i]);
