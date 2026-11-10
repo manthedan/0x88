@@ -417,7 +417,7 @@ function saveAnalysisWorkspace(): void {
         : null,
     );
   } catch {
-    workspaceAutosave?.clear();
+    workspaceAutosave?.pause('too-large');
   }
 }
 
@@ -6254,7 +6254,12 @@ export function mountAnalysisBrowser(): () => void {
   }
   lastAnalysisMountHref = href;
   resetAnalysisPageState();
-  workspaceAutosave = createWorkspaceAutosave('analysis');
+  workspaceAutosave = createWorkspaceAutosave('analysis', undefined, 400, (reason) => {
+    el('autosaveNotice').textContent =
+      reason === 'too-large'
+        ? 'Autosave paused: analysis too large — export PGN to keep it.'
+        : 'Autosave paused: storage unavailable or full — export PGN to keep it.';
+  });
   analysisWorkerProgressMessages = 0;
   analysisUiProgressSamples = 0;
   installHiddenTabPause();

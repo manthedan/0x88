@@ -181,7 +181,7 @@ test('snapshot annotation validation and size limits remain enforced', () => {
   assert.ok(store.getItem(workspaceStorageKey('analysis')));
   saver.schedule(oversized);
   saver.flush();
-  assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
+  assert.ok(store.getItem(workspaceStorageKey('analysis')));
   const tooManyNodes = { ...data.tree, nodes: Array(5001).fill({ parent: 0, uci: 'e2e4', nags: [1] }) };
   assert.equal(decodeAnalysisSnapshot(envelope('analysis', { ...data, tree: tooManyNodes })), null);
 });
@@ -358,17 +358,17 @@ test('denied/full storage fails safely and invalid saved data is removed', () =>
   });
   full.schedule(playData());
   full.flush();
-  assert.equal(store.getItem(workspaceStorageKey('play')), null, 'old game must not survive a failed replacement');
+  assert.ok(store.getItem(workspaceStorageKey('play')), 'last good save survives a failed write');
 });
 
-test('oversized work cannot leave a stale saved game behind', () => {
+test('oversized work retains the last good saved game', () => {
   const store = storage();
   const saver = createWorkspaceAutosave('analysis', store);
   saver.schedule(analysisData());
   saver.flush();
   saver.schedule({ ...analysisData(), headers: { Event: 'x'.repeat(WORKSPACE_MAX_CHARS) } });
   saver.flush();
-  assert.equal(store.getItem(workspaceStorageKey('analysis')), null);
+  assert.ok(store.getItem(workspaceStorageKey('analysis')));
 });
 
 test('only consumed Analysis search keys classify as URL workspace input', () => {
@@ -481,4 +481,44 @@ test('Copy PGN drops an imported result once the mainline no longer owns it', as
   assert.match(pgn, /\[Result "\*"\]/);
   assert.match(pgn, /\*$/);
   assert.equal(pgnResultForExport({ White: 'A' }, '1-0', false).headers.Result, undefined);
+});
+
+test('quota, serialization and node-limit failures pause once without removing the last save', () => {
+  const store = storage();
+  const seed = createWorkspaceAutosave('analysis', store);
+  seed.schedule(analysisData());
+  seed.flush();
+  const original = store.getItem(workspaceStorageKey('analysis'));
+  const notices = [];
+  const saver = createWorkspaceAutosave(
+    'analysis',
+    {
+      ...store,
+      setItem() {
+        throw Error('quota');
+      },
+    },
+    400,
+    (reason) => notices.push(reason),
+  );
+  saver.schedule(analysisData());
+  saver.flush();
+  saver.schedule({ ...analysisData(), headers: { Event: 'another' } });
+  saver.flush();
+  const circular = {};
+  circular.tree = circular;
+  saver.schedule(circular);
+  saver.pause('too-large');
+  assert.deepEqual(notices, ['storage']);
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
+  const tooLargeNotices = [];
+  const oversized = createWorkspaceAutosave('analysis', store, 400, (reason) => tooLargeNotices.push(reason));
+  oversized.schedule({ ...analysisData(), headers: { Event: 'x'.repeat(WORKSPACE_MAX_CHARS) } });
+  oversized.flush();
+  assert.deepEqual(tooLargeNotices, ['too-large']);
+  const tree = new GameTree();
+  for (let i = 0; i < 5001; i++) tree.addUci(['g1f3', 'g8f6', 'f3g1', 'f6g8'][i % 4]);
+  assert.throws(() => serializeTree(tree), /Tree too large/);
+  oversized.pause('too-large');
+  assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
 });

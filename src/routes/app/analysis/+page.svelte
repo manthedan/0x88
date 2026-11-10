@@ -142,6 +142,7 @@ onMount(() => {
     </header>
     <div id="message" aria-live="polite">Loading model…</div>
     <button id="restorePreviousAnalysis" type="button" hidden>Restore previous analysis</button>
+    <p id="autosaveNotice" class="small" role="status" aria-live="polite"></p>
     <div id="pgnImportNotice" role="status" aria-live="polite"></div>
     <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
@@ -744,6 +745,7 @@ onMount(() => {
   :global(.wdlbar .b){background:#3a3a3a}
   /* ── Right column, Lichess-shaped: header → engine strip → top lines → tabs → move list (fills the rest). ── */
   .analysis-overview{display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
+  #autosaveNotice:empty{display:none}
   .position-status{display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0}
   /* Quiet, neutral run state: text + glyph, no pill competing with the primary action. */
   .analysis-status{display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--muted); font:500 12.5px/1.3 var(--sans); white-space:nowrap}
@@ -1070,6 +1072,7 @@ onMount(() => {
     .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:calc(6 + var(--restore-row))}
     .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:calc(7 + var(--restore-row))}
     .app-sidebar #restorePreviousAnalysis{grid-column:1 / -1; grid-row:calc(8 + var(--restore-row)); justify-self:start; margin:4px 12px}
+    .app-sidebar #autosaveNotice{grid-column:1 / -1; grid-row:calc(9 + var(--restore-row)); margin:4px 12px}
     .engine-summaries{max-height:none; overflow:visible}
     .history-panel :global(.movelist){max-height:260px}
     .analysis-workspace .comparison-panel, .analysis-workspace .human-panel{max-height:none}

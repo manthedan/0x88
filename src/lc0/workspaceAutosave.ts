@@ -260,10 +260,21 @@ export function restorePreviousAnalysis(storage = workspaceStorage()): ReturnTyp
 }
 
 /** One small local slot per surface. Only changed committed state resets the debounce. */
-export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspaceStorage(), delay = 400) {
+export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspaceStorage(), delay = 400, onPause?: (reason: 'too-large' | 'storage') => void) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: string | undefined;
   let last: string | undefined;
+  let pauseReported = false;
+  const pause = (reason: 'too-large' | 'storage' = 'too-large') => {
+    clearTimeout(timer);
+    timer = undefined;
+    pending = undefined;
+    last = undefined;
+    if (!pauseReported) {
+      pauseReported = true;
+      onPause?.(reason);
+    }
+  };
   const remove = () => {
     try {
       storage?.removeItem(workspaceStorageKey(kind));
@@ -277,11 +288,14 @@ export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspace
     if (pending === undefined) return;
     try {
       const raw = `{"kind":${JSON.stringify(kind)},"version":${WORKSPACE_VERSION},"savedAt":${Date.now()},"data":${pending}}`;
-      if (raw.length > WORKSPACE_MAX_CHARS) throw new Error('Snapshot too large');
-      storage?.setItem(workspaceStorageKey(kind), raw);
+      if (raw.length > WORKSPACE_MAX_CHARS) {
+        pause('too-large');
+        return;
+      }
+      if (!storage) throw new Error('Storage unavailable');
+      storage.setItem(workspaceStorageKey(kind), raw);
     } catch {
-      // Do not resurrect an older game after a failed replacement. PGN export remains available.
-      remove();
+      pause('storage');
     }
     pending = undefined;
   };
@@ -306,9 +320,10 @@ export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspace
         clearTimeout(timer);
         timer = setTimeout(flush, delay);
       } catch {
-        clear();
+        pause('too-large');
       }
     },
+    pause,
     clear,
     flush,
   };
