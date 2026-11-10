@@ -1887,6 +1887,12 @@ function ctxInit(ctx: PlayContext): void {
     completeHandoff = undefined;
   });
   trackListener(ctx, window, 'pagehide', () => ctx.autosave?.flush());
+  trackListener(ctx, window, 'pageshow', (event: Event) => {
+    if (!(event as PageTransitionEvent).persisted) return;
+    ctxDisarmResign(ctx);
+    ctxDisarmNewGame(ctx);
+    ctxRender(ctx);
+  });
   trackListener(ctx, document, 'visibilitychange', () => {
     if (document.hidden) ctx.autosave?.flush();
   });
