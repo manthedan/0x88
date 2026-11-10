@@ -150,3 +150,55 @@ test('prepared cache keys keep repetition history for slots before a recent pawn
   assert.notDeepEqual(encodeLc0Classical112(a).planes, encodeLc0Classical112(b).planes);
   assert.notEqual(a.prepared.cacheKey, b.prepared.cacheKey, 'previous slot still needs the original FEN-root en-passant key');
 });
+
+function stableStopOptions(earlyStop) {
+  return {
+    visits: 400,
+    earlyStop,
+    kldMinVisits: 50,
+    kldCheckInterval: 50,
+    kldThreshold: 1,
+    kldStableChecks: 1,
+    bestStableMinVisits: 50,
+    bestStableCheckInterval: 50,
+    bestStableChecks: 1,
+    bestStableMinVisitLead: 0,
+    bestStableMaxQDelta: 2,
+  };
+}
+
+for (const earlyStop of ['kld-stable', 'best-stable']) {
+  for (const [batchSize, batchPipelineDepth, reusedVisits, expected] of [
+    [16, 1, 0, 112],
+    [16, 2, 0, 128],
+    [16, 1, 7, 103],
+  ]) {
+    test(`${earlyStop} checks crossed intervals with batch ${batchSize}, pipeline ${batchPipelineDepth}, reused ${reusedVisits}`, async () => {
+      const board = parseFen(START_FEN);
+      const evaluator = new StableEvaluator();
+      const root = reusedVisits ? (await searchRoot(board, evaluator, { visits: reusedVisits })).root : undefined;
+      const result = await searchRoot(board, evaluator, { ...stableStopOptions(earlyStop), batchSize, batchPipelineDepth, root });
+      assert.equal(result.stats.rootReused, !!reusedVisits);
+      assert.equal(result.stats.stopReason, earlyStop);
+      assert.equal(result.visits, expected);
+    });
+  }
+  test(`${earlyStop} serial checks preserve absolute multiples, minimum visits and reused-root timing`, async () => {
+    for (const minVisits of [50, 64]) {
+      for (const reusedVisits of [0, 7, 57]) {
+        const board = parseFen(START_FEN);
+        const evaluator = new StableEvaluator();
+        const root = reusedVisits ? (await searchRoot(board, evaluator, { visits: reusedVisits })).root : undefined;
+        const result = await searchRoot(board, evaluator, {
+          ...stableStopOptions(earlyStop),
+          root,
+          kldMinVisits: minVisits,
+          bestStableMinVisits: minVisits,
+        });
+        assert.equal(result.stats.stopReason, earlyStop);
+        const firstCheck = Math.max(Math.ceil(minVisits / 50), Math.floor(reusedVisits / 50) + 1) * 50;
+        assert.equal(result.visits, firstCheck + 50);
+      }
+    }
+  });
+}

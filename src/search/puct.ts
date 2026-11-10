@@ -965,12 +965,16 @@ function rootVisitDominanceStop(root: Node, maxRootVisits: number): boolean {
   return visits[0] > visits[1] + remaining;
 }
 
-interface KldEarlyStopState {
+interface EarlyStopIntervalState {
+  lastCheckVisits: number;
+}
+
+interface KldEarlyStopState extends EarlyStopIntervalState {
   lastDistribution?: number[];
   lastBest?: number;
   stableChecks: number;
 }
-interface BestStableEarlyStopState {
+interface BestStableEarlyStopState extends EarlyStopIntervalState {
   lastBest?: number;
   lastBestQ?: number;
   stableChecks: number;
@@ -1001,12 +1005,21 @@ function kld(current: number[], previous: number[]): number {
   return out;
 }
 
+function crossedEarlyStopInterval(visits: number, minVisits: number, interval: number, state: EarlyStopIntervalState): boolean {
+  // Use absolute interval boundaries so serial searches keep their old schedule,
+  // while batches can cross a boundary without landing exactly on its multiple.
+  const lastBoundary = Math.max(Math.floor(state.lastCheckVisits / interval), Math.floor((minVisits - 1) / interval));
+  if (visits < minVisits || Math.floor(visits / interval) <= lastBoundary) return false;
+  state.lastCheckVisits = visits;
+  return true;
+}
+
 function rootKldEarlyStop(root: Node, options: SearchOptions, state: KldEarlyStopState): boolean {
   if (options.earlyStop !== 'kld-stable') return false;
   const visits = rootVisitCount(root);
   const minVisits = Math.max(1, Math.floor(options.kldMinVisits ?? Math.min(options.visits ?? visits, 32)));
   const interval = Math.max(1, Math.floor(options.kldCheckInterval ?? 8));
-  if (visits < minVisits || visits % interval !== 0) return false;
+  if (!crossedEarlyStopInterval(visits, minVisits, interval, state)) return false;
   const current = rootVisitDistribution(root);
   const best = rootBestEdgeIndex(root);
   if (!state.lastDistribution || state.lastDistribution.length !== current.length) {
@@ -1029,7 +1042,7 @@ function rootBestStableEarlyStop(root: Node, context: SearchPolicyContext, optio
   const visits = rootVisitCount(root);
   const minVisits = Math.max(1, Math.floor(options.bestStableMinVisits ?? 32));
   const interval = Math.max(1, Math.floor(options.bestStableCheckInterval ?? 8));
-  if (visits < minVisits || visits % interval !== 0) return false;
+  if (!crossedEarlyStopInterval(visits, minVisits, interval, state)) return false;
   const best = rootBestEdgeIndex(root);
   if (best === undefined) return false;
   const sorted = root.edges
@@ -2021,8 +2034,8 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
   const visitsToRun = reusableRoot ? Math.max(0, visits - priorRootVisits) : visits;
   const budgetMode = options.budgetMode ?? 'visits';
   stats.budgetMode = budgetMode;
-  const kldState: KldEarlyStopState = { stableChecks: 0 };
-  const bestStableState: BestStableEarlyStopState = { stableChecks: 0 };
+  const kldState: KldEarlyStopState = { stableChecks: 0, lastCheckVisits: rootVisitCount(root) };
+  const bestStableState: BestStableEarlyStopState = { stableChecks: 0, lastCheckVisits: rootVisitCount(root) };
   const fixedVisitTarget = Math.max(visits, rootVisitCount(root));
   const progressEveryMs = Math.max(50, Math.floor(options.progressEveryMs ?? 250));
   let lastProgressMs = -Infinity;
