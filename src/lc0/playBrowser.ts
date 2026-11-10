@@ -43,6 +43,7 @@ import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, Maia3BrowserEvaluator, type Maia3MoveStyle } from './maia3.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
+import { rememberMoveFocus } from './moveListFocus.ts';
 import {
   displayedPly,
   type MoveNavAction,
@@ -1281,6 +1282,7 @@ function ctxLiveStatusText(ctx: PlayContext): string {
 
 function ctxRenderMoveList(ctx: PlayContext): void {
   const list = el('moveList');
+  const restoreFocus = rememberMoveFocus(list, 'data-ply');
   if (!ctx.sans.length) {
     list.innerHTML = '<span class="placeholder">Your game starts here. Move a piece, or type a move below (e.g. Nf3).</span>';
     return;
@@ -1296,6 +1298,7 @@ function ctxRenderMoveList(ctx: PlayContext): void {
     );
   }
   list.innerHTML = rows.join('');
+  restoreFocus();
   if (ctx.viewPly === null) {
     ctx.moveListScrollKey = 'live';
     list.scrollTop = list.scrollHeight;
@@ -1567,7 +1570,7 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   strip.setAttribute('aria-label', `${isHuman ? 'You' : ctxOpponentName(option)}, ${side}${text ? `, ${text.replace('…', '')}` : ''}`);
 }
 
-function ctxRenderChrome(ctx: PlayContext, _shownBoard: BoardState, shownPly: number): void {
+function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   const phase = ctxPhase(ctx);
   const main = el('main');
   main.dataset.phase = phase;
@@ -1734,7 +1737,7 @@ function ctxRender(ctx: PlayContext): void {
     : ctx.handoffNotice;
   // Switching roots is only offered before play or after the game is finished.
   buttonEl('useStartingPosition').hidden = !ctx.practicePosition || (ctx.started && !ctx.gameOver);
-  ctxRenderChrome(ctx, shownBoard, shownPly);
+  ctxRenderChrome(ctx, shownPly);
 }
 
 // ---------------------------------------------------------------------------

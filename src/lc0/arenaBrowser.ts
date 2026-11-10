@@ -144,6 +144,7 @@ import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
+import { rememberMoveFocus } from './moveListFocus.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import {
@@ -1596,6 +1597,7 @@ function keepMovesAtLiveEnd(): void {
 /** Scoresheet rows (number | White | Black), as on Play; opening-book plies are muted. */
 function renderMoveStrip(): void {
   const strip = el('gameMoves');
+  const restoreFocus = rememberMoveFocus(strip, 'data-idx');
   const block = document.getElementById('movesBlock');
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   if (!trail || trail.entries.length <= 1) {
@@ -1627,6 +1629,7 @@ function renderMoveStrip(): void {
     }
   }
   strip.innerHTML = rows.join('');
+  restoreFocus();
   if (!reviewing) {
     keepMovesAtLiveEnd();
     return;
