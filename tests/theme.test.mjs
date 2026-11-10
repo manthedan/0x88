@@ -33,6 +33,14 @@ async function fixture(saved) {
       }
     },
     unsubscribe: cleanup,
+    blockStorage() {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        get() {
+          throw Error('blocked');
+        },
+      });
+    },
   };
 }
 
@@ -54,6 +62,24 @@ test('first visit and revisits follow the OS until an explicit toggle', async ()
     f.root.dataset.theme = 'unmounted';
     f.system(false);
     assert.equal(f.root.dataset.theme, 'unmounted');
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('an explicit session theme survives OS changes when storage is blocked', async () => {
+  const f = await fixture();
+  try {
+    f.blockStorage();
+    f.module.toggleTheme();
+    assert.equal(f.root.dataset.theme, 'dark');
+    f.system(true);
+    f.system(false);
+    assert.equal(f.root.dataset.theme, 'dark');
+    f.unsubscribe();
+    const cleanup = f.module.syncThemeToDom();
+    assert.equal(f.root.dataset.theme, 'dark', 'remount preserves the session choice');
+    cleanup();
   } finally {
     f.cleanup();
   }
