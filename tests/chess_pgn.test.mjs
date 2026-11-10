@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describePgnWarning, parseFirstPgnGame, parsePgnGame, splitPgnGames } from '../src/chess/pgn.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
+import { moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
+import { describePgnWarning, parseFirstPgnGame, parsePgnGame, sanToMove, splitPgnGames } from '../src/chess/pgn.ts';
+import { moveToSan } from '../src/chess/san.ts';
 
 const mainline = (game) => game.tree.mainlineFrom().map((node) => node.san);
 
@@ -99,4 +103,96 @@ test('black-to-move start positions number their first move and stop labels with
 
 test('escape lines do not split a collection into an extra game', () => {
   assert.equal(splitPgnGames('% exported by tool\n[Event "a"]\n\n1. e4 *\n\n% next\n[Event "b"]\n\n1. d4 *').length, 2);
+});
+
+test('sanToMove accepts lenient real-world forms that identify exactly one legal move', () => {
+  const uci = (fen, san) => {
+    const move = sanToMove(parseFen(fen), san);
+    return move && moveToUci(move);
+  };
+  const promo = '8/P6k/8/8/8/8/8/K7 w - - 0 1';
+  assert.equal(uci(promo, 'a8Q'), 'a7a8q');
+  assert.equal(uci(promo, 'a8=Q+'), 'a7a8q');
+  assert.equal(uci(promo, 'a8N'), 'a7a8n');
+  assert.equal(uci(promo, 'a7a8q'), 'a7a8q');
+  assert.equal(uci(promo, 'a7-a8=R'), 'a7a8r');
+  assert.equal(uci(START_FEN, 'e2e4'), 'e2e4');
+  assert.equal(uci(START_FEN, 'e2-e4'), 'e2e4');
+  assert.equal(uci(START_FEN, 'g1f3'), 'g1f3');
+  assert.equal(uci(START_FEN, 'Ng1f3'), 'g1f3');
+  assert.equal(uci(START_FEN, 'Ng1-f3'), 'g1f3');
+  assert.equal(uci(START_FEN, 'Ngf3'), 'g1f3');
+  assert.equal(uci(START_FEN, 'N1f3'), 'g1f3');
+  assert.equal(uci(START_FEN, 'Nf3!?'), 'g1f3');
+  const afterE4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
+  assert.equal(uci(afterE4, 'Nbc6'), 'b8c6', 'unnecessary disambiguator');
+  assert.equal(uci(afterE4, 'Nb8c6'), 'b8c6');
+  const castles = 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1';
+  for (const [san, expected] of [
+    ['O-O', 'e1g1'],
+    ['0-0', 'e1g1'],
+    ['O-O+', 'e1g1'],
+    ['O-O-O', 'e1c1'],
+    ['0-0-0#', 'e1c1'],
+    ['e1g1', 'e1g1'],
+  ])
+    assert.equal(uci(castles, san), expected, san);
+  assert.equal(uci('4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1', 'exd6e.p.'), 'e5d6');
+  assert.equal(uci('4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1', 'ed6'), 'e5d6');
+  assert.equal(uci('4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1', 'e5d6'), 'e5d6');
+  assert.equal(uci('4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1', 'exd5'), 'e4d5');
+});
+
+test('sanToMove still rejects ambiguous, illegal and contradictory tokens', () => {
+  const none = (fen, san) => assert.equal(sanToMove(parseFen(fen), san), null, `${san} in ${fen}`);
+  const knights = '7k/8/8/8/8/2N1N3/8/7K w - - 0 1';
+  none(knights, 'Nd5'); // two knights reach d5
+  none(knights, 'Nd2f3'); // no knight on d2
+  none('8/P6k/8/8/8/8/8/K7 w - - 0 1', 'a8'); // promotion piece missing: four legal moves
+  none('8/P6k/8/8/8/8/8/K7 w - - 0 1', 'a8=K');
+  none(START_FEN, 'Nf6');
+  none(START_FEN, 'e5');
+  none(START_FEN, 'Nxf3'); // claims a capture on an empty square
+  none(START_FEN, 'e4=Q');
+  none(START_FEN, 'O-O');
+  none(START_FEN, 'Bb5');
+  none(START_FEN, 'nf3'); // piece letters are upper case; `b` is a file
+  none(START_FEN, 'e2e5');
+  none(START_FEN, 'e9');
+  none(START_FEN, '');
+  none(START_FEN, 'Zz9');
+  none(START_FEN, '--');
+  // bxc3 is a pawn capture, Bxc3 a bishop capture; neither may be read as the other.
+  const fileB = 'rnbqkbnr/pppppppp/8/8/8/2p5/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  assert.equal(moveToUci(sanToMove(parseFen(fileB), 'bxc3')), 'b2c3');
+  none(fileB, 'Bxc3');
+});
+
+test('ambiguous tokens stop a tolerant parse with their own reason', () => {
+  const game = parsePgnGame('[SetUp "1"]\n[FEN "7k/8/8/8/8/2N1N3/8/7K w - - 0 1"]\n\n1. Nd5 *');
+  assert.equal(game.warnings[0].reason, 'ambiguous-move');
+  assert.throws(() => parsePgnGame('[SetUp "1"]\n[FEN "7k/8/8/8/8/2N1N3/8/7K w - - 0 1"]\n\n1. Nd5 *', { strict: true }), /Invalid PGN move: Nd5/);
+});
+
+test('sanToMove resolves every legal move from its canonical SAN in a sweep of random games', () => {
+  let seed = 11;
+  const rand = (n) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  for (const start of [START_FEN, 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1', '8/2P1k3/8/8/8/8/1p2K3/8 w - - 0 1']) {
+    for (let game = 0; game < 6; game++) {
+      let board = parseFen(start);
+      for (let ply = 0; ply < 80; ply++) {
+        const moves = legalMoves(board);
+        if (!moves.length) break;
+        for (const move of moves) {
+          const san = moveToSan(board, move);
+          assert.equal(moveToUci(sanToMove(board, san)), moveToUci(move), `${san} in ${boardToFen(board)}`);
+          assert.equal(moveToUci(sanToMove(board, moveToUci(move))), moveToUci(move), `${moveToUci(move)} in ${boardToFen(board)}`);
+        }
+        board = makeMove(board, moves[rand(moves.length)]);
+      }
+    }
+  }
 });

@@ -1,10 +1,9 @@
 import { type GameNode, GameTree } from '../lc0/gameTree.ts';
-import { type BoardState, parseFen, START_FEN } from './board.ts';
+import { type BoardState, type PieceRole, parseFen, START_FEN, squareName } from './board.ts';
 import { type Move } from './moveCodec.ts';
 import { legalMoves } from './movegen.ts';
-import { moveToSan } from './san.ts';
 
-export type PgnWarningReason = 'invalid-move' | 'null-move' | 'after-result';
+export type PgnWarningReason = 'invalid-move' | 'ambiguous-move' | 'null-move' | 'after-result';
 
 /** Where tolerant parsing stopped a line. Strict parsing throws instead. */
 export interface PgnWarning {
@@ -28,22 +27,51 @@ export interface PgnGame {
   warnings: PgnWarning[];
 }
 
-/** Strip check/mate/annotation glyphs and normalize castling so SAN compares cleanly. */
-function normalizeSan(san: string): string {
-  return san
-    .replace(/[+#?!]+$/g, '')
+const SAN_ROLES: Record<string, PieceRole> = { P: 'p', N: 'n', B: 'b', R: 'r', Q: 'q', K: 'k' };
+// [piece][from file][from rank][x or : or -][target][=promotion]. A lower-case letter is
+// always a file, so `bxc3` is a pawn capture and `Bxc3` a bishop capture.
+const SAN_PATTERN = /^([PNBRQK])?([a-h])?([1-8])?([x:-])?([a-h][1-8])(?:=?([NBRQnbrq]))?$/;
+
+/**
+ * Resolve a move token by parsing it and filtering the legal moves, rather than by
+ * printing SAN for every legal move. Accepts canonical SAN and the lenient forms that
+ * still name exactly one legal move: `0-0`, `a8Q`, over- or unnecessarily disambiguated
+ * `Ng1f3`/`Nbc6`, and long algebraic or UCI `e2e4`/`e2-e4`/`e7e8q`. Trailing `+ # ! ?`
+ * and `e.p.` are ignored. A capture mark must match a capture; a missing promotion
+ * piece is ambiguous.
+ */
+function resolveSan(board: BoardState, token: string): { move: Move } | { error: 'ambiguous' | 'invalid' } {
+  const san = token
+    .replace(/[+#?!]+$/, '')
     .replace(/e\.p\.$/i, '')
-    .replace(/^0-0-0/, 'O-O-O')
-    .replace(/^0-0/, 'O-O');
+    .replace(/[+#]+$/, '');
+  const castle = /^(?:O-O|0-0|o-o)(-O|-0|-o)?$/.exec(san);
+  const parsed = castle ? null : SAN_PATTERN.exec(san);
+  if (!castle && !parsed) return { error: 'invalid' };
+  const candidates = legalMoves(board).filter((move) => {
+    const role = board.squares[move.from]?.[1];
+    if (castle) return role === 'k' && Math.abs(move.to - move.from) === 2 && move.to % 8 === (castle[1] ? 2 : 6);
+    const [, piece, fromFile, fromRank, mark, to, promotion] = parsed!;
+    // Without a piece letter, a full from-square is long algebraic for any piece; otherwise a pawn.
+    if (piece ? role !== SAN_ROLES[piece] : !(fromFile && fromRank) && role !== 'p') return false;
+    if (squareName(move.to) !== to) return false;
+    const from = squareName(move.from);
+    if ((fromFile && from[0] !== fromFile) || (fromRank && from[1] !== fromRank)) return false;
+    if (promotion && move.promotion !== promotion.toLowerCase()) return false;
+    if (mark === 'x' || mark === ':') {
+      const enPassant = role === 'p' && move.to === board.epSquare && from[0] !== to[0];
+      if (!board.squares[move.to] && !enPassant) return false;
+    }
+    return true;
+  });
+  if (candidates.length === 1) return { move: candidates[0] };
+  return { error: candidates.length ? 'ambiguous' : 'invalid' };
 }
 
-/** Resolve a SAN token to a legal move in the given position, or null. */
+/** Resolve a SAN (or long algebraic) token to a legal move in the given position, or null. */
 export function sanToMove(board: BoardState, san: string): Move | null {
-  const target = normalizeSan(san);
-  for (const move of legalMoves(board)) {
-    if (normalizeSan(moveToSan(board, move)) === target) return move;
-  }
-  return null;
+  const resolved = resolveSan(board, san);
+  return 'move' in resolved ? resolved.move : null;
 }
 
 /** Split a multi-game PGN string into per-game chunks (tags + movetext). */
@@ -322,14 +350,14 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       continue;
     }
     tree.current = last;
-    const move = sanToMove(parseFen(last.fen), token.value);
-    if (!move) {
+    const resolved = resolveSan(parseFen(last.fen), token.value);
+    if (!('move' in resolved)) {
       if (options.strict) throw new Error(`Invalid PGN move: ${token.value}`);
       // Interactive single-game loading remains tolerant, but never fabricates a game.
-      stop(token.value, NULL_MOVES.has(token.value) ? 'null-move' : 'invalid-move');
+      stop(token.value, resolved.error === 'ambiguous' ? 'ambiguous-move' : NULL_MOVES.has(token.value) ? 'null-move' : 'invalid-move');
       continue;
     }
-    last = tree.addMove(move);
+    last = tree.addMove(resolved.move);
   }
   if (options.strict && stack.length) throw new Error('Unclosed PGN variation');
   tree.current = tree.root;
@@ -338,6 +366,7 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
 
 const WARNING_TEXT: Record<PgnWarningReason, string> = {
   'invalid-move': 'not a legal move here',
+  'ambiguous-move': 'more than one legal move matches',
   'null-move': 'null moves are not supported',
   'after-result': 'moves after the game result',
 };
