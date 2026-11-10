@@ -36,16 +36,17 @@ These are file sizes, **not transfer/startup/performance measurements**. Brotli 
 All commands executed from the assigned worktree on `perf/centipawn-f16`:
 
 ```sh
-cd /Users/macthedan/projects/lc0_browser/leelaweb/.claude/worktrees/centipawn-f16
+cd <checkout>   # the perf/centipawn-f16 worktree
 bash artifacts/centipawn-f16/build.sh > artifacts/centipawn-f16/build.log 2>&1
 ```
 
-That local script (hash recorded in evidence) uses these environment values:
+That local script (hash recorded in evidence) uses these environment values
+(`<workspace>` is the parent of the checkout):
 
 ```sh
-export TVM_SRC=/Users/macthedan/projects/lc0_browser/.deps/tvm-webgpu-src
-export TVM_ENV=/Users/macthedan/projects/lc0_browser/.envs/tvm-mlc-py313
-export ONNX_PYTHON=/Users/macthedan/projects/lc0_browser/leelaweb/.venv-onnx/bin/python
+export TVM_SRC=<workspace>/.deps/tvm-webgpu-src
+export TVM_ENV=<workspace>/.envs/tvm-mlc-py313
+export ONNX_PYTHON=<main-checkout>/.venv-onnx/bin/python
 export PYTHONDONTWRITEBYTECODE=1
 export PATH="/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:$TVM_ENV/bin:$PATH"
 export TVM_LIBRARY_PATH="$TVM_SRC/build-tvmjs/lib"
@@ -144,7 +145,7 @@ BUILD_SCOPE=product npm run build:client
 node scripts/stage_lc0_tvmjs_webgpu_artifacts.mjs \
   --model-family=bt4-soap-rem-c19000-final --dtype=f16 --version=local-one-b16 --batches=16 \
   --artifacts=artifacts/centipawn-f16 \
-  --tvm-src=/Users/macthedan/projects/lc0_browser/.deps/tvm-webgpu-src \
+  --tvm-src=<workspace>/.deps/tvm-webgpu-src \
   --tvmjs-bundle=public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/tvmjs.bundle.js \
   --tvmjs-runtime-wasm=public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/tvmjs_runtime.wasm \
   --out=dist-client/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f16/local-one-b16

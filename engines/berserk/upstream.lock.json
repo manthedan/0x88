@@ -3,12 +3,14 @@
   "upstream": {
     "repo": "https://github.com/jhonnold/berserk.git",
     "ref": "8ae895a6151695be4a50d4fb65b0c131659c513a",
+    "tag": "14",
     "version": "14",
     "license": "GPL-3.0"
   },
   "network": {
     "name": "berserk-9b84c340af7e.nn",
     "url": "https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn",
+    "sha256": "9b84c340af7e45f6e07f0046235ccb327f4ae0840c8ee2c4b97b99121e5c5084",
     "sha256Prefix12AsName": true
   },
   "patches": {

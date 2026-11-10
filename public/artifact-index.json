@@ -1,64 +1,67 @@
 {
   "schema": "0x88.hosted-artifact-index.v1",
-  "generatedAt": "2026-06-10T00:00:00.000Z",
+  "generatedAt": "2026-10-11T21:33:06.242Z",
+  "generatedBy": "scripts/write_artifact_index.mjs (npm run artifact-index)",
   "documentationPath": "docs/hosted_artifacts.md",
   "distributionPolicyPath": "docs/engine_artifact_distribution.md",
   "notes": [
-    "deploymentStatus distinguishes committed/deployable artifacts from manifest-only or ignored local artifacts.",
-    "Do not treat a manifest entry as proof that a large model blob is committed; check deploymentStatus and the per-artifact notes.",
-    "Generated TVMJS and Reckless artifacts are intentionally ignored/local unless a release explicitly publishes them with the required policy artifacts."
+    "Generated from the per-artifact manifests; do not edit by hand. generatedAt is the newest generatedAt among the input manifests, so regeneration is deterministic.",
+    "URLs are public paths. Production builds resolve /models/, engine-directory and Centipawn TVMJS runtime paths against the artifact host (R2_RESOLVED_PREFIXES in src/lc0/assetUrls.ts; VITE_LC0_BROWSER_ASSET_BASE_URL=https://assets.0x88.app in netlify.toml). The R2 publication history is in public/releases/.",
+    "deploymentStatus describes a clean checkout, derived from .gitignore: tracked-deployable = every listed file is committed; tracked-manifest-ignored-blobs = the manifest (and any source archives) are committed but the listed binaries or model blobs are gitignored and must be built, staged (npm run lc0:prepare-model-assets) or fetched from the artifact host; ignored-local-artifacts = nothing listed is committed."
   ],
   "entries": [
     {
       "id": "lc0-small-t1",
       "family": "lc0",
-      "uiLabel": "Lc0 Small",
-      "status": "stable-default",
+      "uiLabel": "Lc0 · Small net",
+      "status": "default",
       "versionOrSource": "t1-256x10-distilled-swa-2432500",
-      "deploymentStatus": "tracked-symlink-and-pack",
+      "deploymentStatus": "tracked-manifest-ignored-blobs",
       "manifestUrl": "/models/lc0/manifest.json",
       "primaryUrls": [
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch4.f16.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch16.f16.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch32.f16.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json"
       ],
-      "notes": "ORT WebGPU/WASM remains the default evaluator path. lc0web pack shards are tracked; ONNX entries are staged symlinks."
+      "notes": "Default Lc0 network: Analysis, Arena and Play load the batch-1 f16 QDQ8 export by default; the lc0web pack serves the opt-in custom WebGPU path."
     },
     {
-      "id": "centipawn-best-bt4",
-      "family": "centipawn",
-      "uiLabel": "Centipawn BT4",
-      "status": "public-candidate",
-      "versionOrSource": "bt4_soap_rem_c19000_final",
-      "deploymentStatus": "tracked-deployable-lfs",
-      "manifestUrl": "/models/centipawn.manifest.json",
-      "provenancePath": "docs/model_provenance/bt4_soap_rem_c19000_final.md",
+      "id": "lc0-t3",
+      "family": "lc0",
+      "uiLabel": "Lc0 · t3-512 distill",
+      "status": "option",
+      "versionOrSource": "t3-512x15x16h-distill-swa-2767500",
+      "deploymentStatus": "tracked-manifest-ignored-blobs",
+      "manifestUrl": "/models/lc0/manifest.json",
       "primaryUrls": [
-        "/models/bt4_soap_rem_c19000_final.onnx"
+        "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch1.f16.onnx",
+        "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch4.f16.onnx",
+        "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx",
+        "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch16.f16.onnx"
       ],
-      "notes": "Production Centipawn ORT model. BT4/SquareFormer + ThreatGraph TG1; LC0 public data with Stockfish labels; not ChessBench, TCEC, or generic human-game corpus."
+      "notes": "The t3-512 option loads the batch-8 f16 export (T3_NET in src/lc0/bt4Engine.ts)."
     },
     {
       "id": "lc0-bt4-it332",
       "family": "lc0",
-      "uiLabel": "Lc0 BT4-it332",
-      "status": "experimental-hosted-warning",
+      "uiLabel": "Lc0 · BT4-it332",
+      "status": "experimental",
       "versionOrSource": "BT4-1024x15x32h-swa-6147500-policytune-332",
-      "deploymentStatus": "r2-hosted-qdq8",
+      "deploymentStatus": "tracked-manifest-ignored-blobs",
       "manifestUrl": "/models/lc0/manifest.json",
       "primaryUrls": [
-        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx"
-      ],
-      "additionalManifestUrls": [
         "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch1.f16.onnx",
         "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx",
-        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx"
+        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.onnx",
+        "/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx"
       ],
-      "notes": "Current Arena BT4 option uses the batch-8 f16 QDQ8 export with WebGPU-first worker, leaf batch size 8, pipeline depth 1, tree reuse, and one-time large-net warnings. The f16 ONNX blobs remain local-only because they exceed Wrangler single-object upload limits."
+      "notes": "The experimental BT4-it332 option loads the batch-8 f16 QDQ8 export (BT4_NET in src/lc0/bt4Engine.ts). The unquantized f16 exports are research entries and appear in no committed release manifest under public/releases/."
     },
     {
       "id": "lc0-bt4-legacy",
@@ -66,49 +69,118 @@
       "uiLabel": "Lc0 BT4 legacy",
       "status": "historical-research",
       "versionOrSource": "BT4-1024x15x32h-swa-6147500",
-      "deploymentStatus": "tracked-manifest-only-local-blob",
+      "deploymentStatus": "tracked-manifest-ignored-blobs",
       "manifestUrl": "/models/lc0/manifest.json",
       "primaryUrls": [
         "/models/lc0/BT4-1024x15x32h-swa-6147500.batch1.f16.onnx"
       ],
-      "notes": "Legacy BT4 manifest entry retained for compatibility/research; not the current Arena BT4 target."
+      "notes": "Kept in the manifest for research compatibility; no UI option loads it and it appears in no committed release manifest."
+    },
+    {
+      "id": "lc0-leela-queen-odds",
+      "family": "lc0",
+      "uiLabel": "Leela Queen Odds",
+      "status": "option",
+      "versionOrSource": "LeelaQueenOdds v2 (lqo_v2)",
+      "deploymentStatus": "tracked-manifest-ignored-blobs",
+      "manifestUrl": "/models/lc0/manifest.json",
+      "primaryUrls": [
+        "/models/lc0/lqo_v2.f16.qdq8.onnx",
+        "/models/lc0/lqo_v2.f16.onnx"
+      ],
+      "notes": "The Leela Queen Odds option loads the f16 QDQ8 export (LQO_NET in src/lc0/bt4Engine.ts); lqo_v2.f16.onnx is its source export."
+    },
+    {
+      "id": "centipawn-best-bt4",
+      "family": "centipawn",
+      "uiLabel": "Centipawn",
+      "status": "default",
+      "versionOrSource": "bt4_soap_rem_c19000_final",
+      "deploymentStatus": "tracked-deployable",
+      "manifestUrl": "/models/centipawn.manifest.json",
+      "provenancePath": "docs/model_provenance/bt4_soap_rem_c19000_final.md",
+      "primaryUrls": [
+        "/models/bt4_soap_rem_c19000_final.onnx",
+        "/models/bt4_soap_rem_c19000_final.meta.json"
+      ],
+      "notes": "Centipawn ORT model and the fallback for the promoted TVMJS runtime. BT4/SquareFormer + ThreatGraph TG1 trained in this project from LC0 public data with Stockfish labels."
+    },
+    {
+      "id": "maia3",
+      "family": "maia3",
+      "uiLabel": "Maia3",
+      "status": "option",
+      "versionOrSource": "maia3_simplified (CSSLab/maia-platform-frontend)",
+      "deploymentStatus": "tracked-manifest-ignored-blobs",
+      "manifestUrl": "/models/maia3/manifest.json",
+      "provenancePath": "docs/model_provenance/maia3.md",
+      "primaryUrls": [
+        "/models/maia3/maia3_simplified.qdq8.onnx",
+        "/models/maia3/maia3_simplified.onnx"
+      ],
+      "notes": "Play and the Analysis Human tab load the locally derived QDQ8 file by default and fall back to the upstream fp16 file."
+    },
+    {
+      "id": "centipawn-tvmjs-webgpu-v2",
+      "family": "centipawn",
+      "uiLabel": "Centipawn · TVMJS",
+      "status": "default",
+      "versionOrSource": "bt4-soap-rem-c19000-final f32 v2-shape-k16 (TVM v0.26.dev0-6-g94398e51f-dirty)",
+      "deploymentStatus": "tracked-deployable",
+      "manifestUrl": "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json",
+      "primaryUrls": [
+        "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/tvmjs.bundle.js",
+        "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/tvmjs_runtime.wasm",
+        "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.tvmjs.wasm",
+        "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.json",
+        "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/tvm-vector-size-storage-rewrite.patch"
+      ],
+      "notes": "Promoted TVMJS WebGPU runtime for Centipawn (CENTIPAWN_TVMJS_WEBGPU_V2 in src/nn/runtimeRegistry.ts); falls back to the ORT model when WebGPU is unavailable."
     },
     {
       "id": "lc0-tvmjs-webgpu",
       "family": "lc0",
-      "uiLabel": "LC0 TVMJS whole-model WebGPU",
+      "uiLabel": "Lc0 TVMJS whole-model WebGPU",
       "status": "research-only",
       "versionOrSource": "TVMJS exports for t1 and BT4-it332 when locally staged",
-      "deploymentStatus": "ignored-local-runtime-artifacts",
+      "deploymentStatus": "ignored-local-artifacts",
       "manifestUrl": null,
       "primaryUrls": [
         "/runtimes/lc0-tvmjs-webgpu/"
       ],
-      "notes": "Source/tooling exists in the repo, but public/runtimes/lc0-tvmjs-webgpu is ignored and no TVMJS runtime artifacts are tracked. Not in the stable runtime registry."
+      "notes": "Source and tooling are in the repository, but public/runtimes/lc0-tvmjs-webgpu/ is gitignored and no runtime artifacts are committed. Not in the stable runtime registry."
     },
     {
-      "id": "stockfish-18.0.7",
+      "id": "stockfish-19.0.1",
       "family": "stockfish",
       "uiLabel": "Stockfish",
       "status": "release",
-      "versionOrSource": "stockfish@18.0.7; nmrugg/stockfish.js commit 32d4b5ae40c01db88219bfbe2b82dbe6dec93832",
+      "license": "GPL-3.0",
+      "versionOrSource": "nmrugg/stockfish.js, tag v19.0.1, version 19.0.1, commit 0d5dd7944f88c817c07a26bc4fb1905d5f9c46d6, native Stockfish sf_19 commit edb0d9db6731067ec50ce619ff372b463bc4dd5d; networks nn-1a298aa575a0.nnue, nn-61e7af4bb97d.nnue",
       "deploymentStatus": "tracked-deployable",
-      "manifestUrl": "/stockfish/stockfish-18.0.7.manifest.json",
-      "sourceArchiveUrl": "/stockfish/stockfish-18.0.7-corresponding-source.tar.gz",
+      "manifestUrl": "/stockfish/stockfish-19.0.1.manifest.json",
+      "sourceArchiveUrl": "/stockfish/stockfish-19.0.1-corresponding-source.tar.gz",
       "primaryUrls": [
-        "/stockfish/stockfish-18-lite-single.js",
-        "/stockfish/stockfish-18-lite.js",
-        "/stockfish/stockfish-18-single.js",
-        "/stockfish/stockfish-18.js"
+        "/stockfish/stockfish-19-lite-single.js",
+        "/stockfish/stockfish-19-lite-single.wasm",
+        "/stockfish/stockfish-19-lite-single-relaxed.js",
+        "/stockfish/stockfish-19-lite-single-relaxed.wasm",
+        "/stockfish/stockfish-19-lite.js",
+        "/stockfish/stockfish-19-lite.wasm",
+        "/stockfish/stockfish-19-single.js",
+        "/stockfish/stockfish-19-single.wasm",
+        "/stockfish/stockfish-19.js",
+        "/stockfish/stockfish-19.wasm"
       ],
-      "notes": "Lite single-thread is the default Stockfish opponent; threaded variants require cross-origin isolation."
+      "notes": "Lite single-thread is the default Stockfish opponent; threaded variants require cross-origin isolation. The full and pthread baseline pairs are symlinks into node_modules/stockfish (restored by npm ci); the lite single-thread and relaxed-SIMD pairs are committed files."
     },
     {
       "id": "viridithas-wasip1",
       "family": "viridithas",
       "uiLabel": "Viridithas",
       "status": "experimental",
-      "versionOrSource": "cosmobobak/viridithas tag v20.0.0 commit 0631113e2215714c54d397cce9a8caebc5e6f8ee; sandhi-s2-b200.nnue.zst v109",
+      "license": "MIT",
+      "versionOrSource": "cosmobobak/viridithas, version v20.0.0, commit 0631113e2215714c54d397cce9a8caebc5e6f8ee; network sandhi-s2-b200.nnue.zst",
       "deploymentStatus": "tracked-deployable",
       "manifestUrl": "/viridithas/viridithas-wasip1.manifest.json",
       "sourceArchiveUrl": "/viridithas/viridithas-wasip1-corresponding-source.tar.gz",
@@ -117,15 +189,18 @@
         "/viridithas/viridithas-simd128.wasm",
         "/viridithas/viridithas-relaxed-simd128.wasm"
       ],
-      "notes": "Patched wasm32-wasip1 scalar, SIMD, and relaxed-SIMD builds with embedded network."
+      "notes": "Patched wasm32-wasip1 scalar, SIMD and relaxed-SIMD builds with the network embedded in each binary."
     },
     {
       "id": "berserk-emscripten-single-thread",
       "family": "berserk",
-      "uiLabel": "Berserk Emscripten",
+      "uiLabel": "Berserk",
       "status": "experimental",
-      "versionOrSource": "jhonnold/berserk tag 14 commit 8ae895a6151695be4a50d4fb65b0c131659c513a; network berserk-9b84c340af7e.nn",
+      "license": "GPL-3.0",
+      "versionOrSource": "jhonnold/berserk, tag 14, commit 8ae895a6151695be4a50d4fb65b0c131659c513a; network berserk-9b84c340af7e.nn",
       "deploymentStatus": "tracked-deployable",
+      "manifestUrl": "/berserk/berserk-emscripten-single-thread.manifest.json",
+      "sourceArchiveUrl": "/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
       "primaryUrls": [
         "/berserk/berserk-emscripten.js",
         "/berserk/berserk-emscripten.wasm",
@@ -135,16 +210,15 @@
         "/berserk/berserk-emscripten-relaxed-simd128.js",
         "/berserk/berserk-emscripten-relaxed-simd128.wasm"
       ],
-      "notes": "Single-thread Emscripten worker builds (scalar, SIMD, relaxed-SIMD) sharing one canonical preload .data. Network licensing: the net is named as EVALFILE in Berserk own GPL-3.0 Makefile, fetched and hash-verified by the engine build, and required for the binary to run, so it is treated as Corresponding Source of the GPL work the author distributes. Confirmation requested upstream; see docs/engine_artifact_distribution.md.",
-      "manifestUrl": "/berserk/berserk-emscripten-single-thread.manifest.json",
-      "sourceArchiveUrl": "/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz"
+      "notes": "Single-thread Emscripten builds (scalar, SIMD, relaxed SIMD) sharing one preload .data that holds the network. Network licensing reasoning: docs/engine_artifact_distribution.md."
     },
     {
       "id": "plentychess-emscripten-single-thread",
       "family": "plentychess",
-      "uiLabel": "PlentyChess Emscripten",
+      "uiLabel": "PlentyChess",
       "status": "experimental",
-      "versionOrSource": "Yoshie2000/PlentyChess commit 58d8ba2505ae2b49f48dd410d214a457d15c12c6, version 7.0.66; network 0134-2r24-s0.bin",
+      "license": "GPL-3.0",
+      "versionOrSource": "Yoshie2000/PlentyChess, tag b-v8.0.0, version 8.0.0, commit 50ad9f1b523063cbbbf599fe0547f42870fe2906; network 0178r.bin",
       "deploymentStatus": "tracked-deployable",
       "manifestUrl": "/plentychess/plentychess-emscripten-single-thread.manifest.json",
       "sourceArchiveUrl": "/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz",
@@ -157,44 +231,53 @@
         "/plentychess/plentychess-emscripten-relaxed-simd128.js",
         "/plentychess/plentychess-emscripten-relaxed-simd128.wasm"
       ],
-      "notes": "Single-thread Emscripten worker builds with baseline, SSE4.1, and relaxed-SIMD tiers; processed NNUE is preloaded in each .data sidecar."
+      "notes": "Single-thread Emscripten builds (baseline, SSE4.1, relaxed SIMD); the processed network is preloaded in the shared .data sidecar."
     },
     {
       "id": "stormphrax-emscripten-single-thread",
       "family": "stormphrax",
-      "uiLabel": "Stormphrax 8",
+      "uiLabel": "Stormphrax",
       "status": "experimental",
-      "versionOrSource": "Ciekce/Stormphrax v8.0.0 commit 582965517ed2032d41a6b4cd6c2e66b1b934e2ad; undertown.nnue",
+      "license": "GPL-3.0-or-later",
+      "versionOrSource": "Ciekce/Stormphrax, tag v8.0.0, version 8.0.0, commit 582965517ed2032d41a6b4cd6c2e66b1b934e2ad; network undertown.nnue",
       "deploymentStatus": "tracked-deployable",
       "manifestUrl": "/stormphrax/stormphrax-emscripten-single-thread.manifest.json",
       "sourceArchiveUrl": "/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
       "primaryUrls": [
         "/stormphrax/stormphrax-emscripten.js",
         "/stormphrax/stormphrax-emscripten.wasm",
-        "/stormphrax/stormphrax-emscripten.data"
+        "/stormphrax/stormphrax-emscripten.data",
+        "/stormphrax/stormphrax-emscripten-relaxed-simd128.js",
+        "/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm"
       ],
-      "notes": "Single-thread WebAssembly SIMD Emscripten worker with the self-trained undertown NNUE preloaded in the data sidecar."
+      "notes": "Single-thread Emscripten builds (WebAssembly SIMD and relaxed SIMD); undertown.nnue is preloaded in the shared .data sidecar."
     },
     {
-      "id": "reckless-wasi",
+      "id": "reckless-wasip1",
       "family": "reckless",
       "uiLabel": "Reckless",
-      "status": "experimental-local-asset",
-      "versionOrSource": "codedeliveryservice/Reckless commit 0010617448bd plus local browser/WASI patches; full v60 and lite v53 candidates",
-      "deploymentStatus": "ignored-local-generated-artifacts",
-      "manifestUrl": null,
-      "sourceArchiveUrl": null,
+      "status": "experimental",
+      "license": "AGPL-3.0",
+      "versionOrSource": "codedeliveryservice/Reckless, commit 0010617448bdef4c8cd7d4f4825b7e42c8bc262a; network v60-7f587dfb.nnue",
+      "deploymentStatus": "tracked-manifest-ignored-blobs",
+      "manifestUrl": "/reckless/reckless-wasip1.manifest.json",
+      "sourceArchiveUrl": "/reckless/reckless-scalar-corresponding-source.tar.gz",
+      "additionalSourceArchiveUrls": [
+        "/reckless/reckless-simd128-corresponding-source.tar.gz",
+        "/reckless/reckless-simd128-external-corresponding-source.tar.gz",
+        "/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz"
+      ],
       "primaryUrls": [
         "/reckless/reckless.wasm",
         "/reckless/reckless-simd128.wasm",
+        "/reckless/reckless-simd128-external.wasm",
         "/reckless/reckless-relaxed-simd128.wasm",
         "/reckless/reckless-browser-api.wasm",
         "/reckless/reckless-browser-api-simd128.wasm",
         "/reckless/reckless-browser-api-simd128-external.wasm",
-        "/reckless/reckless-v60-7f587dfb.nnue",
-        "/reckless/reckless-v53-l1-512.wasm"
+        "/reckless/reckless-v60-7f587dfb.nnue"
       ],
-      "notes": "README/NOTICE are tracked, but generated WASM/NNUE/source archives are ignored. Production builds must publish scalar, SIMD, relaxed-SIMD artifacts and matching corresponding-source archives together. Relaxed SIMD remains explicit/experimental and never the default."
+      "notes": "The WASM binaries and extracted NNUE are gitignored and built locally by npm run reckless:build-release, which also writes the release manifest. The manifest and all four corresponding-source archives are committed. Variant ladder: docs/hosted_artifacts.md."
     }
   ]
 }

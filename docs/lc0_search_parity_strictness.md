@@ -41,9 +41,10 @@ tie-breaks, batching collisions) one at a time, each behind its own fixture.
 
 ## Regenerating the higher-visit fixtures
 
+From the repository root:
+
 ```
-cd leelaweb
-python3 ../scripts/lc0_native_fixture_priors.py \
+python3 scripts/lc0_native_fixture_priors.py \
   --fixtures fixtures/lc0/fen_only.json --nodes 64 \
   --out fixtures/lc0/native_search_fen_only_blas_nodes64.jsonl
 # ...and the history suite, and --nodes 128.

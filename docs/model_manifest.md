@@ -1,5 +1,13 @@
 # Model manifest
 
+> **Historical.** The tooling described here — `eval/build_model_manifest.py`,
+> `eval/model_manifest_overrides.json` and `npm run analysis:model-manifest` —
+> was removed in the 2026-06-11 cleanup (commit `004504e`); recover a file with
+> `git show 004504e^:<path>`. Current per-artifact model records are
+> `public/models/lc0/manifest.json`, `public/models/centipawn.manifest.json`,
+> `public/models/maia3/manifest.json` and the generated
+> `public/artifact-index.json` (see [`hosted_artifacts.md`](hosted_artifacts.md)).
+
 Centipawn model metadata is split across ONNX files, runtime `*.meta.json` files,
 dataset manifests, training logs, arena results, and frontier cards. The project-level model
 manifest makes those pieces queryable from one place.

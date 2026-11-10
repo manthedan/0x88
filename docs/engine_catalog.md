@@ -312,6 +312,6 @@ The staged selectors now consume the shared typed catalog in `src/lc0/engineCata
 - shared row labels for Lc0 and Stockfish;
 - the `EngineFamily` / `EngineRow` types used by arena and analysis.
 
-Reckless, Viridithas, Berserk, PlentyChess, and Stormphrax keep their dynamic artifact metadata in `recklessVariants.ts`, `viridithasVariants.ts`, `berserkVariants.ts`, and `plentychessVariants.ts` because those modules own URL-param custom variants, asset checks, and runtime-specific defaults. If a future engine uses similar generated artifacts, add a dedicated variant module and then surface its family/static selector facts through `engineCatalog.ts`.
+Reckless, Viridithas, Berserk, PlentyChess, and Stormphrax keep their dynamic artifact metadata in `recklessVariants.ts`, `viridithasVariants.ts`, `berserkVariants.ts`, `plentychessVariants.ts`, and `stormphraxVariants.ts` because those modules own URL-param custom variants, asset checks, and runtime-specific defaults. If a future engine uses similar generated artifacts, add a dedicated variant module and then surface its family/static selector facts through `engineCatalog.ts`.
 
 Any UI variant/default change should update both `src/lc0/engineCatalog.ts` and this card in the same commit. `tests/engine_catalog.test.mjs` pins the current selector order, static variants, family guard, and arena/analysis strength defaults.

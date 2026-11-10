@@ -16,7 +16,17 @@ npm test          # typecheck + full suite; takes ~2 minutes
 ```
 
 Run a single test file with
-`node --experimental-strip-types --test tests/<name>.test.mjs`.
+`node --experimental-strip-types --test tests/<name>.test.mjs`. For day-to-day
+changes, `npm run validate:quick` runs the typecheck, Biome and the tests your
+diff selects (`npm run test:targeted -- --dry-run` shows the selection), and
+`npm run validate:full` runs Biome and the full `npm test`.
+
+The Lc0 model tests skip when their networks are missing;
+`npm run test:stage-lc0-assets` fetches the hash-pinned parity set into
+`../models/lc0-bestnets/` so they run.
+
+`npm run hooks:install` installs an opt-in git pre-push hook. It is not
+installed by `npm install`.
 
 Browser-driven smokes and benches (`scripts/*browser*.mjs`) drive a real
 Chromium. Both harnesses are pinned devDependencies, so `npm install` puts
@@ -38,12 +48,18 @@ the prerequisite is missing:
   their pinned upstream sources into the gitignored `.local_engines/` on first
   run, but `RECKLESS_EVALFILE` and similar net-path variables must point at
   nets you downloaded yourself (see docs/engine_catalog.md).
-- Generators like `lc0:generate-tvm-wgsl`/`lc0:check-tvm-wgsl` and the policy
-  map generator read sibling checkouts under `../repos` and `../.deps`.
+- `scripts/generate_lc0_policy_map.mjs` reads `../repos/lc0/src/neural/encoder.cc`
+  unless given a path, and the TVMJS toolchain scripts
+  (`lc0:check-tvmjs-webgpu-toolchain`, `lc0:build-tvmjs-webgpu-toolchain`,
+  `lc0:stage-tvmjs-webgpu`) expect a TVM checkout under `../.deps`.
+  `lc0:generate-tvm-wgsl`/`lc0:check-tvm-wgsl` read only the in-repo kernels
+  under `src/lc0/kernels/tvm/`.
 
 If `npm test` is red on a fresh clone, that's a bug — please open an issue
-rather than working around it. Every PR runs CI: `npm audit`, this suite,
-and a production build.
+rather than working around it. CI (`.github/workflows/ci.yml`) runs on every
+push and pull request and reports Biome, the typecheck and test suite, and the
+production build as separate checks; `npm audit --audit-level=high` runs as its
+own job.
 
 ## The one rule that matters: prove parity before you promote
 
@@ -94,7 +110,11 @@ Two things people usually miss:
 
 1. **Pin the upstream commit** in `engines/<name>/upstream.lock.json` and keep
    your changes in a patch file under `patches/`. Nobody can reproduce a build
-   from an unpinned `git clone`.
+   from an unpinned `git clone`. `scripts/write_engine_artifact_manifest.mjs`
+   and `scripts/write_engine_source_archive.mjs` read the pin from the lock;
+   the build script's env-overridable defaults (`<NAME>_REPO`, `<NAME>_REF`,
+   network SHA-256) must equal it, and `tests/engine_upstream_locks.test.mjs`
+   fails if they drift (add the engine to its `ENGINES` list).
 2. **Licensing is a gate, not paperwork.** If you add a GPL or AGPL engine, it
    ships with a corresponding-source archive and a release manifest, or it does
    not ship. Networks need the same care as engines, and the absence of a
@@ -114,9 +134,11 @@ Two things people usually miss:
   you find one that is unexplained, documenting it is a good first PR.
 - Don't commit generated engine binaries unless the distribution policy says
   that family is deploy-tracked.
-- Documentation belongs in `docs/` only when it is durable product, runtime,
-  provenance, or license documentation — add it to the index in
-  [`docs/README.md`](docs/README.md). Working notes, one-off audits, and
+- Documentation belongs in `docs/` when it is durable product, runtime,
+  provenance, or license documentation, or a dated decision record (an
+  investigation or upgrade audit whose verdict or evidence the code relies on).
+  Link every new doc from the index in [`docs/README.md`](docs/README.md);
+  `tests/docs_index.test.mjs` enforces this. Working notes, agent handoffs, and
   cleanup inventories stay in the gitignored `.local-dev-docs/`. Tracked files
   should never reference your local machine paths or personal tooling.
 

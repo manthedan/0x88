@@ -10,15 +10,27 @@ import { STOCKFISH_RELEASE, stockfishSourceArchive, stockfishSourcePrefix } from
 
 const ROOT = process.cwd();
 
+// Upstream repo/commit/tag/version (and the archive's source prefix) come from
+// engines/<engine>/upstream.lock.json; Stockfish's come from
+// stockfish_release_config.mjs. Only the selected engine's lock is read.
+function withLockedUpstream(config) {
+  if (config.upstreamCommit) return config;
+  const { upstream } = JSON.parse(readFileSync(new URL(`../engines/${config.engine}/upstream.lock.json`, import.meta.url), 'utf8'));
+  return {
+    ...config,
+    upstreamRepo: upstream.repo,
+    upstreamCommit: upstream.ref,
+    upstreamTag: upstream.tag,
+    upstreamVersion: upstream.version,
+    sourcePrefix: `upstream/${config.engine}-${upstream.ref}/`,
+  };
+}
+
 const CONFIGS = {
   berserk: {
     engine: 'berserk',
     flavor: 'emscripten-single-thread',
-    upstreamRepo: 'https://github.com/jhonnold/berserk.git',
-    upstreamCommit: '8ae895a6151695be4a50d4fb65b0c131659c513a',
-    upstreamTag: '14',
     buildDir: '.local_engines/berserk-emscripten-src',
-    sourcePrefix: 'upstream/berserk-8ae895a6151695be4a50d4fb65b0c131659c513a/',
     output: 'public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz',
     patch: 'patches/berserk-emscripten.patch',
     buildScript: 'scripts/build_berserk_emscripten.mjs',
@@ -57,12 +69,7 @@ const CONFIGS = {
   plentychess: {
     engine: 'plentychess',
     flavor: 'emscripten-single-thread',
-    upstreamRepo: 'https://github.com/Yoshie2000/PlentyChess.git',
-    upstreamCommit: '50ad9f1b523063cbbbf599fe0547f42870fe2906',
-    upstreamTag: 'b-v8.0.0',
-    upstreamVersion: '8.0.0',
     buildDir: '.local_engines/plentychess-emscripten-src',
-    sourcePrefix: 'upstream/plentychess-50ad9f1b523063cbbbf599fe0547f42870fe2906/',
     output: 'public/plentychess/plentychess-emscripten-single-thread-corresponding-source.tar.gz',
     patch: 'patches/plentychess-emscripten.patch',
     buildScript: 'scripts/build_plentychess_emscripten.mjs',
@@ -105,12 +112,7 @@ const CONFIGS = {
   stormphrax: {
     engine: 'stormphrax',
     flavor: 'emscripten-single-thread',
-    upstreamRepo: 'https://github.com/Ciekce/Stormphrax.git',
-    upstreamCommit: '582965517ed2032d41a6b4cd6c2e66b1b934e2ad',
-    upstreamTag: 'v8.0.0',
-    upstreamVersion: '8.0.0',
     buildDir: '.local_engines/stormphrax-emscripten-src',
-    sourcePrefix: 'upstream/stormphrax-582965517ed2032d41a6b4cd6c2e66b1b934e2ad/',
     output: 'public/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz',
     patch: 'patches/stormphrax-emscripten.patch',
     buildScript: 'scripts/build_stormphrax_emscripten.mjs',
@@ -147,10 +149,7 @@ const CONFIGS = {
   viridithas: {
     engine: 'viridithas',
     flavor: 'wasip1-scalar-simd128',
-    upstreamRepo: 'https://github.com/cosmobobak/viridithas.git',
-    upstreamCommit: '0631113e2215714c54d397cce9a8caebc5e6f8ee',
     buildDir: '.local_engines/viridithas-wasi-src',
-    sourcePrefix: 'upstream/viridithas-0631113e2215714c54d397cce9a8caebc5e6f8ee/',
     output: 'public/viridithas/viridithas-wasip1-corresponding-source.tar.gz',
     patch: 'patches/viridithas-wasip1.patch',
     buildScript: 'scripts/build_viridithas_wasi.mjs',
@@ -236,7 +235,7 @@ const CONFIGS = {
 
 function usage() {
   console.error(
-    'Usage: node scripts/write_engine_source_archive.mjs <berserk|plentychess|stormphrax|viridithas|stockfish> [--out path] [--allow-missing-assets]',
+    'Usage: node scripts/write_engine_source_archive.mjs <berserk|plentychess|stormphrax|viridithas|stockfish> [--out path] [--allow-missing-assets] [--dry-run]',
   );
 }
 
@@ -428,6 +427,8 @@ async function writeArchive(config, outPath, allowMissingAssets) {
         config.buildScript,
         config.smokeScript,
         'scripts/write_engine_artifact_manifest.mjs',
+        // The manifest helper reads this engine's upstream pin from its lock.
+        `engines/${config.engine}/upstream.lock.json`,
         // The shared manifest helper imports this even for non-Stockfish engines.
         'scripts/stockfish_release_config.mjs',
         'scripts/precompress_engine_artifacts.mjs',
@@ -448,10 +449,14 @@ async function writeArchive(config, outPath, allowMissingAssets) {
 }
 
 const engine = process.argv[2];
-const config = CONFIGS[engine];
+const config = CONFIGS[engine] && withLockedUpstream(CONFIGS[engine]);
 if (!config) {
   usage();
   process.exitCode = 1;
+} else if (process.argv.includes('--dry-run')) {
+  // Print the resolved pin without fetching, building or writing anything.
+  const { upstreamRepo, upstreamCommit, upstreamTag, upstreamVersion, sourcePrefix, output } = config;
+  console.log(JSON.stringify({ engine, upstreamRepo, upstreamCommit, upstreamTag, upstreamVersion, sourcePrefix, output }, null, 2));
 } else {
   const out = resolve(argValue('--out') ?? config.output);
   const allowMissingAssets = process.argv.includes('--allow-missing-assets');

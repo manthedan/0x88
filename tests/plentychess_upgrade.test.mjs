@@ -21,9 +21,12 @@ test('PlentyChess release pin and network agree across build/distribution/runtim
   assert.equal(evidence.network.rawSha256, lock.network.sha256);
   assert.equal(evidence.network.processedSha256, lock.network.processedSha256);
   assert.equal(evidence.nativeMatch.wins + evidence.nativeMatch.losses + evidence.nativeMatch.draws, evidence.nativeMatch.games);
+  // The manifest and source-archive writers read the ref from the lock
+  // (tests/engine_upstream_locks.test.mjs); the network digests stay literal.
   for (const script of ['scripts/build_plentychess_emscripten.mjs', 'scripts/write_engine_source_archive.mjs', 'scripts/write_engine_artifact_manifest.mjs']) {
     const source = read(script);
-    for (const value of [lock.upstream.ref, lock.network.sha256, lock.network.processedSha256]) {
+    const pinned = script.startsWith('scripts/build_') ? [lock.upstream.ref] : [];
+    for (const value of [...pinned, lock.network.sha256, lock.network.processedSha256]) {
       assert.ok(source.includes(value), `${script}: missing ${value}`);
     }
     assert.ok(!source.includes('58d8ba2505ae2b49f48dd410d214a457d15c12c6'), script);

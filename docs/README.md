@@ -4,10 +4,16 @@ This directory favors current browser-product/runtime docs over inherited
 research notebooks. Historical training, cloud, agent, and knowledge-graph
 material was removed in the Centipawn-origin cleanup branch.
 
-Tracked docs should be durable product, runtime, provenance, or license
-documentation. One-off cleanup inventories, agent handoff notes, and dated
-working documents are local-dev artifacts: keep them under `.local-dev-docs/`
-(ignored) instead of publishing them in the repository.
+Tracked docs are durable product, runtime, provenance, or license
+documentation, plus dated decision records: investigations and upgrade audits
+whose verdict, evidence, or rejected alternative the code or a later decision
+relies on. A dated record keeps its original findings; later changes go in a new
+record or a short correction note rather than a rewrite. One-off cleanup
+inventories, agent handoff notes, and scratch working notes stay under
+`.local-dev-docs/` (ignored).
+
+Every tracked Markdown file under `docs/` is linked from this index;
+`tests/docs_index.test.mjs` fails otherwise.
 
 ## Product and runtime
 
@@ -22,6 +28,7 @@ working documents are local-dev artifacts: keep them under `.local-dev-docs/`
 - [`browser_c_engine_porting.md`](browser_c_engine_porting.md) — C/C++ browser engine porting recipe.
 - [`move_encoding.md`](move_encoding.md) — move encoding reference.
 - [`human_vs_computer_play.md`](human_vs_computer_play.md) — Maia3 neural human modeling vs LQO/Monty-style contempt search for practical human play.
+- [`engine_upgrade_audit.md`](engine_upgrade_audit.md) — `npm run engine:upgrade-audit`: the browser-engine upgrade correctness audit tool.
 - [`search_contempt_design.md`](search_contempt_design.md) — search-contempt design; referenced from `src/lc0/playBrowser.ts`.
 - [`engine_resource_broker_design.md`](engine_resource_broker_design.md) — CPU/GPU budget arbitration; referenced from `src/lc0/resourceBroker.ts`.
 - [`arena_analysis_roadmap.md`](arena_analysis_roadmap.md) — staged arena/analysis design; referenced from `src/lc0/charts.ts`, `gameReview.ts`, and `tournament.ts`.
@@ -38,9 +45,11 @@ working documents are local-dev artifacts: keep them under `.local-dev-docs/`
 - [`r2_model_hosting.md`](r2_model_hosting.md) — external model hosting policy.
 - [`asset_telemetry_plan.md`](asset_telemetry_plan.md) — privacy-preserving asset telemetry spec.
 - [`engine_packaging_reorg.md`](engine_packaging_reorg.md) — where patched engine sources live and why.
-- [`model_manifest.md`](model_manifest.md) — LC0 model manifest notes.
+- [`model_manifest.md`](model_manifest.md) — historical: the removed project-level model manifest builder; points to the current per-artifact manifests.
 - [`model_efficiency_metrics.md`](model_efficiency_metrics.md) — model efficiency comparison metrics.
-- [`model_provenance/`](model_provenance/) — per-model provenance and derivation recipes (license load-bearing).
+- [`model_provenance/`](model_provenance/) — per-model provenance and derivation recipes (license load-bearing):
+  - [`model_provenance/bt4_soap_rem_c19000_final.md`](model_provenance/bt4_soap_rem_c19000_final.md) — Centipawn `bt4_soap_rem_c19000_final` model.
+  - [`model_provenance/maia3.md`](model_provenance/maia3.md) — Maia3 upstream file, QDQ8 derivation recipe and source offer.
 
 ## Audits, parity records, and decision logs
 
@@ -98,6 +107,36 @@ working documents are local-dev artifacts: keep them under `.local-dev-docs/`
 - [`viridithas_browser_benchmarks.md`](viridithas_browser_benchmarks.md) — Viridithas browser benchmarks.
 - [`berserk_browser_benchmarks.md`](berserk_browser_benchmarks.md) — Berserk browser benchmarks.
 
+## Upgrade records
+
+- [`stockfish_19_upgrade.md`](stockfish_19_upgrade.md) — Stockfish.js 18.0.7 → 19.0.1: pins, networks, parity and release requirements.
+- [`plentychess_upgrade_v8.md`](plentychess_upgrade_v8.md) — PlentyChess 8.0.0 upgrade audit (2026-10-10).
+- [`viridithas_v20_upgrade.md`](viridithas_v20_upgrade.md) — Viridithas move from the pre-release commit to the v20.0.0 tag.
+- [`reckless_upgrade_2026-10-10.md`](reckless_upgrade_2026-10-10.md) — Reckless upgrade audit: NO-GO, production stays on `00106174`.
+
+## Dated investigation records
+
+- [`ort_1_30_ab_2026-10.md`](ort_1_30_ab_2026-10.md) — ORT Web 1.27 → 1.30 native-WebGPU A/B: do not upgrade.
+- [`ort_batching_jspi_2026-10.md`](ort_batching_jspi_2026-10.md) — ORT 1.27 WebGPU batching and JSPI experiments.
+- [`ort_native_webgpu_profiler_2026-10.md`](ort_native_webgpu_profiler_2026-10.md) — what kernel profiling ORT 1.27's native WebGPU EP actually offers.
+- [`batching_strength_2026-10.md`](batching_strength_2026-10.md) — batching strength re-gate; no product default changes.
+- [`centipawn_f16_2026-10.md`](centipawn_f16_2026-10.md) — Centipawn mixed-f16 TVMJS module: rejected at the numerical gate.
+- [`centipawn_padded_encoding.md`](centipawn_padded_encoding.md) — Centipawn TVMJS evaluator encodes real rows once and copies padding.
+- [`centipawn_tree_reuse_2026-10.md`](centipawn_tree_reuse_2026-10.md) — Centipawn retained-tree / Play yielding pilot: parked.
+- [`centipawn_tvmjs_subgroups_2026-10.md`](centipawn_tvmjs_subgroups_2026-10.md) — Centipawn TVMJS subgroup rebuild: staged experimental, not promoted.
+- [`analysis_continuity_2026-10.md`](analysis_continuity_2026-10.md) — Analysis continuity: model storage, evaluation cache and subtree reuse.
+- [`play_early_stop_2026-10.md`](play_early_stop_2026-10.md) — Play neural early stop: ship root dominance only.
+- [`hidden_tab_residency_2026-10.md`](hidden_tab_residency_2026-10.md) — hidden-tab pause and Play CPU-engine residency.
+- [`wave2_integration_smoke_2026-10.md`](wave2_integration_smoke_2026-10.md) — wave-2 integration smoke and the Analysis pause fix.
+- [`cpu_coop_cancel_2026-10.md`](cpu_coop_cancel_2026-10.md) — warm CPU cooperative cancellation: persistent Viridithas in Analysis.
+- [`cpu_engine_lifecycle_2026-10.md`](cpu_engine_lifecycle_2026-10.md) — CPU-engine lifecycle waste: Hash/Threads command deduplication.
+- [`cpu_engine_build_flags_matrix_2026-10.md`](cpu_engine_build_flags_matrix_2026-10.md) — C/C++ engine compiler-flag matrix: `-O2 -flto` for Berserk.
+- [`arena_parallel_games_2026-10.md`](arena_parallel_games_2026-10.md) — parallel CPU Arena games: K=2 as the desktop Auto setting.
+- [`arena_simul_gate_2026-11.md`](arena_simul_gate_2026-11.md) — Arena simul feasibility gate: bounded experiment only.
+- [`lowend_memory_harness_2026-10.md`](lowend_memory_harness_2026-10.md) — memory harness rerun on a desktop baseline (not a phone).
+
 ## Upstream contributions
 
-- [`upstream/`](upstream/) — PR drafts, patches, and repro for apache/tvm and apache/tvm-ffi fixes (`PR_tvm_webgpu_readback.md`, `PR_tvm_ffi_structural_equal.md`, `repro_constant_pool_dedup.py`).
+- [`upstream/`](upstream/) — PR drafts, patches, and repro for apache/tvm and apache/tvm-ffi fixes (`repro_constant_pool_dedup.py`):
+  - [`upstream/PR_tvm_webgpu_readback.md`](upstream/PR_tvm_webgpu_readback.md) — apache/tvm: pad unaligned WebGPU GPU→CPU readback copies.
+  - [`upstream/PR_tvm_ffi_structural_equal.md`](upstream/PR_tvm_ffi_structural_equal.md) — apache/tvm-ffi: StructuralEqual compares tensor content, matching StructuralHash.

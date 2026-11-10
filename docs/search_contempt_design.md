@@ -84,7 +84,8 @@ within print precision), plus sign/guard/parity/tree-reuse behavior.
 
 ### Calibration vs Maia3's learned contempt (2026-06-11)
 
-`scripts/maia3_vs_elo_contempt.mjs` compares the analytic transform with
+`scripts/maia3_vs_elo_contempt.mjs` (removed in commit `460c2a4`, 2026-06-18; recover with `git show 460c2a4^:scripts/maia3_vs_elo_contempt.mjs`)
+compared the analytic transform with
 Maia3's rating-conditioned value head — the *learned* expected outcome
 between players of the conditioned ratings — over 120 playout positions,
 mean rating held fixed:
@@ -120,7 +121,8 @@ Maia3 directly rather than scaling a strong-engine WDL.
 
 ### Rating inference status (for the Elo-contempt Play mode)
 
-`scripts/maia_elo_probe.mjs` infers a player's rating from their moves.
+`scripts/maia_elo_probe.mjs` (removed in commit `460c2a4`, 2026-06-18; recover with `git show 460c2a4^:scripts/maia_elo_probe.mjs`)
+inferred a player's rating from their moves.
 Two scorers:
 
 - `--scorer ladder` (5 discrete Maia nets): 3/3 correct buckets by ~20
@@ -156,7 +158,8 @@ All mechanisms off (`0`) ⇒ bit-identical search (puct/lc0 parity suites).
 
 ## Empirical results (Maia as the human stand-in)
 
-`scripts/contempt_vs_maia.mjs` plays Lc0 small (t1, fixed visits) against
+`scripts/contempt_vs_maia.mjs` (removed in commit `460c2a4`, 2026-06-18; recover with `git show 460c2a4^:scripts/contempt_vs_maia.mjs`)
+played Lc0 small (t1, fixed visits) against
 a Maia net sampling from its human-move distribution — the same opponent
 model the Play page ships. Arms are `--draw-scores` zipped with
 `--sc-limits`. Queen odds (the Lc0 side starts without its queen) vs
@@ -229,7 +232,9 @@ the opponent** (validated across ±1000) and has a `Contempt_Analysis`
 mode that reports the *practical* best move against that opponent model
 rather than the objective one.
 
-**The now-retired wasm32-wasip1 lab port was built and gated** (2026-06-11):
+**The wasm32-wasip1 lab port was built and gated** (2026-06-11). It was never
+deployed and was retired and removed 2026-11 (`montyEngine.ts`, the smoke page
+and `public/monty/monty.wasm` are gone); the record below is historical:
 
 - The local patch and build harness added inline-execution shims for the four
   `std::thread::scope` sites (search loop, go/stop stdin poll, tree init/clear),
@@ -284,11 +289,11 @@ Decision — Monty's three roles split by where they run, with outcomes
    Monty present. The deeper calibration question ("does the transform
    match real human outcomes?") is now answered by **Maia3**, not Monty
    — see the learned-vs-analytic table above.
-2. **Browser lane — lab only, never product** (unchanged).
-   `lab/monty-smoke.html` / `MontyEngine` stay lab-scoped. The raw network
-   files were removed from tracked public assets; local tests must stage
-   ignored copies/symlinks under `public/models/monty/`. If ever surfaced:
-   explicit ~950MB opt-in + AGPL corresponding-source archive +
+2. **Browser lane — lab only, never product; retired and removed 2026-11.**
+   `lab/monty-smoke.html` / `MontyEngine` were lab-scoped and are now
+   deleted, along with `public/monty/monty.wasm`. It was never deployed and
+   never had an AGPL corresponding-source archive. If
+   ever revived: explicit ~950MB opt-in + AGPL corresponding-source archive +
    stream-into-wasm memory hardening.
 3. **Contempt_Analysis — rehosted Monty-free, in a stronger form.** The
    practical-vs-objective lane is covered by (a) our own PUCT with

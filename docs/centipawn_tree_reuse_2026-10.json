@@ -1236,7 +1236,7 @@
     }
   },
   "reference": {
-    "engine": "/home/ddbb/upgrades/stockfish/sf19-native",
+    "engine": "~/upgrades/stockfish/sf19-native",
     "movetimeMs": 500,
     "threads": 1,
     "hashMb": 16,

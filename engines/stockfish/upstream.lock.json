@@ -1,0 +1,28 @@
+{
+  "name": "stockfish-js",
+  "comment": "Mirror of scripts/stockfish_release_config.mjs, which the Stockfish build, manifest and source-archive scripts import; tests/engine_upstream_locks.test.mjs keeps the two equal.",
+  "upstream": {
+    "repo": "https://github.com/nmrugg/stockfish.js.git",
+    "ref": "0d5dd7944f88c817c07a26bc4fb1905d5f9c46d6",
+    "tag": "v19.0.1",
+    "version": "19.0.1",
+    "license": "GPL-3.0",
+    "nativeTag": "sf_19",
+    "nativeRef": "edb0d9db6731067ec50ce619ff372b463bc4dd5d"
+  },
+  "network": [
+    {
+      "variant": "full",
+      "name": "nn-1a298aa575a0.nnue",
+      "url": "https://tests.stockfishchess.org/api/nn/nn-1a298aa575a0.nnue",
+      "sha256": "1a298aa575a085434d29027978dc36867fe9c5bcea9376654b7a8eba1e52dfc2"
+    },
+    {
+      "variant": "lite",
+      "name": "nn-61e7af4bb97d.nnue",
+      "url": "https://tests.stockfishchess.org/api/nn/nn-61e7af4bb97d.nnue",
+      "sha256": "61e7af4bb97d51eeeb25d322916f86513b5cd3a827ce189c98c6e31946f99e5b"
+    }
+  ],
+  "toolchain": "emscripten/emsdk:6.0.9"
+}
