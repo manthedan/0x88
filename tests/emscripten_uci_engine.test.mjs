@@ -112,3 +112,31 @@ for (const [label, Engine] of ENGINES) {
     assert.deepEqual(options, ['setoption name Hash value 64', 'setoption name Threads value 1']);
   });
 }
+
+test('Emscripten adapters do not retain search output between searches', async (t) => {
+  install(t);
+  const engine = new StormphraxEngine({ depth: 2 });
+  t.after(() => engine.dispose());
+  await engine.prewarm();
+  const worker = EmscriptenWorker.instances[0];
+  const post = worker.postMessage.bind(worker);
+  worker.postMessage = (message) => {
+    if (message.command?.startsWith('go ')) {
+      for (let depth = 1; depth <= 40; depth += 1) {
+        worker.onmessage?.({
+          data: { type: 'line', stream: 'stdout', line: `info depth ${depth} multipv 1 score cp ${depth} nodes ${depth * 10} pv e2e4 e7e5` },
+        });
+        worker.onmessage?.({ data: { type: 'line', stream: 'stderr', line: `debug ${depth}` } });
+      }
+    }
+    post(message);
+  };
+  for (let i = 0; i < 20; i += 1) {
+    assert.equal(await engine.bestMove(START_FEN), 'e2e4');
+    assert.equal(engine.lastInfo()[0].depth, 40, 'info lines of the finished search are still parsed');
+  }
+  const multipv = await engine.analyze(START_FEN, { multipv: 1 });
+  assert.equal(multipv[0].depth, 40);
+  assert.ok(engine.stdout.length <= 16, `stdout retained ${engine.stdout.length} lines`);
+  assert.ok(engine.stderr.length <= 16, `stderr retained ${engine.stderr.length} lines`);
+});

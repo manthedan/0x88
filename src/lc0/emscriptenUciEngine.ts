@@ -57,6 +57,9 @@ function threadsCommand(threads: number): string {
   return `setoption name Threads value ${Math.max(1, Math.min(2048, Math.floor(threads)))}`;
 }
 
+/** Output lines kept between exclusive sections, for timeout diagnostics only. */
+const RETAINED_OUTPUT_LINES = 16;
+
 function abortError(message: string): Error {
   const error = new Error(message);
   error.name = 'AbortError';
@@ -236,9 +239,21 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
           if (this.disposed) throw this.disposedError();
           return await fn();
         } finally {
+          this.trimOutput();
           release();
         }
       });
+  }
+
+  /**
+   * Line indices are only held within one exclusive section, so once it has
+   * settled the transcript can be dropped instead of retaining every `info`
+   * line until dispose().
+   */
+  private trimOutput(): void {
+    if (this.lineWaiters.length) return;
+    if (this.stdout.length > RETAINED_OUTPUT_LINES) this.stdout = this.stdout.slice(-RETAINED_OUTPUT_LINES);
+    if (this.stderr.length > RETAINED_OUTPUT_LINES) this.stderr = this.stderr.slice(-RETAINED_OUTPUT_LINES);
   }
 
   private makeWorker(): Worker {
