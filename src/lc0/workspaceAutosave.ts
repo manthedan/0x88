@@ -266,20 +266,31 @@ export function restorePreviousAnalysis(storage = workspaceStorage()): ReturnTyp
 }
 
 /** One small local slot per surface. Only changed committed state resets the debounce. */
-export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspaceStorage(), delay = 400, onPause?: (reason: 'too-large' | 'storage') => void) {
+export function createWorkspaceAutosave(
+  kind: WorkspaceKind,
+  storage = workspaceStorage(),
+  delay = 400,
+  onPause?: (reason: 'too-large' | 'storage') => void,
+  onResume?: () => void,
+) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: string | undefined;
   let last: string | undefined;
-  let pauseReported = false;
+  let pauseReason: 'too-large' | 'storage' | undefined;
   const pause = (reason: 'too-large' | 'storage' = 'too-large') => {
     clearTimeout(timer);
     timer = undefined;
     pending = undefined;
     last = undefined;
-    if (!pauseReported) {
-      pauseReported = true;
+    if (pauseReason !== reason) {
+      pauseReason = reason;
       onPause?.(reason);
     }
+  };
+  const resume = () => {
+    if (pauseReason === undefined) return;
+    pauseReason = undefined;
+    onResume?.();
   };
   const remove = () => {
     try {
@@ -300,6 +311,7 @@ export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspace
       }
       if (!storage) throw new Error('Storage unavailable');
       storage.setItem(workspaceStorageKey(kind), raw);
+      resume();
     } catch {
       pause('storage');
     }
@@ -311,6 +323,7 @@ export function createWorkspaceAutosave(kind: WorkspaceKind, storage = workspace
     pending = undefined;
     last = undefined;
     remove();
+    resume();
   };
   return {
     schedule(data: AnalysisSnapshot | PlaySnapshot | null) {

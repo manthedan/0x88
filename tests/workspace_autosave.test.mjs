@@ -67,6 +67,43 @@ test('reopening an equal linked workspace never overwrites the previous analysis
   assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), original);
 });
 
+test('autosave resumes after a smaller save, recovered storage or clearing, and reports later failures', () => {
+  const store = storage();
+  const pauses = [];
+  let resumed = 0;
+  const saver = createWorkspaceAutosave(
+    'analysis',
+    store,
+    400,
+    (reason) => pauses.push(reason),
+    () => resumed++,
+  );
+  const oversized = { ...analysisData(), headers: { Event: 'x'.repeat(WORKSPACE_MAX_CHARS) } };
+  saver.schedule(oversized);
+  saver.flush();
+  saver.schedule(analysisData());
+  saver.flush();
+  assert.equal(resumed, 1, 'a smaller analysis clears the paused notice');
+  const write = store.setItem;
+  store.setItem = () => {
+    throw Error('quota');
+  };
+  saver.schedule({ ...analysisData(), headers: { Event: 'retry' } });
+  saver.flush();
+  store.setItem = write;
+  saver.schedule({ ...analysisData(), headers: { Event: 'retry' } });
+  saver.flush();
+  assert.equal(resumed, 2, 'successful retry of the same snapshot clears the notice');
+  saver.pause('too-large');
+  saver.clear();
+  assert.equal(resumed, 3, 'reset clears the paused notice');
+  saver.pause('storage');
+  saver.pause('storage');
+  saver.pause('too-large');
+  assert.deepEqual(pauses, ['too-large', 'storage', 'too-large', 'storage', 'too-large']);
+  saver.clear();
+});
+
 test('analysis round trip retains nested variations, comments, headers, result and selected non-mainline node', () => {
   const parsed = parsePgnGame('[Event "My game"]\n[White "Alice"]\n[Black "Bob"]\n\n1. e4 {Centre} e5 (1... c5 2. Nf3 (2. Nc3)) 2. Nf3 1-0');
   const { tree, tags: headers, result } = parsed;
@@ -497,7 +534,7 @@ test('Copy PGN drops an imported result once the mainline no longer owns it', as
   assert.equal(pgnResultForExport({ White: 'A' }, '1-0', false).headers.Result, undefined);
 });
 
-test('quota, serialization and node-limit failures pause once without removing the last save', () => {
+test('quota, serialization and node-limit failures pause once per reason without removing the last save', () => {
   const store = storage();
   const seed = createWorkspaceAutosave('analysis', store);
   seed.schedule(analysisData());
@@ -523,7 +560,7 @@ test('quota, serialization and node-limit failures pause once without removing t
   circular.tree = circular;
   saver.schedule(circular);
   saver.pause('too-large');
-  assert.deepEqual(notices, ['storage']);
+  assert.deepEqual(notices, ['storage', 'too-large']);
   assert.equal(store.getItem(workspaceStorageKey('analysis')), original);
   const tooLargeNotices = [];
   const oversized = createWorkspaceAutosave('analysis', store, 400, (reason) => tooLargeNotices.push(reason));

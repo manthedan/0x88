@@ -6216,12 +6216,20 @@ export function mountAnalysisBrowser(): () => void {
   }
   lastAnalysisMountHref = href;
   resetAnalysisPageState();
-  workspaceAutosave = createWorkspaceAutosave('analysis', undefined, 400, (reason) => {
-    el('autosaveNotice').textContent =
-      reason === 'too-large'
-        ? 'Autosave paused: analysis too large — export PGN to keep it.'
-        : 'Autosave paused: storage unavailable or full — export PGN to keep it.';
-  });
+  workspaceAutosave = createWorkspaceAutosave(
+    'analysis',
+    undefined,
+    400,
+    (reason) => {
+      el('autosaveNotice').textContent =
+        reason === 'too-large'
+          ? 'Autosave paused: analysis too large — export PGN to keep it.'
+          : 'Autosave paused: storage unavailable or full — export PGN to keep it.';
+    },
+    () => {
+      el('autosaveNotice').textContent = '';
+    },
+  );
   analysisWorkerProgressMessages = 0;
   analysisUiProgressSamples = 0;
   installHiddenTabPause();
