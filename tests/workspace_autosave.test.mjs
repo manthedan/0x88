@@ -12,6 +12,7 @@ import {
   decodePlaySnapshot,
   hasExplicitWorkspaceInput,
   hasPreviousAnalysis,
+  PREVIOUS_ANALYSIS_KEY,
   preservePreviousAnalysis,
   readWorkspace,
   restorePreviousAnalysis,
@@ -52,6 +53,19 @@ const storage = () => {
     removeItem: (key) => values.delete(key),
   };
 };
+
+test('reopening an equal linked workspace never overwrites the previous analysis', () => {
+  const store = storage();
+  const original = envelope('analysis', analysisData());
+  store.setItem(workspaceStorageKey('analysis'), original);
+  const linked = new GameTree();
+  linked.addUci('e2e4');
+  assert.equal(preservePreviousAnalysis(store, linked), true);
+  store.setItem(workspaceStorageKey('analysis'), envelope('analysis', { ...analysisData(), tree: serializeTree(linked) }));
+  linked.toStart();
+  assert.equal(preservePreviousAnalysis(store, linked), true);
+  assert.equal(store.getItem(PREVIOUS_ANALYSIS_KEY), original);
+});
 
 test('analysis round trip retains nested variations, comments, headers, result and selected non-mainline node', () => {
   const parsed = parsePgnGame('[Event "My game"]\n[White "Alice"]\n[Black "Bob"]\n\n1. e4 {Centre} e5 (1... c5 2. Nf3 (2. Nc3)) 2. Nf3 1-0');

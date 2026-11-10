@@ -442,7 +442,7 @@ function restoreAnalysisWorkspace(): void {
       const rawPgn = params.get('pgn') ?? handoffPgn;
       const parsed = params.has('fen') ? null : parseFirstPgnGame(rawPgn ?? '').game;
       const replacement = parsed?.tree ?? new GameTree(linkedFen.fen);
-      if (!preservePreviousAnalysis()) throw new Error('Could not keep the previous analysis. Export it before replacing it.');
+      if (!preservePreviousAnalysis(undefined, replacement)) throw new Error('Could not keep the previous analysis. Export it before replacing it.');
       clearAnalysisWorkspace();
       tree = replacement;
       tree.toStart();
@@ -456,6 +456,13 @@ function restoreAnalysisWorkspace(): void {
       }
       el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
       saveAnalysisWorkspace();
+      const consumedUrl = new URL(location.href);
+      for (const key of ['fen', 'pgn']) {
+        consumedUrl.searchParams.delete(key);
+        params.delete(key);
+      }
+      history.replaceState(history.state, '', consumedUrl);
+      lastAnalysisMountHref = location.href;
       return;
     } catch (error) {
       linkedInputError = `Could not load linked analysis: ${(error as Error).message}`;
