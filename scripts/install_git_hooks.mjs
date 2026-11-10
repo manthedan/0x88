@@ -34,13 +34,37 @@ command -v git-lfs >/dev/null 2>&1 || { printf >&2 "\n%s\n\n" "This repository i
 exec ${LFS_CALL}
 `;
 
-/** The hook `git lfs install` writes: only the git-lfs guard and the pre-push call. */
+// Complete stock pre-push bodies: hookBaseContent and the pre-push upgradeables in
+// https://github.com/git-lfs/git-lfs/blob/v3.7.1/lfs/hook.go
+// The first was also verified with `git lfs install --local` (3.7.1) in a temp repo.
+// Keep variants here as whole bodies; a guard prefix can hide custom commands.
+const STOCK_LFS_HOOKS = [
+  String.raw`#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 "\n%s\n\n" "This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks')."; exit 2; }
+git lfs pre-push "$@"`,
+  String.raw`#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { echo >&2 "\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\n"; exit 2; }
+git lfs pre-push "$@"`,
+  String.raw`#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { echo >&2 "\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting '.git/hooks/pre-push'.\n"; exit 2; }
+git lfs pre-push "$@"`,
+  String.raw`#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { echo >&2 "\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting .git/hooks/pre-push.\n"; exit 2; }
+git lfs pre-push "$@"`,
+  String.raw`#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { echo >&2 "\nThis repository has been set up with Git LFS but Git LFS is not installed.\n"; exit 0; }
+git lfs pre-push "$@"`,
+  String.raw`#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || { echo >&2 "\nThis repository has been set up with Git LFS but Git LFS is not installed.\n"; exit 2; }
+git lfs pre-push "$@"`,
+  '#!/bin/sh\ngit lfs push --stdin $*',
+  '#!/bin/sh\ngit lfs push --stdin "$@"',
+  '#!/bin/sh\ngit lfs pre-push "$@"',
+];
+
+/** Compare the entire hook, normalizing only CRLF and surrounding whitespace. */
 export function isStockLfsHook(text) {
-  const lines = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'));
-  return lines.includes(LFS_CALL) && lines.every((line) => line === LFS_CALL || line.startsWith('command -v git-lfs '));
+  return STOCK_LFS_HOOKS.includes(text.replaceAll('\r\n', '\n').trim());
 }
 
 export function prePushHookState(hooksDir) {
