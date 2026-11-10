@@ -5,7 +5,7 @@
 //   - Lc0, Centipawn and Maia 3 models: the model manifests under public/models/
 //   - the promoted Centipawn TVMJS runtime: its bundle manifest
 // Only labels, statuses and short notes are curated here. Deployment status is
-// derived from .gitignore, so it says what a clean checkout contains.
+// derived from tracked paths and repository .gitignore rules, so it says what a clean checkout contains.
 // Usage: node scripts/write_artifact_index.mjs [--check]
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -167,12 +167,16 @@ function readJson(root, path) {
 const publicUrl = (path) => `/${posix.relative('public', path)}`;
 const publicPath = (url) => `public${url.replace(/\/$/, '')}`;
 
-function ignoredPaths(root, paths) {
-  // --no-index tests the .gitignore patterns themselves, so the answer does not
-  // depend on whether a local checkout happens to track or stage the file.
-  const result = spawnSync('git', ['check-ignore', '--no-index', '--stdin'], { cwd: root, input: paths.join('\n'), encoding: 'utf8' });
-  if (result.status !== 0 && result.status !== 1) throw new Error(`git check-ignore failed: ${result.stderr}`);
-  return new Set(result.stdout.split('\n').filter(Boolean));
+function deployablePaths(root) {
+  const tracked = (...extra) => {
+    const result = spawnSync('git', ['ls-files', '--cached', '-z', ...extra, '--', 'public'], { cwd: root, encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(`git ls-files failed: ${result.stderr}`);
+    return result.stdout.split('\0').filter(Boolean);
+  };
+  // Read only repository .gitignore rules. --exclude-standard would also read
+  // global excludes and .git/info/exclude, making the result checkout-dependent.
+  const ignored = new Set(tracked('--ignored', '--exclude-per-directory=.gitignore'));
+  return new Set(tracked().filter((path) => !ignored.has(path)));
 }
 
 /** Every public URL an index entry references. */
@@ -180,10 +184,10 @@ export function entryUrls(entry) {
   return [entry.manifestUrl, entry.sourceArchiveUrl, ...(entry.additionalSourceArchiveUrls ?? []), ...entry.primaryUrls].filter(Boolean);
 }
 
-function deploymentStatus(entry, ignored) {
-  const isIgnored = (url) => ignored.has(publicPath(url));
-  if (!entryUrls(entry).some(isIgnored)) return 'tracked-deployable';
-  if (entry.manifestUrl && !isIgnored(entry.manifestUrl)) return 'tracked-manifest-ignored-blobs';
+function deploymentStatus(entry, deployable) {
+  const isDeployable = (url) => deployable.has(publicPath(url));
+  if (entryUrls(entry).every(isDeployable)) return 'tracked-deployable';
+  if (entry.manifestUrl && isDeployable(entry.manifestUrl)) return 'tracked-manifest-ignored-blobs';
   return 'ignored-local-artifacts';
 }
 
@@ -297,10 +301,10 @@ export function buildArtifactIndex(root = ROOT) {
     if (!ENGINES.some((curated) => curated.engine === manifest.engine)) throw new Error(`${path}: add an ENGINES row for ${manifest.engine}`);
   }
   const drafts = [...modelEntries(root), ...runtimeEntries(root), ...RESEARCH_ENTRIES, ...engineRows];
-  const ignored = ignoredPaths(root, drafts.flatMap(entryUrls).map(publicPath));
+  const deployable = deployablePaths(root);
   const entries = drafts.map((entry) => {
     const { id, family, uiLabel, status, license, versionOrSource, ...rest } = entry;
-    return { id, family, uiLabel, status, ...(license ? { license } : {}), versionOrSource, deploymentStatus: deploymentStatus(entry, ignored), ...rest };
+    return { id, family, uiLabel, status, ...(license ? { license } : {}), versionOrSource, deploymentStatus: deploymentStatus(entry, deployable), ...rest };
   });
   const inputDates = [...manifests.values(), ...TVMJS_RUNTIMES.map((runtime) => readJson(root, runtime.manifest))]
     .map((manifest) => manifest.generatedAt)

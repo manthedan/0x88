@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,31 @@ const toPath = (url) => `public${url.replace(/\/$/, '')}`;
 test('committed artifact index equals the generator output (run npm run artifact-index)', () => {
   assert.equal(committed, serializeArtifactIndex(buildArtifactIndex(root)));
 });
+
+for (const pattern of ['*.wasm', 'public/', '*']) {
+  test(`artifact index output is unchanged by global excludes: ${pattern}`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'artifact-index-excludes-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const excludes = join(directory, 'excludes');
+    writeFileSync(excludes, `${pattern}\n`);
+
+    const generated = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        "import { buildArtifactIndex, serializeArtifactIndex } from './scripts/write_artifact_index.mjs'; process.stdout.write(serializeArtifactIndex(buildArtifactIndex()));",
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.excludesFile', GIT_CONFIG_VALUE_0: excludes },
+      },
+    );
+    assert.equal(generated.status, 0, generated.stderr);
+    assert.equal(generated.stdout, committed);
+  });
+}
 
 test('every artifact index URL exists under public/ or is an allowlisted gitignored file', () => {
   const urls = [...new Set(index.entries.flatMap(entryUrls))];
