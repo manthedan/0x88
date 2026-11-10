@@ -1,4 +1,5 @@
 import { probeAssetUrls } from './assetProbe.ts';
+import { resolveAssetOverride } from './assetUrls.ts';
 import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
 
@@ -93,18 +94,6 @@ export async function resolveDefaultViridithasVariantAssetFallback(
 
 export const VIRIDITHAS_VARIANTS: readonly ViridithasVariant[] = [VIRIDITHAS_SIMD_VARIANT, VIRIDITHAS_RELAXED_SIMD_VARIANT, VIRIDITHAS_DEFAULT_VARIANT];
 
-function sameOriginViridithasAsset(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
-    const url = new URL(raw, base);
-    if (url.origin !== base || !url.pathname.startsWith('/viridithas/')) return undefined;
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return undefined;
-  }
-}
-
 export function normalizeViridithasVariant(raw: string | null | undefined): ViridithasVariant['key'] {
   const value = String(raw ?? '')
     .toLowerCase()
@@ -128,7 +117,7 @@ export function hasExplicitViridithasVariant(params: URLSearchParams): boolean {
 }
 
 export function viridithasVariantFromParams(params: URLSearchParams): ViridithasVariant {
-  const customUrl = sameOriginViridithasAsset(params.get('viridithasWasm'));
+  const customUrl = resolveAssetOverride(params.get('viridithasWasm'));
   if (customUrl)
     return { key: 'custom', label: 'Viridithas Custom', wasmUrl: customUrl, note: 'Custom same-origin Viridithas WASM URL from ?viridithasWasm=…' };
   return viridithasVariantByKey(params.get('viridithas') ?? params.get('viridithasVariant') ?? defaultViridithasVariantKey());

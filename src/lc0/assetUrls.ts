@@ -102,11 +102,26 @@ export function resolvePublicAssetUrl(pathOrUrl: string): string {
   return `${base}${pathOrUrl}`;
 }
 
+/** Apply the same trust boundary to individual query-selected assets as bases. */
+export function resolveAssetOverride(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const base = typeof location === 'undefined' ? 'http://localhost/' : location.href;
+    const url = new URL(raw, base);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
+    if (typeof location === 'undefined' ? url.origin !== 'http://localhost' : !overrideAllowed(url.href, false)) return undefined;
+    return url.origin === new URL(base).origin ? `${url.pathname}${url.search}` : url.href;
+  } catch {
+    return undefined;
+  }
+}
+
 export function isTrustedExecutableAssetUrl(pathOrUrl: string): boolean {
   try {
     const base = typeof location !== 'undefined' ? location.href : 'http://localhost';
     const url = new URL(pathOrUrl, base);
     if (typeof location !== 'undefined' && url.origin === location.origin) return true;
+    if (isLocalDevelopment() && resolveAssetOverride(pathOrUrl)) return true;
     const trustedBase = trustedConfiguredAssetBase(false);
     return trustedBase ? url.origin === new URL(trustedBase).origin : false;
   } catch {

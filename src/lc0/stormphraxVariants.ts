@@ -1,4 +1,5 @@
 import { probeAssetUrls } from './assetProbe.ts';
+import { resolveAssetOverride } from './assetUrls.ts';
 import { resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -47,18 +48,6 @@ const assetChecks = new Map<string, Promise<StormphraxAssetStatus>>();
 function isLocalDevelopmentOrigin(): boolean {
   if (typeof location === 'undefined') return true;
   return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '::1' || location.hostname === '[::1]';
-}
-
-function sameOriginStormphraxAsset(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
-    const url = new URL(raw, base);
-    if (url.origin !== base || !url.pathname.startsWith('/stormphrax/')) return undefined;
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return undefined;
-  }
 }
 
 function assetUrls(variant: StormphraxVariant): string[] {
@@ -135,9 +124,9 @@ export function hasExplicitStormphraxVariant(params: URLSearchParams): boolean {
 }
 
 export function stormphraxVariantFromParams(params: URLSearchParams): StormphraxVariant {
-  const customJsUrl = sameOriginStormphraxAsset(params.get('stormphraxJs'));
-  const customWasmUrl = sameOriginStormphraxAsset(params.get('stormphraxWasm'));
-  const customDataUrl = sameOriginStormphraxAsset(params.get('stormphraxData'));
+  const customJsUrl = resolveAssetOverride(params.get('stormphraxJs'));
+  const customWasmUrl = resolveAssetOverride(params.get('stormphraxWasm'));
+  const customDataUrl = resolveAssetOverride(params.get('stormphraxData'));
   if (customJsUrl || customWasmUrl || customDataUrl) {
     return {
       ...STORMPHRAX_EMSCRIPTEN_VARIANT,

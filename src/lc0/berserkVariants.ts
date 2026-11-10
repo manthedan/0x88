@@ -1,5 +1,5 @@
 import { probeAssetUrls } from './assetProbe.ts';
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
 import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -83,18 +83,6 @@ function shouldSkipKnownUnshippedProbe(variant: BerserkVariant): boolean {
     const pathname = assetPathname(url);
     return pathname.startsWith('/berserk/') && !DEPLOYED_BERSERK_PATHS.has(pathname);
   });
-}
-
-function sameOriginBerserkAsset(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
-    const url = new URL(raw, base);
-    if (url.origin !== base || !url.pathname.startsWith('/berserk/')) return undefined;
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return undefined;
-  }
 }
 
 function assetUrls(variant: BerserkVariant): string[] {
@@ -216,10 +204,10 @@ export function hasExplicitBerserkVariant(params: URLSearchParams): boolean {
 }
 
 export function berserkVariantFromParams(params: URLSearchParams): BerserkVariant {
-  const customJsUrl = sameOriginBerserkAsset(params.get('berserkJs'));
-  const customWasmUrl = sameOriginBerserkAsset(params.get('berserkWasm'));
-  const customDataUrl = sameOriginBerserkAsset(params.get('berserkData'));
-  const customNnueUrl = sameOriginBerserkAsset(params.get('berserkNnue'));
+  const customJsUrl = resolveAssetOverride(params.get('berserkJs'));
+  const customWasmUrl = resolveAssetOverride(params.get('berserkWasm'));
+  const customDataUrl = resolveAssetOverride(params.get('berserkData'));
+  const customNnueUrl = resolveAssetOverride(params.get('berserkNnue'));
   if (customJsUrl) {
     return {
       key: 'custom',

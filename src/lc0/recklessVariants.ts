@@ -1,5 +1,5 @@
 import { probeAssetUrls } from './assetProbe.ts';
-import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
 import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
@@ -193,7 +193,7 @@ export function hasExplicitRecklessVariant(params: URLSearchParams): boolean {
 }
 
 export function recklessVariantFromParams(params: URLSearchParams): RecklessVariant {
-  const customUrl = params.get('recklessWasm');
+  const customUrl = resolveAssetOverride(params.get('recklessWasm'));
   if (customUrl) return { key: 'custom', label: 'Reckless Custom', wasmUrl: customUrl, note: 'Custom Reckless WASM URL from ?recklessWasm=…' };
   const explicit = params.get('recklessVariant') ?? params.get('reckless');
   if (explicit) return recklessVariantByKey(normalizeRecklessVariant(explicit));

@@ -1,4 +1,5 @@
 import { probeAssetUrls } from './assetProbe.ts';
+import { resolveAssetOverride } from './assetUrls.ts';
 import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -75,18 +76,6 @@ function shouldSkipKnownUnshippedProbe(variant: PlentyChessVariant): boolean {
     const pathname = assetPathname(url);
     return pathname.startsWith('/plentychess/') && !DEPLOYED_PLENTYCHESS_PATHS.has(pathname);
   });
-}
-
-function sameOriginPlentyChessAsset(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const base = typeof location !== 'undefined' ? location.origin : 'http://localhost';
-    const url = new URL(raw, base);
-    if (url.origin !== base || !url.pathname.startsWith('/plentychess/')) return undefined;
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return undefined;
-  }
 }
 
 function assetUrls(variant: PlentyChessVariant): string[] {
@@ -218,9 +207,9 @@ export function hasExplicitPlentyChessVariant(params: URLSearchParams): boolean 
 }
 
 export function plentyChessVariantFromParams(params: URLSearchParams): PlentyChessVariant {
-  const customJsUrl = sameOriginPlentyChessAsset(params.get('plentyChessJs'));
-  const customWasmUrl = sameOriginPlentyChessAsset(params.get('plentyChessWasm'));
-  const customDataUrl = sameOriginPlentyChessAsset(params.get('plentyChessData'));
+  const customJsUrl = resolveAssetOverride(params.get('plentyChessJs'));
+  const customWasmUrl = resolveAssetOverride(params.get('plentyChessWasm'));
+  const customDataUrl = resolveAssetOverride(params.get('plentyChessData'));
   if (customJsUrl || customWasmUrl || customDataUrl) {
     return {
       key: 'custom',

@@ -73,7 +73,9 @@ test('PlentyChess URL params support explicit and custom Emscripten sidecars', (
   assert.equal(custom.jsUrl, '/plentychess/custom.js');
   assert.equal(custom.wasmUrl, '/plentychess/custom.wasm');
   assert.equal(custom.dataUrl, '/plentychess/custom.data');
-  const rejectedCustom = plentyChessVariantFromParams(new URLSearchParams('plentyChessJs=https://evil.example/plenty.js&plentyChessWasm=/local/plenty.wasm'));
+  const rejectedCustom = plentyChessVariantFromParams(
+    new URLSearchParams('plentyChessJs=https://evil.example/plenty.js&plentyChessWasm=https://evil.example/local/plenty.wasm'),
+  );
   assert.equal(rejectedCustom.key, defaultPlentyChessVariantKey());
 });
 
