@@ -31,6 +31,8 @@ test('Analysis FEN and PGN copy show failure and retain text when the clipboard 
       pgnResultForExport: (headers, result) => ({ headers, result }),
       gameTreeToPgn,
       writeClipboard: (text) => writeClipboard(text, clipboard),
+      mountAbort: new AbortController(),
+      isStaleMount: () => false,
       el: (key) => elements.get(key),
       inputEl: (key) => elements.get(key),
     };
@@ -52,6 +54,55 @@ test('Analysis FEN and PGN copy show failure and retain text when the clipboard 
     true,
   );
   assert.equal(copied, 'PGN');
+});
+
+test('pending Analysis clipboard writes cannot update another mount or access removed status nodes', async () => {
+  const copies = analysis.slice(analysis.indexOf('async function copyFen()'), analysis.indexOf('function closePvPreview()'));
+  const review = analysis.slice(analysis.indexOf('async function copyReviewPgn()'), analysis.indexOf('function hasActiveAnalysisRun()'));
+  for (const action of ['copyFen', 'copyPgn', 'copyReviewPgn']) {
+    for (const rejected of [false, true]) {
+      let finish;
+      const clipboard = {
+        writeText: () =>
+          new Promise((resolve, reject) => {
+            finish = () => (rejected ? reject(Error('denied')) : resolve());
+          }),
+      };
+      const controller = new AbortController();
+      const dependencies = {
+        tree: new GameTree(),
+        workspaceHeaders: {},
+        workspaceResult: '*',
+        reviewMetadata: new Map(),
+        reviewSignature: () => '',
+        pgnResultForExport: (headers, result) => ({ headers, result }),
+        gameTreeToPgn,
+        reviewedPgn: () => '1. e4 *',
+        navigator: { clipboard },
+        writeClipboard: (text) => writeClipboard(text, clipboard),
+        mountAbort: controller,
+        isStaleMount: (signal) => signal.aborted,
+      };
+      let unmounted = false;
+      const status = { value: '', textContent: 'New page status' };
+      const el = () => {
+        assert.equal(unmounted, false, 'stale clipboard handler touched the DOM');
+        return status;
+      };
+      const api = new Function(
+        ...Object.keys(dependencies),
+        'el',
+        'inputEl',
+        `${stripTypeScriptTypes(copies + review)}; return {copyFen, copyPgn, copyReviewPgn};`,
+      )(...Object.values(dependencies), el, el);
+      const pending = api[action]();
+      controller.abort();
+      unmounted = true;
+      finish();
+      await assert.doesNotReject(pending, `${action} (${rejected ? 'rejected' : 'resolved'})`);
+      assert.equal(status.textContent, 'New page status');
+    }
+  }
 });
 
 test('move-limit draws export explicit adjudication and have a visible, descriptive label', () => {

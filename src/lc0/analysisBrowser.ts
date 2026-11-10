@@ -3716,12 +3716,15 @@ function reviewedPgn(): string | undefined {
 }
 
 async function copyReviewPgn(): Promise<void> {
+  const signal = mountAbort.signal;
   const pgn = reviewedPgn();
   if (!pgn) return;
   try {
     await navigator.clipboard.writeText(pgn);
+    if (isStaleMount(signal)) return;
     el('reviewStatus').textContent = 'Annotated PGN copied to clipboard.';
   } catch {
+    if (isStaleMount(signal)) return;
     el('reviewStatus').textContent = 'Clipboard unavailable. Use Download PGN to save the reviewed mainline.';
   }
 }
@@ -4890,22 +4893,27 @@ function loadPgn() {
 }
 
 async function copyFen(): Promise<boolean> {
+  const signal = mountAbort.signal;
   const fen = tree.current.fen;
   inputEl('fenInput').value = fen;
   const copied = await writeClipboard(fen);
+  if (isStaleMount(signal)) return false;
   el('message').textContent = copied ? 'FEN copied to the clipboard.' : 'Could not copy FEN to the clipboard. Copy it from the FEN box.';
   return copied;
 }
 
 async function copyPgn(): Promise<boolean> {
+  const signal = mountAbort.signal;
   try {
     const exported = pgnResultForExport(workspaceHeaders, workspaceResult, reviewMetadata.get(tree)?.signature === reviewSignature());
     const pgn = gameTreeToPgn(tree, exported.headers, exported.result);
     inputEl('pgnInput').value = pgn;
     const copied = await writeClipboard(pgn);
+    if (isStaleMount(signal)) return false;
     el('message').textContent = copied ? 'PGN copied to the box and clipboard.' : 'Could not copy PGN to the clipboard. Copy it from the PGN box.';
     return copied;
   } catch (error) {
+    if (isStaleMount(signal)) return false;
     el('message').textContent = `PGN export failed: ${(error as Error).message}`;
     return false;
   }
