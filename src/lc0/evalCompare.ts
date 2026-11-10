@@ -78,7 +78,12 @@ export function compareArenaEvals(scores: readonly (EvalScore & { fen?: string }
   const fair = scores.length === 2 && ages.every((age) => age !== undefined && age >= 0 && age <= 2)
     && Math.abs(ages[0]! - ages[1]!) <= 1
     && (ages[0] !== ages[1] || position(scores[0].fen!) === position(scores[1].fen!));
-  return { ages, fresh, fair, adjacent: fair && ages[0] !== ages[1], comparison: fair ? compareEvals(scores) : undefined };
+  // Only a completed, ineligible pair gets the old-lane treatment. An ordinary
+  // alternating search (or a missing first result) must retain full contrast.
+  // Equally aged but unrelated positions have no authoritative lane: dim both.
+  const complete = scores.every((score) => evalPercent(score) !== undefined);
+  const stale = ages.map((age, index) => !fair && complete && (!fresh[index] || ages.every((other) => other === age)));
+  return { ages, fresh, stale, fair, adjacent: fair && ages[0] !== ages[1], comparison: fair ? compareEvals(scores) : undefined };
 }
 
 /** Compact text retains the unit for mate comparisons; a mate distance is not pawns. */

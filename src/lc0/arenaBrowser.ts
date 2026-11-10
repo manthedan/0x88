@@ -1227,7 +1227,6 @@ function renderEvalBars(): void {
   });
   const state = compareArenaEvals(lanes.map((lane) => lane.score), shownPosition().fen);
   const comparison = state.comparison;
-  const emphasis = !!comparison && (comparison.meaningful || comparison.oppositeSides);
   const status = arenaComparisonStatus(state, lanes.map((lane) => lane.percent !== undefined), lanes.map((lane) => lane.tag));
   const descriptions = lanes.map((lane, index) => `${lane.name} (${lane.side}), ${lane.text}, ${lane.percent === undefined ? 'No completed search' : searchAgeLabel(state.ages[index])}${lane.thinking ? ', searching now' : ''}`);
   const context = state.adjacent ? 'adjacent searches, not the same position' : 'same position';
@@ -1241,17 +1240,12 @@ function renderEvalBars(): void {
     const lane = lanes[index];
     laneNode.classList.toggle('unavailable', lane.percent === undefined);
     laneNode.classList.toggle('thinking', lane.thinking);
+    laneNode.classList.toggle('stale', state.stale[index]);
     laneNode.style.setProperty('--eng', lane.color);
     laneNode.style.setProperty('--pct', `${lane.percent ?? 0}%`);
     laneNode.title = descriptions[index];
     laneNode.querySelector('.eval-lane-label')!.textContent = lane.tag;
   });
-  const range = node.querySelector<HTMLElement>('.eval-gap')!;
-  range.hidden = !emphasis;
-  if (comparison) {
-    range.style.setProperty('--low', `${comparison.min}%`);
-    range.style.setProperty('--high', `${comparison.max}%`);
-  }
   const caption = el('evalSource');
   caption.title = label;
   caption.setAttribute('aria-label', label);
