@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import { detectBrowserCapabilities } from '$lib/browserCapabilities';
 
 let ready = false;
 let webgpu = false;
@@ -9,19 +10,14 @@ let threads = 1;
 let cacheStorage = false;
 
 onMount(() => {
-  void (async () => {
-    try {
-      const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
-      webgpu = !!gpu && !!(await gpu.requestAdapter());
-    } catch {
-      webgpu = false;
-    }
-    isolated = globalThis.crossOriginIsolated === true;
-    sharedMemory = typeof SharedArrayBuffer !== 'undefined';
-    threads = Math.max(1, navigator.hardwareConcurrency || 1);
-    cacheStorage = 'caches' in globalThis;
+  void detectBrowserCapabilities().then((caps) => {
+    webgpu = caps.webgpu === true;
+    isolated = caps.isolated;
+    sharedMemory = caps.sharedMemory;
+    threads = caps.threads;
+    cacheStorage = caps.cacheStorage;
     ready = true;
-  })();
+  });
 });
 </script>
 

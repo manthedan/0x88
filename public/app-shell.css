@@ -1,13 +1,11 @@
 /* =====================================================================
    app-shell.css — shared design layer for the browser-chess app pages.
-   Loaded by lc0-play.html, lc0-analysis.html, lc0-arena.html.
-   index.html ships its own inline copy of the same tokens so the landing
-   page remains a single self-contained HTML file.
+   Loaded by src/app.html for all SvelteKit pages.
 
    Scope: design tokens (light + dark), the sticky site header, the site
    footer, base typography, focus ring, and conservative base styles for
-   form controls. Page-specific classes (.panel, .evalbar, .lines, tables,
-   .maia3-grid, chart cards, etc.) live in each page's inline <style> so
+   form controls. Page-specific classes (.evalbar, .engine-lines, tables,
+   .maia3-grid, chart cards, etc.) live in each page's <style> so
    the rich app surfaces keep their existing layout.
    ===================================================================== */
 
@@ -20,7 +18,7 @@
   --muted:#746955; --muted-2:#706553;
   --rule:#e4dbc9; --rule-soft:#e6dccb; --rule-strong:#e4dbc9;
   --border-input:#ddd2bd; --border-input-hover:#c9bda3;
-  --accent:#5c7029; --accent-2:#6f8736;
+  --accent:#5c7029;
   --accent-hover:#4d601f; --accent-deep:#3f4f1d;
   --accent-soft:#eef2dd; --accent-tint-border:#dde3c2;
   --accent-soft-text:#3f4a1f; --on-accent:#fff;
@@ -32,14 +30,12 @@
   --chart-4:#7a4a9a; --chart-5:#8a7a1c; --chart-6:#5a5a5a;
   --gold:#b5882f;
   --board-light:#f0d9b5; --board-dark:#b58863;
-  --board-highlight:rgba(124,148,42,.42);
-  --eval-black:#3a3326; --eval-white:#f4efe4; --eval-negative:#b07142;
+  --eval-white:#f4efe4;
   --coord-light:rgba(255,255,255,.82); --coord-dark:rgba(72,72,72,.82);
   --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
   --sans:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   --serif:"Iowan Old Style","Apple Garamond",Baskerville,Georgia,serif;
   --radius:8px; --radius-sm:6px; --radius-lg:12px;
-  --shadow-sm:0 1px 2px rgba(31,28,23,.06);
   --shadow:0 18px 40px -24px rgba(80,55,25,.4);
   --shadow-lg:0 30px 60px -32px rgba(31,28,23,.45);
   --focus-ring:0 0 0 3px rgba(92,112,41,.12);
@@ -55,7 +51,7 @@
   --muted:#aaa18f; --muted-2:#948b78;
   --rule:#332e25; --rule-soft:#2a2620; --rule-strong:#3a352c;
   --border-input:#332e25; --border-input-hover:#4a4438;
-  --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
+  --accent:#a3c456; --accent-deep:#768f2f;
   --accent-hover:#8db540; --accent-soft:#2b3416; --accent-tint-border:#3a4318;
   --accent-soft-text:#a3c456; --on-accent:#15130f;
   --input-bg:#28231b;
@@ -83,7 +79,7 @@
     --muted:#aaa18f; --muted-2:#948b78;
     --rule:#332e25; --rule-soft:#2a2620; --rule-strong:#3a352c;
     --border-input:#332e25; --border-input-hover:#4a4438;
-    --accent:#a3c456; --accent-2:#b8d574; --accent-deep:#768f2f;
+    --accent:#a3c456; --accent-deep:#768f2f;
     --accent-hover:#8db540; --accent-soft:#2b3416; --accent-tint-border:#3a4318;
     --accent-soft-text:#a3c456; --on-accent:#15130f;
     --input-bg:#28231b;
@@ -132,7 +128,7 @@ input:focus,select:focus,textarea:focus{
 /* ===== Layout container ===== */
 .wrap{max-width:1280px; margin:0 auto; padding:0 28px}
 
-/* ===== Site header (shared with index.html) ===== */
+/* ===== Site header ===== */
 .site-header{
   position:sticky; top:0; z-index:50;
   background:color-mix(in srgb, var(--bg) 86%, transparent);
@@ -150,8 +146,9 @@ input:focus,select:focus,textarea:focus{
   flex-shrink:0;
 }
 .brand-name{font-family:var(--mono); font-size:16px; font-weight:600; color:var(--ink); letter-spacing:-.01em}
-.brand-tag{font-size:11px; color:var(--muted); font-family:var(--mono); letter-spacing:.02em}
-.page-title{font-family:var(--serif); font-size:18px; font-weight:600; margin:0; color:var(--ink)}
+.page-title{font-family:var(--sans); font-size:17px; font-weight:650; letter-spacing:-.01em; margin:0; color:var(--ink)}
+/* While the nav links are visible, the highlighted link already names the page. */
+@media (min-width:601px){ .page-title{display:none} }
 nav.primary{display:flex; gap:4px; margin-left:auto}
 nav.primary a{
   color:var(--text-soft); padding:7px 13px; border-radius:8px; font-size:14px; font-weight:500;
@@ -234,13 +231,14 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 
 /* ===== Theme toggle button ===== */
 .theme-toggle{
-  width:34px; height:34px; border-radius:8px;
+  width:34px; height:34px; padding:0; border-radius:8px;
   border:1px solid var(--border-input); background:var(--panel);
-  color:var(--text-soft); font-size:15px; line-height:1;
+  color:var(--ink-soft); font-size:15px; line-height:1;
   cursor:pointer; display:flex; align-items:center; justify-content:center;
   transition:border-color .15s, color .15s;
 }
-.theme-toggle svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round}
+/* padding:0 matters: the base button padding (12px each side) squeezed the glyph to ~8px in the 34px box. */
+.theme-toggle svg{width:18px; height:18px; flex:0 0 18px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
 .theme-toggle:hover{border-color:var(--border-input-hover); color:var(--ink)}
 .board-style-select{
   font-size:13px; padding:7px 11px; border:1px solid var(--border-input);
@@ -284,7 +282,6 @@ textarea{width:100%; resize:vertical; line-height:1.5}
   flex:1 1 0; min-width:0; font:inherit; font-size:13px;
   padding:6px 8px; border:1px solid var(--border-input); border-radius:6px; background:var(--card);
 }
-.engine-row .arrow{color:var(--muted); font-weight:700}
 .engine-row .row-strength{
   flex:0 0 72px; width:72px; font:inherit; font-size:13px; font-family:var(--mono);
   padding:6px 8px; border:1px solid var(--border-input); border-radius:6px;
@@ -341,10 +338,6 @@ textarea{
 .app-main .section-block[open]>summary::before{transform:rotate(90deg); color:var(--accent)}
 .app-main .section-block>summary:hover{color:var(--ink)}
 .app-main .section-block:not([open])>summary{padding-bottom:0}
-.app-main .section-heading{
-  margin:0 0 8px; font-family:var(--mono); font-size:10px; font-weight:650;
-  line-height:1.2; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2);
-}
 .app-main .capabilities-slot{padding:0 12px 12px; border-top:1px solid var(--rule)}
 .app-main .app-sidebar .capabilities-slot .capabilities{
   margin:0; padding:10px 0 0; border:0; border-radius:0; background:transparent;
@@ -395,23 +388,22 @@ textarea{
 /* ===== Responsive header ===== */
 @media (max-width:680px){
   .site-header .wrap{gap:10px; padding-top:10px; padding-bottom:10px}
-  .brand-tag{display:none}
   nav.primary{gap:0}
   nav.primary a{padding:7px 8px; font-size:13px}
-  .page-title{font-size:16px}
   .theme-toggle{width:44px; height:44px}
-  .workspace-toolbar .ws-title{font-size:18px}
 }
-@media (max-width:420px){
-  .site-header .wrap{gap:8px; padding-left:14px; padding-right:14px}
-  .brand-name{display:none}
-  .page-title{display:none}
-  nav.primary a{padding:6px 6px; font-size:12px}
-  .board-style-select{display:none}
-}
-@media (max-width:360px){
+/* Phones: collapse the page links into the menu; the page title stays as the current-page indicator. */
+@media (max-width:600px){
   nav.primary{display:none}
   .mobile-nav{display:block}
   .menu-toggle{display:flex; width:44px; height:44px}
+  .page-title{font-size:16px}
+}
+@media (max-width:420px){
+  .site-header .wrap{gap:10px; padding-left:14px; padding-right:14px}
+  .brand-name{display:none}
+  .board-style-select{display:none}
+}
+@media (max-width:360px){
   .site-header .wrap{padding-left:12px; padding-right:12px}
 }

@@ -341,31 +341,36 @@ export class Bt4WorkerSearcher {
     if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries) return this.backend;
     if (this.ready && this.configuredEvalCacheEntries !== evalCacheEntries) this.dispose();
     if (this.initPromise) return this.initPromise;
-    this.initPromise = (async () => {
-      if (!this.worker) {
-        this.worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
-        this.worker.addEventListener('message', (event: MessageEvent) => {
-          const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
-          if (message.type === 'downloadProgress') {
-            this.onDownloadProgress?.(message.loadedBytes ?? 0, message.totalBytes);
-            return;
-          }
-          const pending = this.pending.get(message.id);
-          if (!pending) return;
-          if (message.type === 'searchProgress') {
-            const progress = (message as unknown as { progress: Bt4SearchProgress }).progress;
-            pending.onProgress?.(progress);
-            return;
-          }
-          this.pending.delete(message.id);
-          if (message.type === 'error') pending.reject(new Error(message.error ?? 'Lc0 BT4 worker error'));
-          else pending.resolve(message);
-        });
-        this.worker.addEventListener('error', (event) => {
-          for (const pending of this.pending.values()) pending.reject(new Error(event.message || 'Lc0 BT4 worker error'));
-          this.pending.clear();
-        });
-      }
+    if (!this.worker) {
+      const worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
+      this.worker = worker;
+      worker.addEventListener('message', (event: MessageEvent) => {
+        if (this.worker !== worker) return;
+        const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
+        if (message.type === 'downloadProgress') {
+          this.onDownloadProgress?.(message.loadedBytes ?? 0, message.totalBytes);
+          return;
+        }
+        const pending = this.pending.get(message.id);
+        if (!pending) return;
+        if (message.type === 'searchProgress') {
+          const progress = (message as unknown as { progress: Bt4SearchProgress }).progress;
+          pending.onProgress?.(progress);
+          return;
+        }
+        this.pending.delete(message.id);
+        if (message.type === 'error') pending.reject(new Error(message.error ?? 'Lc0 BT4 worker error'));
+        else pending.resolve(message);
+      });
+      worker.addEventListener('error', (event) => {
+        this.invalidate(worker, new Error(event.message || 'Lc0 BT4 worker crashed'));
+      });
+      worker.addEventListener('messageerror', () => {
+        this.invalidate(worker, new Error('Lc0 BT4 worker message could not be decoded'));
+      });
+    }
+    const worker = this.worker;
+    const initializing = (async () => {
       // WebGPU-first with wasm-CPU fallback: 'auto' resolves to
       // ['webgpu','wasm'] when an adapter is usable and ['wasm'] otherwise,
       // so big nets stay playable (slowly) without WebGPU — callers read
@@ -385,17 +390,19 @@ export class Bt4WorkerSearcher {
         requestPersistentModelStorage: true,
         minimumFreeBytesAfterModelCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES,
       });
+      if (this.worker !== worker) throw new Error('Lc0 BT4 worker invalidated during initialization');
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;
       this.fallback = ready.ortFallback;
       return this.backend;
     })();
+    this.initPromise = initializing;
     try {
-      return await this.initPromise;
+      return await initializing;
     } catch (error) {
-      // Allow a later retry after a failed init.
-      this.initPromise = null;
+      // A retired init must not invalidate its replacement.
+      if (this.initPromise === initializing) this.invalidate(worker, error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
   }
@@ -465,17 +472,22 @@ export class Bt4WorkerSearcher {
     if (this.activeSearchId !== null) this.cancelSearch(this.activeSearchId);
   }
 
-  /** Terminate the worker and free the resident BT4 net. */
-  dispose(): void {
-    this.cancel();
-    this.worker?.terminate();
+  private invalidate(worker: Worker | null, error: Error): void {
+    if (this.worker !== worker) return;
+    worker?.terminate();
     this.worker = null;
     this.ready = false;
     this.initPromise = null;
     this.configuredEvalCacheEntries = -1;
+    this.backend = '';
     this.fallback = undefined;
-    for (const pending of this.pending.values()) pending.reject(new Error('Lc0 BT4 worker disposed'));
+    for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
     this.activeSearchId = null;
+  }
+
+  /** Terminate the worker and free the resident BT4 net. */
+  dispose(): void {
+    this.invalidate(this.worker, new Error('Lc0 BT4 worker disposed'));
   }
 }

@@ -1,158 +1,545 @@
 <script lang="ts">
-import { onMount } from 'svelte';
+import { onMount, tick } from 'svelte';
+import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
+import { activeDocsTopic, docsSearchShortcut, toggleDocsGroup } from '$lib/docsNavigation';
 
 const title = '0x88 Chess — documentation';
-const description = 'Documentation for the 0x88 browser chess workspaces, engine runtimes, upstream projects, licenses, and corresponding-source archives.';
+const description = 'How to use the 0x88 browser chess workspaces, fix WebGPU and download problems, and find each engine’s license and corresponding source.';
+
+type TocLink = { id: string; label: string };
+type TocItem = TocLink & { children?: TocLink[] };
+type TocGroup = { label: string; id: string; items: TocItem[] };
+
+// The rail, the mobile contents sheet, scroll-spy and search all read this
+// outline. Its order must match the order of the sections on the page.
+const toc: TocGroup[] = [
+  {
+    label: 'Get started',
+    id: 'pages',
+    items: [
+      { id: 'pages-analysis', label: 'Analyze a position' },
+      { id: 'pages-arena', label: 'Run an engine match', children: [{ id: 'following-match', label: 'Following the match' }] },
+      { id: 'pages-play', label: 'Play a game' },
+      { id: 'human-vs-computer', label: 'Human-like opponents', children: [{ id: 'model-boundaries', label: 'Model boundaries' }] },
+    ],
+  },
+  {
+    label: 'Analysis in depth',
+    id: 'analysis-in-depth',
+    items: [
+      { id: 'exploring-results', label: 'Exploring the results' },
+      { id: 'explore-engine-lines', label: 'Explore engine lines' },
+      { id: 'save-engine-setups', label: 'Save engine setups' },
+      { id: 'share-restore', label: 'Share and restore your work' },
+      { id: 'explore-own-games', label: 'Opening explorer' },
+      { id: 'manage-collections', label: 'Manage game collections' },
+    ],
+  },
+  {
+    label: 'Review and train',
+    id: 'review-and-train',
+    items: [
+      { id: 'review-game', label: 'Review a game' },
+      { id: 'retry-mistakes', label: 'Retry your mistakes' },
+      { id: 'compare-critical-moments', label: 'Compare critical moments' },
+      { id: 'export-review', label: 'Export a game review' },
+    ],
+  },
+  {
+    label: 'Troubleshooting',
+    id: 'troubleshooting',
+    items: [
+      { id: 'trouble-device', label: 'Check this browser' },
+      { id: 'trouble-webgpu', label: 'WebGPU unavailable' },
+      { id: 'trouble-downloads', label: 'Slow or repeated downloads' },
+      { id: 'trouble-cache', label: 'Clear downloaded models' },
+      { id: 'trouble-threads', label: 'Stockfish runs single-threaded' },
+    ],
+  },
+  {
+    label: 'Engines',
+    id: 'engines',
+    items: [
+      { id: 'engines-lc0', label: 'Leela Chess Zero' },
+      { id: 'engines-lqo', label: 'Leela Queen Odds (LQO)' },
+      { id: 'engines-maia3', label: 'Maia3', children: [{ id: 'maia-source-offer', label: 'AGPL source offer' }] },
+      { id: 'engines-centipawn', label: 'Centipawn' },
+      { id: 'engines-stockfish', label: 'Stockfish 19', children: [{ id: 'stockfish-relaxed-candidate', label: 'Relaxed SIMD candidate' }] },
+      { id: 'engines-berserk', label: 'Berserk' },
+      { id: 'engines-viridithas', label: 'Viridithas' },
+      { id: 'engines-plentychess', label: 'PlentyChess' },
+      { id: 'engines-stormphrax', label: 'Stormphrax' },
+      { id: 'engines-reckless', label: 'Reckless', children: [{ id: 'reckless-public-engine', label: 'Public v0 engine' }] },
+    ],
+  },
+  {
+    label: 'Under the hood',
+    id: 'under-the-hood',
+    items: [
+      { id: 'neural-runtimes', label: 'Neural browser runtimes', children: [{ id: 'neural-stable-baseline', label: 'Stable baseline' }] },
+      { id: 'cpu-wasm', label: 'CPU WASM runtimes', children: [
+        { id: 'cpu-build-lanes', label: 'Two build lanes' },
+        { id: 'cpu-wasm-relaxed-simd', label: 'Relaxed SIMD' },
+        { id: 'simd-benchmark-context', label: 'Benchmark context' },
+      ] },
+      { id: 'cdn', label: 'Artifact CDN & caching', children: [{ id: 'cdn-two-planes', label: 'Two-plane model' }] },
+    ],
+  },
+  {
+    label: 'Licenses & source',
+    id: 'licenses',
+    items: [
+      { id: 'license-summary', label: 'The short version' },
+      { id: 'licenses-per-engine', label: 'Per-engine source links' },
+      { id: 'removal', label: 'Removal requests' },
+    ],
+  },
+];
+
+/** Every linkable heading in page order, with the group it sits in and its top-level rail item. */
+type Located = { link: TocLink; group: TocGroup; top: TocLink };
+const outline: Located[] = toc.flatMap((group) => [
+  ...(group.id ? [{ link: { id: group.id, label: group.label }, group, top: { id: group.id, label: group.label } }] : []),
+  ...group.items.flatMap((item) => [{ link: item, group, top: item }, ...(item.children ?? []).map((link) => ({ link, group, top: item }))]),
+]);
+const byId = new Map(outline.map((entry) => [entry.link.id, entry]));
+
+// ---- scroll-spy -----------------------------------------------------------
+let activeId = outline[0].link.id;
+$: activeTopId = byId.get(activeId)?.top.id ?? '';
+$: activeLabel = byId.get(activeId)?.link.label ?? 'Contents';
+$: activeGroupId = byId.get(activeId)?.group.id ?? '';
+let expandedGroupId: string | null = 'pages';
+let headerHeight = 64;
+let rail: HTMLElement | null = null;
+let railList: HTMLElement | null = null;
+
+function updateActive(): void {
+  // Slightly past the scroll-margin, so a heading reached by a link counts as current.
+  const offset = headerHeight + (narrow ? 84 : 24) + 8;
+  const headings = outline.flatMap(({ link }) => {
+    const el = document.getElementById(link.id);
+    return el ? [{ id: link.id, top: el.getBoundingClientRect().top }] : [];
+  });
+  const doc = document.documentElement;
+  const current = activeDocsTopic(headings, offset, window.innerHeight + window.scrollY >= doc.scrollHeight - 2) ?? activeId;
+  if (current !== activeId) {
+    activeId = current;
+    const groupId = byId.get(current)?.group.id;
+    if (groupId) expandedGroupId = groupId;
+    void tick().then(keepActiveVisible);
+  }
+}
+
+function keepActiveVisible(): void {
+  if (!railList || (narrow && !tocOpen)) return;
+  const link = railList.querySelector<HTMLElement>('a[aria-current="location"]');
+  if (!link) return;
+  const scroller = narrow ? railList : link.closest<HTMLElement>('.toc-group > ul') ?? railList;
+  const box = scroller.getBoundingClientRect();
+  const item = link.getBoundingClientRect();
+  if (item.top < box.top + 8) scroller.scrollTop -= box.top + 8 - item.top;
+  else if (item.bottom > box.bottom - 8) scroller.scrollTop += item.bottom - box.bottom + 8;
+}
+
+// ---- mobile contents sheet --------------------------------------------------
+let narrow = false;
 let tocOpen = false;
+$: if (tocOpen) void tick().then(keepActiveVisible);
+let tocToggle: HTMLButtonElement | null = null;
+let mobileSearch: HTMLButtonElement | null = null;
+let searchShortcut = 'Ctrl K';
+let searchShortcutLabel = 'Control K';
+
+function closeSheet(): void {
+  tocOpen = false;
+}
+
+// ---- search -----------------------------------------------------------------
+type SearchEntry = { id: string; title: string; group: string; parent: string; text: string; titleLc: string; textLc: string };
+type SearchHit = { entry: SearchEntry; score: number; pre: string; match: string; post: string };
+let index: SearchEntry[] = [];
+let query = '';
+let searchInput: HTMLInputElement | null = null;
+let resultList: HTMLElement | null = null;
+$: hits = searchDocs(query, index);
+$: searching = query.trim().length > 0;
+
+const CONTAINERS = '.page-block, .analysis-topic, .task-reference, .callout, .engine-entry, .trouble, .opponents, .runtime-block, .runtime-subsection, .source-links, .removal-block';
+
+function cleanText(node: Element): string {
+  const clone = node.cloneNode(true) as Element;
+  // Headings are indexed as titles; the live device check is not documentation.
+  clone.querySelectorAll('.anchor-link, .device-check, h2, h3, h4, script, style').forEach((el) => el.remove());
+  // Keep table cells and list items from running together ("PlayAGPL").
+  clone.querySelectorAll('td, th, li, dt, dd, p, h4, caption, .sub').forEach((el) => el.append(' '));
+  return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function blockText(el: HTMLElement): string {
+  if (el.tagName === 'SECTION') {
+    const parts: string[] = [];
+    for (const child of Array.from(el.children)) {
+      if (child.matches(`h2, nav, ${CONTAINERS}`) || child.id) continue;
+      parts.push(cleanText(child));
+    }
+    return parts.join(' ');
+  }
+  const container = el.parentElement?.closest(CONTAINERS);
+  if (container) return cleanText(container);
+  // A bare h3: gather its following siblings up to the next heading.
+  const parts: string[] = [];
+  let next = el.nextElementSibling;
+  while (next && !/^H[23]$/.test(next.tagName)) {
+    parts.push(cleanText(next));
+    next = next.nextElementSibling;
+  }
+  return parts.join(' ');
+}
+
+function buildIndex(): SearchEntry[] {
+  return outline.flatMap(({ link, group, top }) => {
+    const el = document.getElementById(link.id);
+    if (!el) return [];
+    const text = blockText(el);
+    return [{ id: link.id, title: link.label, group: group.label, parent: top.id === link.id ? '' : top.label, text, titleLc: link.label.toLowerCase(), textLc: text.toLowerCase() }];
+  });
+}
+
+function searchDocs(raw: string, entries: SearchEntry[]): SearchHit[] {
+  const terms = raw.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const found: SearchHit[] = [];
+  for (const entry of entries) {
+    let score = 0;
+    let ok = true;
+    for (const term of terms) {
+      if (entry.titleLc.includes(term)) score += entry.titleLc.startsWith(term) ? 12 : 10;
+      else if (entry.textLc.includes(term)) score += 1;
+      else if (entry.group.toLowerCase().includes(term)) score += 2;
+      else {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+    found.push({ entry, score, ...snippet(entry, terms) });
+  }
+  return found.sort((a, b) => b.score - a.score).slice(0, 12);
+}
+
+function snippet(entry: SearchEntry, terms: string[]): { pre: string; match: string; post: string } {
+  const term = terms.find((t) => entry.textLc.includes(t));
+  if (!term) return { pre: entry.text.slice(0, 110) + (entry.text.length > 110 ? '…' : ''), match: '', post: '' };
+  const at = entry.textLc.indexOf(term);
+  const start = Math.max(0, at - 44);
+  const end = Math.min(entry.text.length, at + term.length + 70);
+  return {
+    pre: (start > 0 ? '…' : '') + entry.text.slice(start, at),
+    match: entry.text.slice(at, at + term.length),
+    post: entry.text.slice(at + term.length, end) + (end < entry.text.length ? '…' : ''),
+  };
+}
+
+function goTo(id: string): void {
+  query = '';
+  closeSheet();
+  const el = document.getElementById(id);
+  if (!el) return;
+  history.replaceState(history.state, '', `#${id}`);
+  el.scrollIntoView({ block: 'start' });
+  const heading = el.matches('h2, h3, h4') ? el : el.querySelector<HTMLElement>('h2, h3, h4');
+  heading?.setAttribute('tabindex', '-1');
+  heading?.focus({ preventScroll: true });
+}
+
+function onSearchKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    if (query) query = '';
+    else if (narrow) {
+      closeSheet();
+      mobileSearch?.focus();
+    }
+    return;
+  }
+  if (event.key === 'Enter' && hits.length) {
+    event.preventDefault();
+    goTo(hits[0].entry.id);
+  } else if (event.key === 'ArrowDown' && hits.length) {
+    event.preventDefault();
+    resultList?.querySelector<HTMLElement>('a')?.focus();
+  }
+}
+
+function onResultKey(event: KeyboardEvent): void {
+  if (!(event.target instanceof HTMLElement)) return;
+  const li = event.target.closest('li');
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    li?.nextElementSibling?.querySelector<HTMLElement>('a')?.focus();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    const prev = li?.previousElementSibling?.querySelector<HTMLElement>('a');
+    if (prev) prev.focus();
+    else searchInput?.focus();
+  } else if (event.key === 'Escape') {
+    searchInput?.focus();
+  }
+}
+
+async function focusSearch(): Promise<void> {
+  if (narrow) tocOpen = true;
+  await tick();
+  searchInput?.focus();
+  searchInput?.select();
+}
+
+function onWindowKey(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null;
+  const typing = !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+  if (event.key === 'Escape' && tocOpen && !typing) {
+    closeSheet();
+    tocToggle?.focus();
+  } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    void focusSearch();
+  } else if (event.key === '/' && !typing) {
+    event.preventDefault();
+    void focusSearch();
+  }
+}
+
+function onWindowClick(event: MouseEvent): void {
+  if (!tocOpen || !rail) return;
+  if (event.target instanceof Node && rail.contains(event.target)) return;
+  closeSheet();
+}
+
+// ---- live browser check -----------------------------------------------------
+let caps: BrowserCapabilityReport | null = null;
+let capsFailed = false;
+
 onMount(() => {
-  const headings = document.querySelectorAll('.doc-content section[id], .doc-content h3[id]');
-  const tocLinks = document.querySelectorAll<HTMLAnchorElement>('.toc a[href^="#"]');
-  if (!('IntersectionObserver' in window) || !headings.length) return;
-  const linkMap = new Map<string, HTMLAnchorElement>();
-  tocLinks.forEach((link) => {
-    const href = link.getAttribute('href');
-    if (href) linkMap.set(href.slice(1), link);
-  });
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        const id = entry.target.getAttribute('id');
-        const link = id ? linkMap.get(id) : undefined;
-        if (!link) return;
-        tocLinks.forEach((item) => {
-          item.classList.remove('active');
-        });
-        link.classList.add('active');
-      });
-    },
-    { rootMargin: '-88px 0px -70% 0px', threshold: 0 },
-  );
-  headings.forEach((heading) => {
-    observer.observe(heading);
-  });
-  return () => observer.disconnect();
+  const shortcut = docsSearchShortcut(navigator.platform);
+  searchShortcut = shortcut.text;
+  searchShortcutLabel = shortcut.label;
+  index = buildIndex();
+  const header = document.querySelector<HTMLElement>('.site-header');
+  const media = window.matchMedia('(max-width: 860px)');
+  const measure = () => {
+    headerHeight = Math.round(header?.getBoundingClientRect().height ?? 64);
+    narrow = media.matches;
+    if (!narrow) tocOpen = false;
+    updateActive();
+  };
+  measure();
+  // Scroll events are already coalesced by the browser. Updating directly also
+  // keeps anchor jumps current when animation frames are paused in a background tab.
+  window.addEventListener('scroll', updateActive, { passive: true });
+  window.addEventListener('resize', measure);
+  detectBrowserCapabilities()
+    .then((report) => (caps = report))
+    .catch(() => (capsFailed = true));
+  return () => {
+    window.removeEventListener('scroll', updateActive);
+    window.removeEventListener('resize', measure);
+  };
 });
 </script>
 
+<svelte:window on:keydown={onWindowKey} on:click={onWindowClick} />
 <svelte:head>
   <title>{title}</title>
   <meta name="description" content={description} />
 </svelte:head>
-<SiteHeader pageTitle="Docs" />
+<SiteHeader landing />
 <main id="main">
 
-<section class="doc-hero" aria-labelledby="doc-h1">
-  <div class="wrap">
-    <p class="kicker">Documentation</p>
-    <h1 id="doc-h1">Browser chess engines and their source</h1>
-    <p>
-      <strong>0x88.app</strong> is a browser chess platform built from open-source engines and models. This guide explains the app and its browser runtimes. It also credits each upstream project and links every redistributed binary to its license and corresponding source.
-    </p>
+<div class="doc-body" style="--hdr:{headerHeight}px">
+<div class="wrap doc-grid">
+
+<header class="doc-intro">
+  <h1 id="doc-h1">Using 0x88</h1>
+  <p class="intro-lede">Workspace guides, engine details and source links.</p>
+  <p class="intro-help">Fix <a href="#trouble-webgpu">WebGPU problems</a> or <a href="#trouble-downloads">slow downloads</a>, or <a href="#trouble-cache">clear downloaded models</a>.</p>
+</header>
+
+<!-- ===== Contents: left rail on desktop, sticky bar + sheet on phones ===== -->
+<aside class="toc" class:open={tocOpen} aria-label="Documentation contents" bind:this={rail}>
+  <div class="toc-toolbar">
+    <button class="toc-toggle" type="button" aria-expanded={tocOpen} aria-controls="toc-panel" bind:this={tocToggle} on:click={() => (tocOpen = !tocOpen)}>
+      <span class="toc-toggle-label">Contents</span>
+      <span class="toc-current">{activeLabel}</span>
+      <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+    </button>
+    <button class="mobile-search" type="button" aria-controls="toc-panel" bind:this={mobileSearch} on:click={focusSearch}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>
+      Search docs
+    </button>
   </div>
-</section>
-
-<div class="doc-body">
-<div class="wrap">
-
-<!-- ===== TOC (left rail) ===== -->
-<aside class="toc" class:open={tocOpen} aria-label="On this page">
-  <h4>On this page</h4>
-  <button class="toc-toggle" type="button" aria-expanded={tocOpen} on:click={() => tocOpen = !tocOpen}>
-    <span>On this page</span><span aria-hidden="true">{tocOpen ? '−' : '+'}</span>
-  </button>
-  <ul>
-    <li><a href="#pages">The pages</a>
-      <ul>
-        <li><a href="#pages-analysis">Analysis</a></li>
-        <li><a href="#pages-arena">Arena</a></li>
-        <li><a href="#pages-play">Play</a></li>
-      </ul>
-    </li>
-    <li><a href="#human-vs-computer">Human vs computer play</a></li>
-    <li><a href="#neural-runtimes">Neural browser runtimes</a></li>
-    <li><a href="#cpu-wasm">CPU WASM runtimes</a>
-      <ul>
-        <li><a href="#cpu-wasm-relaxed-simd">Relaxed SIMD</a></li>
-      </ul>
-    </li>
-    <li><a href="#engines">The engines</a>
-      <ul>
-        <li><a href="#engines-lc0">Leela Chess Zero</a></li>
-        <li><a href="#engines-lqo">Leela Queen Odds (LQO)</a></li>
-        <li><a href="#engines-maia3">Maia3</a></li>
-        <li><a href="#engines-centipawn">Centipawn</a></li>
-        <li><a href="#engines-stockfish">Stockfish 19</a></li>
-        <li><a href="#engines-berserk">Berserk</a></li>
-        <li><a href="#engines-viridithas">Viridithas</a></li>
-        <li><a href="#engines-plentychess">PlentyChess</a></li>
-        <li><a href="#engines-stormphrax">Stormphrax</a></li>
-        <li><a href="#engines-reckless">Reckless</a></li>
-      </ul>
-    </li>
-    <li><a href="#licenses">Licenses &amp; source</a>
-      <ul>
-        <li><a href="#licenses-per-engine">Per-engine source links</a></li>
-      </ul>
-    </li>
-    <li><a href="#cdn">Artifact CDN &amp; caching</a></li>
-    <li><a href="#removal">I'm in this project and I don't like it</a></li>
-  </ul>
+  <div id="toc-panel" class="toc-panel">
+    <div class="search" role="search">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>
+      <label class="visually-hidden" for="docSearch">Search docs</label>
+      <input
+        id="docSearch"
+        type="search"
+        placeholder="Search docs"
+        autocomplete="off"
+        spellcheck="false"
+        aria-describedby="docSearchHint"
+        aria-controls="docSearchResults"
+        bind:value={query}
+        bind:this={searchInput}
+        on:keydown={onSearchKey}
+      />
+      <span id="docSearchHint" class="visually-hidden">Press / or {searchShortcutLabel} to search</span>
+      <span class="search-shortcuts" aria-hidden="true"><kbd>/</kbd><kbd>{searchShortcut}</kbd></span>
+    </div>
+    {#if searching}
+      <div id="docSearchResults" class="results" aria-live="polite">
+        {#if hits.length}
+          <p class="results-count">{hits.length} {hits.length === 1 ? 'match' : 'matches'}</p>
+          <ul bind:this={resultList}>
+            {#each hits as hit (hit.entry.id)}
+              <li>
+                <a href={`#${hit.entry.id}`} on:click|preventDefault={() => goTo(hit.entry.id)} on:keydown={onResultKey}>
+                  <span class="hit-path">{hit.entry.group}{hit.entry.parent ? ` › ${hit.entry.parent}` : ''}</span>
+                  <span class="hit-title">{hit.entry.title}</span>
+                  {#if hit.pre || hit.match}<span class="hit-snippet">{hit.pre}{#if hit.match}<mark>{hit.match}</mark>{/if}{hit.post}</span>{/if}
+                </a>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="no-results">No matches for “{query.trim()}”. Try an engine name, “WebGPU”, “cache” or “license”.</p>
+        {/if}
+      </div>
+    {:else}
+      <nav class="toc-groups" aria-label="On this page" bind:this={railList}>
+        {#each toc as group (group.label)}
+          <div class="toc-group" class:expanded={expandedGroupId === group.id}>
+            <div class="toc-group-heading" class:current-group={group.id === activeGroupId}>
+              <a class="toc-group-label" href={`#${group.id}`} class:active={group.id === activeId} aria-current={group.id === activeId ? 'location' : group.id === activeGroupId ? 'true' : undefined} on:click={closeSheet}>{group.label}</a>
+              <button type="button" class="group-toggle" aria-label={`${expandedGroupId === group.id ? 'Hide' : 'Show'} ${group.label} topics`} aria-expanded={expandedGroupId === group.id} aria-controls={`toc-${group.id}`} on:click={() => (expandedGroupId = toggleDocsGroup(expandedGroupId, group.id))}>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+              </button>
+            </div>
+            <ul id={`toc-${group.id}`} hidden={expandedGroupId !== group.id}>
+              {#each group.items as item (item.id)}
+                <li>
+                  <a href={`#${item.id}`} class:active={item.id === activeId} class:in-active={item.id === activeTopId} aria-current={item.id === activeId ? 'location' : undefined} on:click={closeSheet}>{item.label}</a>
+                  {#if item.children}
+                    <ul>
+                      {#each item.children as child (child.id)}
+                        <li><a href={`#${child.id}`} class:active={child.id === activeId} aria-current={child.id === activeId ? 'location' : undefined} on:click={closeSheet}>{child.label}</a></li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/each}
+      </nav>
+    {/if}
+  </div>
 </aside>
+
+{#snippet sectionNav(id: string)}
+  {@const position = toc.findIndex((group) => group.id === id)}
+  {@const previous = toc[position - 1]}
+  {@const next = toc[position + 1]}
+  <nav class="section-nav" aria-label={`Continue from ${toc[position].label}`}>
+    {#if previous}<a href={`#${previous.id}`}>Previous: {previous.label}</a>{/if}
+    {#if next}<a class="next-section" href={`#${next.id}`}>Next: {next.label}</a>{/if}
+  </nav>
+{/snippet}
 
 <div class="doc-content">
 
-<!-- ===== PAGES ===== -->
+<!-- ===== GET STARTED: THE WORKSPACES ===== -->
 <section id="pages">
-  <h2>The pages <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
-  <p class="lead">0x88 has dedicated workspaces for analysis, engine tournaments, and play. Each workspace runs client-side and loads its engines when needed.</p>
+  <h2>Get started <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
+  <p class="lead">All workspaces run locally. Engines download on first use and are reused.</p>
 
   <div class="page-block">
-    <h3 id="pages-analysis"><span class="pn">Analysis</span> Analysis board <a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/app/analysis</span>
-    <p>The Analysis page runs several engines on the same FEN or PGN. Its comparison table places each best move, evaluation, and principal variation together so disagreements are easy to inspect.</p>
-    <ul>
-      <li><strong>Multi-engine comparison</strong> &mdash; add as many engines as your machine can handle; each contributes its eval, PV, and best move to a shared table.</li>
-      <li><strong>Game review</strong> &mdash; annotate every move of a PGN with accuracy scores, critical moments (best/good/inaccuracy/mistake/blunder), and a win-probability chart.</li>
-      <li><strong>Human-move explorer (Maia3)</strong> &mdash; see what rated humans actually play in the current position, with a per-rating move distribution. Useful for understanding practical chances versus engine truth.</li>
-      <li><strong>Opening explorer</strong> &mdash; once you've loaded your own PGNs into a local IndexedDB database, the explorer surfaces transpositions and frequency stats over <em>your</em> games, not a generic opening book.</li>
-      <li><strong>PGN database</strong> &mdash; import Lichess or Chess.com games by username, store them locally, and search by position across the whole collection.</li>
-    </ul>
+    <div class="task-heading">
+      <h3 id="pages-analysis" aria-labelledby="analysis-title"><span id="analysis-title">Analyze a position</span><a class="anchor-link" href="#pages-analysis" aria-label="Link to this section">#</a></h3>
+      <a class="open-link" href="/app/analysis/">Open Analysis</a>
+    </div>
+    <p>Run several engines on the same position and compare their best moves, evaluations and lines.</p>
+    <ol class="steps">
+      <li>Open Analysis. It starts with Lc0 (Small net: a neural model) and Stockfish Lite on the starting position.</li>
+      <li>Make board moves, or press <strong>Load</strong> to paste a game record (PGN) or position (FEN). On mobile, Load sits in the row under the board until a game is loaded, then moves to <strong>Board tools ••• → Load</strong>.</li>
+      <li>Press <strong>Add engine</strong> to add another engine. Use <strong>Engines</strong> to pick each engine's net or build and its search limit, which is visits (search iterations) or depth depending on the engine.</li>
+      <li>With <strong>Auto-analyze</strong> on (the default), analysis reruns whenever the position changes. Otherwise press <strong>Analyze</strong>.</li>
+    </ol>
   </div>
 
   <div class="page-block">
-    <h3 id="pages-arena"><span class="pn">Arena</span> Engine arena <a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/app/arena</span>
-    <p>The Arena schedules engine matches and tournaments. Games appear live on the board, and finished results feed the standings and evaluation charts. The project also uses this workspace to compare browser engine builds and Leela Chess Zero networks.</p>
+    <div class="task-heading">
+      <h3 id="pages-arena" aria-labelledby="arena-title"><span id="arena-title">Run an engine match</span><a class="anchor-link" href="#pages-arena" aria-label="Link to this section">#</a></h3>
+      <a class="open-link" href="/app/arena/">Open Arena</a>
+    </div>
+    <p>Play engines against each other and keep score. The project also uses Arena to compare browser engine builds and Lc0 networks.</p>
+    <ol class="steps">
+      <li>Open Arena. Under <strong>Matchup</strong>, pick a mode: a two-engine match, a round robin, or a gauntlet of Engine 1 against the field. Use <strong>+ Add engine</strong> for more seats.</li>
+      <li>Under <strong>Time control &amp; openings</strong>, choose equal time per move or a fixed visit/depth budget, the number of games per opening, and the start position, the built-in opening suite or your own positions.</li>
+      <li>Press <strong>Start match</strong>. Games play live on the board, with colours alternating between games.</li>
+      <li>Read the standings: points, wins, draws, losses and an Elo estimate against the pool with a ±95% range.</li>
+    </ol>
+    <div class="task-reference">
+    <h4 id="following-match">Following the match <a class="anchor-link" href="#following-match" aria-label="Link to this section">#</a></h4>
     <ul>
-      <li><strong>Tournament formats</strong> &mdash; head-to-head, gauntlet, round-robin, with configurable games-per-pairing and color alternation.</li>
-      <li><strong>Live standings and Elo estimates</strong> &mdash; running score table, Elo updates after each game, and a final ranking.</li>
-      <li><strong>Per-game eval charts and move replays</strong> &mdash; click any finished game to replay it with the eval bar; click any move to jump the board.</li>
-      <li><strong>Configurable engine runtime</strong> &mdash; pick engine, strength, opening book, and time control; the arena handles scheduling and the engines do the rest.</li>
+      <li><strong>Charts</strong> &mdash; evaluation, time and speed for the current game.</li>
+      <li><strong>Matchups</strong> &mdash; tournaments with three or more engines show a crosstable of points against each opponent. Open <em>Opening pairs</em> to compare the two colour-reversed games from each opening; select a game score to replay it. Odd games per opening leave an unpaired game.</li>
+      <li><strong>Review</strong> &mdash; select a finished game or a move to replay it.</li>
+      <li><strong>Resume</strong>
+        <ul>
+          <li>After Stop or a reload, choose <em>Resume tournament</em> to continue.</li>
+          <li>Completed games, settings, the schedule and charts are saved on this device after each game.</li>
+        </ul>
+      </li>
+      <li><strong>Saved results</strong>
+        <ul>
+          <li>Finished results remain viewable after a reload.</li>
+          <li><em>Start new tournament</em> replaces the saved run; <em>Discard</em> removes it.</li>
+        </ul>
+      </li>
+      <li><strong>Export</strong> &mdash; <em>Export PGN</em> under <em>Game log &amp; PGN</em> lists every completed game as PGN. If local saving is unavailable or full, export before leaving the page.</li>
     </ul>
+    <p><strong>Note:</strong> Unfinished games restart from their opening, including in parallel CPU runs. Leave the tab open while engines play; background completion is not guaranteed. App or engine-release changes can prevent resuming an old run, but its completed results and PGNs remain available.</p>
+    </div>
   </div>
 
   <div class="page-block">
-    <h3 id="pages-play"><span class="pn">Play</span> Play a game <a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
-    <span class="pg-url">/app/play</span>
-    <p>The Play page runs a game against Maia3 or one of the available chess engines. Choose a color and strength, then play with takebacks and PGN export available throughout the game.</p>
-    <ul>
-      <li><strong>Maia3 rating slider (600&ndash;2600)</strong> &mdash; conditions Maia3's move probabilities and human-game outcome predictions on the selected rating.</li>
-      <li><strong>Engine opponents at five strength levels</strong> &mdash; adjusts visit, depth, or node limits according to the selected engine.</li>
-      <li><strong>Full game lifecycle</strong> &mdash; takebacks, resign, new game, flip board, move list, and one-click PGN export.</li>
-    </ul>
-    <p>Nothing about your game is sent anywhere. The engine binary and (if needed) the neural network download on first use, then cache locally for next time.</p>
+    <div class="task-heading">
+      <h3 id="pages-play" aria-labelledby="play-title"><span id="play-title">Play a game</span><a class="anchor-link" href="#pages-play" aria-label="Link to this section">#</a></h3>
+      <a class="open-link" href="/app/play/">Open Play</a>
+    </div>
+    <p>Play against Maia3, Leela Queen Odds or any of the analysis engines.</p>
+    <ol class="steps">
+      <li>Open Play. Maia3 is the default opponent; <strong>Change</strong> picks another.</li>
+      <li>For Maia3, pick a rating preset, or set a rating from 600 to 2600 in 100-point steps under <em>Exact rating &amp; opponent details</em>. For other opponents, pick one of five strength levels from Fastest to Deep.</li>
+      <li>Choose White, Black or Random, then press <strong>Play</strong>.</li>
+      <li>Take back or resign during the game. Afterwards, copy or download the PGN, or press <strong>Analyze</strong> to open the game in Analysis.</li>
+    </ol>
+    <p>To practise a position, select it in Analysis and choose <strong>Play from here</strong> below the board (on mobile, in <strong>Board tools •••</strong>). In Play, choose your colour (the side to move is selected) and your last-used Maia3 rating or engine, then press <strong>Play</strong>. The preceding moves stay in the game record; takebacks stop at the position you chose. Copy or download PGN to keep the full history, including a FEN/SetUp header when the game began from a custom position. <strong>Analyze</strong> opens the continued game in Analysis.</p>
+    <p>Finished positions cannot be continued. Queen-odds opponents are unavailable for imported positions because they require their own starting position. Before playing, choose <strong>Use starting position</strong> to return to a normal setup.</p>
+    <p><strong>Continue after a reload:</strong> Play saves the current game and opponent settings separately from Analysis. Reopen Play to resume; if it is the opponent’s turn, it moves automatically. Completed games reopen as completed. <strong>Start new</strong> clears the restored game.</p>
+    <p>Autosaves stay in this browser and can be lost if storage is blocked, full or cleared. Keep important games with <strong>Copy PGN</strong> or the PGN download. Opening the same workspace in several tabs shares one save slot; the last tab to save wins.</p>
+    <p>Your games are not sent anywhere. The engine, and its network if it has one, downloads on first use and is reused from your browser’s storage after that.</p>
   </div>
-</section>
 
 <!-- ===== HUMAN VS COMPUTER PLAY ===== -->
-<section id="human-vs-computer">
-  <h2>Human vs computer play <a class="anchor-link" href="#human-vs-computer" aria-label="Link to this section">#</a></h2>
+<div class="opponents">
+  <h3 id="human-vs-computer">Human-like opponents <a class="anchor-link" href="#human-vs-computer" aria-label="Link to this section">#</a></h3>
   <p class="lead">Maia3 predicts a rating-conditioned human move distribution and human-game outcome. Leela Queen Odds is an Lc0-compatible network trained for games where the engine starts without its queen. The optional contempt controls belong to 0x88's search implementation and model an opponent with limited reply search.</p>
 
   <div class="callout info">
-    <h4>Model boundaries</h4>
+    <h4 id="model-boundaries">Model boundaries</h4>
     <p>Maia3 is used directly as a move policy. Leela Queen Odds runs through 0x88's PUCT search from its specialized starting position. Contempt search does not make a conventional engine human-like or give it a personality.</p>
   </div>
 
@@ -189,160 +576,220 @@ onMount(() => {
   </table>
 
   <p>Maia3's WDL output predicts the result of a human game at the selected rating; it is not an engine centipawn evaluation. The Leela Queen Odds and contempt experiments use 0x88's PUCT search. The full design note lives in <a href="https://github.com/manthedan/0x88/blob/main/docs/human_vs_computer_play.md">docs/human_vs_computer_play.md</a>.</p>
+</div>
+  {@render sectionNav('pages')}
 </section>
 
-<!-- ===== NEURAL BROWSER RUNTIMES ===== -->
-<section id="neural-runtimes">
-  <h2>Neural browser runtimes <a class="anchor-link" href="#neural-runtimes" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Lc0 and Maia3 are loaded as browser models rather than compiled UCI executables. 0x88 supplies input encoding, inference, and legal-move mapping. Its own PUCT implementation searches the Lc0 and Leela Queen Odds outputs, while Maia3 is used directly as a rating-conditioned move policy.</p>
+<!-- ===== ADVANCED ANALYSIS ===== -->
+<section id="analysis-in-depth">
+  <h2>Analysis in depth <a class="anchor-link" href="#analysis-in-depth" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Use Analysis to explore engine results and your own games, save engine setups and return to work you have saved.</p>
 
-  <div class="callout info">
-    <h4>Stable baseline</h4>
-    <p><strong>ONNX Runtime WebGPU</strong> is the stable neural baseline and rollback path. TVMJS, custom WGSL, WebNN, and QDQ artifacts all need to prove themselves against ORT WebGPU with fixture drift and search-move gates before they can become product defaults. The TVMJS lane has cleared those gates for Centipawn, where it is the promoted primary runtime with automatic ORT fallback; everywhere else the rule still applies.</p>
+  <div class="analysis-topic">
+    <h3 id="exploring-results">Exploring the results <a class="anchor-link" href="#exploring-results" aria-label="Link to this section">#</a></h3>
+    <ul>
+      <li><strong>Engines tab</strong> &mdash; each engine’s evaluation and best lines.</li>
+      <li><strong>Review tab</strong> &mdash; whole-game accuracy and move classifications.</li>
+      <li><strong>Compare tab</strong> &mdash; every engine’s best move and evaluation in one table, with the difference between them.</li>
+      <li><strong>Human tab (Maia3)</strong> &mdash; what players rated 1100 to 2200 choose in this position, with Maia3’s expected score for a human game. Loading it downloads about 28&nbsp;MB once.</li>
+    </ul>
   </div>
 
-  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
-    <thead>
-      <tr>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Lane</th>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">What it is</th>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">ONNX WebGPU</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">ONNX Runtime Web running LC0/Maia models on the browser GPU, with ORT WASM as fallback/control.</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Stable default baseline for neural models where WebGPU is available.</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">ONNX QDQ</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Weight-only int8 quantize/dequantize ONNX graphs: smaller files, float compute after in-graph dequantization.</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Per-model promotion after real chess fixture/search drift gates; mainly a download/cache win.</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Custom WGSL</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Hand-written WebGPU kernels for hot LC0 subgraphs: encoder blocks, heads, legal-prior/readback experiments.</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Explicit hybrid/runtime lane; parity and readback/batch-fill evidence decide promotion.</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">TVMJS WebGPU</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Compiler path from ONNX to TVM Relax to browser-loadable TVMJS wasm plus WebGPU pipelines.</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Promoted primary runtime for Centipawn with automatic ORT fallback; other models remain research/opt-in pending separate hosting, provenance, and cross-device gates.</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; font-weight:600">ORT WebNN EP</td>
-        <td style="padding:10px">ONNX Runtime through WebNN, potentially reaching CoreML/ANE/NPU hardware instead of WebGPU.</td>
-        <td style="padding:10px">Promising but flag-gated; not shippable until WebNN is unflagged and model-specific correctness gates pass.</td>
-      </tr>
-    </tbody>
-  </table>
+  <div class="analysis-topic">
+    <h3 id="explore-engine-lines">Explore engine lines <a class="anchor-link" href="#explore-engine-lines" aria-label="Link to this section">#</a></h3>
+    <p>Use the <strong>Preview</strong> button beside an engine line to explore its full continuation on a separate board with Previous/Next or the arrow keys. <strong>Insert line</strong> adds the continuation to the game; clicking a move in an engine row inserts only through that move, following existing variations when present.</p>
+  </div>
 
-  <p>WebNN is worth tracking because early probes show real acceleration on supported hardware, but it currently requires Chrome's <code>WebMachineLearningNeuralNetwork</code> feature flag and has model-shape/precision caveats. Likewise, QDQ should be judged on real chess positions: random tensor comparisons can overstate int8 drift compared with actual LC0/Maia activations.</p>
-  <p>Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/neural_browser_runtimes.md">docs/neural_browser_runtimes.md</a>, with supporting runbooks for <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0_tvmjs_research_runbook.md">TVMJS</a>, <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0web_custom_inference_checkpoint.md">custom WGSL</a>, and <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0_t3_qdq_webnn_2026-06-10.md">QDQ/WebNN probes</a>.</p>
+  <div class="analysis-topic">
+    <h3 id="save-engine-setups">Save engine setups <a class="anchor-link" href="#save-engine-setups" aria-label="Link to this section">#</a></h3>
+    <p>In <strong>Engines → Saved engine setups</strong>, name and save the current engines, budgets and number of lines. Select a setup to load it or delete one you no longer need; setups stay on this device, with <strong>Export setups</strong> and <strong>Import setups</strong> providing JSON backups. Large networks still require confirmation before loading.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="share-restore">Share and restore your work <a class="anchor-link" href="#share-restore" aria-label="Link to this section">#</a></h3>
+    <p>Analysis automatically saves the game tree, variations, comments and selected move on this device so you can reload or reopen it to continue. <strong>Start new</strong> in the restore notice or <strong>Load → Reset</strong> clears the save; loading a PGN or FEN replaces it. On mobile, open <strong>Board tools •••</strong> for <strong>Load</strong> and <strong>Copy</strong>. Under the board’s <strong>Copy</strong> button, <strong>Copy link</strong> shares the current FEN only, without moves, variations or engine settings, and opening a position link takes priority over the saved game.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="explore-own-games">Opening explorer <a class="anchor-link" href="#explore-own-games" aria-label="Link to this section">#</a></h3>
+    <p>Explore opening continuations from your own games and compare their frequency with human predictions and engine recommendations.</p>
+    <ol>
+      <li>In Analysis, open <strong>Moves → Opening explorer → Import PGN</strong>.</li>
+      <li>Paste a batch or choose a .pgn file, name the collection and select <strong>Import and save</strong>.</li>
+      <li>Select a collection to load it, then click a continuation to advance the board.</li>
+      <li>For human probabilities, explicitly load Maia3 in <strong>Human</strong> first, then open <strong>Compare with predictions</strong>. Choose a rating to compare Maia3’s probabilities with observed frequency and the analyzed engines’ best moves.</li>
+    </ol>
+    <p><strong>Import limits:</strong> Each batch can contain up to 200 games and 1 MiB, with 32 KiB per game.</p>
+    <p><strong>Reading the results:</strong> Counts use mainlines only and each game’s first continuation at a repeated position; outcomes include unknown results. Maia3 predicts human choices, not accuracy.</p>
+  </div>
+
+  <div class="analysis-topic">
+    <h3 id="manage-collections">Manage game collections <a class="anchor-link" href="#manage-collections" aria-label="Link to this section">#</a></h3>
+    <p>Use <strong>Collection actions</strong> in the Opening explorer to manage and back up your imported games.</p>
+    <ol>
+      <li>Choose <strong>Rename collection…</strong>, edit the name and press <strong>Save collection name</strong>. You can also duplicate or delete a collection, or download its PGN.</li>
+      <li>Make a JSON backup of selected collections or all collections. Restore keeps existing collections and rebuilds indexes from PGN.</li>
+      <li>If storage is blocked, use <strong>Explore without saving</strong> and download your PGN.</li>
+    </ol>
+    <p><strong>Backup limit:</strong> JSON backups are limited to 16 MiB. Back up selected collections separately if the full backup exceeds that limit.</p>
+    <p><strong>Storage:</strong> Collections stay in this browser, not an account or online database.</p>
+  </div>
+  {@render sectionNav('analysis-in-depth')}
 </section>
 
-<!-- ===== CPU WASM RUNTIMES ===== -->
-<section id="cpu-wasm">
-  <h2>CPU WASM runtimes <a class="anchor-link" href="#cpu-wasm" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Stockfish, Reckless, Berserk, Viridithas, PlentyChess, Stormphrax, and the Monty lab port are CPU engines compiled to WebAssembly. Browser workers provide their UCI-style control layer.</p>
+<section id="review-and-train">
+  <h2>Review and train <a class="anchor-link" href="#review-and-train" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Review a game in Analysis, practise the positions where you lost the most, and compare engines at those moments.</p>
 
-  <div class="callout info">
-    <h4>Two build lanes</h4>
-    <p><strong>Emscripten</strong> is the preferred intake path for C/C++ engines: it gives us Stockfish.js-style JS glue, a worker-loadable <code>.wasm</code>, and optional <code>.data</code> sidecars for NNUE files. <strong>Rust WASI</strong> is the preferred path for Rust engines: compile to <code>wasm32-wasip1</code>, then run through the browser WASI shim in one-shot, batch, or persistent-worker mode.</p>
+  <div class="analysis-topic">
+    <h3 id="review-game">Review a game <a class="anchor-link" href="#review-game" aria-label="Link to this section">#</a></h3>
+    <ol>
+      <li>Load a PGN or play a line, then open <strong>Review</strong>, choose a CPU reviewer and depth, and press <strong>Review game</strong>. Stockfish Lite is the default; other selected CPU engines appear in the reviewer menu. You can cancel or navigate the board while it runs.</li>
+      <li>Click the advantage graph or focus it and use arrow keys to visit moves, with Home/End for the ends. The move list shows classifications; <strong>Previous</strong> and <strong>Next</strong> cycle through the five largest error losses.</li>
+    </ol>
+    <p>Approximate accuracy averages estimated winning-chance loss per side, not the game score used by Lichess or Chess.com. Results depend on engine and depth, and changing the mainline clears them.</p>
   </div>
 
-  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
-    <thead>
-      <tr>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Runtime path</th>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Engines</th>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Build targets</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish.js package</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Stockfish 19</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Lite/full, single-thread/threaded flavors; threaded builds require cross-origin isolation.</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Emscripten UCI worker</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Berserk, PlentyChess, Stormphrax</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Single-thread baseline first, then explicit <code>simd128</code>, SSE4.1-shaped wasm SIMD, or relaxed-SIMD variants after smoke/benchmark evidence.</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Rust <code>wasm32-wasip1</code></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Reckless, Viridithas, Monty lab</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Scalar fallback, <code>+simd128</code> preferred variants, and relaxed-SIMD as experimental until proven per engine.</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; font-weight:600">Direct browser API</td>
-        <td style="padding:10px">Reckless experiments</td>
-        <td style="padding:10px">Bypasses UCI text for structured calls, but only graduates if it beats the simpler UCI/WASI path on lifecycle or latency.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <h3 id="cpu-wasm-relaxed-simd">Relaxed SIMD <a class="anchor-link" href="#cpu-wasm-relaxed-simd" aria-label="Link to this section">#</a></h3>
-  <p>Relaxed SIMD is a separate WebAssembly feature from ordinary <code>simd128</code>. A relaxed build can fail to validate on a browser that supports baseline SIMD, so every relaxed artifact needs feature detection, asset fallback, and a non-relaxed path.</p>
-  <p>The main win for these chess engines is the relaxed integer dot product used in NNUE layers. When the activation operand is proven to stay in <code>[0, 127]</code>, <code>i32x4_relaxed_dot_i8x16_i7x16_add</code> is value-exact and can replace slower <code>maddubs</code>/<code>dpbusd</code> emulation. Reckless, Viridithas, Berserk, PlentyChess, and Stormphrax all have this proof in their current SIMD audit lanes.</p>
-  <p>The rule is still parity-first: inspect the artifact to confirm relaxed opcodes are present, then require fixed-depth equality for best move, score, node count, and PV before promoting a runtime ladder such as <code>relaxed-simd &gt; simd128 &gt; scalar</code>. Without that evidence, relaxed SIMD remains a lab or benchmark variant.</p>
-
-  <div class="callout info">
-    <h4>Benchmark context</h4>
-    <p>The current relaxed-SIMD snapshot is measured in a Chromium browser on macOS with an Apple M4 chip. Treat the NPS deltas as device/runtime-specific engineering evidence, not universal engine-speed claims; the exact fixed-depth parity result is the stronger promotion signal.</p>
+  <div class="analysis-topic">
+    <h3 id="retry-mistakes">Retry your mistakes <a class="anchor-link" href="#retry-mistakes" aria-label="Link to this section">#</a></h3>
+    <p>Practise a better move in up to five pre-error positions without engine advice or human predictions.</p>
+    <ol>
+      <li>After reviewing a game, choose the side you played and press <strong>Retry mistakes</strong> in Review.</li>
+      <li>Play a better move, or use <strong>Skip</strong> or <strong>Reveal</strong>. The review’s best move is accepted immediately; alternatives are checked locally with the same reviewer and depth, allowing up to 2 percentage points of estimated score loss versus the best move.</li>
+      <li>After solving or revealing, compare human likelihood at a chosen rating if Maia3 was loaded in <strong>Human</strong> beforehand.</li>
+      <li>Press <strong>Return to review</strong> to restore your untouched game and selected position.</li>
+    </ol>
+    <p>Human probabilities predict choices, not correctness.</p>
   </div>
 
-  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
-    <thead>
-      <tr>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Engine</th>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Apple M4 / Chromium evidence</th>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Parity gate</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Reckless</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>+24%</code> NPS vs old kernels</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>60/60</code> exact fixed-depth parity</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Viridithas</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>+14%</code> NPS over standard SIMD</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Berserk</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>1.50M</code> NPS vs <code>1.38M</code> SIMD (<code>+8%</code>)</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">PlentyChess</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>992k</code> NPS vs <code>603k</code> default (<code>+64%</code>)</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stormphrax</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>540k</code> NPS vs <code>477k</code> SIMD (<code>1.13&times;</code>, Chromium depth 11)</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>60/60</code> exact fixed-depth parity; <code>20/20</code> browser parity</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; font-weight:600">Stockfish</td>
-        <td style="padding:10px">SF19 Lite: <code>1.086M</code> median wall NPS vs <code>0.863M</code> baseline (<code>1.27&times;</code> paired median, Chromium depth 12; shared-host spread is wide).</td>
-        <td style="padding:10px"><code>600/600</code> exact browser/native comparisons; full and pthread relaxed builds remain unpromoted.</td>
-      </tr>
-    </tbody>
-  </table>
+  <div class="analysis-topic">
+    <h3 id="compare-critical-moments">Compare critical moments <a class="anchor-link" href="#compare-critical-moments" aria-label="Link to this section">#</a></h3>
+    <p>Compare Stockfish Lite (depth 12) and Lc0 Small (400 visits) on up to five pre-error positions from your reviewed game.</p>
+    <ol>
+      <li>After reviewing a game, select <strong>Compare critical moments</strong> below the Review results.</li>
+      <li>Check the extra compute and download estimate, optionally include Maia3’s played-move and engine-move probabilities at one rating, then confirm.</li>
+      <li>Follow each engine’s separate progress and failures. <strong>Cancel</strong> retains completed results.</li>
+      <li>Click a moment to visit the board, or use <strong>Compare</strong>, <strong>Human</strong> or <strong>Play from here</strong>.</li>
+    </ol>
+    <p><strong>Interpretation:</strong> The <strong>Original review</strong> sets severity; move agreement is separate. Maia3 predicts human choices, not accuracy.</p>
+    <p><strong>Refreshing:</strong> Mainline or settings changes mark the report stale. Compare again to refresh it.</p>
+  </div>
 
-  <p>The promotion rule is deliberately conservative: build scripts must pin upstream source and NNUE assets, Node and browser smokes must pass, benchmarks must justify the variant, and GPL/AGPL artifacts need manifests plus matching source archives before public distribution. Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/cpu_wasm_runtimes.md">docs/cpu_wasm_runtimes.md</a> and the C/C++ porting recipe in <a href="https://github.com/manthedan/0x88/blob/main/docs/browser_c_engine_porting.md">docs/browser_c_engine_porting.md</a>.</p>
+  <div class="analysis-topic">
+    <h3 id="export-review">Export a game review <a class="anchor-link" href="#export-review" aria-label="Link to this section">#</a></h3>
+    <p><strong>Copy reviewed PGN</strong> or <strong>Download PGN</strong> exports the mainline with original engine evals and error NAGs, retaining imported headers, result and starting FEN. Variations and existing comments are not included in this export. Completed position results are reused during this session when engine, depth and history match; nothing is uploaded.</p>
+  </div>
+  {@render sectionNav('review-and-train')}
+</section>
+
+<!-- ===== TROUBLESHOOTING ===== -->
+<section id="troubleshooting">
+  <h2>Troubleshooting <a class="anchor-link" href="#troubleshooting" aria-label="Link to this section">#</a></h2>
+  <p class="lead">Most problems come from the browser: no WebGPU, no storage for downloaded models, or no shared memory for threads. Start with the check below, then find the symptom.</p>
+
+  <div class="trouble">
+    <h3 id="trouble-device">Check this browser <a class="anchor-link" href="#trouble-device" aria-label="Link to this section">#</a></h3>
+    <p>0x88 checks these features when a page loads. The same check appears on <a href="/#device-details">Home</a> and in the <em>Browser capabilities</em> panel on Analysis, Arena and Play.</p>
+    <div class="device-check" aria-live="polite" aria-busy={!caps && !capsFailed}>
+      {#if capsFailed}
+        <p class="dc-pending">Could not check this browser. Each engine still picks a fallback runtime when it loads.</p>
+      {:else if !caps}
+        <p class="dc-pending">Checking this browser…</p>
+      {:else}
+        <dl>
+          <div>
+            <dt>WebGPU</dt>
+            <dd><span class="dc-state" data-tone={caps.webgpu === true ? 'ok' : 'warn'}>{caps.webgpu === true ? 'Available' : caps.webgpu === null ? 'No answer' : 'Unavailable'}</span>
+              {caps.webgpu === true ? 'Neural engines can use the GPU.' : caps.webgpu === null ? 'The GPU did not answer within 4 seconds. See WebGPU unavailable below.' : 'See WebGPU unavailable below.'}</dd>
+          </div>
+          <div>
+            <dt>WebAssembly</dt>
+            <dd><span class="dc-state" data-tone={caps.wasm ? 'ok' : 'warn'}>{caps.wasm ? 'Available' : 'Unavailable'}</span>
+              {caps.wasm ? `SIMD ${caps.wasmSimd ? 'yes' : 'no'} · relaxed SIMD ${caps.wasmRelaxedSimd ? 'yes' : 'no'}.` : 'The engines cannot run in this browser.'}</dd>
+          </div>
+          <div>
+            <dt>Threads</dt>
+            <dd><span class="dc-state" data-tone={caps.threadedWasm ? 'ok' : 'warn'}>{caps.threadedWasm ? 'Available' : 'Single-thread'}</span>
+              {caps.threadedWasm ? `${caps.threads} logical thread${caps.threads === 1 ? '' : 's'} reported.` : 'Shared memory is unavailable, so CPU engines run on one thread.'}</dd>
+          </div>
+          <div>
+            <dt>Model cache</dt>
+            <dd><span class="dc-state" data-tone={caps.cacheStorage ? 'ok' : 'warn'}>{caps.cacheStorage ? 'Available' : 'Unavailable'}</span>
+              {caps.cacheStorage ? 'Downloaded models are kept for later visits.' : 'Models may download again on every visit.'}</dd>
+          </div>
+        </dl>
+      {/if}
+    </div>
+  </div>
+
+  <div class="trouble">
+    <h3 id="trouble-webgpu">WebGPU unavailable <a class="anchor-link" href="#trouble-webgpu" aria-label="Link to this section">#</a></h3>
+    <p>0x88 asks the browser for a WebGPU adapter once per page load. If the browser has no WebGPU or returns no adapter, WebGPU counts as unavailable. If the request takes longer than 4 seconds, the check reports no answer. Without WebGPU:</p>
+    <ul>
+      <li><strong>CPU engines are unaffected.</strong> Stockfish, Reckless, Berserk, Viridithas, PlentyChess and Stormphrax always run as WebAssembly on the CPU.</li>
+      <li><strong>Lc0 (Small net) and Maia3</strong> run through ONNX Runtime and fall back to WebAssembly on the CPU, which is slower.</li>
+      <li><strong>Centipawn</strong> tries its TVMJS WebGPU runtime first and falls back to ONNX Runtime automatically.</li>
+      <li><strong>Large Lc0 nets (t3, BT4) and Leela Queen Odds</strong> fall back to the CPU in Analysis and Play. Play lowers their visit budgets and warns that each move can take several seconds. In Arena they need WebGPU, and a match that includes them will not start without it.</li>
+    </ul>
+    <p>If your browser offers WebGPU behind a setting or flag, turn it on and reload the page so the check runs again.</p>
+  </div>
+
+  <div class="trouble">
+    <h3 id="trouble-downloads">Slow or repeated downloads <a class="anchor-link" href="#trouble-downloads" aria-label="Link to this section">#</a></h3>
+    <p>Engines and networks download the first time you use them, and the workspace shows download progress. The largest downloads are the neural networks:</p>
+    <table class="doc-table compact">
+      <thead><tr><th scope="col">Download</th><th scope="col">Approximate size</th></tr></thead>
+      <tbody>
+        <tr><td>Lc0 BT4-it332 net</td><td>178&nbsp;MB</td></tr>
+        <tr><td>Lc0 t3-512 net</td><td>163&nbsp;MB</td></tr>
+        <tr><td>Leela Queen Odds net</td><td>96&nbsp;MB</td></tr>
+        <tr><td>Maia3 model</td><td>28&nbsp;MB</td></tr>
+        <tr><td>Centipawn TVMJS runtime</td><td>26&nbsp;MB</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>Later visits</strong> load neural models from the browser’s Cache Storage instead of the network. Each cached model is checked against its manifest, and a damaged or outdated copy is discarded and downloaded again.</li>
+      <li><strong>Downloading every visit?</strong> If the browser reports too little free storage, 0x88 still loads the model but does not cache it, so it downloads again next time. The same happens when the check above shows the model cache as unavailable.</li>
+      <li><strong>Low-memory devices.</strong> When a device reports 4&nbsp;GB of RAM or less, Play warns before loading a large Lc0 net. Lc0 Small, Maia3 and the CPU engines are lighter choices.</li>
+    </ul>
+  </div>
+
+  <div class="trouble">
+    <h3 id="trouble-cache">Clear downloaded models <a class="anchor-link" href="#trouble-cache" aria-label="Link to this section">#</a></h3>
+    <p>0x88 has no in-app button for this. Downloaded models live in your browser’s storage for this site: Cache Storage entries named <code>lc0-browser-models-v1</code> and <code>maia3-browser-models-v1</code>, plus verification records in an IndexedDB database named <code>lc0-browser-model-cache-metadata</code>. Clearing this site’s data in your browser settings removes them; each model downloads again the next time you use it.</p>
+  </div>
+
+  <div class="trouble">
+    <h3 id="trouble-threads">Stockfish runs single-threaded <a class="anchor-link" href="#trouble-threads" aria-label="Link to this section">#</a></h3>
+    <p>Multi-threaded WebAssembly needs a cross-origin-isolated page with <code>SharedArrayBuffer</code>. 0x88 sends the headers for this, and when they take effect Analysis and Arena run Stockfish’s threaded build. If the check above shows <em>Single-thread</em>, Stockfish uses its single-threaded build instead. The other CPU engines are single-threaded builds either way.</p>
+  </div>
+  {@render sectionNav('troubleshooting')}
 </section>
 
 <!-- ===== ENGINES ===== -->
 <section id="engines">
   <h2>The engines <a class="anchor-link" href="#engines" aria-label="Link to this section">#</a></h2>
   <p class="lead">These entries separate upstream engine and model facts from 0x88's browser packaging. The <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">CCRL 40/15 list</a> and <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC engine status</a> provide context for native builds under their own hardware and tournament conditions; neither measures the browser artifacts served here.</p>
+
+  <table class="doc-table engine-table">
+    <caption class="visually-hidden">Engines at a glance</caption>
+    <thead>
+      <tr><th scope="col">Engine</th><th scope="col">Runs on</th><th scope="col">How it picks moves</th><th scope="col">Where</th><th scope="col">License</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row"><a href="#engines-lc0">Leela Chess Zero</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Neural network (Small, t3, BT4) with 0x88’s PUCT search</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0-or-later</span></td></tr>
+      <tr><th scope="row"><a href="#engines-lqo">Leela Queen Odds</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Queen-odds network with 0x88’s PUCT search</td><td>Play</td><td><span class="lic agpl">AGPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-maia3">Maia3</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Rating-conditioned human-move model, no search</td><td>Play, Analysis (Human tab)</td><td><span class="lic agpl">AGPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-centipawn">Centipawn</a></th><td>GPU<span class="sub">ORT fallback</span></td><td>0x88’s experimental neural engine</td><td>Analysis, Arena, Play</td><td><span class="lic own">0x88 project</span></td></tr>
+      <tr><th scope="row"><a href="#engines-stockfish">Stockfish 19</a></th><td>CPU</td><td>Alpha-beta search with NNUE, Lite and full builds</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-berserk">Berserk</a></th><td>CPU</td><td>Principal-variation search with bucketed NNUE</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-viridithas">Viridithas</a></th><td>CPU</td><td>Search with NNUE evaluation</td><td>Analysis, Arena, Play</td><td><span class="lic mit">MIT (pinned)</span></td></tr>
+      <tr><th scope="row"><a href="#engines-plentychess">PlentyChess</a></th><td>CPU</td><td>Search with threat-input NNUE evaluation</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0</span></td></tr>
+      <tr><th scope="row"><a href="#engines-stormphrax">Stormphrax</a></th><td>CPU</td><td>Search with self-play-trained NNUE evaluation</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0-or-later</span></td></tr>
+      <tr><th scope="row"><a href="#engines-reckless">Reckless</a></th><td>CPU</td><td>Alpha-beta search with NNUE</td><td>Analysis, Arena, Play</td><td><span class="lic agpl">AGPL-3.0</span></td></tr>
+    </tbody>
+  </table>
+  <p class="table-note">GPU engines use WebGPU when the browser has it; see <a href="#trouble-webgpu">WebGPU unavailable</a> for what each one does without it. Each engine’s license and source offer is listed under <a href="#licenses-per-engine">per-engine source links</a>.</p>
 
   <div class="engine-entry">
     <h3 id="engines-lc0">Leela Chess Zero <a class="anchor-link" href="#engines-lc0" aria-label="Link to this section">#</a></h3>
@@ -391,7 +838,7 @@ onMount(() => {
     </dl>
     <p>Maia-3 is a family of Chessformer models for predicting human moves across skill levels. The browser model returns rating-conditioned move probabilities and human-game WDL predictions rather than a searched centipawn evaluation. The Play page can sample from that policy or choose its highest-probability move.</p>
     <div class="callout info">
-      <h4>AGPL source offer</h4>
+      <h4 id="maia-source-offer">AGPL source offer</h4>
       <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. The AGPL source offer includes the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> for that artifact.</p>
     </div>
   </div>
@@ -414,7 +861,7 @@ onMount(() => {
     </dl>
     <p>Stockfish is a community-developed UCI engine derived from Glaurung 2.1. It combines alpha-beta search with NNUE evaluation, and proposed changes are tested through the distributed Fishtest system. Stockfish 18 led the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and Stockfish finished first in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 ships the Stockfish.js 19.0.1 package in Lite and full-network forms; SF19 uses new networks for both variants.</p>
     <div class="callout info">
-      <h4>Relaxed SIMD candidate</h4>
+      <h4 id="stockfish-relaxed-candidate">Relaxed SIMD candidate</h4>
       <p>The Lite single-thread build has a feature-detected relaxed-SIMD candidate, with the baseline kept as a fallback. SF19 validation compares each WASM variant against its same-network native build using exact node-count bench signatures and fixed-depth best move, score, nodes, and PV. The Lite network has a different feature architecture from full Stockfish. Full single-threaded, Lite pthread, and full pthread relaxed builds remain local candidates, not default release artifacts. Historical SF18 relaxed-SIMD speedups do not describe the new SF19 networks.</p>
     </div>
     <details>
@@ -480,10 +927,181 @@ onMount(() => {
     </dl>
     <p>Reckless is a competitive Rust UCI engine using alpha-beta search and NNUE evaluation. Native Reckless 0.9.0 placed second on the <a href="https://computerchess.org.uk/ccrl/4040/" rel="noopener">July 2026 CCRL 40/15 list</a>, and a development build finished second in the <a href="https://wiki.chessdom.org/Current_Engine_Status" rel="noopener">TCEC Season 29 Superfinal</a>. 0x88 pins development commit <a href="https://github.com/codedeliveryservice/Reckless/commit/0010617448bdef4c8cd7d4f4825b7e42c8bc262a" rel="noopener"><code>0010617</code></a> and serves scalar, WebAssembly SIMD, and relaxed-SIMD WASI builds.</p>
     <div class="callout info">
-      <h4>Public v0 engine</h4>
+      <h4 id="reckless-public-engine">Public v0 engine</h4>
       <p>Reckless is published through the project CDN for Play, Analysis, and Arena. The browser selects relaxed SIMD or SIMD when supported, and falls back to the scalar WASI build otherwise. Matching source archives for the scalar, SIMD, and relaxed SIMD builds are hosted beside the binaries.</p>
     </div>
   </div>
+  {@render sectionNav('engines')}
+</section>
+
+<!-- ===== UNDER THE HOOD ===== -->
+<section id="under-the-hood">
+  <h2>Under the hood <a class="anchor-link" href="#under-the-hood" aria-label="Link to this section">#</a></h2>
+<!-- ===== NEURAL BROWSER RUNTIMES ===== -->
+<div class="runtime-block">
+  <h3 id="neural-runtimes">Neural browser runtimes <a class="anchor-link" href="#neural-runtimes" aria-label="Link to this section">#</a></h3>
+  <p class="lead">Lc0 and Maia3 are loaded as browser models rather than compiled UCI executables. 0x88 supplies input encoding, inference, and legal-move mapping. Its own PUCT implementation searches the Lc0 and Leela Queen Odds outputs, while Maia3 is used directly as a rating-conditioned move policy.</p>
+
+  <div class="callout info">
+    <h4 id="neural-stable-baseline">Stable baseline</h4>
+    <p><strong>ONNX Runtime WebGPU</strong> is the stable neural baseline and rollback path. TVMJS, custom WGSL, WebNN, and QDQ artifacts all need to prove themselves against ORT WebGPU with fixture drift and search-move gates before they can become product defaults. The TVMJS lane has cleared those gates for Centipawn, where it is the promoted primary runtime with automatic ORT fallback; everywhere else the rule still applies.</p>
+  </div>
+
+  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Lane</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">What it is</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">ONNX WebGPU</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">ONNX Runtime Web running LC0/Maia models on the browser GPU, with ORT WASM as fallback/control.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Stable default baseline for neural models where WebGPU is available.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">ONNX QDQ</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Weight-only int8 quantize/dequantize ONNX graphs: smaller files, float compute after in-graph dequantization.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Per-model promotion after real chess fixture/search drift gates; mainly a download/cache win.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Custom WGSL</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Hand-written WebGPU kernels for hot LC0 subgraphs: encoder blocks, heads, legal-prior/readback experiments.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Explicit hybrid/runtime lane; parity and readback/batch-fill evidence decide promotion.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">TVMJS WebGPU</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Compiler path from ONNX to TVM Relax to browser-loadable TVMJS wasm plus WebGPU pipelines.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Promoted primary runtime for Centipawn with automatic ORT fallback; other models remain research/opt-in pending separate hosting, provenance, and cross-device gates.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; font-weight:600">ORT WebNN EP</td>
+        <td style="padding:10px">ONNX Runtime through WebNN, potentially reaching CoreML/ANE/NPU hardware instead of WebGPU.</td>
+        <td style="padding:10px">Promising but flag-gated; not shippable until WebNN is unflagged and model-specific correctness gates pass.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>WebNN is worth tracking because early probes show real acceleration on supported hardware, but it currently requires Chrome's <code>WebMachineLearningNeuralNetwork</code> feature flag and has model-shape/precision caveats. Likewise, QDQ should be judged on real chess positions: random tensor comparisons can overstate int8 drift compared with actual LC0/Maia activations.</p>
+  <p>Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/neural_browser_runtimes.md">docs/neural_browser_runtimes.md</a>, with supporting runbooks for <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0_tvmjs_research_runbook.md">TVMJS</a>, <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0web_custom_inference_checkpoint.md">custom WGSL</a>, and <a href="https://github.com/manthedan/0x88/blob/main/docs/lc0_t3_qdq_webnn_2026-06-10.md">QDQ/WebNN probes</a>.</p>
+</div>
+
+<!-- ===== CPU WASM RUNTIMES ===== -->
+<div class="runtime-block">
+  <h3 id="cpu-wasm">CPU WASM runtimes <a class="anchor-link" href="#cpu-wasm" aria-label="Link to this section">#</a></h3>
+  <p class="lead">Stockfish, Reckless, Berserk, Viridithas, PlentyChess, Stormphrax, and the Monty lab port are CPU engines compiled to WebAssembly. Browser workers provide their UCI-style control layer.</p>
+
+  <div class="callout info">
+    <h4 id="cpu-build-lanes">Two build lanes</h4>
+    <p><strong>Emscripten</strong> is the preferred intake path for C/C++ engines: it gives us Stockfish.js-style JS glue, a worker-loadable <code>.wasm</code>, and optional <code>.data</code> sidecars for NNUE files. <strong>Rust WASI</strong> is the preferred path for Rust engines: compile to <code>wasm32-wasip1</code>, then run through the browser WASI shim in one-shot, batch, or persistent-worker mode.</p>
+  </div>
+
+  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Runtime path</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Engines</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Build targets</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stockfish.js package</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Stockfish 19</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Lite/full, single-thread/threaded flavors; threaded builds require cross-origin isolation.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Emscripten UCI worker</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Berserk, PlentyChess, Stormphrax</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Single-thread baseline first, then explicit <code>simd128</code>, SSE4.1-shaped wasm SIMD, or relaxed-SIMD variants after smoke/benchmark evidence.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Rust <code>wasm32-wasip1</code></td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Reckless, Viridithas, Monty lab</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Scalar fallback, <code>+simd128</code> preferred variants, and relaxed-SIMD as experimental until proven per engine.</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; font-weight:600">Direct browser API</td>
+        <td style="padding:10px">Reckless experiments</td>
+        <td style="padding:10px">Bypasses UCI text for structured calls, but only graduates if it beats the simpler UCI/WASI path on lifecycle or latency.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="runtime-subsection">
+  <h4 id="cpu-wasm-relaxed-simd">Relaxed SIMD <a class="anchor-link" href="#cpu-wasm-relaxed-simd" aria-label="Link to this section">#</a></h4>
+  <p>Relaxed SIMD is a separate WebAssembly feature from ordinary <code>simd128</code>. A relaxed build can fail to validate on a browser that supports baseline SIMD, so every relaxed artifact needs feature detection, asset fallback, and a non-relaxed path.</p>
+  <p>The main win for these chess engines is the relaxed integer dot product used in NNUE layers. When the activation operand is proven to stay in <code>[0, 127]</code>, <code>i32x4_relaxed_dot_i8x16_i7x16_add</code> is value-exact and can replace slower <code>maddubs</code>/<code>dpbusd</code> emulation. Reckless, Viridithas, Berserk, PlentyChess, and Stormphrax all have this proof in their current SIMD audit lanes.</p>
+  <p>The rule is still parity-first: inspect the artifact to confirm relaxed opcodes are present, then require fixed-depth equality for best move, score, node count, and PV before promoting a runtime ladder such as <code>relaxed-simd &gt; simd128 &gt; scalar</code>. Without that evidence, relaxed SIMD remains a lab or benchmark variant.</p>
+
+  <div class="callout info">
+    <h4 id="simd-benchmark-context">Benchmark context</h4>
+    <p>The current relaxed-SIMD snapshot is measured in a Chromium browser on macOS with an Apple M4 chip. Treat the NPS deltas as device/runtime-specific engineering evidence, not universal engine-speed claims; the exact fixed-depth parity result is the stronger promotion signal.</p>
+  </div>
+
+  <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Engine</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Apple M4 / Chromium evidence</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Parity gate</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Reckless</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>+24%</code> NPS vs old kernels</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>60/60</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Viridithas</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>+14%</code> NPS over standard SIMD</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Berserk</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>1.50M</code> NPS vs <code>1.38M</code> SIMD (<code>+8%</code>)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">PlentyChess</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>992k</code> NPS vs <code>603k</code> default (<code>+64%</code>)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>40/40</code> exact fixed-depth parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Stormphrax</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>540k</code> NPS vs <code>477k</code> SIMD (<code>1.13&times;</code>, Chromium depth 11)</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)"><code>60/60</code> exact fixed-depth parity; <code>20/20</code> browser parity</td>
+      </tr>
+      <tr>
+        <td style="padding:10px; font-weight:600">Stockfish</td>
+        <td style="padding:10px">SF19 Lite: <code>1.086M</code> median wall NPS vs <code>0.863M</code> baseline (<code>1.27&times;</code> paired median, Chromium depth 12; shared-host spread is wide).</td>
+        <td style="padding:10px"><code>600/600</code> exact browser/native comparisons; full and pthread relaxed builds remain unpromoted.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>The promotion rule is deliberately conservative: build scripts must pin upstream source and NNUE assets, Node and browser smokes must pass, benchmarks must justify the variant, and GPL/AGPL artifacts need manifests plus matching source archives before public distribution. Full notes live in <a href="https://github.com/manthedan/0x88/blob/main/docs/cpu_wasm_runtimes.md">docs/cpu_wasm_runtimes.md</a> and the C/C++ porting recipe in <a href="https://github.com/manthedan/0x88/blob/main/docs/browser_c_engine_porting.md">docs/browser_c_engine_porting.md</a>.</p>
+  </div>
+</div>
+
+<!-- ===== CDN ===== -->
+<div class="runtime-block">
+  <h3 id="cdn">Artifact CDN &amp; caching <a class="anchor-link" href="#cdn" aria-label="Link to this section">#</a></h3>
+  <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from 130 KB to 60+ MB, so caching and compression are critical for the site to function.</p>
+
+  <div class="callout info">
+    <h4 id="cdn-two-planes">Two-plane model</h4>
+    <p><strong>Control plane</strong> &mdash; channel and release manifests (mutable, short TTL). <strong>Data plane</strong> &mdash; content-addressed blobs under <code>/artifacts/sha256/</code> (immutable, 1-year edge cache). The Worker maps friendly URLs like <code>/viridithas/viridithas-relaxed-simd128.wasm</code> to the correct blob by reading the channel manifest.</p>
+  </div>
+
+  <p>The Worker also handles range requests (delegated to R2's native reader), sets <code>no-transform</code> on binary types to prevent CDN auto-compression of WASM, and attaches CORS/CORP headers for cross-origin isolation. Pre-compression (brotli + gzip sidecars) is done at publish time, not at the edge. Browser-side, the Cache Storage API validates responses by byte length and SHA-256, and compiled <code>WebAssembly.Module</code> objects are cached per worker session.</p>
+
+  <p>Full architecture, compression pipeline details, artifact size table, and operational playbook (diagnostics, publishing, adding new engines) are in <a href="https://github.com/manthedan/0x88/blob/main/docs/cdn_artifact_caching.md">docs/cdn_artifact_caching.md</a>.</p>
+</div>
+  {@render sectionNav('under-the-hood')}
 </section>
 
 <!-- ===== LICENSES ===== -->
@@ -492,12 +1110,13 @@ onMount(() => {
   <p class="lead">Most engines on this site use GPL or AGPL licenses. This section identifies each redistributed artifact, its upstream project, and its corresponding-source archive.</p>
 
   <div class="callout info">
-    <h4>The short version</h4>
+    <h4 id="license-summary">The short version</h4>
     <p>Every GPL- or AGPL-licensed engine we redistribute ships with a matching <strong>corresponding-source archive</strong> from the same deployment as the binary. The archive contains the exact upstream source at the pinned commit, our local patches, the build script that produced the browser artifact, and the toolchain used. This is what the GPL means by "the scripts used to control compilation and installation of the executable."</p>
     <p>Upstream GitHub links are <em>not</em> a sufficient corresponding-source offer on their own &mdash; the FSF position and our own policy agree on this &mdash; so each engine has a real <code>*-corresponding-source.tar.gz</code> sitting next to its <code>.wasm</code>. The Maia3 model is under AGPL-3.0, and the default browser artifact is a local int8 quantization of the upstream fp16 file, so the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> is part of the source offer.</p>
     <p><strong>Full policy:</strong> <a href="https://github.com/manthedan/0x88/blob/main/docs/engine_artifact_distribution.md">docs/engine_artifact_distribution.md</a> &middot; <strong>Hosted artifact index:</strong> <a href="https://github.com/manthedan/0x88/blob/main/docs/hosted_artifacts.md">docs/hosted_artifacts.md</a> &middot; <strong>This project's source:</strong> <a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a></p>
   </div>
 
+  <div class="source-links">
   <h3 id="licenses-per-engine" style="font-size:20px">Per-engine source links <a class="anchor-link" href="#licenses-per-engine" aria-label="Link to this section">#</a></h3>
   <p>Each row lists the binary we ship, its license, and the matching source offer. This is the same information as the metadata blocks above, collected in one place for quick reference.</p>
   <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
@@ -570,31 +1189,18 @@ onMount(() => {
   <blockquote>
     <p>A note on engine names and branding: the names "Stockfish", "Leela Chess Zero", "Berserk", "Viridithas", "PlentyChess", "Stormphrax", "Reckless", and "Maia" are project trademarks of their respective owners, separate from the code licenses. We use them here solely to identify the engines (nominative use) and do not claim endorsement. Consult each project's own branding guidance if in doubt.</p>
   </blockquote>
-</section>
-
-<!-- ===== CDN ===== -->
-<section id="cdn">
-  <h2>Artifact CDN &amp; caching <a class="anchor-link" href="#cdn" aria-label="Link to this section">#</a></h2>
-  <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from 130 KB to 60+ MB, so caching and compression are critical for the site to function.</p>
-
-  <div class="callout info">
-    <h4>Two-plane model</h4>
-    <p><strong>Control plane</strong> &mdash; channel and release manifests (mutable, short TTL). <strong>Data plane</strong> &mdash; content-addressed blobs under <code>/artifacts/sha256/</code> (immutable, 1-year edge cache). The Worker maps friendly URLs like <code>/viridithas/viridithas-relaxed-simd128.wasm</code> to the correct blob by reading the channel manifest.</p>
   </div>
 
-  <p>The Worker also handles range requests (delegated to R2's native reader), sets <code>no-transform</code> on binary types to prevent CDN auto-compression of WASM, and attaches CORS/CORP headers for cross-origin isolation. Pre-compression (brotli + gzip sidecars) is done at publish time, not at the edge. Browser-side, the Cache Storage API validates responses by byte length and SHA-256, and compiled <code>WebAssembly.Module</code> objects are cached per worker session.</p>
-
-  <p>Full architecture, compression pipeline details, artifact size table, and operational playbook (diagnostics, publishing, adding new engines) are in <a href="https://github.com/manthedan/0x88/blob/main/docs/cdn_artifact_caching.md">docs/cdn_artifact_caching.md</a>.</p>
-</section>
-
 <!-- ===== REMOVAL ===== -->
-<section id="removal">
-  <h2>I'm in this project and I don't like it <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h2>
+<div class="removal-block">
+  <h3 id="removal">Removal requests <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h3>
   <p class="lead">The engines and models above belong to their respective projects. 0x88 packages them for browser use.</p>
   <p>Maintainers and rights holders can request removal by <a href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">opening an issue on GitHub</a>. The requested engine or model will be removed.</p>
   <p>
     <a class="removal-cta" href="https://github.com/manthedan/0x88/issues/new?title=Engine%20removal%20request&amp;body=Which%20engine%20or%20model%3A%20%0A%0AAre%20you%20a%20maintainer%20or%20rights%20holder%3A%20%0A%0AAnything%20else%3A%20" rel="noopener">Request removal on GitHub <span aria-hidden="true">&rarr;</span></a>
   </p>
+</div>
+  {@render sectionNav('licenses')}
 </section>
 
 </div><!-- /doc-content -->
@@ -613,88 +1219,140 @@ onMount(() => {
     </span>
   </div>
 </footer>
-
 <style>
-  .doc-hero{
-    border-bottom:1px solid var(--rule);
-    background:
-      radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--accent-soft) 55%, transparent), transparent 65%),
-      var(--panel);
+  .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
+
+  /* ---- layout: contents rail | intro + content ---- */
+  .doc-body{font-size:16px; --docs-secondary:color-mix(in srgb, var(--text) 80%, var(--ink) 20%)}
+  .doc-body .doc-grid{
+    padding:36px 28px 64px;
+    display:grid; grid-template-columns:248px minmax(0,70ch);
+    grid-template-areas:"toc intro" "toc content";
+    column-gap:56px; align-items:start;
   }
-  .doc-hero .wrap{padding:48px 24px 40px}
-  .doc-hero .kicker{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--accent); margin:0 0 10px}
-  .doc-hero h1{font-size:clamp(28px,5vw,42px); margin:0 0 14px; line-height:1.1; letter-spacing:-.015em}
-  .doc-hero p{margin:0; color:var(--ink-soft); font-size:16px; max-width:62ch; line-height:1.6}
-  .doc-hero p strong{color:var(--ink)}
-  .doc-body .wrap{
-    padding:48px 24px 64px;
-    display:grid; grid-template-columns:220px minmax(0,1fr);
-    gap:56px; align-items:start;
-  }
-  /* Wide tables (per-engine source links) scroll inside their own box
-     instead of forcing the whole column past narrow viewports. */
+  .doc-intro{grid-area:intro; margin-bottom:16px}
+  .doc-intro h1{font-size:44px; margin:0 0 10px; line-height:1.1; letter-spacing:-.015em}
+  .intro-lede{margin:0; color:var(--ink-soft); font-size:16.5px; max-width:66ch; line-height:1.6}
+  .intro-help{margin:10px 0 0; color:var(--text); font-size:14px; line-height:1.55; max-width:66ch}
+  .intro-help a{text-decoration:underline; text-underline-offset:3px; white-space:nowrap}
+  .doc-content{grid-area:content; min-width:0}
+
+  /* Wide tables scroll inside their own box instead of widening the page. */
   .doc-content :global(table){display:block; overflow-x:auto}
-  /* Long slash-joined tokens (best/good/inaccuracy/…) have no natural
-     break points; let them wrap rather than overflow on phones. */
   .doc-content{overflow-wrap:break-word}
+
+  /* ---- contents rail ---- */
   .toc{
-    position:sticky; top:88px;
-    font-size:13px; max-height:calc(100vh - 100px); overflow-y:auto;
-    padding-right:16px; border-right:1px solid var(--rule);
+    grid-area:toc;
+    position:sticky; top:calc(var(--hdr, 64px) + 20px);
+    font-size:14px;
   }
-  .toc h4{
-    font-family:var(--sans); font-size:11px;
-    text-transform:uppercase; letter-spacing:.07em;
-    color:var(--muted-2); margin:0 0 12px; font-weight:600;
+  .toc-toolbar{display:none}
+  .toc-panel{display:flex; flex-direction:column; max-height:calc(100vh - var(--hdr, 64px) - 40px)}
+  .search{position:relative; margin:0 0 14px; flex:0 0 auto}
+  .search-icon{position:absolute; left:10px; top:50%; width:15px; height:15px; transform:translateY(-50%); fill:none; stroke:var(--muted); stroke-width:2; stroke-linecap:round; pointer-events:none}
+  .search input{
+    width:100%; box-sizing:border-box; min-height:40px; padding:8px 96px 8px 32px;
+    border:1px solid var(--border-input); border-radius:var(--radius-sm);
+    background:var(--input-bg); color:var(--ink); font:inherit; font-size:14px;
   }
-  .toc-toggle{display:none}
-  .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:2px}
-  .toc a{
-    color:var(--muted); text-decoration:none;
-    display:block; padding:4px 10px; border-radius:5px;
-    line-height:1.35; font-size:13px;
-    border-left:2px solid transparent; margin-left:-2px;
+  .search input::placeholder{color:var(--muted)}
+  .search input:hover{border-color:var(--border-input-hover)}
+  .search input:focus{outline:none; border-color:var(--accent); box-shadow:var(--focus-ring)}
+  .search input::-webkit-search-cancel-button{display:none}
+  .search-shortcuts{position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:4px; pointer-events:none}
+  .search kbd{
+    min-width:18px; padding:1px 4px; border:1px solid var(--rule-strong); border-radius:4px;
+    background:var(--panel); color:var(--docs-secondary); font-family:var(--mono); font-size:12px; text-align:center;
   }
-  .toc a:hover{color:var(--ink); background:var(--rule-soft)}
-  :global(.toc a.active){
-    color:var(--accent); font-weight:500;
-    background:var(--accent-soft); border-left-color:var(--accent);
+  .search input:focus ~ .search-shortcuts{display:none}
+  .toc-groups,.results{overflow-y:auto; min-height:0; padding-right:6px; margin-right:-6px}
+  .toc-group + .toc-group{margin-top:12px; padding-top:12px; border-top:1px solid var(--rule)}
+  .toc-group-heading{display:flex; align-items:center; gap:4px; margin-bottom:4px; border-radius:6px}
+  .toc-group-heading:hover{background:var(--rule-soft)}
+  .toc-groups .toc-group-heading .toc-group-label{flex:1; font-size:14px; font-weight:700; color:var(--ink); background:transparent}
+  .toc-group-heading.current-group{background:var(--accent-soft); border-radius:6px; box-shadow:inset 0 0 0 1px var(--accent-tint-border)}
+  .toc-groups .toc-group-heading.current-group .toc-group-label{color:var(--accent-soft-text)}
+  .group-toggle{
+    display:flex; align-items:center; justify-content:center; gap:4px; min-width:36px; min-height:36px; padding:4px;
+    border:0; border-radius:6px; background:transparent; color:var(--text-soft); font:12px var(--sans); cursor:pointer;
   }
-  .toc ul ul{margin:2px 0 4px 12px; gap:1px}
-  .toc ul ul a{font-size:12px; padding:3px 8px}
-  .doc-content{max-width:760px}
-  .doc-content section{scroll-margin-top:88px; padding:0 0 48px}
+  .group-toggle:hover{background:transparent; color:var(--ink); outline:1px solid var(--border-input-hover); outline-offset:-4px}
+  .group-toggle:focus-visible{outline:2px solid var(--accent); outline-offset:-3px}
+  .group-toggle svg{width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; transition:transform .15s}
+  .group-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
+  .toc ul[hidden]{display:none}
+  .toc ul{list-style:none; padding:0; margin:0; display:grid; gap:1px}
+  .toc-groups a{
+    display:flex; align-items:center; min-height:36px; padding:7px 10px; border-radius:6px;
+    color:var(--docs-secondary); text-decoration:none; line-height:1.35;
+  }
+  .toc-groups a:hover{color:var(--ink); background:var(--rule-soft)}
+  .toc-groups a.in-active{color:var(--ink); font-weight:600}
+  .toc-groups a.active{color:var(--accent-soft-text); font-weight:700; background:var(--accent-soft)}
+  .toc-group > ul{padding-left:10px}
+  .toc ul ul{margin:0 0 0 12px}
+  .toc ul ul a{font-size:14px}
+
+  /* Keep every group heading visible; only a long topic list needs to scroll. */
+  @media(min-width:861px){
+    .toc-groups{display:flex; flex-direction:column; overflow:hidden}
+    .toc-group{display:flex; flex-direction:column; flex:0 0 auto; min-height:0}
+    .toc-group.expanded{flex:0 1 auto; min-height:40px}
+    .toc-group-heading{flex:0 0 auto}
+    .toc-group > ul{min-height:0; overflow-y:auto}
+  }
+
+  /* ---- search results ---- */
+  .results-count,.no-results{margin:0 0 8px; padding:0 4px; color:var(--text-soft); font-size:12.5px}
+  .no-results{color:var(--text); line-height:1.5}
+  .results ul{gap:2px}
+  .results a{
+    display:grid; gap:2px; padding:8px 10px; border-radius:6px;
+    text-decoration:none; color:var(--text);
+  }
+  .results a:hover,.results a:focus-visible{background:var(--rule-soft); outline:none}
+  .results a:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+  .hit-path{font-size:11.5px; color:var(--text-soft)}
+  .hit-title{color:var(--ink); font-weight:650; font-size:14px}
+  .hit-snippet{font-size:12.5px; line-height:1.45; color:var(--text)}
+  .hit-snippet mark{background:var(--accent-soft); color:var(--accent-soft-text); font-weight:650; border-radius:2px; padding:0 1px}
+
+  /* ---- content ---- */
+  .doc-content section{padding:0 0 52px}
   .doc-content section:last-child{padding-bottom:0}
+  .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 20px)}
   .doc-content h2{
-    font-size:28px; margin:8px 0 14px;
+    font-size:28px; margin:8px 0 12px;
     line-height:1.2; letter-spacing:-.01em;
     display:flex; align-items:center; gap:10px;
-  }
-  .doc-content h2::before{
-    content:""; display:block; width:28px; height:3px;
-    background:var(--accent); border-radius:2px;
   }
   .doc-content h2 .anchor-link,
   .doc-content h3 .anchor-link{
     margin-left:8px; opacity:0;
-    color:var(--muted-2); font-size:.7em;
+    color:var(--muted); font-size:.7em;
     text-decoration:none; font-family:var(--mono);
     transition:opacity .12s;
   }
   .doc-content h2:hover .anchor-link,
-  .doc-content h3:hover .anchor-link{opacity:1}
+  .doc-content h3:hover .anchor-link,
+  .doc-content .anchor-link:focus-visible{opacity:1}
   .doc-content h2 .anchor-link:hover,
   .doc-content h3 .anchor-link:hover{color:var(--accent); opacity:1}
-  .doc-content h3{font-size:20px; margin:36px 0 10px; line-height:1.25}
-  .doc-content h3 .anchor-link{font-size:.6em; vertical-align:middle}
+  .doc-content h3{font-family:var(--sans); font-weight:650; font-size:21px; margin:36px 0 12px; line-height:1.3}
+  .doc-content h4{font-family:var(--sans); font-size:17px; margin:28px 0 12px}
+  .doc-content h3 .anchor-link,.doc-content h4 .anchor-link{font-size:.6em; vertical-align:middle}
+  .doc-content h4 .anchor-link{margin-left:8px; color:var(--muted); text-decoration:none}
+  .runtime-block + .runtime-block{padding-top:16px; margin-top:32px; border-top:1px solid var(--rule)}
+  .doc-content :global(h2:focus),.doc-content :global(h3:focus){outline:none}
   .doc-content > section > p.lead{
-    color:var(--muted); margin:0 0 28px;
-    font-size:16px; max-width:64ch; line-height:1.65;
+    color:var(--ink-soft); margin:0 0 14px;
+    font-size:16px; max-width:66ch; line-height:1.65;
   }
-  .doc-content p{margin:0 0 14px; line-height:1.7; color:var(--ink-soft); max-width:72ch}
-  .doc-content ul{
+  .doc-content p{margin:0 0 14px; line-height:1.65; color:var(--ink-soft)}
+  .doc-content ul,.doc-content ol{
     margin:0 0 16px; padding-left:24px;
-    line-height:1.7; color:var(--ink-soft); max-width:70ch;
+    line-height:1.65; color:var(--ink-soft);
   }
   .doc-content ul li::marker{color:var(--accent)}
   .doc-content code{
@@ -703,48 +1361,110 @@ onMount(() => {
     border-radius:4px; color:var(--ink);
   }
   .doc-content a{font-weight:500}
+
+  /* Advanced topics are document sections, not nested workspace cards. */
+  .analysis-topic{padding:22px 0 8px; border-top:1px solid var(--rule-strong)}
+  .analysis-topic + .analysis-topic{margin-top:18px}
+  .analysis-topic h3{margin:0 0 14px}
+  .analysis-topic li + li{margin-top:8px}
+
+  /* ---- workspace cards ---- */
   .page-block{
-    background:var(--panel); border:1px solid var(--rule);
-    border-radius:var(--radius); padding:24px 28px; margin-bottom:20px;
+    background:var(--panel); border:1px solid color-mix(in srgb, var(--ink) 16%, var(--panel));
+    border-radius:var(--radius); padding:24px; margin-bottom:24px;
   }
-  .page-block h3{margin:0 0 6px; font-size:20px; display:flex; align-items:center; gap:12px}
-  .page-block h3 .pn{
-    font-family:var(--mono); font-size:11px;
-    color:var(--accent-deep); background:var(--accent-soft);
-    padding:3px 10px; border-radius:99px;
-    font-weight:700; letter-spacing:.04em; text-transform:uppercase;
-  }
-  .page-block .pg-url{
-    font-family:var(--mono); font-size:12px;
-    color:var(--muted); margin:0 0 14px; display:block;
-  }
+  .task-heading{display:flex; align-items:center; flex-wrap:wrap; gap:12px; justify-content:space-between; margin-bottom:14px}
+  .page-block h3{margin:0; font-size:20px; flex:1 1 220px}
+  .task-reference{margin-top:24px; padding-top:18px; border-top:1px solid var(--rule-strong)}
+  .task-reference h4{font-size:15px; margin:0 0 10px; color:var(--ink)}
+  .task-reference ul{font-size:16px}
+  .task-reference li + li{margin-top:6px}
+  .task-reference li ul{margin:4px 0 10px}
+  .task-reference > p{font-size:14px; color:var(--text)}
   .page-block p{margin:0 0 12px}
-  .page-block p:last-child{margin-bottom:0}
-  .page-block ul{margin:0 0 12px}
-  .page-block ul li::marker{color:var(--accent)}
+  .page-block ul{margin:0 0 14px}
+  .doc-content .steps{counter-reset:step; list-style:none; padding-left:0; margin:4px 0 18px; display:grid; gap:8px}
+  .steps li{counter-increment:step; position:relative; padding-left:36px; line-height:1.6}
+  .steps li::before{
+    content:counter(step); position:absolute; left:0; top:1px;
+    width:24px; height:24px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center;
+    background:color-mix(in srgb, var(--ink) 7%, var(--panel)); border:1px solid color-mix(in srgb, var(--ink) 24%, var(--panel));
+    color:var(--ink-body-strong); font:650 13px/1 var(--sans);
+  }
+  .doc-content .open-link{
+    display:inline-flex; align-items:center; gap:8px; min-height:40px;
+    padding:8px 14px; border:1px solid var(--border-input-hover); border-radius:var(--radius-sm);
+    /* Same neutral surface and ink as the workspace move-navigation buttons. */
+    background:var(--panel-2); color:var(--ink); font-weight:600; font-size:14px;
+    border-color:color-mix(in srgb, var(--ink) 40%, var(--panel-2));
+    text-decoration:none;
+  }
+  .doc-content .open-link:hover{border-color:var(--accent); background:var(--panel-2); color:var(--ink); text-decoration:none}
+  .section-nav{display:flex; flex-wrap:wrap; gap:8px 24px; margin-top:32px; padding-top:16px; border-top:1px solid var(--rule-strong)}
+  .section-nav a{display:flex; align-items:center; min-height:44px; color:var(--accent); font-size:15px; text-decoration:underline; text-underline-offset:3px}
+  .section-nav a:hover{color:var(--ink)}
+  .section-nav .next-section{margin-left:auto}
+
+  /* ---- troubleshooting ---- */
+  .trouble{padding:4px 0 8px}
+  .trouble + .trouble{border-top:1px solid var(--rule); margin-top:12px}
+  .trouble h3{margin-top:22px}
+  .device-check{
+    margin:14px 0 8px; padding:14px 18px; max-width:640px;
+    border:1px solid var(--rule); border-radius:var(--radius); background:var(--panel);
+  }
+  .device-check dl{margin:0; display:grid; gap:10px}
+  .device-check dl > div{display:grid; grid-template-columns:110px minmax(0,1fr); gap:12px; align-items:baseline}
+  .device-check dt{font-weight:650; color:var(--ink); font-size:14px}
+  .device-check dd{margin:0; color:var(--text); font-size:14px; line-height:1.5}
+  .dc-state{
+    display:inline-block; margin-right:8px; padding:1px 8px; border-radius:99px;
+    font-family:var(--mono); font-size:11.5px; font-weight:700; border:1px solid var(--rule-strong);
+  }
+  .dc-state[data-tone=ok]{color:var(--accent-soft-text); background:var(--accent-soft); border-color:var(--accent-tint-border)}
+  .dc-state[data-tone=warn]{color:var(--warn); background:var(--warn-soft); border-color:color-mix(in srgb, var(--warn) 35%, var(--rule))}
+  .doc-content .dc-pending{margin:0; color:var(--text); font-size:14px}
+
+  /* ---- tables ---- */
+  .doc-table{width:100%; border-collapse:collapse; font-size:13.5px; margin:8px 0 18px}
+  .doc-table th,.doc-table td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; color:var(--ink-soft)}
+  .doc-table thead th{
+    border-bottom:2px solid var(--rule-strong); padding-top:6px; padding-bottom:6px;
+    font-family:var(--mono); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-soft);
+  }
+  .doc-table tbody tr:last-child > *{border-bottom:none}
+  .doc-table tbody th{font-weight:650; white-space:nowrap}
+  .doc-table.compact{width:auto; min-width:320px}
+  .engine-table td:nth-child(2){white-space:nowrap; font-weight:600; color:var(--ink)}
+  .engine-table .sub{display:block; font-weight:400; font-size:12px; color:var(--text-soft)}
+  .table-note{font-size:14px}
+
+  /* ---- engine entries ---- */
   .engine-entry{padding:8px 0 32px; border-bottom:1px solid var(--rule-soft)}
   .engine-entry:last-of-type{border-bottom:none}
   .engine-meta{
     display:grid; grid-template-columns:auto 1fr;
     gap:4px 16px; margin:10px 0 16px;
-    font-size:13px; max-width:100%; border-collapse:collapse;
+    font-size:13.5px; max-width:100%;
   }
   .engine-meta dt{
     font-family:var(--mono); font-size:11px;
     text-transform:uppercase; letter-spacing:.05em;
-    color:var(--muted-2); font-weight:600;
-    white-space:nowrap; padding:4px 0; vertical-align:top;
+    color:var(--text-soft); font-weight:700;
+    white-space:nowrap; padding:4px 0;
   }
-  .engine-meta dd{margin:0; padding:4px 0; color:var(--ink-soft); vertical-align:top}
+  .engine-meta dd{margin:0; padding:4px 0; color:var(--ink-soft)}
   .engine-meta dd a{font-weight:500}
-  .engine-meta .lic{
+  .lic{
     font-family:var(--mono); font-size:11px; font-weight:700;
     padding:2px 9px; border-radius:99px;
     white-space:nowrap; display:inline-block;
   }
-  .engine-meta .lic.gpl{background:color-mix(in srgb, var(--gold) 16%, transparent); color:var(--gold)}
-  .engine-meta .lic.agpl{background:var(--warn-soft); color:var(--warn)}
-  .engine-meta .lic.mit{background:var(--accent-soft); color:var(--accent-deep)}
+  .lic.gpl{background:color-mix(in srgb, var(--gold) 16%, transparent); color:color-mix(in srgb, var(--gold) 55%, var(--ink))}
+  .lic.agpl{background:var(--warn-soft); color:var(--warn)}
+  .lic.mit{background:var(--accent-soft); color:var(--accent-soft-text)}
+  .lic.own{background:var(--rule-soft); color:var(--ink-soft)}
   .engine-entry details{
     margin-top:8px; border:1px solid var(--rule);
     border-radius:var(--radius-sm); background:var(--panel); overflow:hidden;
@@ -752,37 +1472,39 @@ onMount(() => {
   .engine-entry details summary{
     cursor:pointer; padding:10px 16px;
     font-family:var(--mono); font-size:12px;
-    color:var(--muted); font-weight:600;
+    color:var(--text); font-weight:600;
     letter-spacing:.03em; text-transform:uppercase;
     list-style:none; user-select:none;
   }
   .engine-entry details summary::-webkit-details-marker{display:none}
-  .engine-entry details summary::before{content:"\25B8  "; color:var(--accent); transition:transform .12s; display:inline-block}
+  .engine-entry details summary::before{content:"\25B8  "; color:var(--accent); display:inline-block}
   .engine-entry details[open] summary::before{content:"\25BE  "}
   .engine-entry details summary:hover{color:var(--ink); background:var(--rule-soft)}
   .engine-entry details .details-body{padding:0 16px 14px}
   .engine-entry details .details-body p:last-child{margin-bottom:0}
+
+  /* ---- callouts ---- */
   .callout{
-    border-radius:var(--radius); padding:22px 26px;
+    border-radius:var(--radius); padding:20px 24px;
     margin:20px 0; border:1px solid var(--rule);
   }
   .callout.info{
     background:var(--accent-soft);
-    border-color:color-mix(in srgb, var(--accent) 30%, var(--rule));
+    border-color:var(--accent-tint-border);
   }
   .callout h4{
     margin:0 0 10px; font-size:14px;
     font-family:var(--sans); letter-spacing:.02em;
     display:flex; align-items:center; gap:8px;
   }
-  .callout.info h4{color:var(--accent-deep)}
+  .callout.info h4{color:var(--accent-soft-text)}
   .callout h4::before{
     font-family:var(--mono); font-size:14px;
     width:20px; height:20px; border-radius:4px;
     display:inline-flex; align-items:center; justify-content:center;
   }
-  .callout.info h4::before{content:"i"; background:var(--accent); color:var(--panel); font-style:italic}
-  .callout p{margin:0 0 10px; line-height:1.65; font-size:14px; max-width:64ch}
+  .callout.info h4::before{content:"i"; background:var(--accent); color:var(--on-accent); font-style:italic}
+  .callout p{margin:0 0 10px; line-height:1.65; font-size:14px; max-width:64ch; color:var(--ink-soft)}
   .callout p:last-child{margin:0}
   .callout code{
     font-family:var(--mono); font-size:12px;
@@ -793,36 +1515,80 @@ onMount(() => {
   .removal-cta{
     display:inline-flex; align-items:center; gap:8px;
     margin-top:4px; padding:11px 18px; border-radius:10px;
-    background:var(--accent); color:#fbf8f0; font-weight:600; font-size:14px;
+    background:var(--accent); color:var(--on-accent); font-weight:600; font-size:14px;
     border:1px solid var(--accent); text-decoration:none;
-    transition:background .15s ease, transform .15s ease;
+    transition:background .15s ease;
   }
-  .removal-cta:hover{background:var(--accent-2); transform:translateY(-1px); text-decoration:none}
+  .removal-cta:hover{background:var(--accent-hover); text-decoration:none}
   .removal-cta span{transition:transform .15s ease}
   .removal-cta:hover span{transform:translateX(3px)}
   .doc-content blockquote{
     margin:24px 0; padding:16px 22px;
-    border-left:3px solid var(--rule);
-    background:var(--bg-2); border-radius:0 var(--radius-sm) var(--radius-sm) 0;
-    color:var(--muted); font-size:14px; line-height:1.65; max-width:68ch;
+    border:1px solid var(--rule); border-radius:var(--radius);
+    color:var(--text); font-size:14px; line-height:1.65; max-width:68ch;
   }
-  .doc-content blockquote p{margin:0; color:var(--muted)}
+  .doc-content blockquote p{margin:0; color:var(--text)}
+
+  /* ---- phones and narrow tablets: sticky contents bar + sheet ---- */
   @media(max-width:860px){
-    .doc-body .wrap{grid-template-columns:minmax(0,1fr); gap:0}
+    .doc-body .doc-grid{
+      grid-template-columns:minmax(0,1fr);
+      grid-template-areas:"intro" "toc" "content";
+      padding:16px 16px 56px;
+    }
+    .doc-intro{margin-bottom:8px}
+    .doc-intro h1{font-size:36px; margin-bottom:6px}
+    .intro-lede{font-size:15px; line-height:1.5}
+    .intro-help{margin-top:6px; line-height:1.5}
     .toc{
-      position:static; max-height:none; padding:0;
-      margin-bottom:28px; border:1px solid var(--rule); border-radius:var(--radius);
-      background:var(--panel); overflow:hidden;
+      top:var(--hdr, 64px); z-index:30;
+      margin:0 -16px 12px; padding:8px 16px;
+      background:color-mix(in srgb, var(--bg) 92%, transparent);
+      -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+      border-bottom:1px solid var(--rule-strong);
     }
-    .toc h4{display:none}
+    .toc-toolbar{display:flex; gap:8px}
     .toc-toggle{
-      width:100%; min-height:46px; padding:10px 14px; border:0; border-radius:0;
-      display:flex; align-items:center; justify-content:space-between;
-      background:transparent; color:var(--ink); font-family:var(--mono); font-size:11px;
-      text-transform:uppercase; letter-spacing:.08em; font-weight:650;
+      min-width:0; flex:1; min-height:44px; padding:8px 10px;
+      display:flex; align-items:center; gap:10px;
+      border:1px solid var(--rule-strong); border-radius:var(--radius);
+      background:var(--panel); color:var(--ink); font:inherit; text-align:left; cursor:pointer;
     }
-    .toc.open .toc-toggle{border-bottom:1px solid var(--rule)}
-    .toc:not(.open)>ul{display:none}
-    .toc>ul{padding:10px 8px 12px}
+    .mobile-search{display:flex; align-items:center; justify-content:center; gap:6px; padding:8px 10px; border:1px solid var(--rule-strong); border-radius:var(--radius); background:var(--panel); color:var(--ink); font:600 13px var(--sans); cursor:pointer}
+    .mobile-search svg{width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round}
+    .toc-toggle-label{flex:0 0 auto; font-size:13px; font-weight:700; color:var(--text)}
+    .toc-current{flex:1 1 auto; min-width:0; font-size:14.5px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+    .chevron{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s}
+    .toc.open .chevron{transform:rotate(180deg)}
+    .toc-panel{
+      display:none; position:absolute; left:16px; right:16px; top:calc(100% - 2px);
+      max-height:calc(100vh - var(--hdr, 64px) - 80px);
+      padding:12px; border:1px solid var(--rule-strong); border-radius:var(--radius);
+      background:var(--panel); box-shadow:var(--shadow-lg);
+    }
+    .toc.open .toc-panel{display:flex}
+    .search-shortcuts{display:none}
+    .search input{min-height:44px; padding-right:12px; font-size:16px}
+    .group-toggle{min-height:44px; min-width:44px}
+    .toc-groups a{min-height:44px; padding:8px 10px}
+    .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 76px)}
+    .doc-content h2{font-size:24px; margin-bottom:10px}
+    .doc-content > section > p.lead{margin-bottom:16px}
+    .page-block{padding:20px 16px}
+    .device-check{padding:12px 14px}
+    .device-check dl > div{grid-template-columns:1fr; gap:2px}
+  }
+  @media(max-width:480px){
+    .doc-intro{margin-bottom:8px}
+    .toc{margin-bottom:12px}
+    .page-block{padding:16px 0; border:0; border-top:1px solid var(--rule-strong); border-radius:0; background:none; margin-bottom:16px}
+    .task-heading{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; margin-bottom:12px}
+    .page-block h3{font-size:20px}
+    .doc-content .open-link{min-height:44px; padding:8px 10px; font-size:13px}
+    .doc-content .steps{gap:10px}
+    .steps li{padding-left:32px}
+    .section-nav{gap:0 20px}
+    .section-nav a{font-size:14px}
+    .callout{padding:16px}
   }
 </style>

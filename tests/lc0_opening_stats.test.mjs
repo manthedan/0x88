@@ -44,7 +44,7 @@ test('openingStatsForPosition follows transpositions to a deeper position', () =
   assert.equal(stats[0].san, 'Nc6');
   assert.equal(stats[0].count, 2);
   const summary = openingSummary(stats);
-  assert.deepEqual(summary, { total: 2, whiteWins: 1, blackWins: 1, draws: 0 });
+  assert.deepEqual(summary, { total: 2, whiteWins: 1, blackWins: 1, draws: 0, unknown: 0 });
 });
 
 test('buildOpeningPositionIndex precomputes lookup stats by position key', () => {
@@ -59,10 +59,10 @@ test('buildOpeningPositionIndex precomputes lookup stats by position key', () =>
 
 test('mergeOpeningMoveStats aggregates saved collection search hits', () => {
   const merged = mergeOpeningMoveStats([
-    [{ uci: 'e2e4', san: 'e4', count: 2, whiteWins: 1, blackWins: 1, draws: 0 }],
+    [{ uci: 'e2e4', san: 'e4', count: 2, whiteWins: 1, blackWins: 1, draws: 0, unknown: 0 }],
     [
-      { uci: 'e2e4', san: 'e4', count: 1, whiteWins: 0, blackWins: 0, draws: 1 },
-      { uci: 'd2d4', san: 'd4', count: 2, whiteWins: 2, blackWins: 0, draws: 0 },
+      { uci: 'e2e4', san: 'e4', count: 1, whiteWins: 0, blackWins: 0, draws: 1, unknown: 0 },
+      { uci: 'd2d4', san: 'd4', count: 2, whiteWins: 2, blackWins: 0, draws: 0, unknown: 0 },
     ],
   ]);
   assert.deepEqual(
@@ -73,4 +73,47 @@ test('mergeOpeningMoveStats aggregates saved collection search hits', () => {
     ],
   );
   assert.equal(merged[0].draws, 1);
+});
+
+test('different move orders transpose into the same mainline position', () => {
+  const games = parsePgnGames('[Result "1-0"]\n\n1. Nf3 d5 2. d4 Nf6 3. c4 1-0\n\n[Result "0-1"]\n\n1. d4 Nf6 2. Nf3 d5 3. c4 0-1');
+  const fen = games[0].tree.root.children[0].children[0].children[0].children[0].fen;
+  const stats = openingStatsFromIndex(buildOpeningPositionIndex(games), fen);
+  assert.equal(stats[0].san, 'c4');
+  assert.equal(stats[0].count, 2);
+});
+
+test('repeated positions count only the first departure in a game, even when the next move changes', () => {
+  const games = parsePgnGames('1. Nf3 Nf6 2. Ng1 Ng8 3. e4 e5 *');
+  const stats = openingStatsFromIndex(buildOpeningPositionIndex(games), START_FEN);
+  assert.deepEqual(stats.map((s) => [s.san, s.count]), [['Nf3', 1]]);
+  assert.equal(openingSummary(stats).total, 1);
+});
+
+test('variations never contribute games or override the mainline result', () => {
+  const games = parsePgnGames('1. e4 (1. d4 d5 0-1) e5 1-0');
+  const stats = openingStatsFromIndex(buildOpeningPositionIndex(games), START_FEN);
+  assert.deepEqual(stats.map((s) => [s.san, s.count, s.whiteWins]), [['e4', 1, 1]]);
+});
+
+test('unknown results reconcile every move count and the summary total', () => {
+  const games = parsePgnGames('[Result "*"]\n\n1. e4 *\n\n[Result "abandoned"]\n\n1. d4');
+  const stats = openingStatsForPosition(games, START_FEN);
+  for (const s of stats) assert.equal(s.count, s.whiteWins + s.draws + s.blackWins + s.unknown);
+  assert.deepEqual(openingSummary(stats), { total: 2, whiteWins: 0, draws: 0, blackWins: 0, unknown: 2 });
+});
+
+test('position keys canonicalize castling order and discard impossible rights', () => {
+  assert.equal(positionKey(START_FEN.replace('KQkq', 'qkQK')), positionKey(START_FEN));
+  assert.equal(positionKey('4k3/8/8/8/8/8/8/4K3 w KQkq - 0 1'), '4k3/8/8/8/8/8/8/4K3 w - -');
+  assert.notEqual(positionKey(START_FEN), positionKey(START_FEN.replace('KQkq', '-')));
+});
+
+test('position keys ignore uncapturable or pinned EP but retain legal EP', () => {
+  const afterE4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
+  assert.equal(positionKey(afterE4), positionKey(afterE4.replace('e3', '-')));
+  const legal = '4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1';
+  assert.notEqual(positionKey(legal), positionKey(legal.replace('d6', '-')));
+  const pinned = 'k3r3/8/8/3pP3/8/8/8/4K3 w - d6 0 1';
+  assert.equal(positionKey(pinned), positionKey(pinned.replace('d6', '-')));
 });

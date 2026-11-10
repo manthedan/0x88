@@ -1,4 +1,5 @@
 import { Chessground } from 'chessground';
+import artifactChannel from '../../public/channels/stable.json';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
@@ -6,6 +7,7 @@ import { parseValidatedFen } from '../chess/fenValidation.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
+import { uciLineToSan, uciToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
@@ -20,10 +22,13 @@ import {
 } from '../nn/runtimeAudit.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
-import { evalBarWhitePercent } from './analysisFormat.ts';
+import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
+import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
+import { arenaChartGroups } from './arenaChartPresentation.ts';
+import { arenaSideTimeMs } from './arenaTiming.ts';
+import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import {
   appendCpuArenaTrail,
-  arenaChartEngineName,
   type CpuArenaPosition,
   type CpuArenaSeat,
   captureCpuArenaDiagnostics,
@@ -31,7 +36,14 @@ import {
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
+import {
+  ARENA_CONTROL_IDS, ArenaCheckpointConflictError, ArenaCheckpointInvalidError, type ArenaCheckpoint, type ArenaCheckpointToken, type ArenaChartSample,
+  type ArenaCompletedGame, type ArenaCheckpointConfig, type ArenaRootChartSample, arenaCompletedTree, arenaRemainingIndices, claimArenaCheckpoint, commitArenaGame,
+  createArenaCheckpoint, discardArenaCheckpoint, hydrateArenaSchedule, loadArenaCheckpoint, normalizeArenaControls, saveArenaCheckpoint,
+} from './arenaCheckpoint.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
+import { loadArenaResource } from './arenaResourceLoad.ts';
+import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
@@ -96,7 +108,7 @@ import {
   stockfishEngineLabel,
   stockfishVariantOptions,
 } from './engineCatalog.ts';
-import { engineLogoFamilyForEngineFamily, engineLogoHtml, engineLogoHtmlForName, probeEngineLogos } from './engineLogos.ts';
+import { probeEngineLogos } from './engineLogos.ts';
 import {
   berserkCacheKey,
   cpuEngineHashMbForSurface,
@@ -115,7 +127,7 @@ import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { loadLc0ModelForOrt } from './modelCache.ts';
-import { CachedLc0Evaluator, type Lc0Evaluation, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import {
   checkPlentyChessVariantAsset,
@@ -191,6 +203,7 @@ interface ArenaEngine {
 interface GameRecord {
   pgn: string;
   scheduleIndex: number;
+  result: GameResultCode;
 }
 interface MatchScore {
   a: number;
@@ -280,6 +293,12 @@ interface EngineOutputSnapshot {
   nodes?: number;
   nps?: number;
   elapsedMs?: number;
+  /** Display eval from White's perspective in pawns ("+0.16", "#3"); Lc0 Q is mapped with lc0's Q->cp curve. */
+  evalText?: string;
+  /** Lc0-family WDL from White's perspective. */
+  wdlWhite?: [number, number, number];
+  qWhite?: number;
+  visits?: number;
 }
 
 const params = new URLSearchParams(location.search);
@@ -394,6 +413,9 @@ interface GameTrail {
   label: string;
   entries: TrailEntry[];
   openingPlies: number;
+  charts: ArenaChartSample[];
+  rootChart?: ArenaRootChartSample;
+  sides?: { whiteName: string; blackName: string };
 }
 let liveTrail: GameTrail | null = null;
 const finishedTrails: GameTrail[] = [];
@@ -409,6 +431,7 @@ let boardBlackId: string | null = null;
 let boardWhiteName: string | null = null;
 let boardBlackName: string | null = null;
 let loadingLc0 = false;
+let lc0LoadAbort: AbortController | null = null;
 let running = false;
 let startPending = false;
 let abort: AbortController | null = null;
@@ -467,23 +490,8 @@ let cpuTournamentBroker: EngineResourceBroker | null = null;
 const engines = new Map<string, ArenaEngine>();
 const lc0Searchers = new Map<string, Lc0PuctSearcher>();
 const lastLc0SearchResults = new Map<string, Lc0SearchResult>();
-interface GameChartSample {
-  ply: number;
-  engineId: string;
-  engineName: string;
-  whiteScore?: number;
-  moveMs: number;
-  nps?: number;
-}
+type GameChartSample = ArenaChartSample;
 let gameChartSamples: GameChartSample[] = [];
-const CHART_COLORS = [
-  'var(--chart-1,#4a7a2a)',
-  'var(--chart-2,#a5461b)',
-  'var(--chart-3,#1c5f8a)',
-  'var(--chart-4,#7a4a9a)',
-  'var(--chart-5,#8a7a1c)',
-  'var(--chart-6,#5a5a5a)',
-];
 const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
 const uciTelemetry = new Map<string, UciEngineTelemetry>();
@@ -493,6 +501,20 @@ const engineOutputHistory: EngineOutputSnapshot[] = [];
 let engineOutputTotalCount = 0;
 const MAX_ENGINE_OUTPUT_HISTORY = 1000;
 const thinkingEngineIds = new Set<string>();
+/** When the engine on move started thinking (performance.now()), for the live strip clock. */
+const thinkingSince = new Map<string, number>();
+let arenaClockTimer: ReturnType<typeof setInterval> | null = null;
+let arenaChartResizeObserver: ResizeObserver | null = null;
+interface ArenaGameResultChip {
+  index: number;
+  result: GameResultCode;
+  whiteName: string;
+  blackName: string;
+  /** Engine 1's points in a two-engine match (null in pooled tournaments). */
+  aPoints: number | null;
+}
+const gameResultChips: ArenaGameResultChip[] = [];
+let scheduledGameCount = 0;
 interface ArenaSearchProgress {
   label: string;
   completed?: number;
@@ -507,6 +529,15 @@ interface ArenaSearchProgress {
 const arenaSearchProgress = new Map<string, ArenaSearchProgress>();
 let activeEngineIds: string[] = [];
 const games: GameRecord[] = [];
+let resultsSchedule: ScheduledGame<ArenaOpening>[] = [];
+let resultsNames = new Map<string, string>();
+let checkpoint: ArenaCheckpoint | null = null;
+let checkpointToken: ArenaCheckpointToken | null = null;
+let checkpointWrites: Promise<void> = Promise.resolve();
+let checkpointProblem = '';
+let checkpointUnreadable = false;
+let checkpointSaving = false;
+let pendingCheckpointSaves = 0;
 const seatRows: EngineRow[] = [
   { family: 'lc0', variant: 'small', strength: 100 },
   { family: 'sf', variant: 'lite', strength: 8 },
@@ -589,27 +620,11 @@ function hasBoundedArenaSearch(progress: ArenaSearchProgress): boolean {
   );
 }
 
-function arenaSearchProgressText(progress: ArenaSearchProgress): string {
-  if (progress.indeterminate) return `${progress.label}: searching…`;
-  const completed = progress.completed ?? 0;
-  const requested = progress.requested ?? completed;
-  const bounded = hasBoundedArenaSearch(progress);
-  const count = bounded ? `${completed}/${requested}` : `${completed}`;
-  const pct = bounded ? ` ${((100 * completed) / requested).toFixed(0)}%` : '';
-  const elapsed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(progress.elapsedMs / 1000).toFixed(1)}s` : '';
-  const nps = progress.nps && progress.nps > 0 ? ` · ${progress.nps.toFixed(1)} ${progress.units}/s` : '';
-  const best = progress.best ? ` · best ${progress.best}` : '';
-  const value = progress.value !== undefined ? ` · Q ${progress.value.toFixed(3)}` : '';
-  return `${progress.label}: ${count} ${progress.units}${pct}${elapsed}${nps}${best}${value}`;
-}
-
+/** Live activity never borrows evaluation/PV/metrics from the previous search. */
 function arenaSearchProgressHtml(progress: ArenaSearchProgress): string {
-  if (!hasBoundedArenaSearch(progress)) {
-    return `<div class="search-activity-row"><span class="search-activity-mark" aria-hidden="true"></span><div class="search-progress-text">${htmlEscape(arenaSearchProgressText(progress))}</div></div>`;
-  }
-  const value = Math.max(0, Math.floor(progress.completed!));
-  const max = Math.max(1, Math.floor(progress.requested!));
-  return `<div class="search-progress-row"><progress value="${value}" max="${max}"></progress><div class="search-progress-text">${htmlEscape(arenaSearchProgressText(progress))}</div></div>`;
+  return hasBoundedArenaSearch(progress)
+    ? `<progress class="eng-search-meter" aria-label="Current search progress" value="${Math.max(0, Math.floor(progress.completed!))}" max="${Math.max(1, Math.floor(progress.requested!))}"></progress>`
+    : '';
 }
 
 function setArenaSearchProgress(engineId: string, label: string, progress: ArenaSearchProgress): void {
@@ -1084,12 +1099,6 @@ function stmScoreToWhiteScore(fen: string, stmScore: number): number {
   return fenTurn(fen) === 'w' ? score : 1 - score;
 }
 
-function pvText(pv: string[] | undefined, maxMoves = 8): string {
-  if (!pv?.length) return 'PV —';
-  const shown = pv.slice(0, maxMoves).join(' ');
-  return `PV ${shown}${pv.length > maxMoves ? ' …' : ''}`;
-}
-
 // All engine scores are displayed from White's perspective (positive = good for
 // White), matching the eval bar and standard chess GUIs, so the sign no longer
 // flips with the side to move. Engines report from the side-to-move POV, so flip
@@ -1123,11 +1132,6 @@ function stockfishWhiteCp(info: StockfishInfoLine | undefined, fen: string): num
 
 function stockfishMateInWhitePov(info: StockfishInfoLine | undefined, fen: string): number | undefined {
   return info?.mateIn === undefined ? undefined : fenTurn(fen) === 'w' ? info.mateIn : -info.mateIn;
-}
-
-function lc0WdlText(evaluation: Lc0Evaluation): string {
-  const wdl = toWhiteWdl(evaluation.wdl, evaluation.fen);
-  return `WDL ${percent(wdl[0])}/${percent(wdl[1])}/${percent(wdl[2])} · Q ${signed(toWhiteQ(evaluation.q, evaluation.fen), 3)} · MLH ${evaluation.mlh.toFixed(1)}`;
 }
 
 function lc0WdlCompact(wdl: [number, number, number], q: number, fen: string): string {
@@ -1164,8 +1168,15 @@ function searchWdlText(wdl: [number, number, number], q: number, fen: string): s
   return `WDL ${percent(w[0])}/${percent(w[1])}/${percent(w[2])} · search Q ${signed(toWhiteQ(q, fen), 3)}`;
 }
 
+/** White-view pawn eval for an Lc0-family Q, on lc0's standard Q->centipawn curve (as Analysis shows it). */
+function lc0EvalFields(fen: string, q: number, wdl?: [number, number, number]): Pick<EngineOutputSnapshot, 'evalText' | 'qWhite' | 'wdlWhite'> {
+  const qWhite = toWhiteQ(q, fen);
+  return { evalText: formatScore(qToCentipawns(qWhite), undefined), qWhite, wdlWhite: wdl ? toWhiteWdl(wdl, fen) : undefined };
+}
+
 function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
   thinkingEngineIds.delete(snapshot.engineId);
+  thinkingSince.delete(snapshot.engineId);
   arenaSearchProgress.delete(snapshot.engineId);
   engineOutputs.set(snapshot.engineId, snapshot);
   engineOutputTotalCount += 1;
@@ -1176,97 +1187,231 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
   renderEngineDiagnosticsInfo();
 }
 
-function shortEngineTag(name: string): string {
-  const n = name.toLowerCase();
-  if (n.includes('centipawn')) return 'Centi';
-  if (n.includes('stormphrax')) return 'Storm';
-  if (n.includes('bt4')) return 'BT4';
-  if (n.includes('lc0') || n.includes('leela')) return 'Lc0';
-  if (n.includes('reckless')) return 'Reck';
-  if (n.includes('viridithas')) return 'Viri';
-  if (n.includes('stockfish') || /\bsf\b/.test(n)) return n.includes('lite') ? 'SF-L' : 'SF';
-  return name.split(/[\s·|]+/)[0] || name;
+function displayEngineName(name: string): string {
+  return analysisEngineName(name);
 }
 
+/** Engine identity colour + monogram, shared with Analysis (Lc0 violet, Stockfish blue, …). */
+function engineAvatarHtml(name: string, size: 'sm' | 'md' = 'md'): string {
+  return `<span class="arena-avatar ${size}" style="--eng:${engineBrushes(name).swatch}" aria-hidden="true">${htmlEscape(engineMonogram(name))}</span>`;
+}
+
+function formatSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
+}
+
+const evalLaneOutputs: (EngineOutputSnapshot | undefined)[] = [];
+
+/** Fixed lanes: White-playing engine then Black-playing engine, independent of board orientation. */
 function renderEvalBars(): void {
-  const render = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null) => {
-    const node = el(id);
-    const output = engineId ? engineOutputs.get(engineId) : undefined;
-    const bar = output?.evalBar;
-    const thinking = engineId ? thinkingEngineIds.has(engineId) : false;
-    const whiteScore = clamp01(bar?.whiteScore ?? 0.5);
-    const label = bar?.label ?? (thinking ? 'thinking…' : 'eval —');
-    node.classList.toggle('empty', !bar);
-    node.classList.toggle('thinking', thinking);
-    node.title = `${color} engine: ${engineName ?? '—'}${bar ? ` · ${bar.label}` : ''}`;
-    node.innerHTML = `<div class="eval-fill" style="height:${(100 * whiteScore).toFixed(1)}%"></div><div class="eval-midline"></div><div class="eval-bar-caption">${color[0]}</div><div class="eval-bar-value">${htmlEscape(label)}</div>`;
-    const chip = document.getElementById(id.replace('EvalBar', 'Chip'));
-    if (chip) {
-      chip.innerHTML = engineName ? `${engineLogoHtmlForName(engineName)}<span>${htmlEscape(shortEngineTag(engineName))}</span>` : '';
-      chip.title = engineName ? `${color} engine: ${engineName}` : '';
-      chip.style.display = engineName ? '' : 'none';
-    }
-  };
-  render('whiteEngineEvalBar', 'White', boardWhiteId, boardWhiteName);
-  render('blackEngineEvalBar', 'Black', boardBlackId, boardBlackName);
+  const node = el('arenaEvalBar');
+  // Track live seats even while a chart review temporarily hides their evals.
+  [boardWhiteId, boardBlackId].forEach((id, index) => {
+    evalLaneOutputs[index] = arenaLaneOutput(evalLaneOutputs[index], id ? engineOutputs.get(id) : undefined, id, index === 0 ? 'w' : 'b');
+  });
+  const sides = stripSides();
+  const lanes = [
+    { id: sides.w.id, name: sides.w.name, side: 'White', shortSide: 'W' },
+    { id: sides.b.id, name: sides.b.name, side: 'Black', shortSide: 'B' },
+  ].map((seat, index) => {
+    const output = seat.id ? evalLaneOutputs[index] : undefined;
+    const name = displayEngineName(output?.engineName ?? seat.name ?? 'No engine');
+    // Use the same displayed pawn->bar scale as Analysis for BOTH engines.
+    // Lc0's WDL remains in its card/charts; mixing WDL and logistic cp here would
+    // manufacture a spread even when the printed evals are identical.
+    const score = { fen: output?.fen, scoreCp: output?.whiteCp ?? (output?.qWhite !== undefined ? qToCentipawns(output.qWhite) : undefined), mateIn: output?.mateInWhitePov };
+    const tag = engineMonogram(name);
+    const thinking = running && !reviewing && board.turn === (index === 0 ? 'w' : 'b') && !!seat.id && thinkingEngineIds.has(seat.id);
+    return { ...seat, name, tag, thinking, score, percent: evalPercent(score), text: output?.evalText ?? '—', color: engineBrushes(name).swatch };
+  });
+  const state = compareArenaEvals(lanes.map((lane) => lane.score), shownPosition().fen);
+  const comparison = state.comparison;
+  const status = arenaComparisonStatus(state, lanes.map((lane) => lane.percent !== undefined), lanes.map((lane) => lane.tag));
+  const descriptions = lanes.map((lane, index) => `${lane.name} (${lane.side}), ${lane.text}, ${lane.percent === undefined ? 'No completed search' : searchAgeLabel(state.ages[index])}${lane.thinking ? ', searching now' : ''}`);
+  const context = state.adjacent ? 'adjacent searches, not the same position' : 'same position';
+  const label = `Evaluations from White’s view. ${descriptions.join('; ')}. ${status.text}.${comparison ? ` Spread ${comparison.label}; ${context}.` : ''}`;
+  node.classList.toggle('empty', lanes.every((lane) => lane.percent === undefined));
+  node.dataset.disagreement = String(!!comparison?.oppositeSides);
+  node.title = label;
+  node.setAttribute('aria-label', label);
+  // Keep the lane DOM stable so fill/freshness changes can ease rather than flash.
+  node.querySelectorAll<HTMLElement>('.eval-lane').forEach((laneNode, index) => {
+    const lane = lanes[index];
+    laneNode.classList.toggle('unavailable', lane.percent === undefined);
+    laneNode.classList.toggle('thinking', lane.thinking);
+    laneNode.classList.toggle('stale', state.stale[index]);
+    laneNode.style.setProperty('--eng', lane.color);
+    laneNode.style.setProperty('--pct', `${lane.percent ?? 0}%`);
+    laneNode.title = descriptions[index];
+    laneNode.querySelector('.eval-lane-label')!.textContent = lane.tag;
+  });
+  const caption = el('evalSource');
+  caption.title = label;
+  caption.setAttribute('aria-label', label);
+  const markup = lanes.map((lane, index) => {
+    return `<span class="eval-reading${lane.percent === undefined ? ' pending' : ''}" style="--eng:${lane.color}" title="${htmlEscape(descriptions[index])}"><span class="eval-side">${lane.shortSide}</span><span class="eval-engine">${htmlEscape(lane.tag)}</span><strong>${htmlEscape(lane.text)}</strong></span>`;
+  }).join('') + `<span class="eval-comparison${status.emphasis ? ' emphasis' : ''}${comparison?.oppositeSides ? ' opposite' : ''}">${htmlEscape(status.text)}</span>`;
+  if (caption.innerHTML !== markup) caption.innerHTML = markup;
 }
 
-function renderArenaSearchStatus(ids: string[]): void {
-  const host = document.getElementById('arenaSearchStatus');
-  if (!host) return;
-  const progressId = ids.find((id) => thinkingEngineIds.has(id) && arenaSearchProgress.has(id)) ?? ids.find((id) => arenaSearchProgress.has(id));
-  const progress = progressId ? arenaSearchProgress.get(progressId) : undefined;
-  if (progress) {
-    host.innerHTML = arenaSearchProgressHtml(progress);
-    return;
+/** Numbered SAN for a PV searched from `fen` ("16… Bb3 17. a5 Rfd1"), first move emphasised. */
+function pvSanHtml(fen: string, pv: string[], maxMoves = 10): string {
+  const start = parseFen(fen);
+  const sans = uciLineToSan(start, pv, maxMoves).split(/\s+/).filter(Boolean);
+  const startPly = (start.fullmove - 1) * 2 + (start.turn === 'b' ? 1 : 0);
+  const moves = sans.map((san, index) => {
+    const ply = startPly + index;
+    const number = Math.floor(ply / 2) + 1;
+    const label = ply % 2 === 0 ? `${number}.` : index === 0 ? `${number}…` : '';
+    return `<span class="pv-move${index === 0 ? ' first' : ''}">${label ? `<span class="pv-num">${label}</span>` : ''}${htmlEscape(san)}</span>`;
+  });
+  return moves.join(' ') + (pv.length > maxMoves ? ' <span class="pv-num">…</span>' : '');
+}
+
+function boardSideFor(id: string): string {
+  if (boardWhiteId === id && boardBlackId === id) return 'Both sides';
+  if (boardWhiteId === id) return 'White';
+  if (boardBlackId === id) return 'Black';
+  return '';
+}
+
+function engineCardHtml(id: string): string {
+  const snapshot = engineOutputs.get(id);
+  const rawName = snapshot?.engineName ?? isolatedCpuSeats.get(id)?.seat.name ?? engines.get(id)?.name ?? id;
+  const name = displayEngineName(rawName);
+  const thinking = running && thinkingEngineIds.has(id);
+  const side = boardSideFor(id);
+  const progress = arenaSearchProgress.get(id) ?? { label: rawName, units: 'search' as const, indeterminate: true };
+  const live = thinking ? arenaSearchProgressHtml(progress) : '';
+  const searched = snapshot ? parseFen(snapshot.fen) : null;
+  const resultLabel = searched ? `Previous move ${searched.fullmove}${searched.turn === 'b' ? '…' : '.'}` : 'No completed search';
+  const activity = thinking ? `<span class="eng-thinking-label" title="Searching move ${board.fullmove}; results below are from the previous completed search">Thinking</span>` : '';
+  const head = `<header class="eng-head">${engineAvatarHtml(rawName)}<span class="eng-title"><span class="eng-name">${htmlEscape(name)}${activity}</span><span class="eng-side">${side ? `${side} · ` : ''}${resultLabel}</span></span><span class="eng-eval" title="Previous move’s evaluation from White's view">${htmlEscape(snapshot?.evalText ?? '—')}</span></header>`;
+  if (!snapshot) {
+    return `<article class="eng-card${thinking ? ' thinking' : ''}" data-engine-id="${htmlEscape(id)}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${thinking ? '' : '<p class="eng-empty">Waiting for its first move.</p>'}</article>`;
   }
-  const thinkingId = ids.find((id) => thinkingEngineIds.has(id));
-  const thinkingName = thinkingId ? (isolatedCpuSeats.get(thinkingId)?.seat.name ?? engines.get(thinkingId)?.name ?? thinkingId) : null;
-  const text = running ? (thinkingName ? `${thinkingName}: starting search…` : 'Waiting for the next search…') : 'Search progress appears here during play.';
-  host.innerHTML = `<div class="search-progress-placeholder">${htmlEscape(text)}</div>`;
+  const wdl = snapshot.wdlWhite
+    ? `<div class="eng-wdl"><span class="wdl-bar" aria-hidden="true"><span class="w" style="width:${(100 * snapshot.wdlWhite[0]).toFixed(1)}%"></span><span class="d" style="width:${(100 * snapshot.wdlWhite[1]).toFixed(1)}%"></span><span class="l" style="width:${(100 * snapshot.wdlWhite[2]).toFixed(1)}%"></span></span><span class="wdl-text">W ${percent0(snapshot.wdlWhite[0])} · D ${percent0(snapshot.wdlWhite[1])} · L ${percent0(snapshot.wdlWhite[2])}</span></div>`
+    : '';
+  const stats: [string, string][] = [];
+  if (snapshot.kind === 'lc0') {
+    if (snapshot.visits !== undefined) stats.push(['Visits', formatCount(snapshot.visits)]);
+    if (snapshot.nps != null) stats.push(['Visits/s', formatNps(snapshot.nps)]);
+  } else {
+    if (snapshot.depth != null) stats.push(['Depth', String(snapshot.depth)]);
+    if (snapshot.nps != null) stats.push(['Nodes/s', formatNps(snapshot.nps)]);
+    if (snapshot.nodes != null) stats.push(['Nodes', formatNodes(snapshot.nodes)]);
+  }
+  if (snapshot.elapsedMs != null) stats.push(['Move time', formatSeconds(snapshot.elapsedMs)]);
+  const statsHtml = stats.length
+    ? `<dl class="eng-stats">${stats.map(([label, value]) => `<div${label === 'Move time' ? ' class="move-time"' : ''}><dt>${label}</dt><dd>${htmlEscape(value)}</dd></div>`).join('')}</dl>`
+    : '';
+  const line = snapshot.pv?.length
+    ? pvSanHtml(snapshot.fen, snapshot.pv)
+    : snapshot.move
+      ? pvSanHtml(snapshot.fen, [snapshot.move])
+      : '';
+  const lineHtml = line ? `<p class="eng-line" tabindex="0" data-fen="${htmlEscape(snapshot.fen)}" aria-label="Previous move’s principal variation"><span class="eng-line-label">PV</span> ${line}</p>` : '';
+  return `<article class="eng-card${thinking ? ' thinking' : ''}" data-engine-id="${htmlEscape(id)}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${wdl}${statsHtml}${lineHtml}</article>`;
+}
+
+/** Raw engine output (UCI PV, policy, cache counters) for the "Search details" disclosure. */
+function engineRawHtml(id: string): string {
+  const snapshot = engineOutputs.get(id);
+  if (!snapshot) return '';
+  const parts = [snapshot.summary, snapshot.detail, snapshot.pv?.length ? `PV (UCI) ${snapshot.pv.slice(0, 12).join(' ')}` : ''].filter(Boolean);
+  return `<div class="eng-raw-block"><strong>${htmlEscape(displayEngineName(snapshot.engineName))}</strong>${parts.map((part) => `<div>${htmlEscape(part!)}</div>`).join('')}</div>`;
 }
 
 function renderEngineOutputs(): void {
-  const ids = activeEngineIds.length ? activeEngineIds : [...new Set([seatEngineId(0), seatEngineId(1)])].filter((id) => engines.has(id));
-  renderArenaSearchStatus(ids);
-  const cards = ids.map((id) => {
-    const snapshot = engineOutputs.get(id);
-    const name = snapshot?.engineName ?? isolatedCpuSeats.get(id)?.seat.name ?? engines.get(id)?.name ?? id;
-    const thinking = thinkingEngineIds.has(id);
-    if (!snapshot && !running && !thinking) return '';
-    if (!snapshot)
-      return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span></div><div class="eval-card-eval">${thinking ? 'thinking…' : 'waiting…'}</div></div>`;
-    const moveTag = snapshot.move ? ` · move ${snapshot.move}` : '';
-    const statsParts: string[] = [];
-    if (snapshot.nps != null) statsParts.push(`${formatNps(snapshot.nps)} nps`);
-    if (snapshot.depth != null) statsParts.push(`d${snapshot.depth}`);
-    if (snapshot.nodes != null) statsParts.push(`${formatNodes(snapshot.nodes)} nodes`);
-    if (snapshot.elapsedMs != null) statsParts.push(`${Math.round(snapshot.elapsedMs)}ms`);
-    const statsLine = statsParts.length ? `<div class="eval-card-stats">${statsParts.map(htmlEscape).join(' · ')}</div>` : '';
-    const detail = snapshot.detail ? `<div class="eval-card-raw">${htmlEscape(snapshot.detail)}</div>` : '';
-    const pv = snapshot.pv?.length ? `<div class="eval-card-pv">${htmlEscape(pvText(snapshot.pv))}</div>` : '';
-    return `<div class="eval-card"><div class="eval-card-head"><span class="eval-card-name">${htmlEscape(name)}</span></div><div class="eval-card-eval">${htmlEscape(snapshot.shortEval)}${htmlEscape(moveTag)}</div>${statsLine}<div class="eval-card-scroll">${detail}${pv}</div></div>`;
-  });
-  const html = cards.filter(Boolean);
+  const ids = [...new Set(activeEngineIds)];
+  const cards = ids.filter((id) => running || engineOutputs.has(id)).map(engineCardHtml);
   const grid = el('engineEvalInfo');
-  grid.hidden = !html.length && !running;
-  grid.innerHTML = html.length ? html.join('') : '<div class="eval-card">Engine outputs: waiting for a move…</div>';
+  // Progress refreshes must not interrupt a spectator reading a long retained PV.
+  const pvState = new Map([...grid.querySelectorAll<HTMLElement>('.eng-line')].map((line) => [
+    line.closest<HTMLElement>('.eng-card')!.dataset.engineId,
+    { fen: line.dataset.fen, scrollLeft: line.scrollLeft, focused: document.activeElement === line },
+  ]));
+  grid.innerHTML = cards.join('');
+  for (const line of grid.querySelectorAll<HTMLElement>('.eng-line')) {
+    const previous = pvState.get(line.closest<HTMLElement>('.eng-card')!.dataset.engineId);
+    if (previous?.focused) line.focus({ preventScroll: true });
+    // A newly completed result starts at its first move; ongoing searches retain the reader's place.
+    if (previous && previous.fen === line.dataset.fen) line.scrollLeft = previous.scrollLeft;
+  }
+  const raw = document.getElementById('engineRaw');
+  if (raw) raw.innerHTML = ids.map(engineRawHtml).join('');
+  const section = document.getElementById('engineOutputsSection');
+  if (section) section.hidden = !cards.length;
+}
+
+interface StripSide {
+  id: string | null;
+  name: string | null;
+  seat: string | null;
+}
+
+/** Before any game, the strips preview the selected seats (Engine 1 plays White in game 1). */
+function stripSides(): { w: StripSide; b: StripSide } {
+  if (reviewing && reviewTrail?.sides) return {
+    w: { id: null, name: reviewTrail.sides.whiteName, seat: null }, b: { id: null, name: reviewTrail.sides.blackName, seat: null },
+  };
+  if (running || liveTrail || boardWhiteName || boardBlackName) {
+    return { w: { id: boardWhiteId, name: boardWhiteName, seat: null }, b: { id: boardBlackId, name: boardBlackName, seat: null } };
+  }
+  const seatName = (index: number): string | null => {
+    const row = seatRows[index];
+    if (!row) return null;
+    try {
+      return engines.get(engineIdForRow(row))?.name ?? rowLabel(row);
+    } catch {
+      return null;
+    }
+  };
+  return { w: { id: null, name: seatName(0), seat: 'Engine 1' }, b: { id: null, name: seatName(1), seat: 'Engine 2' } };
+}
+
+function renderStrips(): void {
+  const sides = stripSides();
+  const turn = board.turn;
+  const now = performance.now();
+  const sideTimeMs = liveTrail
+    ? arenaSideTimeMs(liveTrail.charts, parseFen(liveTrail.entries[liveTrail.openingPlies].fen).turn)
+    : { w: 0, b: 0 };
+  const update = (nodeId: string, color: 'w' | 'b', side: StripSide) => {
+    const node = el(nodeId);
+    const colorName = color === 'w' ? 'White' : 'Black';
+    const thinking = running && !reviewing && turn === color && !!side.id && thinkingEngineIds.has(side.id);
+    const since = side.id ? thinkingSince.get(side.id) : undefined;
+    const moveMs = thinking && since !== undefined ? Math.max(0, now - since) : 0;
+    const usedMs = sideTimeMs[color] + moveMs;
+    const meta = thinking
+      ? `<span class="strip-thinking">${colorName} · thinking · move ${board.fullmove}</span>`
+      : `${colorName}${side.seat ? ` · ${side.seat}` : ''}`;
+    const name = side.name ? displayEngineName(side.name) : 'No engine';
+    const showClock = !reviewing && (running || usedMs > 0);
+    node.dataset.turn = String(thinking);
+    const head =
+      `${side.name ? engineAvatarHtml(side.name) : ''}` +
+      `<span class="strip-id"><strong>${htmlEscape(name)}</strong><small><span class="side-dot ${color}" aria-hidden="true"></span>${meta}</small></span>`;
+    // The clock ticks every 100 ms. Update only its text, so the thinking spinner isn't recreated
+    // (and its animation restarted) on every tick.
+    const signature = `${head}|${showClock}`;
+    const clock = node.querySelector<HTMLElement>('.strip-clock-value');
+    if (node.dataset.signature === signature && (!showClock || clock)) {
+      if (clock) clock.textContent = formatSeconds(usedMs);
+      return;
+    }
+    node.dataset.signature = signature;
+    node.innerHTML = head +
+      (showClock ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small><span class="strip-clock-value">${formatSeconds(usedMs)}</span></span>` : '');
+  };
+  update('blackSideLabel', 'b', sides.b);
+  update('whiteSideLabel', 'w', sides.w);
 }
 
 function renderSideLabels() {
-  // Side labels are static identity rows (chip + logo + engine + eval). Whose turn
-  // it is is conveyed by the board's last-move arrow, not a per-ply highlight that
-  // would strobe at fast movetimes.
-  const update = (id: string, color: 'White' | 'Black', engineId: string | null, engineName: string | null) => {
-    const node = el(id);
-    const output = engineId ? engineOutputs.get(engineId) : undefined;
-    const thinking = engineId ? thinkingEngineIds.has(engineId) : false;
-    const evalText = output?.shortEval ?? (thinking ? 'thinking…' : 'eval —');
-    node.classList.remove('active');
-    node.innerHTML = `<span class="side-main"><span class="color">${color}</span> ${engineName ? engineLogoHtmlForName(engineName) : ''}<span class="engine">${htmlEscape(engineName ?? '—')}</span> <span class="side-eval">${htmlEscape(evalText)}</span></span>`;
-  };
-  update('blackSideLabel', 'Black', boardBlackId, boardBlackName);
-  update('whiteSideLabel', 'White', boardWhiteId, boardWhiteName);
+  renderStrips();
   renderEvalBars();
 }
 
@@ -1302,15 +1447,12 @@ function renderBoard() {
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 140 },
     lastMove: shownUci ? [shownUci.slice(0, 2) as Key, shownUci.slice(2, 4) as Key] : undefined,
-    // Custom brushes in the two side identity colors so the last-move arrow also
-    // shows which side just moved — a calm alternative to per-ply "to move" flashing.
+    // Last moves use square highlights only. Arrows are reserved for root candidates.
     drawable: {
       enabled: false,
       brushes: {
-        moveWhite: { key: 'moveWhite', color: '#2f6e7d', opacity: 0.9, lineWidth: 14 },
-        moveBlack: { key: 'moveBlack', color: '#b15c2b', opacity: 0.9, lineWidth: 14 },
-        candidate: { key: 'candidate', color: '#5a6e2a', opacity: 0.95, lineWidth: 14 },
-        candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.5, lineWidth: 9 },
+        candidate: { key: 'candidate', color: '#5a6e2a', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+        candidateDim: { key: 'candidateDim', color: '#8a8474', opacity: 0.45, lineWidth: ENGINE_ARROW_WIDTH },
       },
     },
   };
@@ -1319,14 +1461,7 @@ function renderBoard() {
   const cfg = config as unknown as NonNullable<Parameters<typeof Chessground>[1]>;
   if (!ground) ground = Chessground(el('ground'), cfg);
   else ground.set(cfg);
-  // The mover is the side NOT to move now; tint the arrow with their identity hue.
-  const moverBrush = fenTurn(shown.fen) === 'w' ? 'moveBlack' : 'moveWhite';
-  const shapes: DrawShape[] =
-    reviewing && reviewShapes
-      ? reviewShapes
-      : shownUci && shownUci.length >= 4
-        ? [{ orig: shownUci.slice(0, 2) as Key, dest: shownUci.slice(2, 4) as Key, brush: moverBrush }]
-        : [];
+  const shapes: DrawShape[] = reviewing && reviewShapes ? reviewShapes : [];
   ground.setAutoShapes(shapes);
   renderSideLabels();
   renderEngineOutputs();
@@ -1342,7 +1477,7 @@ function trailFromTree(tree: GameTree, label: string, openingPlies: number): Gam
   for (const node of tree.mainlineFrom(tree.root)) {
     entries.push({ fen: node.fen, uci: node.move ? moveToUci(node.move) : null, san: node.san });
   }
-  return { label, entries, openingPlies };
+  return { label, entries, openingPlies, charts: [] };
 }
 
 function enterReview(trail: GameTrail, index: number, shapes: DrawShape[] | null = null): void {
@@ -1350,14 +1485,30 @@ function enterReview(trail: GameTrail, index: number, shapes: DrawShape[] | null
   reviewIndex = Math.max(0, Math.min(index, trail.entries.length - 1));
   reviewing = true;
   reviewShapes = shapes;
+  gameChartSamples = trail.charts;
+  el('chartsPanel').hidden = false;
+  renderGameCharts();
+  renderSavedRootChart(trail.rootChart);
   renderBoard();
 }
 
+/** Step through the shown game; from the live game this enters review, and stepping back onto the live end returns to live. */
 function stepReview(delta: number | 'start' | 'end'): void {
-  if (!reviewing || !reviewTrail) return;
-  if (delta === 'start') reviewIndex = 0;
-  else if (delta === 'end') reviewIndex = reviewTrail.entries.length - 1;
-  else reviewIndex = Math.max(0, Math.min(reviewIndex + delta, reviewTrail.entries.length - 1));
+  const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  if (!trail) return;
+  const last = trail.entries.length - 1;
+  const current = reviewing && reviewTrail === trail ? reviewIndex : last;
+  const next = delta === 'start' ? 0 : delta === 'end' ? last : Math.max(0, Math.min(current + delta, last));
+  if (!reviewing && next === last) return;
+  if (reviewing && trail === liveTrail && running && next === last) {
+    exitReview();
+    return;
+  }
+  if (!reviewing) {
+    enterReview(trail, next);
+    return;
+  }
+  reviewIndex = next;
   reviewShapes = null;
   renderBoard();
 }
@@ -1366,39 +1517,86 @@ function exitReview(): void {
   reviewing = false;
   reviewTrail = null;
   reviewShapes = null;
+  gameChartSamples = liveTrail?.charts ?? [];
+  renderGameCharts();
+  renderSavedRootChart(liveTrail?.rootChart);
   renderBoard();
 }
 
 function renderReviewBar(): void {
   const bar = el('reviewBar');
   bar.hidden = !reviewing || !reviewTrail;
-  if (bar.hidden || !reviewTrail) return;
-  el('reviewLabel').textContent = `${reviewTrail.label} · move ${reviewIndex}/${reviewTrail.entries.length - 1}`;
-  (el('revPrev') as HTMLButtonElement).disabled = reviewIndex <= 0;
-  (el('revStart') as HTMLButtonElement).disabled = reviewIndex <= 0;
-  (el('revNext') as HTMLButtonElement).disabled = reviewIndex >= reviewTrail.entries.length - 1;
-  (el('revEnd') as HTMLButtonElement).disabled = reviewIndex >= reviewTrail.entries.length - 1;
+  if (!bar.hidden && reviewTrail) el('reviewLabel').textContent = `Reviewing ${reviewTrail.label} · ply ${reviewIndex} of ${reviewTrail.entries.length - 1}`;
+  const chartPly = inputEl('chartPly');
+  const shownTrail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  chartPly.max = String(Math.max(0, (shownTrail?.entries.length ?? 1) - 1));
+  chartPly.value = String(reviewing ? reviewIndex : Number(chartPly.max));
+  chartPly.disabled = !shownTrail || shownTrail.entries.length <= 1;
+  chartPly.setAttribute('aria-valuetext', chartPly.value === '0' ? 'Opening position' : `Ply ${chartPly.value}`);
+  const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  const last = trail ? trail.entries.length - 1 : 0;
+  const index = reviewing && reviewTrail ? reviewIndex : last;
+  (el('revPrev') as HTMLButtonElement).disabled = !trail || index <= 0;
+  (el('revStart') as HTMLButtonElement).disabled = !trail || index <= 0;
+  (el('revNext') as HTMLButtonElement).disabled = !trail || index >= last;
+  (el('revEnd') as HTMLButtonElement).disabled = !trail || index >= last;
+  const liveButton = el('revLive') as HTMLButtonElement;
+  liveButton.hidden = !reviewing;
+  liveButton.textContent = running ? 'Back to live' : 'Exit review';
 }
 
+/** Following the live game, the list stays scrolled to its newest row (even as panels above resize it). */
+function keepMovesAtLiveEnd(): void {
+  if (reviewing) return;
+  const strip = document.getElementById('gameMoves');
+  if (strip) strip.scrollTop = strip.scrollHeight;
+}
+
+/** Scoresheet rows (number | White | Black), as on Play; opening-book plies are muted. */
 function renderMoveStrip(): void {
   const strip = el('gameMoves');
+  const block = document.getElementById('movesBlock');
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   if (!trail || trail.entries.length <= 1) {
-    strip.hidden = true;
+    if (block) block.hidden = true;
     strip.innerHTML = '';
     return;
   }
-  strip.hidden = false;
+  if (block) block.hidden = false;
   const shownIndex = reviewing && reviewTrail === trail ? reviewIndex : trail.entries.length - 1;
-  const parts: string[] = [];
-  for (let i = 1; i < trail.entries.length; i++) {
-    const entry = trail.entries[i];
-    if (i % 2 === 1) parts.push(`<span class="num">${(i + 1) >> 1}.</span>`);
-    parts.push(`<span class="mv${i === shownIndex ? ' current' : ''}" data-idx="${i}">${htmlEscape(entry.san ?? entry.uci ?? '?')}</span>`);
+  const start = parseFen(trail.entries[0].fen);
+  const startPly = (start.fullmove - 1) * 2 + (start.turn === 'b' ? 1 : 0);
+  const cell = (index: number) => {
+    const entry = trail.entries[index];
+    if (!entry) return '<span class="san empty"></span>';
+    const classes = ['san', index === shownIndex ? 'current' : '', index <= trail.openingPlies ? 'book' : ''].filter(Boolean).join(' ');
+    return `<button type="button" class="${classes}" data-idx="${index}"${index <= trail.openingPlies ? ' title="Opening move"' : ''}>${htmlEscape(entry.san ?? entry.uci ?? '?')}</button>`;
+  };
+  const rows: string[] = [];
+  let index = 1;
+  while (index < trail.entries.length) {
+    const ply = startPly + index - 1;
+    const number = Math.floor(ply / 2) + 1;
+    if (ply % 2 === 1) {
+      rows.push(`<div class="move-row"><span class="num">${number}</span><span class="san empty">…</span>${cell(index)}</div>`);
+      index += 1;
+    } else {
+      rows.push(`<div class="move-row"><span class="num">${number}</span>${cell(index)}${cell(index + 1)}</div>`);
+      index += 2;
+    }
   }
-  strip.innerHTML = parts.join(' ');
-  const current = strip.querySelector('.mv.current');
-  if (current) (current as HTMLElement).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  strip.innerHTML = rows.join('');
+  if (!reviewing) {
+    keepMovesAtLiveEnd();
+    return;
+  }
+  const current = strip.querySelector<HTMLElement>('.san.current');
+  if (current) {
+    // Scroll only the list (never the page) so the current move stays in view.
+    const top = current.offsetTop;
+    if (top < strip.scrollTop) strip.scrollTop = top;
+    else if (top + current.offsetHeight > strip.scrollTop + strip.clientHeight) strip.scrollTop = top - strip.clientHeight + current.offsetHeight;
+  }
 }
 
 /**
@@ -1406,14 +1604,15 @@ function renderMoveStrip(): void {
  * made from and draw the candidate moves — the clicked bar bold, the rest dim.
  */
 function reviewRootChartClick(event: MouseEvent): void {
-  if (!rootChartContext || !liveTrail) return;
+  const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  if (!rootChartContext || !trail) return;
   const svg = el('rootChart').querySelector('svg');
   if (!svg) return;
   // Find the searched position in the current game's trail (latest match wins;
   // exact FEN strings, both produced by boardToFen of the same board).
   let index = -1;
-  for (let i = liveTrail.entries.length - 1; i >= 0; i--) {
-    if (liveTrail.entries[i].fen === rootChartContext.fen) {
+  for (let i = trail.entries.length - 1; i >= 0; i--) {
+    if (trail.entries[i].fen === rootChartContext.fen) {
       index = i;
       break;
     }
@@ -1423,16 +1622,20 @@ function reviewRootChartClick(event: MouseEvent): void {
   const rect = svg.getBoundingClientRect();
   const viewH = rootChartContext.top.length * 14 + 2;
   const row = Math.floor((((event.clientY - rect.top) / rect.height) * viewH - 1) / 14);
-  const clicked = rootChartContext.top[Math.max(0, Math.min(row, rootChartContext.top.length - 1))];
-  const shapes: DrawShape[] = rootChartContext.top.slice(0, 5).map((child) => ({
-    orig: child.uci.slice(0, 2) as Key,
-    dest: child.uci.slice(2, 4) as Key,
-    brush: child.uci === clicked.uci ? 'candidate' : 'candidateDim',
-  }));
-  if (!shapes.some((shape) => shape.brush === 'candidate')) {
-    shapes.push({ orig: clicked.uci.slice(0, 2) as Key, dest: clicked.uci.slice(2, 4) as Key, brush: 'candidate' });
-  }
-  enterReview(liveTrail, index, shapes);
+  previewRootCandidate(Math.max(0, Math.min(row, rootChartContext.top.length - 1)), index);
+}
+
+/** Keyboard and pointer previews share the same candidate/position mapping. */
+function previewRootCandidate(row: number, knownIndex?: number): void {
+  const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+  if (!rootChartContext || !trail) return;
+  const index = knownIndex ?? trail.entries.findLastIndex((entry) => entry.fen === rootChartContext!.fen);
+  const clicked = rootChartContext.top[row];
+  if (index < 0 || !clicked) return;
+  selectEl('rootCandidate').value = String(row);
+  const shapes: DrawShape[] = [{ orig: clicked.uci.slice(0, 2) as Key, dest: clicked.uci.slice(2, 4) as Key, brush: 'candidate' }];
+  enterReview(trail, index, shapes);
+  selectEl('rootCandidate').value = String(row);
 }
 
 function chartDrawnPlies(chartId: 'evalChart' | 'timeChart' | 'npsChart'): number[] {
@@ -1449,12 +1652,12 @@ function chartPlyFromClick(chartId: 'evalChart' | 'timeChart' | 'npsChart', targ
   if (!svg || !plies.length) return null;
   const rect = svg.getBoundingClientRect();
   if (!rect.width) return null;
-  // Mirror lineChartSvg's layout: viewBox width 360, plot area between
-  // pad.left=36 and width-pad.right=352, x spanning the actually drawn points.
-  const viewX = ((event.clientX - rect.left) / rect.width) * 360;
+  // Mirror lineChartSvg's plot padding at the responsive SVG viewBox width.
+  const width = svg.viewBox.baseVal.width;
+  const viewX = ((event.clientX - rect.left) / rect.width) * width;
   const xMin = Math.min(...plies);
   const xMax = Math.max(...plies);
-  const frac = Math.max(0, Math.min(1, (viewX - 36) / (352 - 36)));
+  const frac = Math.max(0, Math.min(1, (viewX - 36) / (width - 8 - 36)));
   return Math.round(xMin + frac * (xMax - xMin));
 }
 
@@ -1660,26 +1863,38 @@ function renderSeatSelectors(): void {
   }
   const families = engineFamilyOptions();
   const matchMode = arenaTournamentMode() === 'match';
-  el('arenaSeatList').innerHTML = seatRows
-    .map((row, index) => {
-      const meta = strengthMeta(row.family);
-      const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
-      const varSel = variantOptions(row.family)
-        .map(
-          (option) =>
-            `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`,
-        )
-        .join('');
-      const label = `Engine ${index + 1}`;
-      const inactive = matchMode && index >= 2 ? ' seat-inactive' : '';
-      const remove =
-        seatRows.length > 2
-          ? `<button type="button" class="seat-remove" data-seat="${index}" title="Remove ${label}" aria-label="Remove ${label}">×</button>`
-          : '';
-      return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${label}</span>${engineLogoHtml(engineLogoFamilyForEngineFamily(row.family))}<select class="seat-fam" data-seat="${index}" aria-label="${label} family">${famSel}</select><span class="arrow">→</span><select class="seat-var" data-seat="${index}" aria-label="${label} variant">${varSel}</select><span class="arrow">→</span><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span>${remove}</div>`;
-    })
-    .join('');
+  const head = `<div class="seat-head" aria-hidden="true"><span>Seat</span><span>Engine</span><span>Version</span></div>`;
+  el('arenaSeatList').innerHTML =
+    head +
+    seatRows
+      .map((row, index) => {
+        const meta = strengthMeta(row.family);
+        const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
+        const varSel = variantOptions(row.family)
+          .map(
+            (option) =>
+              `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`,
+          )
+          .join('');
+        const label = `Engine ${index + 1}`;
+        const inactive = matchMode && index >= 2 ? ' seat-inactive' : '';
+        const remove =
+          seatRows.length > 2
+            ? `<button type="button" class="seat-remove" data-seat="${index}" title="Remove ${label}" aria-label="Remove ${label}">×</button>`
+            : '';
+        let avatarName: string = row.family;
+        try {
+          avatarName = rowLabel(row);
+        } catch {
+          // Unknown variant: the family id still picks a stable colour.
+        }
+        return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${engineAvatarHtml(avatarName, 'sm')}<span>${label}</span></span><select class="seat-fam" data-seat="${index}" aria-label="${label} engine">${famSel}</select><select class="seat-var" data-seat="${index}" aria-label="${label} version">${varSel}</select><span class="seat-strength-wrap"><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength (${meta.unit})" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span></span>${remove}</div>`;
+      })
+      .join('');
+  el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   reconcileActiveRuntimeFallbackWarning();
+  if (!running) renderSideLabels();
+  renderSetupSummary();
 }
 
 function syncSeatRowsFromDom(): void {
@@ -1706,6 +1921,70 @@ function populateSeats(): void {
   renderSeatSelectors();
 }
 
+type ArenaMatchState = 'none' | 'live' | 'final' | 'stopped' | 'failed';
+let arenaMatchState: ArenaMatchState = 'none';
+
+function readyMessage(): string {
+  return arenaTournamentMode() === 'match'
+    ? 'Ready. Set up your match.'
+    : 'Ready. Set up your tournament.';
+}
+
+function isReadyMessage(text: string | null): boolean {
+  return !!text && text.startsWith('Ready. Set up ');
+}
+
+function arenaGamesPerOpening(): number {
+  return Math.max(1, Math.min(20, Math.floor(Number(inputEl('gamesInput').value) || 2)));
+}
+
+/** One-line description of the locked setup, shown in place of the forms while a match runs. */
+function renderSetupSummary(): void {
+  const node = document.getElementById('setupSummaryText');
+  if (!node) return;
+  const mode = arenaTournamentMode();
+  const names = activeSeatRows().map((row) => {
+    try {
+      return displayEngineName(engines.get(engineIdForRow(row))?.name ?? rowLabel(row));
+    } catch {
+      return row.family;
+    }
+  });
+  const who = mode === 'match' ? names.join(' vs ') : `${mode === 'gauntlet' ? 'Gauntlet' : 'Round robin'} · ${names.length} engines`;
+  const budget = arenaBudgetMode() === 'movetime' ? `${arenaMovetimeMs()} ms/move` : 'Fixed visits / depth';
+  node.textContent = checkpoint ? checkpoint.config.controls.budgetModeSelect === 'movetime' ? `${checkpoint.config.controls.movetimeInput} ms/move` : 'Fixed visits / depth' : budget;
+  let scheduleText: string;
+  try {
+    const openings = selectedOpenings();
+    const pairs = tournamentPairings(mode, activeSeatRows().map((_, index) => String(index)));
+    const count = openings.length * pairs.length * arenaGamesPerOpening();
+    scheduleText = `${count} game${count === 1 ? '' : 's'} · ${budget} · ${selectEl('startingPositionSelect').selectedOptions[0]?.textContent ?? 'Custom openings'}`;
+  } catch {
+    scheduleText = `${budget} · Check custom openings`;
+  }
+  el('startSummary').innerHTML = `<strong>${htmlEscape(who)}</strong>${htmlEscape(scheduleText)}`;
+}
+
+/** Setup vs running sidebar states (CSS keys off these data attributes on <main>). */
+function syncArenaPhase(): void {
+  const main = document.getElementById('main');
+  if (!main) return;
+  const wasRunning = main.dataset.phase === 'running';
+  main.dataset.phase = running ? 'running' : 'setup';
+  if (running && !wasRunning && window.matchMedia('(max-width: 900px)').matches) main.scrollIntoView({ block: 'start' });
+  main.dataset.match = arenaMatchState;
+  (el('setupPane') as HTMLFieldSetElement).disabled = running || startPending;
+  if (!running) main.dataset.config = 'closed';
+  const editButton = document.getElementById('editSetup');
+  if (editButton) editButton.setAttribute('aria-expanded', String(main.dataset.config === 'open'));
+  el('start').textContent = checkpoint ? 'Start new tournament' : arenaTournamentMode() === 'match' ? 'Start match' : 'Start tournament';
+  const title = document.getElementById('scoreboardTitle');
+  const displayedMode = checkpoint?.config.mode ?? arenaTournamentMode();
+  if (title) title.textContent = displayedMode === 'match' ? 'Match' : displayedMode === 'gauntlet' ? 'Gauntlet' : 'Round robin';
+  renderSetupSummary();
+  renderCheckpointStatus();
+}
+
 function refreshSeatControls(): void {
   selectEl('seatA').disabled = running;
   selectEl('seatB').disabled = running;
@@ -1722,14 +2001,20 @@ function refreshSeatControls(): void {
     for (const node of el('arenaSeatList').querySelectorAll<HTMLInputElement | HTMLSelectElement>(selector)) node.disabled = running;
   }
   const fixedBudget = arenaBudgetMode() === 'fixed';
-  for (const node of el('arenaSeatList').querySelectorAll<HTMLElement>('.seat-strength, .seat-row .row-unit')) {
+  for (const node of el('arenaSeatList').querySelectorAll<HTMLElement>('.seat-strength-wrap')) {
     node.hidden = !fixedBudget;
   }
+  el('arenaSeatList').dataset.fixed = String(fixedBudget);
   el('addSeat').toggleAttribute('hidden', arenaTournamentMode() === 'match');
-  el('addSeat').toggleAttribute('disabled', running);
+  el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   selectEl('tournamentModeSelect').disabled = running;
   selectEl('arenaConcurrencySelect').disabled = running;
+  // Everything that shapes the schedule is locked for the whole match, so no edit silently applies mid-game.
+  selectEl('budgetModeSelect').disabled = running;
+  inputEl('movetimeInput').disabled = running;
+  inputEl('gamesInput').disabled = running;
   refreshArenaConcurrencyNote();
+  syncArenaPhase();
 }
 
 function isolatedCpuPool(): boolean {
@@ -2098,26 +2383,7 @@ function recordUciTelemetry(engineId: string, engineName: string, lines: Stockfi
   renderSearchTelemetryInfo();
 }
 
-function recordLc0PolicyOutput(engineId: string, engineName: string, evaluation: Lc0Evaluation, move?: string): void {
-  recordEngineOutput({
-    engineId,
-    engineName,
-    kind: 'lc0',
-    fen: evaluation.fen,
-    move,
-    summary: lc0WdlText(evaluation),
-    shortEval: lc0WdlCompact(evaluation.wdl, evaluation.q, evaluation.fen),
-    evalBar: lc0EvalBar(evaluation.fen, evaluation.wdl),
-    detail: `top policy ${
-      evaluation.legalPriors
-        .slice(0, 5)
-        .map((p) => `${p.uci} ${(100 * p.prior).toFixed(1)}%`)
-        .join(', ') || '—'
-    }`,
-  });
-}
-
-function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0SearchResult): void {
+function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0SearchResult, elapsedMs?: number): void {
   const stats = result.search.stats;
   const rootWdl = result.search.root?.evaluation?.wdl;
   recordEngineOutput({
@@ -2131,6 +2397,10 @@ function recordLc0SearchOutput(engineId: string, engineName: string, result: Lc0
     evalBar: rootWdl ? lc0EvalBar(result.fen, rootWdl) : qEvalBar(result.fen, result.value),
     detail: `visits ${result.visits} · evals ${stats?.evalCalls ?? 0} · cache hits ${stats?.cacheHits ?? 0}`,
     pv: result.pv,
+    ...lc0EvalFields(result.fen, result.value, rootWdl),
+    visits: result.visits,
+    elapsedMs,
+    nps: elapsedMs && elapsedMs > 0 ? (result.visits * 1000) / elapsedMs : undefined,
   });
 }
 
@@ -2147,6 +2417,8 @@ function recordBt4SearchOutput(engineId: string, engineName: string, result: Bt4
     evalBar: qEvalBar(result.fen, result.value),
     detail: `visits ${result.visits} · evals ${result.stats?.evalCalls ?? 0} · cache hits ${result.stats?.cacheHits ?? 0}`,
     pv: result.pv,
+    ...lc0EvalFields(result.fen, result.value),
+    visits: result.visits,
   });
 }
 
@@ -2163,6 +2435,8 @@ function recordCentipawnSearchOutput(engineId: string, engineName: string, fen: 
     evalBar: qEvalBar(fen, result.value),
     detail: `visits ${result.visits} · evals ${result.stats?.evalCalls ?? 0} · cache hits ${result.stats?.cacheHits ?? 0}`,
     pv,
+    ...lc0EvalFields(fen, result.value),
+    visits: result.visits,
   });
 }
 
@@ -2196,6 +2470,7 @@ function recordUciOutput(
     pv: best?.pvUci,
     whiteCp: stockfishWhiteCp(best, fen),
     mateInWhitePov: stockfishMateInWhitePov(best, fen),
+    evalText: best ? formatScore(stockfishWhiteCp(best, fen), stockfishMateInWhitePov(best, fen)) : undefined,
     depth: best?.depth,
     nodes: best?.nodes,
     nps: best?.nps,
@@ -2229,6 +2504,7 @@ function recordStormphraxOutput(engineId: string, engineName: string, fen: strin
 
 function recordEngineThinking(engine: Pick<ArenaEngine, 'id' | 'name'>): void {
   thinkingEngineIds.add(engine.id);
+  thinkingSince.set(engine.id, performance.now());
   arenaSearchProgress.set(engine.id, { label: engine.name, units: 'search', indeterminate: true });
   renderSideLabels();
   renderEngineOutputs();
@@ -2650,7 +2926,7 @@ function buildEngines() {
       const elapsedMs = performance.now() - started;
       const engineName = engines.get(engineId)?.name ?? engineId;
       recordLc0SearchTelemetry(engineId, engineName, result, elapsedMs);
-      recordLc0SearchOutput(engineId, engineName, result);
+      recordLc0SearchOutput(engineId, engineName, result, elapsedMs);
       return result.move ?? null;
     };
   const lc0BigNetMove =
@@ -3012,45 +3288,99 @@ function refreshOpeningPreview(): void {
   select.disabled = running;
   textarea.disabled = running || !custom;
   if (running) return;
+  renderSetupSummary();
   try {
     const openings = selectedOpenings();
     el('openingInfo').textContent = `${openings.length} position${openings.length === 1 ? '' : 's'} in the schedule.`;
-    setOpeningPreview(openings[0]);
+    if (!checkpoint) setOpeningPreview(openings[0]);
   } catch (error) {
     el('openingInfo').textContent = `Opening setup error: ${(error as Error).message}`;
   }
 }
 
-function formatScoreHalf(value: number): string {
-  return value % 1 ? `${Math.floor(value) || ''}½` : String(value);
-}
+const formatScoreHalf = formatArenaPoints;
 
 function renderMatchScore(nameA: string, nameB: string, sameEngine: boolean, score: MatchScore): void {
-  if (score.games === 0) {
-    el('matchScore').textContent = 'No games played yet.';
-    return;
-  }
-  (el('resultSection') as HTMLDetailsElement).open = true;
-  const games = `${score.games} game${score.games === 1 ? '' : 's'}`;
-  el('matchScore').textContent = sameEngine
-    ? `${nameA} mirror · ${score.aWins}–${score.bWins}–${score.draws} (W–L–D, Engine 1 seat) over ${games}`
-    : `${nameA} ${formatScoreHalf(score.a)} – ${formatScoreHalf(score.b)} ${nameB} · ${score.aWins}W ${score.draws}D ${score.bWins}L over ${games}`;
+  const side = (name: string, seat: string) =>
+    `<span class="sb-player">${engineAvatarHtml(name)}<span class="sb-name"><strong>${htmlEscape(displayEngineName(name))}</strong>${sameEngine ? `<small>${seat}</small>` : ''}</span></span>`;
+  const points = (value: number) => formatScoreHalf(value) || '0';
+  const record = score.games ? `<div class="sb-record">${htmlEscape(displayEngineName(nameA))} · W ${score.aWins} · D ${score.draws} · L ${score.bWins} · ${score.games}/${scheduledGameCount || score.games} finished</div>` : '';
+  el('matchScore').innerHTML =
+    `<div class="sb-match">${side(nameA, 'Engine 1')}<span class="sb-points" aria-label="Score ${points(score.a)} to ${points(score.b)}">${points(score.a)}<span class="sb-dash">–</span>${points(score.b)}</span>${side(nameB, 'Engine 2').replace('sb-player', 'sb-player right')}</div>` +
+    record;
+  renderGameResultChips();
 }
 
 function renderStandings(standings: TournamentStandings, scheduledGames: number): void {
-  (el('resultSection') as HTMLDetailsElement).open = true;
   const rows = standings.table();
   const elo = (row: ReturnType<TournamentStandings['table']>[number]) =>
     row.eloDiff === null ? '—' : `${row.eloDiff >= 0 ? '+' : ''}${Math.round(row.eloDiff)}${row.eloError !== null ? ` ±${Math.round(row.eloError)}` : ''}`;
   const body = rows
     .map(
       (row, i) =>
-        `<tr><td>${i + 1}</td><td>${htmlEscape(row.name)}</td><td>${elo(row)}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${formatScoreHalf(row.points) || '0'}</td><td>${row.games}</td></tr>`,
+        `<tr${i === 0 && row.games ? ' class="leader"' : ''}><td>${i + 1}</td><td><span class="sb-cell-name">${engineAvatarHtml(row.name, 'sm')}${htmlEscape(displayEngineName(row.name))}</span></td><td>${formatScoreHalf(row.points) || '0'}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${elo(row)}</td></tr>`,
     )
     .join('');
   el('matchScore').innerHTML =
-    `<div class="small">${standings.totalGames()}/${scheduledGames} games · Elo vs pool, ±95% approx</div>` +
-    `<table class="standings"><thead><tr><th>#</th><th>Engine</th><th>Elo</th><th>W</th><th>D</th><th>L</th><th>Pts</th><th>G</th></tr></thead><tbody>${body}</tbody></table>`;
+    `<div class="arena-table-scroll" tabindex="0" role="region" aria-label="Standings"><table class="standings"><thead><tr><th>#</th><th>Engine</th><th title="Points">Pts</th><th title="Wins">W</th><th title="Draws">D</th><th title="Losses">L</th><th title="Elo vs the pool, ±95% approx">Elo</th></tr></thead><tbody>${body}</tbody></table></div>` +
+    `<div class="sb-record">${standings.totalGames()} of ${scheduledGames} games played · Elo vs the pool, ±95%</div>`;
+  renderGameResultChips();
+  renderCrosstable(standings);
+}
+
+function renderCrosstable(standings: TournamentStandings): void {
+  const rows = standings.table();
+  const host = el('crosstableSection');
+  host.hidden = rows.length < 3;
+  const name = (row: (typeof rows)[number]) => htmlEscape(displayEngineName(row.name));
+  el('crosstable').innerHTML = `<table class="arena-detail-table"><caption>Row engine’s points / games against each opponent.</caption><thead><tr><th scope="col">Engine</th>${rows.map((row) => `<th scope="col">${name(row)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr><th scope="row">${name(row)}</th>${rows.map((opponent) => {
+    const record = row.perOpponent.get(opponent.id);
+    if (row.id === opponent.id) return '<td class="cross-self" aria-label="Same seat">—</td>';
+    if (!record) return '<td aria-label="No games played">—</td>';
+    const count = record.wins + record.draws + record.losses;
+    return `<td title="${record.wins} wins, ${record.draws} draws, ${record.losses} losses">${formatArenaPoints(record.wins + record.draws / 2)} / ${count}</td>`;
+  }).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+function renderOpeningPairs(): void {
+  const section = el('openingPairsSection');
+  section.hidden = !resultsSchedule.length;
+  const selector = selectEl('pairMatchup');
+  const previous = selector.value;
+  const pairs = arenaOpeningPairs(resultsSchedule, games);
+  const matchups = [...new Map(pairs.map((pair) => [pair.pairingKey, pair])).values()];
+  const name = (id: string) => htmlEscape(displayEngineName(resultsNames.get(id) ?? id));
+  selector.innerHTML = matchups.map((pair) => `<option value="${htmlEscape(pair.pairingKey)}">${name(pair.a)} vs ${name(pair.b)}</option>`).join('');
+  if (matchups.some((pair) => pair.pairingKey === previous)) selector.value = previous;
+  selector.hidden = matchups.length < 2;
+  const selected = pairs.filter((pair) => pair.pairingKey === selector.value);
+  const first = selected[0];
+  if (!first) return;
+  const cell = (pair: (typeof selected)[number], slot: number) => {
+    const index = pair.indices[slot];
+    const result = pair.results[slot];
+    if (index === undefined) return '<td aria-label="Not scheduled">—</td>';
+    if (!result) return `<td title="Game ${index + 1} is not finished">Pending</td>`;
+    const points = result === '1/2-1/2' ? 0.5 : (resultsSchedule[index].whiteId === pair.a) === (result === '1-0') ? 1 : 0;
+    return `<td><button type="button" data-game="${index}" title="Replay game ${index + 1}">${formatArenaPoints(points)}–${formatArenaPoints(1 - points)}</button></td>`;
+  };
+  el('openingPairs').innerHTML = `<table class="arena-detail-table"><caption>Scores in ${name(first.a)}–${name(first.b)} order. Select a game score to replay it.</caption><thead><tr><th scope="col">Opening</th><th scope="col">${name(first.a)}<br>White</th><th scope="col">${name(first.a)}<br>Black</th><th scope="col">Pair total</th></tr></thead><tbody>${selected.map((pair) => {
+    const total = pair.played === 2 ? `${formatArenaPoints(pair.points[0])}–${formatArenaPoints(pair.points[1])}` : pair.indices.length < 2 ? 'Unpaired' : `${pair.played} of 2`;
+    return `<tr><th scope="row">${htmlEscape(pair.opening.name)}${pair.round > 1 ? ` · pair ${pair.round}` : ''}</th>${cell(pair, 0)}${cell(pair, 1)}<td>${total}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+/** Finished games as small chips (Engine 1's result in a match); click one to replay it. */
+function renderGameResultChips(): void {
+  const host = el('gameChips');
+  host.hidden = !gameResultChips.length;
+  host.innerHTML = gameResultChips
+    .map((chip) => {
+      const outcome = chip.aPoints === null ? (chip.result === '1/2-1/2' ? 'draw' : 'decisive') : chip.aPoints === 1 ? 'win' : chip.aPoints === 0 ? 'loss' : 'draw';
+      const text = chip.result === '1/2-1/2' ? '½–½' : chip.result.replace('-', '–');
+      return `<button type="button" class="sb-chip ${outcome}" data-game="${chip.index}" title="Game ${chip.index + 1}: ${htmlEscape(displayEngineName(chip.whiteName))} (White) vs ${htmlEscape(displayEngineName(chip.blackName))} (Black), ${chip.result}. Click to replay."><span class="sb-chip-n">G${chip.index + 1}</span>${text}</button>`;
+    })
+    .join('');
 }
 
 function appendLog(text: string, gameIndex?: number) {
@@ -3135,11 +3465,6 @@ function legalFromUci(current: BoardState, uci: string | null): Move | undefined
   return uci ? legalMoves(current).find((m) => moveToUci(m) === uci) : undefined;
 }
 
-function chartColorFor(engineId: string): string {
-  const index = Math.max(0, activeEngineIds.indexOf(engineId));
-  return CHART_COLORS[index % CHART_COLORS.length];
-}
-
 function formatCompactNumber(value: number): string {
   if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
   if (value >= 1000) return `${Math.round(value / 1000)}k`;
@@ -3150,20 +3475,41 @@ function resetGameCharts(): void {
   gameChartSamples = [];
   rootChartContext = null;
   el('chartsPanel').hidden = false;
+  selectChart('evalChart');
+  el('rootChartTab').hidden = true;
   for (const id of ['evalChart', 'timeChart', 'npsChart', 'rootChart']) el(id).innerHTML = '';
   el('rootChartTitle').textContent = 'LC0 root visits';
   (el('rootChart').parentElement as HTMLElement).hidden = true;
   el('chartLegend').innerHTML = '';
 }
 
+function selectChart(id: string): void {
+  el('chartsPanel').dataset.chart = id;
+  for (const button of el('chartsPanel').querySelectorAll<HTMLButtonElement>('button[data-chart]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.chart === id));
+  }
+}
+
+/** Label generated SVGs locally; the shared chart builders also serve other pages. */
+function describeChart(id: string, summary: string): void {
+  const svg = el(id).querySelector('svg');
+  if (!svg) return;
+  svg.setAttribute('aria-label', summary);
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+  title.textContent = summary;
+  svg.prepend(title);
+}
+
 function renderGameCharts(): void {
+  const chartSize = { width: Math.max(300, el('chartsPanel').clientWidth - 24), height: 64 };
   const ids = [...new Set(gameChartSamples.map((sample) => sample.engineId))];
+  const groups = arenaChartGroups(gameChartSamples);
   const seriesFor = (value: (sample: GameChartSample) => number | undefined): ChartSeries[] =>
-    ids.map((id) => ({
-      label: arenaChartEngineName(gameChartSamples, id),
-      color: chartColorFor(id),
-      points: gameChartSamples
-        .filter((sample) => sample.engineId === id)
+    groups.map(({ label, color, dashed, samples }) => ({
+      label,
+      color,
+      dashed,
+      points: samples
         .flatMap((sample) => {
           const y = value(sample);
           return y === undefined || !Number.isFinite(y) ? [] : [{ x: sample.ply, y }];
@@ -3171,23 +3517,30 @@ function renderGameCharts(): void {
     }));
   el('evalChart').innerHTML = lineChartSvg(
     seriesFor((sample) => sample.whiteScore),
-    { yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%` },
+    { ...chartSize, yMin: 0, yMax: 1, midline: 0.5, formatY: (v) => `${Math.round(v * 100)}%` },
   );
   el('timeChart').innerHTML = lineChartSvg(
     seriesFor((sample) => sample.moveMs),
-    { yMin: 0, formatY: formatCompactNumber },
+    { ...chartSize, yMin: 0, formatY: formatCompactNumber },
   );
   el('npsChart').innerHTML = lineChartSvg(
     seriesFor((sample) => sample.nps),
-    { yMin: 0, formatY: formatCompactNumber },
+    { ...chartSize, yMin: 0, formatY: formatCompactNumber },
   );
-  el('chartLegend').innerHTML = ids
-    .map((id) => `<span><span class="swatch" style="background:${chartColorFor(id)}"></span>${htmlEscape(arenaChartEngineName(gameChartSamples, id))}</span>`)
+  const summaries = (value: (sample: GameChartSample) => string) => ids.map((id) => {
+    const sample = gameChartSamples.findLast((entry) => entry.engineId === id);
+    return sample ? `${displayEngineName(sample.engineName)}: ${value(sample)}` : '';
+  }).join('; ');
+  describeChart('evalChart', `White expected score by ply. Latest: ${summaries((sample) => sample.whiteScore === undefined ? 'unavailable' : percent0(sample.whiteScore))}. Use the Review game position slider to explore.`);
+  describeChart('timeChart', `Search time by ply. Latest: ${summaries((sample) => formatSeconds(sample.moveMs))}. Use the Review game position slider to explore.`);
+  describeChart('npsChart', `Search speed by ply. Latest: ${summaries((sample) => sample.nps === undefined ? 'unavailable' : `${formatNps(sample.nps)} nodes or visits per second`)}. Use the Review game position slider to explore.`);
+  el('chartLegend').innerHTML = groups
+    .map(({ label, color, dashed }) => `<span><span class="swatch" style="background:${dashed ? `repeating-linear-gradient(90deg,${color} 0 3px,transparent 3px 5px)` : color}"></span>${htmlEscape(label)}</span>`)
     .join('');
 }
 
 /** Live PUCT-root distribution from the real search tree (Lc0SearchResult.children). */
-function renderRootChart(engineId: string): void {
+function renderRootChart(engineId: string, display = true): void {
   const result = lastLc0SearchResults.get(engineId);
   if (!result?.children?.length) return;
   const top = [...result.children]
@@ -3195,26 +3548,49 @@ function renderRootChart(engineId: string): void {
     .slice(0, 8)
     .filter((child) => child.visits > 0);
   if (!top.length) return;
-  rootChartContext = { fen: result.fen, top: top.map((child) => ({ uci: child.uci, visits: child.visits })) };
-  el('rootChartTitle').textContent = `${engines.get(engineId)?.name ?? engineId} root visits (Q from side to move)`;
+  const data = { fen: result.fen, engineName: engines.get(engineId)?.name ?? engineId,
+    children: top.map((child) => ({ uci: child.uci, visits: child.visits, q: child.q, prior: child.prior })) };
+  if (liveTrail) liveTrail.rootChart = data;
+  if (display) renderSavedRootChart(data);
+}
+
+function renderSavedRootChart(data?: ArenaRootChartSample): void {
+  if (!data) {
+    rootChartContext = null;
+    el('rootChartTab').hidden = true;
+    (el('rootChart').parentElement as HTMLElement).hidden = true;
+    if (el('chartsPanel').dataset.chart === 'rootChart') selectChart('evalChart');
+    return;
+  }
+  const top = data.children;
+  rootChartContext = { fen: data.fen, top };
+  el('rootChartTitle').textContent = `${data.engineName} root visits (Q from side to move)`;
   (el('rootChart').parentElement as HTMLElement).hidden = false;
+  el('rootChartTab').hidden = false;
+  selectEl('rootCandidate').innerHTML = '<option value="">Choose a move…</option>' + top.map((child, index) => `<option value="${index}">${htmlEscape(uciToSan(parseFen(data.fen), child.uci))} · ${formatCount(child.visits)} ${child.visits === 1 ? 'visit' : 'visits'} · Q ${signed(child.q, 2)}</option>`).join('');
   el('rootChart').innerHTML = hBarChartSvg(
     top.map((child) => ({
       label: child.uci,
       value: child.visits,
       detail: `Q ${signed(child.q, 2)} · P ${Math.round(child.prior * 100)}%`,
-      color: chartColorFor(engineId),
+      color: engineBrushes(data.engineName).swatch,
     })),
   );
+  describeChart('rootChart', `Root search candidates by visits. ${top.map((child) => `${child.uci}: ${child.visits} ${child.visits === 1 ? 'visit' : 'visits'}`).join('; ')}. Use Preview a root search candidate to show arrows on the board.`);
 }
 
-function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number): void {
+function recordGameChartSample(ply: number, engine: Pick<ArenaEngine, 'id' | 'name'>, moveMs: number, samples = liveTrail?.charts ?? gameChartSamples, display = true, captured?: ArenaChartSample): void {
   const snapshot = engineOutputs.get(engine.id);
   const lc0 = lastLc0SearchResults.get(engine.id);
   const nps = snapshot?.nps ?? (lc0 && moveMs > 0 ? Math.round((lc0.visits / moveMs) * 1000) : undefined);
-  gameChartSamples.push({ ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
-  renderGameCharts();
-  renderRootChart(engine.id);
+  if (snapshot && snapshot.elapsedMs == null) snapshot.elapsedMs = moveMs;
+  if (snapshot && snapshot.nps == null && nps !== undefined) snapshot.nps = nps;
+  samples.push(captured ?? { ply, engineId: engine.id, engineName: engine.name, whiteScore: snapshot?.evalBar?.whiteScore, moveMs: Math.round(moveMs), nps });
+  if (display) renderRootChart(engine.id, !reviewing);
+  if (display && !reviewing) {
+    gameChartSamples = samples;
+    renderGameCharts();
+  }
 }
 
 async function playArenaGame(
@@ -3237,7 +3613,10 @@ async function playArenaGame(
   liveTrail = trailFromTree(tree, `${white.name} vs ${black.name}`, historyBoards.length - 1);
   renderBoard();
   renderEngineOutputs();
-  resetGameCharts();
+  if (!reviewing) {
+    resetGameCharts();
+    liveTrail.charts = gameChartSamples;
+  }
   const priorFens: string[] = historyBoards.slice(0, -1).map(boardToFen);
   const delay = Math.max(0, Math.floor(Number(inputEl('delayInput').value) || 0));
   for (let ply = 0; ply < 300; ply++) {
@@ -3310,6 +3689,7 @@ async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.si
 function clearStartPending(): void {
   startPending = false;
   if (!running) el('start').toggleAttribute('disabled', false);
+  syncArenaPhase();
 }
 
 function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
@@ -3328,9 +3708,10 @@ function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
 
 async function runIsolatedCpuTournament(
   schedule: ScheduledGame<ArenaOpening>[],
+  pendingIndices: number[],
   byPid: Map<string, { index: number; name: string }>,
   signal: AbortSignal,
-  complete: (index: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail, diagnostics: { runtime: string; search: string }) => void,
+  complete: (index: number, result: GameResultCode, reason: string, tree: GameTree, trail: GameTrail, diagnostics: { runtime: string; search: string }) => Promise<void>,
 ): Promise<void> {
   const concurrency = selectedArenaConcurrency();
   const broker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: concurrency, dial: resourceBroker.getDial() });
@@ -3346,18 +3727,22 @@ async function runIsolatedCpuTournament(
     const game = live.get(index)!;
     if (displayed !== index) {
       displayed = index;
-      el('message').textContent = 'Playing…';
+      el('message').textContent = '';
       activeEngineIds = [game.white.id, game.black.id];
       setBoardSideEngines(game.white.id, game.white.name, game.black.id, game.black.name);
-      resetGameCharts();
+      if (!reviewing) resetGameCharts();
     }
     const position = game.position;
     historyBoards = position.positions;
     board = historyBoards[historyBoards.length - 1];
     lastUci = position.lastUci;
     liveTrail = game.trail;
+    if (!reviewing) {
+      gameChartSamples = game.trail.charts;
+      renderGameCharts();
+    }
     el('pairing').textContent =
-      `Game ${index + 1}/${schedule.length}: ${game.white.name} (W) vs ${game.black.name} (B) · ${live.size} active (K=${concurrency})`;
+      `Game ${index + 1} of ${schedule.length} · ${game.white.name === game.black.name ? game.white.name : `${displayEngineName(game.white.name)} vs ${displayEngineName(game.black.name)}`}${concurrency > 1 ? ` · ${live.size} running at once` : ''}`;
     renderBoard();
   };
   try {
@@ -3369,10 +3754,11 @@ async function runIsolatedCpuTournament(
     plentyChessEngines.disposeAll();
     stormphraxEngines.disposeAll();
     await runArenaSchedule({
-      count: schedule.length,
+      count: pendingIndices.length,
       concurrency,
       signal,
-      play: async (index, gameSignal) => {
+      play: async (pendingIndex, gameSignal) => {
+        const index = pendingIndices[pendingIndex];
         const seats: CpuArenaSeat[] = [];
         const game = schedule[index];
         try {
@@ -3405,8 +3791,10 @@ async function runIsolatedCpuTournament(
             },
             afterMove: (seat, fen, move, elapsedMs) => {
               if (signal.aborted) return;
-              recordUciOutput(seat.id, seat.name, seat.name, fen, move, seat.engine.lastInfo(), elapsedMs, displayed === index);
-              if (displayed === index) recordGameChartSample(live.get(index)!.position.ply, seat, elapsedMs);
+              const lines = seat.engine.lastInfo();
+              const ply = live.get(index)!.position.ply;
+              recordUciOutput(seat.id, seat.name, seat.name, fen, move, lines, elapsedMs, displayed === index);
+              recordGameChartSample(ply, seat, elapsedMs, trail.charts, displayed === index, arenaUciChartSample(ply, seat, fen, lines, elapsedMs));
             },
             position: (position) => {
               if (signal.aborted) return;
@@ -3431,18 +3819,141 @@ async function runIsolatedCpuTournament(
           if (live.size) show(Math.min(...live.keys()));
         }
       },
-      complete: (index, outcome) => complete(index, outcome.result, outcome.reason, outcome.tree, outcome.trail, outcome.diagnostics),
+      complete: (pendingIndex, outcome) => complete(pendingIndices[pendingIndex], outcome.result, outcome.reason, outcome.tree, outcome.trail, outcome.diagnostics),
     });
   } finally {
     if (cpuTournamentBroker === broker) cpuTournamentBroker = null;
   }
 }
 
-async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> {
+function renderCheckpointStatus(): void {
+  const host = document.getElementById('checkpointSection');
+  if (!host) return;
+  // Routine storage status belongs with exports, not above the live scoresheet.
+  host.hidden = running ? !checkpointProblem : !checkpoint && !checkpointProblem;
+  const storage = el('checkpointStorageText');
+  storage.hidden = !checkpoint || !!checkpointProblem;
+  storage.textContent = checkpointSaving ? 'Saving completed games on this device…' : 'Completed games are saved on this device.';
+  const pending = checkpoint ? arenaRemainingIndices(checkpoint).length : 0;
+  el('checkpointText').textContent = checkpointProblem || (checkpointSaving ? 'Saving completed games on this device…' : running
+    ? 'Completed games are saved on this device.'
+    : checkpoint ? pending ? 'Saved on this device. Unfinished games restart from their opening.' : 'Finished results are saved on this device until you start a new run.' : '');
+  const resume = el('resumeTournament') as HTMLButtonElement;
+  resume.hidden = !checkpoint || !pending || running;
+  resume.disabled = startPending || checkpointSaving || checkpointUnreadable;
+  resume.textContent = checkpoint ? `Resume tournament (${checkpoint.completed.length} of ${checkpoint.schedule.length} games played)` : 'Resume tournament';
+  el('main').dataset.checkpoint = resume.hidden ? 'none' : 'resumable';
+  el('start').classList.toggle('primary', resume.hidden);
+  el('discardTournament').hidden = running || (!checkpoint && !checkpointProblem);
+  (el('discardTournament') as HTMLButtonElement).disabled = startPending || checkpointSaving;
+  el('checkpointRoster').textContent = checkpoint && !running ? checkpoint.config.seats.map((seat) => displayEngineName(seat.name)).join(' vs ') : '';
+}
+
+async function checkpointCompatibility(): Promise<string> {
+  // Metadata only; never fetch engine binaries here. The hashed controller URL also
+  // prevents combining results from different app/search builds after an update.
+  const channelUrl = resolvePublicAssetUrl('/models/arena-channel-probe').replace('/models/arena-channel-probe', '/channels/stable.json');
+  const channel = await fetch(channelUrl, { cache: 'no-cache', signal: AbortSignal.timeout(5000) })
+    .then((response) => response.ok ? response.json() : artifactChannel).catch(() => artifactChannel);
+  return JSON.stringify({ bundle: import.meta.url, release: channel.releaseId, query: location.search,
+    model: MODEL_URL, pack: PACK_URL, centipawn: CENTIPAWN_MODEL_URL, centipawnRuntime: CENTIPAWN_HYBRID_MANIFEST_URL,
+    whole: LC0_WHOLE_MODEL_MANIFEST_URL, dial: resourceBroker.getDial() });
+}
+
+function captureCheckpointConfig(participants: { pid: string; index: number; name: string }[], compatibility: string): ArenaCheckpointConfig {
+  const controls = normalizeArenaControls(Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls']);
+  return { mode: arenaTournamentMode(), seats: participants.map((participant) => ({
+    id: participant.pid, name: participant.name, ...seatRows[participant.index],
+  })), controls, compatibility };
+}
+
+function applyCheckpointConfig(saved: ArenaCheckpoint): void {
+  for (const id of ARENA_CONTROL_IDS) {
+    const control = el(id) as HTMLInputElement | HTMLSelectElement;
+    control.value = saved.config.controls[id];
+    if (control.value !== saved.config.controls[id]) throw new Error(`Saved setting ${id} is no longer supported. Export the completed PGNs and start a new run.`);
+  }
+  seatRows.splice(0, seatRows.length, ...saved.config.seats.map((seat) => ({ family: seat.family as EngineFamily, variant: seat.variant, strength: seat.strength })));
+  renderSeatSelectors();
+  if (seatRows.some((row, i) => row.variant !== saved.config.seats[i].variant)) throw new Error('A saved engine version is unavailable. Completed results are still viewable and exportable.');
+  refreshBudgetControls();
+  refreshSeatControls();
+}
+
+function showCheckpointResults(saved: ArenaCheckpoint): void {
+  resultsSchedule = hydrateArenaSchedule(saved);
+  resultsNames = new Map(saved.config.seats.map((seat) => [seat.id, seat.name]));
+  scheduledGameCount = saved.schedule.length;
+  games.length = 0;
+  finishedTrails.length = 0;
+  gameResultChips.length = 0;
+  el('log').innerHTML = '';
+  const standings = new TournamentStandings(saved.config.seats);
+  for (const game of saved.completed) {
+    const scheduled = saved.schedule[game.scheduleIndex];
+    standings.record(scheduled.whiteId, scheduled.blackId, game.result);
+    games.push({ pgn: game.pgn, scheduleIndex: game.scheduleIndex, result: game.result });
+    const whiteName = resultsNames.get(scheduled.whiteId)!;
+    const blackName = resultsNames.get(scheduled.blackId)!;
+    const trail = trailFromTree(arenaCompletedTree(game), `Game ${game.scheduleIndex + 1}: ${whiteName} vs ${blackName} (${game.result})`, scheduled.opening.moves?.length ?? 0);
+    trail.charts = game.charts;
+    trail.rootChart = game.rootChart;
+    trail.sides = { whiteName, blackName };
+    finishedTrails[game.scheduleIndex] = trail;
+    gameResultChips.push({ index: game.scheduleIndex, result: game.result, whiteName, blackName,
+      aPoints: saved.config.mode === 'match' ? game.result === '1/2-1/2' ? 0.5 : (scheduled.whiteId === '0') === (game.result === '1-0') ? 1 : 0 : null });
+    appendLog(`${game.scheduleIndex + 1}. ${whiteName} vs ${blackName} [${scheduled.opening.name}]: ${game.result} (${game.reason}) · ${game.diagnostics.runtime} · ${game.diagnostics.search}`, game.scheduleIndex);
+  }
+  if (saved.config.mode === 'match') {
+    const a = standings.table().find((row) => row.id === '0')!;
+    const b = standings.table().find((row) => row.id === '1')!;
+    renderMatchScore(a.name, b.name, a.name === b.name, { a: a.points, b: b.points, aWins: a.wins, bWins: b.wins, draws: a.draws, games: a.games });
+    el('crosstableSection').hidden = true;
+  } else renderStandings(standings, saved.schedule.length);
+  renderOpeningPairs();
+  el('pairing').textContent = `${saved.completed.length} of ${saved.schedule.length} games played`;
+}
+
+function queueCheckpointSave(saved: ArenaCheckpoint, mountSignal: AbortSignal): void {
+  if (checkpointProblem) return;
+  pendingCheckpointSaves++;
+  checkpointSaving = true;
+  renderCheckpointStatus();
+  checkpointWrites = checkpointWrites.then(async () => {
+    if (checkpointProblem) return;
+    await saveArenaCheckpoint(saved, { runId: saved.runId, revision: saved.revision - 1 });
+    checkpointToken = { runId: saved.runId, revision: saved.revision };
+  }).catch((error) => {
+    checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Export PGN before leaving.`;
+    if (error instanceof ArenaCheckpointConflictError) abort?.abort();
+  }).finally(() => {
+    pendingCheckpointSaves--;
+    if (!isStaleMount(mountSignal)) {
+      checkpointSaving = pendingCheckpointSaves > 0;
+      renderCheckpointStatus();
+    }
+  });
+}
+
+async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null): Promise<void> {
   if (running || startPending) return;
   const mountSignal = mountAbort.signal;
   startPending = true;
   el('start').toggleAttribute('disabled', true);
+  syncArenaPhase();
+  await checkpointWrites;
+  if (isStaleMount(mountSignal)) return;
+  if (checkpointUnreadable) throw new Error('Discard the unreadable saved tournament before starting a new run.');
+  const compatibility = await checkpointCompatibility();
+  if (isStaleMount(mountSignal)) return;
+  if (resume) {
+    if (resume.config.compatibility !== compatibility) throw new Error('The app build, engine assets or runtime overrides changed. Completed results are still viewable and exportable, but cannot be mixed with a new build.');
+    applyCheckpointConfig(resume);
+    // UI runtime changes while paused may have created a different evaluator.
+    disposeLc0Resources();
+  }
+  const effectiveControls = normalizeArenaControls(Object.fromEntries(ARENA_CONTROL_IDS.map((id) => [id, (el(id) as HTMLInputElement).value])) as ArenaCheckpointConfig['controls']);
+  for (const id of ARENA_CONTROL_IDS) (el(id) as HTMLInputElement).value = effectiveControls[id];
   syncSeatRowsFromDom();
   const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
   if (isStaleMount(mountSignal)) return;
@@ -3456,6 +3967,9 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   }
   buildEngines();
   populateSeats();
+  if (resume && seatRows.some((row, i) => row.family !== resume.config.seats[i]?.family || row.variant !== resume.config.seats[i]?.variant || row.strength !== resume.config.seats[i]?.strength)) {
+    throw new Error('The saved engine configuration is no longer supported. Export the completed PGNs before starting a new run.');
+  }
   const mode = arenaTournamentMode();
   const participantIdx = mode === 'match' ? [0, 1] : seatRows.map((_, index) => index);
   const idCounts = new Map<string, number>();
@@ -3504,12 +4018,12 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   const engineB = participants[1].engine!;
   const sameEngine = mode === 'match' && participants[0].engineId === participants[1].engineId;
   const seatIds = [...new Set(participants.map((participant) => participant.engineId))];
-  const gamesPerOpening = Math.max(1, Math.floor(Number(inputEl('gamesInput').value) || 2));
+  const gamesPerOpening = arenaGamesPerOpening();
   const standings = new TournamentStandings(participants.map((participant) => ({ id: participant.pid, name: participant.name })));
   let schedule: ScheduledGame<ArenaOpening>[];
   try {
     // Colors alternate per game index within each pairing (see tournament.ts).
-    schedule = buildSchedule(
+    schedule = resume ? hydrateArenaSchedule(resume) : buildSchedule(
       tournamentPairings(
         mode,
         participants.map((participant) => participant.pid),
@@ -3528,8 +4042,28 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     return;
   }
 
+  const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);
+  // Establish the slot before any games run. A stale tab must not overwrite it.
+  try {
+    await saveArenaCheckpoint(runCheckpoint, checkpointToken);
+    checkpointToken = { runId: runCheckpoint.runId, revision: runCheckpoint.revision };
+    checkpointProblem = '';
+  } catch (error) {
+    if (error instanceof ArenaCheckpointConflictError) throw error;
+    checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Keep this tab open and export PGN before leaving.`;
+  }
+  if (isStaleMount(mountSignal)) return;
+  checkpoint = runCheckpoint;
+  const pendingIndices = arenaRemainingIndices(runCheckpoint);
   startPending = false;
   running = true;
+  arenaMatchState = 'live';
+  scheduledGameCount = schedule.length;
+  resultsSchedule = schedule;
+  resultsNames = new Map(participants.map((participant) => [participant.pid, participant.name]));
+  el('crosstableSection').hidden = mode === 'match';
+  gameResultChips.length = 0;
+  el('pairing').textContent = `Game 1 of ${schedule.length}`;
   const matchAbort = new AbortController();
   abort = matchAbort;
   refreshOpeningPreview();
@@ -3544,6 +4078,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   inputEl('pgnOut').value = '';
   inputEl('pgnOut').hidden = true;
   (el('resultSection') as HTMLDetailsElement).open = false;
+  liveTrail = null;
   activeEngineIds = [];
   engineOutputs.clear();
   engineOutputHistory.length = 0;
@@ -3562,9 +4097,22 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
   el('start').toggleAttribute('disabled', true);
   el('stop').toggleAttribute('disabled', false);
   const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
-  if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
-  else renderStandings(standings, schedule.length);
-  const completeGame = (
+  if (resume) {
+    showCheckpointResults(resume);
+    for (const game of resume.completed) {
+      const scheduled = schedule[game.scheduleIndex];
+      standings.record(scheduled.whiteId, scheduled.blackId, game.result);
+    }
+    const first = standings.table().find((row) => row.id === participants[0].pid)!;
+    const second = standings.table().find((row) => row.id === participants[1].pid)!;
+    Object.assign(score, { a: first.points, b: second.points, aWins: first.wins, bWins: second.wins, draws: first.draws, games: resume.completed.length });
+  } else {
+    if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
+    else renderStandings(standings, schedule.length);
+    renderOpeningPairs();
+  }
+  renderCheckpointStatus();
+  const completeGame = async (
     i: number,
     result: GameResultCode,
     reason: string,
@@ -3572,7 +4120,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     trail: GameTrail | null,
     diagnostics?: { runtime: string; search: string },
   ) => {
-    if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
+    if (isStaleMount(mountSignal) || matchAbort.signal.aborted || checkpoint!.completed.some((game) => game.scheduleIndex === i)) return;
     const { whiteId, blackId, opening } = schedule[i];
     const white = byPid.get(whiteId)!;
     const black = byPid.get(blackId)!;
@@ -3593,12 +4141,34 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
       }
     }
     const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
-    games.push({ pgn: gameTreeToPgn(tree, tags, result), scheduleIndex: i });
+    const pgn = gameTreeToPgn(tree, tags, result);
+    const completed: ArenaCompletedGame = {
+      pgn, scheduleIndex: i, result, reason, rootFen: tree.root.fen,
+      moves: tree.mainlineFrom(tree.root).map((node) => moveToUci(node.move!)),
+      charts: (trail?.charts ?? []).map((sample) => ({ ...sample })),
+      ...(trail?.rootChart ? { rootChart: structuredClone(trail.rootChart) } : {}),
+      diagnostics: diagnostics ?? { runtime: engineRuntimeDiagnosticsText(), search: searchTelemetryText() },
+    };
+    checkpoint = commitArenaGame(checkpoint!, completed);
+    queueCheckpointSave(checkpoint, mountSignal);
+    // Do not show a committed score or advance this lane until its save settles.
+    await checkpointWrites;
+    if (isStaleMount(mountSignal)) return;
+    games.push({ pgn, scheduleIndex: i, result });
     games.sort((a, b) => a.scheduleIndex - b.scheduleIndex);
     if (trail) {
       trail.label = `Game ${i + 1}: ${white.name} vs ${black.name} (${result})`;
+      trail.sides = { whiteName: white.name, blackName: black.name };
       finishedTrails[i] = trail;
     }
+    gameResultChips.push({
+      index: i,
+      result,
+      whiteName: white.name,
+      blackName: black.name,
+      aPoints: mode === 'match' ? (result === '1/2-1/2' ? 0.5 : (whiteId === participants[0].pid) === (result === '1-0') ? 1 : 0) : null,
+    });
+    gameResultChips.sort((x, y) => x.index - y.index);
     renderCacheInfo();
     appendLog(
       `${i + 1}. ${white.name} vs ${black.name} [${opening.name}]: ${result} (${reason}) · ${diagnostics?.runtime ?? engineRuntimeDiagnosticsText()} · ${diagnostics?.search ?? searchTelemetryText()}`,
@@ -3606,19 +4176,24 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     );
     if (mode === 'match') renderMatchScore(engineA.name, engineB.name, sameEngine, score);
     else renderStandings(standings, schedule.length);
+    renderOpeningPairs();
   };
   let enginesReady = false;
   try {
     if (isolatedCpuPool()) {
       enginesReady = true;
       el('message').textContent = 'Preparing private CPU workers…';
-      await runIsolatedCpuTournament(schedule, byPid, matchAbort.signal, completeGame);
+      await runIsolatedCpuTournament(schedule, pendingIndices, byPid, matchAbort.signal, completeGame);
     } else {
+      if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {
+        await loadLc0Evaluator(mountSignal, matchAbort.signal);
+        if (!lc0Cache) throw new Error('The saved Lc0 network could not be loaded.');
+      }
       resetLc0SearchTrees(seatIds);
       await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
       enginesReady = true;
       if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
-      for (let i = 0; i < schedule.length; i++) {
+      for (const i of pendingIndices) {
         if (matchAbort.signal.aborted) break;
         const { whiteId, blackId, opening } = schedule[i];
         const white = byPid.get(whiteId)!;
@@ -3645,32 +4220,36 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
         for (const engine of gameCpuEngines) await engine.newGame(matchAbort.signal);
         if (isStaleMount(mountSignal) || matchAbort.signal.aborted) break;
         setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
-        el('pairing').textContent = `Game ${i + 1}/${schedule.length}: ${whiteEngine.name} (W) vs ${blackEngine.name} (B) · ${opening.name}`;
-        el('message').textContent = 'Playing…';
+        el('pairing').textContent = `Game ${i + 1} of ${schedule.length} · ${opening.name}`;
+        el('message').textContent = '';
         const { result, reason, tree } = await playArenaGame(whiteEngine, blackEngine, opening, matchAbort.signal);
         if (reason === 'cancelled') break;
-        completeGame(i, result, reason, tree, liveTrail);
+        await completeGame(i, result, reason, tree, liveTrail);
       }
     }
     if (!isStaleMount(mountSignal)) {
-      el('message').textContent = matchAbort.signal.aborted
-        ? `Stopped after ${score.games} game(s).`
-        : `Match done (${score.games} game${score.games === 1 ? '' : 's'}).`;
-      el('pairing').textContent = matchAbort.signal.aborted ? 'Match stopped.' : 'Match finished.';
+      const noun = mode === 'match' ? 'Match' : 'Tournament';
+      el('message').textContent = matchAbort.signal.aborted ? `${noun} stopped.` : `${noun} finished.`;
+      el('pairing').textContent = `${score.games} of ${schedule.length} game${schedule.length === 1 ? '' : 's'} played`;
+      arenaMatchState = matchAbort.signal.aborted ? 'stopped' : 'final';
     }
   } catch (error) {
     if (!isStaleMount(mountSignal)) {
       if (isAbortError(error) || matchAbort.signal.aborted) {
-        el('message').textContent = `Stopped after ${score.games} game(s).`;
-        el('pairing').textContent = 'Match stopped.';
+        el('message').textContent = mode === 'match' ? 'Match stopped.' : 'Tournament stopped.';
+        el('pairing').textContent = `${score.games} of ${schedule.length} game${schedule.length === 1 ? '' : 's'} played`;
+        arenaMatchState = 'stopped';
       } else if (enginesReady) {
         el('message').textContent = `Match failed: ${error instanceof Error ? error.message : String(error)}`;
+        arenaMatchState = 'failed';
       } else {
+        arenaMatchState = 'failed';
         el('message').textContent = `Engine preparation failed: ${error instanceof Error ? error.message : String(error)}`;
         el('pairing').textContent = 'Match did not start.';
       }
     }
   } finally {
+    await checkpointWrites;
     const ownsMatchState = abort === matchAbort;
     if (ownsMatchState) {
       running = false;
@@ -3695,17 +4274,18 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400): Promise<void> 
     }
   }
 }
-async function startMatch(minimumWarmupVisibleMs = 400): Promise<void> {
+async function startMatch(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null): Promise<void> {
   const mountSignal = mountAbort.signal;
   try {
-    await startMatchUnchecked(minimumWarmupVisibleMs);
+    await startMatchUnchecked(minimumWarmupVisibleMs, resume);
   } catch (error) {
     if (isStaleMount(mountSignal)) return;
     hideEngineWarmupStatus();
     clearStartPending();
     const detail = error instanceof Error ? error.message : String(error);
     el('message').textContent = `Match preparation failed: ${detail}`;
-    el('pairing').textContent = 'Match did not start.';
+    if (!checkpoint) el('pairing').textContent = 'Match did not start.';
+    renderCheckpointStatus();
   }
 }
 
@@ -3717,6 +4297,9 @@ function exportPgn() {
 }
 
 function disposeLc0Resources(): void {
+  lc0LoadAbort?.abort();
+  lc0LoadAbort = null;
+  loadingLc0 = false;
   void lc0Cache?.dispose();
   lc0Cache = null;
   player = null;
@@ -3761,12 +4344,13 @@ function disposeRuntimeResources(): void {
   }
 }
 
-async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
+async function createSelectedLc0Evaluator(signal: AbortSignal): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
   const runtime = selectedLc0Runtime();
   if (runtime === 'onnx') {
     const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
       cache: true,
-      onProgress: (loaded, total) => showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'),
+      signal,
+      onProgress: (loaded, total) => { if (!signal.aborted) showDownloadProgress('Lc0 small net', loaded, total, 'Downloading'); },
     });
     return Lc0OnnxEvaluator.create(modelLoad.model);
   }
@@ -3792,25 +4376,31 @@ async function createSelectedLc0Evaluator(): Promise<Lc0OnnxEvaluator | Lc0WebHy
   });
 }
 
-async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): Promise<void> {
-  if (isStaleMount(mountSignal)) return;
+async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, matchSignal?: AbortSignal): Promise<void> {
+  if (isStaleMount(mountSignal) || matchSignal?.aborted) return;
+  lc0LoadAbort?.abort();
+  const loadAbort = new AbortController();
+  lc0LoadAbort = loadAbort;
+  const signal = AbortSignal.any([mountSignal, loadAbort.signal, ...(matchSignal ? [matchSignal] : [])]);
   const runtime = selectedLc0Runtime();
   if (!selectedSeatsNeedLc0Evaluator()) {
+    lc0LoadAbort = null;
+    loadingLc0 = false;
     el('start').toggleAttribute('disabled', false);
     refreshSeatControls();
-    el('message').textContent = 'Ready (LC0 not loaded for current matchup). Pick engines and start a tournament.';
+    el('message').textContent = readyMessage();
     return;
   }
   loadingLc0 = true;
   el('start').toggleAttribute('disabled', true);
   refreshSeatControls();
   const hybrid = lc0HybridConfigLabel(runtime);
-  el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)}${hybrid ? ` (${hybrid})` : ''}…`;
+  el('message').textContent = 'Loading the Lc0 network…';
   showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
-    const evaluator = await createSelectedLc0Evaluator();
+    const evaluator = await loadArenaResource(() => createSelectedLc0Evaluator(signal), signal);
     const ortDiagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics({ probeAdapter: false }) : undefined;
-    if (isStaleMount(mountSignal)) {
+    if (isStaleMount(mountSignal) || signal.aborted) {
       void evaluator.dispose?.();
       return;
     }
@@ -3847,9 +4437,9 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
     renderCacheInfo();
     hideDownloadProgress();
     el('start').toggleAttribute('disabled', false);
-    el('message').textContent = `Ready (${lc0RuntimeLabel(runtime)}${hybrid ? ` · ${hybrid}` : ''}). Pick engines and start a tournament.`;
+    el('message').textContent = readyMessage();
   } catch (error) {
-    if (isStaleMount(mountSignal)) return;
+    if (isStaleMount(mountSignal) || signal.aborted) return;
     hideDownloadProgress();
     if (!selectedSeatsNeedLc0Evaluator()) {
       el('start').toggleAttribute('disabled', false);
@@ -3858,8 +4448,10 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal): P
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
     }
   } finally {
-    if (!isStaleMount(mountSignal)) {
+    if (!isStaleMount(mountSignal) && lc0LoadAbort === loadAbort) {
+      lc0LoadAbort = null;
       loadingLc0 = false;
+      hideDownloadProgress();
       refreshSeatControls();
     }
   }
@@ -3935,6 +4527,8 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
     const sfKind = seatRows[1].family === 'sf' && seatRows[1].variant === 'full' ? 'full' : 'lite';
     const sfId = seatRows[1].family === 'sf' ? seatEngineId(1) : 'sf:lite:8';
     const sfName = seatRows[1].family === 'sf' ? (engines.get(sfId)?.name ?? rowLabel(seatRows[1])) : 'Stockfish Lite d8';
+    if (!lc0Cache) await loadLc0Evaluator(mountAbort.signal, controller.signal);
+    if (!lc0Cache) throw new Error('LC0 evaluator could not be initialized for the fixed suite.');
     await warmUpSelectedEngines([lc0Id, sfId], controller.signal, 0);
     const sfEngine = stockfishEngineFor(sfKind);
     const timed = arenaBudgetMode() === 'movetime';
@@ -3964,7 +4558,7 @@ async function runFixedSuiteBenchAutorun(): Promise<void> {
       );
       const searchElapsedMs = performance.now() - searchStarted;
       recordLc0SearchTelemetry(lc0Id, lc0Name, search, searchElapsedMs);
-      recordLc0SearchOutput(lc0Id, lc0Name, search);
+      recordLc0SearchOutput(lc0Id, lc0Name, search, searchElapsedMs);
       const legal = legalFromUci(boardAtMove, search.move ?? null);
       if (!legal || !search.move) {
         positions.push({ index: i + 1, fen: fens[i], lc0Move: search.move, error: 'LC0 returned no legal move' });
@@ -4136,6 +4730,40 @@ function wireEvents() {
   el('start').addEventListener('click', () => {
     void startMatch();
   });
+  el('resumeTournament').addEventListener('click', () => {
+    if (checkpoint) void startMatch(400, checkpoint);
+  });
+  el('discardTournament').addEventListener('click', () => {
+    void (async () => {
+      if (running || startPending) return;
+      await checkpointWrites;
+      try {
+        await discardArenaCheckpoint(checkpointToken);
+        checkpoint = null;
+        checkpointToken = null;
+        checkpointProblem = '';
+        checkpointUnreadable = false;
+        games.length = 0;
+        finishedTrails.length = 0;
+        gameResultChips.length = 0;
+        resultsSchedule = [];
+        arenaMatchState = 'none';
+        liveTrail = null;
+        exitReview();
+        resetGameCharts();
+        el('chartsPanel').hidden = true;
+        el('crosstableSection').hidden = true;
+        el('openingPairsSection').hidden = true;
+        el('message').textContent = 'Saved tournament discarded. Set up a new run.';
+        refreshOpeningPreview();
+        refreshSeatControls();
+        el('start').toggleAttribute('disabled', false);
+      } catch (error) {
+        checkpointProblem = `Could not discard: ${error instanceof Error ? error.message : String(error)}`;
+        renderCheckpointStatus();
+      }
+    })();
+  });
   el('stop').addEventListener('click', () => {
     abort?.abort();
     el('message').textContent = 'Stopping…';
@@ -4150,19 +4778,65 @@ function wireEvents() {
   el('revLive').addEventListener('click', exitReview);
   for (const id of ['evalChart', 'timeChart', 'npsChart'] as const) {
     el(id).addEventListener('click', (event) => {
-      if (!liveTrail) return;
+      const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+      if (!trail) return;
       const ply = chartPlyFromClick(id, event.target as HTMLElement, event as MouseEvent);
       if (ply === null) return;
-      enterReview(liveTrail, liveTrail.openingPlies + ply);
+      enterReview(trail, trail.openingPlies + ply);
     });
   }
   el('rootChart').addEventListener('click', (event) => reviewRootChartClick(event as MouseEvent));
+  for (const button of el('chartsPanel').querySelectorAll<HTMLButtonElement>('button[data-chart]')) {
+    button.addEventListener('click', () => selectChart(button.dataset.chart!));
+  }
+  el('rootCandidate').addEventListener('change', () => {
+    const value = selectEl('rootCandidate').value;
+    if (value !== '') previewRootCandidate(Number(value));
+  });
+  el('chartPly').addEventListener('input', () => {
+    const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
+    if (trail) enterReview(trail, Number(inputEl('chartPly').value));
+  });
+  el('chartLive').addEventListener('click', () => {
+    if (running) exitReview();
+    else if (liveTrail) enterReview(liveTrail, liveTrail.entries.length - 1);
+  });
   el('gameMoves').addEventListener('click', (event) => {
-    const span = (event.target as HTMLElement).closest('.mv') as HTMLElement | null;
+    const span = (event.target as HTMLElement).closest('.san[data-idx]') as HTMLElement | null;
     if (!span) return;
     const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
     if (trail) enterReview(trail, Number(span.dataset.idx));
   });
+  el('gameChips').addEventListener('click', (event) => {
+    const chip = (event.target as HTMLElement).closest('[data-game]') as HTMLElement | null;
+    const trail = chip ? finishedTrails[Number(chip.dataset.game)] : undefined;
+    if (trail) enterReview(trail, trail.entries.length - 1);
+  });
+  el('pairMatchup').addEventListener('change', renderOpeningPairs);
+  el('openingPairs').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>('[data-game]');
+    const trail = button ? finishedTrails[Number(button.dataset.game)] : undefined;
+    if (trail) enterReview(trail, trail.entries.length - 1);
+  });
+  el('editSetup').addEventListener('click', () => {
+    const main = document.getElementById('main');
+    if (!main) return;
+    main.dataset.config = main.dataset.config === 'open' ? 'closed' : 'open';
+    syncArenaPhase();
+  });
+  arenaChartResizeObserver?.disconnect();
+  let previousChartWidth = 0;
+  arenaChartResizeObserver = new ResizeObserver(([entry]) => {
+    const width = Math.round(entry.contentRect.width);
+    if (width <= 0 || width === previousChartWidth) return;
+    previousChartWidth = width;
+    if (gameChartSamples.length) renderGameCharts();
+  });
+  arenaChartResizeObserver.observe(el('chartsPanel'));
+  if (arenaClockTimer) clearInterval(arenaClockTimer);
+  arenaClockTimer = setInterval(() => {
+    if (running && thinkingSince.size) renderStrips();
+  }, 100);
   el('log').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest('[data-game]') as HTMLElement | null;
     const trail = row ? finishedTrails[Number(row.dataset.game)] : undefined;
@@ -4170,9 +4844,9 @@ function wireEvents() {
   });
   if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
   arenaKeydownHandler = (event: KeyboardEvent) => {
-    if (!reviewing) return;
+    if (!reviewing && !(event.key === 'ArrowLeft' && liveTrail && liveTrail.entries.length > 1)) return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest?.('input,textarea,select')) return;
+    if (target?.closest?.('input,textarea,select,.eng-line,.arena-table-scroll')) return;
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
       stepReview(-1);
@@ -4248,7 +4922,7 @@ function wireEvents() {
     populateSeats();
   });
   el('addSeat').addEventListener('click', () => {
-    if (running) return;
+    if (running || seatRows.length >= 8) return;
     syncSeatRowsFromDom();
     seatRows.push({ family: 'sf', variant: 'lite', strength: 8 });
     persistArenaSeatRows();
@@ -4257,6 +4931,7 @@ function wireEvents() {
   });
   el('tournamentModeSelect').addEventListener('change', () => {
     if (running) return;
+    if (isReadyMessage(el('message').textContent)) el('message').textContent = readyMessage();
     syncSeatRowsFromDom();
     buildEngines();
     populateSeats();
@@ -4305,6 +4980,7 @@ function wireEvents() {
     resetLc0SearchTrees();
   });
   el('movetimeInput').addEventListener('input', () => resetLc0SearchTrees());
+  for (const id of ['movetimeInput', 'gamesInput', 'budgetModeSelect']) el(id).addEventListener('input', renderSetupSummary);
   el('stockfishThreadsInput').addEventListener('input', () => {
     if (running) return;
     inputEl('stockfishThreadsInput').value = String(stockfishThreadsCap());
@@ -4399,7 +5075,38 @@ async function init(mountSignal: AbortSignal) {
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();
-  await loadLc0Evaluator(mountSignal);
+  await checkpointWrites;
+  try {
+    const saved = await loadArenaCheckpoint();
+    if (isStaleMount(mountSignal)) return;
+    checkpoint = saved;
+    checkpointToken = saved ? { runId: saved.runId, revision: saved.revision } : null;
+    if (saved) {
+      showCheckpointResults(saved);
+      arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
+      el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
+      // Inspect results without loading engines or changing the saved configuration.
+      const last = saved.completed.at(-1);
+      if (last) {
+        const trail = finishedTrails[last.scheduleIndex];
+        liveTrail = trail;
+        historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
+        board = historyBoards[historyBoards.length - 1];
+        lastUci = trail.entries.at(-1)?.uci ?? null;
+        const scheduled = saved.schedule[last.scheduleIndex];
+        setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
+        enterReview(trail, trail.entries.length - 1);
+      }
+      el('start').toggleAttribute('disabled', false);
+      syncArenaPhase();
+    }
+  } catch (error) {
+    if (isStaleMount(mountSignal)) return;
+    checkpointUnreadable = error instanceof ArenaCheckpointInvalidError;
+    checkpointProblem = checkpointUnreadable ? `${error instanceof Error ? error.message : String(error)}. Discard it to start a new run.` : `Local saving is unavailable: ${error instanceof Error ? error.message : String(error)}. Export PGN before leaving.`;
+    renderCheckpointStatus();
+  }
+  if (!checkpoint) await loadLc0Evaluator(mountSignal);
   void renderRuntimeBadge();
   void runFixedSuiteBenchAutorun();
   void runArenaBenchAutorun();
@@ -4427,6 +5134,17 @@ function resetArenaPageState(): void {
   startPending = false;
   gameChartSamples = [];
   games.length = 0;
+  gameResultChips.length = 0;
+  scheduledGameCount = 0;
+  resultsSchedule = [];
+  resultsNames.clear();
+  arenaMatchState = 'none';
+  checkpoint = null;
+  checkpointToken = null;
+  checkpointProblem = '';
+  checkpointUnreadable = false;
+  checkpointSaving = false;
+  thinkingSince.clear();
   engines.clear();
   seatRows.splice(0, seatRows.length, { family: 'lc0', variant: 'small', strength: 100 }, { family: 'sf', variant: 'lite', strength: 8 });
 }
@@ -4459,6 +5177,10 @@ export function mountArenaBrowser(): () => void {
     arenaAuditHandler = null;
     if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
     arenaPagehideHandler = null;
+    if (arenaClockTimer) clearInterval(arenaClockTimer);
+    arenaClockTimer = null;
+    arenaChartResizeObserver?.disconnect();
+    arenaChartResizeObserver = null;
     (ground as { destroy?: () => void } | null)?.destroy?.();
     ground = null;
   };

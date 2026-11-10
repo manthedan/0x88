@@ -20,6 +20,8 @@ const mime = new Map([
   ['.br', 'application/octet-stream'],
   ['.gz', 'application/gzip'],
   ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
   ['.svg', 'image/svg+xml'],
 ]);
 

@@ -46,12 +46,15 @@ test('analysis and arena probe bundled logos in every deploy profile', async () 
   assert.doesNotMatch(arenaSource, /if \(!isV0DeployProfile\(\)\) void probeEngineLogos/);
 });
 
-test('engine comparison shows family names unless same-family variants need disambiguation', async () => {
+test('engine comparison retains readable engine-and-variant display names', async () => {
+  const { analysisEngineName } = await import('../src/lc0/analysisPresentation.ts');
+  assert.equal(analysisEngineName('Lc0'), 'Lc0 Small');
+  assert.equal(analysisEngineName('Lc0 BT4'), 'Lc0 BT4');
+  assert.equal(analysisEngineName('SF Lite'), 'Stockfish Lite');
+  assert.equal(analysisEngineName('SF 18'), 'Stockfish 18');
   const source = await readFile(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
-  const comparisonSource = source.slice(source.indexOf('function comparisonEngineName'), source.indexOf('function renderLines'));
-  assert.match(comparisonSource, /const familyCount = rows\.filter\(\(candidate\) => candidate\.family === row\.family\)\.length;/);
-  assert.match(comparisonSource, /return familyCount > 1 \? engine : engineFamilyDefinition\(row\.family\)\.label;/);
-  assert.match(comparisonSource, /htmlEscape\(comparisonEngineName\(line\.engine\)\)/);
+  const comparisonSource = source.slice(source.indexOf('function renderEngineComparison'), source.indexOf('function renderLines'));
+  assert.match(comparisonSource, /htmlEscape\(analysisEngineName\(line\.engine\)\)/);
 });
 
 test('concurrent engine logo probes retain every re-render callback', async () => {

@@ -1,4 +1,4 @@
-import { type BoardState, parseFen } from '../chess/board.ts';
+import { parseFen } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { uciLineToSan } from '../chess/san.ts';
 
@@ -61,7 +61,7 @@ export function evalBarWhitePercent(scoreCp: number | undefined, mateIn: number 
   return Math.max(0, Math.min(100, 50 + 50 * whiteAdvantage));
 }
 
-export type EngineColorKey = 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'cyan' | 'pink' | 'yellow';
+export type EngineColorKey = 'violet' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'cyan' | 'pink' | 'yellow';
 
 export interface EngineBrushes {
   /** Chessground brush for the engine's best move. */
@@ -72,28 +72,42 @@ export interface EngineBrushes {
   swatch: string;
 }
 
+// Owner choice (2026-11-08): engine arrows are 11 wide at 75% opacity, between lichess's wide
+// translucent arrow and chess.com's narrow opaque one, so the pieces under an arrow stay readable.
+// Alternatives keep the same width and a lighter opacity.
+export const ENGINE_ARROW_WIDTH = 11;
+export const ENGINE_ARROW_OPACITY = 0.75;
+// Chessground's stylesheet (public/chessground.base.css, `.cg-wrap .cg-shapes`) also dims the whole
+// arrow layer to 60%, so a 75% brush shows at 45%. The owner picked the width and opacity on the live
+// board, so 45% is what they chose. Arrows drawn outside chessground must apply both factors.
+export const CHESSGROUND_SHAPES_LAYER_OPACITY = 0.6;
 export const ANALYSIS_DRAWABLE_BRUSHES = {
-  green: { key: 'g', color: '#15781B', opacity: 1, lineWidth: 10 },
-  paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: 15 },
-  blue: { key: 'b', color: '#003088', opacity: 1, lineWidth: 10 },
-  paleBlue: { key: 'pb', color: '#003088', opacity: 0.4, lineWidth: 15 },
-  red: { key: 'r', color: '#882020', opacity: 1, lineWidth: 10 },
-  paleRed: { key: 'pr', color: '#882020', opacity: 0.4, lineWidth: 15 },
-  purple: { key: 'purple', color: '#68217a', opacity: 0.85, lineWidth: 10 },
-  palePurple: { key: 'palePurple', color: '#68217a', opacity: 0.35, lineWidth: 15 },
-  orange: { key: 'orange', color: '#c45a11', opacity: 0.85, lineWidth: 10 },
-  paleOrange: { key: 'paleOrange', color: '#c45a11', opacity: 0.35, lineWidth: 15 },
-  cyan: { key: 'cyan', color: '#007a87', opacity: 0.85, lineWidth: 10 },
-  paleCyan: { key: 'paleCyan', color: '#007a87', opacity: 0.35, lineWidth: 15 },
-  pink: { key: 'pink', color: '#b02080', opacity: 0.75, lineWidth: 10 },
-  palePink: { key: 'palePink', color: '#b02080', opacity: 0.3, lineWidth: 15 },
-  yellow: { key: 'y', color: '#e68f00', opacity: 1, lineWidth: 10 },
-  paleGrey: { key: 'pgr', color: '#4a4a4a', opacity: 0.35, lineWidth: 15 },
+  // Lc0: violet, so engine identity never reads as the brand-lime actions or the last-move highlight.
+  violet: { key: 'v', color: '#7a4fd6', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleViolet: { key: 'pv', color: '#7a4fd6', opacity: 0.4, lineWidth: ENGINE_ARROW_WIDTH },
+  green: { key: 'g', color: '#15781B', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleGreen: { key: 'pg', color: '#15781B', opacity: 0.4, lineWidth: ENGINE_ARROW_WIDTH },
+  // Brighter than lichess's #003088 so the arrow stays visible over dark pieces and squares.
+  blue: { key: 'b', color: '#1f5fcf', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleBlue: { key: 'pb', color: '#1f5fcf', opacity: 0.4, lineWidth: ENGINE_ARROW_WIDTH },
+  red: { key: 'r', color: '#882020', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleRed: { key: 'pr', color: '#882020', opacity: 0.4, lineWidth: ENGINE_ARROW_WIDTH },
+  purple: { key: 'purple', color: '#68217a', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  palePurple: { key: 'palePurple', color: '#68217a', opacity: 0.35, lineWidth: ENGINE_ARROW_WIDTH },
+  orange: { key: 'orange', color: '#c45a11', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleOrange: { key: 'paleOrange', color: '#c45a11', opacity: 0.35, lineWidth: ENGINE_ARROW_WIDTH },
+  cyan: { key: 'cyan', color: '#007a87', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleCyan: { key: 'paleCyan', color: '#007a87', opacity: 0.35, lineWidth: ENGINE_ARROW_WIDTH },
+  pink: { key: 'pink', color: '#b02080', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  palePink: { key: 'palePink', color: '#b02080', opacity: 0.3, lineWidth: ENGINE_ARROW_WIDTH },
+  yellow: { key: 'y', color: '#e68f00', opacity: ENGINE_ARROW_OPACITY, lineWidth: ENGINE_ARROW_WIDTH },
+  paleGrey: { key: 'pgr', color: '#4a4a4a', opacity: 0.35, lineWidth: ENGINE_ARROW_WIDTH },
 } as const;
 
 const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {
+  violet: { primary: 'violet', alt: 'paleViolet', swatch: '#7a4fd6' },
   green: { primary: 'green', alt: 'paleGreen', swatch: '#15781B' },
-  blue: { primary: 'blue', alt: 'paleBlue', swatch: '#003088' },
+  blue: { primary: 'blue', alt: 'paleBlue', swatch: '#1f5fcf' },
   red: { primary: 'red', alt: 'paleRed', swatch: '#882020' },
   purple: { primary: 'purple', alt: 'palePurple', swatch: '#68217a' },
   orange: { primary: 'orange', alt: 'paleOrange', swatch: '#c45a11' },
@@ -105,7 +119,7 @@ const ENGINE_BRUSHES: Record<EngineColorKey, EngineBrushes> = {
 /** Stable color family per engine/family for multi-engine analysis overlays. */
 export function engineColorKey(engine: string): EngineColorKey {
   const lower = engine.toLowerCase();
-  if (lower.startsWith('lc0')) return 'green';
+  if (lower.startsWith('lc0')) return 'violet';
   if (lower.startsWith('sf') || lower.startsWith('stockfish')) return 'blue';
   if (lower.startsWith('reckless')) return 'red';
   if (lower.startsWith('viridithas')) return 'purple';

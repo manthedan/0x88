@@ -132,7 +132,7 @@ async function runAnalysisSmoke(args) {
       'analysis strict custom WebGPU',
       `(() => ({
       message: document.querySelector('#message')?.textContent ?? '',
-      lines: document.querySelector('#lines')?.textContent ?? '',
+      lines: document.querySelector('#engineSummaries')?.textContent ?? '',
       runtimeInfo: document.querySelector('#recklessRuntimeInfo')?.textContent ?? '',
       lc0Audit: document.querySelector('#runtimeAudit')?.textContent ?? '',
       auditEvents: window.__lc0BrowserRuntimeAuditEvents ?? []

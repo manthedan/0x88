@@ -6,8 +6,8 @@
  * for current-position opening lookups across saved collections.
  */
 
-import { parsePgnGames } from '../chess/pgn.ts';
-import { buildOpeningPositionIndex, type OpeningMoveStat, type OpeningPositionIndex, openingSummary, positionKey } from './openingStats.ts';
+import { importStoredPgn, MAX_BACKUP_BYTES, parseLocalPgnGame, storedPgnChunks } from './localPgnImport.ts';
+import { buildOpeningPositionIndex, OPENING_INDEX_VERSION, type OpeningMoveStat, type OpeningPositionIndex, openingSummary, positionKey } from './openingStats.ts';
 
 export type PgnCollectionSource = 'manual' | 'lichess' | 'chesscom';
 
@@ -20,6 +20,7 @@ export interface PgnCollectionRecord {
   username?: string;
   color?: string;
   positionIndex?: OpeningPositionIndex;
+  indexVersion?: number;
   indexedPositionCount?: number;
   createdAt: number;
   updatedAt: number;
@@ -75,7 +76,18 @@ function openDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined') return Promise.reject(new Error('IndexedDB is unavailable in this browser context'));
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
+    let abandoned = false;
+    const timer = setTimeout(() => {
+      abandoned = true;
+      reject(new Error('Local storage did not respond. Close other tabs or allow browser storage; PGN can still be explored without saving.'));
+    }, 4000);
+    request.onblocked = () => {
+      abandoned = true;
+      clearTimeout(timer);
+      reject(new Error('Local storage is blocked by another tab. Close other tabs and retry.'));
+    };
     request.onupgradeneeded = () => {
+      if (abandoned) { request.transaction?.abort(); return; }
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) {
         const store = db.createObjectStore(STORE, { keyPath: 'id' });
@@ -83,8 +95,16 @@ function openDatabase(): Promise<IDBDatabase> {
         store.createIndex('name', 'name');
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('Failed to open IndexedDB'));
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      if (abandoned) { request.result.close(); return; }
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      clearTimeout(timer);
+      reject(request.error ?? new Error('Failed to open IndexedDB'));
+    };
   });
 }
 
@@ -133,42 +153,19 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return text || undefined;
 }
 
-function normalizePositionIndex(value: unknown): OpeningPositionIndex | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const index: OpeningPositionIndex = {};
-  for (const [key, rawStats] of Object.entries(value as Record<string, unknown>)) {
-    if (!Array.isArray(rawStats)) continue;
-    const stats: OpeningMoveStat[] = [];
-    for (const raw of rawStats) {
-      if (!raw || typeof raw !== 'object') continue;
-      const entry = raw as Record<string, unknown>;
-      const uci = normalizeString(entry.uci);
-      const san = normalizeString(entry.san) || uci;
-      if (!uci) continue;
-      stats.push({
-        uci,
-        san,
-        count: Math.max(0, Math.floor(Number(entry.count)) || 0),
-        whiteWins: Math.max(0, Math.floor(Number(entry.whiteWins)) || 0),
-        blackWins: Math.max(0, Math.floor(Number(entry.blackWins)) || 0),
-        draws: Math.max(0, Math.floor(Number(entry.draws)) || 0),
-      });
-    }
-    if (stats.length) index[key] = stats;
-  }
-  return Object.keys(index).length ? index : undefined;
-}
-
 export function normalizePgnDatabaseBackup(input: unknown): SavePgnCollectionInput[] {
   if (!input || typeof input !== 'object') throw new Error('Backup JSON must be an object');
   const rawCollections = (input as { collections?: unknown }).collections;
   if (!Array.isArray(rawCollections)) throw new Error('Backup JSON does not contain a collections array');
+  const header = input as { kind?: unknown; version?: unknown };
+  if (header.kind !== 'lc0-analysis-pgn-database-backup' || header.version !== 1) throw new Error('Unsupported PGN backup format or version');
+  if (new TextEncoder().encode(JSON.stringify(input)).length > MAX_BACKUP_BYTES) throw new Error('Backup exceeds 16 MiB.');
   return rawCollections.map((raw, i) => {
     if (!raw || typeof raw !== 'object') throw new Error(`Collection ${i + 1} is not an object`);
     const entry = raw as Record<string, unknown>;
     const pgn = normalizeString(entry.pgn);
     if (!pgn.trim()) throw new Error(`Collection ${i + 1} has no PGN`);
-    const positionIndex = normalizePositionIndex(entry.positionIndex);
+    storedPgnChunks(pgn); // Derived indexes are deliberately ignored and rebuilt.
     return {
       name: sanitizePgnCollectionName(normalizeString(entry.name), `Imported backup ${i + 1}`),
       pgn,
@@ -176,8 +173,7 @@ export function normalizePgnDatabaseBackup(input: unknown): SavePgnCollectionInp
       source: isPgnCollectionSource(entry.source) ? entry.source : 'manual',
       username: normalizeOptionalString(entry.username),
       color: normalizeOptionalString(entry.color),
-      positionIndex,
-      indexedPositionCount: positionIndex ? Object.keys(positionIndex).length : 0,
+      indexedPositionCount: 0,
     };
   });
 }
@@ -222,6 +218,7 @@ export async function savePgnCollection(input: SavePgnCollectionInput): Promise<
       username: input.username !== undefined ? input.username.trim() || undefined : existing?.username,
       color: input.color !== undefined ? input.color || undefined : existing?.color,
       positionIndex: input.positionIndex,
+      indexVersion: input.positionIndex ? OPENING_INDEX_VERSION : undefined,
       indexedPositionCount: input.indexedPositionCount ?? (input.positionIndex ? Object.keys(input.positionIndex).length : 0),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -280,6 +277,7 @@ export async function updatePgnCollectionPositionIndex(id: string, positionIndex
     const record = await requestToPromise<PgnCollectionRecord | undefined>(store.get(id));
     if (record) {
       record.positionIndex = positionIndex;
+      record.indexVersion = OPENING_INDEX_VERSION;
       record.indexedPositionCount = Object.keys(positionIndex).length;
       store.put(record);
     }
@@ -300,18 +298,38 @@ export async function deletePgnCollection(id: string): Promise<void> {
   }
 }
 
-export async function exportPgnDatabaseBackup(now = new Date()): Promise<PgnDatabaseBackup> {
+export function serializePgnDatabaseBackup(backup: PgnDatabaseBackup): string {
+  const json = JSON.stringify(backup);
+  if (new TextEncoder().encode(json).length > MAX_BACKUP_BYTES) {
+    throw new Error('Backup exceeds the 16 MiB restore limit. Use “Back up selected collection” for each collection instead.');
+  }
+  normalizePgnDatabaseBackup(backup);
+  return json;
+}
+
+export async function exportPgnDatabaseBackup(now = new Date(), collectionId?: string): Promise<PgnDatabaseBackup> {
   const db = await openDatabase();
   try {
-    const collections = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
-    return { kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: now.toISOString(), collections };
+    const store = db.transaction(STORE, 'readonly').objectStore(STORE);
+    const collections = collectionId
+      ? [await requestToPromise<PgnCollectionRecord | undefined>(store.get(collectionId))].filter((record): record is PgnCollectionRecord => !!record)
+      : await requestToPromise<PgnCollectionRecord[]>(store.getAll());
+    if (collectionId && !collections.length) throw new Error('Saved PGN collection not found');
+    // Omit derived indexes: smaller portable backups, rebuilt using current semantics on restore.
+    const rawCollections = collections.map(({ positionIndex: _index, ...record }) => record);
+    const backup: PgnDatabaseBackup = { kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: now.toISOString(), collections: rawCollections };
+    serializePgnDatabaseBackup(backup); // Check size and shape before replaying any games.
+    // Validate legal replay once, yielding between games just as restore does.
+    for (const collection of rawCollections) await importStoredPgn(collection.pgn);
+    return backup;
   } finally {
     db.close();
   }
 }
 
 export function rebuildPgnCollectionIndex(collection: SavePgnCollectionInput): SavePgnCollectionInput {
-  const games = parsePgnGames(collection.pgn).map((game) => ({ tree: game.tree, result: game.result }));
+  const games = storedPgnChunks(collection.pgn).flatMap((chunk, i) => parseLocalPgnGame(chunk, i + 1) ?? []);
+  if (!games.length) throw new Error('No playable moves in this collection.');
   const positionIndex = buildOpeningPositionIndex(games);
   return {
     ...collection,
@@ -321,11 +339,28 @@ export function rebuildPgnCollectionIndex(collection: SavePgnCollectionInput): S
   };
 }
 
-export async function importPgnDatabaseBackup(input: unknown): Promise<number> {
-  // Raw PGN is authoritative; never trust imported derived indexes because they
-  // can be stale, partial, or user-edited. Rebuild on every backup import.
-  const collections = normalizePgnDatabaseBackup(input).map(rebuildPgnCollectionIndex);
-  for (const collection of collections) await savePgnCollection(collection);
+export async function importPgnDatabaseBackup(input: unknown, onProgress: (done: number, total: number) => void = () => {}, signal?: AbortSignal): Promise<number> {
+  // Validate/rebuild everything before an atomic write; a bad game cannot cause a partial restore.
+  const inputs = normalizePgnDatabaseBackup(input);
+  const collections: PgnCollectionRecord[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    onProgress(i, inputs.length);
+    const input = inputs[i];
+    const batch = await importStoredPgn(input.pgn, () => {}, signal);
+    const now = Date.now();
+    collections.push({ ...input, id: newId(), source: input.source ?? 'manual', gameCount: batch.games.length,
+      positionIndex: batch.positionIndex, indexVersion: OPENING_INDEX_VERSION,
+      indexedPositionCount: Object.keys(batch.positionIndex).length, createdAt: now, updatedAt: now });
+  }
+  signal?.throwIfAborted();
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(STORE, 'readwrite');
+    const done = transactionDone(tx);
+    for (const collection of collections) tx.objectStore(STORE).put(collection);
+    await done;
+  } finally { db.close(); }
+  onProgress(inputs.length, inputs.length);
   return collections.length;
 }
 
@@ -336,7 +371,8 @@ export async function searchPgnCollectionsByPosition(fen: string): Promise<PgnPo
     const records = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
     return records
       .map((record) => {
-        const stats = record.positionIndex?.[key] ?? [];
+        const index = record.indexVersion === OPENING_INDEX_VERSION ? record.positionIndex : rebuildPgnCollectionIndex(record).positionIndex;
+        const stats = index?.[key] ?? [];
         return { summary: collectionSummary(record), stats, total: openingSummary(stats).total };
       })
       .filter((result) => result.total > 0)

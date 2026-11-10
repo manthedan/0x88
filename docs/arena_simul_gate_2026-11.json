@@ -1,0 +1,2472 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "rawPath": "artifacts/arena-simul/n2.json",
+      "rawSha256": "72bcb888ff54fa03547d5929554c13ebdc3bd4c0f8aa5d609bfb69ac8e4d3b45",
+      "rawRunIndex": 0,
+      "n": 2,
+      "visits": 8,
+      "maxPlies": 160,
+      "pairs": 3,
+      "measuredAt": "2026-11-08T05:19:11.220Z",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "runtime": "webgpu->webgpu",
+      "options": {
+        "batchPipelineDepth": 1,
+        "batchSize": 1,
+        "contemptElo": 0,
+        "drawScore": 0,
+        "reuseTree": false,
+        "searchContemptLimit": 0,
+        "temperature": 0
+      },
+      "openings": [
+        {
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "moves": [
+            "e2e4",
+            "e7e5",
+            "g1f3",
+            "b8c6",
+            "f1c4"
+          ],
+          "name": "Italian Game"
+        },
+        {
+          "fen": "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
+          "moves": [
+            "e2e4",
+            "e7e6",
+            "d2d4",
+            "d7d5",
+            "e4e5"
+          ],
+          "name": "French Advance"
+        },
+        {
+          "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq e3 0 4",
+          "moves": [
+            "d2d4",
+            "g8f6",
+            "c2c4",
+            "g7g6",
+            "b1c3",
+            "f8g7",
+            "e2e4"
+          ],
+          "name": "King's Indian"
+        },
+        {
+          "fen": "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1",
+          "moves": [
+            "c2c4"
+          ],
+          "name": "English Opening"
+        }
+      ],
+      "rows": [
+        {
+          "index": 0,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 94752.08000004292,
+          "gamesPerHour": 303.95111115225075,
+          "evalsPerSecond": 63.76641019381594,
+          "visitsPerSecond": 57.91957284734556,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 185.1849999427795,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 1.9800000190734863,
+          "memory": null,
+          "bufferAllocationBytes": null,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "concurrency": 2,
+          "control": false,
+          "physical": 4,
+          "completed": 8,
+          "elapsedMs": 78274.15499997139,
+          "gamesPerHour": 367.937539536652,
+          "evalsPerSecond": 100.5695941400182,
+          "visitsPerSecond": 90.5535166748538,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.5,
+          "p95MoveMs": 211.22500002384183,
+          "batchSizes": {
+            "2": 3936
+          },
+          "maxResident": 2,
+          "maxObservedQueueMs": 2.784999966621399,
+          "memory": null,
+          "bufferAllocationBytes": null,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 106283.33999991415,
+          "gamesPerHour": 270.97379514064255,
+          "evalsPerSecond": 56.848044105547295,
+          "visitsPerSecond": 51.63556207402244,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 189.375,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 1.4550000429153442,
+          "memory": null,
+          "bufferAllocationBytes": null,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "concurrency": 2,
+          "control": false,
+          "physical": 4,
+          "completed": 8,
+          "elapsedMs": 79601.22000002861,
+          "gamesPerHour": 361.8034999964781,
+          "evalsPerSecond": 98.892956665704,
+          "visitsPerSecond": 89.0438613880221,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.5,
+          "p95MoveMs": 217.0900000333786,
+          "batchSizes": {
+            "2": 3936
+          },
+          "maxResident": 2,
+          "maxObservedQueueMs": 3.7700001001358032,
+          "memory": null,
+          "bufferAllocationBytes": null,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 104472.19500005244,
+          "gamesPerHour": 275.6714358302278,
+          "evalsPerSecond": 57.83356997521653,
+          "visitsPerSecond": 52.53072360542673,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 182.75,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.6499999761581421,
+          "memory": null,
+          "bufferAllocationBytes": null,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "concurrency": 2,
+          "control": false,
+          "physical": 4,
+          "completed": 8,
+          "elapsedMs": 74573.95500004292,
+          "gamesPerHour": 386.1938125714725,
+          "evalsPerSecond": 105.55964210286916,
+          "visitsPerSecond": 95.0465883162013,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.5,
+          "p95MoveMs": 197.14999997615817,
+          "batchSizes": {
+            "2": 3936
+          },
+          "maxResident": 2,
+          "maxObservedQueueMs": 8.259999990463257,
+          "memory": null,
+          "bufferAllocationBytes": null,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "concurrency": 1,
+          "control": true,
+          "physical": 4,
+          "completed": 8,
+          "elapsedMs": 143383.04499995708,
+          "gamesPerHour": 200.86056897458568,
+          "evalsPerSecond": 54.901888853053414,
+          "visitsPerSecond": 49.43401780874525,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.25,
+          "p95MoveMs": 189.7300000190735,
+          "batchSizes": {
+            "1": 7872
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.565000057220459,
+          "memory": null,
+          "bufferAllocationBytes": null,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        }
+      ],
+      "serial": {
+        "gamesPerHour": {
+          "median": 275.6714358302278,
+          "min": 270.97379514064255,
+          "max": 303.95111115225075
+        },
+        "evalsPerSecond": {
+          "median": 57.83356997521653,
+          "min": 56.848044105547295,
+          "max": 63.76641019381594
+        },
+        "visitsPerSecond": {
+          "median": 52.53072360542673,
+          "min": 51.63556207402244,
+          "max": 57.91957284734556
+        },
+        "occupancy": {
+          "median": 1,
+          "min": 1,
+          "max": 1
+        },
+        "p95MoveMs": {
+          "median": 185.1849999427795,
+          "min": 182.75,
+          "max": 189.375
+        }
+      },
+      "simul": {
+        "gamesPerHour": {
+          "median": 367.937539536652,
+          "min": 361.8034999964781,
+          "max": 386.1938125714725
+        },
+        "evalsPerSecond": {
+          "median": 100.5695941400182,
+          "min": 98.892956665704,
+          "max": 105.55964210286916
+        },
+        "visitsPerSecond": {
+          "median": 90.5535166748538,
+          "min": 89.0438613880221,
+          "max": 95.0465883162013
+        },
+        "occupancy": {
+          "median": 0.5,
+          "min": 0.5,
+          "max": 0.5
+        },
+        "p95MoveMs": {
+          "median": 211.22500002384183,
+          "min": 197.14999997615817,
+          "max": 217.0900000333786
+        }
+      },
+      "pairedGamesPerHourRatios": [
+        1.2105155271248544,
+        1.3351973751140493,
+        1.400920669957659
+      ],
+      "pairedEvalsPerSecondRatios": [
+        1.5771562776442984,
+        1.7396017439420386,
+        1.8252312998852522
+      ],
+      "allowsN8": false
+    },
+    {
+      "rawPath": "artifacts/arena-simul/n4.json",
+      "rawSha256": "b476185e25cba6e0e899f93377efedb40aad5a73a06c4ffdd443251172a17aea",
+      "rawRunIndex": 0,
+      "n": 4,
+      "visits": 8,
+      "maxPlies": 160,
+      "pairs": 3,
+      "measuredAt": "2026-11-08T05:40:42.538Z",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "runtime": "webgpu->webgpu",
+      "options": {
+        "batchPipelineDepth": 1,
+        "batchSize": 1,
+        "contemptElo": 0,
+        "drawScore": 0,
+        "reuseTree": false,
+        "searchContemptLimit": 0,
+        "temperature": 0
+      },
+      "openings": [
+        {
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "moves": [
+            "e2e4",
+            "e7e5",
+            "g1f3",
+            "b8c6",
+            "f1c4"
+          ],
+          "name": "Italian Game"
+        },
+        {
+          "fen": "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
+          "moves": [
+            "e2e4",
+            "e7e6",
+            "d2d4",
+            "d7d5",
+            "e4e5"
+          ],
+          "name": "French Advance"
+        },
+        {
+          "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq e3 0 4",
+          "moves": [
+            "d2d4",
+            "g8f6",
+            "c2c4",
+            "g7g6",
+            "b1c3",
+            "f8g7",
+            "e2e4"
+          ],
+          "name": "King's Indian"
+        },
+        {
+          "fen": "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1",
+          "moves": [
+            "c2c4"
+          ],
+          "name": "English Opening"
+        }
+      ],
+      "rows": [
+        {
+          "index": 0,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 98925.63499999046,
+          "gamesPerHour": 291.12777491903665,
+          "evalsPerSecond": 61.0761811132229,
+          "visitsPerSecond": 55.47601488734976,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 172.91499996185303,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.4950000047683716,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 191260496,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "concurrency": 4,
+          "control": false,
+          "physical": 4,
+          "completed": 8,
+          "elapsedMs": 48627.770000100136,
+          "gamesPerHour": 592.2541790409203,
+          "evalsPerSecond": 161.88280893785156,
+          "visitsPerSecond": 145.76033406395985,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.8612691466083151,
+          "p95MoveMs": 225.1799999475479,
+          "batchSizes": {
+            "2": 634,
+            "4": 1651
+          },
+          "maxResident": 4,
+          "maxObservedQueueMs": 6.304999947547913,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 250140720,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 100828.25999999046,
+          "gamesPerHour": 285.6342061243814,
+          "evalsPerSecond": 59.92367615984419,
+          "visitsPerSecond": 54.42918483370158,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 170.5,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.5800000429153442,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 191260496,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "concurrency": 4,
+          "control": false,
+          "physical": 4,
+          "completed": 8,
+          "elapsedMs": 41910.360000014305,
+          "gamesPerHour": 687.1809261478587,
+          "evalsPerSecond": 187.82945314708135,
+          "visitsPerSecond": 169.12286126861187,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.8612691466083151,
+          "p95MoveMs": 181.9450000524521,
+          "batchSizes": {
+            "2": 634,
+            "4": 1651
+          },
+          "maxResident": 4,
+          "maxObservedQueueMs": 2.4399999380111694,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 250140720,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 105130.6549999714,
+          "gamesPerHour": 273.9448355953631,
+          "evalsPerSecond": 57.47134363427722,
+          "visitsPerSecond": 52.20171033844974,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 183.2150000333786,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.6749999523162842,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 191260496,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "concurrency": 4,
+          "control": false,
+          "physical": 4,
+          "completed": 8,
+          "elapsedMs": 44361.69499993324,
+          "gamesPerHour": 649.2087374038197,
+          "evalsPerSecond": 177.45038822371072,
+          "visitsPerSecond": 159.77748370549563,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.8597640891218873,
+          "p95MoveMs": 205.52500009536743,
+          "batchSizes": {
+            "2": 642,
+            "4": 1647
+          },
+          "maxResident": 4,
+          "maxObservedQueueMs": 65.5550000667572,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 250429744,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "concurrency": 1,
+          "control": true,
+          "physical": 4,
+          "completed": 8,
+          "elapsedMs": 136167.2799999714,
+          "gamesPerHour": 211.50455527940375,
+          "evalsPerSecond": 57.8112451097037,
+          "visitsPerSecond": 52.05362110487548,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.25,
+          "p95MoveMs": 175.36000001430511,
+          "batchSizes": {
+            "1": 7872
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.10500001907348631,
+          "memory": {
+            "bytes": 151179734,
+            "note": "Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency"
+          },
+          "bufferAllocationBytes": 653834992,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        }
+      ],
+      "serial": {
+        "gamesPerHour": {
+          "median": 285.6342061243814,
+          "min": 273.9448355953631,
+          "max": 291.12777491903665
+        },
+        "evalsPerSecond": {
+          "median": 59.92367615984419,
+          "min": 57.47134363427722,
+          "max": 61.0761811132229
+        },
+        "visitsPerSecond": {
+          "median": 54.42918483370158,
+          "min": 52.20171033844974,
+          "max": 55.47601488734976
+        },
+        "occupancy": {
+          "median": 1,
+          "min": 1,
+          "max": 1
+        },
+        "p95MoveMs": {
+          "median": 172.91499996185303,
+          "min": 170.5,
+          "max": 183.2150000333786
+        }
+      },
+      "simul": {
+        "gamesPerHour": {
+          "median": 649.2087374038197,
+          "min": 592.2541790409203,
+          "max": 687.1809261478587
+        },
+        "evalsPerSecond": {
+          "median": 177.45038822371072,
+          "min": 161.88280893785156,
+          "max": 187.82945314708135
+        },
+        "visitsPerSecond": {
+          "median": 159.77748370549563,
+          "min": 145.76033406395985,
+          "max": 169.12286126861187
+        },
+        "occupancy": {
+          "median": 0.8612691466083151,
+          "min": 0.8597640891218873,
+          "max": 0.8612691466083151
+        },
+        "p95MoveMs": {
+          "median": 205.52500009536743,
+          "min": 181.9450000524521,
+          "max": 225.1799999475479
+        }
+      },
+      "pairedGamesPerHourRatios": [
+        2.034344470243788,
+        2.405807537801061,
+        2.3698520762141664
+      ],
+      "pairedEvalsPerSecondRatios": [
+        2.6505064001587386,
+        3.134478142596813,
+        3.0876324965173647
+      ],
+      "allowsN8": true
+    },
+    {
+      "rawPath": "artifacts/arena-simul/n8.json",
+      "rawSha256": "2693df964755c4986976f80a7e9139ae34397a12505748d5c5afb35a3c3b94b5",
+      "rawRunIndex": 0,
+      "n": 8,
+      "visits": 8,
+      "maxPlies": 160,
+      "pairs": 3,
+      "measuredAt": "2026-11-08T05:51:02.932Z",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+      "runtime": "webgpu->webgpu",
+      "options": {
+        "batchPipelineDepth": 1,
+        "batchSize": 1,
+        "contemptElo": 0,
+        "drawScore": 0,
+        "reuseTree": false,
+        "searchContemptLimit": 0,
+        "temperature": 0
+      },
+      "openings": [
+        {
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "moves": [
+            "e2e4",
+            "e7e5",
+            "g1f3",
+            "b8c6",
+            "f1c4"
+          ],
+          "name": "Italian Game"
+        },
+        {
+          "fen": "rnbqkbnr/ppp2ppp/4p3/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
+          "moves": [
+            "e2e4",
+            "e7e6",
+            "d2d4",
+            "d7d5",
+            "e4e5"
+          ],
+          "name": "French Advance"
+        },
+        {
+          "fen": "rnbqk2r/ppppppbp/5np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR b KQkq e3 0 4",
+          "moves": [
+            "d2d4",
+            "g8f6",
+            "c2c4",
+            "g7g6",
+            "b1c3",
+            "f8g7",
+            "e2e4"
+          ],
+          "name": "King's Indian"
+        },
+        {
+          "fen": "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1",
+          "moves": [
+            "c2c4"
+          ],
+          "name": "English Opening"
+        }
+      ],
+      "rows": [
+        {
+          "index": 0,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 73137.16999995708,
+          "gamesPerHour": 393.7806179814846,
+          "evalsPerSecond": 82.61189214736564,
+          "visitsPerSecond": 75.0370844264718,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 160.99500000476837,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.10500001907348631,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 191260496,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "concurrency": 8,
+          "control": false,
+          "physical": 8,
+          "completed": 8,
+          "elapsedMs": 45291.98000001907,
+          "gamesPerHour": 635.8741658012715,
+          "evalsPerSecond": 173.8056053190142,
+          "visitsPerSecond": 156.4956974722018,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.49848024316109424,
+          "p95MoveMs": 430.0049999952316,
+          "batchSizes": {
+            "2": 665,
+            "4": 890,
+            "6": 185,
+            "8": 234
+          },
+          "maxResident": 8,
+          "maxObservedQueueMs": 93.26499998569489,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 374465904,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 102729.90999996662,
+          "gamesPerHour": 280.346785079529,
+          "evalsPerSecond": 58.81441928647619,
+          "visitsPerSecond": 53.42163737904358,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 178.7150000333786,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.05000007152557373,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 191260496,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "concurrency": 8,
+          "control": false,
+          "physical": 8,
+          "completed": 8,
+          "elapsedMs": 55155.87999999523,
+          "gamesPerHour": 522.1564772423627,
+          "evalsPerSecond": 142.72277044624582,
+          "visitsPerSecond": 128.5085107879815,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.45640074211502785,
+          "p95MoveMs": 511.78000009059906,
+          "batchSizes": {
+            "2": 839,
+            "4": 898,
+            "6": 375,
+            "8": 44
+          },
+          "maxResident": 8,
+          "maxObservedQueueMs": 66.86000001430511,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 400761264,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "concurrency": 1,
+          "control": false,
+          "physical": 1,
+          "completed": 8,
+          "elapsedMs": 99589.54999995232,
+          "gamesPerHour": 289.1869679099242,
+          "evalsPerSecond": 60.66901597610284,
+          "visitsPerSecond": 55.106183329502215,
+          "evaluations": 6042,
+          "searchedPlies": 686,
+          "occupancy": 1,
+          "p95MoveMs": 168.24500000476837,
+          "batchSizes": {
+            "1": 6042
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.2549999952316284,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 191260496,
+          "exportDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 8,
+          "matchingSameExportGames": 2,
+          "sameExportEquivalent": false,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 3,
+              "plies": 108,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "b6809d95fea5ed5f58fe2c7865e355e41c2337962ab97eaef3e6fdb612065245"
+            },
+            {
+              "id": 4,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 5,
+              "plies": 26,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "d4f3642b4d3a80faaec5c5af1c719f3a8c46c30e5062d1ebc33c3bca4ddda33f"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "84e355637eeacf317fa15c2672fc49081ae840013b4c6155017e7fa3996d3d76"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "concurrency": 8,
+          "control": false,
+          "physical": 8,
+          "completed": 8,
+          "elapsedMs": 43786.45000004768,
+          "gamesPerHour": 657.7377247977088,
+          "evalsPerSecond": 179.7816447780404,
+          "visitsPerSecond": 161.87656226965834,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.46218882104274306,
+          "p95MoveMs": 386.6850000619888,
+          "batchSizes": {
+            "2": 810,
+            "4": 893,
+            "6": 364,
+            "8": 62
+          },
+          "maxResident": 8,
+          "maxObservedQueueMs": 62.949999928474426,
+          "memory": {
+            "bytes": null,
+            "note": "Memory sampled after all timed trials on the same-export control"
+          },
+          "bufferAllocationBytes": 396860304,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "concurrency": 1,
+          "control": true,
+          "physical": 8,
+          "completed": 8,
+          "elapsedMs": 151056.00999999046,
+          "gamesPerHour": 190.65775668245055,
+          "evalsPerSecond": 52.11312015986982,
+          "visitsPerSecond": 46.92299233906978,
+          "evaluations": 7872,
+          "searchedPlies": 886,
+          "occupancy": 0.125,
+          "p95MoveMs": 199.9450000524521,
+          "batchSizes": {
+            "1": 7872
+          },
+          "maxResident": 1,
+          "maxObservedQueueMs": 0.3400000333786011,
+          "memory": {
+            "bytes": 151363583,
+            "note": "Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency"
+          },
+          "bufferAllocationBytes": 1226608944,
+          "exportDrift": {
+            "maxPrior": 0.0071360062212856845,
+            "maxWdl": 0.00244140625
+          },
+          "rowDrift": {
+            "maxPrior": 0,
+            "maxWdl": 0
+          },
+          "matchingBatch1Games": 2,
+          "matchingSameExportGames": 8,
+          "sameExportEquivalent": true,
+          "games": [
+            {
+              "id": 0,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 1,
+              "plies": 49,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "43edecb3f7b9d7832bbf4463a9f0b49958382d28c9236fcd493e83f82f25fcf1"
+            },
+            {
+              "id": 2,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 3,
+              "plies": 96,
+              "result": "1-0",
+              "reason": "checkmate",
+              "movesSha256": "ed69e1d0b38436fb6a41c1adc6126abe724cf128779d3f19200f412d4131df36"
+            },
+            {
+              "id": 4,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 5,
+              "plies": 138,
+              "result": "1/2-1/2",
+              "reason": "threefold",
+              "movesSha256": "513651894c49ca4e29b83e4eb10576a5151af6d790409a04ad2dd7fc0748b34e"
+            },
+            {
+              "id": 6,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            },
+            {
+              "id": 7,
+              "plies": 160,
+              "result": "1/2-1/2",
+              "reason": "max plies",
+              "movesSha256": "b7dfd274d029f0b55d5ccfb9c3105fba93abe3862ef76dab6d083e4e470ae7dc"
+            }
+          ]
+        }
+      ],
+      "serial": {
+        "gamesPerHour": {
+          "median": 289.1869679099242,
+          "min": 280.346785079529,
+          "max": 393.7806179814846
+        },
+        "evalsPerSecond": {
+          "median": 60.66901597610284,
+          "min": 58.81441928647619,
+          "max": 82.61189214736564
+        },
+        "visitsPerSecond": {
+          "median": 55.106183329502215,
+          "min": 53.42163737904358,
+          "max": 75.0370844264718
+        },
+        "occupancy": {
+          "median": 1,
+          "min": 1,
+          "max": 1
+        },
+        "p95MoveMs": {
+          "median": 168.24500000476837,
+          "min": 160.99500000476837,
+          "max": 178.7150000333786
+        }
+      },
+      "simul": {
+        "gamesPerHour": {
+          "median": 635.8741658012715,
+          "min": 522.1564772423627,
+          "max": 657.7377247977088
+        },
+        "evalsPerSecond": {
+          "median": 173.8056053190142,
+          "min": 142.72277044624582,
+          "max": 179.7816447780404
+        },
+        "visitsPerSecond": {
+          "median": 156.4956974722018,
+          "min": 128.5085107879815,
+          "max": 161.87656226965834
+        },
+        "occupancy": {
+          "median": 0.46218882104274306,
+          "min": 0.45640074211502785,
+          "max": 0.49848024316109424
+        },
+        "p95MoveMs": {
+          "median": 430.0049999952316,
+          "min": 386.6850000619888,
+          "max": 511.78000009059906
+        }
+      },
+      "pairedGamesPerHourRatios": [
+        1.6147929500968226,
+        1.8625377747572063,
+        2.2744376399512602
+      ],
+      "pairedEvalsPerSecondRatios": [
+        2.103881182251272,
+        2.4266629200411667,
+        2.963318950959338
+      ],
+      "allowsN8": false
+    }
+  ],
+  "modelComparisons": [
+    {
+      "files": [
+        {
+          "file": "public/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
+          "sha256": "34ed77d4eaf9f628980cb40eb026666467fae982ae58592a71aed80e8e6b3ac6",
+          "bytes": 40491226
+        },
+        {
+          "file": "public/models/lc0/t1-256x10-distilled-swa-2432500.batch4.f16.onnx",
+          "sha256": "878ddb3f35de0cf96bd1ead1f5d74dca4e2a4005aa4d34ebee0a7d81ed79e511",
+          "bytes": 40491226
+        }
+      ],
+      "initializers": 375,
+      "sameInitializerNames": true,
+      "differentInitializers": [
+        "/const/pos_encoding_shape"
+      ],
+      "shapeValues": {
+        "/const/pos_encoding_shape": [
+          [
+            1,
+            64,
+            64
+          ],
+          [
+            4,
+            64,
+            64
+          ]
+        ]
+      },
+      "nodes": 552,
+      "identicalSerializedNodes": true
+    },
+    {
+      "files": [
+        {
+          "file": "public/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
+          "sha256": "34ed77d4eaf9f628980cb40eb026666467fae982ae58592a71aed80e8e6b3ac6",
+          "bytes": 40491226
+        },
+        {
+          "file": "public/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.onnx",
+          "sha256": "4a3d0b0ee3080c36d1f18c4a1acbdb0ef9751bb32fc33f28db032f4c230418eb",
+          "bytes": 40491226
+        }
+      ],
+      "initializers": 375,
+      "sameInitializerNames": true,
+      "differentInitializers": [
+        "/const/pos_encoding_shape"
+      ],
+      "shapeValues": {
+        "/const/pos_encoding_shape": [
+          [
+            1,
+            64,
+            64
+          ],
+          [
+            8,
+            64,
+            64
+          ]
+        ]
+      },
+      "nodes": 552,
+      "identicalSerializedNodes": true
+    }
+  ],
+  "memoryOnlyFollowup": {
+    "rawPath": "artifacts/arena-simul/n2-memory-pilot.json",
+    "rawSha256": "adff903a522f78d5ae820b0559b95e5bdef2d6ff8ce943dcaee2ec3d82b3a430",
+    "maxPlies": 2,
+    "measuredAt": "2026-11-08T05:57:49.954Z",
+    "memory": {
+      "bytes": 150533941,
+      "note": "Page + dedicated worker + WASM after trial, session still loaded; excludes GPU residency"
+    },
+    "modelUrl": "/models/lc0/t1-256x10-distilled-swa-2432500.batch4.f16.onnx",
+    "n": 2,
+    "pairs": 3,
+    "physical": 4,
+    "protocol": "arena-simul-1",
+    "purpose": "Memory-only follow-up; excluded from timing gate",
+    "visits": 8
+  },
+  "verification": {
+    "baseline": {
+      "passed": 1230,
+      "skipped": 3,
+      "failed": 0
+    },
+    "final": {
+      "passed": 1244,
+      "skipped": 3,
+      "failed": 0,
+      "command": "npm test -- --test-concurrency=4"
+    },
+    "autoreviewRounds": 7,
+    "acceptedFindings": 13,
+    "rejectedFindings": 0,
+    "finalReview": "clean"
+  }
+}
