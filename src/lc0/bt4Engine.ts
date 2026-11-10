@@ -1,4 +1,4 @@
-import { assetProbeRetryAllowed, probeAssetUrls } from './assetProbe.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 // Lc0 big-net (BT4-it332, t3-512 distill) browser integration.
 //
 // Big nets are large and attention-heavy, so they are handled with care:
@@ -220,18 +220,21 @@ export function bt4AssetStatusSync(): Bt4AssetStatus {
 export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?: () => void): Promise<Bt4AssetStatus> {
   const existingStatus = assetStatuses.get(config.modelUrl);
   if (existingStatus === 'present' || existingStatus === 'missing') return existingStatus;
+  const urls = [config.modelUrl];
   const existing = assetProbes.get(config.modelUrl);
-  if (existing) return existing;
+  if (existing) {
+    subscribeAssetProbeChange(urls, onStatus);
+    return existing;
+  }
   if (shouldSkipKnownUnhostedBigNetProbe(config)) {
     assetStatuses.set(config.modelUrl, 'missing');
-    onStatus?.();
+    notifyAssetProbeChange(urls, onStatus);
     return 'missing';
   }
-  if (!assetProbeRetryAllowed([config.modelUrl], onStatus)) return 'unknown';
-  const probe = probeAssetUrls([config.modelUrl]).then((status) => {
+  if (!assetProbeRetryAllowed(urls, onStatus)) return 'unknown';
+  const probe = probeAssetUrls(urls).then((status) => {
     assetStatuses.set(config.modelUrl, status);
     assetProbes.delete(config.modelUrl);
-    onStatus?.();
     return status;
   });
   assetProbes.set(config.modelUrl, probe);

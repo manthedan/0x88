@@ -1,4 +1,4 @@
-import { assetProbeRetryAllowed, probeAssetUrls } from './assetProbe.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 import { isLocalDevelopmentOrigin, resolveAssetOverride, resolvePublicAssetUrl } from './assetUrls.ts';
 import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
@@ -210,24 +210,22 @@ export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: (
   const key = assetKey(variant);
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
+  const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
   const existing = assetChecks.get(key);
-  if (existing)
-    return existing.then((status) => {
-      onChange?.();
-      return status;
-    });
+  if (existing) {
+    subscribeAssetProbeChange(urls, onChange);
+    return existing;
+  }
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
-    onChange?.();
+    notifyAssetProbeChange(urls, onChange);
     return Promise.resolve('missing');
   }
-  const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
   if (!assetProbeRetryAllowed(urls, onChange)) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
   const promise = probeAssetUrls(urls).then((status) => {
     assetStatuses.set(key, status);
     assetChecks.delete(key);
-    onChange?.();
     return status;
   });
   assetChecks.set(key, promise);

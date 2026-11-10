@@ -37,7 +37,8 @@ test('production probes deployed Viridithas relaxed asset', async () => {
   }
 });
 
-test('Viridithas in-flight asset checks notify callbacks attached by a remount', async () => {
+test('Viridithas in-flight asset checks notify callbacks attached by a remount', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
   const originalFetch = globalThis.fetch;
   let resolveFetch;
   globalThis.fetch = () =>
@@ -48,22 +49,20 @@ test('Viridithas in-flight asset checks notify callbacks attached by a remount',
   let firstNotifications = 0;
   let remountNotifications = 0;
   try {
-    let remount;
-    let remountedVariant;
     const first = checkViridithasVariantAsset(variant, () => {
       firstNotifications += 1;
-      if (firstNotifications === 1) {
-        remountedVariant = { ...variant, assetStatus: undefined };
-        remount = checkViridithasVariantAsset(remountedVariant, () => {
-          remountNotifications += 1;
-        });
-      }
+    });
+    const remountedVariant = { ...variant, assetStatus: undefined };
+    const remount = checkViridithasVariantAsset(remountedVariant, () => {
+      remountNotifications += 1;
     });
     resolveFetch({ ok: true });
     assert.equal(await first, 'ok');
     assert.equal(await remount, 'ok');
     assert.equal(viridithasVariantAssetStatus(remountedVariant), 'ok');
-    assert.equal(firstNotifications, 2);
+    assert.equal(firstNotifications, 0, 'completion notifications wait for the shared batch');
+    t.mock.timers.tick(0);
+    assert.equal(firstNotifications, 1);
     assert.equal(remountNotifications, 1);
   } finally {
     globalThis.fetch = originalFetch;

@@ -37,7 +37,8 @@ test('both Stormphrax SIMD tiers share one canonical preload .data', () => {
   assert.notEqual(STORMPHRAX_RELAXED_VARIANT.wasmUrl, STORMPHRAX_EMSCRIPTEN_VARIANT.wasmUrl);
 });
 
-test('Stormphrax in-flight asset checks notify callbacks attached by a remount', async () => {
+test('Stormphrax in-flight asset checks notify callbacks attached by a remount', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
   const originalFetch = globalThis.fetch;
   const resolvers = [];
   globalThis.fetch = () => new Promise((resolve) => resolvers.push(resolve));
@@ -51,19 +52,19 @@ test('Stormphrax in-flight asset checks notify callbacks attached by a remount',
   let firstNotifications = 0;
   let remountNotifications = 0;
   try {
-    let remount;
     const first = checkStormphraxVariantAsset(variant, () => {
       firstNotifications += 1;
-      if (firstNotifications === 1)
-        remount = checkStormphraxVariantAsset(variant, () => {
-          remountNotifications += 1;
-        });
     });
-    assert.equal(resolvers.length, 3, 're-entrant checking callback must reuse the registered probe');
+    const remount = checkStormphraxVariantAsset(variant, () => {
+      remountNotifications += 1;
+    });
+    assert.equal(resolvers.length, 3, 'a remount must reuse the registered probe');
     for (const resolve of resolvers) resolve({ ok: true });
     assert.equal(await first, 'present');
     assert.equal(await remount, 'present');
-    assert.equal(firstNotifications, 2);
+    assert.equal(firstNotifications, 0, 'completion notifications wait for the shared batch');
+    t.mock.timers.tick(0);
+    assert.equal(firstNotifications, 1);
     assert.equal(remountNotifications, 1);
   } finally {
     globalThis.fetch = originalFetch;

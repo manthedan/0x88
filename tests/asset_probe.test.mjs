@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { getEventListeners } from 'node:events';
 import test from 'node:test';
-import { assetProbeRetryAllowed, probeAssetUrls, subscribeAssetProbeRetry } from '../src/lc0/assetProbe.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange, subscribeAssetProbeRetry } from '../src/lc0/assetProbe.ts';
 import { berserkVariantAssetStatus, checkBerserkVariantAsset } from '../src/lc0/berserkVariants.ts';
 import { browserVariantOption } from '../src/lc0/browserVariantOption.ts';
 import { bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
@@ -146,11 +147,14 @@ for (const [name, check] of [
       t.mock.timers.tick(1);
       await check(variant, onChange);
       assert.equal(calls, firstCalls * 3);
+      await flush(t);
     });
   }
 }
 
-const flush = async () => {
+const flush = async (t) => {
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  t.mock.timers.tick(0);
   for (let i = 0; i < 40; i++) await Promise.resolve();
 };
 
@@ -186,25 +190,25 @@ for (const [name, check, read, ok] of [
         if (['unknown', 'checking'].includes(read(variant))) void check(variant, render);
       };
       render();
-      await flush();
+      await flush(t);
       const firstCalls = calls;
       const firstNotifications = notifications;
       assert.ok(firstCalls > 0);
       if (recover) status = 200;
       t.mock.timers.tick(999);
-      await flush();
+      await flush(t);
       assert.equal(calls, firstCalls);
       assert.equal(notifications, firstNotifications, 'silent during cooldown');
       t.mock.timers.tick(1);
-      await flush();
+      await flush(t);
       assert.equal(calls, firstCalls * 2, 'cooldown wakes the render without external activity');
       if (!recover) {
         const secondNotifications = notifications;
         t.mock.timers.tick(1_999);
-        await flush();
+        await flush(t);
         assert.equal(notifications, secondNotifications);
         t.mock.timers.tick(1);
-        await flush();
+        await flush(t);
         assert.equal(calls, firstCalls * 3);
       }
       assert.equal(read(variant), recover ? ok : 'missing');
@@ -215,7 +219,7 @@ for (const [name, check, read, ok] of [
       }
       const settledNotifications = notifications;
       t.mock.timers.tick(120_000);
-      await flush();
+      await flush(t);
       assert.equal(calls, firstCalls * (recover ? 2 : 3));
       assert.equal(notifications, settledNotifications, 'no retry or notification after settling');
     });
@@ -259,3 +263,197 @@ test('the shared helper keeps exhausted probes missing without more requests', a
   assert.equal(await probeAssetUrls(urls), 'missing');
   assert.equal(fetch.mock.callCount(), 3);
 });
+
+// Match Analysis/Arena: every callback is a fresh closure, and each render
+// checks all three variants, including probes that are already in flight.
+for (const [name, check, read, ok, headsPerVariant] of [
+  ['Berserk', checkBerserkVariantAsset, berserkVariantAssetStatus, 'present', 3],
+  ['PlentyChess', checkPlentyChessVariantAsset, plentyChessVariantAssetStatus, 'present', 3],
+  ['Reckless', checkRecklessVariantAsset, recklessVariantAssetStatus, 'present', 1],
+  ['Stormphrax', checkStormphraxVariantAsset, stormphraxVariantAssetStatus, 'present', 3],
+  ['Viridithas', checkViridithasVariantAsset, viridithasVariantAssetStatus, 'ok', 1],
+  ['BT4', checkBigNetAsset, bigNetAssetStatusSync, 'present', 1],
+]) {
+  for (const recoverOnThird of [false, true]) {
+    for (const extraRenders of [0, 1_000]) {
+      test(`${name} batches fresh render closures across three variants and ${recoverOnThird ? 'recovery' : 'three failures then server recovery'} (${extraRenders} unrelated renders)`, async (t) => {
+        t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+        const variants = Array.from({ length: 3 }, (_, i) => ({
+          key: 'custom',
+          jsUrl: `/${name}/fresh-${recoverOnThird}-${extraRenders}-${i}.js`,
+          wasmUrl: `/${name}/fresh-${recoverOnThird}-${extraRenders}-${i}.wasm`,
+          dataUrl: `/${name}/fresh-${recoverOnThird}-${extraRenders}-${i}.data`,
+          modelUrl: `/${name}/fresh-${recoverOnThird}-${extraRenders}-${i}.onnx`,
+        }));
+        let requests = 0;
+        let renders = 1;
+        let status = 503;
+        t.mock.method(globalThis, 'fetch', async (_url, options) => {
+          assert.equal(options.method, 'HEAD');
+          requests++;
+          return new Response(null, { status });
+        });
+        const render = () => {
+          for (const variant of variants) {
+            if (['unknown', 'checking'].includes(read(variant)))
+              void check(variant, () => {
+                renders++;
+                render();
+              });
+          }
+        };
+        const unrelatedRenders = () => {
+          for (let i = 0; i < extraRenders; i++) render();
+        };
+        const settle = async () => {
+          for (let i = 0; i < 4; i++) {
+            await flush(t);
+            t.mock.timers.tick(0);
+          }
+          await flush(t);
+        };
+        const counts = [];
+        render();
+        unrelatedRenders(); // In-flight subscribers are bounded too.
+        await settle();
+        counts.push(renders);
+        unrelatedRenders(); // Cooldown subscriptions cannot accumulate either.
+        t.mock.timers.tick(999);
+        await settle();
+        assert.equal(renders, counts[0], 'cooldown is silent despite unrelated renders');
+        assert.equal(requests, 3 * headsPerVariant);
+        t.mock.timers.tick(1);
+        await settle();
+        counts.push(renders);
+        assert.equal(requests, 6 * headsPerVariant);
+        unrelatedRenders();
+        if (recoverOnThird) status = 200;
+        t.mock.timers.tick(2_000);
+        await settle();
+        counts.push(renders);
+        status = 200;
+        t.mock.timers.tick(120_000);
+        await settle();
+        t.diagnostic(`renders=${counts.join(' → ')}; HEADs=${requests}`);
+        assert.deepEqual(variants.map(read), Array(3).fill(recoverOnThird ? ok : 'missing'));
+        assert.equal(requests, 9 * headsPerVariant, 'three attempts per variant, then no requests after settlement');
+        assert.ok(counts[0] <= 13, 'at most four callbacks per key in a completion batch, plus the initial render');
+        assert.ok(counts[1] <= 37, 'at most twelve cooldown and twelve completion callbacks per attempt');
+        assert.ok(counts[2] <= 61, 'three attempts have a fixed callback budget');
+        assert.deepEqual(counts, extraRenders ? [13, 37, 61] : [4, 25, 49]);
+        assert.equal(renders, counts[2], 'server recovery after exhaustion cannot restart the settled picker');
+      });
+    }
+  }
+}
+
+test('state changes and simultaneous cooldowns notify each distinct callback once', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const schedule = t.mock.method(globalThis, 'setTimeout');
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 503 }));
+  const groups = [0, 1, 2].map((i) => [`/coalesced-${i}.wasm`]);
+  let notifications = 0;
+  const listener = () => notifications++;
+  const controllers = groups.map(() => new AbortController());
+  for (const [i, urls] of groups.entries()) subscribeAssetProbeChange(urls, listener, controllers[i].signal);
+  await Promise.all(groups.map((urls) => probeAssetUrls(urls)));
+  assert.equal(notifications, 0, 'defer until every completion in this tick has updated its status');
+  assert.equal(schedule.mock.calls.filter(({ arguments: args }) => args[1] === 0).length, 1, 'one shared completion timer');
+  await flush(t);
+  assert.equal(notifications, 1, 'same callback across three keys runs once');
+  for (const controller of controllers) assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  const beforeRetry = schedule.mock.callCount();
+  for (const [i, urls] of groups.entries()) subscribeAssetProbeRetry(urls, listener, controllers[i].signal);
+  assert.equal(schedule.mock.callCount(), beforeRetry + 1, 'one shared cooldown timer');
+  t.mock.timers.tick(999);
+  assert.equal(notifications, 1);
+  t.mock.timers.tick(1);
+  assert.equal(notifications, 2, 'all equal cooldown deadlines form one round');
+  for (const controller of controllers) assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  const settledTimers = schedule.mock.callCount();
+  for (const urls of groups) notifyAssetProbeChange(urls);
+  assert.equal(schedule.mock.callCount(), settledTimers, 'listener sets are empty after one-shot delivery');
+});
+
+test('notification rounds detach every due key before a render can resubscribe', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const groups = [0, 1, 2].map((i) => [`/one-shot-${i}.wasm`]);
+  const controller = new AbortController();
+  let notifications = 0;
+  const listener = () => {
+    notifications++;
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0, 'all previous subscriptions are detached first');
+    if (notifications === 1) for (const urls of groups) subscribeAssetProbeChange(urls, listener, controller.signal);
+  };
+  for (const urls of groups) {
+    subscribeAssetProbeChange(urls, listener, controller.signal);
+    notifyAssetProbeChange(urls);
+  }
+  await flush(t);
+  assert.equal(notifications, 1, 'render subscriptions join the next notification round');
+  for (const urls of groups) notifyAssetProbeChange(urls);
+  await flush(t);
+  assert.equal(notifications, 2, 'the next change delivers exactly one new notification');
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  t.mock.timers.tick(120_000);
+  assert.equal(notifications, 2, 'one-shot delivery leaves no further notification');
+});
+
+test('fresh subscription replacement retains only the newest four callbacks per key', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const schedule = t.mock.method(globalThis, 'setTimeout');
+  const urls = ['/bounded-subscribers.wasm'];
+  const controllers = Array.from({ length: 100 }, () => new AbortController());
+  const notified = [];
+  for (const [i, controller] of controllers.entries()) subscribeAssetProbeChange(urls, () => notified.push(i), controller.signal);
+  assert.equal(
+    controllers.reduce((sum, controller) => sum + getEventListeners(controller.signal, 'abort').length, 0),
+    4,
+    'evicted closures and abort handlers are released',
+  );
+  notifyAssetProbeChange(urls);
+  await flush(t);
+  assert.deepEqual(notified, [96, 97, 98, 99]);
+  for (const controller of controllers) assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  const settledTimers = schedule.mock.callCount();
+  notifyAssetProbeChange(urls);
+  assert.equal(schedule.mock.callCount(), settledTimers, 'the listener set is empty after delivery');
+});
+
+for (const exit of ['unsubscribe', 'abort', 'never called again']) {
+  test(`${exit} leaves no timer or retained listener after probe settlement`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+    const schedule = t.mock.method(globalThis, 'setTimeout');
+    const cancel = t.mock.method(globalThis, 'clearTimeout');
+    const urls = [`/cleanup-${exit}.wasm`];
+    const controller = new AbortController();
+    let notifications = 0;
+    let finish;
+    t.mock.method(
+      globalThis,
+      'fetch',
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const unsubscribe = subscribeAssetProbeChange(urls, () => notifications++, controller.signal);
+    const probe = probeAssetUrls(urls);
+    if (exit === 'unsubscribe') unsubscribe();
+    if (exit === 'abort') controller.abort();
+    finish(new Response(null, { status: 503 }));
+    await probe;
+    await flush(t);
+    assert.equal(notifications, exit === 'never called again' ? 1 : 0);
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0, 'no retained abort handler or render closure');
+    assert.ok(
+      cancel.mock.calls.some(({ arguments: args }) => args[0] === schedule.mock.calls[0].result),
+      'the probe timeout was cleared',
+    );
+    const settledTimers = schedule.mock.callCount();
+    notifyAssetProbeChange(urls);
+    assert.equal(schedule.mock.callCount(), settledTimers, 'no listener set survives settlement');
+    t.mock.timers.tick(120_000);
+    assert.equal(notifications, exit === 'never called again' ? 1 : 0, 'no deferred retry remains');
+  });
+}

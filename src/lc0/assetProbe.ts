@@ -3,53 +3,107 @@ export type AssetProbeStatus = 'present' | 'missing' | 'unknown';
 type ProbeFailure = {
   attempts: number;
   retryAt: number;
-  timer?: ReturnType<typeof setTimeout>;
+};
+type NotificationRound = {
   listeners: Map<() => void, () => void>;
+  dueAt?: number;
 };
 const failures = new Map<string, ProbeFailure>();
+const subscribers = new Map<string, NotificationRound>();
 const maxAttempts = 3;
+// Fresh closures from repeated renders replace old subscriptions instead of
+// growing the next notification round. Allow several independent UI consumers.
+// N keys over K attempts notify at most 4*N*(2*K-1) times: one completion
+// per attempt and one cooldown expiry between attempts, regardless of renders.
+const maxSubscribersPerKey = 4;
+let notificationTimer: ReturnType<typeof setTimeout> | undefined;
+let notificationAt = Infinity;
 
-function clearRetry(failure: ProbeFailure): void {
-  clearTimeout(failure.timer);
-  failure.timer = undefined;
-  for (const unsubscribe of failure.listeners.values()) unsubscribe();
+function scheduleNotifications(): void {
+  let dueAt = Infinity;
+  for (const round of subscribers.values()) dueAt = Math.min(dueAt, round.dueAt ?? Infinity);
+  if (dueAt === notificationAt) return;
+  if (notificationTimer !== undefined) clearTimeout(notificationTimer);
+  notificationTimer = undefined;
+  notificationAt = dueAt;
+  if (dueAt === Infinity) return;
+  notificationTimer = setTimeout(
+    () => {
+      notificationTimer = undefined;
+      notificationAt = Infinity;
+      const listeners = new Set<() => void>();
+      // Detach ALL due rounds before calling any render. A re-subscription must
+      // belong to the next round, even when several cooldowns expire together.
+      const due = [...subscribers].filter(([, round]) => (round.dueAt ?? Infinity) <= Date.now());
+      for (const [key] of due) subscribers.delete(key);
+      for (const [, round] of due) {
+        for (const [listener, unsubscribe] of round.listeners) {
+          listeners.add(listener);
+          unsubscribe();
+        }
+      }
+      scheduleNotifications();
+      for (const listener of listeners) listener();
+    },
+    Math.max(0, dueAt - Date.now()),
+  );
+  (notificationTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+}
+
+/** One-shot subscription for the next state change. At most four callbacks per
+ * URL group are retained; the oldest is replaced when a caller renders again. */
+export function subscribeAssetProbeChange(urls: readonly string[], listener?: () => void, signal?: AbortSignal): () => void {
+  if (!listener || signal?.aborted) return () => {};
+  const key = JSON.stringify(urls);
+  let round = subscribers.get(key);
+  if (!round) {
+    round = { listeners: new Map() };
+    subscribers.set(key, round);
+  }
+  const listeners = round.listeners;
+  const existing = listeners.get(listener);
+  if (existing) return existing;
+  const unsubscribe = () => {
+    listeners.delete(listener);
+    signal?.removeEventListener('abort', unsubscribe);
+    if (!listeners.size && subscribers.get(key) === round) subscribers.delete(key);
+    scheduleNotifications();
+  };
+  listeners.set(listener, unsubscribe);
+  signal?.addEventListener('abort', unsubscribe, { once: true });
+  if (listeners.size > maxSubscribersPerKey) listeners.values().next().value?.();
+  return unsubscribe;
+}
+
+/** Batch all state changes in this tick, deduplicating callbacks across keys.
+ * Repeated notifications without a state change must not be scheduled by callers. */
+export function notifyAssetProbeChange(urls: readonly string[], listener?: () => void): void {
+  subscribeAssetProbeChange(urls, listener);
+  const round = subscribers.get(JSON.stringify(urls));
+  if (round) round.dueAt = Date.now();
+  scheduleNotifications();
 }
 
 /** One-shot cooldown notification. Unsubscribe (or abort) when the listener
- * goes away; without listeners no retry timer is retained. */
+ * goes away; without listeners no retry timer or callback is retained. */
 export function subscribeAssetProbeRetry(urls: readonly string[], listener: () => void, signal?: AbortSignal): () => void {
-  const failure = failures.get(JSON.stringify(urls));
+  const key = JSON.stringify(urls);
+  const failure = failures.get(key);
   if (!failure || failure.attempts >= maxAttempts || signal?.aborted) return () => {};
-  const existing = failure.listeners.get(listener);
-  if (existing) return existing;
-  const unsubscribe = () => {
-    failure.listeners.delete(listener);
-    signal?.removeEventListener('abort', unsubscribe);
-    if (!failure.listeners.size) {
-      clearTimeout(failure.timer);
-      failure.timer = undefined;
-    }
-  };
-  failure.listeners.set(listener, unsubscribe);
-  signal?.addEventListener('abort', unsubscribe, { once: true });
-  if (failure.timer === undefined) {
-    failure.timer = setTimeout(
-      () => {
-        const listeners = [...failure.listeners.keys()];
-        clearRetry(failure);
-        for (const notify of listeners) notify();
-      },
-      Math.max(0, failure.retryAt - Date.now()),
-    );
-    (failure.timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
-  }
+  const unsubscribe = subscribeAssetProbeChange(urls, listener, signal);
+  const round = subscribers.get(key);
+  if (round) round.dueAt = Math.min(round.dueAt ?? Infinity, failure.retryAt);
+  scheduleNotifications();
   return unsubscribe;
 }
 
 /** Completion callbacks may render and probe again. Remain silent during the
  * cooldown, then wake those renders once so recovery needs no unrelated UI event. */
 export function assetProbeRetryAllowed(urls: readonly string[], onRetry?: () => void): boolean {
-  if (Date.now() >= (failures.get(JSON.stringify(urls))?.retryAt ?? 0)) return true;
+  if (Date.now() >= (failures.get(JSON.stringify(urls))?.retryAt ?? 0)) {
+    subscribeAssetProbeChange(urls, onRetry);
+    return true;
+  }
   if (onRetry) subscribeAssetProbeRetry(urls, onRetry);
   return false;
 }
@@ -62,7 +116,10 @@ export async function probeAssetUrls(
   { timeoutMs = 8_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<AssetProbeStatus> {
   const key = JSON.stringify(urls);
-  if ((failures.get(key)?.attempts ?? 0) >= maxAttempts) return 'missing';
+  if ((failures.get(key)?.attempts ?? 0) >= maxAttempts) {
+    notifyAssetProbeChange(urls);
+    return 'missing';
+  }
   if (!assetProbeRetryAllowed(urls)) return 'unknown';
   const controller = new AbortController();
   let finish!: (status: AssetProbeStatus) => void;
@@ -98,19 +155,17 @@ export async function probeAssetUrls(
     if (status === 'unknown') {
       const previous = failures.get(key);
       const attempts = (previous?.attempts ?? 0) + 1;
-      if (previous) clearRetry(previous);
       if (attempts >= maxAttempts) {
-        failures.set(key, { attempts, retryAt: 0, listeners: new Map() });
+        failures.set(key, { attempts, retryAt: 0 });
         return 'missing';
       }
-      failures.set(key, { attempts, retryAt: Date.now() + 1_000 * 2 ** (attempts - 1), listeners: new Map() });
+      failures.set(key, { attempts, retryAt: Date.now() + 1_000 * 2 ** (attempts - 1) });
     } else {
-      const previous = failures.get(key);
-      if (previous) clearRetry(previous);
       failures.delete(key);
     }
     return status;
   } finally {
+    notifyAssetProbeChange(urls);
     clearTimeout(timer);
     signal?.removeEventListener('abort', abort);
   }

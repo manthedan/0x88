@@ -1,4 +1,4 @@
-import { assetProbeRetryAllowed, probeAssetUrls } from './assetProbe.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
 import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
@@ -116,31 +116,30 @@ export function viridithasVariantAssetStatus(variant: ViridithasVariant): Viridi
 
 export function checkViridithasVariantAsset(variant: ViridithasVariant, onChange?: () => void): Promise<ViridithasAssetStatus> {
   if (variant.assetStatus === 'ok' || variant.assetStatus === 'missing') return Promise.resolve(variant.assetStatus);
+  const urls = [variant.wasmUrl];
   const existing = assetChecks.get(variant.wasmUrl);
   if (existing) {
     variant.assetStatus = 'checking';
+    subscribeAssetProbeChange(urls, onChange);
     return existing.then((status) => {
       variant.assetStatus = status;
-      onChange?.();
       return status;
     });
   }
   if (shouldSkipKnownUnshippedProbe(variant)) {
     variant.assetStatus = 'missing';
-    onChange?.();
+    notifyAssetProbeChange(urls, onChange);
     return Promise.resolve(variant.assetStatus);
   }
-  if (!assetProbeRetryAllowed([variant.wasmUrl], onChange)) return Promise.resolve('unknown');
+  if (!assetProbeRetryAllowed(urls, onChange)) return Promise.resolve('unknown');
   variant.assetStatus = 'checking';
-  const promise = probeAssetUrls([variant.wasmUrl])
+  const promise = probeAssetUrls(urls)
     .then((status): ViridithasAssetStatus => (status === 'present' ? 'ok' : status))
     .then((status) => {
       variant.assetStatus = status;
       assetChecks.delete(variant.wasmUrl);
-      onChange?.();
       return status;
     });
   assetChecks.set(variant.wasmUrl, promise);
-  onChange?.();
   return promise;
 }

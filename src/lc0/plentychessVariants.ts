@@ -1,4 +1,4 @@
-import { assetProbeRetryAllowed, probeAssetUrls } from './assetProbe.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 import { isLocalDevelopmentOrigin, resolveAssetOverride } from './assetUrls.ts';
 import { engineArtifactPathname as assetPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
@@ -220,25 +220,23 @@ export function checkPlentyChessVariantAsset(variant: PlentyChessVariant, onChan
   const current = assetStatuses.get(key);
   if (current === 'present' || current === 'missing') return Promise.resolve(current);
   const existing = assetChecks.get(key);
-  if (existing)
-    return existing.then((status) => {
-      onChange?.();
-      return status;
-    });
+  const urls = assetUrls(variant);
+  if (existing) {
+    subscribeAssetProbeChange(urls, onChange);
+    return existing;
+  }
   if (shouldSkipKnownUnshippedProbe(variant)) {
     assetStatuses.set(key, 'missing');
-    onChange?.();
+    notifyAssetProbeChange(urls, onChange);
     return Promise.resolve('missing');
   }
-  if (!assetProbeRetryAllowed(assetUrls(variant), onChange)) return Promise.resolve('unknown');
+  if (!assetProbeRetryAllowed(urls, onChange)) return Promise.resolve('unknown');
   assetStatuses.set(key, 'checking');
-  const promise = probeAssetUrls(assetUrls(variant)).then((status) => {
+  const promise = probeAssetUrls(urls).then((status) => {
     assetStatuses.set(key, status);
     assetChecks.delete(key);
-    onChange?.();
     return status;
   });
   assetChecks.set(key, promise);
-  onChange?.();
   return promise;
 }
