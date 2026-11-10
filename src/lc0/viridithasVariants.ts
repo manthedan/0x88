@@ -1,3 +1,4 @@
+import { probeAssetUrls } from './assetProbe.ts';
 import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './recklessVariants.ts';
 
@@ -154,9 +155,8 @@ export function checkViridithasVariantAsset(variant: ViridithasVariant, onChange
     return Promise.resolve(variant.assetStatus);
   }
   variant.assetStatus = 'checking';
-  const promise = fetch(variant.wasmUrl, { method: 'HEAD' })
-    .then((response) => (response.ok ? 'ok' : ('missing' as ViridithasAssetStatus)))
-    .catch(() => 'missing' as ViridithasAssetStatus)
+  const promise = probeAssetUrls([variant.wasmUrl])
+    .then((status): ViridithasAssetStatus => (status === 'present' ? 'ok' : status))
     .then((status) => {
       variant.assetStatus = status;
       assetChecks.delete(variant.wasmUrl);

@@ -110,7 +110,7 @@ test('production skips known-unshipped Berserk asset probes', async () => {
   let calls = 0;
   globalThis.fetch = async () => {
     calls += 1;
-    return { ok: false };
+    return { ok: false, status: 404 };
   };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
@@ -178,7 +178,7 @@ test('Berserk asset checks use Emscripten sidecars or WASI+NNUE assets', async (
   const calls = [];
   globalThis.fetch = async (url, init) => {
     calls.push([String(url), init?.method, init?.cache]);
-    return { ok: !String(url).includes('missing') };
+    return { ok: !String(url).includes('missing'), status: String(url).includes('missing') ? 404 : 200 };
   };
   try {
     const present = { ...BERSERK_EMSCRIPTEN_VARIANT, jsUrl: '/ok/berserk.js', wasmUrl: '/ok/berserk.wasm', dataUrl: '/ok/berserk.data' };

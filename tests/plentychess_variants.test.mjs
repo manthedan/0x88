@@ -83,7 +83,7 @@ test('IPv6 loopback still probes local generated PlentyChess assets', async () =
   let calls = 0;
   globalThis.fetch = async () => {
     calls += 1;
-    return { ok: false };
+    return { ok: false, status: 404 };
   };
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
@@ -151,7 +151,7 @@ test('PlentyChess asset checks require JS, WASM, and data sidecars', async () =>
   const calls = [];
   globalThis.fetch = async (url, init) => {
     calls.push([String(url), init?.method, init?.cache]);
-    return { ok: !String(url).includes('missing') };
+    return { ok: !String(url).includes('missing'), status: String(url).includes('missing') ? 404 : 200 };
   };
   try {
     const present = { ...PLENTYCHESS_EMSCRIPTEN_VARIANT, jsUrl: '/ok/plenty.js', wasmUrl: '/ok/plenty.wasm', dataUrl: '/ok/plenty.data' };

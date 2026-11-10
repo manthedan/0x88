@@ -1,3 +1,4 @@
+import { probeAssetUrls } from './assetProbe.ts';
 import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -254,20 +255,12 @@ export function checkPlentyChessVariantAsset(variant: PlentyChessVariant, onChan
     return Promise.resolve('missing');
   }
   assetStatuses.set(key, 'checking');
-  const promise = Promise.all(
-    assetUrls(variant).map((url) =>
-      fetch(url, { method: 'HEAD', cache: 'no-store' })
-        .then((response) => response.ok)
-        .catch(() => false),
-    ),
-  )
-    .then((results) => (results.every(Boolean) ? 'present' : 'missing') as PlentyChessAssetStatus)
-    .then((status) => {
-      assetStatuses.set(key, status);
-      assetChecks.delete(key);
-      onChange?.();
-      return status;
-    });
+  const promise = probeAssetUrls(assetUrls(variant)).then((status) => {
+    assetStatuses.set(key, status);
+    assetChecks.delete(key);
+    onChange?.();
+    return status;
+  });
   assetChecks.set(key, promise);
   onChange?.();
   return promise;

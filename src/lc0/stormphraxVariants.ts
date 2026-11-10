@@ -1,3 +1,4 @@
+import { probeAssetUrls } from './assetProbe.ts';
 import { resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { supportsWasmRelaxedSimd, supportsWasmSimd } from './wasmFeatures.ts';
 
@@ -171,23 +172,12 @@ export function checkStormphraxVariantAsset(variant: StormphraxVariant, onChange
     return Promise.resolve('missing');
   }
   assetStatuses.set(key, 'checking');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
-  const promise = Promise.all(
-    assetUrls(variant).map((url) =>
-      fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal })
-        .then((response) => response.ok)
-        .catch(() => false),
-    ),
-  )
-    .then((results) => (results.every(Boolean) ? 'present' : 'missing') as StormphraxAssetStatus)
-    .then((status) => {
-      assetStatuses.set(key, status);
-      assetChecks.delete(key);
-      onChange?.();
-      return status;
-    })
-    .finally(() => clearTimeout(timeout));
+  const promise = probeAssetUrls(assetUrls(variant), { timeoutMs }).then((status) => {
+    assetStatuses.set(key, status);
+    assetChecks.delete(key);
+    onChange?.();
+    return status;
+  });
   assetChecks.set(key, promise);
   onChange?.();
   return promise;

@@ -1,3 +1,4 @@
+import { probeAssetUrls } from './assetProbe.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { engineArtifactPathname, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { DEFAULT_RECKLESS_WASM_URL } from './recklessEngine.ts';
@@ -235,20 +236,12 @@ export function checkRecklessVariantAsset(variant: RecklessVariant, onChange?: (
   }
   assetStatuses.set(key, 'checking');
   const urls = [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])];
-  const promise = Promise.all(
-    urls.map((url) =>
-      fetch(url, { method: 'HEAD', cache: 'no-store' })
-        .then((response) => response.ok)
-        .catch(() => false),
-    ),
-  )
-    .then((results) => (results.every(Boolean) ? 'present' : 'missing') as RecklessAssetStatus)
-    .then((status) => {
-      assetStatuses.set(key, status);
-      assetChecks.delete(key);
-      onChange?.();
-      return status;
-    });
+  const promise = probeAssetUrls(urls).then((status) => {
+    assetStatuses.set(key, status);
+    assetChecks.delete(key);
+    onChange?.();
+    return status;
+  });
   assetChecks.set(key, promise);
   return promise;
 }

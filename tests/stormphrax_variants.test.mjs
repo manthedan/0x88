@@ -70,7 +70,7 @@ test('Stormphrax in-flight asset checks notify callbacks attached by a remount',
   }
 });
 
-test('Stormphrax asset probes time out to the safe missing state', async () => {
+test('Stormphrax timed-out asset probes stay unknown and retryable', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (_url, init) =>
     new Promise((_resolve, reject) => {
@@ -84,7 +84,7 @@ test('Stormphrax asset probes time out to the safe missing state', async () => {
       wasmUrl: '/stormphrax/timeout-test.wasm',
       dataUrl: '/stormphrax/timeout-test.data',
     };
-    assert.equal(await checkStormphraxVariantAsset(variant, undefined, 5), 'missing');
+    assert.equal(await checkStormphraxVariantAsset(variant, undefined, 5), 'unknown');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -92,7 +92,7 @@ test('Stormphrax asset probes time out to the safe missing state', async () => {
 
 test('Stormphrax missing default relaxed assets fall back to baseline SIMD', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: false });
+  globalThis.fetch = async () => ({ ok: false, status: 404 });
   try {
     assert.equal(await resolveDefaultStormphraxVariantAssetFallback(STORMPHRAX_RELAXED_VARIANT, false), STORMPHRAX_EMSCRIPTEN_VARIANT);
     assert.equal(await resolveDefaultStormphraxVariantAssetFallback(STORMPHRAX_RELAXED_VARIANT, true), STORMPHRAX_RELAXED_VARIANT);
