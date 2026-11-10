@@ -104,6 +104,7 @@ test('black-to-move start positions number their first move and stop labels with
 
 test('escape lines do not split a collection into an extra game', () => {
   assert.equal(splitPgnGames('% exported by tool\n[Event "a"]\n\n1. e4 *\n\n% next\n[Event "b"]\n\n1. d4 *').length, 2);
+  assert.equal(splitPgnGames('[Event "a"]\n\n1. e4 [%clk 0:03:00] e5 *\n\n[Event "b"]\n\n1. d4 *').length, 2);
 });
 
 test('sanToMove accepts lenient real-world forms that identify exactly one legal move', () => {
@@ -243,7 +244,18 @@ test('PGN round-trips random variation trees (seeded property test)', () => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     return seed % n;
   };
-  const COMMENTS = ['plan', 'a (b) c', 'x ; y', '[%eval 0.31]', 'line\nbreak', '1. e4 is not a move here', '$1 ! ?', 'tab\tand  spaces'];
+  const COMMENTS = [
+    'plan',
+    '[Site "y"]',
+    '[FEN "8/8/8/8/8/8/8/K6k w - - 0 1"]',
+    'a (b) c',
+    'x ; y',
+    '[%eval 0.31]',
+    'line\nbreak',
+    '1. e4 is not a move here',
+    '$1 ! ?',
+    'tab\tand  spaces',
+  ];
   const STARTS = [START_FEN, 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3', '8/2P1k3/8/8/8/8/1p2K3/8 w - - 0 40'];
   for (let round = 0; round < 40; round++) {
     const tree = new GameTree(STARTS[round % STARTS.length]);
@@ -269,4 +281,42 @@ test('PGN round-trips random variation trees (seeded property test)', () => {
     assert.equal(reparsed.tree.root.comment, tree.root.comment);
     assert.equal(serializeMovetext(reparsed.tree), serializeMovetext(tree));
   }
+});
+
+test('tag pairs are read only from the header, never from comments or later games', () => {
+  const quoted = parsePgnGame('[White "O\\"Neil"]\n[Black "x"]\n\n1. e4 { see [Site "y"] } e5 *');
+  assert.deepEqual(quoted.tags, { White: 'O"Neil', Black: 'x' });
+  assert.equal(quoted.tree.root.children[0].comment, 'see [Site "y"]');
+  assert.deepEqual(mainline(quoted), ['e4', 'e5']);
+
+  const fen = parsePgnGame('1. e4 {[SetUp "1"] [FEN "4k3/8/8/8/8/8/8/4K3 w - - 0 1"]} e5 *');
+  assert.deepEqual(fen.tags, {});
+  assert.equal(fen.tree.root.fen, START_FEN);
+  assert.deepEqual(mainline(fen), ['e4', 'e5']);
+
+  const alice = '[White "Alice"]\n[Black "Bob"]\n[Result "1-0"]\n\n1. e4 e5 2. Nf3 Nc6 1-0';
+  const carol = '[White "Carol"]\n[Black "Dave"]\n[Result "0-1"]\n\n1. d4 d5 2. c4 e6 3. Nc3 Nf6 0-1';
+  const glued = parsePgnGame(`${alice}\n\n${carol}`);
+  assert.deepEqual(glued.tags, { White: 'Alice', Black: 'Bob', Result: '1-0' });
+  assert.equal(glued.result, '1-0');
+  assert.deepEqual(mainline(glued), ['e4', 'e5', 'Nf3', 'Nc6']);
+  assert.equal(glued.warnings[0].reason, 'tag-pair');
+});
+
+test('the header tolerates escape lines, comments and a malformed quote before the movetext', () => {
+  const game = parsePgnGame('% exported\n; note\n{intro}\n[Event "Rated "Blitz" game"]\n[White  "A"] [Black "B"]\n\n1. e4 [%clk 0:03:00] e5 *');
+  assert.deepEqual(game.tags, { Event: 'Rated "Blitz" game', White: 'A', Black: 'B' });
+  assert.equal(game.tree.root.comment, 'intro');
+  assert.deepEqual(mainline(game), ['e4', 'e5']);
+  assert.deepEqual(game.warnings, []);
+});
+
+test('a tag pair inside the movetext stops a tolerant line and fails a strict parse', () => {
+  const pgn = '[Event "a"]\n\n1. e4 (1. d4 [Event "b"] d5) e5 *';
+  const game = parsePgnGame(pgn);
+  assert.equal(game.tags.Event, 'a');
+  assert.deepEqual(mainline(game), ['e4', 'e5']);
+  assert.equal(game.warnings[0].reason, 'tag-pair');
+  assert.equal(game.warnings[0].variation, true);
+  assert.throws(() => parsePgnGame(pgn, { strict: true }), /tag pair/i);
 });

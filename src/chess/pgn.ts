@@ -3,7 +3,7 @@ import { type BoardState, type PieceRole, parseFen, START_FEN, squareName } from
 import { type Move } from './moveCodec.ts';
 import { legalMoves } from './movegen.ts';
 
-export type PgnWarningReason = 'invalid-move' | 'ambiguous-move' | 'null-move' | 'after-result';
+export type PgnWarningReason = 'invalid-move' | 'ambiguous-move' | 'null-move' | 'after-result' | 'tag-pair';
 
 /** Where tolerant parsing stopped a line. Strict parsing throws instead. */
 export interface PgnWarning {
@@ -108,7 +108,8 @@ export function splitPgnGames(text: string): string[] {
     }
     // A top-level result terminates a game even when the next game has no tags.
     // Leave trailing comments with the preceding game rather than making empty games.
-    if (!depth && (ended || (ch === '[' && sawMovetext))) finish(i);
+    // A `[%clk ...]` command outside a comment is not the next game's tag section.
+    if (!depth && (ended || (ch === '[' && text[i + 1] !== '%' && sawMovetext))) finish(i);
     if (ch === '[') {
       i++;
       let quoted = false;
@@ -150,15 +151,51 @@ export function splitPgnGames(text: string): string[] {
   return games;
 }
 
-function parseTags(text: string): Record<string, string> {
+const TAG_PAIR = /\[\s*(\w+)\s+"((?:\\.|[^"\\])*)"\s*\]/y;
+// Some sites write unescaped quotes inside a value; accept a whole `[Name "..."]` line.
+const LOOSE_TAG_LINE = /\[\s*(\w+)\s+"(.*)"\s*\][ \t]*(?=\n|$)/y;
+
+/**
+ * Read tag pairs only from the header that precedes the movetext, so a `[Site "y"]`
+ * or `[FEN "..."]` quoted in a comment, or a following game's tags, cannot change this
+ * game. Escape lines and `;` comments are skipped; `{...}` comments are kept for the movetext.
+ */
+function parseHeader(text: string): { tags: Record<string, string>; movetext: string } {
   const tags: Record<string, string> = {};
-  const re = /\[(\w+)\s+"((?:\\.|[^"\\])*)"\]/g;
-  let match = re.exec(text);
-  while (match) {
+  const comments: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (ch === ';' || isEscapeLine(text, i)) {
+      const end = text.indexOf('\n', i);
+      i = end === -1 ? text.length : end + 1;
+      continue;
+    }
+    if (ch === '{') {
+      const end = text.indexOf('}', i);
+      if (end === -1) break;
+      comments.push(text.slice(i, end + 1));
+      i = end + 1;
+      continue;
+    }
+    if (ch !== '[') break;
+    let match: RegExpExecArray | null = null;
+    for (const pattern of [TAG_PAIR, LOOSE_TAG_LINE]) {
+      pattern.lastIndex = i;
+      match = pattern.exec(text);
+      if (match) {
+        i = pattern.lastIndex;
+        break;
+      }
+    }
+    if (!match) break;
     tags[match[1]] = match[2].replace(/\\(["\\])/g, '$1');
-    match = re.exec(text);
   }
-  return tags;
+  return { tags, movetext: [...comments, text.slice(i)].join(' ') };
 }
 
 type Token =
@@ -167,6 +204,7 @@ type Token =
   | { type: 'close' }
   | { type: 'comment'; value: string }
   | { type: 'nag'; value: string }
+  | { type: 'tag'; value: string }
   | { type: 'result'; value: string };
 
 const RESULTS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
@@ -253,6 +291,20 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
       i = j;
       continue;
     }
+    // A tag pair after the header (usually the next game), or a stray `[%clk ...]` command.
+    if (ch === '[' && /^\[(?:\s*\w+\s+"|%)/.test(movetext.slice(i, i + 64))) {
+      let j = i + 1;
+      let quoted = false;
+      while (j < n) {
+        const next = movetext[j++];
+        if (next === '\\' && quoted) j++;
+        else if (next === '"') quoted = !quoted;
+        else if (next === ']' && !quoted) break;
+      }
+      if (movetext[i + 1] !== '%') tokens.push({ type: 'tag', value: movetext.slice(i, j) });
+      i = j;
+      continue;
+    }
     // A whitespace/paren/comment-delimited word: move number, SAN, or result.
     let j = i;
     while (j < n && !/[\s(){};$]/.test(movetext[j])) j++;
@@ -284,11 +336,9 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
 /** Parse a single game's PGN text into a variation tree. */
 export function parsePgnGame(text: string, options: { strict?: boolean; mainlineOnly?: boolean } = {}): PgnGame {
   text = text.replace(/\r\n?/g, '\n');
-  const tags = parseTags(text);
+  const { tags, movetext } = parseHeader(text);
   const startFen = tags.FEN || START_FEN;
   const tree = new GameTree(startFen);
-  // Movetext is everything after the last tag line.
-  const movetext = text.replace(/\[(\w+)\s+"((?:\\.|[^"\\])*)"\]\s*/g, '');
   const tokens = tokenizeMovetext(movetext, options.strict);
 
   let last: GameNode = tree.root;
@@ -340,6 +390,11 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       }
       continue;
     }
+    if (token.type === 'tag') {
+      if (options.strict) throw new Error(`PGN tag pair inside the movetext: ${token.value}`);
+      stop(token.value, 'tag-pair');
+      continue;
+    }
     if (token.type === 'nag') {
       const nag = Number(token.value.slice(1));
       if (last !== tree.root && token.value.length > 1 && nag <= 255 && !last.nags?.includes(nag)) last.nags = [...(last.nags ?? []), nag];
@@ -375,6 +430,7 @@ const WARNING_TEXT: Record<PgnWarningReason, string> = {
   'ambiguous-move': 'more than one legal move matches',
   'null-move': 'null moves are not supported',
   'after-result': 'moves after the game result',
+  'tag-pair': 'a tag pair inside the movetext, probably another game',
 };
 
 /** One-line explanation of where and why a tolerant parse stopped a line. */
