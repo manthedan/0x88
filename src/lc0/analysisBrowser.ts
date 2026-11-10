@@ -410,6 +410,7 @@ let tree = new GameTree(START_FEN);
 let workspaceHeaders: Record<string, string> = {};
 let workspaceResult = '*';
 let workspaceAutosave: ReturnType<typeof createWorkspaceAutosave> | null = null;
+let completeAnalysisHandoff: (() => void) | undefined;
 
 function saveAnalysisWorkspace(): void {
   try {
@@ -433,7 +434,10 @@ function clearAnalysisWorkspace(): void {
 }
 
 function restoreAnalysisWorkspace(): void {
-  const handoffPgn = takeAnalysisHandoff();
+  let consumeHandoff: (() => void) | undefined;
+  const handoffPgn = takeAnalysisHandoff(Date.now(), (consume) => {
+    consumeHandoff = consume;
+  });
   let linkedInputError = '';
   el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
   if (hasExplicitWorkspaceInput(location.search) || handoffPgn) {
@@ -457,6 +461,7 @@ function restoreAnalysisWorkspace(): void {
         reviewMetadata.set(tree, { tags: parsed.tags, result: parsed.result, signature: reviewSignature() });
         if (parsed.warnings.length) renderPgnImportNotice(describePgnWarning(parsed.warnings[0]));
       }
+      if (!params.has('fen') && !params.has('pgn')) completeAnalysisHandoff = consumeHandoff;
       el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
       saveAnalysisWorkspace();
       // A quota failure or oversized analysis must remain reloadable from the link.
@@ -6228,6 +6233,7 @@ export function mountAnalysisBrowser(): () => void {
   }
   lastAnalysisMountHref = href;
   resetAnalysisPageState();
+  completeAnalysisHandoff = undefined;
   workspaceAutosave = createWorkspaceAutosave(
     'analysis',
     undefined,
@@ -6240,6 +6246,10 @@ export function mountAnalysisBrowser(): () => void {
     },
     () => {
       el('autosaveNotice').textContent = '';
+    },
+    () => {
+      completeAnalysisHandoff?.();
+      completeAnalysisHandoff = undefined;
     },
   );
   analysisWorkerProgressMessages = 0;

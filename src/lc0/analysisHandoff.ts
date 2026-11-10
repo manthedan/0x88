@@ -90,17 +90,27 @@ export function takePlayHandoff(now = Date.now(), defer?: (consume: () => void) 
   }
 }
 
-/** Returns the pending PGN (and clears it), or null when none is fresh. */
-export function takeAnalysisHandoff(now = Date.now()): string | null {
+/** Returns a fresh PGN; callers can defer acknowledgement until their workspace is saved. */
+export function takeAnalysisHandoff(now = Date.now(), defer?: (consume: () => void) => void): string | null {
   const storage = handoffStorage();
   if (!storage) return null;
   try {
     const raw = storage.getItem(HANDOFF_KEY);
     if (!raw) return null;
-    storage.removeItem(HANDOFF_KEY);
-    const parsed = JSON.parse(raw) as { pgn?: unknown; at?: unknown };
-    if (typeof parsed.pgn !== 'string' || typeof parsed.at !== 'number') return null;
-    if (now - parsed.at > HANDOFF_TTL_MS || now < parsed.at - 60_000) return null;
+    const consume = acknowledgeHandoff(storage, HANDOFF_KEY, raw);
+    let parsed: { pgn?: unknown; at?: unknown };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      consume();
+      return null;
+    }
+    if (!parsed || typeof parsed.pgn !== 'string' || typeof parsed.at !== 'number' || now - parsed.at > HANDOFF_TTL_MS || now < parsed.at - 60_000) {
+      consume();
+      return null;
+    }
+    if (defer) defer(consume);
+    else consume();
     return parsed.pgn;
   } catch {
     return null;

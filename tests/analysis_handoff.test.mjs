@@ -140,3 +140,51 @@ test('Play handoff is retained until its replacement workspace has been saved', 
     else delete globalThis.localStorage;
   }
 });
+
+test('Analysis handoff survives failed saving and acknowledges only its own transfer', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) };
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  let consume;
+  try {
+    writeAnalysisHandoff('1. e4 *', now);
+    const raw = values.get('0x88-analysis-handoff-pgn-v1');
+    assert.equal(
+      takeAnalysisHandoff(now, (ready) => {
+        consume = ready;
+      }),
+      '1. e4 *',
+    );
+    assert.equal(values.get('0x88-analysis-handoff-pgn-v1'), raw, 'Reading a linked PGN must preserve it before a durable save');
+    const saver = createWorkspaceAutosave(
+      'analysis',
+      {
+        ...storage,
+        setItem() {
+          throw Error('quota');
+        },
+      },
+      400,
+      undefined,
+      undefined,
+      () => consume(),
+    );
+    saver.schedule({ tree: { startFen: START_FEN, nodes: [], current: 0 }, headers: {}, result: '*' });
+    saver.flush();
+    assert.equal(values.get('0x88-analysis-handoff-pgn-v1'), raw);
+    writeAnalysisHandoff('1. d4 *', now);
+    consume();
+    assert.equal(takeAnalysisHandoff(now), '1. d4 *', 'Late acknowledgement cannot remove a newer PGN');
+    writeAnalysisHandoff('1. e4 *', now);
+    takeAnalysisHandoff(now, (ready) => {
+      consume = ready;
+    });
+    consume();
+    assert.equal(takeAnalysisHandoff(now), null);
+    saver.clear();
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else delete globalThis.localStorage;
+  }
+});
