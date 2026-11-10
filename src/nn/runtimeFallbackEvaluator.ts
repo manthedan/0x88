@@ -25,11 +25,18 @@ export class RuntimeFallbackEvaluator implements Evaluator {
   private readonly primary: Evaluator;
   private readonly createFallback: () => Promise<Evaluator>;
   private readonly auditBase: BrowserRuntimeAuditDetail;
+  private readonly fallbackRuntime: 'tvmjs-webgpu-fallback-ort' | 'custom-webgpu-fallback-ort';
 
-  constructor(primary: Evaluator, createFallback: () => Promise<Evaluator>, auditBase: BrowserRuntimeAuditDetail) {
+  constructor(
+    primary: Evaluator,
+    createFallback: () => Promise<Evaluator>,
+    auditBase: BrowserRuntimeAuditDetail,
+    fallbackRuntime: 'tvmjs-webgpu-fallback-ort' | 'custom-webgpu-fallback-ort' = 'tvmjs-webgpu-fallback-ort',
+  ) {
     this.primary = primary;
     this.createFallback = createFallback;
     this.auditBase = auditBase;
+    this.fallbackRuntime = fallbackRuntime;
   }
 
   private async fallback(error: unknown): Promise<Evaluator> {
@@ -38,11 +45,12 @@ export class RuntimeFallbackEvaluator implements Evaluator {
     if (!this.primaryFailed) {
       this.primaryFailed = true;
       const fallbackReason = error instanceof Error ? error.message : String(error);
-      console.warn('TVMJS WebGPU runtime failed; switching Centipawn to ORT.', { fallbackReason });
+      const primaryLabel = this.fallbackRuntime === 'custom-webgpu-fallback-ort' ? 'Custom WebGPU' : 'TVMJS WebGPU';
+      console.warn(`${primaryLabel} runtime failed; switching Centipawn to ORT.`, { fallbackReason });
       destroyEvaluator(this.primary);
       publishBrowserRuntimeAudit({
         ...this.auditBase,
-        resolvedRuntime: 'tvmjs-webgpu-fallback-ort',
+        resolvedRuntime: this.fallbackRuntime,
         fallbackReason,
       });
     }
