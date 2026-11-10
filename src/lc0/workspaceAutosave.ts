@@ -19,7 +19,7 @@ export interface WorkspaceStorage {
 /** Flat preorder records avoid circular parents and recursive JSON limits. FEN/SAN are rebuilt. */
 export interface TreeSnapshot {
   startFen: string;
-  nodes: Array<{ parent: number; uci: string; comment?: string }>;
+  nodes: Array<{ parent: number; uci: string; comment?: string; beforeComment?: string; nags?: number[] }>;
   rootComment?: string;
   current: number;
 }
@@ -70,7 +70,13 @@ export function serializeTree(tree: GameTree): TreeSnapshot {
     const parent = indices.get(node.parent);
     if (parent === undefined) throw new Error('Missing parent');
     indices.set(node, nodes.length + 1);
-    nodes.push({ parent, uci: moveToUci(node.move), ...(node.comment !== undefined ? { comment: node.comment } : {}) });
+    nodes.push({
+      parent,
+      uci: moveToUci(node.move),
+      ...(node.comment !== undefined ? { comment: node.comment } : {}),
+      ...(node.beforeComment !== undefined ? { beforeComment: node.beforeComment } : {}),
+      ...(node.nags !== undefined ? { nags: [...node.nags] } : {}),
+    });
     pending.push(...[...node.children].reverse());
   }
   const current = indices.get(tree.current);
@@ -92,6 +98,11 @@ export function restoreTree(value: unknown): GameTree {
     const node = tree.addUci(text(record.uci, 5));
     if (!node || parent.children.length === childCount) throw new Error('Illegal or duplicate move');
     if (record.comment !== undefined) node.comment = text(record.comment);
+    if (record.beforeComment !== undefined) node.beforeComment = text(record.beforeComment);
+    if (record.nags !== undefined) {
+      if (!Array.isArray(record.nags) || record.nags.length > 256) throw new Error('Invalid NAGs');
+      node.nags = record.nags.map((nag) => index(nag, 255));
+    }
     nodes.push(node);
   }
   tree.goTo(nodes[index(raw.current, nodes.length - 1)]);

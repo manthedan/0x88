@@ -92,6 +92,10 @@ test('malformed comment braces and variations reject instead of hanging or trunc
   await assert.rejects(importLocalPgn('1. e4 (1. d4 *'), /Unclosed PGN variation/);
 });
 
+test('local import rejects an unterminated bracket command instead of indexing a truncated game', async () => {
+  await assert.rejects(importLocalPgn('1. e4 [%clk 0:03:00 e5 2. Nf3 Nc6 1-0'), /Unclosed PGN bracket command/);
+});
+
 test('repeated-move RAVs cannot replace or extend the literal mainline', async () => {
   const batch = await importLocalPgn('[Result "*"]\n1. e4 (1. e4 c5) e5 *\n\n[Result "*"]\n1. e4 (1. e4 c5) *');
   const afterE4 = batch.games[0].tree.root.children[0].fen;

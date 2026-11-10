@@ -3,7 +3,18 @@ import { type BoardState, type PieceRole, parseFen, START_FEN, squareName } from
 import { type Move } from './moveCodec.ts';
 import { legalMoves } from './movegen.ts';
 
-export type PgnWarningReason = 'invalid-move' | 'ambiguous-move' | 'null-move' | 'after-result' | 'tag-pair';
+export type PgnWarningReason =
+  | 'invalid-move'
+  | 'ambiguous-move'
+  | 'null-move'
+  | 'after-result'
+  | 'tag-pair'
+  | 'unclosed-command'
+  | 'unmatched-comment'
+  | 'variation-depth';
+
+// Bound recursive export and hostile imports consistently, well below the JS stack limit.
+const MAX_VARIATION_DEPTH = 128;
 
 /** Where tolerant parsing stopped a line. Strict parsing throws instead. */
 export interface PgnWarning {
@@ -207,6 +218,7 @@ type Token =
   | { type: 'comment'; value: string }
   | { type: 'nag'; value: string }
   | { type: 'tag'; value: string }
+  | { type: 'error'; value: string; reason: 'unclosed-command' | 'unmatched-comment' }
   | { type: 'result'; value: string };
 
 const RESULTS = new Set(['1-0', '0-1', '1/2-1/2', '*']);
@@ -272,7 +284,12 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
       i = stop + 1;
       continue;
     }
-    if (ch === '}') throw new Error('Unmatched closing PGN comment brace');
+    if (ch === '}') {
+      if (strict) throw new Error('Unmatched closing PGN comment brace');
+      tokens.push({ type: 'error', value: ch, reason: 'unmatched-comment' });
+      i++;
+      continue;
+    }
     if (ch === '(') {
       tokens.push({ type: 'open' });
       i++;
@@ -299,19 +316,28 @@ function tokenizeMovetext(movetext: string, strict = false): Token[] {
     if (ch === '[' && /^\[(?:\s*\w+\s+"|%)/.test(movetext.slice(i, i + 64))) {
       let j = i + 1;
       let quoted = false;
+      let closed = false;
       while (j < n) {
         const next = movetext[j++];
         if (next === '\\' && quoted) j++;
         else if (next === '"') quoted = !quoted;
-        else if (next === ']' && !quoted) break;
+        else if (next === ']' && !quoted) {
+          closed = true;
+          break;
+        }
+      }
+      if (!closed) {
+        if (strict) throw new Error('Unclosed PGN bracket command');
+        tokens.push({ type: 'error', value: movetext.slice(i), reason: 'unclosed-command' });
+        break;
       }
       if (movetext[i + 1] !== '%') tokens.push({ type: 'tag', value: movetext.slice(i, j) });
       i = j;
       continue;
     }
     // A whitespace/paren/comment-delimited word: move number, SAN, or result.
-    let j = i;
-    while (j < n && !/[\s(){};$]/.test(movetext[j])) j++;
+    let j = i + 1; // Consume at least one character, including an unrecognised opening bracket.
+    while (j < n && !/[\s(){};$\[]/.test(movetext[j])) j++;
     let word = movetext.slice(i, j);
     i = j;
     if (RESULTS.has(word)) {
@@ -347,7 +373,7 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
   const tokens = tokenizeMovetext(movetext, options.strict);
 
   let last: GameNode = tree.root;
-  const stack: GameNode[] = [];
+  const stack: Array<{ resume: GameNode; beforeMove: boolean; beforeComment?: string }> = [];
   let result = tags.Result || '*';
   let hasResult = RESULTS.has(tags.Result);
   const warnings: PgnWarning[] = [];
@@ -369,24 +395,34 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       else if (token.type === 'close' && stoppedNesting) stoppedNesting--;
       else if (token.type === 'close' && stoppedAt > 0) {
         stoppedAt = -1;
-        last = stack.pop() ?? tree.root;
+        last = stack.pop()?.resume ?? tree.root;
       }
       continue;
     }
     if (token.type === 'open') {
-      stack.push(last);
+      if (stack.length >= MAX_VARIATION_DEPTH) {
+        if (options.strict) throw new Error(`PGN variation depth exceeds ${MAX_VARIATION_DEPTH}`);
+        stop('(', 'variation-depth');
+        stoppedNesting = 1;
+        continue;
+      }
+      stack.push({ resume: last, beforeMove: true });
       if (!options.mainlineOnly) last = last.parent ?? tree.root;
       continue;
     }
     if (token.type === 'close') {
       if (options.strict && !stack.length) throw new Error('Unmatched closing PGN variation');
       // A stray `)` must not restart the line from the root position.
-      last = stack.pop() ?? last;
+      last = stack.pop()?.resume ?? last;
       continue;
     }
     // Aggregation must use the literal mainline, not child insertion order when
     // a RAV shares moves with its parent line. The authoritative PGN retains RAVs.
     if (options.mainlineOnly && stack.length) continue;
+    if (token.type === 'error') {
+      stop(token.value, token.reason);
+      continue;
+    }
     if (token.type === 'result') {
       if (!stack.length) {
         result = token.value;
@@ -406,8 +442,13 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       continue;
     }
     if (token.type === 'comment') {
-      // A comment before the first move belongs to the root (the game as a whole).
-      last.comment = last.comment ? `${last.comment} ${token.value}` : token.value;
+      const variation = stack.at(-1);
+      if (variation?.beforeMove) {
+        variation.beforeComment = variation.beforeComment ? `${variation.beforeComment} ${token.value}` : token.value;
+      } else {
+        // Only top-level pre-move comments belong to the game introduction.
+        last.comment = last.comment ? `${last.comment} ${token.value}` : token.value;
+      }
       continue;
     }
     // move
@@ -424,6 +465,11 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       continue;
     }
     last = tree.addMove(resolved.move);
+    const variation = stack.at(-1);
+    if (variation?.beforeMove) {
+      if (variation.beforeComment) last.beforeComment = last.beforeComment ? `${last.beforeComment} ${variation.beforeComment}` : variation.beforeComment;
+      variation.beforeMove = false;
+    }
   }
   if (options.strict && stack.length) throw new Error('Unclosed PGN variation');
   tree.current = tree.root;
@@ -436,6 +482,9 @@ const WARNING_TEXT: Record<PgnWarningReason, string> = {
   'null-move': 'null moves are not supported',
   'after-result': 'moves after the game result',
   'tag-pair': 'a tag pair inside the movetext, probably another game',
+  'unclosed-command': 'unclosed bracket command',
+  'unmatched-comment': 'unmatched closing comment brace',
+  'variation-depth': `variation depth exceeds ${MAX_VARIATION_DEPTH}`,
 };
 
 /** One-line explanation of where and why a tolerant parse stopped a line. */
@@ -463,16 +512,23 @@ export function parsePgnGames(text: string): PgnGame[] {
   return splitPgnGames(text).map((text) => parsePgnGame(text));
 }
 
+// PGN has no escape for a closing comment brace; keep the text readable and reparsable.
+function serializeComment(comment: string): string {
+  return `{${comment.replace(/}/g, ']')}}`;
+}
+
 function serializeNode(node: GameNode, withNumber: boolean): string {
   const board = parseFen(node.parent!.fen);
   const number = board.turn === 'w' ? `${board.fullmove}. ` : withNumber ? `${board.fullmove}... ` : '';
   const nags = node.nags?.length ? ` ${node.nags.map((nag) => `$${nag}`).join(' ')}` : '';
-  const comment = node.comment ? ` {${node.comment}}` : '';
-  return `${number}${node.san}${nags}${comment}`;
+  const comment = node.comment ? ` ${serializeComment(node.comment)}` : '';
+  const beforeComment = node.beforeComment ? `${serializeComment(node.beforeComment)} ` : '';
+  return `${beforeComment}${number}${node.san}${nags}${comment}`;
 }
 
 /** Tokens for the line continuing from `from`: its mainline, with each variation nested where it branches. */
-function serializeLine(from: GameNode, forceNumber: boolean): string[] {
+function serializeLine(from: GameNode, forceNumber: boolean, depth = 0): string[] {
+  if (depth > MAX_VARIATION_DEPTH) throw new Error(`PGN variation depth exceeds ${MAX_VARIATION_DEPTH}`);
   const out: string[] = [];
   let node = from;
   // A black move number is re-printed at the start of a line and after a comment or a variation.
@@ -481,7 +537,7 @@ function serializeLine(from: GameNode, forceNumber: boolean): string[] {
     const [main, ...variations] = node.children;
     out.push(serializeNode(main, force));
     for (const variation of variations) {
-      out.push(`(${[serializeNode(variation, true), ...serializeLine(variation, !!variation.comment)].join(' ')})`);
+      out.push(`(${[serializeNode(variation, true), ...serializeLine(variation, !!variation.comment, depth + 1)].join(' ')})`);
     }
     force = variations.length > 0 || !!main.comment;
     node = main;
@@ -491,7 +547,7 @@ function serializeLine(from: GameNode, forceNumber: boolean): string[] {
 
 /** Serialize a variation tree to PGN movetext: the pre-game comment, then every line recursively. */
 export function serializeMovetext(tree: GameTree): string {
-  const intro = tree.root.comment ? [`{${tree.root.comment}}`] : [];
+  const intro = tree.root.comment ? [serializeComment(tree.root.comment)] : [];
   return [...intro, ...serializeLine(tree.root, true)].join(' ');
 }
 

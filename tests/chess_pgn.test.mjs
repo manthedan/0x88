@@ -207,6 +207,7 @@ test('sanToMove resolves every legal move from its canonical SAN in a sweep of r
 
 const shape = (node) => ({
   san: node.san,
+  ...(node.beforeComment ? { beforeComment: node.beforeComment } : {}),
   ...(node.comment ? { comment: node.comment } : {}),
   ...(node.nags?.length ? { nags: node.nags } : {}),
   children: node.children.map(shape),
@@ -325,4 +326,121 @@ test('a tag pair inside the movetext stops a tolerant line and fails a strict pa
   assert.equal(game.warnings[0].reason, 'tag-pair');
   assert.equal(game.warnings[0].variation, true);
   assert.throws(() => parsePgnGame(pgn, { strict: true }), /tag pair/i);
+});
+
+test('tag-shaped escape lines preserve the following moves in both parse modes', () => {
+  for (const newline of ['\n', '\r\n', '\r']) {
+    const pgn = ['1. e4', '% [Site "ignored"]', 'e5 2. Nf3 *'].join(newline);
+    for (const strict of [false, true]) {
+      const game = parsePgnGame(pgn, { strict });
+      assert.deepEqual(mainline(game), ['e4', 'e5', 'Nf3']);
+      assert.deepEqual(game.tags, {});
+      assert.deepEqual(game.warnings, []);
+    }
+    assert.deepEqual(mainline(parseFirstPgnGame(pgn).game), ['e4', 'e5', 'Nf3']);
+  }
+});
+
+test('unterminated bracket commands reject strictly and warn before truncating tolerantly', () => {
+  const pgn = '1. e4 [%clk 0:03:00 e5 2. Nf3 Nc6 1-0';
+  assert.throws(() => parsePgnGame(pgn, { strict: true }), /Unclosed PGN bracket command/);
+  const game = parsePgnGame(pgn);
+  assert.deepEqual(mainline(game), ['e4']);
+  assert.equal(game.hasResult, false);
+  assert.equal(game.warnings.length, 1);
+  assert.equal(game.warnings[0].reason, 'unclosed-command');
+  assert.equal(game.warnings[0].label, '1...');
+  assert.match(describePgnWarning(game.warnings[0]), /unclosed bracket command/i);
+  // A quoted closing bracket is not the end of a command.
+  assert.throws(() => parsePgnGame('1. e4 [%note "]"', { strict: true }), /Unclosed PGN bracket command/);
+  assert.deepEqual(mainline(parsePgnGame('1. e4 [%note "]"] e5 *', { strict: true })), ['e4', 'e5']);
+});
+
+test('bracket commands adjacent to moves are separate tokens', () => {
+  const pgn = '1. e4[%clk 0:03:00]e5 2.Nf3[%eval 0.2] *';
+  for (const strict of [false, true]) {
+    const game = parsePgnGame(pgn, { strict });
+    assert.deepEqual(mainline(game), ['e4', 'e5', 'Nf3']);
+    assert.deepEqual(game.warnings, []);
+  }
+  assert.deepEqual(mainline(parseFirstPgnGame(pgn).game), ['e4', 'e5', 'Nf3']);
+  // A stray opening bracket must also make progress, rather than looping forever.
+  assert.equal(parsePgnGame('1. e4 [broken e5 *').warnings[0].token, '[broken');
+});
+
+test('variation-leading comments stay before their first move and out of the introduction', () => {
+  const pgn = '{Intro} 1. e4 ({d4 only} 1. d4 d5) e5 *';
+  const { tree } = parsePgnGame(pgn, { strict: true });
+  assert.equal(tree.root.comment, 'Intro');
+  assert.equal(tree.root.children[1].beforeComment, 'd4 only');
+  assert.equal(serializeMovetext(tree), '{Intro} 1. e4 ({d4 only} 1. d4 d5) 1... e5');
+  assert.deepEqual(shape(roundTrip(tree).tree.root), shape(tree.root));
+  const nested = parsePgnGame('1. e4 e5 ({Sicilian} {plan} 1... c5 2. Nf3 ({other} 2. Nc3 {after} Nc6)) 2. Nf3 *');
+  const c5 = nested.tree.root.children[0].children[1];
+  assert.equal(c5.beforeComment, 'Sicilian plan');
+  assert.equal(c5.children[1].beforeComment, 'other');
+  assert.equal(c5.children[1].comment, 'after');
+  assert.equal(nested.tree.root.comment, undefined);
+  assert.equal(nested.tree.root.children[0].comment, undefined);
+  assert.deepEqual(shape(roundTrip(nested.tree).tree.root), shape(nested.tree.root));
+});
+
+test('export sanitizes closing braces in every comment position so PGN re-parses', () => {
+  const { tree } = parsePgnGame('1. e4 (1. d4) e5 *');
+  tree.root.comment = 'Intro } tail';
+  tree.root.children[0].comment = 'Move } tail';
+  tree.root.children[1].beforeComment = 'Variation } tail';
+  const exported = gameTreeToPgn(tree);
+  const again = parsePgnGame(exported, { strict: true });
+  assert.equal(again.tree.root.comment, 'Intro ] tail');
+  assert.equal(again.tree.root.children[0].comment, 'Move ] tail');
+  assert.equal(again.tree.root.children[1].beforeComment, 'Variation ] tail');
+  assert.deepEqual(mainline(again), ['e4', 'e5']);
+  assert.equal(tree.root.comment, 'Intro } tail', 'export must not mutate the tree');
+});
+
+test('unmatched closing comment braces warn tolerantly and reject strictly', () => {
+  const pgn = '1. e4 } e5 *';
+  assert.throws(() => parsePgnGame(pgn, { strict: true }), /Unmatched closing PGN comment brace/);
+  const game = parsePgnGame(pgn);
+  assert.deepEqual(mainline(game), ['e4']);
+  assert.equal(game.warnings[0].reason, 'unmatched-comment');
+  assert.equal(game.warnings[0].token, '}');
+  assert.match(describePgnWarning(game.warnings[0]), /unmatched closing comment brace/i);
+  const variation = parsePgnGame('1. e4 (1. d4 } d5) e5 *');
+  assert.deepEqual(mainline(variation), ['e4', 'e5']);
+  assert.equal(variation.warnings[0].variation, true);
+});
+
+test('5000 nested PGN variations hit a clear depth limit instead of overflowing', () => {
+  const alternatives = ['Nc3', 'Nc6', 'Nc3', 'Nc6'];
+  const cycle = ['Nf3', 'Nf6', 'Ng1', 'Ng8'];
+  const pgn = `${Array.from({ length: 5000 }, (_, i) => `${alternatives[i % 4]} (${cycle[i % 4]} `).join('')}${')'.repeat(5000)} Nf6 *`;
+  assert.throws(() => parsePgnGame(pgn, { strict: true }), /PGN variation depth exceeds 128/);
+  const game = parsePgnGame(pgn);
+  assert.equal(game.warnings.length, 1);
+  assert.equal(game.warnings[0].reason, 'variation-depth');
+  assert.match(describePgnWarning(game.warnings[0]), /variation depth exceeds 128/i);
+  assert.deepEqual(mainline(game), ['Nc3', 'Nf6']);
+  assert.throws(() => parsePgnGame(pgn, { strict: true, mainlineOnly: true }), /PGN variation depth exceeds 128/);
+});
+
+test('export round-trips 128 variation levels and bounds a 5000-level tree', () => {
+  const alternatives = ['b1c3', 'b8c6', 'b1c3', 'b8c6'];
+  const cycle = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
+  for (const limit of [128, 5000]) {
+    const tree = new GameTree();
+    for (let depth = 0; depth < limit; depth++) {
+      const parent = tree.current;
+      assert.ok(tree.addUci(alternatives[depth % 4]));
+      tree.goTo(parent);
+      assert.ok(tree.addUci(cycle[depth % 4]));
+    }
+    if (limit === 128) {
+      const game = parsePgnGame(serializeMovetext(tree), { strict: true });
+      assert.deepEqual(shape(game.tree.root), shape(tree.root));
+    } else {
+      assert.throws(() => serializeMovetext(tree), /PGN variation depth exceeds 128/);
+    }
+  }
 });

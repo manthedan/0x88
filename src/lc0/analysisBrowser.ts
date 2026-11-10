@@ -2232,8 +2232,30 @@ function signedPawns(value: number): string {
   return `${pawns > 0 ? '+' : pawns < 0 ? '−' : '±'}${Math.abs(pawns).toFixed(2)}`;
 }
 
+let pgnImportNotice: { tree: GameTree; node: GameNode; text: string } | null = null;
+
+/** Import losses stay visible through engine updates, until navigation or another load. */
+function renderPgnImportNotice(text?: string): void {
+  if (text !== undefined) pgnImportNotice = text ? { tree, node: tree.current, text } : null;
+  if (pgnImportNotice && (pgnImportNotice.tree !== tree || pgnImportNotice.node !== tree.current)) pgnImportNotice = null;
+  let notice = document.getElementById('pgnImportNotice');
+  if (!pgnImportNotice) {
+    notice?.remove();
+    return;
+  }
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.id = 'pgnImportNotice';
+    notice.setAttribute('role', 'status');
+    notice.style.cssText = 'margin:6px 12px; font-size:12px; line-height:1.5';
+    el('message').after(notice);
+  }
+  if (notice.textContent !== pgnImportNotice.text) notice.textContent = pgnImportNotice.text;
+}
+
 /** Labelled run state beside the turn pip: running, complete, or waiting — never an unexplained glyph. */
 function renderAnalysisStatus(): void {
+  renderPgnImportNotice();
   if (retry) return;
   const status = document.getElementById('analysisStatus');
   if (!status) return;
@@ -4864,6 +4886,7 @@ function loadFen() {
 function loadPgn() {
   const raw = inputEl('pgnInput').value.trim();
   if (!raw) return;
+  renderPgnImportNotice('');
   try {
     // Parse (and reject empty or non-PGN text) before the saved workspace is cleared.
     const { game, gameCount } = parseFirstPgnGame(raw);
@@ -4883,6 +4906,7 @@ function loadPgn() {
     }
     if (gameCount > 1) notes.push(`Only the first of ${gameCount} games was loaded; use Import PGN in the opening explorer for a collection.`);
     el('message').textContent = notes.join(' ');
+    renderPgnImportNotice(warnings.length || gameCount > 1 ? notes.slice(1).join(' ') : '');
     afterNavigation();
   } catch (error) {
     el('message').textContent = `PGN parse failed: ${(error as Error).message}`;
