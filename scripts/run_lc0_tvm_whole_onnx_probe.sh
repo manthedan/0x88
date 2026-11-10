@@ -3,10 +3,10 @@ set -euo pipefail
 
 # Reproducible whole-model ONNX -> TVM Relax -> target probe for LC0 browser models.
 # Run from anywhere; durable TVM state lives under the workspace root (the
-# parent of leelaweb/) unless LC0_BROWSER_ROOT overrides it.
+# parent of this checkout) unless LC0_BROWSER_ROOT overrides it.
 
-ROOT="${LC0_BROWSER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-REPO="${LC0_WEB_REPO:-$ROOT/leelaweb}"
+REPO="${LC0_WEB_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ROOT="${LC0_BROWSER_ROOT:-$(dirname "$REPO")}"
 TVM_SRC="${TVM_SRC:-$ROOT/.deps/tvm-webgpu-src}"
 TVM_ENV="${TVM_ENV:-$ROOT/.envs/tvm-mlc-py313}"
 TARGET="${TVM_TARGET:-webgpu}"
@@ -14,10 +14,12 @@ OUT_DIR="${OUT_DIR:-$REPO/artifacts/tvm}"
 MODEL_DIR="${MODEL_DIR:-$REPO/public/models/lc0}"
 TVM_BUILD_DIR="${TVM_BUILD_DIR:-build}"
 TVM_LIB_DIR="$TVM_SRC/$TVM_BUILD_DIR/lib"
+HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/opt/homebrew}"
+LLVM_PREFIX="${LLVM_PREFIX:-$HOMEBREW_PREFIX/opt/llvm}"
 
-export PATH="/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:$TVM_ENV/bin:${PATH:-}"
+export PATH="$HOMEBREW_PREFIX/bin:$LLVM_PREFIX/bin:$TVM_ENV/bin:${PATH:-}"
 export TVM_LIBRARY_PATH="$TVM_LIB_DIR"
-export DYLD_LIBRARY_PATH="$TVM_LIB_DIR:/opt/homebrew/opt/llvm/lib:${DYLD_LIBRARY_PATH:-}"
+export DYLD_LIBRARY_PATH="$TVM_LIB_DIR:$LLVM_PREFIX/lib:${DYLD_LIBRARY_PATH:-}"
 export PYTHONPATH="$TVM_SRC/python:${PYTHONPATH:-}"
 
 extra_args=()

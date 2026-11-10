@@ -27,9 +27,11 @@ onnx.save(model, out)
 assert out.stat().st_size == 16246184
 assert hashlib.sha256(out.read_bytes()).hexdigest() == 'c4adcf876904baf3381727720391ffba2fa2981e0395334e81af9424815b0506'
 PY
-export PATH="/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:$TVM_ENV/bin:$PATH"
+HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/opt/homebrew}"
+LLVM_PREFIX="${LLVM_PREFIX:-$HOMEBREW_PREFIX/opt/llvm}"
+export PATH="$HOMEBREW_PREFIX/bin:$LLVM_PREFIX/bin:$TVM_ENV/bin:$PATH"
 export TVM_LIBRARY_PATH="$TVM_SRC/build-tvmjs/lib"
-export DYLD_LIBRARY_PATH="$TVM_LIBRARY_PATH:/opt/homebrew/opt/llvm/lib:${DYLD_LIBRARY_PATH:-}"
+export DYLD_LIBRARY_PATH="$TVM_LIBRARY_PATH:$LLVM_PREFIX/lib:${DYLD_LIBRARY_PATH:-}"
 export PYTHONPATH="$TVM_SRC/python"
 CONFIG='{"selector":{"kind":"static_large","min_macs":8000000,"j_multiple":32,"k_multiple":16},"config":{"micro_size_k":16}}'
 STEM='bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe'

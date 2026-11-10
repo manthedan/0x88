@@ -8,7 +8,9 @@ ROOT="${LC0_BROWSER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 TVM_SRC="${TVM_SRC:-$ROOT/.deps/tvm-webgpu-src}"
 TVM_ENV="${TVM_ENV:-$ROOT/.envs/tvm-mlc-py313}"
 TVM_BUILD_DIR="${TVM_BUILD_DIR:-build-tvmjs}"
-LLVM_CONFIG="${LLVM_CONFIG:-/opt/homebrew/opt/llvm/bin/llvm-config}"
+HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/opt/homebrew}"
+LLVM_PREFIX="${LLVM_PREFIX:-$HOMEBREW_PREFIX/opt/llvm}"
+LLVM_CONFIG="${LLVM_CONFIG:-$LLVM_PREFIX/bin/llvm-config}"
 
 if [[ ! -x "$TVM_ENV/bin/python" ]]; then
   echo "Missing TVM python env: $TVM_ENV/bin/python" >&2
@@ -28,7 +30,7 @@ if ! command -v emcc >/dev/null 2>&1; then
   exit 2
 fi
 
-export PATH="/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:$TVM_ENV/bin:${PATH:-}"
+export PATH="$HOMEBREW_PREFIX/bin:$LLVM_PREFIX/bin:$TVM_ENV/bin:${PATH:-}"
 export TVM_BUILD_DIR LLVM_CONFIG
 cd "$TVM_SRC"
 mkdir -p "$TVM_BUILD_DIR"
