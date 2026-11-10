@@ -218,6 +218,15 @@ function tensorCacheUrl(manifest: RuntimeManifest, baseUrl: URL): string | undef
   return checkedStagedRuntimeUrl(path, baseUrl, 'tensor cache').toString();
 }
 
+/**
+ * WebGPU buffer copies must be 4-byte multiples, and tvmjs reads a tensor back
+ * at its exact byte size. The f16 policy [b,1858] always qualifies, but WDL
+ * [b,3] (6b bytes) and MLH [b,1] (2b bytes) only do for even physical batches.
+ */
+function readbackAlignedBatch(batch: number): boolean {
+  return (batch * 3 * 2) % 4 === 0 && (batch * 2) % 4 === 0;
+}
+
 let batchEvalSequence = 0;
 
 export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
@@ -279,6 +288,13 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const requestedBatch = Math.max(1, Math.floor(options.batch ?? 8));
     const model = manifest.models.find((item) => item.batch === requestedBatch);
     if (!model) throw new Error(`Batch ${requestedBatch} not in manifest`);
+    if (!readbackAlignedBatch(model.batch)) {
+      const usable = manifest.models.map((item) => item.batch).filter(readbackAlignedBatch);
+      throw new Error(
+        `Whole-model batch ${model.batch} is unsupported: its f16 WDL/MLH outputs (${model.batch * 6}/${model.batch * 2} bytes) cannot be read back ` +
+          `because WebGPU copies need 4-byte multiples; use an even batch${usable.length ? ` (${usable.join(', ')})` : ''}`,
+      );
+    }
     const bundle = manifest.runtime?.['tvm' + 'jsBundle'] ?? DEFAULT_BUNDLE;
     const bundleFile = manifest.files?.find((entry) => entry.path === bundle);
     if (!bundleFile?.sha256) throw new Error(`Runtime bundle integrity metadata missing for ${bundle}`);
@@ -506,7 +522,8 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const policyRaw = staged[0]?.toRawBytes();
     if (!policyRaw) throw new Error('Whole-model policy output readback unavailable');
     const policy = f16BytesToFloat32Array(policyRaw);
-    const wdl = staged[1] ? f16BytesToFloat32Array(staged[1].toRawBytes()) : undefined;
+    if (!staged[1]) throw new Error('Whole-model WDL output readback unavailable');
+    const wdl = f16BytesToFloat32Array(staged[1].toRawBytes());
     const mlh = staged[2] ? f16BytesToFloat32Array(staged[2].toRawBytes()) : undefined;
     const outputDecodeMs = performance.now() - phaseStarted;
     const phases: Record<string, number | string> = { ...timing, outputDecodeMs, ...timingExtra };
@@ -519,7 +536,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       logicalBatchSize: boards.length,
     };
     return boards.map((board, i) => {
-      const rawWdl = wdl ? Array.from(wdl.subarray(i * 3, i * 3 + 3)) : [];
+      const rawWdl = Array.from(wdl.subarray(i * 3, i * 3 + 3));
       const wdlSlice: [number, number, number] = [rawWdl[0] ?? NaN, rawWdl[1] ?? NaN, rawWdl[2] ?? NaN];
       const logits = policy.subarray(i * LC0_POLICY_SIZE, (i + 1) * LC0_POLICY_SIZE);
       const legalStarted = performance.now();

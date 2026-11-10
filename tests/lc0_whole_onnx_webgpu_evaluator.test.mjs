@@ -184,6 +184,30 @@ test('whole-model evaluator releases the batch when readback fails', async () =>
   assert.equal(state.scopes.length, 1);
 });
 
+function replaceGlobal(name, value) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  return () => {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+    else delete globalThis[name];
+  };
+}
+
+test('whole-model create rejects odd physical batches whose WDL/MLH outputs cannot be read back', async (t) => {
+  const manifest = { models: [1, 4, 8].map((batch) => ({ batch, wasm: `b${batch}.wasm` })), files: [] };
+  const restore = [
+    replaceGlobal('location', { href: 'https://lab.test/app/analysis', origin: 'https://lab.test' }),
+    replaceGlobal('fetch', async () => new Response(JSON.stringify(manifest), { status: 200 })),
+  ];
+  t.after(() => {
+    for (const undo of restore) undo();
+  });
+  const manifestUrl = '/runtimes/lc0-tvmjs-webgpu/t1/f16/v1/manifest.json';
+  await assert.rejects(Lc0WholeOnnxWebgpuEvaluator.create({ manifestUrl, batch: 1 }), /batch 1 is unsupported.*\(6\/2 bytes\).*even batch \(4, 8\)/);
+  // An even batch passes the readback check and fails later on the (absent) bundle metadata.
+  await assert.rejects(Lc0WholeOnnxWebgpuEvaluator.create({ manifestUrl, batch: 4 }), /Runtime bundle integrity metadata missing/);
+});
+
 test('whole-model evaluator defers runtime and device release until in-flight work settles', async () => {
   let releaseSync;
   let syncStarted;
