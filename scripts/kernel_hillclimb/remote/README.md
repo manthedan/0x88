@@ -145,7 +145,31 @@ Common to all hosts: `--headless=new --enable-unsafe-webgpu --enable-webgpu-deve
   153/157. Real users of 0x88.app will not have it unless Chrome ships it.
 - `--enable-webgpu-developer-features` adds `adapter.info.backend`, `type`, `driver`,
   `memoryHeaps` and `powerPreference`, and leaves timestamp-query unquantized.
-- Yukon (Linux, no DISPLAY) also needs: see "Yukon bring-up" below.
+- Yukon (Linux, no DISPLAY) also needs the flags in the next section.
+
+### Yukon bring-up (gpu-queue job 585, 2026-11-11)
+
+Matrix: 3 builds x 6 flag sets (`bringup_matrix.mjs`, `device-probe.html?bench=0`).
+The builds were puppeteer Chrome for Testing 151.0.7922.71, playwright chromium-1228
+(CfT 149.0.7827.55) and chromium_headless_shell-1228.
+
+- **`--no-sandbox` is mandatory.** Without it, Chrome never writes `DevToolsActivePort` on any of
+  the three builds, because the setuid/userns sandbox is unusable there and we have no sudo.
+  Every config without it failed.
+- With `--no-sandbox`, all three builds expose the hardware adapter:
+  `nvidia / ampere / NVIDIA GeForce RTX 3090`, `backend: vulkan`, `type: discrete GPU`,
+  driver `NVIDIA: 580.178.04`. ANGLE also runs on Vulkan (`chrome://gpu`: vulkan enabled_on,
+  webgpu enabled). It is not SwiftShader or lavapipe.
+- **`shader-f16` is not exposed** on NVIDIA Vulkan by default, so subgroup-matrix offers only
+  `u8/i8 -> u32/i32` configs (16x16x32 and 16x8x32). Dawn has the toggle
+  `vulkan_enable_f16_on_nvidia` ("Enables F16 on Nvidia GPUs with Vulkan"), which the runner
+  passes through `--enable-dawn-features=`. See the device-probe result to check whether it took
+  effect.
+- The default runner flags for yukon:
+  `--headless=new --enable-unsafe-webgpu --enable-webgpu-developer-features --no-sandbox
+  --enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan --use-angle=vulkan
+  --ignore-gpu-blocklist --disable-vulkan-surface --enable-gpu
+  --enable-dawn-features=vulkan_enable_f16_on_nvidia`
 
 The agent always adds `--user-data-dir=<fresh tmp profile> --remote-debugging-port=0
 --no-first-run --no-default-browser-check --disable-extensions` and the three

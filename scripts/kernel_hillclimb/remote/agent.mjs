@@ -50,7 +50,7 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
 };
 
-const state = { chrome: null, server: null, profileDir: null, cleaned: false, console: [], lockDir: null, sampler: null, samples: [] };
+const state = { chrome: null, server: null, profileDir: null, cleaned: false, console: [], lockDir: null, sampler: null, samples: [], chromeStderr: '' };
 
 async function main() {
   if (args.lock) await takeLock(resolve(args.lock));
@@ -69,8 +69,7 @@ async function main() {
     'about:blank',
   ];
   state.chrome = spawn(chromeBin, flags, { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  let chromeStderr = '';
-  state.chrome.stderr.on('data', (d) => { chromeStderr = (chromeStderr + d).slice(-8000); });
+  state.chrome.stderr.on('data', (d) => { state.chromeStderr = (state.chromeStderr + d).slice(-8000); });
   const wsPath = await waitDevToolsPort(state.profileDir, 30_000);
   const cdp = await Cdp.connect(`ws://127.0.0.1:${wsPath.port}${wsPath.path}`);
   const version = await cdp.send('Browser.getVersion');
@@ -148,7 +147,7 @@ async function main() {
       contended: contendedReasons.length > 0, contendedReasons,
       console: state.console.slice(-60),
       ...(gpuInfo ? { gpuInfo } : {}),
-      ...(outcome ? {} : { chromeStderrTail: chromeStderr.slice(-3000) }),
+      ...(outcome ? {} : { chromeStderrTail: state.chromeStderr.slice(-3000) }),
     },
   };
   emit(out);
@@ -365,7 +364,8 @@ async function cleanup() {
 }
 
 function fail(msg) {
-  const out = { ok: false, result: null, error: msg, meta: { host: os.hostname(), wallMs: Date.now() - tStart, console: state.console.slice(-60) } };
+  const out = { ok: false, result: null, error: msg, meta: { host: os.hostname(), wallMs: Date.now() - tStart, flags: extraFlags, console: state.console.slice(-60),
+    chromeExit: state.chrome ? { code: state.chrome.exitCode, signal: state.chrome.signalCode } : null, chromeStderrTail: state.chromeStderr.slice(-3000) } };
   clearInterval(state.sampler);
   cleanup().finally(() => { emit(out); releaseLock(); process.exit(3); });
 }

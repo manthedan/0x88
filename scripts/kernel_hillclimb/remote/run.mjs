@@ -40,7 +40,12 @@ export const HOSTS = {
     ssh: 'yukon', base: 'kernel-hillclimb', scheduler: 'gpu-queue',
     pathPrefix: 'export PATH=$HOME/.local/bin:$PATH;',
     chrome: '/home/ddbb/.cache/puppeteer/chrome/linux-151.0.7922.71/chrome-linux64/chrome',
-    flags: [...COMMON_FLAGS, '--enable-features=Vulkan', '--use-angle=vulkan', '--ignore-gpu-blocklist'],
+    // --no-sandbox is required: without it Chrome never comes up on Yukon (no usable
+    // setuid/userns sandbox for the CfT build). Every no-sandbox-less config failed in the
+    // 2026-11-11 bring-up matrix (gpu-queue job 585).
+    // vulkan_enable_f16_on_nvidia: Dawn hides shader-f16 on NVIDIA Vulkan by default.
+    flags: [...COMMON_FLAGS, '--no-sandbox', '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan', '--use-angle=vulkan',
+      '--ignore-gpu-blocklist', '--disable-vulkan-surface', '--enable-gpu', '--enable-dawn-features=vulkan_enable_f16_on_nvidia'],
   },
   'mac-mini': {
     ssh: 'mac-mini', base: 'kernel-hillclimb', scheduler: 'idle-wait',
