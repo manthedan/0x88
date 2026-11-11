@@ -24,7 +24,7 @@ import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
 import { boardToMaia3Tokens, maia3InternalsForTests } from '../../src/lc0/maia3.ts';
 import { legalPolicyPriors } from '../../src/lc0/onnxEvaluator.ts';
 import * as ort from '../../src/nn/ortRuntime.ts';
-import { deviceIdentity, intParam, log, params, runMain, summarize } from './common.mjs';
+import { intParam, log, params, runMain, runtimeDeviceIdentity, summarize } from './common.mjs';
 import { legalPolicyParity, maia3ParityRows, ortParity, profileComplete, runChunked } from './gates.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
 
@@ -33,7 +33,14 @@ import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-pro
 // Limits are ~2x the full-corpus baseline (M4, Chrome 157). A flip needs the
 // two priors to move by the reference gap in total, so tieEpsilon only adds
 // strength while it is below 2 * maxProbAbs.
-const LEGAL = (maxProbAbs, tieEpsilon = 0.01) => ({ maxProbAbs, tieEpsilon, topK: 3 });
+const LEGAL = (maxProbAbs, allowedFlips = []) => ({ maxProbAbs, tieEpsilon: 0.01, topK: 3, allowedFlips });
+// LQO's WebGPU drift flips two measured near-mirror pairs (M4, Chrome 157).
+// Only these fixture/move pairs may flip, and only up to maxGap; any other
+// flip is held to the 0.01 tie epsilon.
+const LQO_ALLOWED_FLIPS = [
+  { fen: 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1', moves: ['h1h8', 'a1a8'], maxGap: 0.1 }, // reference gap 0.070
+  { fen: '4k3/8/8/8/8/8/p6p/4K3 b - - 0 1', moves: ['h2h1q', 'a2a1q'], maxGap: 0.1 }, // reference gap 0.045
+];
 
 const PRESETS = {
   'lc0-small': {
@@ -71,7 +78,7 @@ const PRESETS = {
     parityMaxAbs: { '/output/policy': 0.6, '/output/wdl': 0.006, '/output/mlh': 2 },
   },
   lqo: {
-    legalPolicy: LEGAL(0.08, 0.08), // baseline 0.039; WebGPU flips the near-mirror pairs Rxh8/Rxa8 (fixture 2, reference gap 0.070) and h1=Q/a1=Q (fixture 7, 0.045)
+    legalPolicy: LEGAL(0.08, LQO_ALLOWED_FLIPS), // baseline 0.039
     model: '/models/lc0/lqo_v2.f16.qdq8.onnx',
     batch: 8,
     family: 'lqo_v2',
@@ -79,7 +86,7 @@ const PRESETS = {
     parityMaxAbs: { '/output/policy': 2.0, '/output/wdl': 0.02, '/output/mlh': 0.3 },
   },
   maia3: {
-    legalPolicy: LEGAL(0.05, 0.02), // baseline 0.026; flip at fixture 7, 1500/1500, reference gap 0.013
+    legalPolicy: { ...LEGAL(0.05), tieEpsilon: 0.02 }, // baseline 0.026; flip at fixture 7, 1500/1500, reference gap 0.013
     model: '/models/maia3/maia3_simplified.qdq8.onnx',
     batch: 1,
     family: 'maia3',
@@ -88,7 +95,7 @@ const PRESETS = {
     parityMaxAbs: { logits_move: 1.3, logits_value: 0.15 },
   },
   'maia3-grid': {
-    legalPolicy: LEGAL(0.05, 0.02), // baseline 0.024; same fixture-7 flip
+    legalPolicy: { ...LEGAL(0.05), tieEpsilon: 0.02 }, // baseline 0.024; same fixture-7 flip
     model: '/models/maia3/maia3_simplified.qdq8.onnx',
     batch: 11,
     family: 'maia3',
@@ -353,7 +360,7 @@ runMain(async () => {
       const legalRows = rows.map(({ fen }) => {
         const board = parseFen(fen);
         const legal = isMaia3 ? maia3InternalsForTests.legalMaia3Moves(board) : legalPolicyPriors(board, new Float32Array(1858), 1);
-        return { indices: legal.map((m) => m.index), ucis: legal.map((m) => m.uci) };
+        return { fen, indices: legal.map((m) => m.index), ucis: legal.map((m) => m.uci) };
       });
       const legalLimits = preset?.legalPolicy ?? null;
       const legalPolicy =
@@ -377,8 +384,7 @@ runMain(async () => {
     }
     log('parity', parity);
   }
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-  const identity = await deviceIdentity(adapter, prof?.device ?? null);
+  const identity = await runtimeDeviceIdentity(prof);
   await ort.releaseOrtSession(session);
   const gpuUsed = /webgpu/.test(backend) && !!prof;
   return {

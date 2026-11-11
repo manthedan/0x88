@@ -14,7 +14,7 @@ import { Lc0WholeOnnxWebgpuEvaluator } from '../../src/lc0/wholeOnnxWebgpuEvalua
 import * as ort from '../../src/nn/ortRuntime.ts';
 import { SquareFormerEvaluator } from '../../src/nn/squareformerEvaluator.ts';
 import { SquareformerTvmjsWebgpuEvaluator } from '../../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
-import { deviceIdentity, intParam, log, params, runMain, summarize } from './common.mjs';
+import { intParam, log, params, runMain, runtimeDeviceIdentity, summarize } from './common.mjs';
 import { compareCentipawn, compareLc0, manifestCheck, profileComplete } from './gates.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
 
@@ -171,8 +171,7 @@ runMain(async () => {
     }
     log('parity', parity);
   }
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-  const identity = await deviceIdentity(adapter, prof?.device ?? null);
+  const identity = await runtimeDeviceIdentity(prof);
   evaluator.dispose?.();
   return {
     bench: 'tvmjs-profile',

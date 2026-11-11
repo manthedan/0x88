@@ -241,7 +241,9 @@ function legalSoftmax(logits, base, indices) {
 /**
  * Legal-move policy parity on raw policy logits (`cand`, `ref`: flat
  * [rows * rowSize]). `rows[r].indices` are the policy indices of row r's legal
- * moves (`ucis` optional, for reports). Per row, on the softmax over legal
+ * moves (`ucis` optional, for reports; `fen` and `ucis` needed for
+ * `allowedFlips`: [{ fen, moves: [a, b], maxGap }], measured drift pairs that
+ * may flip up to maxGap in that position only). Per row, on the softmax over legal
  * moves only: max |prob diff| <= maxProbAbs; the candidate's best move is the
  * reference's unless the REFERENCE prior gap between them is <= tieEpsilon;
  * and among the reference's top-k moves, every pair whose reference gap
@@ -249,7 +251,7 @@ function legalSoftmax(logits, base, indices) {
  * alone lets a swap of the two leading logits pass ([1, 0] -> [0, 1] is a
  * max-abs of 1 but reverses a 73/27 split).
  */
-export function legalPolicyParity(cand, ref, rows, { maxProbAbs, tieEpsilon, topK = 3 }) {
+export function legalPolicyParity(cand, ref, rows, { maxProbAbs, tieEpsilon, topK = 3, allowedFlips = [] }) {
   if (!(maxProbAbs >= 0) || !(tieEpsilon >= 0)) throw new Error('legalPolicyParity: maxProbAbs and tieEpsilon are required');
   const problems = [];
   const rowSize = ref.length / rows.length;
@@ -274,11 +276,22 @@ export function legalPolicyParity(cand, ref, rows, { maxProbAbs, tieEpsilon, top
       if (pr[k] > 0) kl += pr[k] * Math.log(pr[k] / Math.max(pc[k], 1e-30));
     }
     maxKl = Math.max(maxKl, kl);
+    // A pair may flip if the reference gap is a tie, or if this exact
+    // position/move pair is allowlisted (measured drift) within its maxGap.
+    const flipOk = (a, b) => {
+      const gap = Math.abs(pr[a] - pr[b]);
+      if (gap <= tieEpsilon) return 'tie';
+      const ua = ucis?.[a];
+      const ub = ucis?.[b];
+      const entry = allowedFlips.find((f) => f.fen === rows[r].fen && ua !== ub && f.moves.includes(ua) && f.moves.includes(ub));
+      return entry && gap <= entry.maxGap ? 'allowlisted' : null;
+    };
     const argmax = (p) => p.reduce((b, x, k) => (x > p[b] ? k : b), 0);
     const bc = argmax(pc);
     const br = argmax(pr);
+    const why = bc === br ? null : flipOk(br, bc);
     if (bc === br) bestMatches++;
-    else if (pr[br] - pr[bc] <= tieEpsilon) tieTolerated.push({ row: r, candidate: name(bc), reference: name(br), referenceGap: pr[br] - pr[bc] });
+    else if (why) tieTolerated.push({ row: r, candidate: name(bc), reference: name(br), referenceGap: pr[br] - pr[bc], why });
     else problems.push(`row ${r}: best move ${name(bc)} vs reference ${name(br)} (reference gap ${(pr[br] - pr[bc]).toFixed(4)})`);
     const top = pr
       .map((p, k) => [p, k])
@@ -288,7 +301,7 @@ export function legalPolicyParity(cand, ref, rows, { maxProbAbs, tieEpsilon, top
     for (let i = 0; i < top.length; i++)
       for (let j = i + 1; j < top.length; j++) {
         const [a, b] = [top[i], top[j]];
-        if (pr[a] - pr[b] > tieEpsilon && !(pc[a] > pc[b])) problems.push(`row ${r}: top-${topK} order ${name(a)} > ${name(b)} reversed`);
+        if (!(pc[a] > pc[b]) && !flipOk(a, b)) problems.push(`row ${r}: top-${topK} order ${name(a)} > ${name(b)} reversed`);
       }
   }
   if (maxProb > maxProbAbs) problems.push(`max legal prob diff ${maxProb.toFixed(4)} > ${maxProbAbs}`);
@@ -298,7 +311,7 @@ export function legalPolicyParity(cand, ref, rows, { maxProbAbs, tieEpsilon, top
     maxKl,
     bestMoveMatches: bestMatches,
     tieTolerated,
-    limits: { maxProbAbs, tieEpsilon, topK },
+    limits: { maxProbAbs, tieEpsilon, topK, allowedFlips },
     problems,
     pass: problems.length === 0,
   };

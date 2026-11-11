@@ -65,6 +65,17 @@ export function summarize(values) {
 }
 
 /** Everything a remote run needs to identify the device and browser. */
+/**
+ * Identity of the adapter that actually created the runtime's device (the
+ * profiler records it in its requestDevice wrapper). Falls back to a fresh
+ * high-performance request only when no device was created, and says so.
+ */
+export async function runtimeDeviceIdentity(prof) {
+  if (prof?.adapter) return { ...(await deviceIdentity(prof.adapter, prof.device)), adapterSource: 'runtime device (requestDevice wrapper)' };
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+  return { ...(await deviceIdentity(adapter, null)), adapterSource: 'fresh high-performance request (runtime created no WebGPU device)' };
+}
+
 export async function deviceIdentity(adapter, device) {
   const info = adapter?.info ?? {};
   let uaData = null;

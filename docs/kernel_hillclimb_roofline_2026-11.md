@@ -115,15 +115,22 @@ moves; flips tolerated as reference near-ties):
 | Lc0 Small b8 | 0.018 | 0.04 | 10/10 | - |
 | t3 b8 | 0.0072 | 0.015 | 10/10 | - |
 | BT4 b8 | 0.013 | 0.03 | 10/10 | - |
-| LQO b8 | 0.039 | 0.08 | 8/10 | Rxh8 → Rxa8 (0.070), h1=Q → a1=Q (0.045) |
+| LQO b8 | 0.039 | 0.08 | 8/10 | allowlisted: Rxh8 → Rxa8 (0.070), h1=Q → a1=Q (0.045) |
 | Maia3 b1 / grid | 0.026 / 0.024 | 0.05 | 38/40 | the same h1=Q / a1=Q pair (0.013) |
 
-Tie-epsilon is 0.01 for the Lc0 nets and 0.02 for Maia3. For LQO it is 0.08:
-its WebGPU drift (prob diff up to 0.039) flips both near-mirror move pairs in
-fixtures 2 and 7, and a flip can only come from priors moving by the gap in
-total. That makes LQO's best-move check no stronger than its probability
-limit. The flips are drift between WebGPU f16 and the WASM reference, not a
-proven defect. A native check of LQO on those two positions would settle it.
+Tie-epsilon is 0.01 for the Lc0 nets, LQO included, and 0.02 for Maia3. LQO's
+WebGPU drift (prob diff up to 0.039) flips both near-mirror move pairs in
+fixtures 2 and 7. Those two position/move pairs are allowlisted explicitly,
+for the best-move and top-3 checks, up to a reference gap of 0.1 (fourth
+review round; a blanket 0.08 epsilon would have passed any new 0.535/0.465
+swap). A swap of any other pair, or in any other position, fails. The flips
+are drift between WebGPU f16 and the WASM reference, not a proven defect. A
+native check of LQO on those two positions would settle it.
+
+Fourth review round, second fix: page identity now comes from the adapter
+that created the runtime's device (recorded in the profiler's
+`requestDevice` wrapper), not from a fresh high-performance
+`requestAdapter()`, which can pick the other GPU on a dual-GPU laptop.
 The broken t1 copies still fail: the ×1.1 Q-scale copy on legal prob (0.064),
 the ×1.5 FFN copy on legal prob (0.13), and the b1 rule50 copy on legal prob
 (0.024) as well as raw policy.

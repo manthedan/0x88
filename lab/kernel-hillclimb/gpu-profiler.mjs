@@ -32,7 +32,11 @@ export function installGpuProfiler({ capacity = 16384, addTimestampFeature = tru
     const wantsTs = addTimestampFeature && this.features.has('timestamp-query');
     const requiredFeatures = [...new Set([...(descriptor.requiredFeatures ?? []), ...(wantsTs ? ['timestamp-query'] : [])])];
     const device = await original.call(this, { ...descriptor, requiredFeatures });
-    state.devices.push(instrumentDevice(device, state));
+    const prof = instrumentDevice(device, state);
+    // The adapter this device came from: a fresh requestAdapter() later may
+    // pick another GPU (dual-GPU laptops), so identity must use this one.
+    prof.adapter = this;
+    state.devices.push(prof);
     return device;
   };
   return {

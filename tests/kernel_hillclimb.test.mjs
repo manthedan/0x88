@@ -465,3 +465,30 @@ test('a Maia3 candidate that swaps elo_self and elo_oppo fails parity', async ()
   const old = CORPUS.map((fen, i) => ({ fen, eloSelf: 1100 + 100 * (i % 1), eloOppo: 1100 + 100 * (i % 1) }));
   assert.equal(ortParity(await runChunked(old, 1, model(true)), await runChunked(old, 1, model(false)), limits).pass, true);
 });
+
+test('an allowlisted drift flip passes only for its own position and move pair', () => {
+  const fenA = 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1';
+  const row = (fen) => ({ fen, indices: [0, 1, 2], ucis: ['h1h8', 'a1a8', 'e1d1'] });
+  // Reference 0.535 / 0.465 between the leading pair (gap 0.07), then a tail move.
+  const logits = (p) => Float32Array.from(p.map(Math.log));
+  const ref = logits([0.5, 0.435, 0.065]);
+  const swapped = logits([0.435, 0.5, 0.065]);
+  const allowedFlips = [{ fen: fenA, moves: ['h1h8', 'a1a8'], maxGap: 0.1 }];
+  const limits = { maxProbAbs: 0.08, tieEpsilon: 0.01, topK: 3, allowedFlips };
+  const ok = legalPolicyParity(swapped, ref, [row(fenA)], limits);
+  assert.equal(ok.pass, true);
+  assert.equal(ok.tieTolerated[0].why, 'allowlisted');
+  // The same swap in another position fails (best move and top-3 order).
+  const other = legalPolicyParity(swapped, ref, [row('4k3/8/8/8/8/8/8/R3K2R w Q - 0 1')], limits);
+  assert.equal(other.pass, false);
+  assert.ok(other.problems.some((p) => /best move a1a8 vs reference h1h8/.test(p)));
+  assert.ok(other.problems.some((p) => /order h1h8 > a1a8 reversed/.test(p)));
+  // A different pair in the allowlisted position fails too.
+  const ref2 = logits([0.5, 0.065, 0.435]);
+  const swap2 = logits([0.435, 0.065, 0.5]);
+  assert.equal(legalPolicyParity(swap2, ref2, [row(fenA)], limits).pass, false);
+  // So does the allowlisted pair beyond its maxGap.
+  assert.equal(legalPolicyParity(logits([0.3, 0.65, 0.05]), logits([0.65, 0.3, 0.05]), [row(fenA)], { ...limits, maxProbAbs: 1 }).pass, false);
+  // Without the allowlist (blanket 0.01 epsilon), the measured flip fails.
+  assert.equal(legalPolicyParity(swapped, ref, [row(fenA)], { ...limits, allowedFlips: [] }).pass, false);
+});
