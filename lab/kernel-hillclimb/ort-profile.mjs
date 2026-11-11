@@ -9,13 +9,22 @@
 // Query params:
 //   preset=lc0-small|lc0-small-b8|t3|bt4|lqo|maia3|maia3-grid  (or model=URL & batch=N)
 //   warmup=N (5)  iters=N (30)  profileInvokes=N (5, 0 disables)
-//   parity=wasm   also run the same inputs on an ORT WASM session and report max abs diffs
+//   parity=wasm   also run the same inputs on an ORT WASM session of the REFERENCE model
+//                 and gate max abs diffs (fails the run on mismatch)
+//   referenceModel=URL  reference for parity (default: the preset's shipped model,
+//                 so a candidate passed via model= is judged against the original)
 //   ortDequantFold=0  run the graph as shipped (QDQ dequant per invoke)
+//   ab=PRESET     paired comparison: also load PRESET's model and interleave
+//                 A/B blocks (ABAB...) in this page session; reports the
+//                 per-position wall ratio and GPU-busy ratio per round, which
+//                 holds up under host load where absolute wall times do not
+//   abRounds=N (20)  abBlock=N (3 invokes per arm per round)
 import { parseFen } from '../../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
 import { boardToMaia3Tokens } from '../../src/lc0/maia3.ts';
 import * as ort from '../../src/nn/ortRuntime.ts';
 import { deviceIdentity, intParam, log, params, runMain, summarize } from './common.mjs';
+import { ortParity, profileComplete } from './gates.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
 
 const PRESETS = {
@@ -137,20 +146,67 @@ function f16BitsToF32(h) {
   return s * (1 + m / 1024) * 2 ** (e - 15);
 }
 
-function maxAbsDiff(a, b) {
-  const rows = {};
-  for (const name of Object.keys(a)) {
-    if (!b[name]) continue;
-    let max = 0;
-    let nonFinite = 0;
-    for (let i = 0; i < a[name].length; i++) {
-      const d = Math.abs(a[name][i] - b[name][i]);
-      if (!Number.isFinite(d)) nonFinite++;
-      else if (d > max) max = d;
+const median = (xs) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+/**
+ * Interleaved A/B in one page session: per round, `block` timed invokes of A
+ * then of B (order alternates each round), plus pass-mode GPU busy for both
+ * arms. Ratios are A per position / B per position, one per round.
+ */
+async function pairedComparison(prof, a, bPresetName) {
+  const bPreset = PRESETS[bPresetName];
+  if (!bPreset) throw new Error(`ab: unknown preset ${bPresetName}`);
+  const rounds = intParam('abRounds', 20, 2, 500);
+  const block = intParam('abBlock', 3, 1, 100);
+  const bSession = await ort.createOrtSession(bPreset.model);
+  const b = { session: bSession, feeds: (await buildFeeds(bSession, bPreset.batch)).feeds, batch: bPreset.batch, name: bPresetName };
+  for (let i = 0; i < 5; i++) await b.session.run(b.feeds);
+  const arms = { a, b };
+  const wall = { a: [], b: [] };
+  const busy = { a: [], b: [] };
+  const wallRatio = [];
+  const busyRatio = [];
+  for (let r = 0; r < rounds; r++) {
+    const order = r % 2 ? ['b', 'a'] : ['a', 'b'];
+    const roundWall = {};
+    const roundBusy = {};
+    for (const k of order) {
+      const arm = arms[k];
+      const ms = [];
+      for (let i = 0; i < block; i++) {
+        const t = performance.now();
+        await arm.session.run(arm.feeds);
+        ms.push(performance.now() - t);
+      }
+      roundWall[k] = median(ms) / arm.batch;
+      if (prof?.supported) roundBusy[k] = (await passModeProfile(prof, () => arm.session.run(arm.feeds), block)).busyMs / arm.batch;
     }
-    rows[name] = { maxAbs: max, nonFinite, length: a[name].length };
+    wall.a.push(roundWall.a);
+    wall.b.push(roundWall.b);
+    wallRatio.push(roundWall.a / roundWall.b);
+    if (roundBusy.a > 0 && roundBusy.b > 0) {
+      busy.a.push(roundBusy.a);
+      busy.b.push(roundBusy.b);
+      busyRatio.push(roundBusy.a / roundBusy.b);
+    }
   }
-  return rows;
+  await ort.releaseOrtSession(bSession);
+  const out = {
+    a: { name: a.name, batch: a.batch },
+    b: { name: b.name, batch: b.batch, model: bPreset.model },
+    rounds,
+    block,
+    perPositionWallMs: { a: summarize(wall.a), b: summarize(wall.b) },
+    wallRatioAoverB: summarize(wallRatio),
+    perPositionGpuBusyMs: busy.a.length ? { a: summarize(busy.a), b: summarize(busy.b) } : null,
+    gpuBusyRatioAoverB: busyRatio.length ? summarize(busyRatio) : null,
+  };
+  log('ab', { wallRatio: out.wallRatioAoverB.median, gpuBusyRatio: out.gpuBusyRatioAoverB?.median });
+  return out;
 }
 
 runMain(async () => {
@@ -181,6 +237,7 @@ runMain(async () => {
   }
   const timing = summarize(runMs);
   log('session.run ms', timing);
+  const ab = params.get('ab') ? await pairedComparison(prof, { session, feeds, batch, name: presetName ?? model }, params.get('ab')) : null;
   let profile = null;
   if (profileInvokes > 0 && prof?.supported) {
     prof.arm();
@@ -197,7 +254,6 @@ runMain(async () => {
     profile.profiledRunMs = summarize(profiledRunMs);
     profile.submitsPerInvoke = submits / profileInvokes;
     profile.timestampsQuantized = collected.timestampsQuantized;
-    profile.dropped = collected.dropped;
     profile.errors = collected.errors;
     profile.sequence = collected.rows
       .filter((r) => r.invoke === 1)
@@ -218,20 +274,28 @@ runMain(async () => {
   if (params.get('parity') === 'wasm') {
     const gpuOut = await outputsToArrays(await session.run(feeds));
     ort.setRequestedOrtExecutionProviderForCurrentThread('wasm');
-    const ref = await ort.InferenceSession.create(model, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
-    const refOut = await outputsToArrays(await ref.run(feeds));
-    const outputs = maxAbsDiff(gpuOut, refOut);
+    // The reference is the ORIGINAL model (preset's shipped export unless
+    // referenceModel= says otherwise), never the candidate URL: comparing a
+    // candidate with itself on another EP would pass broken weights.
+    const referenceModel = params.get('referenceModel') ?? preset?.model ?? null;
     // Thresholds: ~2x the shipped baseline's max-abs on this fixture set (M4,
     // Chrome 157), i.e. a regression tripwire for f16 accumulation-order noise,
     // not a numerical proof (npm test pins ORT WASM to native lc0).
     const limits = preset?.parityMaxAbs ?? null;
-    const failures = limits
-      ? Object.entries(limits)
-          .filter(([name, max]) => !(outputs[name] && outputs[name].nonFinite === 0 && outputs[name].maxAbs <= max))
-          .map(([name]) => name)
-      : [];
-    parity = { reference: 'ORT WASM (same model bytes, no dequant fold)', outputs, maxAbsLimits: limits, failures, pass: !!limits && failures.length === 0 };
-    await ref.release();
+    if (!referenceModel) {
+      parity = { reference: null, candidateModel: model, pass: false, failures: ['no reference model: pass preset= or referenceModel='] };
+    } else {
+      const ref = await ort.InferenceSession.create(referenceModel, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+      const refOut = await outputsToArrays(await ref.run(feeds));
+      parity = {
+        reference: 'ORT WASM, reference model, no dequant fold',
+        referenceModel,
+        candidateModel: model,
+        candidateIsReference: referenceModel === model,
+        ...ortParity(gpuOut, refOut, limits),
+      };
+      await ref.release();
+    }
     log('parity', parity);
   }
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
@@ -240,7 +304,7 @@ runMain(async () => {
   const gpuUsed = /webgpu/.test(backend) && !!prof;
   return {
     bench: 'ort-profile',
-    ok: gpuUsed && !profiler.state.errors.length && (parity ? parity.pass : true),
+    ok: gpuUsed && !profiler.state.errors.length && profileComplete(profile) && (parity ? parity.pass : true),
     device: identity,
     candidate: {
       runtime: 'ort-webgpu',
@@ -256,6 +320,7 @@ runMain(async () => {
     timing: { sessionCreateMs, runMs: timing, perPositionMs: timing.median / batch },
     profile,
     parity,
+    ab,
     errors: profiler.state.errors,
   };
 });

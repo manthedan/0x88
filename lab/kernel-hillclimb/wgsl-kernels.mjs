@@ -2,27 +2,31 @@
 // kernels, not product kernels: they establish what a straightforward
 // hand-written shader reaches on this device at our real shapes.
 
-/** Independent-accumulator FMA chain; 8 vec4 accumulators per thread. */
+/**
+ * Independent-accumulator FMA chain; 8 vec4 accumulators per thread.
+ * Multiplier, addend and accumulator seeds differ per lane (and per thread),
+ * and every invocation stores its sum, so the compiler can neither collapse
+ * lanes nor dead-code the chains of threads other than 0.
+ */
 export function fmaKernel(type, iters) {
   const t = type === 'f16' ? 'f16' : 'f32';
   const enable = t === 'f16' ? 'enable f16;\n' : '';
   const acc = Array.from({ length: 8 }, (_, i) => i);
   return `${enable}
 @group(0) @binding(0) var<storage, read_write> outBuf: array<vec4<f32>>;
-@group(0) @binding(1) var<uniform> P: vec4<f32>;
+@group(0) @binding(1) var<uniform> P: array<vec4<f32>, 2>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let seed = ${t}(f32(gid.x & 255u) * 0.001);
-  let b = vec4<${t}>(${t}(P.x));
-  let c = vec4<${t}>(${t}(P.y));
-${acc.map((i) => `  var a${i} = vec4<${t}>(seed + ${t}(${i}.0 * 0.01));`).join('\n')}
+  let seed = f32(gid.x & 255u) * 0.001;
+  let b = vec4<${t}>(P[0]);
+  let c = vec4<${t}>(P[1]);
+${acc.map((i) => `  var a${i} = vec4<${t}>(vec4<f32>(seed) + vec4<f32>(${i}.0 * 0.01, ${i}.0 * 0.01 + 0.002, ${i}.0 * 0.01 + 0.004, ${i}.0 * 0.01 + 0.006));`).join('\n')}
   for (var i = 0u; i < ${iters}u; i = i + 1u) {
 ${acc.map((i) => `    a${i} = fma(a${i}, b, c);`).join('\n')}
 ${acc.map((i) => `    a${i} = fma(a${i}, b, c);`).join('\n')}
   }
   let s = ${acc.map((i) => `a${i}`).join(' + ')};
-  if (P.z > 1.0e30) { outBuf[gid.x] = vec4<f32>(s); }
-  if (gid.x == 0u) { outBuf[0] = vec4<f32>(s); }
+  outBuf[gid.x] = vec4<f32>(s);
 }`;
 }
 /** FLOPs per thread of fmaKernel: iters * 2 (unroll) * 8 accumulators * 4 lanes * 2 flops. */
@@ -65,7 +69,8 @@ fn main(@builtin(local_invocation_index) li: u32) { if (li == 0u) { dst[0] = dst
 /**
  * Register-blocked shared-memory GEMM, C[M,N] = A[M,K] * B[K,N], all
  * row-major. 16x16 threads; each thread owns (4*tm4) x (4*tn4) outputs, so
- * BM = 64*tm4, BN = 64*tn4, BK = 16. Requires M%BM == N%BN == K%16 == 0.
+ * BM = 64*tm4, BN = 64*tn4, BK = 16. Requires M%BM == N%BN == K%16 == 0 and
+ * tm4 <= 4 (the A-tile load uses one invocation per 4 rows x 4 cols).
  * storage: 'f32' | 'f16'; accum: 'f32' | 'f16'.
  */
 export function gemmKernel({ M, N, K, storage, accum, tm4, tn4 }) {
@@ -74,6 +79,7 @@ export function gemmKernel({ M, N, K, storage, accum, tm4, tn4 }) {
   const BM = 64 * tm4;
   const BN = 64 * tn4;
   const BK = 16;
+  if (tm4 > 4) throw new Error('gemm tm4 > 4 unsupported');
   if (M % BM || N % BN || K % BK) throw new Error(`gemm shape ${M}x${N}x${K} not divisible by ${BM}x${BN}x${BK}`);
   const enable = T === 'f16' || AT === 'f16' ? 'enable f16;\n' : '';
   const accs = [];
@@ -94,16 +100,23 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
   let tx = lid.x; let ty = lid.y;`);
   for (const a of accs) lines.push(`  var ${a.name} = vec4<${AT}>();`);
   lines.push(`  for (var k0 = 0u; k0 < K; k0 = k0 + ${BK}u) {`);
-  for (let l = 0; l < tm4; l++) {
-    lines.push(`    {
-      let idx = li + ${l * 256}u; let m = idx / 4u; let kq = idx % 4u;
-      let a = vec4<${AT}>(A[((row0 + m) * K + k0) / 4u + kq]);
-      As[(kq * 4u + 0u) * BM4 + m / 4u][m % 4u] = a.x;
-      As[(kq * 4u + 1u) * BM4 + m / 4u][m % 4u] = a.y;
-      As[(kq * 4u + 2u) * BM4 + m / 4u][m % 4u] = a.z;
-      As[(kq * 4u + 3u) * BM4 + m / 4u][m % 4u] = a.w;
+  // A tile: BM rows x BK cols, stored k-major as vec4 over 4 consecutive rows
+  // (As[k * BM4 + m/4]). Each of the first BM threads loads one vec4 column
+  // chunk (kq) from 4 consecutive rows and writes 4 whole vec4s, so no two
+  // invocations write the same workgroup vector (component writes to a shared
+  // vec4 from different invocations are a data race in WGSL).
+  lines.push(`    if (li < ${BM}u) {
+      let mb = li / 4u; let kq = li % 4u;
+      let base = ((row0 + mb * 4u) * K + k0) / 4u + kq;
+      let r0 = vec4<${AT}>(A[base]);
+      let r1 = vec4<${AT}>(A[base + K / 4u]);
+      let r2 = vec4<${AT}>(A[base + 2u * K / 4u]);
+      let r3 = vec4<${AT}>(A[base + 3u * K / 4u]);
+      As[(kq * 4u + 0u) * BM4 + mb] = vec4<${AT}>(r0.x, r1.x, r2.x, r3.x);
+      As[(kq * 4u + 1u) * BM4 + mb] = vec4<${AT}>(r0.y, r1.y, r2.y, r3.y);
+      As[(kq * 4u + 2u) * BM4 + mb] = vec4<${AT}>(r0.z, r1.z, r2.z, r3.z);
+      As[(kq * 4u + 3u) * BM4 + mb] = vec4<${AT}>(r0.w, r1.w, r2.w, r3.w);
     }`);
-  }
   for (let l = 0; l < tn4; l++) {
     lines.push(`    {
       let idx = li + ${l * 256}u; let k = idx / BN4; let nq = idx % BN4;

@@ -21,7 +21,7 @@
 //   --out PATH         result JSON (default artifacts/kernel-hillclimb/results/<name>-<stamp>.json)
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { loadavg, release, type as osType } from 'node:os';
+import { loadavg, type as osType, release } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';

@@ -6,14 +6,16 @@
 //   batch=N   physical batch (lc0 targets; centipawn manifests are fixed b16)
 //   warmup=N (5)  iters=N (30)  profileInvokes=N (5, 0 disables)
 //   parity=ort  compare evaluator outputs with the ORT path on the same positions
-//   tieEpsilon=X  (lc0 parity) best-move flips whose prior gap <= X count as tolerated
+//   tieEpsilon=X  (lc0 parity) best-move flips whose REFERENCE prior gap <= X are tolerated
+//   maxPriorAbs=X maxWdlAbs=X  (lc0 parity) override the target's max-abs limits
 import { parseFen } from '../../src/chess/board.ts';
 import { Lc0OnnxEvaluator } from '../../src/lc0/onnxEvaluator.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from '../../src/lc0/wholeOnnxWebgpuEvaluator.ts';
-import { SquareformerTvmjsWebgpuEvaluator } from '../../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
-import { SquareFormerEvaluator } from '../../src/nn/squareformerEvaluator.ts';
 import * as ort from '../../src/nn/ortRuntime.ts';
+import { SquareFormerEvaluator } from '../../src/nn/squareformerEvaluator.ts';
+import { SquareformerTvmjsWebgpuEvaluator } from '../../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
 import { deviceIdentity, intParam, log, params, runMain, summarize } from './common.mjs';
+import { compareCentipawn, compareLc0, profileComplete } from './gates.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
 
 const LC0 = '/runtimes/lc0-tvmjs-webgpu';
@@ -31,6 +33,9 @@ const TARGETS = {
     manifest: `${LC0}/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json`,
     batch: 8,
     ortModel: '/models/lc0/t1-256x10-distilled-swa-2432500.batch{batch}.f16.onnx',
+    // ~4x the max-abs observed vs ORT (prior 0.0063, WDL 0.0024; M4, Nov 2026).
+    maxPriorAbs: 0.03,
+    maxWdlAbs: 0.01,
     shipped: 'Lc0 small TVM whole-model option (non-default; hidden in the v0 deploy profile)',
   },
   'lc0-t3': {
@@ -38,6 +43,8 @@ const TARGETS = {
     manifest: `${LC0}/t3-512x15x16h-distill-swa-2767500/f16/v1/manifest.json`,
     batch: 8,
     ortModel: '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch{batch}.f16.onnx',
+    maxPriorAbs: 0.05,
+    maxWdlAbs: 0.01,
     shipped: 'research lane (not wired to product)',
   },
   'lc0-bt4': {
@@ -45,6 +52,9 @@ const TARGETS = {
     manifest: `${LC0}/BT4-1024x15x32h-swa-6147500-policytune-332/f16/v1/manifest.json`,
     batch: 8,
     ortModel: '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch{batch}.f16.onnx',
+    // ~4x observed (prior 0.012, WDL 0.0022).
+    maxPriorAbs: 0.05,
+    maxWdlAbs: 0.01,
     shipped: 'research lane (not wired to product)',
   },
 };
@@ -53,44 +63,6 @@ async function fixtureFens(n) {
   const fixtures = await (await fetch('/fixtures/lc0/fen_only.json')).json();
   const fens = fixtures.map((f) => f.fen);
   return Array.from({ length: n }, (_, i) => fens[i % fens.length]);
-}
-
-function compareLc0(a, b, tieEpsilon) {
-  let maxPrior = 0;
-  let maxWdl = 0;
-  let bestMatches = 0;
-  const tolerated = [];
-  for (let i = 0; i < a.length; i++) {
-    const pb = new Map(b[i].legalPriors.map((p) => [p.uci, p.prior]));
-    for (const p of a[i].legalPriors) maxPrior = Math.max(maxPrior, Math.abs(p.prior - (pb.get(p.uci) ?? NaN)));
-    for (let j = 0; j < 3; j++) maxWdl = Math.max(maxWdl, Math.abs(a[i].wdl[j] - b[i].wdl[j]));
-    const ba = [...a[i].legalPriors].sort((x, y) => y.prior - x.prior)[0]?.uci;
-    const bb = [...b[i].legalPriors].sort((x, y) => y.prior - x.prior)[0]?.uci;
-    if (ba === bb) bestMatches++;
-    else {
-      const pa = new Map(a[i].legalPriors.map((p) => [p.uci, p.prior]));
-      const gap = Math.abs((pa.get(ba) ?? NaN) - (pa.get(bb) ?? NaN));
-      if (tieEpsilon !== null && gap <= tieEpsilon) tolerated.push({ row: i, tvm: ba, ort: bb, priorGap: gap });
-    }
-  }
-  return {
-    rows: a.length,
-    bestMoveMatches: bestMatches,
-    tieTolerated: tolerated,
-    maxLegalPriorAbs: maxPrior,
-    maxWdlAbs: maxWdl,
-    pass: Number.isFinite(maxPrior) && bestMatches + tolerated.length === a.length,
-  };
-}
-
-function compareCentipawn(a, b, tolerance = 0.001) {
-  let policy = 0;
-  let wdl = 0;
-  for (let i = 0; i < a.length; i++) {
-    for (const [k, p] of a[i].policy) policy = Math.max(policy, Math.abs(p - (b[i].policy.get(k) ?? NaN)));
-    for (let j = 0; j < 3; j++) wdl = Math.max(wdl, Math.abs(a[i].wdl[j] - b[i].wdl[j]));
-  }
-  return { rows: a.length, maxLegalPolicyAbs: policy, maxWdlAbs: wdl, tolerance, pass: Number.isFinite(policy) && policy <= tolerance && wdl <= tolerance };
 }
 
 runMain(async () => {
@@ -147,7 +119,6 @@ runMain(async () => {
     profile.profiledRunMs = summarize(profiledRunMs);
     profile.submitsPerInvoke = submits / profileInvokes;
     profile.timestampsQuantized = collected.timestampsQuantized;
-    profile.dropped = collected.dropped;
     profile.sequence = collected.rows
       .filter((r) => r.invoke === 1)
       .map((r) => [r.name, Math.round(r.ns / 10) / 100, r.workgroups?.join('x') ?? 'indirect', r.bindBytes]);
@@ -175,7 +146,9 @@ runMain(async () => {
       const ref = await Lc0OnnxEvaluator.create(ortModel);
       const refOut = [];
       for (const fen of fens) refOut.push(await ref.evaluate(fen));
-      parity = { reference: `ORT ${ort.describeOrtBackendConfig()} ${ortModel}`, tieEpsilon, ...compareLc0(tvmOut, refOut, tieEpsilon) };
+      const maxPriorAbs = params.get('maxPriorAbs') === null ? target.maxPriorAbs : Number(params.get('maxPriorAbs'));
+      const maxWdlAbs = params.get('maxWdlAbs') === null ? target.maxWdlAbs : Number(params.get('maxWdlAbs'));
+      parity = { reference: `ORT ${ort.describeOrtBackendConfig()} ${ortModel}`, ...compareLc0(tvmOut, refOut, { tieEpsilon, maxPriorAbs, maxWdlAbs }) };
     }
     log('parity', parity);
   }
@@ -184,7 +157,7 @@ runMain(async () => {
   evaluator.dispose?.();
   return {
     bench: 'tvmjs-profile',
-    ok: !profiler.state.errors.length && (parity ? parity.pass : true),
+    ok: !profiler.state.errors.length && profileComplete(profile) && (parity ? parity.pass : true),
     device: identity,
     candidate: { runtime: 'tvmjs-webgpu', target: targetName, manifest, batch, shipped: target.shipped },
     params: { warmup, iters, profileInvokes, fens },

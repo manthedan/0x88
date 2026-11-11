@@ -19,6 +19,8 @@ const DEFAULT_GEMM_SHAPES = [
   ['square 2048x2048x2048', 2048, 2048, 2048],
 ];
 
+const uncaptured = [];
+
 async function getDevice() {
   const adapter = await requestAdapter();
   const want = ['timestamp-query', 'shader-f16', 'subgroups', 'chromium-experimental-subgroup-matrix'];
@@ -30,7 +32,14 @@ async function getDevice() {
     maxComputeInvocationsPerWorkgroup: adapter.limits.maxComputeInvocationsPerWorkgroup,
   };
   const device = await adapter.requestDevice({ requiredFeatures, requiredLimits });
-  device.addEventListener('uncapturederror', (e) => log('uncapturederror', String(e.error?.message ?? e)));
+  // Any uncaptured validation/OOM error invalidates the run: timings around an
+  // invalid dispatch resolve to zero or garbage. runMain turns the throw at the
+  // end of the page into window.__kernelBenchError.
+  device.addEventListener('uncapturederror', (e) => {
+    const msg = String(e.error?.message ?? e);
+    uncaptured.push(msg);
+    log('uncapturederror', msg);
+  });
   if (!device.features.has('timestamp-query')) throw new Error('timestamp-query required for peak measurements');
   return { adapter, device };
 }
@@ -68,6 +77,8 @@ async function timeDispatches(device, pipeline, group, dispatch, { reps, trials,
     pass.end();
     return enc.finish();
   };
+  device.pushErrorScope('validation');
+  device.pushErrorScope('out-of-memory');
   for (let i = 0; i < warmup; i++) {
     device.queue.submit([encodeRun(null)]);
     await device.queue.onSubmittedWorkDone();
@@ -89,15 +100,21 @@ async function timeDispatches(device, pipeline, group, dispatch, { reps, trials,
   read.unmap();
   const gpuNs = [];
   for (let t = 0; t < trials; t++) gpuNs.push(Number(ticks[2 * t + 1] - ticks[2 * t]) / reps);
+  const oom = await device.popErrorScope();
+  const invalid = await device.popErrorScope();
+  if (invalid || oom) throw new Error(`timeDispatches: ${(invalid ?? oom).message}`);
+  if (!gpuNs.every((v) => v > 0)) throw new Error(`timeDispatches: non-positive GPU duration ${gpuNs.join(',')}`);
   qs.destroy();
   resolve.destroy();
   read.destroy();
   return { gpuNs, wallMs: wall };
 }
 
-function randomBuffer(device, bytes, type) {
+/** Random device buffer; with `keepHost` also returns the exact values as f32 (for validation). */
+function randomBuffer(device, bytes, type, keepHost = false) {
   const buf = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
   const n = bytes / (type === 'f16' ? 2 : 4);
+  const host = keepHost ? new Float32Array(n) : null;
   const chunk = 1 << 20;
   for (let off = 0; off < n; off += chunk) {
     const len = Math.min(chunk, n - off);
@@ -105,23 +122,76 @@ function randomBuffer(device, bytes, type) {
       const a = new Uint16Array(len);
       // f16 values in roughly [-0.5, 0.5): sign + exponent 13..14 + random mantissa.
       for (let i = 0; i < len; i++) a[i] = ((Math.random() < 0.5 ? 0x8000 : 0) | ((13 + (i & 1)) << 10) | ((Math.random() * 1024) | 0)) & 0xffff;
+      if (host) for (let i = 0; i < len; i++) host[off + i] = f16ToF32(a[i]);
       device.queue.writeBuffer(buf, off * 2, a);
     } else {
       const a = new Float32Array(len);
       for (let i = 0; i < len; i++) a[i] = Math.random() - 0.5;
+      if (host) host.set(a, off);
       device.queue.writeBuffer(buf, off * 4, a);
     }
   }
-  return buf;
+  return keepHost ? { buf, host } : buf;
 }
+
+function f16ToF32(h) {
+  const s = h & 0x8000 ? -1 : 1;
+  const e = (h >> 10) & 0x1f;
+  const m = h & 0x3ff;
+  if (e === 0) return s * m * 2 ** -24;
+  if (e === 31) return m ? NaN : s * Infinity;
+  return s * (1 + m / 1024) * 2 ** (e - 15);
+}
+
+/**
+ * Check a GEMM result C[M,N] = A[M,K] * B[K,N] (row-major) on sampled entries
+ * against a float64 CPU reference. Error is relative to sum_k |a*b| so the
+ * bound is scale-free; a racing or mis-indexed kernel misses by O(1).
+ */
+async function validateGemm(device, C, { M, N, K, hostA, hostB, outType, tol, samples = 96 }) {
+  const size = outType === 'f16' ? 2 : 4;
+  const staging = device.createBuffer({ size: M * N * size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const enc = device.createCommandEncoder();
+  enc.copyBufferToBuffer(C, 0, staging, 0, M * N * size);
+  device.queue.submit([enc.finish()]);
+  await staging.mapAsync(GPUMapMode.READ);
+  const raw = staging.getMappedRange().slice(0);
+  staging.unmap();
+  staging.destroy();
+  const out = outType === 'f16' ? Uint16Array.from(new Uint16Array(raw)) : new Float32Array(raw);
+  let maxRel = 0;
+  for (let s = 0; s < samples; s++) {
+    // Corners plus random entries, so edge tiles are always covered.
+    const i = s === 0 || s === 1 ? 0 : s === 2 || s === 3 ? M - 1 : (Math.random() * M) | 0;
+    const j = s === 0 || s === 2 ? 0 : s === 1 || s === 3 ? N - 1 : (Math.random() * N) | 0;
+    let ref = 0;
+    let mag = 0;
+    for (let k = 0; k < K; k++) {
+      const p = hostA[i * K + k] * hostB[k * N + j];
+      ref += p;
+      mag += Math.abs(p);
+    }
+    const got = outType === 'f16' ? f16ToF32(out[i * N + j]) : out[i * N + j];
+    const rel = Math.abs(got - ref) / Math.max(mag, 1e-6);
+    if (!Number.isFinite(rel)) return { valid: false, maxRelErr: Infinity, tol };
+    maxRel = Math.max(maxRel, rel);
+  }
+  return { valid: maxRel <= tol, maxRelErr: maxRel, tol };
+}
+
+// f16 accumulation over K<=2048 stays near 5e-4 of sum|ab| for these
+// inputs; f32 accumulation inside 1e-4. A wrong kernel misses by ~1.
+const GEMM_TOL = { f16: 5e-3, f32: 1e-4 };
 
 async function fmaTests(device, trials) {
   const out = [];
   const threads = 4096 * 256;
   const iters = 256;
   const outBuf = device.createBuffer({ size: threads * 16, usage: GPUBufferUsage.STORAGE });
-  const uni = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(uni, 0, new Float32Array([0.999, 0.001, 0, 0]));
+  const uni = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  // Distinct per-lane multiplier and addend (distinct in f16 too: f16 spacing
+  // near 1 is 4.9e-4), so no lane can be folded into another.
+  device.queue.writeBuffer(uni, 0, new Float32Array([0.99, 0.991, 0.992, 0.993, 0.01, 0.011, 0.012, 0.013]));
   for (const type of ['f32', 'f16']) {
     if (type === 'f16' && !device.features.has('shader-f16')) continue;
     const pipeline = await compile(device, fmaKernel(type, iters), `fma_${type}`);
@@ -140,7 +210,11 @@ async function fmaTests(device, trials) {
 
 async function bandwidthTests(device, trials) {
   const out = [];
-  const bytes = 256 * 1024 * 1024;
+  // Full-buffer bindings must fit maxStorageBufferBindingSize (128 MiB on some adapters).
+  const MiB = 1024 * 1024;
+  const limit = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize);
+  const bytes = Math.min(256 * MiB, Math.floor(limit / MiB) * MiB);
+  if (bytes < 32 * MiB) throw new Error(`bandwidth: storage binding limit ${limit} too small for a DRAM-resident working set`);
   const src = randomBuffer(device, bytes, 'f32');
   const dst = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const uni = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -203,10 +277,14 @@ async function gemmTests(device, trials, shapes) {
     for (const type of ['f32', 'f16']) {
       if (type === 'f16' && !device.features.has('shader-f16')) continue;
       const size = type === 'f16' ? 2 : 4;
+      const A = randomBuffer(device, M * K * size, type, true);
+      const B = randomBuffer(device, K * N * size, type, true);
       buffers[type] = {
-        A: randomBuffer(device, M * K * size, type),
-        B: randomBuffer(device, K * N * size, type),
+        A: A.buf,
+        B: B.buf,
         C: device.createBuffer({ size: M * N * size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
+        hostA: A.host,
+        hostB: B.host,
       };
     }
     for (const variant of gemmVariants(M, N)) {
@@ -219,7 +297,21 @@ async function gemmTests(device, trials, shapes) {
         const t = await timeDispatches(device, pipeline, bindGroup(device, pipeline, [b.A, b.B, b.C]), dispatch, { reps, trials });
         const s = summarize(t.gpuNs);
         const bytes = (M * K + K * N + M * N) * (variant.storage === 'f16' ? 2 : 4);
+        const check = await validateGemm(device, b.C, {
+          M,
+          N,
+          K,
+          hostA: b.hostA,
+          hostB: b.hostB,
+          outType: variant.storage,
+          tol: GEMM_TOL[variant.accum === 'f16' ? 'f16' : variant.storage],
+        });
+        if (!check.valid) {
+          out.push({ test: 'gemm', shape: label, M, N, K, ...variant, kernel: name, error: `output check failed: maxRelErr ${check.maxRelErr}`, check });
+          continue;
+        }
         out.push({
+          check,
           test: 'gemm',
           shape: label,
           M,
@@ -239,7 +331,7 @@ async function gemmTests(device, trials, shapes) {
     }
     const best = out.filter((r) => r.shape === label && r.tflops).sort((a, b) => b.tflops - a.tflops)[0];
     if (best) log('gemm', label, `${best.tflops.toFixed(3)} TFLOP/s best=${best.kernel} ${(best.gpuNs.median / 1e3).toFixed(1)}us`);
-    for (const b of Object.values(buffers)) for (const buf of Object.values(b)) buf.destroy();
+    for (const b of Object.values(buffers)) for (const buf of [b.A, b.B, b.C]) buf.destroy();
   }
   return out;
 }
@@ -282,15 +374,42 @@ async function subgroupMatrixTests(device, adapter, trials, shapes) {
           });
           const pipeline = await compile(device, code, name);
           const size = cfg.componentType === 'f16' ? 2 : 4;
-          const A = randomBuffer(device, M * K * size, cfg.componentType);
-          const B = randomBuffer(device, K * N * size, cfg.componentType);
-          const C = device.createBuffer({ size: M * N * (cfg.resultComponentType === 'f16' ? 2 : 4), usage: GPUBufferUsage.STORAGE });
-          const t = await timeDispatches(device, pipeline, bindGroup(device, pipeline, [A, B, C]), dispatch, { reps, trials });
-          const s = summarize(t.gpuNs);
-          rows.push({ test: 'sgmatrix_gemm', shape: label, M, N, K, config: cfg, rt, ct, kernel: name, flops, gpuNs: s, tflops: flops / s.median / 1e3 });
-          A.destroy();
-          B.destroy();
-          C.destroy();
+          const A = randomBuffer(device, M * K * size, cfg.componentType, true);
+          const B = randomBuffer(device, K * N * size, cfg.componentType, true);
+          const C = device.createBuffer({ size: M * N * (cfg.resultComponentType === 'f16' ? 2 : 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+          try {
+            const t = await timeDispatches(device, pipeline, bindGroup(device, pipeline, [A.buf, B.buf, C]), dispatch, { reps, trials });
+            const s = summarize(t.gpuNs);
+            const check = await validateGemm(device, C, {
+              M,
+              N,
+              K,
+              hostA: A.host,
+              hostB: B.host,
+              outType: cfg.resultComponentType,
+              tol: GEMM_TOL[cfg.resultComponentType],
+            });
+            if (!check.valid) throw new Error(`output check failed: maxRelErr ${check.maxRelErr}`);
+            rows.push({
+              test: 'sgmatrix_gemm',
+              shape: label,
+              M,
+              N,
+              K,
+              config: cfg,
+              rt,
+              ct,
+              kernel: name,
+              flops,
+              gpuNs: s,
+              tflops: flops / s.median / 1e3,
+              check,
+            });
+          } finally {
+            A.buf.destroy();
+            B.buf.destroy();
+            C.destroy();
+          }
         } catch (error) {
           rows.push({ test: 'sgmatrix_gemm', shape: label, M, N, K, config: cfg, rt, ct, kernel: name, error: String(error.message ?? error).slice(0, 600) });
         }
@@ -441,6 +560,9 @@ runMain(async () => {
       shapes.map(([label]) => [label, gemmRows.filter((r) => r.shape === label).sort((a, b) => b.tflops - a.tflops)[0]?.kernel ?? null]),
     ),
   };
+  if (uncaptured.length) throw new Error(`peak: ${uncaptured.length} uncaptured WebGPU error(s), results invalid: ${uncaptured.slice(0, 3).join(' | ')}`);
+  const failedGemm = [...(result.results.gemm ?? []), ...(result.results.subgroupMatrix?.rows ?? [])].filter((r) => /output check failed/.test(r.error ?? ''));
+  result.gemmOutputCheckFailures = failedGemm.map((r) => r.kernel + ' ' + r.shape);
   device.destroy();
   return result;
 });

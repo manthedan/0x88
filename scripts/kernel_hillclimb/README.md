@@ -13,6 +13,7 @@ fixed scale. Baseline numbers and the ranked candidate list are in
 | `lab/kernel-hillclimb/ort-profile.html` | ORT WebGPU (shipped Lc0 / Maia3 path) timing + per-dispatch GPU profile + ORT WASM parity |
 | `lab/kernel-hillclimb/tvmjs-profile.html` | TVMJS WebGPU (shipped Centipawn path, Lc0 research lanes) timing + profile + ORT parity |
 | `lab/kernel-hillclimb/gpu-profiler.mjs` | runtime-agnostic WebGPU profiler (see below) |
+| `lab/kernel-hillclimb/gates.mjs` | pure correctness gates (ORT parity, Lc0 / Centipawn evaluator parity, profile completeness); unit-tested against broken candidates in `tests/kernel_hillclimb.test.mjs` |
 | `scripts/kernel_hillclimb/build_lab.mjs` | production-compiles the pages and overlays them onto `dist-client` |
 | `scripts/kernel_hillclimb/candidates.mjs` | named candidates: page + query + correctness gate |
 | `scripts/kernel_hillclimb/bench.mjs` | local runner (agent-browser): opens a page, waits for the result, writes one JSON |
@@ -49,20 +50,20 @@ in `#log`). Result object (`schema: "kernel-hillclimb.bench-result.v1"`):
 | field | meaning |
 |---|---|
 | `schema`, `generatedAt`, `bench` | `peak` / `ort-profile` / `tvmjs-profile` |
-| `ok` | correctness gate passed (and no profiler/runtime errors). Timing from a result with `ok: false` must not be used |
+| `ok` | correctness gate passed, no profiler/runtime errors, and the profile is complete (no dispatch ran untimed). Timing from a result with `ok: false` must not be used; `roofline.mjs` drops such repeats |
 | `device` | adapter vendor/architecture/description, subgroup min/max, subgroup-matrix configs, adapter + device features, limits, WGSL language features, UA + UA-CH high-entropy values, platform, cores, `crossOriginIsolated`, page URL + query |
 | `candidate` | runtime, preset/target, model or manifest, physical batch, dequant-fold summary, effective backend |
 | `params` | warmup / iters / profileInvokes / fixture FENs |
 | `timing.runMs` | noise-aware stats over unprofiled invokes: n, median, MAD, MAD/median, mean, min, p10, p90, max, `noisy` (MAD/median > 10%) |
-| `profile` | per-dispatch GPU profile (null if `timestamp-query` missing): `kernelMsPerInvoke`, `perInvoke[]` (busy / envelope / gap ms, dispatches), `kernels[]` (by name), `sequence` (invoke 1: `[name, µs, grid, boundBytes]`), `submitsPerInvoke`, `timestampsQuantized` |
+| `profile` | per-dispatch GPU profile (null if `timestamp-query` missing): `kernelMsPerInvoke`, `perInvoke[]` (busy / envelope / gap ms, dispatches), `kernels[]` (by name), `sequence` (invoke 1: `[name, µs, grid, boundBytes]`), `submitsPerInvoke`, `timestampsQuantized`, `dropped` (dispatches past the 16384-slot capacity; > 0 fails the run) |
 | `parity` | gate details (per-output max-abs, best-move matches, tie tolerances) |
-| `peaks` (peak page) | `fmaF32Tflops`, `fmaF16Tflops`, `readGBps`, `copyGBps`, best GEMM per shape + kernel |
+| `peaks` (peak page) | `fmaF32Tflops`, `fmaF16Tflops` (null without `shader-f16`), `readGBps`, `copyGBps`, best GEMM per shape + kernel. Every GEMM row carries `check` (sampled outputs vs a float64 CPU reference, error relative to Σ\|a·b\|; tolerance 1e-4 f32 / 5e-3 f16 accumulation); rows that fail are recorded with `error` and excluded from the peaks. Any uncaptured WebGPU error turns the page into `__kernelBenchError` |
 
 Query params per page:
 
 - `peak`: `tests=fma,bandwidth,overhead,gemm,sgmatrix` `trials=7` `gemmShapes=MxNxK,...`
-- `ort-profile`: `preset=lc0-small|lc0-small-b8|t3|bt4|lqo|maia3|maia3-grid` (or `model=URL&batch=N`), `warmup=5` `iters=30` `profileInvokes=5` `parity=wasm` `ortDequantFold=0`
-- `tvmjs-profile`: `target=centipawn|lc0-t1|lc0-t3|lc0-bt4` `manifest=URL` `batch=N` `warmup` `iters` `profileInvokes` `parity=ort` `tieEpsilon=0.01`
+- `ort-profile`: `preset=lc0-small|lc0-small-b8|t3|bt4|lqo|maia3|maia3-grid` (or `model=URL&batch=N`), `warmup=5` `iters=30` `profileInvokes=5` `parity=wasm` `referenceModel=URL` `ortDequantFold=0` `ab=PRESET` (`abRounds=20` `abBlock=3`: ABAB-interleaved paired comparison in one page session; result `ab` carries per-position wall and GPU-busy ratios per round, the comparison to use on a loaded machine). A candidate model goes in `model=` next to the preset it replaces; parity then runs the preset's original model on ORT WASM as the reference (override with `referenceModel=`). With neither a preset nor `referenceModel`, parity fails.
+- `tvmjs-profile`: `target=centipawn|lc0-t1|lc0-t3|lc0-bt4` `manifest=URL` `batch=N` `warmup` `iters` `profileInvokes` `parity=ort` `tieEpsilon=0.01` `maxPriorAbs` `maxWdlAbs`
 
 Timestamps: Chrome quantizes `timestamp-query` to 65.536 µs unless launched
 with `--enable-webgpu-developer-features`; `profile.timestampsQuantized` says
@@ -93,9 +94,9 @@ compare candidate vs baseline with `scripts/lib/perf_canary_stats.mjs`
 
 | path | gate | where |
 |---|---|---|
-| ORT WebGPU (Lc0 small / t3 / BT4 / LQO, Maia3) | `parity=wasm`: per-output max-abs vs ORT WASM on identical encoded fixture inputs, within the preset's threshold. `npm test` separately pins ORT WASM to native lc0 fixtures, so this chains the shipped GPU path to native | in-page |
-| TVMJS Centipawn | `parity=ort`: legal-policy and WDL max-abs ≤ 0.001 vs the ORT Centipawn evaluator (16 positions). Promotion also needs the search-parity runs in `docs/centipawn_tvmjs_subgroups_2026-10.md` | in-page |
-| TVMJS Lc0 (t1 / BT4) | `parity=ort&tieEpsilon=0.01`: best legal move per position vs ORT f16 b1, f16 near-tie flips within 0.01 prior tolerated (the BT4 onboarding gate), plus max prior / WDL diff | in-page; `--command-gate` adds `npm run lc0:tvmjs-webgpu-smoke` search parity |
+| ORT WebGPU (Lc0 small / t3 / BT4 / LQO, Maia3) | `parity=wasm`: per-output max-abs of the candidate on ORT WebGPU vs the preset's ORIGINAL model on ORT WASM, identical encoded fixture inputs; every limited output must exist, match in length, be finite and sit within the preset's threshold. `npm test` separately pins ORT WASM to native lc0 fixtures, so this chains the GPU path to native | in-page |
+| TVMJS Centipawn | `parity=ort`: same move set, finite values, legal-policy and WDL max-abs ≤ 0.001 vs the ORT Centipawn evaluator (16 positions). Promotion also needs the search-parity runs in `docs/centipawn_tvmjs_subgroups_2026-10.md` | in-page |
+| TVMJS Lc0 (t1 / BT4) | `parity=ort&tieEpsilon=0.01` vs ORT f16 b1: same legal-move set, finite priors and WDL, max \|prior diff\| ≤ 0.03 (t1) / 0.05 (t3, BT4), max \|WDL diff\| ≤ 0.01, and the same best move unless the REFERENCE prior gap between the two moves is ≤ 0.01 (the BT4 onboarding tie rule, measured in the reference so a flattened candidate cannot excuse itself) | in-page; `--command-gate` adds `npm run lc0:tvmjs-webgpu-smoke` search parity |
 | hybrid custom-WGSL heads (not in v0) | `npm run lc0:browser-wgsl-smokes` | command (`WGSL_HEADS_GATE`) |
 | a new hand-written kernel | its own unit gate vs a CPU/ORT reference at the real shape, then the path gate above with the kernel swapped in | both |
 
@@ -108,7 +109,13 @@ bytes, and while armed splits every compute pass into one timestamped pass per
 dispatch (pipeline + bind groups replayed). It works for ORT's native WebGPU EP
 (emdawnwebgpu) and TVMJS alike. ORT names pipelines by op type (`Gemm`,
 `MatMul`, `Softmax`...), so `roofline.mjs` maps matmul dispatches to ONNX nodes
-by bound bytes; TVMJS kernels map to probe-JSON MACs by function name.
+(`matchMatmuls`): bound buffer bytes narrow the candidates (loosely: ORT's
+allocator rounds buffers up into buckets), the dispatch grid must fit the
+node's output shape (ORT tiles C at 32×32, z = batch for 3-D MatMul), and the
+node count breaks remaining ties. A dispatch class whose candidates still
+disagree on FLOPs is left unassigned (`ambiguous`) instead of guessed; the
+roofline notes list them and report the share of graph matmul FLOPs attached.
+TVMJS kernels map to probe-JSON MACs by function name.
 Splitting passes costs ~1 µs per dispatch and serializes the queue, so profiled
 busy time is an upper bound; the unprofiled `timing.runMs` is the number that
 counts.
@@ -124,7 +131,10 @@ node scripts/kernel_hillclimb/roofline.mjs --md artifacts/kernel-hillclimb/roofl
 Per kernel group (name, grid, bound bytes): FLOPs, bytes, median µs, TFLOP/s,
 GB/s, % of FMA peak and of read bandwidth, arithmetic intensity, and a bound
 label: `launch` (median dispatch < 8 µs, ~10× the empty-dispatch cost),
-`compute` / `bandwidth` (≥ 50% of the attainable roof, by AI vs the ridge), or
+`compute` / `bandwidth` (≥ 50% of the attainable roof, by AI vs the ridge),
 `underused` (neither roof reached: occupancy or kernel quality, the WGSL
-target). Per invoke: wall, GPU busy, non-kernel wall (= wall − busy: submit,
+target), or `unresolved` (zero median duration: no rate is computed). Only
+repeats with `ok`, unquantized timestamps and a complete profile are used;
+rejected repeats are listed. GB/s uses bound buffer bytes, which overstate
+traffic where ORT rounds buffers up. Per invoke: wall, GPU busy, non-kernel wall (= wall − busy: submit,
 readback, JS, idle), dispatches, matmul TFLOP/s.

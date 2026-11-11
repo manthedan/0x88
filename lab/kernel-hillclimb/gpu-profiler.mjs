@@ -389,7 +389,10 @@ export function aggregateProfile(collected, { invokes }) {
       firstSeq: k.firstSeq,
     }))
     .sort((a, b) => b.msPerInvoke - a.msPerInvoke);
-  return { invokes, kernelMsPerInvoke: total / 1e6 / invokes, perInvoke, kernels };
+  // Dispatches past the slot capacity run untimed: per-kernel totals would be
+  // silently low, so the pages fail the run when dropped > 0.
+  const dropped = collected.dropped ?? 0;
+  return { invokes, kernelMsPerInvoke: total / 1e6 / invokes, perInvoke, kernels, dropped, complete: dropped === 0 };
 }
 
 /**
@@ -422,5 +425,6 @@ export async function passModeProfile(prof, run, invokes) {
     passesPerInvoke: med(agg.perInvoke.map((p) => p.dispatches)),
     submitsPerInvoke: submits / invokes,
     timestampsQuantized: collected.timestampsQuantized,
+    dropped: collected.dropped ?? 0,
   };
 }

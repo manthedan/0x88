@@ -35,6 +35,13 @@ export const CANDIDATES = {
   'ort-maia3-grid': { page: 'ort-profile', query: 'preset=maia3-grid', path: 'ort-webgpu', gate: ORT_WASM_PARITY },
 
   // Shipped TVMJS baseline (Centipawn) and the LC0 TVMJS research lanes.
+  // Paired b1-vs-b8 Lc0 Small comparison (ABAB interleaved in one page session).
+  'ort-lc0-small-ab-b8': {
+    page: 'ort-profile',
+    query: 'preset=lc0-small&ab=lc0-small-b8&profileInvokes=0&iters=10',
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
   'tvmjs-centipawn': {
     page: 'tvmjs-profile',
     query: 'target=centipawn',
@@ -59,7 +66,8 @@ export const CANDIDATES = {
     gate: {
       kind: 'in-page',
       query: 'parity=ort&tieEpsilon=0.01',
-      description: 'Per-position legal-prior best move vs ORT f16 b1 (tie-epsilon 0.01 tolerates f16 near-tie flips), plus max prior / WDL diffs.',
+      description:
+        'vs ORT f16 b1 on the same positions: same legal-move set, finite priors/WDL, max |prior diff| <= 0.03 and max |WDL diff| <= 0.01 (lab/kernel-hillclimb/gates.mjs compareLc0), same best move unless the reference prior gap is <= tie-epsilon 0.01.',
       command: [
         'npm',
         'run',
@@ -96,7 +104,7 @@ export const CANDIDATES = {
       kind: 'in-page',
       query: 'parity=ort&tieEpsilon=0.01',
       description:
-        'As t1; BT4 strict parity fails on f16 near-ties by design (docs/lc0_tvmjs_bt4it332_onboarding_2026-06-09.md), so tie-epsilon 0.01 is the gate.',
+        'As t1 with max |prior diff| <= 0.05; BT4 strict best-move parity fails on f16 near-ties by design (docs/lc0_tvmjs_bt4it332_onboarding_2026-06-09.md), so flips are tolerated only where the reference prior gap is <= 0.01.',
     },
   },
 };
