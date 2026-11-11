@@ -116,8 +116,17 @@ async function main() {
   try { await Promise.race([cdp.send('Browser.close'), sleep(3000)]); } catch {}
   cdp.close();
   await cleanup();
-  await sleep(3000); // let GPU utilisation counters decay past our own work
-  const loadEnd = await sampleLoad(); // after Chrome is gone: GPU util here is other people's
+  // After Chrome is gone, GPU util should be other people's, but the counters (ioreg
+  // especially) lag our own work by several seconds: wait up to 15 s for them to settle.
+  await sleep(3000);
+  const settle = { waitedMs: 3000, readings: [] };
+  for (let i = 0; i < 12; i++) {
+    const g = gpuUtil(gpuLoad()); settle.readings.push(g);
+    if (g === null || g < IDLE.gpuMax) break;
+    await sleep(1000); settle.waitedMs += 1000;
+  }
+  const loadEnd = await sampleLoad();
+  loadEnd.gpuSettle = settle;
   const during = summarizeSamples(state.samples);
   const contendedReasons = [];
   if (args['wait-idle'] || os.platform() === 'darwin') {
