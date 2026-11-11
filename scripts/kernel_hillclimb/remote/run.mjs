@@ -24,12 +24,14 @@
 //   --gpu-info             include CDP SystemInfo.getInfo (chrome://gpu equivalent) in meta
 //   --out FILE             also write the final JSON to FILE
 //   --dry-run              show what would be synced/submitted, then stop
-// Exit: 0 ok, 2 page error/timeout, 3 runner/agent failure, 75 host busy (never started).
+// Exit: 0 ok, 2 page error/timeout, 3 runner/agent failure, 4 refused (0x88 job already
+// waiting), 75 confirmed never started (host busy), 76 still pending remotely (--fetch later).
 import { spawnSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, statSync, mkdtempSync } from 'node:fs';
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
+import { makeRunId, validateEstimate, q, slug, lockCommand, parseQueueList } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BENCHLOCK = '/Users/macthedan/projects/lc0_browser/notes/kernel-hillclimb/benchlock.sh';
@@ -37,7 +39,7 @@ const BENCHLOCK = '/Users/macthedan/projects/lc0_browser/notes/kernel-hillclimb/
 const COMMON_FLAGS = ['--headless=new', '--enable-unsafe-webgpu', '--enable-webgpu-developer-features'];
 export const HOSTS = {
   yukon: {
-    ssh: 'yukon', base: 'kernel-hillclimb', scheduler: 'gpu-queue',
+    ssh: 'yukon', base: 'kernel-hillclimb', scheduler: 'gpu-queue', platform: 'linux',
     pathPrefix: 'export PATH=$HOME/.local/bin:$PATH;',
     chrome: '/home/ddbb/.cache/puppeteer/chrome/linux-151.0.7922.71/chrome-linux64/chrome',
     // --no-sandbox is required: without it Chrome never comes up on Yukon (no usable
@@ -48,7 +50,7 @@ export const HOSTS = {
       '--ignore-gpu-blocklist', '--disable-vulkan-surface', '--enable-gpu', '--enable-dawn-features=vulkan_enable_f16_on_nvidia'],
   },
   'mac-mini': {
-    ssh: 'mac-mini', base: 'kernel-hillclimb', scheduler: 'idle-wait',
+    ssh: 'mac-mini', base: 'kernel-hillclimb', scheduler: 'idle-wait', platform: 'darwin',
     pathPrefix: 'export PATH=/opt/homebrew/bin:$PATH;',
     chrome: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     flags: COMMON_FLAGS,
@@ -71,13 +73,16 @@ const timeoutS = Number(args.timeout ?? 120);
 const maxWaitS = Number(args['max-wait'] ?? 21600);
 const chrome = args.chrome ?? H.chrome;
 const flags = args['flags-json'] ? JSON.parse(args['flags-json']) : [...H.flags, ...(args['add-flags'] ? String(args['add-flags']).split(',') : [])];
+let estimate;
+try { estimate = validateEstimate(args['estimate-min'] ?? 5); } catch (e) { die(e.message); }
 
 main().catch((e) => die(String(e?.stack ?? e)));
 
 async function main() {
   if (hostName === 'local') return runLocal();
   const home = sh(H, 'printf %s "$HOME"').stdout;
-  const runId = args.fetch ?? `${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}-${slug(args.name ?? basename((args.page ?? 'page').split('?')[0]))}`;
+  if (args.fetch && !/^[A-Za-z0-9_.-]+$/.test(args.fetch)) die('--fetch takes a run id');
+  const runId = args.fetch ?? makeRunId(args.name ?? basename((args.page ?? 'page').split('?')[0]));
   const remoteDir = `${home}/${H.base}/${runId}`;
   if (!args.fetch) await launch(home, runId, remoteDir);
   const result = await waitForResult(runId, remoteDir);
@@ -96,7 +101,8 @@ async function launch(home, runId, remoteDir) {
   // Hard-link unchanged files against the most recent earlier dist on the host.
   const prev = sh(H, `ls -td ${home}/${H.base}/*/dist 2>/dev/null | head -1`, { allowFail: true }).stdout.trim();
   const rs = ['-a', '--prune-empty-dirs', '--stats', ...filters, ...(prev ? [`--link-dest=${prev}`] : []), ...(args['dry-run'] ? ['--dry-run'] : [])];
-  sh(H, `mkdir -p ${q(remoteDir)}/dist`, { dry: args['dry-run'] });
+  // Exclusive allocation: plain mkdir fails if the run dir already exists.
+  sh(H, `mkdir -p ${q(`${home}/${H.base}`)} && mkdir ${q(remoteDir)} && mkdir ${q(remoteDir)}/dist`, { dry: args['dry-run'] });
   const r1 = spawnSync('rsync', [...rs, `${dist}/`, `${H.ssh}:${remoteDir}/dist/`], { encoding: 'utf8' });
   if (r1.status !== 0) die(`rsync failed: ${r1.stderr}`);
   const sent = r1.stdout.match(/Total transferred file size: ([\d,.]+\w*)/)?.[1];
@@ -111,25 +117,37 @@ async function launch(home, runId, remoteDir) {
   if (H.scheduler === 'gpu-queue') {
     job = jobScript(remoteDir, nodeBin, agentArgs, true);
   } else {
-    const gate = ['--lock', `${home}/${H.base}/.lock`];
-    if (!args['no-wait']) gate.push('--wait-idle', '--load-max', String(args['load-max'] ?? 3), '--gpu-max', String(args['gpu-max'] ?? 10),
-      '--hold', String(args.hold ?? 60), '--poll', String(args.poll ?? 30), '--max-wait', String(args['max-wait'] ?? 21600));
-    job = jobScript(remoteDir, nodeBin, [...agentArgs, ...gate], false);
+    const gate = [];
+    if (!args['no-wait']) gate.push('--wait-idle', '--load-max', String(Number(args['load-max'] ?? 3)), '--gpu-max', String(Number(args['gpu-max'] ?? 10)),
+      '--hold', String(Number(args.hold ?? 60)), '--poll', String(Number(args.poll ?? 30)), '--max-wait', String(maxWaitS));
+    // Our own jobs serialize on a kernel advisory lock held for the job's whole life.
+    const lock = lockCommand(H.platform, `${home}/${H.base}/.host.lockf`, maxWaitS);
+    job = jobScript(remoteDir, nodeBin, [...agentArgs, ...gate], false, lock);
   }
   const tmp = mkdtempSync(join(os.tmpdir(), 'khc-run-'));
   writeFileSync(join(tmp, 'job.sh'), job, { mode: 0o755 });
   writeFileSync(join(tmp, 'run.json'), JSON.stringify({ runId, host: hostName, page: args.page, dist, chrome, flags, scheduler: H.scheduler, noWait: !!args['no-wait'], submittedAt: new Date().toISOString() }, null, 1));
-  const r2 = spawnSync('rsync', ['-a', join(HERE, 'agent.mjs'), join(tmp, 'job.sh'), join(tmp, 'run.json'), `${H.ssh}:${remoteDir}/`], { encoding: 'utf8' });
+  const r2 = spawnSync('rsync', ['-a', join(HERE, 'agent.mjs'), join(HERE, 'lib.mjs'), join(tmp, 'job.sh'), join(tmp, 'run.json'), `${H.ssh}:${remoteDir}/`], { encoding: 'utf8' });
   if (r2.status !== 0) die(`rsync tools failed: ${r2.stderr}`);
 
   if (H.scheduler === 'gpu-queue') {
-    const est = String(args['estimate-min'] ?? 5);
     const name = slug(args.name ?? basename(args.page.split('?')[0]));
-    const out = sh(H, `cd ${q(remoteDir)} && [ "$(pwd)" = ${q(remoteDir)} ] && gpu-queue submit -p 0x88 -e ${est} -n ${q(name)} -o ${q(remoteDir + '/job.log')} -- ${q(remoteDir + '/job.sh')}`).stdout.trim();
+    // Admission check and submit are one critical section on the host (flock), so two
+    // controllers cannot both see "no 0x88 job waiting" and both submit.
+    const admit = [
+      `exec 9>>${q(`${home}/${H.base}/.submit.flock`)}`,
+      'flock -w 300 9 || { echo ADMISSION_LOCK_TIMEOUT; exit 5; }',
+      `if gpu-queue list | awk '$2=="queued"' | grep -qF '[0x88:'; then echo ALREADY_WAITING; exit 4; fi`,
+      `cd ${q(remoteDir)} && gpu-queue submit -p 0x88 -e ${q(estimate)} -n ${q(name)} -o ${q(remoteDir + '/job.log')} -- ${q(remoteDir + '/job.sh')}`,
+    ].join('\n');
+    const r = sh(H, admit, { allowFail: true });
+    const out = r.stdout.trim();
+    if (r.status === 4) die(`a 0x88 job is already waiting in gpu-queue; policy: at most one. Nothing submitted (run dir ${remoteDir} left unused).`, 4);
+    if (r.status !== 0) die(`gpu-queue submit failed (${r.status}): ${out} ${r.stderr}`);
     const id = out.split('\n').pop().trim();
     if (!/^\d+$/.test(id)) die(`unexpected gpu-queue submit output: ${out}`);
     sh(H, `printf %s ${id} > ${q(remoteDir + '/queue-job-id')}`);
-    log(`submitted gpu-queue job ${id} (-p 0x88 -e ${est} -n ${name}); run id ${runId}`);
+    log(`submitted gpu-queue job ${id} (-p 0x88 -e ${estimate} -n ${name}); run id ${runId}`);
   } else {
     // NB: `cd X && nohup … &` would background the whole list and keep ssh's stdout open.
     sh(H, `cd ${q(remoteDir)} || exit 1; nohup ./job.sh > job.log 2>&1 < /dev/null & echo $! > ${q(remoteDir + '/job.pid')}`);
@@ -137,7 +155,7 @@ async function launch(home, runId, remoteDir) {
   }
 }
 
-function jobScript(remoteDir, nodeBin, agentArgs, nvidia) {
+function jobScript(remoteDir, nodeBin, agentArgs, nvidia, lock = null) {
   const gpuSnap = nvidia
     ? 'nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader; nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader'
     : 'uptime; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -o \'"Device Utilization %"=[0-9]*\' | head -1';
@@ -147,8 +165,15 @@ function jobScript(remoteDir, nodeBin, agentArgs, nvidia) {
 set -u
 cd ${q(remoteDir)} || exit 3
 echo "job start $(date) pid $$"; ${gpuSnap}
-${q(nodeBin)} agent.mjs ${agentArgs.map(q).join(' ')} > agent.out 2> agent.err
+${lock ? `echo "[job $(date)] waiting for host lock ${lock[lock.length - 1]}" >> agent.err
+# --wait-until bounds the idle wait so lock wait + idle wait never exceed max-wait in total.
+WAIT_UNTIL=$(( ($(date +%s) + ${Number(maxWaitS)}) * 1000 ))
+${lock.map(q).join(' ')} ${q(nodeBin)} agent.mjs ${agentArgs.map(q).join(' ')} --wait-until "$WAIT_UNTIL" > agent.out 2>> agent.err
 rc=$?
+if [ "$rc" -eq 75 ] && [ ! -s result.json ]; then
+  printf '%s\n' '{"ok":false,"result":null,"error":"busy: host lock not acquired within max-wait","busy":true,"meta":{}}' > result.json
+fi` : `${q(nodeBin)} agent.mjs ${agentArgs.map(q).join(' ')} > agent.out 2> agent.err
+rc=$?`}
 echo "job end $(date) rc=$rc"; ${gpuSnap}
 echo "leftover khc-chrome processes (expected none):"; ps -u "$(id -u)" -o pid=,command= | grep -F 'khc-chrome-' | grep -v grep || true
 exit $rc
@@ -167,7 +192,8 @@ async function waitForResult(runId, remoteDir) {
     }
     let note;
     if (H.scheduler === 'gpu-queue') {
-      const row = queueRows().find((x) => x.id === jobId);
+      const rows = queueRows();
+      const row = rows.find((x) => x.id === jobId);
       if (!row) return { j: null, jobId, runId, remoteDir, failure: `gpu-queue job ${jobId} not found` };
       if (row.state === 'finished' || row.state === 'skipped') {
         await sleep(2000);
@@ -175,7 +201,7 @@ async function waitForResult(runId, remoteDir) {
         const tail = sh(H, `tail -20 ${q(remoteDir + '/job.log')} 2>/dev/null; tail -5 ${q(remoteDir + '/agent.err')} 2>/dev/null`, { allowFail: true }).stdout;
         return { j: null, jobId, runId, remoteDir, exit: row.elevel === '75' ? 75 : 3, failure: `gpu-queue job ${jobId} ${row.state} exit=${row.elevel} without result.json${row.elevel === '75' ? ' (never started: GPU busy for 30 min; investigate, do not resubmit in a loop)' : ''}\n${tail}` };
       }
-      const ahead = queueRows().filter((x) => (x.state === 'running' || x.state === 'queued') && Number(x.id) < Number(jobId));
+      const ahead = rows.filter((x) => (x.state === 'running' || x.state === 'queued') && Number(x.id) < Number(jobId));
       note = `gpu-queue job ${jobId}: ${row.state}; ahead: ${ahead.map((x) => `${x.id}${x.label}`).join(' ') || 'none'}`;
     } else {
       const alive = sh(H, `kill -0 "$(cat ${q(remoteDir + '/job.pid')})" 2>/dev/null && echo alive`, { allowFail: true }).stdout.trim() === 'alive';
@@ -192,24 +218,26 @@ async function waitForResult(runId, remoteDir) {
     if (key !== lastNote || Date.now() - lastLogAt > 300_000) { log(note); lastNote = key; lastLogAt = Date.now(); }
     if ((Date.now() - t0) / 1000 > maxWaitS) {
       log(`local max-wait reached; the remote job keeps going. Collect later: node scripts/kernel_hillclimb/remote/run.mjs --host ${hostName} --fetch ${runId}`);
-      return { j: null, jobId, runId, remoteDir, exit: 75, failure: 'local max-wait reached (job still pending remotely)' };
+      // Not 75: the job may still start (or be running). 75 is only for confirmed never-started.
+      return { j: null, jobId, runId, remoteDir, exit: 76, pending: true, failure: 'local max-wait reached; job still pending remotely' };
     }
     await sleep(H.scheduler === 'gpu-queue' ? 20_000 : 15_000);
   }
 }
 
-function finish({ j, jobId, runId, remoteDir, failure, exit }) {
+function finish({ j, jobId, runId, remoteDir, failure, exit, pending }) {
   const runner = { host: hostName, runId, remoteDir, scheduler: H?.scheduler, queueJobId: jobId ?? null, fetchedAt: new Date().toISOString() };
   if (H?.ssh) {
     try { runner.run = JSON.parse(sh(H, `cat ${q(remoteDir + '/run.json')}`, { allowFail: true }).stdout); } catch {}
   }
   if (H?.scheduler === 'idle-wait') runner.timingValid = !(runner.run?.noWait) && !j?.meta?.contended;
   if (H?.scheduler === 'gpu-queue') runner.timingValid = !j?.meta?.contended; // inside the queue = clean unless something else showed up
-  const out = j ? { ...j, runner } : { ok: false, result: null, error: failure, runner };
+  const out = j ? { ...j, runner } : { ok: false, result: null, error: failure, ...(pending ? { pending: true } : {}), runner };
   const text = JSON.stringify(out, null, 1);
   if (args.out) writeFileSync(args.out, text + '\n');
-  process.stdout.write(text + '\n');
-  process.exit(j ? (j.ok ? 0 : j.busy ? 75 : 2) : (exit ?? 3));
+  const code = j ? (j.ok ? 0 : j.busy ? 75 : 2) : (exit ?? 3);
+  // Exit only after stdout drained: process.exit() can truncate a piped write.
+  process.stdout.write(text + '\n', () => process.exit(code));
 }
 
 function runLocal() {
@@ -222,15 +250,7 @@ function runLocal() {
   finish({ j, jobId: null, runId: 'local', remoteDir: null, failure: j ? null : `agent produced no JSON (exit ${r.status})` });
 }
 
-function queueRows() {
-  const txt = sh(H, 'gpu-queue list').stdout;
-  return txt.split('\n').slice(1).filter(Boolean).map((l) => {
-    const m = l.match(/^(\d+)\s+(\w+)\s+(\S+)\s+(?:(-?\d+)\s+(\S+)\s+)?(.*)$/);
-    if (!m) return null;
-    const label = (m[6].match(/\[[^\]]*:[^\]]*:\d+m\]/) ?? [''])[0];
-    return { id: m[1], state: m[2], elevel: m[4] ?? null, label, raw: l };
-  }).filter(Boolean);
-}
+function queueRows() { return parseQueueList(sh(H, 'gpu-queue list').stdout); }
 
 function rsyncFilters() {
   const f = [];
@@ -254,8 +274,6 @@ function sh(h, cmd, { allowFail = false, dry = false } = {}) {
   if (r.status !== 0 && !allowFail) die(`ssh ${h.ssh} failed (${r.status}): ${cmd}\n${r.stderr}`);
   return r;
 }
-function q(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
-function slug(s) { return String(s).replace(/\.[a-z]+$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 40) || 'page'; }
 function log(s) { process.stderr.write(`[run ${hostName} ${new Date().toISOString().slice(11, 19)}] ${s}\n`); }
 function die(msg, code = 3) { process.stderr.write(`run.mjs: ${msg}\n`); process.exit(code); }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }

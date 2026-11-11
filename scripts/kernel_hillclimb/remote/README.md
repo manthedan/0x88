@@ -19,7 +19,8 @@ to drive Chrome over the DevTools protocol.
   MIME types: `.wasm` → `application/wasm`; `.js`/`.mjs` → `text/javascript`;
   `.json`, `.html`, `.css`, `.wgsl` (text/plain). `/foo` falls back to `/foo.html`, and
   directories fall back to `index.html`. So `crossOriginIsolated === true`, and
-  SharedArrayBuffer / wasm threads work.
+  SharedArrayBuffer / wasm threads work. Only regular files whose resolved path (symlinks
+  followed) stays inside the dist root are served. Anything else gets a 403 or 404.
 - `--page` is a path relative to the dist root, with an optional query string
   (`kernels/bench.html?kernel=conv3x3&batch=8`). The page reads its own parameters
   from `location.search`.
@@ -27,6 +28,11 @@ to drive Chrome over the DevTools protocol.
   On failure it sets **`window.__kernelBenchError`**, a string. The agent polls every 250 ms,
   and whichever appears first ends the run. Neither appearing within `--timeout` seconds
   (default 120) is a timeout.
+- **A failed or partial measurement is an error, not a result.** If any benchmark step throws,
+  an error scope or `uncapturederror` reports a WebGPU error, or the device is lost, the page sets
+  `__kernelBenchError` and must not set `__kernelBenchResult`.
+  `lab/kernel-hillclimb/probe-contract.mjs` (`settleProbe`, `publish`) implements this, and
+  bench pages should reuse it.
 - Console output and uncaught exceptions are captured (last 60 lines go into `meta.console`).
 
 ## Usage
@@ -63,8 +69,18 @@ Options (see the header of `run.mjs` for all of them):
 - `--out FILE` also writes the JSON to `FILE`. The JSON always goes to stdout, and progress goes
   to stderr.
 
-Exit codes: `0` result, `2` page error or timeout, `3` runner or agent failure, `4` refused
-(a 0x88 job is already waiting in gpu-queue), `75` the host never became free (job did not run).
+Exit codes:
+- `0` result.
+- `2` page error or timeout.
+- `3` runner or agent failure.
+- `4` refused: a 0x88 job is already waiting in gpu-queue.
+- `75` **confirmed** never started: the host or GPU stayed busy, or the host lock was not
+  acquired, within max-wait.
+- `76` still pending remotely when the runner's own `--max-wait` ran out. The job may still run,
+  so collect it with `--fetch <run-id>`.
+
+Run ids are `<UTC second>-<page slug>-<12 hex random>`. The run directory is created with a
+plain `mkdir`, so a collision fails instead of sharing a directory.
 
 ## Output
 
@@ -97,11 +113,15 @@ agent and its Chrome process group.
 Every job that touches the 3090 goes through the shared one-slot FIFO, including adapter probes.
 The runner:
 
-1. Refuses (exit 4) if a `[0x88:…]` job is already **queued**. Policy allows at most one 0x88 job waiting.
+1. Refuses (exit 4) if a `[0x88:…]` job is already **queued**. Policy allows at most one 0x88 job
+   waiting. The check and the `gpu-queue submit` run as one critical section on Yukon, under
+   `flock ~/kernel-hillclimb/.submit.flock`, so two runners cannot both pass the check. Other
+   tools that submit 0x88 jobs without that flock are not covered.
 2. Writes `job.sh` into `~/kernel-hillclimb/<run-id>/`. This one script holds the whole
    lifecycle: static server, headless Chrome, page, teardown. It runs `nvidia-smi` before and
    after, and lists any leftover `khc-chrome-*` processes, which should be none.
-3. Submits it as `gpu-queue submit -p 0x88 -e <est> -n <name> -o <run>/job.log -- <run>/job.sh`,
+3. Submits it as `gpu-queue submit -p 0x88 -e <est> -n <name> -o <run>/job.log -- <run>/job.sh`.
+   `<est>` must be a positive number and is shell-quoted. The runner
    and records the job id in `<run>/queue-job-id` and `runner.queueJobId`.
 4. Polls `gpu-queue list` and `<run>/result.json` every 20 s. While it waits, it prints which jobs are ahead.
    - If the job finishes without a result and exit `75`, it never started because the GPU was busy for 30 min.
@@ -110,22 +130,35 @@ The runner:
 
 The queue starts a job only when no process holds more than 1 GiB of GPU memory, so results from
 inside the queue count as **clean**. `meta.contended` is still set if any compute app shows up
-in `nvidia-smi` at start or end.
+in `nvidia-smi` at start or end, or if a compute app outside our Chrome process group shows up
+during the run (sampled every second).
 Light CPU only: rsync, ssh and one Chrome. Nothing here needs `cpu-run`.
 
 ### Mac mini: queue behind (lock + wait-for-idle)
 
-Mac mini has no shared queue, and other projects run CPU arenas and Metal jobs there. The agent:
+Mac mini has no shared queue, and other projects run CPU arenas and Metal jobs there. The job:
 
-1. Takes a mkdir lock at `~/kernel-hillclimb/.lock`, so our own jobs serialize. A lock whose owner PID is dead is reclaimed.
+1. Runs the agent under `lockf -k -t <max-wait> ~/kernel-hillclimb/.host.lockf` (BSD lockf(1)),
+   so our own jobs serialize. The lock is a kernel advisory lock that the kernel releases when its
+   holder dies. There is no stale-lock reclamation step to race. Timing out on the lock gives
+   exit 75 and a `busy` result.json. The old mkdir lock (`~/kernel-hillclimb/.lock`) is retired;
+   only jobs started before 2026-11-11 23:30Z still use it.
 2. Waits until the 1-min load average is `< --load-max` (default 3) **and** `ioreg -c IOAccelerator`
    `"Device Utilization %"` is `< --gpu-max` (default 10). Both must hold for `--hold`
-   seconds (default 60). It polls every `--poll` seconds (default 30) and logs each reason
-   for waiting to `<run>/agent.err`, which the runner relays.
-3. Gives up after `--max-wait` seconds (default 6 h) with exit 75 and a `busy: …` error.
-4. Flags `meta.contended: true` (with reasons) if the thresholds were crossed at start or end, or if
-   foreign CPU went over `--load-max` cores during the run. `runner.timingValid` is false when the
-   run is contended or was started with `--no-wait`.
+   seconds (default 60). A missing or unparseable GPU reading counts as **not idle** and resets
+   the hold. It polls every `--poll` seconds (default 30) and logs each reason for waiting to
+   `<run>/agent.err`, which the runner relays.
+3. Gives up when `--max-wait` runs out with exit 75 and a `busy: …` error. That budget is
+   measured from job start and covers both the lock wait and the idle wait.
+4. Flags `meta.contended: true` (with reasons) in these cases:
+   - the thresholds were crossed at start or end;
+   - a GPU reading was unknown;
+   - foreign CPU went over `--load-max` cores during the run.
+
+   Foreign CPU is the CPU used by processes outside the agent and its Chrome process group,
+   sampled every second. Raw load1 and ioreg GPU utilisation taken mid-run include our own
+   Chrome, so they are not used for the during-run check. `runner.timingValid` is false when
+   the run is contended or was started with `--no-wait`.
 
 The job is started with `nohup` and runs detached, so a dropped ssh session does not kill it.
 It never stops or renices the other jobs.
@@ -192,11 +225,17 @@ The agent always adds `--user-data-dir=<fresh tmp profile> --remote-debugging-po
 ## Files
 
 - `run.mjs` is the local controller: rsync, schedule, poll, fetch, augment.
-- `agent.mjs` runs on the host: static COOP/COEP server, Chrome launch, CDP poll, load sampling,
-  lock and idle gate.
+- `agent.mjs` runs on the host: static COOP/COEP server, Chrome launch, CDP poll, load sampling
+  and idle gate. Exactly one terminal outcome: cleanup is a single shared promise, and stdout is
+  drained before exit.
+- `lib.mjs` holds the pure helpers shared by both sides: run ids, estimate validation, quoting,
+  static-path containment, the lock command, queue parsing and the idle verdict. They are tested
+  in `tests/kernel_remote.test.mjs`.
 - `bringup_matrix.mjs` is the bring-up helper. It tries every Chrome binary and flag set with
   `device-probe.html?bench=0` and writes JSONL. On Yukon it must run inside one gpu-queue job.
 - `../../../lab/kernel-hillclimb/device-probe.{html,mjs}` is the proof page: adapter info,
   features, limits, f16/subgroup/subgroup-matrix shader compile checks, WASM SIMD/relaxed-SIMD
   and threads detection, an f32 (and f16) FMA microbench, and a vec4 copy bandwidth
-  microbench, timed with timestamp-query when available.
+  microbench, timed with timestamp-query when available. The FMA kernel is the one from
+  `lab/kernel-hillclimb/wgsl-kernels.mjs` on `perf/kernel-hillclimb` (commit 6924d9a9). It uses
+  per-lane constants and seeds and stores from every invocation, so no vector lane can be folded.

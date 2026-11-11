@@ -12,7 +12,11 @@ const BUDGET_MS = Number(q.get('ms') ?? 2000);
 const POWER = q.get('power') ?? 'high-performance';
 const BW_MIB = Number(q.get('mib') ?? 64);
 
+import { settleProbe, publish } from './probe-contract.mjs';
+
 const out = document.getElementById('out');
+// Collected for the error contract (probe-contract.mjs): any of these makes the run an error.
+const ctx = { gpuErrors: [], deviceLost: null, benchError: null };
 const log = (s) => { out.textContent += `\n${s}`; console.log(s); };
 
 const WANT_FEATURES = [
@@ -84,16 +88,25 @@ async function probe() {
   }
   result.webgpu.deviceFeatures = [...device.features].sort();
   if (device.adapterInfo) result.webgpu.deviceAdapterInfo = plain(device.adapterInfo);
-  const lost = { v: null }; device.lost.then((l) => { lost.v = `${l.reason}: ${l.message}`; });
-  device.addEventListener?.('uncapturederror', (ev) => log(`uncapturederror: ${ev.error.message}`));
+  let destroying = false;
+  device.lost.then((l) => { if (!destroying) ctx.deviceLost = `${l.reason}: ${l.message}`; });
+  device.addEventListener?.('uncapturederror', (ev) => { ctx.gpuErrors.push(`uncaptured ${ev.error.constructor?.name}: ${ev.error.message}`); log(`uncapturederror: ${ev.error.message}`); });
 
   // Smoke-compile subgroup / f16 shaders to prove the features actually work.
   result.webgpu.shaderChecks = await shaderChecks(device);
 
   if (BENCH) {
-    try { result.bench = await microbench(device); } catch (e) { result.bench = { error: String(e?.stack ?? e) }; }
+    // Error scopes around all benchmark work: validation, OOM and internal errors fail the run.
+    for (const f of ['validation', 'out-of-memory', 'internal']) device.pushErrorScope(f);
+    try { result.bench = await microbench(device); } catch (e) { ctx.benchError = e; }
+    for (let i = 0; i < 3; i++) {
+      const err = await device.popErrorScope();
+      if (err) ctx.gpuErrors.push(`${err.constructor?.name}: ${err.message}`);
+    }
+    await device.queue.onSubmittedWorkDone();
   }
-  if (lost.v) result.webgpu.deviceLost = lost.v;
+  if (ctx.deviceLost) result.webgpu.deviceLost = ctx.deviceLost;
+  destroying = true;
   device.destroy();
   result.finishedAt = new Date().toISOString();
   return result;
@@ -187,37 +200,57 @@ function stats(xs) {
   return { n: s.length, best: s[0], median: s[Math.floor(s.length / 2)], worst: s[s.length - 1] };
 }
 
+// FMA peak kernel, identical to fmaKernel() in lab/kernel-hillclimb/wgsl-kernels.mjs on
+// perf/kernel-hillclimb (commit 6924d9a9) so both branches measure the same thing:
+// per-lane multiplier/addend (uniform) and per-lane accumulator seeds, so no lane can be
+// folded into another, and every invocation stores its sum.
+export function fmaKernel(type, iters) {
+  const t = type === 'f16' ? 'f16' : 'f32';
+  const enable = t === 'f16' ? 'enable f16;\n' : '';
+  const acc = Array.from({ length: 8 }, (_, i) => i);
+  return `${enable}
+@group(0) @binding(0) var<storage, read_write> outBuf: array<vec4<f32>>;
+@group(0) @binding(1) var<uniform> P: array<vec4<f32>, 2>;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let seed = f32(gid.x & 255u) * 0.001;
+  let b = vec4<${t}>(P[0]);
+  let c = vec4<${t}>(P[1]);
+${acc.map((i) => `  var a${i} = vec4<${t}>(vec4<f32>(seed) + vec4<f32>(${i}.0 * 0.01, ${i}.0 * 0.01 + 0.002, ${i}.0 * 0.01 + 0.004, ${i}.0 * 0.01 + 0.006));`).join('\n')}
+  for (var i = 0u; i < ${iters}u; i = i + 1u) {
+${acc.map((i) => `    a${i} = fma(a${i}, b, c);`).join('\n')}
+${acc.map((i) => `    a${i} = fma(a${i}, b, c);`).join('\n')}
+  }
+  let s = ${acc.map((i) => `a${i}`).join(' + ')};
+  outBuf[gid.x] = vec4<f32>(s);
+}`;
+}
+/** FLOPs per thread of fmaKernel: iters * 2 (unroll) * 8 accumulators * 4 lanes * 2 flops. */
+export const fmaFlopsPerThread = (iters) => iters * 2 * 8 * 4 * 2;
+
 async function fmaBench(device, timer, type, budgetMs) {
-  const T = type; const V = `vec4<${T}>`;
-  const code = `${T === 'f16' ? 'enable f16;' : ''}
-  struct P { iters: u32 }
-  @group(0) @binding(0) var<storage, read_write> outb: array<${V}>;
-  @group(0) @binding(1) var<uniform> p: P;
-  @compute @workgroup_size(256)
-  fn main(@builtin(global_invocation_id) g: vec3u) {
-    let s = ${T}(f32(g.x & 255u) * 1e-3);
-    var a0 = ${V}(s); var a1 = ${V}(s + ${T}(0.1)); var a2 = ${V}(s + ${T}(0.2)); var a3 = ${V}(s + ${T}(0.3));
-    var a4 = ${V}(s + ${T}(0.4)); var a5 = ${V}(s + ${T}(0.5)); var a6 = ${V}(s + ${T}(0.6)); var a7 = ${V}(s + ${T}(0.7));
-    let m = ${V}(${T}(0.999)); let c = ${V}(${T}(0.001));
-    for (var i = 0u; i < p.iters; i++) {
-      a0 = fma(a0, m, c); a1 = fma(a1, m, c); a2 = fma(a2, m, c); a3 = fma(a3, m, c);
-      a4 = fma(a4, m, c); a5 = fma(a5, m, c); a6 = fma(a6, m, c); a7 = fma(a7, m, c);
-    }
-    outb[g.x] = a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7;
-  }`;
   const WG = 8192, threads = WG * 256;
-  const pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
-  const outBuf = device.createBuffer({ size: threads * (T === 'f16' ? 8 : 16), usage: GPUBufferUsage.STORAGE });
-  const uni = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  const bg = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: outBuf } }, { binding: 1, resource: { buffer: uni } }] });
-  const run = (iters) => {
-    device.queue.writeBuffer(uni, 0, new Uint32Array([iters, 0, 0, 0]));
+  const outBuf = device.createBuffer({ size: threads * 16, usage: GPUBufferUsage.STORAGE });
+  const uni = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  // Distinct per-lane multiplier and addend (distinct in f16 too), as on perf/kernel-hillclimb.
+  device.queue.writeBuffer(uni, 0, new Float32Array([0.99, 0.991, 0.992, 0.993, 0.01, 0.011, 0.012, 0.013]));
+  const pipelines = new Map();
+  const pipelineFor = async (iters) => {
+    if (!pipelines.has(iters)) {
+      const pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: device.createShaderModule({ code: fmaKernel(type, iters) }), entryPoint: 'main' } });
+      const bg = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: outBuf } }, { binding: 1, resource: { buffer: uni } }] });
+      pipelines.set(iters, { pipeline, bg });
+    }
+    return pipelines.get(iters);
+  };
+  const run = async (iters) => {
+    const { pipeline, bg } = await pipelineFor(iters);
     return timer((pass) => { pass.setPipeline(pipeline); pass.setBindGroup(0, bg); pass.dispatchWorkgroups(WG); });
   };
-  // Calibrate: grow iters until one dispatch takes >= 15 ms (cap 60 ms to stay far from watchdogs).
-  let iters = 32, r = await run(iters);
-  while ((r.gpuMs ?? r.wallMs) < 15 && iters < (1 << 20)) { iters *= 2; r = await run(iters); }
-  const flopsPerDispatch = threads * iters * 8 * 4 * 2;
+  // Calibrate: grow iters (compile-time constant) until one dispatch takes >= 15 ms.
+  let iters = 16, r = await run(iters);
+  while ((r.gpuMs ?? r.wallMs) < 15 && iters < (1 << 18)) { iters *= 2; r = await run(iters); }
+  const flopsPerDispatch = threads * fmaFlopsPerThread(iters);
   const gpu = [], wall = [];
   const end = performance.now() + budgetMs;
   while (performance.now() < end || gpu.length + wall.length < 6) {
@@ -228,7 +261,7 @@ async function fmaBench(device, timer, type, budgetMs) {
   const med = (gpu.length ? stats(gpu) : stats(wall)).median;
   outBuf.destroy(); uni.destroy();
   return {
-    type: T, threads, iters, flopsPerDispatch, reps: wall.length,
+    type, kernel: 'fmaKernel@perf/kernel-hillclimb#6924d9a9', threads, iters, flopsPerDispatch, reps: wall.length,
     gpuMs: gpu.length ? stats(gpu) : null, wallMs: stats(wall),
     tflopsBest: +(flopsPerDispatch / best / 1e9).toFixed(3), tflopsMedian: +(flopsPerDispatch / med / 1e9).toFixed(3),
   };
@@ -273,10 +306,11 @@ async function bwBench(device, timer, budgetMs) {
   };
 }
 
-probe().then((r) => {
-  window.__kernelBenchResult = r;
-  log(`done: ${JSON.stringify(r.bench ? { fma: r.bench.fmaF32?.tflopsBest, bw: r.bench.bandwidth?.gbpsBest } : r.webgpu?.want)}`);
+probe().then((result) => {
+  const outcome = settleProbe({ result, benchRequested: BENCH, ...ctx });
+  publish(window, outcome);
+  log(outcome.ok ? `done: ${JSON.stringify(result.bench ? { fma: result.bench.fmaF32?.tflopsBest, bw: result.bench.bandwidth?.gbpsBest } : result.webgpu?.want)}` : `error: ${outcome.error}`);
 }, (e) => {
-  window.__kernelBenchError = String(e?.stack ?? e);
+  publish(window, { ok: false, error: String(e?.stack ?? e) });
   log(`error: ${window.__kernelBenchError}`);
 });

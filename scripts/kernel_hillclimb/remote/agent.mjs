@@ -11,18 +11,21 @@
 //   node agent.mjs --root <dir> --page <path?query> --chrome <binary>
 //                  [--flags-json '["--flag", ...]'] [--timeout 120] [--gpu-info]
 //                  [--out result.json] [--keep-profile] [--watch-stdin]
-//                  [--lock <dir>] [--wait-idle] [--load-max 3] [--gpu-max 10]
-//                  [--hold 60] [--poll 30] [--max-wait 21600]
-// --lock: mkdir mutex so our own jobs on this host serialize (stale owner PID reclaimed).
+//                  [--wait-idle] [--load-max 3] [--gpu-max 10]
+//                  [--hold 60] [--poll 30] [--max-wait 21600] [--wait-until <epoch ms>]
+// Host serialisation is NOT done here: job.sh wraps the agent in a kernel advisory
+// lock (lockf/flock, see lib.mjs lockCommand), which dies with its holder.
 // --wait-idle: before launching Chrome, wait until 1-min loadavg < load-max AND GPU
-//   utilisation < gpu-max for `hold` seconds; exit 75 after max-wait seconds.
+//   utilisation < gpu-max (a known reading) for `hold` seconds; exit 75 once
+//   max-wait seconds (or --wait-until) pass without that.
 // --watch-stdin: clean up and exit when stdin closes (controller ssh gone).
 // Exit codes: 0 result, 2 page error/timeout, 3 agent failure, 75 never started (busy).
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync, statSync, existsSync, createReadStream, mkdirSync, writeFileSync, renameSync } from 'node:fs';
-import { join, resolve, extname, normalize, sep } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, createReadStream, writeFileSync, renameSync, realpathSync } from 'node:fs';
+import { join, resolve, extname } from 'node:path';
 import os from 'node:os';
+import { resolveStatic, idleVerdict } from './lib.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const root = resolve(args.root ?? '.');
@@ -35,9 +38,9 @@ const outFile = args.out ? resolve(args.out) : null;
 const IDLE = {
   loadMax: Number(args['load-max'] ?? 3), gpuMax: Number(args['gpu-max'] ?? 10),
   holdS: Number(args.hold ?? 60), pollS: Number(args.poll ?? 30), maxWaitS: Number(args['max-wait'] ?? 21600),
+  waitUntil: args['wait-until'] ? Number(args['wait-until']) : null,
 };
 const tStart = Date.now();
-if (!chromeBin) fail('missing --chrome');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
@@ -50,10 +53,10 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
 };
 
-const state = { chrome: null, server: null, profileDir: null, cleaned: false, console: [], lockDir: null, sampler: null, samples: [], chromeStderr: '' };
+const state = { chrome: null, server: null, profileDir: null, cleanupPromise: null, exiting: false, console: [], sampler: null, samples: [], chromeStderr: '' };
 
 async function main() {
-  if (args.lock) await takeLock(resolve(args.lock));
+  if (!chromeBin) throw new Error('missing --chrome');
   const idleWait = args['wait-idle'] ? await waitIdle() : null;
   armDeadline();
   const loadStart = await sampleLoad();
@@ -94,7 +97,8 @@ async function main() {
   await cdp.send('Page.enable', {}, sessionId);
   await cdp.send('Page.navigate', { url }, sessionId);
 
-  state.sampler = setInterval(() => { state.samples.push(foreignLoad()); }, 2000);
+  state.samples.push(foreignLoad());
+  state.sampler = setInterval(() => { state.samples.push(foreignLoad()); }, 1000);
   const deadline = Date.now() + timeoutS * 1000;
   let outcome = null;
   while (Date.now() < deadline) {
@@ -113,6 +117,7 @@ async function main() {
     if (v) { outcome = v; break; }
   }
   clearInterval(state.sampler);
+  state.samples.push(foreignLoad());
   try { await Promise.race([cdp.send('Browser.close'), sleep(3000)]); } catch {}
   cdp.close();
   await cleanup();
@@ -129,10 +134,18 @@ async function main() {
   loadEnd.gpuSettle = settle;
   const during = summarizeSamples(state.samples);
   const contendedReasons = [];
+  // During-run contention uses signals attributable to *other* processes: raw load1
+  // and (on macOS) ioreg GPU utilisation include our own Chrome, so a load1 or GPU
+  // reading taken mid-run cannot distinguish our work from someone else's. Review
+  // finding "include during-run load1Max" is applied in this attributed form.
+  if (during.foreignGpuApps.length) contendedReasons.push(`foreign GPU compute apps during run: ${during.foreignGpuApps.join('; ')}`);
+  if (during.samples === 0 || during.foreignCpuCoresMax === null) contendedReasons.push('no during-run load samples');
   if (args['wait-idle'] || os.platform() === 'darwin') {
     for (const [tag, l] of [['start', loadStart], ['end', loadEnd]]) {
       if (l.loadavg[0] >= IDLE.loadMax) contendedReasons.push(`loadavg1 ${l.loadavg[0]} >= ${IDLE.loadMax} at ${tag}`);
-      const g = gpuUtil(l.gpu); if (g !== null && g >= IDLE.gpuMax) contendedReasons.push(`gpu util ${g}% >= ${IDLE.gpuMax}% at ${tag}`);
+      const g = gpuUtil(l.gpu);
+      if (g === null) contendedReasons.push(`gpu util unknown at ${tag}`);
+      else if (g >= IDLE.gpuMax) contendedReasons.push(`gpu util ${g}% >= ${IDLE.gpuMax}% at ${tag}`);
     }
     if (during.foreignCpuCoresMax !== null && during.foreignCpuCoresMax >= IDLE.loadMax)
       contendedReasons.push(`foreign CPU ${during.foreignCpuCoresMax} cores >= ${IDLE.loadMax} during run`);
@@ -159,88 +172,83 @@ async function main() {
       ...(outcome ? {} : { chromeStderrTail: state.chromeStderr.slice(-3000) }),
     },
   };
-  emit(out);
-  releaseLock();
-  process.exit(out.ok ? 0 : 2);
+  await finish(out, out.ok ? 0 : 2);
 }
 
-function emit(out) {
-  const line = JSON.stringify(out) + '\n';
-  if (outFile) { writeFileSync(outFile + '.tmp', line); renameSync(outFile + '.tmp', outFile); }
-  process.stdout.write(line);
+// Exactly one terminal outcome per process: the first caller wins, later ones
+// (a signal during cleanup, the hard deadline, a second error) wait on it.
+let finishing = null;
+function finish(out, code) {
+  if (finishing) return finishing;
+  finishing = (async () => {
+    const line = JSON.stringify(out) + '\n';
+    if (outFile) { try { writeFileSync(outFile + '.tmp', line); renameSync(outFile + '.tmp', outFile); } catch (e) { logErr(`writing ${outFile}: ${e}`); } }
+    // Wait for stdout to drain: process.exit() can truncate a piped write.
+    await new Promise((r) => process.stdout.write(line, () => r()));
+    process.exit(code);
+  })();
+  return finishing;
 }
 
 function gpuUtil(g) { return g?.utilGpuPct ?? g?.deviceUtilPct ?? null; }
 
-async function takeLock(dir) {
-  const end = Date.now() + IDLE.maxWaitS * 1000;
-  let lastLog = 0;
-  while (true) {
-    try {
-      mkdirSync(dir);
-      writeFileSync(join(dir, 'owner'), `${process.pid} ${new Date().toISOString()} ${page}\n`);
-      state.lockDir = dir; return;
-    } catch {}
-    let owner = null; try { owner = Number(readFileSync(join(dir, 'owner'), 'utf8').split(' ')[0]); } catch {}
-    if (owner && !pidAlive(owner)) { try { rmSync(dir, { recursive: true, force: true }); } catch {} continue; }
-    if (Date.now() > end) { busyExit(`lock ${dir} held by pid ${owner} for > max-wait`); }
-    if (Date.now() - lastLog > 300_000) { logErr(`waiting on lock ${dir} (owner ${owner})`); lastLog = Date.now(); }
-    await sleep(5000);
-  }
-}
-function releaseLock() {
-  if (!state.lockDir) return;
-  try { if (Number(readFileSync(join(state.lockDir, 'owner'), 'utf8').split(' ')[0]) === process.pid) rmSync(state.lockDir, { recursive: true, force: true }); } catch {}
-  state.lockDir = null;
-}
-function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
-
 async function waitIdle() {
   const t0 = Date.now(), end = t0 + IDLE.maxWaitS * 1000;
+  const deadline = IDLE.waitUntil ? Math.min(end, IDLE.waitUntil) : end;
   let idleSince = null, polls = 0, last = null;
   while (true) {
     const load1 = +os.loadavg()[0].toFixed(2), g = gpuUtil(gpuLoad());
     last = { load1, gpuUtilPct: g };
-    const ok = load1 < IDLE.loadMax && (g === null || g < IDLE.gpuMax);
+    const { ok, reason } = idleVerdict(last, IDLE);
     polls++;
     if (ok) {
       idleSince ??= Date.now();
       if (Date.now() - idleSince >= IDLE.holdS * 1000) break;
     } else {
       idleSince = null;
-      logErr(`waiting for idle: load1=${load1} (max ${IDLE.loadMax}) gpu=${g}% (max ${IDLE.gpuMax}%) waited ${Math.round((Date.now() - t0) / 1000)}s`);
+      logErr(`waiting for idle (${reason}): load1=${load1} (max ${IDLE.loadMax}) gpu=${g}% (max ${IDLE.gpuMax}%) waited ${Math.round((Date.now() - t0) / 1000)}s`);
     }
-    if (Date.now() > end) busyExit(`host never idle for ${IDLE.holdS}s within ${IDLE.maxWaitS}s (last load1=${load1}, gpu=${g}%)`);
+    if (Date.now() > deadline) return busyExit(`host never idle for ${IDLE.holdS}s before the wait deadline (last load1=${load1}, gpu=${g}%: ${reason})`);
     await sleep((ok ? Math.min(IDLE.pollS, 10) : IDLE.pollS) * 1000);
   }
   return { waitedS: Math.round((Date.now() - t0) / 1000), polls, thresholds: IDLE, last };
 }
 function busyExit(msg) {
-  emit({ ok: false, result: null, error: `busy: ${msg}`, busy: true, meta: { host: os.hostname(), wallMs: Date.now() - tStart, loadavg: os.loadavg(), gpu: gpuLoad() } });
-  releaseLock();
-  process.exit(75);
+  // Never started: no Chrome or server exists yet. Returns a promise that never settles
+  // past process exit, so callers can `return busyExit()`.
+  return finish({ ok: false, result: null, error: `busy: ${msg}`, busy: true, meta: { host: os.hostname(), wallMs: Date.now() - tStart, loadavg: os.loadavg(), gpu: gpuLoad() } }, 75)
+    .then(() => new Promise(() => {}));
 }
 function logErr(s) { process.stderr.write(`[agent ${new Date().toISOString()}] ${s}\n`); }
 
-// CPU used by processes outside our Chrome process group and this agent (in cores).
+// Load attributable to processes outside this agent and its Chrome process group:
+// CPU (cores, from ps %cpu) and, on Linux, NVIDIA compute apps.
+// Caveat: Linux ps %cpu is a lifetime average; macOS's is a decaying recent average.
 function foreignLoad() {
-  const s = { t: Date.now(), load1: +os.loadavg()[0].toFixed(2), foreignCpuCores: null };
+  const s = { t: Date.now(), load1: +os.loadavg()[0].toFixed(2), foreignCpuCores: null, foreignGpuApps: [] };
   try {
     const txt = execFileSync('ps', ['-A', '-o', 'pid=,pgid=,%cpu='], { encoding: 'utf8', timeout: 3000 });
-    const pg = state.chrome?.pid; let sum = 0;
+    const pg = state.chrome?.pid; let sum = 0; const pgidOf = new Map();
     for (const l of txt.trim().split('\n')) {
       const [pid, pgid, cpu] = l.trim().split(/\s+/).map(Number);
+      pgidOf.set(pid, pgid);
       if (pid === process.pid || pgid === pg) continue;
       sum += cpu || 0;
     }
     s.foreignCpuCores = +(sum / 100).toFixed(2);
+    if (os.platform() === 'linux') {
+      const apps = execFileSync('nvidia-smi', ['--query-compute-apps=pid,process_name,used_memory', '--format=csv,noheader,nounits'], { encoding: 'utf8', timeout: 3000 })
+        .trim().split('\n').filter(Boolean).map((l) => l.split(',').map((x) => x.trim()));
+      s.foreignGpuApps = apps.filter(([pid]) => pgidOf.get(Number(pid)) !== pg).map((a) => a.join(' '));
+    }
   } catch {}
   return s;
 }
 function summarizeSamples(xs) {
   const f = xs.map((x) => x.foreignCpuCores).filter((x) => x !== null);
   return { samples: xs.length, load1Max: xs.length ? Math.max(...xs.map((x) => x.load1)) : null,
-    foreignCpuCoresMax: f.length ? Math.max(...f) : null, foreignCpuCoresMean: f.length ? +(f.reduce((a, b) => a + b, 0) / f.length).toFixed(2) : null };
+    foreignCpuCoresMax: f.length ? Math.max(...f) : null, foreignCpuCoresMean: f.length ? +(f.reduce((a, b) => a + b, 0) / f.length).toFixed(2) : null,
+    foreignGpuApps: [...new Set(xs.flatMap((x) => x.foreignGpuApps ?? []))] };
 }
 
 function pushConsole(s) {
@@ -249,23 +257,25 @@ function pushConsole(s) {
 }
 
 function startServer() {
+  const rootReal = realpathSync(root);
   return new Promise((res, rej) => {
     const server = createServer((req, resp) => {
-      let p;
-      try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { p = '/'; }
-      let file = normalize(join(root, p));
-      if (file !== root && !file.startsWith(root + sep)) { resp.writeHead(403); return resp.end(); }
-      try { if (statSync(file).isDirectory()) file = join(file, 'index.html'); } catch {}
-      if (!existsSync(file)) {
-        // SvelteKit static fallbacks: /foo -> /foo.html
-        if (existsSync(file + '.html')) file += '.html';
-        else { resp.writeHead(404, headers('text/plain')); return resp.end('not found'); }
+      // Any filesystem/stream failure answers this request only; it must never throw
+      // out of the handler (that would kill the agent and skip Chrome teardown).
+      try {
+        const r = resolveStatic(rootReal, req.url);
+        if (!r.file) { resp.writeHead(r.status, headers('text/plain')); return resp.end(String(r.status)); }
+        resp.writeHead(200, { ...headers(MIME[extname(r.file).toLowerCase()] ?? 'application/octet-stream'), 'Content-Length': r.size });
+        if (req.method === 'HEAD') return resp.end();
+        const stream = createReadStream(r.file);
+        stream.on('error', (e) => { logErr(`static ${req.url}: ${e.message}`); resp.destroy(e); });
+        stream.pipe(resp);
+      } catch (e) {
+        logErr(`static ${req.url}: ${e?.message ?? e}`);
+        try { if (!resp.headersSent) resp.writeHead(500, headers('text/plain')); resp.end(); } catch { resp.destroy(); }
       }
-      const size = statSync(file).size;
-      resp.writeHead(200, { ...headers(MIME[extname(file).toLowerCase()] ?? 'application/octet-stream'), 'Content-Length': size });
-      if (req.method === 'HEAD') return resp.end();
-      createReadStream(file).pipe(resp);
     });
+    server.on('clientError', (_e, sock) => { try { sock.destroy(); } catch {} });
     server.on('error', rej);
     server.listen(0, '127.0.0.1', () => { state.server = server; res(server.address().port); });
   });
@@ -358,8 +368,13 @@ function gpuLoad() {
   return null;
 }
 
-async function cleanup() {
-  if (state.cleaned) return; state.cleaned = true;
+// Idempotent: every caller gets the same in-flight promise, so a second fail()
+// cannot exit before the first cleanup has reached SIGKILL.
+function cleanup() {
+  state.cleanupPromise ??= doCleanup();
+  return state.cleanupPromise;
+}
+async function doCleanup() {
   const ch = state.chrome;
   if (ch && ch.exitCode === null && ch.signalCode === null) {
     try { process.kill(-ch.pid, 'SIGTERM'); } catch {}
@@ -376,7 +391,8 @@ function fail(msg) {
   const out = { ok: false, result: null, error: msg, meta: { host: os.hostname(), wallMs: Date.now() - tStart, flags: extraFlags, console: state.console.slice(-60),
     chromeExit: state.chrome ? { code: state.chrome.exitCode, signal: state.chrome.signalCode } : null, chromeStderrTail: state.chromeStderr.slice(-3000) } };
   clearInterval(state.sampler);
-  cleanup().finally(() => { emit(out); releaseLock(); process.exit(3); });
+  if (finishing) return finishing;
+  return cleanup().catch(() => {}).then(() => finish(out, 3));
 }
 
 function parseArgs(argv) {
@@ -393,6 +409,8 @@ function parseArgs(argv) {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => fail(`agent got ${sig}`));
+process.on('uncaughtException', (e) => fail(`uncaught: ${e?.stack ?? e}`));
+process.on('unhandledRejection', (e) => fail(`unhandled rejection: ${e?.stack ?? e}`));
 if (args['watch-stdin']) { process.stdin.on('end', () => fail('stdin closed (controller gone)')); process.stdin.resume(); }
 let hardDeadline = null;
 const armDeadline = () => { hardDeadline = setTimeout(() => fail('agent hard deadline'), (timeoutS + 90) * 1000); hardDeadline.unref(); };
