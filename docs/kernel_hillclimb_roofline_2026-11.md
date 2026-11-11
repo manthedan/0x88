@@ -97,6 +97,37 @@ outputs. On the old timing feeds, the rule50 copy passed: zeroing the plane
 does nothing to the start position. A unit test reproduces this with a fake
 model.
 
+### Third review round
+
+| finding | fix | effect on numbers |
+|---|---|---|
+| ORT parity checked raw logits only: swapping the two leading legal-move logits ([1, 0] → [0, 1]) passes a max-abs of 1 while reversing a 73/27 split | Kept the raw max-abs as a drift tripwire and added `legalPolicyParity` for Lc0 and Maia3: softmax over legal moves only, max \|prob diff\|, same best move unless the reference gap is ≤ tie-epsilon, and top-3 order kept for pairs whose reference gap exceeds it. Limits are ~2× the full-corpus baseline | Every shipped lane passes (table below). A unit test swaps the top-2 legal logits: the raw tripwire passes it, the new gate fails it |
+| Maia3 parity fed the same ratings to `elo_self` and `elo_oppo`, and at b1 every fixture ran at 1100/1100 | Each fixture runs under 4 conditions (1100/1900, 1900/1100, 1500/1500, 2300/800): 40 rows | The Maia3 value-logit baseline rises to 0.078, so its limit goes 0.06 → 0.15. A Maia3 copy that swaps the two Elo inputs fails on both outputs (move 5.3, value 3.3) and on the legal policy (prob diff 0.27; 8 best-move flips and 10 top-3 order reversals across 11 of 40 rows). It is also a unit test |
+| With `ortGpuOutputs=1` or `ortPreferredOutputLocation=gpu-buffer`, `session.run` returns after ORT's non-waiting Flush and the outputs are never disposed | Rejected: the harness measures the shipped CPU-output path, so a run whose outputs stay on the GPU disposes them and fails | None (no recorded run used these overrides) |
+| One `max(f32, f16)` FMA roof was used for every kernel | Separate f32 and f16 roofs and ridges. Each path declares its arithmetic precision (Lc0 and Maia3 ORT and TVMJS Lc0 paths: f16; Centipawn TVMJS: f32), which picks the roof for utilization, % of peak and classification | M4: f32 3.44, f16 3.28 TFLOP/s. **No kernel changes class.** % of FMA peak for the f16 paths rises ×1.05 (e.g. BT4 23.0 → 24.1%, big-net GEMMs 36-37 → 38-39%). Centipawn is unchanged. On a device with a wider f16/f32 gap (3090 probe: 36.7 / 28.4) the split matters |
+
+Legal-move policy over the full corpus (max \|legal prob diff\| / limit; best
+moves; flips tolerated as reference near-ties):
+
+| lane | prob diff | limit | best move | tolerated flips (reference gap) |
+|---|---|---|---|---|
+| Lc0 Small b1 | 0.0062 | 0.015 | 10/10 | - |
+| Lc0 Small b8 | 0.018 | 0.04 | 10/10 | - |
+| t3 b8 | 0.0072 | 0.015 | 10/10 | - |
+| BT4 b8 | 0.013 | 0.03 | 10/10 | - |
+| LQO b8 | 0.039 | 0.08 | 8/10 | Rxh8 → Rxa8 (0.070), h1=Q → a1=Q (0.045) |
+| Maia3 b1 / grid | 0.026 / 0.024 | 0.05 | 38/40 | the same h1=Q / a1=Q pair (0.013) |
+
+Tie-epsilon is 0.01 for the Lc0 nets and 0.02 for Maia3. For LQO it is 0.08:
+its WebGPU drift (prob diff up to 0.039) flips both near-mirror move pairs in
+fixtures 2 and 7, and a flip can only come from priors moving by the gap in
+total. That makes LQO's best-move check no stronger than its probability
+limit. The flips are drift between WebGPU f16 and the WASM reference, not a
+proven defect. A native check of LQO on those two positions would settle it.
+The broken t1 copies still fail: the ×1.1 Q-scale copy on legal prob (0.064),
+the ×1.5 FFN copy on legal prob (0.13), and the b1 rule50 copy on legal prob
+(0.024) as well as raw policy.
+
 ## 1. What users actually run
 
 These are the GPU paths in the v0 deploy profile (`VITE_BROWSER_CHESS_DEPLOY_PROFILE=v0`).
@@ -417,11 +448,13 @@ corrected gates:
   `parityMaxAbs` over all 10 fixtures (second review round; the b1 limits were
   recalibrated). The policy-logit max-abs was 0.0996 (t1 b1), 0.085 (t1 b8),
   0.063 (t3), 0.29 (BT4) and 1.30 (LQO). WDL was ≤ 0.009 on every Lc0 path.
+  The legal-move policy gate passes on every lane (third review round, table
+  above), with Maia3 over 10 fixtures × 4 Elo conditions.
 - TVMJS Centipawn vs ORT: ≤ 1.1e-6 policy and ≤ 1.4e-6 WDL, same move sets.
 - TVMJS Lc0 t1: 10/10 best moves at b8 and b16, prior 0.0063, WDL 0.0022.
 - TVMJS Lc0 BT4: 9/10 best moves, with 1 flip whose reference prior gap is
   0.00055 (≤ 0.01). Prior 0.012, WDL 0.0024.
 - The gates reject deliberately broken candidates. In the browser, scaled-weight
-  and rule50-zeroed t1 copies fail ORT parity (above). In `tests/kernel_hillclimb.test.mjs`, unit
+  and rule50-zeroed t1 copies and an Elo-swapped Maia3 copy fail ORT parity (above). In `tests/kernel_hillclimb.test.mjs`, unit
   tests fail scaled or NaN outputs, NaN or shifted WDL, missing moves,
   flattened policies, dropped profiles and ambiguous byte matches.
