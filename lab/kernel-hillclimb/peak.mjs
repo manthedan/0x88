@@ -159,6 +159,12 @@ async function validateGemm(device, C, { M, N, K, hostA, hostB, outType, tol, sa
   staging.unmap();
   staging.destroy();
   const out = outType === 'f16' ? Uint16Array.from(new Uint16Array(raw)) : new Float32Array(raw);
+  // C is NaN-poisoned before each kernel (poisonBuffer), so any element the
+  // grid failed to write is non-finite. Scan all of C, not just the samples.
+  for (let i = 0; i < out.length; i++) {
+    const v = outType === 'f16' ? f16ToF32(out[i]) : out[i];
+    if (!Number.isFinite(v)) return { valid: false, maxRelErr: Infinity, tol, unwritten: i };
+  }
   let maxRel = 0;
   for (let s = 0; s < samples; s++) {
     // Corners plus random entries, so edge tiles are always covered.
@@ -177,6 +183,15 @@ async function validateGemm(device, C, { M, N, K, hostA, hostB, outType, tol, sa
     maxRel = Math.max(maxRel, rel);
   }
   return { valid: maxRel <= tol, maxRelErr: maxRel, tol };
+}
+
+/**
+ * Fill C with NaN before a variant runs. Without this, a kernel whose grid
+ * misses tiles inherits the previous variant's correct values and passes.
+ */
+function poisonBuffer(device, buf, type, count) {
+  const host = type === 'f16' ? new Uint16Array(count).fill(0x7e00) : new Float32Array(count).fill(Number.NaN);
+  device.queue.writeBuffer(buf, 0, host);
 }
 
 // f16 accumulation over K<=2048 stays near 5e-4 of sum|ab| for these
@@ -268,7 +283,7 @@ function gemmVariants(M, N) {
   return v;
 }
 
-async function gemmTests(device, trials, shapes) {
+async function gemmTests(device, trials, shapes, { undersizeGrid = false } = {}) {
   const out = [];
   for (const [label, M, N, K] of shapes) {
     const flops = 2 * M * N * K;
@@ -282,7 +297,7 @@ async function gemmTests(device, trials, shapes) {
       buffers[type] = {
         A: A.buf,
         B: B.buf,
-        C: device.createBuffer({ size: M * N * size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
+        C: device.createBuffer({ size: M * N * size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
         hostA: A.host,
         hostB: B.host,
       };
@@ -292,8 +307,16 @@ async function gemmTests(device, trials, shapes) {
       if (!b) continue;
       const name = `gemm_${variant.storage}acc${variant.accum}_${variant.tm4 * 4}x${variant.tn4 * 4}`;
       try {
-        const { code, dispatch } = gemmKernel({ M, N, K, ...variant });
+        const { code, dispatch: fullDispatch } = gemmKernel({ M, N, K, ...variant });
+        // Self-test hook (?undersizeGrid=1): drop the last workgroup column (or row) so
+        // every variant must fail its output check.
+        const dispatch = !undersizeGrid
+          ? fullDispatch
+          : fullDispatch[0] > 1
+            ? [fullDispatch[0] - 1, ...fullDispatch.slice(1)]
+            : [fullDispatch[0], fullDispatch[1] - 1, ...fullDispatch.slice(2)];
         const pipeline = await compile(device, code, name);
+        poisonBuffer(device, b.C, variant.storage, M * N);
         const t = await timeDispatches(device, pipeline, bindGroup(device, pipeline, [b.A, b.B, b.C]), dispatch, { reps, trials });
         const s = summarize(t.gpuNs);
         const bytes = (M * K + K * N + M * N) * (variant.storage === 'f16' ? 2 : 4);
@@ -376,7 +399,11 @@ async function subgroupMatrixTests(device, adapter, trials, shapes) {
           const size = cfg.componentType === 'f16' ? 2 : 4;
           const A = randomBuffer(device, M * K * size, cfg.componentType, true);
           const B = randomBuffer(device, K * N * size, cfg.componentType, true);
-          const C = device.createBuffer({ size: M * N * (cfg.resultComponentType === 'f16' ? 2 : 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+          const C = device.createBuffer({
+            size: M * N * (cfg.resultComponentType === 'f16' ? 2 : 4),
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+          });
+          poisonBuffer(device, C, cfg.resultComponentType, M * N);
           try {
             const t = await timeDispatches(device, pipeline, bindGroup(device, pipeline, [A.buf, B.buf, C]), dispatch, { reps, trials });
             const s = summarize(t.gpuNs);
@@ -542,7 +569,7 @@ runMain(async () => {
   if (tests.has('fma')) result.results.fma = await fmaTests(device, trials);
   if (tests.has('bandwidth')) result.results.bandwidth = await bandwidthTests(device, trials);
   if (tests.has('overhead')) result.results.overhead = await overheadTests(device, trials);
-  if (tests.has('gemm')) result.results.gemm = await gemmTests(device, trials, shapes);
+  if (tests.has('gemm')) result.results.gemm = await gemmTests(device, trials, shapes, { undersizeGrid: intParam('undersizeGrid', 0, 0, 1) === 1 });
   if (tests.has('sgmatrix')) result.results.subgroupMatrix = await subgroupMatrixTests(device, adapter, trials, shapes);
   // Headline peaks: best measured values (the practical roofline used by roofline.mjs).
   const fma = result.results.fma ?? [];

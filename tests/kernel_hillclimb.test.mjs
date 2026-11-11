@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
-import { compareCentipawn, compareLc0, ortParity, profileComplete } from '../lab/kernel-hillclimb/gates.mjs';
+import { compareCentipawn, compareLc0, fixtureChunks, manifestCheck, ortParity, profileComplete, runChunked } from '../lab/kernel-hillclimb/gates.mjs';
 import { fmaKernel, gemmKernel, subgroupMatrixGemmKernel } from '../lab/kernel-hillclimb/wgsl-kernels.mjs';
 import { CANDIDATES, WGSL_HEADS_GATE } from '../scripts/kernel_hillclimb/candidates.mjs';
-import { analyzeCandidate, classify, devicePeaks, gridConsistent, MATMUL_RE, matchMatmuls, PATHS } from '../scripts/kernel_hillclimb/roofline.mjs';
+import { analyzeCandidate, classify, devicePeaks, gridConsistent, MATMUL_RE, matchMatmuls, PATHS, toMarkdown } from '../scripts/kernel_hillclimb/roofline.mjs';
+import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 
 // The lab modules read location.search at import time.
 globalThis.location ??= { search: '' };
@@ -243,6 +244,29 @@ test('roofline drops failed and quantized repeats, and zero durations stay unres
   assert.match(analyzeCandidate('x', { results: [rep(false, false, 5)] }, null, peaks).error, /not ok/);
 });
 
+test('roofline rejects the whole report when the command gate failed', () => {
+  const rep = {
+    ok: true,
+    candidate: { runtime: 'ort-webgpu', batch: 1, model: 'm' },
+    timing: { runMs: { median: 1 } },
+    profile: {
+      dropped: 0,
+      submitsPerInvoke: 1,
+      kernelMsPerInvoke: 0.5,
+      perInvoke: [{ envelopeMs: 0.6, dispatches: 1 }],
+      sequence: [['Softmax', 40, '1x1x1', 4096]],
+    },
+  };
+  const gate = { inPagePass: true, commandGate: { command: 'npm run gate', pass: false, tail: 'FAIL' } };
+  const bad = analyzeCandidate('broken', { ok: false, gate, results: [rep, rep] }, null, peaks);
+  assert.match(bad.error, /command gate failed/);
+  assert.equal(bad.rejected.length, 2);
+  const passing = analyzeCandidate('fine', { ok: true, gate: { ...gate, commandGate: { ...gate.commandGate, pass: true } }, results: [rep] }, null, peaks);
+  assert.equal(passing.error, undefined);
+  const md = toMarkdown({ peaks, candidates: [bad] });
+  assert.match(md, /broken: REJECTED, command gate failed/);
+});
+
 test('GEMM generators reject non-tiling shapes and size the grid', () => {
   assert.deepEqual(gemmKernel({ M: 512, N: 1024, K: 1024, storage: 'f16', accum: 'f32', tm4: 1, tn4: 2 }).dispatch, [8, 8, 1]);
   assert.throws(() => gemmKernel({ M: 100, N: 64, K: 16, storage: 'f32', accum: 'f32', tm4: 1, tn4: 1 }));
@@ -267,4 +291,71 @@ test('FMA peak kernel uses per-lane constants and stores every invocation', () =
   assert.match(code, /let b = vec4<f32>\(P\[0\]\)/);
   assert.match(code, /\n  outBuf\[gid\.x\] = vec4<f32>\(s\);/);
   assert.doesNotMatch(code, /gid\.x == 0u/);
+});
+
+const CORPUS = JSON.parse(readFileSync('fixtures/lc0/fen_only.json', 'utf8')).map((f) => f.fen);
+const RULE50_PLANE = 109;
+
+test('parity chunks cover every fixture, including the only nonzero rule50 one', () => {
+  const rule50 = CORPUS.map((fen) => encodeLc0Classical112(fen).planes[RULE50_PLANE * 64]);
+  const nonzero = rule50.flatMap((v, i) => (v ? [i] : []));
+  assert.equal(nonzero.length, 1, 'fixture corpus should hold exactly one nonzero rule50 position');
+  for (const batch of [1, 4, 8, 16]) {
+    const chunks = fixtureChunks(CORPUS, batch);
+    assert.ok(chunks.every((c) => c.fens.length === batch));
+    assert.deepEqual(
+      chunks.flatMap((c) => c.fens.slice(0, c.real)),
+      CORPUS,
+      `batch ${batch}`,
+    );
+  }
+});
+
+test('a candidate that zeroes the rule50 plane fails full-corpus parity', async () => {
+  // Fake "models": the moves-left head reads the rule50 plane; the broken
+  // candidate zeroes it before the forward pass.
+  const model = (zeroRule50) => async (fens) => {
+    const mlh = new Float32Array(fens.length);
+    const policy = new Float32Array(fens.length * 4);
+    fens.forEach((fen, i) => {
+      const planes = Float32Array.from(encodeLc0Classical112(fen).planes);
+      if (zeroRule50) planes.fill(0, RULE50_PLANE * 64, (RULE50_PLANE + 1) * 64);
+      let occ = 0;
+      for (let k = 0; k < 104 * 64; k++) occ += planes[k];
+      mlh[i] = 0.1 * planes[RULE50_PLANE * 64] + 0.01 * occ;
+      policy.fill(occ / 64, i * 4, i * 4 + 4);
+    });
+    return { '/output/mlh': mlh, '/output/policy': policy };
+  };
+  const limits = { '/output/policy': 0.06, '/output/mlh': 0.3 };
+  for (const batch of [1, 8]) {
+    const cand = await runChunked(CORPUS, batch, model(true));
+    const ref = await runChunked(CORPUS, batch, model(false));
+    assert.equal(ref['/output/mlh'].length, CORPUS.length);
+    const full = ortParity(cand, ref, limits);
+    assert.equal(full.pass, false, `batch ${batch}`);
+    assert.deepEqual(full.failures, ['/output/mlh']);
+    // The old timing-feed parity (first `batch` fixtures, cycled) missed it.
+    const timingFeeds = Array.from({ length: batch }, (_, i) => CORPUS[i % CORPUS.length]);
+    assert.equal(ortParity(await model(true)(timingFeeds), await model(false)(timingFeeds), limits).pass, true, `timing feed b${batch}`);
+  }
+});
+
+test('runChunked keeps only real rows and rejects outputs without a batch dimension', async () => {
+  const out = await runChunked(['a', 'b', 'c'], 2, async (fens) => ({ y: Float32Array.from(fens.flatMap((f) => [f.charCodeAt(0), 0])) }));
+  assert.deepEqual([...out.y], [97, 0, 98, 0, 99, 0]);
+  await assert.rejects(
+    runChunked(['a'], 2, async () => ({ y: new Float32Array(3) })),
+    /not a multiple/,
+  );
+});
+
+test('manifestCheck flags a silent v3-subgroups -> v2 fallback', () => {
+  const base = 'http://127.0.0.1:5241/lab/kernel-hillclimb/tvmjs-profile.html';
+  const v3 = '/runtimes/centipawn-tvmjs-webgpu/x/f32/v3-subgroups/manifest.json';
+  const v2 = 'http://127.0.0.1:5241/runtimes/centipawn-tvmjs-webgpu/x/f32/v2-shape-k16/manifest.json';
+  assert.equal(manifestCheck(v3, `http://127.0.0.1:5241${v3}`, base).ok, true);
+  const fb = manifestCheck(v3, v2, base);
+  assert.equal(fb.ok, false);
+  assert.equal(fb.effective, '/runtimes/centipawn-tvmjs-webgpu/x/f32/v2-shape-k16/manifest.json');
 });

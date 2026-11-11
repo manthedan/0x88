@@ -24,7 +24,7 @@ import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
 import { boardToMaia3Tokens } from '../../src/lc0/maia3.ts';
 import * as ort from '../../src/nn/ortRuntime.ts';
 import { deviceIdentity, intParam, log, params, runMain, summarize } from './common.mjs';
-import { ortParity, profileComplete } from './gates.mjs';
+import { ortParity, profileComplete, runChunked } from './gates.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
 
 const PRESETS = {
@@ -33,7 +33,9 @@ const PRESETS = {
     batch: 1,
     family: 't1-256x10',
     shipped: 'Lc0 Small (Play/Analysis/Arena default), search batch 1',
-    parityMaxAbs: { '/output/policy': 0.06, '/output/wdl': 0.006, '/output/mlh': 0.3 },
+    // Re-derived over the full corpus (baseline policy 0.0996, WDL 0.0027,
+    // MLH 0.966); the old 0.06/0.3 were 2x a start-position-only baseline.
+    parityMaxAbs: { '/output/policy': 0.2, '/output/wdl': 0.006, '/output/mlh': 2 },
   },
   'lc0-small-b8': {
     model: '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx',
@@ -68,7 +70,8 @@ const PRESETS = {
     batch: 1,
     family: 'maia3',
     shipped: 'Maia3 single eval (Play move)',
-    parityMaxAbs: { logits_move: 0.5, logits_value: 0.01 },
+    // Full-corpus baseline: move 0.641, value 0.031 (old limits were start-position-only).
+    parityMaxAbs: { logits_move: 1.3, logits_value: 0.06 },
   },
   'maia3-grid': {
     model: '/models/maia3/maia3_simplified.qdq8.onnx',
@@ -96,15 +99,21 @@ function f32ToF16(values) {
   return out;
 }
 
+async function fixtureCorpus() {
+  const fixtures = await (await fetch('/fixtures/lc0/fen_only.json')).json();
+  const fens = fixtures.map((f) => f.fen).filter(Boolean);
+  if (!fens.length) throw new Error('ort-profile: empty fixture corpus');
+  return fens;
+}
+
 async function loadBoards(n) {
-  const fixtures = await (await fetch('/fixtures/lc0/fen_only.json')).json().catch(() => null);
-  const fens = (fixtures ?? []).map((f) => f.fen).filter(Boolean);
-  if (!fens.length) fens.push('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  const fens = await fixtureCorpus();
   return Array.from({ length: n }, (_, i) => fens[i % fens.length]);
 }
 
-async function buildFeeds(session, batch) {
-  const fens = await loadBoards(batch);
+async function buildFeeds(session, batch, explicitFens = null) {
+  const fens = explicitFens ?? (await loadBoards(batch));
+  if (fens.length !== batch) throw new Error(`buildFeeds: ${fens.length} positions for batch ${batch}`);
   const feeds = {};
   for (const meta of session.inputMetadata) {
     const name = meta.name;
@@ -272,23 +281,29 @@ runMain(async () => {
     profile = { supported: false, reason: prof ? 'timestamp-query unavailable' : 'ORT created no instrumented WebGPU device (WASM fallback?)' };
   let parity = null;
   if (params.get('parity') === 'wasm') {
-    const gpuOut = await outputsToArrays(await session.run(feeds));
+    // Parity covers the whole fixture corpus in physical-batch chunks, not the
+    // timing feeds (b1 timing feeds are only the start position).
+    const corpus = await fixtureCorpus();
+    const gpuOut = await runChunked(corpus, batch, async (chunk) => outputsToArrays(await session.run((await buildFeeds(session, batch, chunk)).feeds)));
     ort.setRequestedOrtExecutionProviderForCurrentThread('wasm');
     // The reference is the ORIGINAL model (preset's shipped export unless
     // referenceModel= says otherwise), never the candidate URL: comparing a
     // candidate with itself on another EP would pass broken weights.
     const referenceModel = params.get('referenceModel') ?? preset?.model ?? null;
-    // Thresholds: ~2x the shipped baseline's max-abs on this fixture set (M4,
-    // Chrome 157), i.e. a regression tripwire for f16 accumulation-order noise,
+    // Thresholds: ~2x the shipped baseline's max-abs over the 10-position
+    // fixture corpus (M4, Chrome 157), i.e. a regression tripwire for f16 accumulation-order noise,
     // not a numerical proof (npm test pins ORT WASM to native lc0).
     const limits = preset?.parityMaxAbs ?? null;
     if (!referenceModel) {
       parity = { reference: null, candidateModel: model, pass: false, failures: ['no reference model: pass preset= or referenceModel='] };
     } else {
       const ref = await ort.InferenceSession.create(referenceModel, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
-      const refOut = await outputsToArrays(await ref.run(feeds));
+      // Same chunking as the candidate (the reference takes the same feed shapes).
+      const refOut = await runChunked(corpus, batch, async (chunk) => outputsToArrays(await ref.run((await buildFeeds(ref, batch, chunk)).feeds)));
       parity = {
         reference: 'ORT WASM, reference model, no dequant fold',
+        fixtures: corpus.length,
+        chunks: Math.ceil(corpus.length / batch),
         referenceModel,
         candidateModel: model,
         candidateIsReference: referenceModel === model,

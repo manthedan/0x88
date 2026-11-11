@@ -154,3 +154,62 @@ export function profileComplete(profile) {
   if (!profile || profile.supported === false) return true; // nothing claimed
   return !(profile.dropped > 0) && !(profile.passMode?.dropped > 0);
 }
+
+/**
+ * Split the full fixture corpus into physical-batch chunks for parity. The
+ * last chunk is padded by repeating its final position (as the production
+ * evaluators do); `real` is how many leading rows are fixtures. Parity runs
+ * over these chunks, not the timing feeds: a b1 timing feed holds only the
+ * start position and a b8 feed drops the tail fixtures, including the only
+ * nonzero rule50 position.
+ */
+export function fixtureChunks(fens, batch) {
+  if (!(batch >= 1)) throw new Error(`fixtureChunks: bad batch ${batch}`);
+  if (!fens.length) throw new Error('fixtureChunks: empty corpus');
+  const chunks = [];
+  for (let i = 0; i < fens.length; i += batch) {
+    const real = fens.slice(i, i + batch);
+    chunks.push({ fens: [...real, ...Array(batch - real.length).fill(real[real.length - 1])], real: real.length });
+  }
+  return chunks;
+}
+
+/**
+ * Run `run(chunkFens) -> {output: Float32Array}` over fixtureChunks and
+ * concatenate the real rows of each output, so the result has one row per
+ * fixture. Every output's leading dimension must be the batch.
+ */
+export async function runChunked(fens, batch, run) {
+  const parts = {};
+  for (const chunk of fixtureChunks(fens, batch)) {
+    const out = await run(chunk.fens);
+    for (const [name, data] of Object.entries(out)) {
+      if (data.length % batch) throw new Error(`runChunked: ${name} length ${data.length} is not a multiple of batch ${batch}`);
+      const row = data.length / batch;
+      parts[name] ??= [];
+      parts[name].push(data.subarray(0, chunk.real * row));
+    }
+  }
+  const out = {};
+  for (const [name, list] of Object.entries(parts)) {
+    const all = new Float32Array(list.reduce((n, a) => n + a.length, 0));
+    let off = 0;
+    for (const a of list) {
+      all.set(a, off);
+      off += a.length;
+    }
+    out[name] = all;
+  }
+  return out;
+}
+
+/**
+ * Compare the requested manifest with the one the evaluator actually loaded
+ * (both resolved against `base`). A mismatch means a silent runtime fallback,
+ * and the run must not be recorded as the requested candidate.
+ */
+export function manifestCheck(requested, effective, base) {
+  const req = new URL(requested, base).href;
+  const eff = new URL(effective, base).href;
+  return { ok: req === eff, requested: new URL(req).pathname, effective: new URL(eff).pathname };
+}

@@ -15,7 +15,7 @@ import * as ort from '../../src/nn/ortRuntime.ts';
 import { SquareFormerEvaluator } from '../../src/nn/squareformerEvaluator.ts';
 import { SquareformerTvmjsWebgpuEvaluator } from '../../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
 import { deviceIdentity, intParam, log, params, runMain, summarize } from './common.mjs';
-import { compareCentipawn, compareLc0, profileComplete } from './gates.mjs';
+import { compareCentipawn, compareLc0, manifestCheck, profileComplete } from './gates.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
 
 const LC0 = '/runtimes/lc0-tvmjs-webgpu';
@@ -59,9 +59,13 @@ const TARGETS = {
   },
 };
 
-async function fixtureFens(n) {
+async function fixtureCorpus() {
   const fixtures = await (await fetch('/fixtures/lc0/fen_only.json')).json();
-  const fens = fixtures.map((f) => f.fen);
+  return fixtures.map((f) => f.fen);
+}
+
+async function fixtureFens(n) {
+  const fens = await fixtureCorpus();
   return Array.from({ length: n }, (_, i) => fens[i % fens.length]);
 }
 
@@ -93,7 +97,11 @@ runMain(async () => {
   }
   const createMs = performance.now() - t0;
   const prof = profiler.lastDevice();
-  log('evaluator', { target: targetName, manifest, batch, createMs });
+  // The Centipawn evaluator silently swaps v3-subgroups for v2-shape-k16 on
+  // adapters without fixed 32-wide subgroups; record what actually ran.
+  const manifestRun = manifestCheck(manifest, evaluator.manifestUrl ?? manifest, location.href);
+  log('evaluator', { target: targetName, manifest, effectiveManifest: manifestRun.effective, batch, createMs });
+  if (!manifestRun.ok) log('MANIFEST FALLBACK', manifestRun);
   for (let i = 0; i < warmup; i++) await evaluate();
   const runMs = [];
   for (let i = 0; i < iters; i++) {
@@ -134,21 +142,32 @@ runMain(async () => {
   } else if (profileInvokes > 0) profile = { supported: false, reason: 'timestamp-query unavailable' };
   let parity = null;
   if (params.get('parity') === 'ort') {
-    const tvmOut = await evaluate();
+    // Whole fixture corpus, not the timing batch (b8 timing feeds drop the
+    // tail fixtures, including the only nonzero rule50 position). The
+    // evaluators split it into physical batches and pad the last one.
+    const corpus = await fixtureCorpus();
     if (target.kind === 'centipawn') {
+      const boards = corpus.map((f) => parseFen(f));
+      const tvmOut = await evaluator.evaluateBatch(boards);
       const ref = await SquareFormerEvaluator.create(target.ortModel, target.metaJson);
       parity = {
         reference: `ORT ${ort.describeOrtBackendConfig()} ${target.ortModel}`,
-        ...compareCentipawn(tvmOut, await ref.evaluateBatch(fens.map((f) => parseFen(f)))),
+        fixtures: corpus.length,
+        ...compareCentipawn(tvmOut, await ref.evaluateBatch(boards)),
       };
     } else {
+      const tvmOut = await evaluator.evaluateBatch(corpus);
       const ortModel = target.ortModel.replace('{batch}', '1');
       const ref = await Lc0OnnxEvaluator.create(ortModel);
       const refOut = [];
-      for (const fen of fens) refOut.push(await ref.evaluate(fen));
+      for (const fen of corpus) refOut.push(await ref.evaluate(fen));
       const maxPriorAbs = params.get('maxPriorAbs') === null ? target.maxPriorAbs : Number(params.get('maxPriorAbs'));
       const maxWdlAbs = params.get('maxWdlAbs') === null ? target.maxWdlAbs : Number(params.get('maxWdlAbs'));
-      parity = { reference: `ORT ${ort.describeOrtBackendConfig()} ${ortModel}`, ...compareLc0(tvmOut, refOut, { tieEpsilon, maxPriorAbs, maxWdlAbs }) };
+      parity = {
+        reference: `ORT ${ort.describeOrtBackendConfig()} ${ortModel}`,
+        fixtures: corpus.length,
+        ...compareLc0(tvmOut, refOut, { tieEpsilon, maxPriorAbs, maxWdlAbs }),
+      };
     }
     log('parity', parity);
   }
@@ -157,13 +176,25 @@ runMain(async () => {
   evaluator.dispose?.();
   return {
     bench: 'tvmjs-profile',
-    ok: !profiler.state.errors.length && profileComplete(profile) && (parity ? parity.pass : true),
+    ok: manifestRun.ok && !profiler.state.errors.length && profileComplete(profile) && (parity ? parity.pass : true),
     device: identity,
-    candidate: { runtime: 'tvmjs-webgpu', target: targetName, manifest, batch, shipped: target.shipped },
+    // `manifest` is what ran (roofline reads its MAC table from it);
+    // `requestedManifest` is what was asked for.
+    candidate: {
+      runtime: 'tvmjs-webgpu',
+      target: targetName,
+      manifest: manifestRun.effective,
+      requestedManifest: manifestRun.requested,
+      manifestFallback: !manifestRun.ok,
+      batch,
+      shipped: target.shipped,
+    },
     params: { warmup, iters, profileInvokes, fens },
     timing: { createMs, runMs: timing, perPositionMs: timing.median / batch },
     profile,
     parity,
-    errors: profiler.state.errors,
+    errors: manifestRun.ok
+      ? profiler.state.errors
+      : [...profiler.state.errors, `manifest fallback: requested ${manifestRun.requested}, ran ${manifestRun.effective}`],
   };
 });

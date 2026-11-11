@@ -15,7 +15,7 @@ const ORT_WASM_PARITY = {
   kind: 'in-page',
   query: 'parity=wasm',
   description:
-    'Raw output max-abs diff, ORT WebGPU vs ORT WASM on the same encoded fixture positions. npm test separately proves ORT WASM vs native lc0 fixtures, so this chains the shipped GPU path to the native reference.',
+    'Raw output max-abs diff, ORT WebGPU vs ORT WASM over the whole 10-position fixture corpus (physical-batch chunks, separate from the timing feeds). npm test separately proves ORT WASM vs native lc0 fixtures, so this chains the shipped GPU path to the native reference.',
   // Per-output max-abs ceilings live with the presets (lab/kernel-hillclimb/ort-profile.mjs
   // parityMaxAbs): ~2x the shipped baseline on the M4 so remote devices get the same gate.
   thresholds: 'ort-profile.mjs PRESETS[*].parityMaxAbs',
@@ -50,7 +50,7 @@ export const CANDIDATES = {
       kind: 'in-page',
       query: 'parity=ort',
       description:
-        'Legal-policy and WDL max-abs <= 0.001 vs the ORT Centipawn evaluator on 16 fixture positions (the docs/centipawn_tvmjs_subgroups_2026-10.md whole-output gate, evaluator form). Promotion additionally needs the search-parity runs in that doc.',
+        'Legal-policy and WDL max-abs <= 0.001 vs the ORT Centipawn evaluator over the 10-position fixture corpus (the docs/centipawn_tvmjs_subgroups_2026-10.md whole-output gate, evaluator form). Promotion additionally needs the search-parity runs in that doc.',
     },
   },
   'tvmjs-centipawn-v3-subgroups': {
@@ -67,7 +67,7 @@ export const CANDIDATES = {
       kind: 'in-page',
       query: 'parity=ort&tieEpsilon=0.01',
       description:
-        'vs ORT f16 b1 on the same positions: same legal-move set, finite priors/WDL, max |prior diff| <= 0.03 and max |WDL diff| <= 0.01 (lab/kernel-hillclimb/gates.mjs compareLc0), same best move unless the reference prior gap is <= tie-epsilon 0.01.',
+        'vs ORT f16 b1 over the 10-position fixture corpus: same legal-move set, finite priors/WDL, max |prior diff| <= 0.03 and max |WDL diff| <= 0.01 (lab/kernel-hillclimb/gates.mjs compareLc0), same best move unless the reference prior gap is <= tie-epsilon 0.01.',
       command: [
         'npm',
         'run',

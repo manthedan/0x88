@@ -220,7 +220,16 @@ export function rejectReason(r) {
   return null;
 }
 
+/** Whole-report rejection: a failed --command-gate invalidates every repeat. */
+export function runRejectReason(run) {
+  const cg = run.gate?.commandGate;
+  if (cg && cg.pass === false) return `command gate failed (${cg.command})`;
+  return null;
+}
+
 export function analyzeCandidate(name, run, cost, peaks) {
+  const whole = runRejectReason(run);
+  if (whole) return { name, error: whole, rejected: run.results.map((_, i) => ({ repeat: i, reason: whole })) };
   const rejected = run.results.map((r, i) => ({ repeat: i, reason: rejectReason(r) })).filter((x) => x.reason);
   const results = run.results.filter((r) => !rejectReason(r));
   if (!results.length) return { name, error: `no usable profile: ${rejected.map((x) => x.reason).join('; ')}`, rejected };
@@ -400,6 +409,11 @@ export function toMarkdown(report) {
     lines.push(
       `| ${c.name} | ${c.shipped ? 'yes' : 'no'} | ${c.batch} | ${fmt(q.wallMs)} | ${fmt(q.kernelBusyMs)} | ${fmt(q.nonKernelMs)} | ${fmt(q.gpuIdleInEnvelopeMs)} | ${q.dispatches} | ${q.passesPerInvoke ?? '-'} | ${fmt(q.gflops)} | ${fmt(q.achievedTflopsWall)} | ${fmt(q.pctPeakWall, 1)} | ${fmt(q.matmulMs)} | ${fmt(q.matmulTflops)} | ${fmt(b.launch)} | ${fmt(b.underused)} | ${fmt(b.bandwidth)} | ${fmt(b.compute)} |`,
     );
+  }
+  const failed = report.candidates.filter((c) => c.error);
+  if (failed.length) {
+    lines.push('', 'Rejected (not in the table):');
+    for (const c of failed) lines.push(`- ${c.name}: REJECTED, ${c.error}`);
   }
   for (const c of report.candidates) {
     if (c.error) continue;
