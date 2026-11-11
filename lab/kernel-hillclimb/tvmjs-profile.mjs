@@ -1,0 +1,196 @@
+// TVMJS WebGPU timing + per-kernel profile through the production evaluators.
+//
+// Query params:
+//   target=centipawn|lc0-t1|lc0-t3|lc0-bt4   (default centipawn, the shipped TVMJS path)
+//   manifest=/runtimes/...manifest.json       override the target's default manifest
+//   batch=N   physical batch (lc0 targets; centipawn manifests are fixed b16)
+//   warmup=N (5)  iters=N (30)  profileInvokes=N (5, 0 disables)
+//   parity=ort  compare evaluator outputs with the ORT path on the same positions
+//   tieEpsilon=X  (lc0 parity) best-move flips whose prior gap <= X count as tolerated
+import { parseFen } from '../../src/chess/board.ts';
+import { Lc0OnnxEvaluator } from '../../src/lc0/onnxEvaluator.ts';
+import { Lc0WholeOnnxWebgpuEvaluator } from '../../src/lc0/wholeOnnxWebgpuEvaluator.ts';
+import { SquareformerTvmjsWebgpuEvaluator } from '../../src/nn/squareformerTvmjsWebgpuEvaluator.ts';
+import { SquareFormerEvaluator } from '../../src/nn/squareformerEvaluator.ts';
+import * as ort from '../../src/nn/ortRuntime.ts';
+import { deviceIdentity, intParam, log, params, runMain, summarize } from './common.mjs';
+import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
+
+const LC0 = '/runtimes/lc0-tvmjs-webgpu';
+const TARGETS = {
+  centipawn: {
+    kind: 'centipawn',
+    manifest: '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json',
+    batch: 16,
+    meta: '/models/bt4_soap_rem_c19000_final.meta.json',
+    ortModel: '/models/bt4_soap_rem_c19000_final.onnx',
+    shipped: 'Centipawn default runtime (TVMJS v2-shape-k16, f32, physical b16)',
+  },
+  'lc0-t1': {
+    kind: 'lc0',
+    manifest: `${LC0}/t1-256x10-distilled-swa-2432500/f16/v1/manifest.json`,
+    batch: 8,
+    ortModel: '/models/lc0/t1-256x10-distilled-swa-2432500.batch{batch}.f16.onnx',
+    shipped: 'Lc0 small TVM whole-model option (non-default; hidden in the v0 deploy profile)',
+  },
+  'lc0-t3': {
+    kind: 'lc0',
+    manifest: `${LC0}/t3-512x15x16h-distill-swa-2767500/f16/v1/manifest.json`,
+    batch: 8,
+    ortModel: '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch{batch}.f16.onnx',
+    shipped: 'research lane (not wired to product)',
+  },
+  'lc0-bt4': {
+    kind: 'lc0',
+    manifest: `${LC0}/BT4-1024x15x32h-swa-6147500-policytune-332/f16/v1/manifest.json`,
+    batch: 8,
+    ortModel: '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch{batch}.f16.onnx',
+    shipped: 'research lane (not wired to product)',
+  },
+};
+
+async function fixtureFens(n) {
+  const fixtures = await (await fetch('/fixtures/lc0/fen_only.json')).json();
+  const fens = fixtures.map((f) => f.fen);
+  return Array.from({ length: n }, (_, i) => fens[i % fens.length]);
+}
+
+function compareLc0(a, b, tieEpsilon) {
+  let maxPrior = 0;
+  let maxWdl = 0;
+  let bestMatches = 0;
+  const tolerated = [];
+  for (let i = 0; i < a.length; i++) {
+    const pb = new Map(b[i].legalPriors.map((p) => [p.uci, p.prior]));
+    for (const p of a[i].legalPriors) maxPrior = Math.max(maxPrior, Math.abs(p.prior - (pb.get(p.uci) ?? NaN)));
+    for (let j = 0; j < 3; j++) maxWdl = Math.max(maxWdl, Math.abs(a[i].wdl[j] - b[i].wdl[j]));
+    const ba = [...a[i].legalPriors].sort((x, y) => y.prior - x.prior)[0]?.uci;
+    const bb = [...b[i].legalPriors].sort((x, y) => y.prior - x.prior)[0]?.uci;
+    if (ba === bb) bestMatches++;
+    else {
+      const pa = new Map(a[i].legalPriors.map((p) => [p.uci, p.prior]));
+      const gap = Math.abs((pa.get(ba) ?? NaN) - (pa.get(bb) ?? NaN));
+      if (tieEpsilon !== null && gap <= tieEpsilon) tolerated.push({ row: i, tvm: ba, ort: bb, priorGap: gap });
+    }
+  }
+  return {
+    rows: a.length,
+    bestMoveMatches: bestMatches,
+    tieTolerated: tolerated,
+    maxLegalPriorAbs: maxPrior,
+    maxWdlAbs: maxWdl,
+    pass: Number.isFinite(maxPrior) && bestMatches + tolerated.length === a.length,
+  };
+}
+
+function compareCentipawn(a, b, tolerance = 0.001) {
+  let policy = 0;
+  let wdl = 0;
+  for (let i = 0; i < a.length; i++) {
+    for (const [k, p] of a[i].policy) policy = Math.max(policy, Math.abs(p - (b[i].policy.get(k) ?? NaN)));
+    for (let j = 0; j < 3; j++) wdl = Math.max(wdl, Math.abs(a[i].wdl[j] - b[i].wdl[j]));
+  }
+  return { rows: a.length, maxLegalPolicyAbs: policy, maxWdlAbs: wdl, tolerance, pass: Number.isFinite(policy) && policy <= tolerance && wdl <= tolerance };
+}
+
+runMain(async () => {
+  const targetName = params.get('target') ?? 'centipawn';
+  const target = TARGETS[targetName];
+  if (!target) throw new Error(`unknown target ${targetName}; known: ${Object.keys(TARGETS).join(', ')}`);
+  const manifest = params.get('manifest') ?? target.manifest;
+  const batch = intParam('batch', target.batch, 1, 64);
+  const warmup = intParam('warmup', 5, 0, 1000);
+  const iters = intParam('iters', 30, 3, 10000);
+  const profileInvokes = intParam('profileInvokes', 5, 0, 200);
+  const tieEpsilonRaw = params.get('tieEpsilon');
+  const tieEpsilon = tieEpsilonRaw === null ? null : Number(tieEpsilonRaw);
+  const profiler = installGpuProfiler();
+  const fens = await fixtureFens(batch);
+  const t0 = performance.now();
+  let evaluator;
+  let evaluate;
+  if (target.kind === 'centipawn') {
+    const meta = await (await fetch(target.meta)).json();
+    evaluator = await SquareformerTvmjsWebgpuEvaluator.create(manifest, meta);
+    const boards = fens.map((fen) => parseFen(fen));
+    evaluate = () => evaluator.evaluateBatch(boards);
+    target.metaJson = meta;
+  } else {
+    evaluator = await Lc0WholeOnnxWebgpuEvaluator.create({ manifestUrl: manifest, batch });
+    evaluate = () => evaluator.evaluateBatch(fens);
+  }
+  const createMs = performance.now() - t0;
+  const prof = profiler.lastDevice();
+  log('evaluator', { target: targetName, manifest, batch, createMs });
+  for (let i = 0; i < warmup; i++) await evaluate();
+  const runMs = [];
+  for (let i = 0; i < iters; i++) {
+    const s = performance.now();
+    await evaluate();
+    runMs.push(performance.now() - s);
+  }
+  const timing = summarize(runMs);
+  log('evaluateBatch ms', timing);
+  let profile = null;
+  if (profileInvokes > 0 && prof?.supported) {
+    prof.arm();
+    const profiledRunMs = [];
+    for (let i = 0; i < profileInvokes; i++) {
+      prof.nextInvoke();
+      const s = performance.now();
+      await evaluate();
+      profiledRunMs.push(performance.now() - s);
+    }
+    const submits = prof.submits;
+    const collected = await prof.collect();
+    profile = aggregateProfile(collected, { invokes: profileInvokes });
+    profile.profiledRunMs = summarize(profiledRunMs);
+    profile.submitsPerInvoke = submits / profileInvokes;
+    profile.timestampsQuantized = collected.timestampsQuantized;
+    profile.dropped = collected.dropped;
+    profile.sequence = collected.rows
+      .filter((r) => r.invoke === 1)
+      .map((r) => [r.name, Math.round(r.ns / 10) / 100, r.workgroups?.join('x') ?? 'indirect', r.bindBytes]);
+    profile.shaders = prof.shaders.map(({ code, ...rest }) => rest);
+    log('profile', {
+      kernelMsPerInvoke: profile.kernelMsPerInvoke,
+      dispatches: profile.perInvoke[0]?.dispatches,
+      top: profile.kernels.slice(0, 6).map((k) => `${k.name}:${k.msPerInvoke.toFixed(3)}`),
+    });
+    // Same invokes with the runtime's own passes timestamped (no split): true GPU busy vs idle.
+    profile.passMode = await passModeProfile(prof, evaluate, Math.max(profileInvokes, 10));
+    log('passMode', profile.passMode);
+  } else if (profileInvokes > 0) profile = { supported: false, reason: 'timestamp-query unavailable' };
+  let parity = null;
+  if (params.get('parity') === 'ort') {
+    const tvmOut = await evaluate();
+    if (target.kind === 'centipawn') {
+      const ref = await SquareFormerEvaluator.create(target.ortModel, target.metaJson);
+      parity = {
+        reference: `ORT ${ort.describeOrtBackendConfig()} ${target.ortModel}`,
+        ...compareCentipawn(tvmOut, await ref.evaluateBatch(fens.map((f) => parseFen(f)))),
+      };
+    } else {
+      const ortModel = target.ortModel.replace('{batch}', '1');
+      const ref = await Lc0OnnxEvaluator.create(ortModel);
+      const refOut = [];
+      for (const fen of fens) refOut.push(await ref.evaluate(fen));
+      parity = { reference: `ORT ${ort.describeOrtBackendConfig()} ${ortModel}`, tieEpsilon, ...compareLc0(tvmOut, refOut, tieEpsilon) };
+    }
+    log('parity', parity);
+  }
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+  const identity = await deviceIdentity(adapter, prof?.device ?? null);
+  evaluator.dispose?.();
+  return {
+    bench: 'tvmjs-profile',
+    ok: !profiler.state.errors.length && (parity ? parity.pass : true),
+    device: identity,
+    candidate: { runtime: 'tvmjs-webgpu', target: targetName, manifest, batch, shipped: target.shipped },
+    params: { warmup, iters, profileInvokes, fens },
+    timing: { createMs, runMs: timing, perPositionMs: timing.median / batch },
+    profile,
+    parity,
+    errors: profiler.state.errors,
+  };
+});
