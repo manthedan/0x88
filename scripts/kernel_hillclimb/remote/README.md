@@ -163,8 +163,9 @@ The builds were puppeteer Chrome for Testing 151.0.7922.71, playwright chromium-
 - **`shader-f16` is not exposed** on NVIDIA Vulkan by default, so subgroup-matrix offers only
   `u8/i8 -> u32/i32` configs (16x16x32 and 16x8x32). Dawn has the toggle
   `vulkan_enable_f16_on_nvidia` ("Enables F16 on Nvidia GPUs with Vulkan"), which the runner
-  passes through `--enable-dawn-features=`. See the device-probe result to check whether it took
-  effect.
+  passes through `--enable-dawn-features=`. That is confirmed in gpu-queue job 588: with it,
+  `shader-f16` is true and subgroup-matrix adds `f16 -> f16|f32` configs at 16x16x16, 16x8x16
+  and 16x8x8. Note that real users on NVIDIA/Linux Chrome do not get f16 this way.
 - The default runner flags for yukon:
   `--headless=new --enable-unsafe-webgpu --enable-webgpu-developer-features --no-sandbox
   --enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan --use-angle=vulkan
