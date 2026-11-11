@@ -21,14 +21,23 @@
 //   abRounds=N (20)  abBlock=N (3 invokes per arm per round)
 import { parseFen } from '../../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
-import { boardToMaia3Tokens } from '../../src/lc0/maia3.ts';
+import { boardToMaia3Tokens, maia3InternalsForTests } from '../../src/lc0/maia3.ts';
+import { legalPolicyPriors } from '../../src/lc0/onnxEvaluator.ts';
 import * as ort from '../../src/nn/ortRuntime.ts';
 import { deviceIdentity, intParam, log, params, runMain, summarize } from './common.mjs';
-import { ortParity, profileComplete, runChunked } from './gates.mjs';
+import { legalPolicyParity, maia3ParityRows, ortParity, profileComplete, runChunked } from './gates.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
+
+// Legal-move policy gate (gates.mjs legalPolicyParity): max |legal prob diff|,
+// reference-measured tie epsilon for best-move / top-3 order flips.
+// Limits are ~2x the full-corpus baseline (M4, Chrome 157). A flip needs the
+// two priors to move by the reference gap in total, so tieEpsilon only adds
+// strength while it is below 2 * maxProbAbs.
+const LEGAL = (maxProbAbs, tieEpsilon = 0.01) => ({ maxProbAbs, tieEpsilon, topK: 3 });
 
 const PRESETS = {
   'lc0-small': {
+    legalPolicy: LEGAL(0.015), // baseline 0.0062
     model: '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx',
     batch: 1,
     family: 't1-256x10',
@@ -38,6 +47,7 @@ const PRESETS = {
     parityMaxAbs: { '/output/policy': 0.2, '/output/wdl': 0.006, '/output/mlh': 2 },
   },
   'lc0-small-b8': {
+    legalPolicy: LEGAL(0.04), // baseline 0.0178
     model: '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx',
     batch: 8,
     family: 't1-256x10',
@@ -45,6 +55,7 @@ const PRESETS = {
     parityMaxAbs: { '/output/policy': 0.2, '/output/wdl': 0.006, '/output/mlh': 0.8 },
   },
   t3: {
+    legalPolicy: LEGAL(0.015), // baseline 0.0072
     model: '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx',
     batch: 8,
     family: 't3-512x15x16h',
@@ -52,6 +63,7 @@ const PRESETS = {
     parityMaxAbs: { '/output/policy': 0.15, '/output/wdl': 0.007, '/output/mlh': 0.5 },
   },
   bt4: {
+    legalPolicy: LEGAL(0.03), // baseline 0.013
     model: '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx',
     batch: 8,
     family: 'BT4-1024x15x32h',
@@ -59,6 +71,7 @@ const PRESETS = {
     parityMaxAbs: { '/output/policy': 0.6, '/output/wdl': 0.006, '/output/mlh': 2 },
   },
   lqo: {
+    legalPolicy: LEGAL(0.08, 0.08), // baseline 0.039; WebGPU flips the near-mirror pairs Rxh8/Rxa8 (fixture 2, reference gap 0.070) and h1=Q/a1=Q (fixture 7, 0.045)
     model: '/models/lc0/lqo_v2.f16.qdq8.onnx',
     batch: 8,
     family: 'lqo_v2',
@@ -66,14 +79,16 @@ const PRESETS = {
     parityMaxAbs: { '/output/policy': 2.0, '/output/wdl': 0.02, '/output/mlh': 0.3 },
   },
   maia3: {
+    legalPolicy: LEGAL(0.05, 0.02), // baseline 0.026; flip at fixture 7, 1500/1500, reference gap 0.013
     model: '/models/maia3/maia3_simplified.qdq8.onnx',
     batch: 1,
     family: 'maia3',
     shipped: 'Maia3 single eval (Play move)',
-    // Full-corpus baseline: move 0.641, value 0.031 (old limits were start-position-only).
-    parityMaxAbs: { logits_move: 1.3, logits_value: 0.06 },
+    // Baseline over 10 fixtures x 4 Elo conditions: move 0.49, value 0.078.
+    parityMaxAbs: { logits_move: 1.3, logits_value: 0.15 },
   },
   'maia3-grid': {
+    legalPolicy: LEGAL(0.05, 0.02), // baseline 0.024; same fixture-7 flip
     model: '/models/maia3/maia3_simplified.qdq8.onnx',
     batch: 11,
     family: 'maia3',
@@ -111,9 +126,17 @@ async function loadBoards(n) {
   return Array.from({ length: n }, (_, i) => fens[i % fens.length]);
 }
 
-async function buildFeeds(session, batch, explicitFens = null) {
-  const fens = explicitFens ?? (await loadBoards(batch));
-  if (fens.length !== batch) throw new Error(`buildFeeds: ${fens.length} positions for batch ${batch}`);
+/**
+ * Feeds for `batch` rows. `explicitRows` are FEN strings or
+ * { fen, eloSelf, eloOppo }; timing feeds (no rows given) cycle the fixtures
+ * with ratings 1100 + 100 * i.
+ */
+async function buildFeeds(session, batch, explicitRows = null) {
+  const rows = (explicitRows ?? (await loadBoards(batch))).map((r, i) =>
+    typeof r === 'string' ? { fen: r, eloSelf: 1100 + 100 * i, eloOppo: 1100 + 100 * i } : r,
+  );
+  if (rows.length !== batch) throw new Error(`buildFeeds: ${rows.length} positions for batch ${batch}`);
+  const fens = rows.map((r) => r.fen);
   const feeds = {};
   for (const meta of session.inputMetadata) {
     const name = meta.name;
@@ -128,13 +151,31 @@ async function buildFeeds(session, batch, explicitFens = null) {
       data = new Float32Array(batch * 64 * 12);
       for (const [i, fen] of fens.entries()) data.set(boardToMaia3Tokens(parseFen(fen)), i * 64 * 12);
       shape = [batch, 64, 12];
-    } else if (/elo/.test(name)) {
-      data = Float32Array.from({ length: batch }, (_, i) => 1100 + 100 * i);
+    } else if (name === 'elo_self' || name === 'elo_oppo') {
+      data = Float32Array.from(rows, (r) => (name === 'elo_self' ? r.eloSelf : r.eloOppo));
       shape = [batch];
     } else throw new Error(`ort-profile: no input generator for ${name} (${type})`);
     feeds[name] = type === 'float16' ? new ort.Tensor('float16', f32ToF16(data), shape) : new ort.Tensor('float32', data, shape);
   }
   return { feeds, fens };
+}
+
+/**
+ * The timing loops await session.run() and drop the outputs. That only times
+ * the GPU work when ORT reads outputs back to the CPU: with GPU-resident
+ * outputs (ortGpuOutputs=1, ortPreferredOutputLocation=gpu-buffer) run()
+ * returns after ORT's Flush, which submits without waiting, and the tensors
+ * would need explicit disposal. The harness measures the shipped CPU-output
+ * path, so it rejects those overrides.
+ */
+function assertCpuOutputs(outputs, label) {
+  const gpu = Object.entries(outputs).filter(([, t]) => t.location && t.location !== 'cpu' && t.location !== 'cpu-pinned');
+  if (!gpu.length) return;
+  const where = gpu.map(([n, t]) => `${n}:${t.location}`).join(', ');
+  for (const t of Object.values(outputs)) t.dispose?.();
+  throw new Error(
+    `ort-profile: ${label} returned GPU-resident outputs (${where}); drop ortGpuOutputs / ortPreferredOutputLocation=gpu-buffer, which the timing loop cannot synchronize`,
+  );
 }
 
 async function outputsToArrays(outputs) {
@@ -173,6 +214,7 @@ async function pairedComparison(prof, a, bPresetName) {
   const block = intParam('abBlock', 3, 1, 100);
   const bSession = await ort.createOrtSession(bPreset.model);
   const b = { session: bSession, feeds: (await buildFeeds(bSession, bPreset.batch)).feeds, batch: bPreset.batch, name: bPresetName };
+  assertCpuOutputs(await b.session.run(b.feeds), `ab preset ${bPresetName}`);
   for (let i = 0; i < 5; i++) await b.session.run(b.feeds);
   const arms = { a, b };
   const wall = { a: [], b: [] };
@@ -236,6 +278,7 @@ runMain(async () => {
   log('session', { model, batch, sessionCreateMs, backend, fold: ort.lastOrtDequantFoldSummary() });
   const prof = profiler.lastDevice();
   const { feeds, fens } = await buildFeeds(session, batch);
+  assertCpuOutputs(await session.run(feeds), model);
   for (let i = 0; i < warmup; i++) await session.run(feeds);
   // Headline: unprofiled invokes (runtime's own passes, no timestamp writes).
   const runMs = [];
@@ -284,7 +327,10 @@ runMain(async () => {
     // Parity covers the whole fixture corpus in physical-batch chunks, not the
     // timing feeds (b1 timing feeds are only the start position).
     const corpus = await fixtureCorpus();
-    const gpuOut = await runChunked(corpus, batch, async (chunk) => outputsToArrays(await session.run((await buildFeeds(session, batch, chunk)).feeds)));
+    const isMaia3 = session.inputNames.includes('tokens');
+    // Maia3: each fixture under several unequal (self, opponent) ratings.
+    const rows = isMaia3 ? maia3ParityRows(corpus) : corpus.map((fen) => ({ fen }));
+    const gpuOut = await runChunked(rows, batch, async (chunk) => outputsToArrays(await session.run((await buildFeeds(session, batch, chunk)).feeds)));
     ort.setRequestedOrtExecutionProviderForCurrentThread('wasm');
     // The reference is the ORIGINAL model (preset's shipped export unless
     // referenceModel= says otherwise), never the candidate URL: comparing a
@@ -299,15 +345,33 @@ runMain(async () => {
     } else {
       const ref = await ort.InferenceSession.create(referenceModel, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
       // Same chunking as the candidate (the reference takes the same feed shapes).
-      const refOut = await runChunked(corpus, batch, async (chunk) => outputsToArrays(await ref.run((await buildFeeds(ref, batch, chunk)).feeds)));
+      const refOut = await runChunked(rows, batch, async (chunk) => outputsToArrays(await ref.run((await buildFeeds(ref, batch, chunk)).feeds)));
+      const raw = ortParity(gpuOut, refOut, limits);
+      // Legal-move policy gate (softmax over legal moves, best move, top-3
+      // order): the raw-logit max-abs above is only a drift tripwire.
+      const policyOutput = isMaia3 ? 'logits_move' : '/output/policy';
+      const legalRows = rows.map(({ fen }) => {
+        const board = parseFen(fen);
+        const legal = isMaia3 ? maia3InternalsForTests.legalMaia3Moves(board) : legalPolicyPriors(board, new Float32Array(1858), 1);
+        return { indices: legal.map((m) => m.index), ucis: legal.map((m) => m.uci) };
+      });
+      const legalLimits = preset?.legalPolicy ?? null;
+      const legalPolicy =
+        legalLimits && gpuOut[policyOutput] && refOut[policyOutput]
+          ? legalPolicyParity(gpuOut[policyOutput], refOut[policyOutput], legalRows, legalLimits)
+          : { pass: false, problems: [legalLimits ? `no ${policyOutput} output` : 'no legalPolicy limits for this preset'] };
       parity = {
         reference: 'ORT WASM, reference model, no dequant fold',
         fixtures: corpus.length,
-        chunks: Math.ceil(corpus.length / batch),
+        rows: rows.length,
+        eloConditions: isMaia3 ? [...new Set(rows.map((r) => `${r.eloSelf}/${r.eloOppo}`))] : null,
+        chunks: Math.ceil(rows.length / batch),
         referenceModel,
         candidateModel: model,
         candidateIsReference: referenceModel === model,
-        ...ortParity(gpuOut, refOut, limits),
+        ...raw,
+        legalPolicy,
+        pass: raw.pass && legalPolicy.pass,
       };
       await ref.release();
     }

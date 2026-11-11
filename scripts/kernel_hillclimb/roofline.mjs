@@ -25,20 +25,39 @@ export const LAUNCH_US = 8;
 export const MATMUL_RE = /^(Gemm|MatMul|FusedMatMul|MatMulNBits|Einsum|Conv|FusedConv)$|matmul|dense|conv2d/i;
 
 /** Which ONNX cost file and search unit belong to each candidate. */
+// precision: the arithmetic type of the path's FLOP-bearing kernels, which
+// picks the compute roof. ORT folds QDQ weights to f16 for the Lc0 and Maia3
+// exports (Maia3's dequant scales are f16); Centipawn TVMJS is the f32 manifest.
 export const PATHS = {
-  'ort-lc0-small': { cost: 'lc0-small', shipped: true, unit: 'visit (b1: 1 invoke per NN eval)' },
-  'ort-lc0-small-b8': { cost: 'lc0-small-b8', shipped: false, unit: '8 visits' },
-  'ort-t3': { cost: 't3', shipped: true, unit: '8 visits' },
-  'ort-bt4': { cost: 'bt4', shipped: true, unit: '8 visits' },
-  'ort-lqo': { cost: 'lqo', shipped: true, unit: '8 visits' },
-  'ort-maia3': { cost: 'maia3', shipped: true, unit: '1 move (1 invoke)' },
-  'ort-maia3-grid': { cost: 'maia3-grid', shipped: true, unit: '11-condition Elo grid' },
-  'tvmjs-centipawn': { cost: 'centipawn', shipped: true, unit: '16 visits' },
-  'tvmjs-centipawn-v3-subgroups': { cost: 'centipawn', shipped: false, unit: '16 visits' },
-  'tvmjs-lc0-t1-b8': { cost: 'lc0-small-b8', shipped: false, unit: '8 visits' },
-  'tvmjs-lc0-t1-b16': { cost: 'lc0-t1-b16', shipped: false, unit: '16 visits' },
-  'tvmjs-lc0-bt4-b8': { cost: 'bt4', shipped: false, unit: '8 visits' },
+  'ort-lc0-small': { cost: 'lc0-small', shipped: true, unit: 'visit (b1: 1 invoke per NN eval)', precision: 'f16' },
+  'ort-lc0-small-b8': { cost: 'lc0-small-b8', shipped: false, unit: '8 visits', precision: 'f16' },
+  'ort-t3': { cost: 't3', shipped: true, unit: '8 visits', precision: 'f16' },
+  'ort-bt4': { cost: 'bt4', shipped: true, unit: '8 visits', precision: 'f16' },
+  'ort-lqo': { cost: 'lqo', shipped: true, unit: '8 visits', precision: 'f16' },
+  'ort-maia3': { cost: 'maia3', shipped: true, unit: '1 move (1 invoke)', precision: 'f16' },
+  'ort-maia3-grid': { cost: 'maia3-grid', shipped: true, unit: '11-condition Elo grid', precision: 'f16' },
+  'tvmjs-centipawn': { cost: 'centipawn', shipped: true, unit: '16 visits', precision: 'f32' },
+  'tvmjs-centipawn-v3-subgroups': { cost: 'centipawn', shipped: false, unit: '16 visits', precision: 'f32' },
+  'tvmjs-lc0-t1-b8': { cost: 'lc0-small-b8', shipped: false, unit: '8 visits', precision: 'f16' },
+  'tvmjs-lc0-t1-b16': { cost: 'lc0-t1-b16', shipped: false, unit: '16 visits', precision: 'f16' },
+  'tvmjs-lc0-bt4-b8': { cost: 'bt4', shipped: false, unit: '8 visits', precision: 'f16' },
 };
+
+/** Arithmetic precision of a path: declared in PATHS, else inferred from the model or manifest path. */
+export function pathPrecision(name, candidate) {
+  if (PATHS[name]?.precision) return PATHS[name].precision;
+  const where = String(candidate?.manifest ?? candidate?.model ?? '');
+  if (/\/f16\/|\.f16\./.test(where)) return 'f16';
+  if (/\/f32\/|\.f32\./.test(where)) return 'f32';
+  throw new Error(`pathPrecision: cannot tell the arithmetic precision of ${name} (${where}); add it to PATHS`);
+}
+
+/** Compute roof and ridge for one precision. An adapter without shader-f16 has no f16 roof. */
+export function roofFor(peaks, precision) {
+  const flops = peaks.flopsByPrecision?.[precision];
+  if (!(flops > 0)) throw new Error(`roofFor: no ${precision} FMA peak on this device`);
+  return { flops, ridge: flops / peaks.bw };
+}
 
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
 
@@ -81,12 +100,28 @@ export function devicePeaks(peakRun) {
   const fma = [pick('fmaF32Tflops'), pick('fmaF16Tflops')].filter((v) => v != null);
   const bws = [pick('readGBps'), pick('copyGBps')].filter((v) => v != null);
   if (!fma.length || !bws.length) throw new Error('devicePeaks: peak runs carry no FMA or bandwidth figure');
+  // Per-precision roofs: f16 and f32 rates differ by up to 2x on some GPUs
+  // (3090 probe: f32 28.4, f16 36.7 TFLOP/s), so each kernel is judged
+  // against the roof of its own arithmetic precision (roofFor). `flops` is
+  // the larger of the two, for display only.
+  const flopsByPrecision = {
+    f32: pick('fmaF32Tflops') != null ? pick('fmaF32Tflops') * 1e12 : null,
+    f16: pick('fmaF16Tflops') != null ? pick('fmaF16Tflops') * 1e12 : null,
+  };
   const flops = Math.max(...fma) * 1e12;
   const bw = Math.max(...bws) * 1e9;
   // Subgroup-matrix ceiling: its own rows only (bestGemmTflops mixes in plain
   // WGSL, which reported a "subgroup-matrix" ceiling on adapters without it).
   const sgSquare = gemmByShape['square 2048x2048x2048']?.sgmatrixTflops ?? null;
-  return { flops, bw, ridge: flops / bw, gemmCeilingSgMatrix: sgSquare != null ? sgSquare * 1e12 : null, gemmCeilingPlain: plainGemm * 1e12, gemmByShape };
+  return {
+    flops,
+    flopsByPrecision,
+    bw,
+    ridge: flops / bw,
+    gemmCeilingSgMatrix: sgSquare != null ? sgSquare * 1e12 : null,
+    gemmCeilingPlain: plainGemm * 1e12,
+    gemmByShape,
+  };
 }
 
 // ORT WebGPU tiles C at 32x32 (vec4 lanes, 8x8 threads); 4..128 leaves headroom
@@ -199,14 +234,16 @@ function probeMacs(manifestPath) {
   return macs;
 }
 
-export function classify({ meanUs, achievedFlops, achievedBw, ai }, peaks) {
+/** `roof` is roofFor(peaks, kernel precision): { flops, ridge }. */
+export function classify({ meanUs, achievedFlops, achievedBw, ai }, peaks, roof) {
   // A zero / missing duration (quantized or dropped timestamps) has no rate.
   if (!(meanUs > 0)) return { bound: 'unresolved', util: null };
-  const attainable = Math.min(peaks.flops, ai * peaks.bw);
+  if (!roof) throw new Error('classify: roof (roofFor(peaks, precision)) is required');
+  const attainable = Math.min(roof.flops, ai * peaks.bw);
   const util = attainable > 0 ? Math.max(achievedFlops, 0) / attainable : 0;
   const bwUtil = achievedBw / peaks.bw;
   if (meanUs < LAUNCH_US) return { bound: 'launch', util: Math.max(util, bwUtil) };
-  if (achievedFlops > 0 && util >= 0.5) return { bound: ai >= peaks.ridge ? 'compute' : 'bandwidth', util };
+  if (achievedFlops > 0 && util >= 0.5) return { bound: ai >= roof.ridge ? 'compute' : 'bandwidth', util };
   if (bwUtil >= 0.5) return { bound: 'bandwidth', util: bwUtil };
   return { bound: 'underused', util: Math.max(util, bwUtil) };
 }
@@ -234,6 +271,8 @@ export function analyzeCandidate(name, run, cost, peaks) {
   const results = run.results.filter((r) => !rejectReason(r));
   if (!results.length) return { name, error: `no usable profile: ${rejected.map((x) => x.reason).join('; ')}`, rejected };
   const meta = PATHS[name] ?? {};
+  const precision = pathPrecision(name, results[0].candidate);
+  const roof = roofFor(peaks, precision);
   // Group dispatches by (name, grid, bound bytes); average over repeats.
   const groups = new Map();
   let macsByFn = null;
@@ -285,7 +324,7 @@ export function analyzeCandidate(name, run, cost, peaks) {
     const achievedBw = timed ? bytes / (meanUs * 1e-6) : null;
     const achievedFlops = timed && g.flops ? g.flops / (meanUs * 1e-6) : timed ? 0 : null;
     const ai = g.flops ? g.flops / bytes : 0;
-    const cls = classify({ meanUs, achievedFlops, achievedBw, ai }, peaks);
+    const cls = classify({ meanUs, achievedFlops, achievedBw, ai }, peaks, roof);
     return {
       kernel: g.kernel,
       grid: g.grid,
@@ -297,7 +336,7 @@ export function analyzeCandidate(name, run, cost, peaks) {
       bytes,
       tflops: achievedFlops == null ? null : achievedFlops / 1e12,
       gbps: achievedBw == null ? null : achievedBw / 1e9,
-      pctPeakFlops: achievedFlops == null ? null : (100 * achievedFlops) / peaks.flops,
+      pctPeakFlops: achievedFlops == null ? null : (100 * achievedFlops) / roof.flops,
       pctPeakBw: achievedBw == null ? null : (100 * achievedBw) / peaks.bw,
       ai,
       ...cls,
@@ -345,6 +384,8 @@ export function analyzeCandidate(name, run, cost, peaks) {
     name,
     shipped: meta.shipped ?? null,
     runtime: results[0].candidate?.runtime,
+    precision,
+    roofTflops: roof.flops / 1e12,
     model: results[0].candidate?.model ?? results[0].candidate?.manifest,
     batch,
     searchUnit: meta.unit ?? null,
@@ -367,7 +408,7 @@ export function analyzeCandidate(name, run, cost, peaks) {
       submits: median(results.map((r) => r.profile.submitsPerInvoke)),
       gflops: totalFlops ? totalFlops / 1e9 : null,
       achievedTflopsWall: totalFlops ? totalFlops / (wallMs * 1e-3) / 1e12 : null,
-      pctPeakWall: totalFlops ? (100 * totalFlops) / (wallMs * 1e-3) / peaks.flops : null,
+      pctPeakWall: totalFlops ? (100 * totalFlops) / (wallMs * 1e-3) / roof.flops : null,
       matmulMs: mmMs,
       matmulFlopsAttachedPct: mmFlopsCost ? (100 * mmFlopsAttached) / mmFlopsCost : null,
       matmulTflops: mmFlopsCost && mmMs ? mmFlopsCost / (mmMs * 1e-3) / 1e12 : null,
@@ -395,19 +436,19 @@ export function toMarkdown(report) {
   const p = report.peaks;
   const lines = [];
   lines.push(
-    `Peaks: FMA ${fmt(p.flops / 1e12)} TFLOP/s, BW ${fmt(p.bw / 1e9, 0)} GB/s, ridge ${fmt(p.ridge, 1)} FLOP/B, plain-WGSL GEMM ceiling ${fmt(p.gemmCeilingPlain / 1e12)} TFLOP/s, subgroup-matrix GEMM ${fmt((p.gemmCeilingSgMatrix ?? NaN) / 1e12)} TFLOP/s (flag-only).`,
+    `Peaks: FMA f32 ${fmt((p.flopsByPrecision?.f32 ?? NaN) / 1e12)} / f16 ${fmt((p.flopsByPrecision?.f16 ?? NaN) / 1e12)} TFLOP/s, BW ${fmt(p.bw / 1e9, 0)} GB/s, ridge f32 ${fmt((p.flopsByPrecision?.f32 ?? NaN) / p.bw, 1)} / f16 ${fmt((p.flopsByPrecision?.f16 ?? NaN) / p.bw, 1)} FLOP/B (each kernel uses its path's precision), plain-WGSL GEMM ceiling ${fmt(p.gemmCeilingPlain / 1e12)} TFLOP/s, subgroup-matrix GEMM ${fmt((p.gemmCeilingSgMatrix ?? NaN) / 1e12)} TFLOP/s (flag-only).`,
     '',
   );
   lines.push(
-    '| path | shipped | batch | wall ms | GPU kernel ms | non-kernel ms | GPU idle in envelope ms | dispatches | passes | GFLOP | TFLOP/s (wall) | % FMA peak | matmul ms | matmul TFLOP/s | launch ms | underused ms | bw ms | compute ms |',
+    '| path | shipped | batch | wall ms | GPU kernel ms | non-kernel ms | GPU idle in envelope ms | dispatches | passes | GFLOP | TFLOP/s (wall) | precision | % FMA peak | matmul ms | matmul TFLOP/s | launch ms | underused ms | bw ms | compute ms |',
   );
-  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const c of report.candidates) {
     if (c.error) continue;
     const q = c.perInvoke;
     const b = q.timeByBoundMs;
     lines.push(
-      `| ${c.name} | ${c.shipped ? 'yes' : 'no'} | ${c.batch} | ${fmt(q.wallMs)} | ${fmt(q.kernelBusyMs)} | ${fmt(q.nonKernelMs)} | ${fmt(q.gpuIdleInEnvelopeMs)} | ${q.dispatches} | ${q.passesPerInvoke ?? '-'} | ${fmt(q.gflops)} | ${fmt(q.achievedTflopsWall)} | ${fmt(q.pctPeakWall, 1)} | ${fmt(q.matmulMs)} | ${fmt(q.matmulTflops)} | ${fmt(b.launch)} | ${fmt(b.underused)} | ${fmt(b.bandwidth)} | ${fmt(b.compute)} |`,
+      `| ${c.name} | ${c.shipped ? 'yes' : 'no'} | ${c.batch} | ${fmt(q.wallMs)} | ${fmt(q.kernelBusyMs)} | ${fmt(q.nonKernelMs)} | ${fmt(q.gpuIdleInEnvelopeMs)} | ${q.dispatches} | ${q.passesPerInvoke ?? '-'} | ${fmt(q.gflops)} | ${fmt(q.achievedTflopsWall)} | ${c.precision} | ${fmt(q.pctPeakWall, 1)} | ${fmt(q.matmulMs)} | ${fmt(q.matmulTflops)} | ${fmt(b.launch)} | ${fmt(b.underused)} | ${fmt(b.bandwidth)} | ${fmt(b.compute)} |`,
     );
   }
   const failed = report.candidates.filter((c) => c.error);

@@ -1,10 +1,32 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
-import { compareCentipawn, compareLc0, fixtureChunks, manifestCheck, ortParity, profileComplete, runChunked } from '../lab/kernel-hillclimb/gates.mjs';
+import {
+  compareCentipawn,
+  compareLc0,
+  fixtureChunks,
+  legalPolicyParity,
+  MAIA3_PARITY_CONDITIONS,
+  maia3ParityRows,
+  manifestCheck,
+  ortParity,
+  profileComplete,
+  runChunked,
+} from '../lab/kernel-hillclimb/gates.mjs';
 import { fmaKernel, gemmKernel, subgroupMatrixGemmKernel } from '../lab/kernel-hillclimb/wgsl-kernels.mjs';
 import { CANDIDATES, WGSL_HEADS_GATE } from '../scripts/kernel_hillclimb/candidates.mjs';
-import { analyzeCandidate, classify, devicePeaks, gridConsistent, MATMUL_RE, matchMatmuls, PATHS, toMarkdown } from '../scripts/kernel_hillclimb/roofline.mjs';
+import {
+  analyzeCandidate,
+  classify,
+  devicePeaks,
+  gridConsistent,
+  MATMUL_RE,
+  matchMatmuls,
+  PATHS,
+  pathPrecision,
+  roofFor,
+  toMarkdown,
+} from '../scripts/kernel_hillclimb/roofline.mjs';
 import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 
 // The lab modules read location.search at import time.
@@ -12,7 +34,7 @@ globalThis.location ??= { search: '' };
 const { aggregateProfile } = await import('../lab/kernel-hillclimb/gpu-profiler.mjs');
 const { summarize } = await import('../lab/kernel-hillclimb/common.mjs');
 
-const peaks = { flops: 3e12, bw: 100e9, ridge: 30, gemmCeilingPlain: 2e12 };
+const peaks = { flops: 3e12, flopsByPrecision: { f32: 3e12, f16: 3e12 }, bw: 100e9, ridge: 30, gemmCeilingPlain: 2e12 };
 
 test('every candidate points at a lab page and declares a known gate kind', () => {
   for (const [name, c] of Object.entries(CANDIDATES)) {
@@ -26,10 +48,31 @@ test('every candidate points at a lab page and declares a known gate kind', () =
 });
 
 test('classify separates launch, compute, bandwidth and underused kernels', () => {
-  assert.equal(classify({ meanUs: 3, achievedFlops: 0, achievedBw: 1e9, ai: 0 }, peaks).bound, 'launch');
-  assert.equal(classify({ meanUs: 500, achievedFlops: 2e12, achievedBw: 10e9, ai: 200 }, peaks).bound, 'compute');
-  assert.equal(classify({ meanUs: 500, achievedFlops: 0, achievedBw: 80e9, ai: 0 }, peaks).bound, 'bandwidth');
-  assert.equal(classify({ meanUs: 300, achievedFlops: 3e9, achievedBw: 4e9, ai: 1 }, peaks).bound, 'underused');
+  const roof = roofFor(peaks, 'f32');
+  assert.equal(classify({ meanUs: 3, achievedFlops: 0, achievedBw: 1e9, ai: 0 }, peaks, roof).bound, 'launch');
+  assert.equal(classify({ meanUs: 500, achievedFlops: 2e12, achievedBw: 10e9, ai: 200 }, peaks, roof).bound, 'compute');
+  assert.equal(classify({ meanUs: 500, achievedFlops: 0, achievedBw: 80e9, ai: 0 }, peaks, roof).bound, 'bandwidth');
+  assert.equal(classify({ meanUs: 300, achievedFlops: 3e9, achievedBw: 4e9, ai: 1 }, peaks, roof).bound, 'underused');
+  assert.throws(() => classify({ meanUs: 300, achievedFlops: 3e9, achievedBw: 4e9, ai: 1 }, peaks), /roof/);
+});
+
+test('each kernel is judged against the roof of its own precision', () => {
+  // f16 twice as fast as f32: an f32 kernel at 80% of the f32 roof is
+  // compute-bound, though it is only 40% of the larger (f16) roof.
+  const p2 = { flops: 20e12, flopsByPrecision: { f32: 10e12, f16: 20e12 }, bw: 100e9, ridge: 200 };
+  const k = { meanUs: 500, achievedFlops: 8e12, achievedBw: 20e9, ai: 400 };
+  assert.equal(classify(k, p2, roofFor(p2, 'f32')).bound, 'compute');
+  assert.equal(classify(k, p2, roofFor(p2, 'f16')).bound, 'underused');
+  // Ridge per precision: AI 150 is past the f32 ridge (100) but not the f16 one (200).
+  const mid = { meanUs: 500, achievedFlops: 6e12, achievedBw: 40e9, ai: 150 };
+  assert.equal(classify(mid, p2, roofFor(p2, 'f32')).bound, 'compute');
+  assert.equal(roofFor(p2, 'f16').ridge, 200);
+  assert.throws(() => roofFor({ ...p2, flopsByPrecision: { f32: 10e12, f16: null } }, 'f16'), /no f16/);
+  assert.equal(pathPrecision('tvmjs-centipawn'), 'f32');
+  assert.equal(pathPrecision('ort-bt4'), 'f16');
+  assert.equal(pathPrecision('new', { manifest: '/runtimes/x/f32/v2/manifest.json' }), 'f32');
+  assert.throws(() => pathPrecision('new', { model: '/models/x.onnx' }), /cannot tell/);
+  for (const [name, meta] of Object.entries(PATHS)) assert.ok(['f16', 'f32'].includes(meta.precision), name);
 });
 
 test('matchMatmuls attaches FLOPs by bytes and grid shape', () => {
@@ -200,6 +243,8 @@ test('devicePeaks takes medians over repeats and splits plain vs subgroup-matrix
   });
   const p = devicePeaks({ results: [run(3.2, 2.9), run(3.4, 3.0), run(3.0, 2.8)] });
   assert.equal(p.flops, 3.2e12);
+  assert.equal(p.flopsByPrecision.f32, 3.2e12);
+  assert.equal(p.flopsByPrecision.f16, 2.7e12);
   assert.equal(p.bw, 90e9);
   assert.equal(p.gemmByShape['square 2048x2048x2048'].plainTflops, 1.4);
   assert.equal(p.gemmByShape['square 2048x2048x2048'].sgmatrixTflops, 2.9);
@@ -219,7 +264,7 @@ test('devicePeaks tolerates a missing f16 figure and skips failed runs', () => {
 test('roofline drops failed and quantized repeats, and zero durations stay unresolved', () => {
   const rep = (ok, quantized, us) => ({
     ok,
-    candidate: { runtime: 'ort-webgpu', batch: 1, model: 'm' },
+    candidate: { runtime: 'ort-webgpu', batch: 1, model: 'm.f16.onnx' },
     timing: { runMs: { median: 1 } },
     profile: {
       timestampsQuantized: quantized,
@@ -247,7 +292,7 @@ test('roofline drops failed and quantized repeats, and zero durations stay unres
 test('roofline rejects the whole report when the command gate failed', () => {
   const rep = {
     ok: true,
-    candidate: { runtime: 'ort-webgpu', batch: 1, model: 'm' },
+    candidate: { runtime: 'ort-webgpu', batch: 1, model: 'm.f16.onnx' },
     timing: { runMs: { median: 1 } },
     profile: {
       dropped: 0,
@@ -358,4 +403,65 @@ test('manifestCheck flags a silent v3-subgroups -> v2 fallback', () => {
   const fb = manifestCheck(v3, v2, base);
   assert.equal(fb.ok, false);
   assert.equal(fb.effective, '/runtimes/centipawn-tvmjs-webgpu/x/f32/v2-shape-k16/manifest.json');
+});
+
+test('swapping the top-2 legal logits passes the logit tripwire but fails the legal-policy gate', () => {
+  // Two rows of 6 policy slots; legal moves are slots 0, 2, 3, 5.
+  const rows = [{ indices: [0, 2, 3, 5], ucis: ['e2e4', 'd2d4', 'g1f3', 'c2c4'] }, { indices: [0, 2, 3, 5] }];
+  const ref = Float32Array.from([1, -9, 0, -1, -9, -2, 0.5, -9, 0.2, -1, -9, -3]);
+  const limits = { maxProbAbs: 0.05, tieEpsilon: 0.01, topK: 3 };
+  const same = legalPolicyParity(
+    Float32Array.from(ref, (x) => x + 0.001),
+    ref,
+    rows,
+    limits,
+  );
+  assert.equal(same.pass, true);
+  assert.equal(same.bestMoveMatches, 2);
+  const swapped = Float32Array.from(ref);
+  [swapped[0], swapped[2]] = [ref[2], ref[0]];
+  assert.equal(ortParity({ logits_move: swapped }, { logits_move: ref }, { logits_move: 1.3 }).pass, true, 'raw-logit tripwire alone misses the swap');
+  const g = legalPolicyParity(swapped, ref, rows, limits);
+  assert.equal(g.pass, false);
+  assert.ok(g.problems.some((p) => /row 0: best move d2d4 vs reference e2e4/.test(p)));
+  assert.ok(g.problems.some((p) => /row 1: /.test(p)) === false, 'row 1 is untouched');
+  // Every row is checked, not just rows before the first failure.
+  const both = Float32Array.from(swapped);
+  [both[6], both[8]] = [swapped[8], swapped[6]];
+  assert.ok(legalPolicyParity(both, ref, rows, limits).problems.some((p) => /row 1: best move/.test(p)));
+  // A near-tie in the REFERENCE (gap <= tieEpsilon) may flip.
+  const tieRef = Float32Array.from(ref);
+  tieRef[2] = tieRef[0] - 0.01; // ~0.3% prior gap
+  const tieSwap = Float32Array.from(tieRef);
+  [tieSwap[0], tieSwap[2]] = [tieRef[2], tieRef[0]];
+  const tie = legalPolicyParity(tieSwap, tieRef, rows, limits);
+  assert.equal(tie.pass, true);
+  assert.equal(tie.tieTolerated.length, 1);
+  // Swapping the 2nd and 3rd moves (best move intact) fails the top-3 order check.
+  const order = Float32Array.from(ref);
+  [order[2], order[3]] = [ref[3], ref[2]];
+  assert.ok(legalPolicyParity(order, ref, rows, { ...limits, maxProbAbs: 1 }).problems.some((p) => /order d2d4 > g1f3 reversed/.test(p)));
+});
+
+test('a Maia3 candidate that swaps elo_self and elo_oppo fails parity', async () => {
+  // Fake Maia3: the value logit depends on the rating difference.
+  const model = (swap) => async (rows) => ({
+    logits_value: Float32Array.from(
+      rows.flatMap((r) => {
+        const [self, oppo] = swap ? [r.eloOppo, r.eloSelf] : [r.eloSelf, r.eloOppo];
+        return [0, 0, (self - oppo) / 400];
+      }),
+    ),
+  });
+  const limits = { logits_value: 0.06 };
+  const rows = maia3ParityRows(CORPUS);
+  assert.equal(rows.length, CORPUS.length * MAIA3_PARITY_CONDITIONS.length);
+  assert.ok(MAIA3_PARITY_CONDITIONS.some(([a, b]) => a !== b));
+  for (const batch of [1, 11]) {
+    const full = ortParity(await runChunked(rows, batch, model(true)), await runChunked(rows, batch, model(false)), limits);
+    assert.equal(full.pass, false, `batch ${batch}`);
+  }
+  // The old feeds gave both inputs the same 1100 + 100 * i array: the swap was invisible.
+  const old = CORPUS.map((fen, i) => ({ fen, eloSelf: 1100 + 100 * (i % 1), eloOppo: 1100 + 100 * (i % 1) }));
+  assert.equal(ortParity(await runChunked(old, 1, model(true)), await runChunked(old, 1, model(false)), limits).pass, true);
 });

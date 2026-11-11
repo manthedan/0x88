@@ -213,3 +213,93 @@ export function manifestCheck(requested, effective, base) {
   const eff = new URL(effective, base).href;
   return { ok: req === eff, requested: new URL(req).pathname, effective: new URL(eff).pathname };
 }
+
+/**
+ * Maia3 parity rows: every fixture under several (self, opponent) rating
+ * conditions, all unequal except one, so a candidate that swaps or ignores
+ * one Elo input changes its outputs. (Equal ratings at every row made
+ * elo_self and elo_oppo indistinguishable.)
+ */
+export const MAIA3_PARITY_CONDITIONS = [
+  [1100, 1900],
+  [1900, 1100],
+  [1500, 1500],
+  [2300, 800],
+];
+export function maia3ParityRows(fens) {
+  return fens.flatMap((fen) => MAIA3_PARITY_CONDITIONS.map(([eloSelf, eloOppo]) => ({ fen, eloSelf, eloOppo })));
+}
+
+function legalSoftmax(logits, base, indices) {
+  const v = indices.map((i) => logits[base + i]);
+  const max = Math.max(...v);
+  const e = v.map((x) => Math.exp(x - max));
+  const sum = e.reduce((a, b) => a + b, 0);
+  return e.map((x) => x / sum);
+}
+
+/**
+ * Legal-move policy parity on raw policy logits (`cand`, `ref`: flat
+ * [rows * rowSize]). `rows[r].indices` are the policy indices of row r's legal
+ * moves (`ucis` optional, for reports). Per row, on the softmax over legal
+ * moves only: max |prob diff| <= maxProbAbs; the candidate's best move is the
+ * reference's unless the REFERENCE prior gap between them is <= tieEpsilon;
+ * and among the reference's top-k moves, every pair whose reference gap
+ * exceeds tieEpsilon keeps its order in the candidate. Raw-logit max-abs
+ * alone lets a swap of the two leading logits pass ([1, 0] -> [0, 1] is a
+ * max-abs of 1 but reverses a 73/27 split).
+ */
+export function legalPolicyParity(cand, ref, rows, { maxProbAbs, tieEpsilon, topK = 3 }) {
+  if (!(maxProbAbs >= 0) || !(tieEpsilon >= 0)) throw new Error('legalPolicyParity: maxProbAbs and tieEpsilon are required');
+  const problems = [];
+  const rowSize = ref.length / rows.length;
+  const shapeOk = Number.isInteger(rowSize) && cand.length === ref.length;
+  if (!shapeOk) problems.push(`shape: candidate ${cand.length}, reference ${ref.length}, rows ${rows.length}`);
+  let maxProb = 0;
+  let maxKl = 0;
+  let bestMatches = 0;
+  const tieTolerated = [];
+  for (let r = 0; shapeOk && r < rows.length; r++) {
+    const { indices, ucis } = rows[r];
+    const name = (k) => ucis?.[k] ?? indices[k];
+    const pc = legalSoftmax(cand, r * rowSize, indices);
+    const pr = legalSoftmax(ref, r * rowSize, indices);
+    if (pc.some((x) => !Number.isFinite(x))) {
+      problems.push(`row ${r}: non-finite candidate policy`);
+      continue;
+    }
+    let kl = 0;
+    for (let k = 0; k < indices.length; k++) {
+      maxProb = Math.max(maxProb, Math.abs(pc[k] - pr[k]));
+      if (pr[k] > 0) kl += pr[k] * Math.log(pr[k] / Math.max(pc[k], 1e-30));
+    }
+    maxKl = Math.max(maxKl, kl);
+    const argmax = (p) => p.reduce((b, x, k) => (x > p[b] ? k : b), 0);
+    const bc = argmax(pc);
+    const br = argmax(pr);
+    if (bc === br) bestMatches++;
+    else if (pr[br] - pr[bc] <= tieEpsilon) tieTolerated.push({ row: r, candidate: name(bc), reference: name(br), referenceGap: pr[br] - pr[bc] });
+    else problems.push(`row ${r}: best move ${name(bc)} vs reference ${name(br)} (reference gap ${(pr[br] - pr[bc]).toFixed(4)})`);
+    const top = pr
+      .map((p, k) => [p, k])
+      .sort((a, b) => b[0] - a[0])
+      .slice(0, topK)
+      .map(([, k]) => k);
+    for (let i = 0; i < top.length; i++)
+      for (let j = i + 1; j < top.length; j++) {
+        const [a, b] = [top[i], top[j]];
+        if (pr[a] - pr[b] > tieEpsilon && !(pc[a] > pc[b])) problems.push(`row ${r}: top-${topK} order ${name(a)} > ${name(b)} reversed`);
+      }
+  }
+  if (maxProb > maxProbAbs) problems.push(`max legal prob diff ${maxProb.toFixed(4)} > ${maxProbAbs}`);
+  return {
+    rows: rows.length,
+    maxLegalProbAbs: maxProb,
+    maxKl,
+    bestMoveMatches: bestMatches,
+    tieTolerated,
+    limits: { maxProbAbs, tieEpsilon, topK },
+    problems,
+    pass: problems.length === 0,
+  };
+}
