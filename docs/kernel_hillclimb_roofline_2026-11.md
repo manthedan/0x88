@@ -65,6 +65,38 @@ contention. Its absolute walls (Lc0 Small 11.0-13.4 ms, BT4 125-156 ms, LQO
 123-152 ms, all at load 14-31) are not used anywhere in this doc. Clean wall
 times will come from the queued remote runs.
 
+### Second review round
+
+| finding | fix | effect on numbers |
+|---|---|---|
+| GEMM variants shared one C buffer, so a variant whose grid missed tiles could inherit the previous variant's correct values and pass | C is filled with NaN before every plain and subgroup-matrix variant, and the check scans all of C for unwritten (non-finite) elements before sampling. `peak.html?undersizeGrid=1` drops one workgroup column as a self-test | Self-test: all 18 undersized rows fail. Real runs: 0 of 936 rows invalid over 6 page loads (load 4-5), so no earlier row was passing on inherited values. Ceilings unchanged within run-to-run spread: plain 2.61 (was 2.59), subgroup-matrix 2.78 at t1 b16 FFN1 (2.77 before). BT4-shape f16/f16-accumulate is 2.23-2.61 at best and 1.39-2.03 in the slower batch of three loads, so treat 2.2 as typical, not a floor |
+| A failed `--command-gate` set the report's `ok` to false, but roofline still used its repeats | `roofline.mjs` rejects the whole report and lists it under "Rejected" in the markdown | No committed run has a failed command gate |
+| Centipawn `v3-subgroups` silently falls back to `v2-shape-k16` without fixed 32-wide subgroups, and the run was recorded as v3 | `candidate.manifest` is the manifest that ran, `requestedManifest` is what was asked for, and a fallback makes the run `ok: false` with an error | On the M4, v3-subgroups really runs v3 (no fallback) |
+| Parity reused the timing feeds: Lc0 Small b1 checked only the start position, and b8 lanes skipped the last fixtures, including the only nonzero rule50 position | Every ORT and TVMJS lane checks all 10 fixtures, in physical-batch chunks (last chunk padded) separate from the timed workload | See below |
+
+Full-corpus parity moved two b1 baselines past their limits. The old limits
+were 2× a start-position-only baseline, so they were recalibrated to about 2×
+the full-corpus baseline:
+
+| lane | full-corpus max-abs | old limit | new limit |
+|---|---|---|---|
+| Lc0 Small b1 policy / MLH | 0.0996 / 0.966 (start position only: 0.025 / -) | 0.06 / 0.3 | 0.2 / 2 |
+| Maia3 b1 move / value logits | 0.641 / 0.031 | 0.5 / 0.01 | 1.3 / 0.06 |
+
+The rest stay inside their existing limits: t1 b8 policy 0.085, t3 0.063,
+BT4 0.29, LQO 1.30 (limit 2.0; it was 1.05 on 8 positions), Maia3 grid
+0.44, WDL ≤ 0.009 on every Lc0 path. TVMJS: t1 b8/b16 10/10 best moves, prior
+0.0063, WDL 0.0022; BT4 9/10 with the same tolerated tie (gap 0.00055);
+Centipawn v2 and v3 ≤ 1.4e-6.
+
+The looser b1 limits still reject the broken candidates. A t1 copy that
+zeroes the rule50 plane (input plane 109) fails at b1 and b8 on policy (0.53).
+Its MLH diff (1.89) is inside the b1 noise limit. The ×1.1 Q-scale copy fails
+on policy (0.387) and WDL (0.0071), and the ×1.5 FFN copy fails on all three
+outputs. On the old timing feeds, the rule50 copy passed: zeroing the plane
+does nothing to the start position. A unit test reproduces this with a fake
+model.
+
 ## 1. What users actually run
 
 These are the GPU paths in the v0 deploy profile (`VITE_BROWSER_CHESS_DEPLOY_PROFILE=v0`).
@@ -382,13 +414,14 @@ All gates passed, in phase 0 and again in the review sweep under the
 corrected gates:
 
 - ORT WebGPU vs the reference model on ORT WASM is within the preset
-  `parityMaxAbs`. The policy-logit max-abs was 0.025 (t1 b1), 0.085 (t1 b8),
-  0.06 (t3), 0.29 (BT4) and 1.05 (LQO). WDL was ≤ 0.003 on every Lc0 path.
-- TVMJS Centipawn vs ORT: 7e-7 policy, 1e-6 WDL, same move sets.
-- TVMJS Lc0 t1: 8/8 and 16/16 best moves, prior 0.0063, WDL 0.0022.
-- TVMJS Lc0 BT4: 7/8 best moves, with 1 flip whose reference prior gap is
+  `parityMaxAbs` over all 10 fixtures (second review round; the b1 limits were
+  recalibrated). The policy-logit max-abs was 0.0996 (t1 b1), 0.085 (t1 b8),
+  0.063 (t3), 0.29 (BT4) and 1.30 (LQO). WDL was ≤ 0.009 on every Lc0 path.
+- TVMJS Centipawn vs ORT: ≤ 1.1e-6 policy and ≤ 1.4e-6 WDL, same move sets.
+- TVMJS Lc0 t1: 10/10 best moves at b8 and b16, prior 0.0063, WDL 0.0022.
+- TVMJS Lc0 BT4: 9/10 best moves, with 1 flip whose reference prior gap is
   0.00055 (≤ 0.01). Prior 0.012, WDL 0.0024.
 - The gates reject deliberately broken candidates. In the browser, scaled-weight
-  t1 copies fail ORT parity (above). In `tests/kernel_hillclimb.test.mjs`, unit
+  and rule50-zeroed t1 copies fail ORT parity (above). In `tests/kernel_hillclimb.test.mjs`, unit
   tests fail scaled or NaN outputs, NaN or shifted WDL, missing moves,
   flattened policies, dropped profiles and ambiguous byte matches.
