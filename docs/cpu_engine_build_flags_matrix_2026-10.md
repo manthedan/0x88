@@ -2,7 +2,7 @@
 
 ## Decision
 
-**Promote `-O2 -flto` for the next Berserk promoted-tier build only.**
+**Promote `-O2 -flto` for the Berserk promoted (relaxed SIMD) tier only.** Staged as the committed default on 2026-11-11; see the release note below.
 
 - Berserk: browser paired wall NPS **+29.42%** at depth 11, **+29.09%** in a separate depth-12 confirmation. Engine-reported aggregate NPS corroborates this: **+30.00% / +28.77%**. Every comparison preserves exact depth, bestmove, score, nodes, and full PV.
 - `-O3 -flto` is +30.99% at depth 11 but +28.94% at depth 12: no repeatable extra benefit over `-O2 -flto`. Choose the smaller `-O2 -flto` artifact.
@@ -11,7 +11,22 @@
 
 The Berserk builder defaults LTO on only when `BERSERK_WASM_RELAXED_SIMD=1`, the already-promoted tier measured here. Its optimization level remains `-O2`; scalar and regular SIMD fallback defaults remain unchanged. `BERSERK_EMSCRIPTEN_LTO=0` restores the previous build. All three builders accept explicit `<ENGINE>_EMSCRIPTEN_LTO=1` independently of their existing `<ENGINE>_EMSCRIPTEN_OPT` knob. `-flto` is passed at compilation and linking in the single Emscripten invocation; this is full LTO, not ThinLTO.
 
-**Release pending, not published:** no JS/WASM/data binary, source archive, or existing release manifest was replaced or committed by this experiment. The manifest generator now records Berserk's recipe defaults in `build.defaultCompilerFlags`, and `public/berserk/README.md` marks the pending rebuild. The existing manifest and source archive still correctly describe the existing no-LTO binaries. Before release, rebuild the artifact pairs, regenerate the corresponding-source archive and manifest, and publish that matching set through the normal release process. Do not regenerate only a manifest against old binaries and call that a new release.
+**Staged in the repo, not yet published (2026-11-11).** The committed relaxed-tier JS/WASM are now the `-O2 -flto` build, and the source archive and manifest were regenerated with them. Production keeps serving the no-LTO relaxed files until the next engine release.
+
+### Release note: what the next release must upload
+
+A clean rebuild with the default recipe (`BERSERK_WASM_RELAXED_SIMD=1`, no OPT/LTO overrides, emcc 5.0.7-git) reproduced the measured artifact byte for byte. The parity gate it was promoted on (`emscripten_uci_bench.mjs`, shipped relaxed vs new, depths 9 and 11, 20 positions, hash 16) passed again: **40/40 exact** (bestmove, score, depth, nodes, PV); depth-11 node total 513540 for both.
+
+Four logical files change. Nothing else in the Berserk family (scalar, SIMD128, `.data`) changes:
+
+| Logical URL | Bytes | SHA-256 |
+|---|---|---|
+| `/berserk/berserk-emscripten-relaxed-simd128.wasm` | 142181 | `0b5ebb07a098c3404c21b69b03d68823fe6c6933a8c6a75c5605de865df77493` |
+| `/berserk/berserk-emscripten-relaxed-simd128.js` | 66468 | `20c5907ba8edcc554f7d39e91f2444dc34e51fae0100cdae3ff326cd4eef1c0c` |
+| `/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz` | 18478288 | `d763a4d0a5afb3ab4079794bbf88d0bcf0ffc0d4cdf0bcf45996c3dcd83faee1` |
+| `/berserk/berserk-emscripten-single-thread.manifest.json` | 5885 | `c6d0a671850268d33c36015363aee3b4c83cb2aab63a3c0bcab038d3116a6cf9` |
+
+A local staging run of `write_artifact_release_manifests.mjs --base-release <2026-11-09.engine-upgrades.1.json> --manifest public/berserk/berserk-emscripten-single-thread.manifest.json` gave exactly those four as the changed entries. They are 8 new content-addressed objects (`identity` and `br` for each) under `artifacts/sha256/<sha>/`. Upload those 8, then the new release manifest, then flip `channels/stable.json` last, following the normal engine publish steps. The wasm, glue, archive and manifest must go up together; the archive includes the adapter sources at this commit, so regenerate archive and manifest together if `src/lc0/berserkEngine.ts` or another archived file changes before release.
 
 ## Environment and controls
 
@@ -232,4 +247,4 @@ Evidence under `.local-dev-artifacts/cpu-flags/` includes all build logs, pinned
 - Production `BUILD_SCOPE=product npm run build:client`: passed, SvelteKit runtime-ID check passed; real native browser checks passed on port 5193.
 - `git diff --check`: clean. Branch Codex review is a required closeout gate; its final outcome is reported with the commit, not inferred from benchmark parity.
 
-Open questions are limited to portability of this compiler win beyond M4/Chromium, true field cold-download/startup costs, and the unresolved Stormphrax byte-reproduction delta. There is no evidence here to promote PlentyChess or Stormphrax flags, no promise of a universal hardware speedup, and no reason to change the unmeasured Berserk fallback-tier defaults. Release artifact/source/manifest rebuilding and publication remain intentionally outstanding.
+Open questions are limited to portability of this compiler win beyond M4/Chromium, true field cold-download/startup costs, and the unresolved Stormphrax byte-reproduction delta. There is no evidence here to promote PlentyChess or Stormphrax flags, no promise of a universal hardware speedup, and no reason to change the unmeasured Berserk fallback-tier defaults. Artifact, source and manifest rebuilding was done on 2026-11-11 (see the release note); publication remains outstanding.
