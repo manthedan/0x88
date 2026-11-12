@@ -438,7 +438,7 @@ Ranked by expected effect per unit of work:
 ```sh
 BUILD_SCOPE=product npm run build:client && node scripts/kernel_hillclimb/build_lab.mjs
 node scripts/serve_isolated_static.mjs dist-client 5241 &
-LOCK=/Users/macthedan/projects/lc0_browser/notes/kernel-hillclimb/benchlock.sh
+LOCK=<workspace>/notes/kernel-hillclimb/benchlock.sh   # <workspace> is the parent of the checkout
 FLAGS=--browser-args=--enable-unsafe-webgpu,--enable-webgpu-developer-features
 $LOCK peak -- node scripts/kernel_hillclimb/bench.mjs --candidate peak --repeat 3 $FLAGS --out artifacts/kernel-hillclimb/results/peak-dev.json
 for c in ort-lc0-small ort-lc0-small-b8 ort-lc0-small-ab-b8 ort-t3 ort-bt4 ort-lqo ort-maia3 ort-maia3-grid tvmjs-centipawn; do

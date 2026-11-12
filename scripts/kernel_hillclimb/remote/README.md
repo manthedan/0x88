@@ -190,7 +190,8 @@ It never stops or renices the other jobs.
 ### Local: `benchlock.sh`
 
 `--host local` runs the agent under
-`/Users/macthedan/projects/lc0_browser/notes/kernel-hillclimb/benchlock.sh`, so local timing
+`<workspace>/notes/kernel-hillclimb/benchlock.sh` (`<workspace>` is the parent of the checkout; set
+`KERNEL_BENCHLOCK` if it lives elsewhere), so local timing
 runs serialize with the other agents on this Mac.
 
 ## Chrome flags (what works)

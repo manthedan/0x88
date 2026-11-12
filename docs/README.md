@@ -120,6 +120,7 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`ort_batching_jspi_2026-10.md`](ort_batching_jspi_2026-10.md) — ORT 1.27 WebGPU batching and JSPI experiments.
 - [`ort_native_webgpu_profiler_2026-10.md`](ort_native_webgpu_profiler_2026-10.md) — what kernel profiling ORT 1.27's native WebGPU EP actually offers.
 - [`batching_strength_2026-10.md`](batching_strength_2026-10.md) — batching strength re-gate; no product default changes.
+- [`kernel_hillclimb_roofline_2026-11.md`](kernel_hillclimb_roofline_2026-11.md) — WebGPU kernel roofline: per-dispatch GPU time vs measured peak for the shipped nets, and where hand-written kernels could pay off.
 - [`centipawn_f16_2026-10.md`](centipawn_f16_2026-10.md) — Centipawn mixed-f16 TVMJS module: rejected at the numerical gate.
 - [`centipawn_padded_encoding.md`](centipawn_padded_encoding.md) — Centipawn TVMJS evaluator encodes real rows once and copies padding.
 - [`centipawn_tree_reuse_2026-10.md`](centipawn_tree_reuse_2026-10.md) — Centipawn retained-tree / Play yielding pilot: parked.

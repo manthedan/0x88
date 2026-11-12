@@ -35,7 +35,8 @@ import { fileURLToPath } from 'node:url';
 import { lockCommand, makeRunId, parseQueueList, q, slug, timingValidity, validateEstimate } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BENCHLOCK = '/Users/macthedan/projects/lc0_browser/notes/kernel-hillclimb/benchlock.sh';
+// The shared-Mac timing lock lives outside the repo; KERNEL_BENCHLOCK overrides its path.
+const BENCHLOCK = process.env.KERNEL_BENCHLOCK ?? join(os.homedir(), 'projects/lc0_browser/notes/kernel-hillclimb/benchlock.sh');
 
 // ssh/rsync options: bounded connection setup and dead-link detection (see sh()).
 const SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4'];

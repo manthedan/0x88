@@ -75,7 +75,7 @@ which you got. Per-dispatch rows are only meaningful unquantized; `timing.runMs`
 
 ```sh
 export AGENT_BROWSER_SESSION=kernel-hillclimb
-LOCK=/Users/macthedan/projects/lc0_browser/notes/kernel-hillclimb/benchlock.sh   # shared Mac: always wrap timing
+LOCK=<workspace>/notes/kernel-hillclimb/benchlock.sh   # shared Mac: always wrap timing (<workspace> = parent of the checkout)
 $LOCK kernel-ort-small -- node scripts/kernel_hillclimb/bench.mjs --candidate ort-lc0-small --gate --repeat 3 \
   --browser-args=--enable-unsafe-webgpu,--enable-webgpu-developer-features
 ```
@@ -123,7 +123,7 @@ counts.
 ## Roofline
 
 ```sh
-PY=/Users/macthedan/projects/lc0_browser/leelaweb/.venv-onnx/bin/python
+PY=<checkout>/.venv-onnx/bin/python
 $PY -I scripts/kernel_hillclimb/onnx_cost.py public/models/lc0/<model>.onnx --batch 8 --out artifacts/kernel-hillclimb/cost/<cost>.json
 node scripts/kernel_hillclimb/roofline.mjs --md artifacts/kernel-hillclimb/roofline.md
 ```
