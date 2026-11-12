@@ -14,6 +14,7 @@ import {
   idleVerdict,
   lockCommand,
   makeRunId,
+  modelIncludes,
   parseAgxClients,
   parseQueueList,
   q,
@@ -367,3 +368,33 @@ for (const [host, failOn, extra] of [
     }
   });
 }
+
+test('includes that name model blobs are flagged (default excludes would drop them)', () => {
+  assert.deepEqual(
+    modelIncludes([
+      'lab/kernel-hillclimb/**',
+      'assets/**',
+      'ort/**',
+      'models/lc0/manifest.json',
+      'models/lc0/t1-256x10.batch1.*',
+      'x/net.onnx',
+      'runtimes/tensor-cache/**',
+      'reckless/net.nnue',
+    ]),
+    ['models/lc0/manifest.json', 'models/lc0/t1-256x10.batch1.*', 'x/net.onnx', 'runtimes/tensor-cache/**', 'reckless/net.nnue'],
+  );
+});
+
+test('run.mjs refuses a model --include without --with-models before syncing or queueing', () => {
+  const dist = mkdtempSync(join(tmpdir(), 'kr-dist-'));
+  const run = (extra) =>
+    spawnSync(process.execPath, [RUN, '--host', 'yukon', '--dist', dist, '--page', 'x.html', '--include', 'models/lc0/m.onnx', '--dry-run', ...extra], {
+      encoding: 'utf8',
+      timeout: 20000,
+    });
+  const refused = run([]);
+  assert.equal(refused.status, 3);
+  assert.match(refused.stderr + refused.stdout, /names model blobs.*--with-models/);
+  assert.doesNotMatch(refused.stderr + refused.stdout, /rsync|gpu-queue|mkdir/);
+  rmSync(dist, { recursive: true, force: true });
+});

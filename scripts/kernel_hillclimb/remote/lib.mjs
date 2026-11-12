@@ -90,6 +90,23 @@ function inside(root, p) {
  * flock(1) on Linux) is released by the kernel when the holder dies, so there is
  * no stale-owner reclamation (and no reclaim race) at all. Exit 75 on timeout.
  */
+/**
+ * Include patterns that name model blobs, which the default excludes drop. rsync takes the first
+ * matching rule and the default excludes come first, so such an include silently syncs nothing
+ * (the page then fails to load its model). A pattern names a model blob when one of its path
+ * segments is a model directory (`models`, `tensor-cache`) or contains a model-blob suffix.
+ */
+export function modelIncludes(includes) {
+  const dirs = new Set(['models', 'tensor-cache']);
+  const tokens = ['.onnx', '.pb', '.pt', '.safetensors', '.nnue', '.lc0web', 'params_shard_'];
+  return includes.filter((p) =>
+    p
+      .replace(/^\/+/, '')
+      .split('/')
+      .some((seg) => dirs.has(seg) || tokens.some((t) => seg.includes(t))),
+  );
+}
+
 export function lockCommand(platform, lockFile, timeoutS) {
   const t = String(Math.max(0, Math.floor(Number(timeoutS))));
   if (platform === 'darwin') return ['lockf', '-k', '-t', t, lockFile]; // lockf exits 75 (EX_TEMPFAIL) on timeout

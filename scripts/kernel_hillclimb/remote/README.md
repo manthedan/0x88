@@ -55,7 +55,9 @@ Options (see the header of `run.mjs` for all of them):
   (for example `--dist build --include kernel-bench,_app/immutable/workers`).
 - Model blobs are excluded by default: `*.onnx`, `*.pt`, `*.safetensors`, `*.nnue`, `*.lc0web`,
   `models/`, `tensor-cache/`, `params_shard_*.bin` and `*.map`. Pass `--with-models` when the
-  page needs them. Each run hard-links unchanged files against the previous run's dist on the
+  page needs them. The default excludes take precedence over `--include`, so an `--include` that
+  names model files without `--with-models` is refused before anything is synced or queued,
+  instead of silently syncing nothing. Each run hard-links unchanged files against the previous run's dist on the
   host (`rsync --link-dest`), so a repeat upload costs only the changed files.
 - `--gpu-info` adds CDP `SystemInfo.getInfo` (the `chrome://gpu` data: GPU devices, driver,
   feature status, ANGLE/Vulkan aux attributes) to `meta.gpuInfo`.
