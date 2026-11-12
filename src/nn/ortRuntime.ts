@@ -128,6 +128,8 @@ export type OrtWebGpuAdapterDiagnostics = {
   summary?: string;
   info?: unknown;
   features?: string[];
+  /** gpuAdapterShaderF16 of the probed adapter; absent when unknowable. */
+  shaderF16?: boolean;
   limits?: Record<string, number>;
   error?: string;
 };
@@ -1293,7 +1295,14 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
       diag.resolvedExecutionProviders = resolvedOrtExecutionProviders();
       diag.describe = describeOrtBackendConfig();
       diag.adapter = adapter
-        ? { ok: true, summary: summarizeGpuAdapter(adapter), ...(info ? { info } : {}), ...(features ? { features } : {}), ...(limits ? { limits } : {}) }
+        ? {
+            ok: true,
+            summary: summarizeGpuAdapter(adapter),
+            ...(info ? { info } : {}),
+            ...(features ? { features } : {}),
+            ...(probedWebGpuShaderF16 !== null ? { shaderF16: probedWebGpuShaderF16 } : {}),
+            ...(limits ? { limits } : {}),
+          }
         : { ok: false, error: 'navigator.gpu.requestAdapter returned null' };
     } catch (err) {
       probedWebGpuAdapterUsable = false;

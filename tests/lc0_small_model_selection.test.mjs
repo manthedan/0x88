@@ -224,8 +224,20 @@ test('an adapter without shader-f16 resolves ORT to WASM: the f16 nets fail at f
     // The big-net support probe reads this, so its UI matches the worker's backend.
     const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
     assert.equal(diag.adapter?.ok, true);
+    assert.equal(diag.adapter?.shaderF16, false);
     assert.deepEqual(diag.resolvedExecutionProviders, ['wasm']);
   });
+  await withFakeAdapter(
+    noF16,
+    async () => {
+      // A strict page keeps WebGPU for itself, but the adapter verdict is still
+      // reported, so the big-net probe matches its ep:'auto' worker (WASM).
+      const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
+      assert.deepEqual(diag.resolvedExecutionProviders, ['webgpu']);
+      assert.equal(diag.adapter?.shaderF16, false);
+    },
+    'webgpu',
+  );
   await withFakeAdapter(
     noF16,
     async () => {
