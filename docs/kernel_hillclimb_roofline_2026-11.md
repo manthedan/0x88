@@ -388,9 +388,11 @@ Ranked by expected effect per unit of work:
    virtual loss at low visit counts. That strength cost was already measured: the
    October re-gate ([batching_strength_2026-10.md](batching_strength_2026-10.md),
    arm B2) found search batch 8 losing to the shipped search batch 1 at equal
-   visits (about −300 Elo at 8 visits, −69 at 32), and the owner stopped that
-   line. Only an equal-time match is untested, and only that could turn this
-   throughput into strength. Until then this is a measured speed, not a lever.
+   visits (about −300 Elo at 8 visits, −69 at 32; the 100-visit match stopped
+   partway, also negative), and the owner stopped that line. That record is not
+   evidence about higher visit counts: 400 visits never ran, and neither did an
+   equal-time match, which is the comparison that could turn this throughput
+   into strength. Until one runs, this is a measured speed, not a lever.
    It would compound with #1, because at b8 the GEMMs leave the M ≤ 64 regime.
 2. **Maia3 graph fixes.**
    - Rewrite `Einsum bhi,oi->bho` as a MatMul against a pre-transposed weight:
