@@ -1962,6 +1962,16 @@ function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
   return stockfishFull;
 }
 
+function disposeStockfish(kind: 'lite' | 'full'): void {
+  const engine = kind === 'lite' ? stockfishLite : stockfishFull;
+  if (!engine) return;
+  engine.dispose();
+  if (kind === 'lite') stockfishLite = null;
+  else stockfishFull = null;
+  // A recreated worker downloads and starts again; show that, not a warm search.
+  preparedCpuEngineKeys.delete(`sf:${kind}`);
+}
+
 const ANALYSIS_CPU_ENGINE_OPTIONS = { surface: 'analysis' } as const;
 
 const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) =>
@@ -2012,6 +2022,12 @@ function disposeUnusedEngines(): void {
   }
   disposeUnusedCentipawnEvaluators();
   const activeRows = activeEngineRows();
+  // Game review always runs SF Lite, so a running review keeps its rows too.
+  const stockfishRows = reviewAbort ? [...activeRows, ...reviewEngineRows()] : activeRows;
+  for (const kind of ['lite', 'full'] as const) {
+    if (stockfishRows.some((row) => row.family === 'sf' && (row.variant === 'full' ? 'full' : 'lite') === kind)) continue;
+    disposeStockfish(kind);
+  }
   recklessEngines.retain(activeRows.filter((row) => row.family === 'reckless').map((row) => recklessVariantForKey(row.variant)));
   viridithasEngines.retain(activeRows.filter((row) => row.family === 'viridithas').map((row) => viridithasVariantForKey(row.variant)));
   berserkEngines.retain(activeRows.filter((row) => row.family === 'berserk').map((row) => berserkVariantForKey(row.variant)));
@@ -5933,10 +5949,8 @@ function disposeRuntimeResources(): void {
     peekBigNetSearcher(key)?.cancel();
     releaseBigNetSearcher(key);
   }
-  stockfishLite?.dispose();
-  stockfishLite = null;
-  stockfishFull?.dispose();
-  stockfishFull = null;
+  disposeStockfish('lite');
+  disposeStockfish('full');
   disposeCentipawnEvaluators();
   recklessEngines.disposeAll();
   viridithasEngines.disposeAll();
