@@ -2,6 +2,7 @@ import { Chessground } from 'chessground';
 import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { searchHistoryFens } from '../chess/drawRules.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame } from '../chess/pgn.ts';
@@ -160,6 +161,7 @@ import {
 } from './bt4Engine.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import {
+  CENTIPAWN_NET_HISTORY_POSITIONS,
   canonicalEngineFamily,
   centipawnEngineLabel,
   centipawnVariantOptions,
@@ -1281,7 +1283,7 @@ function centipawnEvaluator(variant: string): Promise<Evaluator> {
 }
 
 function centipawnHistoryFens(positions: BoardState[]): string[] {
-  return positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16);
+  return searchHistoryFens(positions, CENTIPAWN_NET_HISTORY_POSITIONS);
 }
 
 function disposeCentipawnEvaluators(): void {

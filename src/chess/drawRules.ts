@@ -31,6 +31,29 @@ function capturableEpField(placement: string, turn: string, ep: string): string 
   return '-';
 }
 
+/**
+ * Previous positions of a game, newest first, for search draw detection. A
+ * capture or pawn move (halfmove clock 0) makes every earlier position
+ * unrepeatable, so history stops there, but never below `minPositions` so a
+ * history-aware net keeps its input context. The oldest entry is keyed as a
+ * FEN root (see rootRepetitionKeyFromFen), so when history stops at an
+ * irreversible move it keeps one unrepeatable position before it: the position
+ * after the pawn move (whose uncapturable en-passant square a root key would
+ * keep) is then compared like any other.
+ */
+export function searchHistoryFens(positions: readonly BoardState[], minPositions = 0): string[] {
+  const current = positions.length - 1;
+  if (current <= 0) return [];
+  let root = current;
+  while (root > 0 && positions[root].halfmove !== 0) root--;
+  if (root > 0) root--;
+  const count = Math.max(current - root, Math.min(minPositions, current));
+  return positions
+    .slice(current - count, current)
+    .map((board) => boardToFen(board))
+    .reverse();
+}
+
 export function repetitionKeyFromFen(fen: string): string {
   const fields = fen.trim().split(/\s+/).slice(0, 4);
   if (fields.length === 4) fields[3] = capturableEpField(fields[0], fields[1], fields[3]);

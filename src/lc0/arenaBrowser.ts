@@ -3,6 +3,7 @@ import type { DrawShape } from 'chessground/draw';
 import type { Key } from 'chessground/types';
 import artifactChannel from '../../public/channels/stable.json';
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { searchHistoryFens } from '../chess/drawRules.ts';
 import { parseValidatedFen } from '../chess/fenValidation.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
@@ -109,6 +110,7 @@ import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import {
+  CENTIPAWN_NET_HISTORY_POSITIONS,
   canonicalEngineFamily,
   centipawnEngineLabel,
   centipawnVariantOptions,
@@ -762,7 +764,7 @@ function disposeUnusedCentipawnEvaluators(): void {
 }
 
 function centipawnHistoryFens(positions: BoardState[]): string[] {
-  return positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16);
+  return searchHistoryFens(positions, CENTIPAWN_NET_HISTORY_POSITIONS);
 }
 
 function initialLc0Runtime(): Lc0ArenaRuntime {

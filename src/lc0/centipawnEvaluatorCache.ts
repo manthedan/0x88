@@ -1,5 +1,6 @@
 import type { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { CENTIPAWN_NET_HISTORY_POSITIONS } from './engineCatalog.ts';
 
 type Loader = typeof createBrowserSquareformerRuntimeEvaluator;
 type Request = {
@@ -45,6 +46,7 @@ export function createCentipawnEvaluatorCache(load: Loader) {
               includeHistory: true,
               includeLegalMoves: true,
               label: request.label,
+              maxHistoryPositions: CENTIPAWN_NET_HISTORY_POSITIONS,
             });
             if (entries.get(key) !== entry || !isActive()) {
               destroy(cached);

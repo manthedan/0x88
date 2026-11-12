@@ -80,6 +80,9 @@ export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'bt4', label: 'BT4-it332', experimental: true },
 ];
 
+/** Newest history positions the Centipawn nets read; search keeps longer histories for draws. */
+export const CENTIPAWN_NET_HISTORY_POSITIONS = 16;
+
 export const CENTIPAWN_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'bt4-auto', label: 'v1 · TVMJS auto' },
   { value: 'bt4-ort', label: 'v1 · ORT' },

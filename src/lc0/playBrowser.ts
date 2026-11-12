@@ -3,6 +3,7 @@
 import { Chessground } from 'chessground';
 import type { Key } from 'chessground/types';
 import { type BoardState, boardToFen, type Color, parseFen, START_FEN } from '../chess/board.ts';
+import { searchHistoryFens } from '../chess/drawRules.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { sanToMove } from '../chess/pgn.ts';
@@ -38,7 +39,7 @@ import {
 import { writeClipboard } from './clipboard.ts';
 import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineResidency.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
-import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
+import { CENTIPAWN_NET_HISTORY_POSITIONS, type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
@@ -595,6 +596,7 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
           includeHistory: true,
           includeLegalMoves: true,
           label: `centipawn-play:${loaded.resolvedRuntime}`,
+          maxHistoryPositions: CENTIPAWN_NET_HISTORY_POSITIONS,
         });
         if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
         return centipawnEvaluator;
@@ -794,7 +796,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         earlyStop: 'root-dominance',
         batchSize: Math.max(1, Math.min(32, visitsOrDepth)),
         signal,
-        historyFens: ctx.positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16),
+        historyFens: searchHistoryFens(ctx.positions, CENTIPAWN_NET_HISTORY_POSITIONS),
         searchPolicy: montyLitePuctPolicy,
         includePv: true,
         onProgress: (progress) => {
@@ -915,7 +917,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
     } else if (option.family === 'centipawn') {
       const evaluator = await ctxEnsureCentipawn(ctx);
       await evaluator.evaluate(ctx.board, {
-        historyFens: ctx.positions.slice(0, -1).map(boardToFen).reverse().slice(0, 16),
+        historyFens: searchHistoryFens(ctx.positions, CENTIPAWN_NET_HISTORY_POSITIONS),
         legalMoves: legalMoves(ctx.board),
       });
     } else if (option.family === 'lc0' && option.variant === 'small') {

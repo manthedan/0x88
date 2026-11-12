@@ -76,6 +76,13 @@ export interface CachedEvaluatorOptions {
   includeLegalMoves?: boolean;
   /** Human/debug label. */
   label?: string;
+  /**
+   * Newest history positions the wrapped net reads. Longer histories (search
+   * keeps the game back to the last irreversible move for repetition draws)
+   * are cut to this before keying and evaluation, so cache keys and encoder
+   * work stay bounded.
+   */
+  maxHistoryPositions?: number;
 }
 
 function cloneEvaluation(evaln: Evaluation): Evaluation {
@@ -142,6 +149,7 @@ export class CachedEvaluator implements Evaluator {
   private readonly maxEntries: number;
   private readonly includeHistory: boolean;
   private readonly includeLegalMoves: boolean;
+  private readonly maxHistoryPositions: number | undefined;
   private cache = new Map<string, Evaluation>();
   private metricsState: CachedEvaluatorMetrics = { hits: 0, misses: 0, inserts: 0, evictions: 0 };
 
@@ -151,6 +159,14 @@ export class CachedEvaluator implements Evaluator {
     this.includeHistory = options.includeHistory ?? true;
     this.includeLegalMoves = options.includeLegalMoves ?? true;
     this.label = options.label ?? 'eval';
+    this.maxHistoryPositions = options.maxHistoryPositions === undefined ? undefined : Math.max(0, Math.floor(options.maxHistoryPositions));
+  }
+
+  private netContext(context: EvaluationContext): EvaluationContext {
+    const limit = this.maxHistoryPositions;
+    if (limit === undefined) return context;
+    if ((context.historyFens?.length ?? 0) <= limit && (context.historyBoards?.length ?? 0) <= limit) return context;
+    return { ...context, historyFens: context.historyFens?.slice(0, limit), historyBoards: context.historyBoards?.slice(0, limit) };
   }
 
   metrics(): CachedEvaluatorMetrics & { entries: number; hitRate: number } {
@@ -197,7 +213,7 @@ export class CachedEvaluator implements Evaluator {
     const duplicateSlots: { slot: number; firstSlot: number }[] = [];
 
     for (let i = 0; i < boards.length; i++) {
-      const context = contexts[i] ?? {};
+      const context = this.netContext(contexts[i] ?? {});
       const key = evalCacheKey(boards[i], context, this.includeHistory, this.includeLegalMoves);
       const cached = this.get(key);
       if (cached) {
