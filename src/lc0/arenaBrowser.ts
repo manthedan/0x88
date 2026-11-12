@@ -146,10 +146,10 @@ import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
+import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
-import { loadLc0ModelForOrt } from './modelCache.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
-import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, type Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import {
   checkPlentyChessVariantAsset,
@@ -325,7 +325,14 @@ interface EngineOutputSnapshot {
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
+// v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
+  DEFAULT_MODEL_URL,
+  isV0DeployProfile() ? null : params.get('model'),
+  resolvePublicAssetUrl,
+);
+/** Model the ONNX evaluator runs: MODEL_URL or, on Apple WebGPU, its split-K rewrite. */
+let arenaLc0ServedModelUrl = '';
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
 const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_soap_rem_c19000_final.onnx';
@@ -4447,6 +4454,7 @@ function disposeLc0Resources(): void {
   loadingLc0 = false;
   void lc0Cache?.dispose();
   lc0Cache = null;
+  arenaLc0ServedModelUrl = '';
   lc0Searchers.clear();
   lastLc0SearchResults.clear();
   pendingLc0ReplyProbes.clear();
@@ -4485,14 +4493,18 @@ function disposeRuntimeResources(): void {
 async function createSelectedLc0Evaluator(signal: AbortSignal): Promise<Lc0OnnxEvaluator | Lc0WebHybridEvaluator | Lc0WholeOnnxWebgpuEvaluator> {
   const runtime = selectedLc0Runtime();
   if (runtime === 'onnx') {
-    const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
-      cache: true,
-      signal,
-      onProgress: (loaded, total) => {
-        if (!signal.aborted) showDownloadProgress('Lc0 small net', loaded, total, 'Downloading');
+    const created = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
+      deviceSelection: LC0_DEVICE_MODEL_SELECTION,
+      load: {
+        cache: true,
+        signal,
+        onProgress: (loaded, total) => {
+          if (!signal.aborted) showDownloadProgress('Lc0 small net', loaded, total, 'Downloading');
+        },
       },
     });
-    return Lc0OnnxEvaluator.create(modelLoad.model);
+    arenaLc0ServedModelUrl = created.servedUrl;
+    return created.evaluator;
   }
   if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
     return Lc0WholeOnnxWebgpuEvaluator.create({
@@ -4550,7 +4562,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
       family: 'lc0',
       engineLabel: 'LC0',
       modelId: 'lc0-default',
-      modelUrl: runtime === 'onnx' ? MODEL_URL : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
+      modelUrl: runtime === 'onnx' ? arenaLc0ServedModelUrl || MODEL_URL : runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : PACK_URL,
       requestedRuntime: runtime,
       resolvedRuntime: ortDiagnostics?.fallback ? 'ort-main-thread-wasm-fallback' : lc0ResolvedRuntime(runtime),
       fallbackReason: ortDiagnostics?.fallback?.reason,

@@ -1,6 +1,6 @@
 {
   "schema": "0x88.hosted-artifact-index.v1",
-  "generatedAt": "2026-10-11T21:33:06.242Z",
+  "generatedAt": "2026-11-12T07:25:28.521Z",
   "generatedBy": "scripts/write_artifact_index.mjs (npm run artifact-index)",
   "documentationPath": "docs/hosted_artifacts.md",
   "distributionPolicyPath": "docs/engine_artifact_distribution.md",
@@ -21,6 +21,7 @@
       "primaryUrls": [
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f32.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx",
+        "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.splitk.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch4.f16.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.onnx",
@@ -29,7 +30,7 @@
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch32.f16.onnx",
         "/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json"
       ],
-      "notes": "Default Lc0 network: Analysis, Arena and Play load the batch-1 f16 QDQ8 export by default; the lc0web pack serves the opt-in custom WebGPU path."
+      "notes": "Default Lc0 network: Analysis, Arena and Play load the batch-1 f16 QDQ8 export by default, or its split-K rewrite (batch1.f16.qdq8.splitk) when ORT runs on WebGPU with an Apple adapter; the lc0web pack serves the opt-in custom WebGPU path."
     },
     {
       "id": "lc0-t3",
@@ -115,10 +116,11 @@
       "manifestUrl": "/models/maia3/manifest.json",
       "provenancePath": "docs/model_provenance/maia3.md",
       "primaryUrls": [
+        "/models/maia3/maia3_simplified.qdq8.graph.onnx",
         "/models/maia3/maia3_simplified.qdq8.onnx",
         "/models/maia3/maia3_simplified.onnx"
       ],
-      "notes": "Play and the Analysis Human tab load the locally derived QDQ8 file by default and fall back to the upstream fp16 file."
+      "notes": "Play and the Analysis Human tab load the graph-rewritten QDQ8 file by default and fall back to the plain QDQ8 file, then the upstream fp16 file."
     },
     {
       "id": "centipawn-tvmjs-webgpu-v2",

@@ -5,13 +5,20 @@ import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 
 /**
- * Default browser model: the locally derived weight-only int8 QDQ variant
- * (28.1MB vs 45.7MB fp16; parity 159/160 top-1, drift <=0.021; speed neutral
- * or better on both EPs). The loader falls back to the upstream fp16 file
- * when the QDQ artifact is not staged.
+ * Default browser model: the weight-only int8 QDQ variant after the
+ * einsum,promo graph rewrite (scripts/maia3_graph_rewrite.py). Same weights
+ * and I/O as the QDQ8 file and bit-identical on ORT WASM, with half the
+ * WebGPU dispatches (docs/maia3_graph_rewrite_2026-11.md). Dynamic batch:
+ * Play and critical moments run b1, the Analysis panel b6, the Elo grid b11.
+ * The loader falls back to the plain QDQ8 file, then to the upstream fp16
+ * file, when a derived artifact is not staged.
  */
-export const MAIA3_DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.qdq8.onnx');
+export const MAIA3_DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.qdq8.graph.onnx');
+/** Pre-rewrite QDQ8 file (28.1MB vs 45.7MB fp16): the default before the graph rewrite, now the first fallback. */
+export const MAIA3_QDQ8_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.qdq8.onnx');
 export const MAIA3_FP16_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.onnx');
+/** Load order when no model is requested explicitly. */
+export const MAIA3_MODEL_FALLBACK_URLS = [MAIA3_DEFAULT_MODEL_URL, MAIA3_QDQ8_MODEL_URL, MAIA3_FP16_MODEL_URL] as const;
 export const MAIA3_MODEL_MANIFEST_URL = '/models/maia3/manifest.json';
 export const MAIA3_MIN_ELO = 600;
 export const MAIA3_MAX_ELO = 2600;
@@ -303,13 +310,7 @@ export class Maia3BrowserEvaluator {
     if (options.modelUrl) {
       modelLoad = await load(options.modelUrl);
     } else {
-      try {
-        modelLoad = await load(MAIA3_DEFAULT_MODEL_URL);
-      } catch (error) {
-        if (options.signal?.aborted) throw error;
-        console.warn(`Maia3 QDQ model unavailable (${error instanceof Error ? error.message : String(error)}); falling back to fp16`);
-        modelLoad = await load(MAIA3_FP16_MODEL_URL);
-      }
+      modelLoad = await Maia3BrowserEvaluator.loadWithFallback(load, options.signal);
     }
     options.signal?.throwIfAborted();
     const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
@@ -324,6 +325,19 @@ export class Maia3BrowserEvaluator {
     } catch (error) {
       worker.terminate();
       throw error;
+    }
+  }
+
+  private static async loadWithFallback(load: (url: string) => Promise<Lc0ModelLoadResult>, signal?: AbortSignal): Promise<Lc0ModelLoadResult> {
+    for (let i = 0; ; i++) {
+      const url = MAIA3_MODEL_FALLBACK_URLS[i];
+      try {
+        return await load(url);
+      } catch (error) {
+        const next = MAIA3_MODEL_FALLBACK_URLS[i + 1];
+        if (signal?.aborted || !next) throw error;
+        console.warn(`Maia3 model ${url} unavailable (${error instanceof Error ? error.message : String(error)}); falling back to ${next}`);
+      }
     }
   }
 

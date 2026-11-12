@@ -69,6 +69,8 @@ export interface Lc0OnnxEvaluatorOptions {
    * logical batch as one session.run. Fixed batch-N graphs are unaffected.
    */
   physicalBatchMode?: OrtPhysicalBatchMode;
+  /** Passed to createOrtSession: the model for its WebGPU -> WASM fallback attempt. */
+  wasmFallbackModel?: () => Promise<string | Uint8Array | ArrayBuffer>;
 }
 
 export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput | Lc0PreparedEvaluatorInput;
@@ -527,7 +529,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   }
 
   static async create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0OnnxEvaluator> {
-    return new Lc0OnnxEvaluator(await ort.createOrtSession(modelPath), options);
+    return new Lc0OnnxEvaluator(await ort.createOrtSession(modelPath, { wasmFallbackModel: options.wasmFallbackModel }), options);
   }
 
   async dispose(): Promise<void> {

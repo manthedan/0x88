@@ -854,7 +854,7 @@ onMount(() => {
     <p>Maia-3 is a family of Chessformer models for predicting human moves across skill levels. The browser model returns rating-conditioned move probabilities and human-game WDL predictions rather than a searched centipawn evaluation. The Play page can sample from that policy or choose its highest-probability move.</p>
     <div class="callout info">
       <h4 id="maia-source-offer">AGPL source offer</h4>
-      <p>The default browser artifact is a local int8 quantization of the upstream fp16 file. The AGPL source offer includes the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> for that artifact.</p>
+      <p>The default browser artifact is a local int8 quantization of the upstream fp16 file, with its graph rewritten to run fewer GPU kernels. The weights and outputs are unchanged. The AGPL source offer includes the <a href="https://github.com/manthedan/0x88/blob/main/docs/model_provenance/maia3.md">derivation recipe</a> and scripts for that artifact.</p>
     </div>
   </div>
 

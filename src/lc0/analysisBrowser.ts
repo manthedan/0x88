@@ -217,9 +217,9 @@ import {
   stopHiddenTabResume,
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
+import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
-import { loadLc0ModelForOrt } from './modelCache.ts';
-import { CachedLc0Evaluator, type Lc0EvaluationProvider, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
 import {
   checkPlentyChessVariantAsset,
@@ -279,7 +279,12 @@ type Ground = ReturnType<typeof Chessground>;
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
+// v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
+  DEFAULT_MODEL_URL,
+  isV0DeployProfile() ? null : params.get('model'),
+  resolvePublicAssetUrl,
+);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
 const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_soap_rem_c19000_final.onnx';
@@ -750,6 +755,12 @@ function currentBookStats(): OpeningMoveStat[] {
 let searchWorker: Worker | null = null;
 let workerReady = false;
 let workerBackend = '';
+/**
+ * Model the loaded ONNX backend runs: MODEL_URL, or its split-K rewrite on
+ * Apple WebGPU. Part of the Lc0 result-cache key so results from the two
+ * models are never mixed. Empty until a backend is ready.
+ */
+let lc0ServedModelUrl = '';
 let workerRuntime: Lc0AnalysisRuntime | '' = '';
 let workerSeq = 0;
 const workerPending = new Map<
@@ -839,6 +850,7 @@ function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown>
   const common = {
     type: 'init',
     modelUrl: MODEL_URL,
+    deviceModelSelection: LC0_DEVICE_MODEL_SELECTION,
     ep: requestedEp(),
     cacheModel: true,
     requestPersistentModelStorage: true,
@@ -885,6 +897,7 @@ function resetSearchWorker(reason: string | Error): void {
   workerReady = false;
   workerBackend = '';
   workerRuntime = '';
+  lc0ServedModelUrl = '';
   const error = typeof reason === 'string' ? new DOMException(reason, 'AbortError') : reason;
   for (const pending of workerPending.values()) pending.reject(error);
   workerPending.clear();
@@ -923,19 +936,20 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
     if (searchWorker === worker) resetSearchWorker(new Error('LC0 worker message could not be decoded'));
   });
   const runtime = selectedLc0Runtime();
-  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback'] }>(lc0InitMessage(runtime));
+  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>(lc0InitMessage(runtime));
   if (searchWorker !== worker) throw new Error('LC0 worker invalidated during initialization');
   if (operationSignal?.aborted) throw new DOMException('LC0 backend load cancelled', 'AbortError');
   workerReady = true;
   workerBackend = ready.backend;
   workerRuntime = runtime;
+  lc0ServedModelUrl = runtime === 'onnx' ? (ready.servedModelUrl ?? MODEL_URL) : '';
   publishBrowserRuntimeAudit({
     source: 'lc0-analysis-worker',
     surface: 'analysis',
     family: 'lc0',
     engineLabel: 'LC0',
     modelId: 'lc0-default',
-    modelUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : MODEL_URL,
+    modelUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : lc0ServedModelUrl || MODEL_URL,
     requestedRuntime: runtime,
     resolvedRuntime: ready.ortFallback ? 'ort-worker-wasm-fallback' : lc0ResolvedRuntime(runtime),
     fallbackReason: ready.ortFallback?.reason,
@@ -1691,7 +1705,9 @@ function rowLabel(row: EngineRow): string {
 }
 
 function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tree.current, requestedMultiPv = multiPv()): string {
-  const runtime = row.family === 'lc0' && !isLc0BigNetVariant(row.variant) ? selectedLc0Runtime() : '';
+  // The served model is part of the runtime identity: Lc0 Small runs either the
+  // shipped model or its split-K rewrite depending on the device.
+  const runtime = row.family === 'lc0' && !isLc0BigNetVariant(row.variant) ? `${selectedLc0Runtime()}|${lc0ServedModelUrl}` : '';
   const { dial, cpuBudget } = resourceBroker.snapshot();
   const participants = [
     ...new Set(
@@ -5962,6 +5978,7 @@ function disposeRuntimeResources(): void {
   void mainEvaluator?.dispose?.();
   mainEvaluator = null;
   searcher = null;
+  lc0ServedModelUrl = '';
 }
 
 function disposePageResources(): void {
@@ -6054,6 +6071,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
     console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
     try {
       let nextEvaluator: Lc0EvaluationProvider | null = null;
+      let nextServedModelUrl = '';
       if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
         nextEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
           manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
@@ -6063,15 +6081,19 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
           signal: operationSignal,
         });
       } else {
-        const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
-          cache: true,
-          requestPersistentStorage: true,
-          signal: operationSignal,
-          onProgress: (loaded, total) => {
-            if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
+        const created = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
+          deviceSelection: LC0_DEVICE_MODEL_SELECTION,
+          load: {
+            cache: true,
+            requestPersistentStorage: true,
+            signal: operationSignal,
+            onProgress: (loaded, total) => {
+              if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
+            },
           },
         });
-        nextEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+        nextEvaluator = created.evaluator;
+        nextServedModelUrl = created.servedUrl;
       }
       if (loadCancelled()) {
         void nextEvaluator?.dispose?.();
@@ -6086,6 +6108,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
       }
       mainEvaluator = nextEvaluator;
       searcher = nextSearcher;
+      lc0ServedModelUrl = nextServedModelUrl;
       el('backend').textContent = `${diagnostics?.describe ?? 'whole-onnx-webgpu'} (main thread)`;
       publishBrowserRuntimeAudit({
         source: 'lc0-analysis-main-thread-fallback',
@@ -6093,7 +6116,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
         family: 'lc0',
         engineLabel: 'LC0',
         modelId: 'lc0-default',
-        modelUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : MODEL_URL,
+        modelUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : nextServedModelUrl || MODEL_URL,
         requestedRuntime: runtime,
         resolvedRuntime: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? 'whole-onnx-webgpu-main-thread-fallback' : 'ort-main-thread-fallback',
         manifestUrl: runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME ? LC0_WHOLE_MODEL_MANIFEST_URL : undefined,

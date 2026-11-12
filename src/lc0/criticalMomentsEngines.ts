@@ -6,11 +6,12 @@ import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type CriticalLane, type CriticalMoment, type CriticalProvenance, type CriticalResult } from './criticalMoments.ts';
 import { cpuEngineHashMbForSurface } from './engineProvision.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
+import { LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
 import { MAIA3_DEFAULT_MODEL_URL, Maia3BrowserEvaluator } from './maia3.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 
-export const CRITICAL_LC0_MODEL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
+export const CRITICAL_LC0_MODEL = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
 
 /** Own workers prevent a navigating interactive tab from resetting a report engine. Created only after consent. */
 export function createCriticalEngines(
@@ -21,7 +22,7 @@ export function createCriticalEngines(
   let sf: StockfishEngine | undefined;
   let worker: Worker | undefined;
   let maia: Maia3BrowserEvaluator | undefined;
-  let lc0Ready: Promise<{ backend: string }> | undefined;
+  let lc0Ready: Promise<{ backend: string; servedModelUrl?: string }> | undefined;
   let maiaReady: Promise<Maia3BrowserEvaluator> | undefined;
   let sequence = 0;
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; progress: (text: string) => void }>();
@@ -72,10 +73,11 @@ export function createCriticalEngines(
         for (const request of pending.values()) request.reject(new Error(event.message || 'Lc0 worker failed.'));
         pending.clear();
       });
-      lc0Ready = post<{ backend: string }>(
+      lc0Ready = post<{ backend: string; servedModelUrl?: string }>(
         {
           type: 'init',
           modelUrl: CRITICAL_LC0_MODEL,
+          deviceModelSelection: true,
           ep: 'auto',
           runtime: 'onnx',
           cacheModel: true,
@@ -107,6 +109,9 @@ export function createCriticalEngines(
   };
   const lc0Provenance: CriticalProvenance = {
     engine: 'Lc0 Small',
+    // Replaced by the model this job's worker actually loaded (the split-K
+    // rewrite on Apple WebGPU) in prepare(), before any cache lookup, so the
+    // report cache key never mixes results from the two models.
     model: CRITICAL_LC0_MODEL,
     build: 't1-256x10-distilled-swa-2432500 · QDQ8',
     runtime: 'ORT auto (WebGPU / WASM)',
@@ -140,6 +145,18 @@ export function createCriticalEngines(
       id: 'lc0',
       row: { family: 'lc0', variant: 'small', strength: 400 },
       provenance: lc0Provenance,
+      prepare: (_signal, progress) =>
+        protectedWork('critical-lc0', async (operationSignal) => {
+          const abort = () => stopWorker();
+          operationSignal.addEventListener('abort', abort, { once: true });
+          try {
+            progress('Loading Lc0 Small');
+            const ready = await initLc0(progress);
+            lc0Provenance.model = ready.servedModelUrl ?? CRITICAL_LC0_MODEL;
+          } finally {
+            operationSignal.removeEventListener('abort', abort);
+          }
+        }),
       evaluate: (moment, _signal, progress) =>
         protectedWork('critical-lc0', async (operationSignal) => {
           const abort = () => stopWorker();
@@ -147,6 +164,7 @@ export function createCriticalEngines(
           try {
             progress('Loading Lc0 Small');
             const ready = await initLc0(progress);
+            lc0Provenance.model = ready.servedModelUrl ?? CRITICAL_LC0_MODEL;
             const response = await post<{ result: Lc0SearchLike }>(
               {
                 type: 'search',
@@ -174,7 +192,7 @@ export function createCriticalEngines(
     const provenance: CriticalProvenance = {
       engine: 'Maia3',
       model: MAIA3_DEFAULT_MODEL_URL,
-      build: 'maia3_simplified QDQ8 (fp16 fallback)',
+      build: 'maia3_simplified QDQ8 einsum,promo graph rewrite (QDQ8, then fp16 fallback)',
       runtime: 'ORT auto',
       budget: '1 policy inference',
       options: `self ${rating}; opponent ${rating}; temperature 1; WASM threads 1`,

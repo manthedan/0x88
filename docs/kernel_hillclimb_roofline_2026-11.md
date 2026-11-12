@@ -385,9 +385,15 @@ Ranked by expected effect per unit of work:
    throughput** with no kernel work. The paired re-check (ABAB in one page
    session, candidate `ort-lc0-small-ab-b8`) gives 5.4× per-position wall
    [5.1-5.5] and 4.6× per-position GPU busy. The cost is search-side: collisions and
-   virtual loss at low visit counts, which needs a strength A/B. This beats every
-   kernel candidate for the default engine. It also compounds with #1, because
-   at b8 the GEMMs leave the M ≤ 64 regime.
+   virtual loss at low visit counts. That strength cost was already measured: the
+   October re-gate ([batching_strength_2026-10.md](batching_strength_2026-10.md),
+   arm B2) found search batch 8 losing to the shipped search batch 1 at equal
+   visits (about −300 Elo at 8 visits, −69 at 32; the 100-visit match stopped
+   partway, also negative), and the owner stopped that line. That record is not
+   evidence about higher visit counts: 400 visits never ran, and neither did an
+   equal-time match, which is the comparison that could turn this throughput
+   into strength. Until one runs, this is a measured speed, not a lever.
+   It would compound with #1, because at b8 the GEMMs leave the M ≤ 64 regime.
 2. **Maia3 graph fixes.**
    - Rewrite `Einsum bhi,oi->bho` as a MatMul against a pre-transposed weight:
      about −19 ms per grid call (53 → ~35 ms) and −1 ms per move.

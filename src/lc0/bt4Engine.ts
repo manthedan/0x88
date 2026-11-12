@@ -193,7 +193,11 @@ export async function probeBt4Support(): Promise<boolean> {
         return supportedCached;
       }
       const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
-      supportedCached = diag.webgpuAvailable === true && diag.adapter?.ok !== false;
+      // An adapter without shader-f16 cannot run the f16 nets, and the worker
+      // (ep 'auto') resolves to WASM there. Read the adapter itself rather than
+      // this page's resolved providers: a strict ?ep=webgpu page keeps
+      // ['webgpu'] while the worker still picks WASM.
+      supportedCached = diag.webgpuAvailable === true && diag.adapter?.ok !== false && diag.adapter?.shaderF16 !== false;
     } catch {
       supportedCached = false;
     }

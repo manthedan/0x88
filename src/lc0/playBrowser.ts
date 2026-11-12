@@ -41,10 +41,10 @@ import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineReside
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { CENTIPAWN_NET_HISTORY_POSITIONS, type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
+import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, Maia3BrowserEvaluator, type Maia3MoveStyle } from './maia3.ts';
-import { loadLc0ModelForOrt } from './modelCache.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import {
   displayedPly,
@@ -56,7 +56,7 @@ import {
   searchProgressLabel,
   viewPlyFor,
 } from './moveNavigation.ts';
-import { CachedLc0Evaluator, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { CachedLc0Evaluator } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
 import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import { playMaterial } from './playMaterial.ts';
@@ -72,7 +72,12 @@ import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './wo
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
+// v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
+  DEFAULT_MODEL_URL,
+  isV0DeployProfile() ? null : params.get('model'),
+  resolvePublicAssetUrl,
+);
 const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.onnx');
 const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.meta.json');
 const CENTIPAWN_TVMJS_MANIFEST_URL = resolvePublicAssetUrl('/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json');
@@ -537,15 +542,19 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
     const uiGeneration = ctx.enginePreparationGeneration;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Lc0 small net…');
     lc0LoadPromise = (async () => {
-      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, {
-        cache: true,
-        requestPersistentStorage: true,
-        onProgress: (loaded, total) => {
-          if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Lc0 small net', loaded, total);
+      // Download progress hides only once the session exists: on Apple WebGPU a
+      // failed session reloads the original model for its WASM fallback.
+      const { evaluator } = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
+        deviceSelection: LC0_DEVICE_MODEL_SELECTION,
+        load: {
+          cache: true,
+          requestPersistentStorage: true,
+          onProgress: (loaded, total) => {
+            if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Lc0 small net', loaded, total);
+          },
         },
       });
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxHideDownloadProgress();
-      const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
       lc0Searcher = new Lc0PuctSearcher(new CachedLc0Evaluator(evaluator, { maxEntries: 2048 }));
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
       return lc0Searcher;

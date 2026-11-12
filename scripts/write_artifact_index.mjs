@@ -64,7 +64,8 @@ const MODEL_GROUPS = [
     versionOrSource: 't1-256x10-distilled-swa-2432500',
     manifest: 'public/models/lc0/manifest.json',
     prefix: 't1-256x10-distilled-swa-2432500.',
-    notes: 'Default Lc0 network: Analysis, Arena and Play load the batch-1 f16 QDQ8 export by default; the lc0web pack serves the opt-in custom WebGPU path.',
+    notes:
+      'Default Lc0 network: Analysis, Arena and Play load the batch-1 f16 QDQ8 export by default, or its split-K rewrite (batch1.f16.qdq8.splitk) when ORT runs on WebGPU with an Apple adapter; the lc0web pack serves the opt-in custom WebGPU path.',
   },
   {
     id: 'lc0-t3',
@@ -128,7 +129,7 @@ const MODEL_GROUPS = [
     manifest: 'public/models/maia3/manifest.json',
     prefix: 'maia3_simplified.',
     provenancePath: 'docs/model_provenance/maia3.md',
-    notes: 'Play and the Analysis Human tab load the locally derived QDQ8 file by default and fall back to the upstream fp16 file.',
+    notes: 'Play and the Analysis Human tab load the graph-rewritten QDQ8 file by default and fall back to the plain QDQ8 file, then the upstream fp16 file.',
   },
 ];
 

@@ -1,25 +1,25 @@
 {
-  "source": "/releases/2026-11-09.engine-upgrades.1.json",
+  "source": "/releases/2026-11-12.kernel-releases.1.json",
   "schema": "lc0_browser.artifact_release_manifest.v2",
   "artifacts": {
     "/berserk/berserk-emscripten-relaxed-simd128.js": {
       "raw": {
-        "bytes": 66451,
-        "sha256": "87805af5371be3fc0cb6a32ec844458a409a86b1878f48ae74279be433d88d6f"
+        "bytes": 66468,
+        "sha256": "20c5907ba8edcc554f7d39e91f2444dc34e51fae0100cdae3ff326cd4eef1c0c"
       },
       "br": {
-        "sha256": "4b2b416ce6a757da5acfbb3c720c3886cd287122572ea7264b71bbabbcec76cf",
-        "bytes": 18014
+        "sha256": "de518066799d5e3dfab3f304a2cf596f04cb463a95d15c27f46aad05f503e25b",
+        "bytes": 18051
       }
     },
     "/berserk/berserk-emscripten-relaxed-simd128.wasm": {
       "raw": {
-        "bytes": 131480,
-        "sha256": "0add80acd95319f51c60f152a2d4f44ae1f6c622f5b2752cc5235fe1709418bb"
+        "bytes": 142181,
+        "sha256": "0b5ebb07a098c3404c21b69b03d68823fe6c6933a8c6a75c5605de865df77493"
       },
       "br": {
-        "sha256": "5537b03ae814db68eadbb5ee8c962f5cc795ba03860e81f7bb1eb10b4abdd4ea",
-        "bytes": 55217
+        "sha256": "b7f3960d1a7fa0dbf7c812cf93ccab384ea508fc256d85590bd3a281476f8fb8",
+        "bytes": 58847
       }
     },
     "/berserk/berserk-emscripten-simd128.js": {
