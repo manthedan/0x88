@@ -77,6 +77,7 @@ function playHarness(run) {
     const ctxSetEngineNote = () => {}, ctxDisarmResign = () => {}, ctxDisarmNewGame = () => {}, ctxPrepareOrStartEngine = () => {};
     const ctxPersistPlayPreferences = () => {}, ctxRestoreSelectedRuntimeWarning = () => {}, evictInactiveCpuEngines = () => {};
     const lc0Searcher = null, BIG_NET_KEYS = [];
+    const pendingCpuNewGames = { markAll() {} }, cpuEnginePromises = new Map();
     ${stripTypeScriptTypes(lifecycle + apply + reset + newGame + render + init + autosave + handler)}
     ctxResetGameStateForMount(ctx); ctxRender(ctx); ctx.autosave.flush();
     return {useStartingPosition: () => useStartingPosition(), newGame: () => ctxNewGame(ctx), render: () => ctxRender(ctx)};
