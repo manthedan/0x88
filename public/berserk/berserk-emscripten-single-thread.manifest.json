@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-11-11T23:53:08.927Z",
+  "generatedAt": "2026-11-12T07:25:28.521Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "berserk",
   "flavor": "emscripten-single-thread",
@@ -157,8 +157,8 @@
   "sourceArchive": {
     "required": true,
     "path": "public/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
-    "bytes": 18478288,
-    "sha256": "d763a4d0a5afb3ab4079794bbf88d0bcf0ffc0d4cdf0bcf45996c3dcd83faee1",
+    "bytes": 18480277,
+    "sha256": "ba5b5ab2e3a4ba9345ecf3cf9a578ee8acff4b5cd39ff69bca351ba49199fe3b",
     "url": "/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

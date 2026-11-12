@@ -11,7 +11,7 @@
 
 The Berserk builder defaults LTO on only when `BERSERK_WASM_RELAXED_SIMD=1`, the already-promoted tier measured here. Its optimization level remains `-O2`; scalar and regular SIMD fallback defaults remain unchanged. `BERSERK_EMSCRIPTEN_LTO=0` restores the previous build. All three builders accept explicit `<ENGINE>_EMSCRIPTEN_LTO=1` independently of their existing `<ENGINE>_EMSCRIPTEN_OPT` knob. `-flto` is passed at compilation and linking in the single Emscripten invocation; this is full LTO, not ThinLTO.
 
-**Staged in the repo, not yet published (2026-11-11).** The committed relaxed-tier JS/WASM are now the `-O2 -flto` build, and the source archive and manifest were regenerated with them. Production keeps serving the no-LTO relaxed files until the next engine release.
+**Staged in the repo, not yet published (2026-11-11; archive and manifest regenerated 2026-11-12 on the release branch).** The committed relaxed-tier JS/WASM are now the `-O2 -flto` build, and the source archive and manifest were regenerated with them. The archive is not byte-reproducible (its hash changes between runs), so always regenerate the manifest after the final archive. Production keeps serving the no-LTO relaxed files until the next engine release.
 
 ### Release note: what the next release must upload
 
@@ -23,8 +23,8 @@ Four logical files change. Nothing else in the Berserk family (scalar, SIMD128, 
 |---|---|---|
 | `/berserk/berserk-emscripten-relaxed-simd128.wasm` | 142181 | `0b5ebb07a098c3404c21b69b03d68823fe6c6933a8c6a75c5605de865df77493` |
 | `/berserk/berserk-emscripten-relaxed-simd128.js` | 66468 | `20c5907ba8edcc554f7d39e91f2444dc34e51fae0100cdae3ff326cd4eef1c0c` |
-| `/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz` | 18478288 | `d763a4d0a5afb3ab4079794bbf88d0bcf0ffc0d4cdf0bcf45996c3dcd83faee1` |
-| `/berserk/berserk-emscripten-single-thread.manifest.json` | 5885 | `c6d0a671850268d33c36015363aee3b4c83cb2aab63a3c0bcab038d3116a6cf9` |
+| `/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz` | 18480277 | `ba5b5ab2e3a4ba9345ecf3cf9a578ee8acff4b5cd39ff69bca351ba49199fe3b` |
+| `/berserk/berserk-emscripten-single-thread.manifest.json` | 5885 | `bdb156c3883b84a8af278224f4c52d406d8b6b21e77d69c5e12827fbaed76593` |
 
 A local staging run of `write_artifact_release_manifests.mjs --base-release <2026-11-09.engine-upgrades.1.json> --manifest public/berserk/berserk-emscripten-single-thread.manifest.json` gave exactly those four as the changed entries. They are 8 new content-addressed objects (`identity` and `br` for each) under `artifacts/sha256/<sha>/`. Upload those 8, then the new release manifest, then flip `channels/stable.json` last, following the normal engine publish steps. The wasm, glue, archive and manifest must go up together; the archive includes the adapter sources at this commit, so regenerate archive and manifest together if `src/lc0/berserkEngine.ts` or another archived file changes before release.
 
