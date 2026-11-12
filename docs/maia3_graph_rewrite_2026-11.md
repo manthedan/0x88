@@ -149,9 +149,39 @@ Einsums take 26.0 ms of 78.7 ms in the shipped model, and 1.0 ms after the
 rewrite (that 1.0 ms is the remaining `bid,bjd->bij`). At b1 the gain is small
 because the kernel is launch-bound. The promo fix is what moves b1.
 
-Yukon (RTX 3090, Vulkan) was not measured. Both submissions were refused
-because another 0x88 job was already waiting in the shared queue, and the
-retry window ran out before this record was written.
+### RTX 3090 (Yukon, Chrome/Vulkan), b1
+
+Measured after the release (2026-11-12, gpu-queue job 677,
+`artifacts/kernel-hillclimb/results/yukon/maia3-graph-paired.json`). The run
+used the runner's Yukon flags (Vulkan/ANGLE plus
+`--enable-dawn-features=vulkan_enable_f16_on_nvidia`; stock Chrome on
+Linux/NVIDIA has no `shader-f16`, and Maia3 runs on WASM there). It was a
+paired b1 A/B with 20 rounds, block 3 and `parity=wasm`. The runner marked
+the timing valid (GPU idle at start), although other processes used about 15
+CPU cores on average during the run. The grid (`ort-maia3-grid-ab-graph`) was
+not run.
+
+| per position | graph | shipped qdq8 | graph / shipped |
+|---|---|---|---|
+| wall median (MAD) | 19.87 ms (1.05) | 23.93 ms (2.36) | **0.87** (MAD 0.07, p10-p90 0.75-0.99) |
+| GPU busy median (MAD) | 5.93 ms (0.36) | 8.24 ms (0.54) | **0.72** |
+
+So the graph model is about 1.15× faster per b1 position on wall time and
+uses 28% less GPU time. That is a smaller wall gain than on the M4 (0.76) but
+the same direction.
+
+Gate, against the ORT WASM reference:
+- The graph model passes. Value logits max-abs 0.142 (ceiling 0.15), move
+  logits 0.594 (ceiling 1.3), legal-prob max 0.0296, best move 39/40, with
+  the one miss a tolerated tie.
+- The old qdq8 model, as arm B, fails the value ceiling: 0.158 against
+  0.15. Its legal-policy check passes (legal-prob max 0.0287, best move
+  39/40).
+
+Both models sit near the b1 value ceiling on this GPU, and the new default
+is the closer of the two. The old model is now only the second fallback, so
+this is not a release regression. The runner reported `ok: false` because
+arm B failed its gate. The arm-A gate and the timing are valid.
 
 ## 5. Verdicts
 
@@ -191,7 +221,8 @@ sha256 `3be705330f38fb0309c82e0ea2f95734ee6bd14fd72eabbad694356bba443246`.
      pass, and both match the §3 numbers.
    - Then the paired `ort-maia3-ab-graph` / `ort-maia3-grid-ab-graph` on at
      least one non-Apple GPU (Yukon). This one runs outside the release
-     branch.
+     branch. The b1 pair ran on the RTX 3090 after the release: graph / shipped
+     wall 0.87, gate pass (§4). The grid pair has not been run.
 3. `public/models/maia3/manifest.json` has the entry (file, url, bytes,
    sha256, `derivedFrom: "maia3_simplified.qdq8.onnx"`,
    `rewritePasses: "einsum,promo"`). `scripts/stage_maia3_assets.mjs` derives
