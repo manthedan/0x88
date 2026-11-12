@@ -114,8 +114,9 @@ try {
 }
 
 // Refuse before any ssh/rsync/queue call: the default excludes precede --include rules, so an
-// include naming a model file (or other excluded item) would otherwise sync nothing.
-if (args.include && !args.fetch && !args['with-models']) {
+// include naming a model file (or other excluded item) would otherwise sync nothing. Local runs
+// serve --dist in place and never apply the excludes.
+if (hostName !== 'local' && args.include && !args.fetch && !args['with-models']) {
   const blocked = excludedIncludes(String(args.include).split(','), DEFAULT_EXCLUDES);
   if (blocked.length) die(`--include ${blocked.join(',')} names files the default excludes drop (model blobs, source maps); add --with-models`);
 }

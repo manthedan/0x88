@@ -94,9 +94,11 @@ function inside(root, p) {
  * Include patterns that name something the default excludes drop. rsync takes the first matching
  * rule and the default excludes come before the includes, so such an include silently syncs
  * nothing (a page then fails to load its model). A pattern names an excluded item when one of its
- * path segments is an excluded directory (exclude ending in `/`, e.g. `models/`), or is a literal
- * file name (no wildcard) that an exclude glob matches (e.g. `net.onnx`). Broad globs such as
- * `assets/**` are not flagged: the default excludes are meant to apply inside them.
+ * path segments, read as a literal string, matches an exclude glob: an excluded directory (exclude
+ * ending in `/`, e.g. `models/`) or an excluded file glob (e.g. `net.onnx`, `*.onnx`,
+ * `params_shard_*.bin`). The pattern's own wildcards can only match the exclude's `*` spans, so a
+ * flagged segment loses every file it could match. Broad globs such as `assets/**` or `x/*` are not
+ * flagged: the default excludes are meant to apply inside them.
  */
 export function excludedIncludes(includes, excludes) {
   const toRe = (glob) =>
@@ -113,7 +115,7 @@ export function excludedIncludes(includes, excludes) {
       .replace(/^\/+/, '')
       .split('/')
       .filter(Boolean)
-      .some((seg) => dirs.some((re) => re.test(seg)) || (!/[*?[]/.test(seg) && files.some((re) => re.test(seg)))),
+      .some((seg) => dirs.some((re) => re.test(seg)) || files.some((re) => re.test(seg))),
   );
 }
 

@@ -385,6 +385,10 @@ test('includes that name excluded items are flagged; broad globs and look-alike 
     'kernels/foo.ptx',
     'p/params_shard_manifest.json',
     'x/*.onnx',
+    'nets/params_shard_*.bin',
+    'x/*',
+    'x/*.json',
+    'x/net.onnx*',
   ];
   assert.deepEqual(excludedIncludes(includes, excludes), [
     'models/lc0/manifest.json',
@@ -394,6 +398,8 @@ test('includes that name excluded items are flagged; broad globs and look-alike 
     'reckless/net.nnue',
     'nets/t1.lc0web/model.lc0web.json',
     'p/params_shard_3.bin',
+    'x/*.onnx',
+    'nets/params_shard_*.bin',
   ]);
 });
 
@@ -416,5 +422,15 @@ test('run.mjs refuses a model --include without --with-models before any ssh, rs
   assert.equal(refused.status, 3);
   assert.match(refused.stderr + refused.stdout, /names files the default excludes drop.*--with-models/);
   assert.equal(existsSync(calls), false, 'no ssh or rsync call before the refusal');
+  // --host local serves --dist in place (no excludes), so the guard must not refuse it; with no
+  // --dist it stops at runLocal's own argument check instead.
+  const local = spawnSync(process.execPath, [RUN, '--host', 'local', '--page', 'x.html', '--include', 'models/lc0/m.onnx'], {
+    encoding: 'utf8',
+    timeout: 20000,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(local.status, 3);
+  assert.doesNotMatch(local.stderr + local.stdout, /default excludes drop/);
+  assert.match(local.stderr + local.stdout, /--dist and --page are required/);
   rmSync(dir, { recursive: true, force: true });
 });
