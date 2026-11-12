@@ -5,11 +5,12 @@ for Lc0 Small (`t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx`) at
 physical batch 1, without a custom kernel? This is option 1 of candidate #1 in
 [`kernel_hillclimb_roofline_2026-11.md`](kernel_hillclimb_roofline_2026-11.md) §5.
 
-**Verdict: yes.** A split-K rewrite of 97 MatMuls passes the existing ORT WASM
-parity gate unchanged. On the Apple M4 it is **~1.5× faster per invoke on wall
-time and ~1.95× on GPU busy time**, in paired ABAB runs. Product
-defaults, the shipped model and the manifest are unchanged. The release steps
-are at the end. The same rewrite for the smolgen compress GEMV in t3/BT4/LQO
+**Verdict: yes on the Apple M4, no on the RTX 3090.** A split-K rewrite of 97
+MatMuls passes the existing ORT WASM parity gate unchanged. On the Apple M4 it
+is **~1.5× faster per invoke on wall time and ~1.95× on GPU busy time**, in
+paired ABAB runs. On the RTX 3090 (Chrome/Vulkan) a paired run makes it
+**~1.46× slower on wall time** (§5). Since release
+2026-11-12.kernel-releases.1 it is served to Apple WebGPU sessions only (§9). The same rewrite for the smolgen compress GEMV in t3/BT4/LQO
 gives 4-8% per invoke.
 
 Setup matches the roofline doc: Apple M4 (10-core GPU, `apple / metal-3`),
@@ -196,8 +197,51 @@ inflates submit latency. The gate passed on all three repeats.
 
 ### RTX 3090 (Yukon, Chrome/Vulkan)
 
-Pending. The paired run is queued behind other projects' jobs on the shared
-GPU queue; this section will be filled when it completes.
+**Split-K is ~1.46× slower per position here.** Every run below used the
+runner's Yukon flags, which are not standard Chrome. They force Vulkan/ANGLE
+and add `--enable-dawn-features=vulkan_enable_f16_on_nvidia`. Without that
+flag, NVIDIA/Vulkan does not expose `shader-f16`, so ordinary Chrome users on
+this GPU do not get this configuration (see
+`scripts/kernel_hillclimb/remote/README.md`). In that default
+configuration the f16 nets cannot run on WebGPU at all. Since main 46d53f82
+the app sends them to WASM there.
+
+**Paired run** (`abRounds=10`, block 3, `parity=wasm`, no profiled invokes;
+`lc0small-splitk-paired.json`). The runner marked it `timingValid: true`
+(GPU idle at start), although other processes still used ~14.6 CPU cores on
+average. Rounds interleave the two models, so that load hits both sides:
+
+| per position | split-K | shipped | split-K / shipped |
+|---|---|---|---|
+| wall median (MAD) | 22.41 ms (4.54) | 15.50 ms (3.47) | **1.46** (MAD 0.11, p10-p90 1.22-1.75) |
+| GPU busy median (MAD) | 3.59 ms (1.41) | 5.71 ms (2.30) | (both noisy) |
+
+The ratio is stable even though the absolute times are noisy: every round
+had split-K slower (min ratio 1.16). The gate passed. The GPU-busy medians
+have a MAD near 40% of the median in this mode, so they are not a result.
+
+**Earlier unpaired solo runs** (30 timed iterations plus 5 profiled invokes;
+`lc0small-shipped-default.json`, `lc0small-splitk-solo.json`). Both were
+marked `timingValid: false` (GPU at 100% at job start, ~14-15 foreign CPU
+cores) and are kept only for the per-kernel profile:
+
+| model | wall median | GPU busy / invoke | dispatches / invoke | gate |
+|---|---|---|---|---|
+| shipped `batch1.f16.qdq8` | 9.86 ms (MAD 1.06) | 4.95 ms | 356 | pass |
+| split-K (`splitk-all`) | 15.07 ms | 4.78 ms | 595 | pass (legal-prob 0.009) |
+
+In that profile, net GPU busy time drops only ~3% across all kernels. The net
+figure hides large per-kernel changes in both directions. For example, the
+first smolgen dense1 goes from a 92.16 µs Gemm at `8x1x1` to a 9.22 µs MatMul
+at `8x1x16`. The added reshape/transpose/reduce/bias work and the 239 extra
+dispatches per invoke offset these gains. One explanation for the wall gap is
+the extra CPU-side encode and submit cost of those dispatches. That is a
+hypothesis; it was not measured.
+
+The first attempt, a 30-round paired A/B with default iterations, crashed
+Chrome's GPU process (`SEGV_ACCERR` about 30 s in), restarted it, and then hit
+the runner's 990 s deadline with no result. Neither model reproduced it alone,
+and the shorter 10-round paired run above finished without a crash.
 
 ### WASM EP (the fallback path)
 
@@ -286,11 +330,12 @@ roofline doc estimated. Its cost (ORT surgery or a hybrid runtime for every
 matmul) should be weighed against that smaller gain. The cheap next steps stay
 in-graph: drop the FFN-up split, and look at the remaining head Gemms.
 
-## 9. Release steps (not done here)
+## 9. Release steps
 
-**Status, branch `release/lc0-splitk`:** steps 1–3 and 6 are done in code.
-The R2 publish (step 5) is still pending, and so are the step 4 items listed
-under "Not yet run" below.
+**Status: released** in 2026-11-12.kernel-releases.1 (main 60a36d58), with
+steps 1–3, 5 and 6 done. The live site was checked on the M4: Lc0 Small
+fetched and cached the split-K artifact and analysed. The step 4 items listed
+under "Not yet run" below are still open.
 
 - **Artifact.** `t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.splitk.onnx`
   is 20,580,952 bytes, sha256
@@ -351,7 +396,10 @@ under "Not yet run" below.
    `r2-stable-present.manifest.json`), then run `npm run artifact-index`
    (`tests/artifact_index.test.mjs` checks it).
 3. **Select the model by execution provider.** The split-K model is 1.21×
-   slower on WASM (§5), so do not just swap the URL:
+   slower on WASM and 1.46× slower on the RTX 3090 WebGPU (§5). Do not just
+   swap the URL. The gain is device-specific, so a release also needs a
+   device condition (for example Apple adapters only), or a short on-device
+   timing probe, measured on more GPUs first:
    - Map the default Lc0 Small URL to the split-K URL only when the resolved
      ORT providers include `webgpu`. The resolution happens in
      `createOrtSession` (`src/nn/ortRuntime.ts`), or in a helper the callers
@@ -385,9 +433,9 @@ under "Not yet run" below.
    - then `npm run release:netlify-r2`.
 
    As always, publish to R2 before deploying the app shell.
-6. Update [`hosted_artifacts.md`](hosted_artifacts.md) (Lc0 Small row: the
-   WebGPU default becomes the split-K export, WASM keeps the plain QDQ8
-   export).
+6. Update [`hosted_artifacts.md`](hosted_artifacts.md) for the Lc0 Small row:
+   - WebGPU sessions on the devices selected in step 3 get the split-K export.
+   - Other WebGPU devices and WASM keep the plain QDQ8 export.
 
 ## Reproduce
 
