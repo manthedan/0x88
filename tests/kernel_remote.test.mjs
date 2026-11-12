@@ -2,17 +2,27 @@
 // host lock (kernel advisory lock, released when the holder dies), queue parsing,
 // idle gate, and the page error contract.
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync, rmSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { tmpdir, platform } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { platform, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { publish, settleProbe } from '../lab/kernel-hillclimb/probe-contract.mjs';
 import {
-  makeRunId, validateEstimate, q, resolveStatic, lockCommand, parseQueueList, idleVerdict,
-  waitForIdle, parseAgxClients, summarizeSamples, assessRun, timingValidity,
+  assessRun,
+  idleVerdict,
+  lockCommand,
+  makeRunId,
+  parseAgxClients,
+  parseQueueList,
+  q,
+  resolveStatic,
+  summarizeSamples,
+  timingValidity,
+  validateEstimate,
+  waitForIdle,
 } from '../scripts/kernel_hillclimb/remote/lib.mjs';
-import { settleProbe, publish } from '../lab/kernel-hillclimb/probe-contract.mjs';
 
 test('run ids are unique within the same second and shell-safe', () => {
   const now = new Date('2026-11-11T22:07:10.123Z');
@@ -62,7 +72,9 @@ test('static server resolves inside the root and refuses symlink escapes', () =>
     assert.equal(r('/dangling').status, 404);
     assert.equal(r('/missing.wasm').status, 404);
     assert.equal(r('/%E0%A4%A').status, 400);
-  } finally { rmSync(base, { recursive: true, force: true }); }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('lockCommand uses kernel advisory locks that exit 75 on timeout', () => {
@@ -87,9 +99,13 @@ test('host lock serializes, times out with 75, and is reclaimed when the holder 
     const waited = spawnSync(...splitCmd([...lockCommand(platform(), file, 10), 'true']));
     assert.equal(waited.status, 0, 'lock must be free once the holder was killed');
     await holderExit;
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
-function splitCmd(argv) { return [argv[0], argv.slice(1)]; }
+function splitCmd(argv) {
+  return [argv[0], argv.slice(1)];
+}
 
 test('gpu-queue list parsing finds queued 0x88 jobs and exit levels', () => {
   const txt = `ID   State      Output               E-Level  Times(r/u/s)   Command [run=1/1]
@@ -98,12 +114,15 @@ test('gpu-queue list parsing finds queued 0x88 jobs and exit levels', () => {
 10   finished   /tmp/ts-out.liAdZ3   1        361.95/350.17/37.72 [tiny-leela:tl2-preflight2:30m]/home/ddbb/.local/bin/gpu-queue _exec c -- d
 99   finished   /tmp/ts-out.x        75       0.01/0.00/0.00 [0x88:p:2.5m]/home/ddbb/.local/bin/gpu-queue _exec e -- f`;
   const rows = parseQueueList(txt);
-  assert.deepEqual(rows.map((r) => [r.id, r.state, r.elevel, r.label]), [
-    ['588', 'queued', null, '[0x88:device-probe:3m]'],
-    ['584', 'running', null, '[tiny-leela:tl2-s4fix-m:35m]'],
-    ['10', 'finished', '1', '[tiny-leela:tl2-preflight2:30m]'],
-    ['99', 'finished', '75', '[0x88:p:2.5m]'],
-  ]);
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.state, r.elevel, r.label]),
+    [
+      ['588', 'queued', null, '[0x88:device-probe:3m]'],
+      ['584', 'running', null, '[tiny-leela:tl2-s4fix-m:35m]'],
+      ['10', 'finished', '1', '[tiny-leela:tl2-preflight2:30m]'],
+      ['99', 'finished', '75', '[0x88:p:2.5m]'],
+    ],
+  );
 });
 
 test('idle gate never treats an unknown GPU reading as idle', () => {
@@ -129,9 +148,12 @@ test('page error contract: failures never publish a partial ok result', () => {
   ];
   for (const [over, re] of cases) {
     const o = settleProbe({ result: good, benchRequested: true, ...over });
-    assert.equal(o.ok, false); assert.match(o.error, re);
-    const win = {}; publish(win, o);
-    assert.equal(win.__kernelBenchResult, undefined); assert.match(win.__kernelBenchError, re);
+    assert.equal(o.ok, false);
+    assert.match(o.error, re);
+    const win = {};
+    publish(win, o);
+    assert.equal(win.__kernelBenchResult, undefined);
+    assert.match(win.__kernelBenchError, re);
   }
   // Adapter-only probe (bench=0): "no adapter" is a finding, not an error.
   const none = { webgpu: { available: false, reason: 'navigator.gpu missing' } };
@@ -140,8 +162,19 @@ test('page error contract: failures never publish a partial ok result', () => {
 
 // ---- idle wait deadline (review r2 #3) ----
 function fakeClock(start = 1_000_000) {
-  let t = start; const sleeps = [];
-  return { now: () => t, sleep: async (ms) => { sleeps.push(ms); t += ms; }, sleeps, get t() { return t; } };
+  let t = start;
+  const sleeps = [];
+  return {
+    now: () => t,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      t += ms;
+    },
+    sleeps,
+    get t() {
+      return t;
+    },
+  };
 }
 const IDLE_TH = { loadMax: 3, gpuMax: 10 };
 const idleRead = () => ({ load1: 0.5, gpuUtilPct: 0 });
@@ -161,15 +194,18 @@ test('idle hold completing at or before the deadline is accepted', async () => {
 });
 
 test('sleeps are bounded by the remaining wait budget', async () => {
-  const c = fakeClock(); const deadline = c.t + 45_000;
+  const c = fakeClock();
+  const deadline = c.t + 45_000;
   const r = await waitForIdle({ read: () => ({ load1: 9, gpuUtilPct: 0 }), th: IDLE_TH, deadline, holdMs: 60_000, pollMs: 30_000, now: c.now, sleep: c.sleep });
-  assert.equal(r.ok, false); assert.match(r.reason, /load1=9/);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /load1=9/);
   assert.deepEqual(c.sleeps, [30_000, 15_001]);
   assert.equal(c.t, deadline + 1);
 });
 
 test('a busy reading resets the hold', async () => {
-  const c = fakeClock(); let n = 0;
+  const c = fakeClock();
+  let n = 0;
   const read = () => (n++ === 3 ? { load1: 5, gpuUtilPct: 0 } : idleRead());
   const r = await waitForIdle({ read, th: IDLE_TH, deadline: c.t + 600_000, holdMs: 60_000, pollMs: 30_000, now: c.now, sleep: c.sleep });
   assert.equal(r.ok, true);
@@ -235,19 +271,28 @@ test('linux: every nvidia-smi failure is unverified, foreign compute apps are co
   assert.deepEqual([clean.contendedReasons, clean.unverifiedReasons], [[], []]); // loadavg ignored when not gated
   assert.match(run([lx(0, [], false), lx(1000, [], false)]).unverifiedReasons.join('|'), /2\/2 during-run GPU attribution/);
   assert.match(run([lx(0, []), lx(1000, ['4242 python 900'])]).contendedReasons.join('|'), /4242 python/);
-  assert.match(run([lx(0, []), lx(1000, [])], { loadavg: [0], gpu: { error: 'nvidia-smi: not found' } }).unverifiedReasons.join('|'), /gpu util unknown at start: nvidia-smi/);
+  assert.match(
+    run([lx(0, []), lx(1000, [])], { loadavg: [0], gpu: { error: 'nvidia-smi: not found' } }).unverifiedReasons.join('|'),
+    /gpu util unknown at start: nvidia-smi/,
+  );
   assert.match(run([lx(0, [])]).unverifiedReasons.join('|'), /only 1 during-run samples/);
 });
 
 test('summarizeSamples ignores failed samples for maxima but counts them', () => {
   const d = summarizeSamples([okCpu(0, 1.5), { t: 1, load1: 2, cpuOk: false, foreignCpuCores: null, gpuOk: false }]);
-  assert.equal(d.foreignCpuCoresMax, 1.5); assert.equal(d.cpuFailures, 1); assert.equal(d.gpuFailures, 2);
+  assert.equal(d.foreignCpuCoresMax, 1.5);
+  assert.equal(d.cpuFailures, 1);
+  assert.equal(d.gpuFailures, 2);
 });
 
 test('macOS: a short foreign GPU burst is caught per interval even when the run mean is low', () => {
   // 30 one-second intervals; a foreign client burns 2 s of GPU time across two intervals.
-  const s = []; let ns = 0;
-  for (let i = 0; i <= 30; i++) { if (i === 11 || i === 12) ns += 1e9; s.push(mac(i * 1000, { 'w/404': 0, 'm/9': ns })); }
+  const s = [];
+  let ns = 0;
+  for (let i = 0; i <= 30; i++) {
+    if (i === 11 || i === 12) ns += 1e9;
+    s.push(mac(i * 1000, { 'w/404': 0, 'm/9': ns }));
+  }
   const r = macRun(s);
   assert.ok(r.during.foreignGpuPct < 10, `mean ${r.during.foreignGpuPct}`);
   assert.equal(r.during.foreignGpuPctMax, 100);
@@ -275,11 +320,15 @@ test('timing validity needs positive evidence, including agent-side proof the id
 const RUN = join(dirname(fileURLToPath(import.meta.url)), '../scripts/kernel_hillclimb/remote/run.mjs');
 function fakeRemote(failOn) {
   const dir = mkdtempSync(join(tmpdir(), 'khc-fake-'));
-  const bin = join(dir, 'bin'); mkdirSync(bin); mkdirSync(join(dir, 'dist'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  mkdirSync(join(dir, 'dist'));
   writeFileSync(join(dir, 'dist', 'p.html'), '<p>');
   writeFileSync(join(bin, 'rsync'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   // The last ssh argument is the remote command.
-  writeFileSync(join(bin, 'ssh'), `#!/bin/sh
+  writeFileSync(
+    join(bin, 'ssh'),
+    `#!/bin/sh
 for a; do cmd=$a; done
 case "$cmd" in
   *${failOn}*) echo "Connection reset by peer" >&2; exit 255 ;;
@@ -288,22 +337,33 @@ case "$cmd" in
   *'command -v node'*) echo /usr/bin/node ;;
   *) exit 0 ;;
 esac
-`, { mode: 0o755 });
+`,
+    { mode: 0o755 },
+  );
   return { dir, bin };
 }
-for (const [host, failOn, extra] of [['yukon', "'gpu-queue submit'", []], ['mac-mini', 'nohup', ['--no-wait']]]) {
+for (const [host, failOn, extra] of [
+  ['yukon', "'gpu-queue submit'", []],
+  ['mac-mini', 'nohup', ['--no-wait']],
+]) {
   test(`${host}: ssh transport failure during launch exits 76 pending with the run id`, () => {
     const { dir, bin } = fakeRemote(failOn);
     try {
-      const r = spawnSync(process.execPath, [RUN, '--host', host, '--dist', join(dir, 'dist'), '--page', 'p.html', ...extra],
-        { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 30_000 });
+      const r = spawnSync(process.execPath, [RUN, '--host', host, '--dist', join(dir, 'dist'), '--page', 'p.html', ...extra], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        timeout: 30_000,
+      });
       assert.equal(r.status, 76, `exit ${r.status}\n${r.stderr}`);
       const j = JSON.parse(r.stdout);
-      assert.equal(j.pending, true); assert.equal(j.ok, false);
+      assert.equal(j.pending, true);
+      assert.equal(j.ok, false);
       assert.match(j.error, /ssh transport failed \(exit 255\)/);
       assert.match(j.runner.runId, /^\d{8}T\d{6}Z-p-[0-9a-f]{12}$/);
       assert.equal(j.runner.timingValid, false);
       assert.match(r.stderr, new RegExp(`--fetch ${j.runner.runId}`));
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 }

@@ -1,17 +1,26 @@
 // Pure helpers shared by run.mjs (controller) and agent.mjs (remote side).
 // Kept dependency-free and side-effect-free so tests/kernel_remote.test.mjs can cover them.
+
+import { randomBytes } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
-import { randomBytes } from 'node:crypto';
 
 /** Collision-resistant run id: UTC second + slug + 48 random bits. */
 export function makeRunId(name, now = new Date(), rand = () => randomBytes(6).toString('hex')) {
-  const ts = now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const ts = now
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d+Z$/, 'Z');
   return `${ts}-${slug(name)}-${rand()}`;
 }
 
 export function slug(s) {
-  return String(s).replace(/\.[a-z]+$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 40) || 'page';
+  return (
+    String(s)
+      .replace(/\.[a-z]+$/i, '')
+      .replace(/[^A-Za-z0-9_.-]+/g, '-')
+      .slice(0, 40) || 'page'
+  );
 }
 
 /** gpu-queue -e value: a positive number of minutes, returned as a canonical string. */
@@ -24,7 +33,9 @@ export function validateEstimate(v) {
 }
 
 /** POSIX single-quote for a remote shell. */
-export function q(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+export function q(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
 
 /**
  * Map a request path to a regular file inside rootReal (already realpath'd).
@@ -34,16 +45,28 @@ export function q(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
  */
 export function resolveStatic(rootReal, urlPath) {
   let p;
-  try { p = decodeURIComponent(new URL(urlPath, 'http://x').pathname); } catch { return { status: 400 }; }
+  try {
+    p = decodeURIComponent(new URL(urlPath, 'http://x').pathname);
+  } catch {
+    return { status: 400 };
+  }
   if (p.includes('\0')) return { status: 400 };
   const lexical = normalize(join(rootReal, p));
   if (!inside(rootReal, lexical)) return { status: 403 };
   for (const cand of candidates(lexical)) {
     let real;
-    try { real = realpathSync(cand); } catch { continue; } // missing or dangling
+    try {
+      real = realpathSync(cand);
+    } catch {
+      continue;
+    } // missing or dangling
     if (!inside(rootReal, real)) return { status: 403 };
     let st;
-    try { st = statSync(real); } catch { continue; }
+    try {
+      st = statSync(real);
+    } catch {
+      continue;
+    }
     if (st.isFile()) return { file: real, size: st.size };
   }
   return { status: 404 };
@@ -51,12 +74,16 @@ export function resolveStatic(rootReal, urlPath) {
 function candidates(lexical) {
   const out = [];
   let isDir = false;
-  try { isDir = statSync(lexical).isDirectory(); } catch {}
+  try {
+    isDir = statSync(lexical).isDirectory();
+  } catch {}
   if (isDir) out.push(join(lexical, 'index.html'));
   else out.push(lexical, `${lexical}.html`);
   return out;
 }
-function inside(root, p) { return p === root || p.startsWith(root.endsWith(sep) ? root : root + sep); }
+function inside(root, p) {
+  return p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
+}
 
 /**
  * Host lock wrapper. A kernel advisory lock (BSD lockf(1) on macOS, util-linux
@@ -71,12 +98,17 @@ export function lockCommand(platform, lockFile, timeoutS) {
 
 /** Parse `gpu-queue list` (task-spooler `tsp -l`) rows. */
 export function parseQueueList(txt) {
-  return txt.split('\n').slice(1).filter(Boolean).map((l) => {
-    const m = l.match(/^(\d+)\s+(\w+)\s+(\S+)\s+(?:(-?\d+)\s+(\S+)\s+)?(.*)$/);
-    if (!m) return null;
-    const label = (m[6].match(/\[[^\]]*:[^\]]*:[\d.]+m\]/) ?? [''])[0];
-    return { id: m[1], state: m[2], elevel: m[4] ?? null, label, raw: l };
-  }).filter(Boolean);
+  return txt
+    .split('\n')
+    .slice(1)
+    .filter(Boolean)
+    .map((l) => {
+      const m = l.match(/^(\d+)\s+(\w+)\s+(\S+)\s+(?:(-?\d+)\s+(\S+)\s+)?(.*)$/);
+      if (!m) return null;
+      const label = (m[6].match(/\[[^\]]*:[^\]]*:[\d.]+m\]/) ?? [''])[0];
+      return { id: m[1], state: m[2], elevel: m[4] ?? null, label, raw: l };
+    })
+    .filter(Boolean);
 }
 
 /**
@@ -96,12 +128,26 @@ export function idleVerdict({ load1, gpuUtilPct }, { loadMax, gpuMax }) {
  * sleep is bounded by the remaining budget, so nothing starts after the deadline.
  * Returns { ok, polls, last, reason, waitedMs }. Clock and sleep are injectable for tests.
  */
-export async function waitForIdle({ read, th, deadline, holdMs, pollMs, okPollMs = Math.min(pollMs, 10_000),
-  verdict = idleVerdict, now = Date.now, sleep, log = () => {} }) {
+export async function waitForIdle({
+  read,
+  th,
+  deadline,
+  holdMs,
+  pollMs,
+  okPollMs = Math.min(pollMs, 10_000),
+  verdict = idleVerdict,
+  now = Date.now,
+  sleep,
+  log = () => {},
+}) {
   const t0 = now();
-  let idleSince = null, polls = 0, last = null, reason = null;
+  let idleSince = null,
+    polls = 0,
+    last = null,
+    reason = null;
   while (true) {
-    last = read(); polls++;
+    last = read();
+    polls++;
     const v = verdict(last, th);
     const t = now();
     if (t > deadline) return { ok: false, polls, last, reason: v.reason ?? `hold of ${holdMs / 1000}s not completed`, waitedMs: t - t0 };
@@ -109,7 +155,8 @@ export async function waitForIdle({ read, th, deadline, holdMs, pollMs, okPollMs
       idleSince ??= t;
       if (t - idleSince >= holdMs) return { ok: true, polls, last, reason: null, waitedMs: t - t0 };
     } else {
-      idleSince = null; reason = v.reason;
+      idleSince = null;
+      reason = v.reason;
       log(`waiting for idle (${reason}): load1=${last?.load1} gpu=${last?.gpuUtilPct}% waited ${Math.round((t - t0) / 1000)}s`);
     }
     // +1 ms: wake just past the deadline so the next poll returns the busy outcome.
@@ -124,7 +171,9 @@ export async function waitForIdle({ read, th, deadline, holdMs, pollMs, okPollMs
  */
 export function parseAgxClients(txt) {
   const out = [];
-  for (const block of String(txt).split(/^\+-o /m).slice(1)) {
+  for (const block of String(txt)
+    .split(/^\+-o /m)
+    .slice(1)) {
     const id = block.match(/\bid (0x[0-9a-f]+)/i)?.[1];
     const pid = Number(block.match(/"IOUserClientCreator" = "pid (\d+)/)?.[1]);
     if (!id || !Number.isFinite(pid)) continue;
@@ -146,27 +195,43 @@ export function parseAgxClients(txt) {
 export function summarizeSamples(xs) {
   const cpu = xs.filter((x) => x.cpuOk).map((x) => x.foreignCpuCores);
   const gpu = xs.filter((x) => x.gpuOk);
-  let foreignGpuPct = null, foreignGpuTop = [], foreignGpuPctMax = null, foreignGpuPeakAt = null;
+  let foreignGpuPct = null,
+    foreignGpuTop = [],
+    foreignGpuPctMax = null,
+    foreignGpuPeakAt = null;
   const cl = gpu.filter((x) => x.foreignGpuClients);
   // Per-interval utilisation between consecutive valid samples: a short foreign burst must
   // not hide in the whole-run average. A client absent from the previous sample started
   // during the interval and counts from 0.
   for (let i = 1; i < cl.length; i++) {
-    const a = cl[i - 1], b = cl[i], dt = b.t - a.t;
+    const a = cl[i - 1],
+      b = cl[i],
+      dt = b.t - a.t;
     if (!(dt > 0)) continue;
     let ns = 0;
     for (const [id, v] of Object.entries(b.foreignGpuClients)) ns += Math.max(0, v - (a.foreignGpuClients[id] ?? 0));
     const pct = +(ns / 1e4 / dt).toFixed(2);
-    if (foreignGpuPctMax === null || pct > foreignGpuPctMax) { foreignGpuPctMax = pct; foreignGpuPeakAt = b.t; }
+    if (foreignGpuPctMax === null || pct > foreignGpuPctMax) {
+      foreignGpuPctMax = pct;
+      foreignGpuPeakAt = b.t;
+    }
   }
   if (cl.length >= 2) {
-    const first = cl[0], last = cl[cl.length - 1], seen = new Map();
-    for (const s of cl) for (const [id, ns] of Object.entries(s.foreignGpuClients)) {
-      const e = seen.get(id);
-      if (e) { e.last = ns; } else seen.set(id, { first: s === first ? ns : 0, last: ns });
-    }
+    const first = cl[0],
+      last = cl[cl.length - 1],
+      seen = new Map();
+    for (const s of cl)
+      for (const [id, ns] of Object.entries(s.foreignGpuClients)) {
+        const e = seen.get(id);
+        if (e) {
+          e.last = ns;
+        } else seen.set(id, { first: s === first ? ns : 0, last: ns });
+      }
     const ms = last.t - first.t;
-    const per = [...seen].map(([id, e]) => [id, Math.max(0, e.last - e.first)]).filter(([, ns]) => ns > 0).sort((a, b) => b[1] - a[1]);
+    const per = [...seen]
+      .map(([id, e]) => [id, Math.max(0, e.last - e.first)])
+      .filter(([, ns]) => ns > 0)
+      .sort((a, b) => b[1] - a[1]);
     const ns = per.reduce((a, [, n]) => a + n, 0);
     if (ms > 0) {
       foreignGpuPct = +(ns / 1e4 / ms).toFixed(2); // ns / 1e6 / ms * 100
@@ -174,12 +239,17 @@ export function summarizeSamples(xs) {
     }
   }
   return {
-    samples: xs.length, cpuFailures: xs.length - cpu.length, gpuFailures: xs.length - gpu.length,
+    samples: xs.length,
+    cpuFailures: xs.length - cpu.length,
+    gpuFailures: xs.length - gpu.length,
     load1Max: xs.length ? Math.max(...xs.map((x) => x.load1)) : null,
     foreignCpuCoresMax: cpu.length ? Math.max(...cpu) : null,
     foreignCpuCoresMean: cpu.length ? +(cpu.reduce((a, b) => a + b, 0) / cpu.length).toFixed(2) : null,
     foreignGpuApps: [...new Set(gpu.flatMap((x) => x.foreignGpuApps ?? []))],
-    foreignGpuPct, foreignGpuPctMax, foreignGpuPeakAt, foreignGpuTop,
+    foreignGpuPct,
+    foreignGpuPctMax,
+    foreignGpuPeakAt,
+    foreignGpuTop,
   };
 }
 
@@ -192,17 +262,24 @@ export function summarizeSamples(xs) {
  */
 export function assessRun({ platform, samples, loadStart, loadEnd, gated, th }) {
   const d = summarizeSamples(samples);
-  const contended = [], unverified = [];
+  const contended = [],
+    unverified = [];
   if (d.samples < 2) unverified.push(`only ${d.samples} during-run samples`);
   if (d.cpuFailures) unverified.push(`${d.cpuFailures}/${d.samples} during-run CPU samples failed`);
   if (d.gpuFailures) unverified.push(`${d.gpuFailures}/${d.samples} during-run GPU attribution samples failed`);
   if (d.foreignGpuApps.length) contended.push(`foreign GPU compute apps during run: ${d.foreignGpuApps.join('; ')}`);
   if (platform === 'darwin') {
     if (d.foreignGpuPctMax === null) unverified.push('no attributable GPU reading during run');
-    else if (d.foreignGpuPctMax >= th.gpuMax) contended.push(`foreign GPU peaked at ${d.foreignGpuPctMax}% >= ${th.gpuMax}% in one sampling interval (run mean ${d.foreignGpuPct}%; ${d.foreignGpuTop.join(', ')})`);
+    else if (d.foreignGpuPctMax >= th.gpuMax)
+      contended.push(
+        `foreign GPU peaked at ${d.foreignGpuPctMax}% >= ${th.gpuMax}% in one sampling interval (run mean ${d.foreignGpuPct}%; ${d.foreignGpuTop.join(', ')})`,
+      );
   }
   const util = (g) => g?.utilGpuPct ?? g?.deviceUtilPct ?? null;
-  for (const [tag, l] of [['start', loadStart], ['end', loadEnd]]) {
+  for (const [tag, l] of [
+    ['start', loadStart],
+    ['end', loadEnd],
+  ]) {
     const g = util(l?.gpu);
     if (g === null || !Number.isFinite(g)) unverified.push(`gpu util unknown at ${tag}${l?.gpu?.error ? `: ${l.gpu.error}` : ''}`);
     else if (g >= th.gpuMax) contended.push(`gpu util ${g}% >= ${th.gpuMax}% at ${tag}`);
