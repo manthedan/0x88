@@ -142,7 +142,9 @@ async function launch(home, runId, remoteDir) {
     const admit = [
       `exec 9>>${q(`${home}/${H.base}/.submit.flock`)}`,
       'flock -w 300 9 || { echo ADMISSION_LOCK_TIMEOUT; exit 5; }',
-      `if gpu-queue list | awk '$2=="queued"' | grep -qF '[0x88:'; then echo ALREADY_WAITING; exit 4; fi`,
+      // A failed list must abort admission, not read as "nothing waiting".
+      `qlist=$(gpu-queue list) || { echo QUEUE_LIST_FAILED; exit 7; }`,
+      `if printf '%s\\n' "$qlist" | awk '$2=="queued"' | grep -qF '[0x88:'; then echo ALREADY_WAITING; exit 4; fi`,
       // The job id is recorded on the host in the same command, so --fetch works even if
       // this ssh call dies after the submit.
       `cd ${q(remoteDir)} || exit 3`,
@@ -153,6 +155,7 @@ async function launch(home, runId, remoteDir) {
     // Timeout or ssh transport failure (255): the submit may have happened. Uncertain -> 76.
     if (r.timedOut || r.status === 255) return pendingUnknown(runId, remoteDir, 'gpu-queue admission/submit', r);
     const out = r.stdout.trim();
+    if (r.status === 7) die(`gpu-queue list failed inside the admission lock; nothing submitted (run dir ${remoteDir} left unused).`, 7);
     if (r.status === 4) die(`a 0x88 job is already waiting in gpu-queue; policy: at most one. Nothing submitted (run dir ${remoteDir} left unused).`, 4);
     if (r.status !== 0) die(`gpu-queue submit failed (${r.status}): ${out} ${r.stderr}`);
     const id = out.split('\n').pop().trim();
