@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { boardToFen } from '../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
-import { createLc0WasmInputEncoder } from '../src/lc0/wasmInputEncoder.ts';
+import { createLc0WasmInputEncoder, LC0_INPUT_ENCODER_WASM_URL, LC0_INPUT_ENCODER_WASM_VERSION, Lc0WasmInputEncoder } from '../src/lc0/wasmInputEncoder.ts';
 
 const fenFixtures = JSON.parse(readFileSync('fixtures/lc0/fen_only.json', 'utf8'));
 const historyFixtures = JSON.parse(readFileSync('fixtures/lc0/history.json', 'utf8'));
@@ -24,6 +25,21 @@ function assertEncodedEqual(actual, expected, label) {
   assert.deepEqual(actual.masks, expected.masks, `${label} masks`);
   assert.deepEqual(actual.values, expected.values, `${label} values`);
 }
+
+test('the default encoder URL is versioned by the shipped binary hash', () => {
+  // A changed binary must change the URL, or browsers can pair new JS with a cached old encoder.
+  const digest = createHash('sha256').update(wasmBytes).digest('hex').slice(0, 12);
+  assert.equal(LC0_INPUT_ENCODER_WASM_VERSION, digest, 'update LC0_INPUT_ENCODER_WASM_VERSION in src/lc0/wasmInputEncoder.ts');
+  assert.ok(LC0_INPUT_ENCODER_WASM_URL.endsWith(`?v=${digest}`));
+});
+
+test('an encoder whose history export takes no historyFill argument is rejected', () => {
+  // WASM export wrappers report their parameter count as Function.length.
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const stale = { exports: { memory, lc0_encode_fen_history: (_len) => 0 } };
+  assert.throws(() => new Lc0WasmInputEncoder(stale), /stale/);
+  assert.doesNotThrow(() => new Lc0WasmInputEncoder({ exports: { memory, lc0_encode_fen_history: (_len, _fill) => 0 } }));
+});
 
 test('SIMD WASM LC0 input encoder matches JS FEN-only 112-plane encoding', async () => {
   const wasm = await createLc0WasmInputEncoder(wasmBytes);

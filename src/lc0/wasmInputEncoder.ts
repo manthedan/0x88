@@ -34,6 +34,15 @@ type Lc0InputEncoderExports = WebAssembly.Exports & {
   lc0_encode_fen_history: (len: number, historyFill: number) => number;
 };
 
+/**
+ * First 12 hex digits of the SHA-256 of public/lc0/lc0_input_encoder.wasm. The
+ * default URL carries it so a browser never pairs this wrapper with a cached
+ * older binary (the file is served from a fixed path with a one-hour cache).
+ * tests/lc0_wasm_input_encoder.test.mjs fails if the binary changes without it.
+ */
+export const LC0_INPUT_ENCODER_WASM_VERSION = '7565f9efa07d';
+export const LC0_INPUT_ENCODER_WASM_URL = `/lc0/lc0_input_encoder.wasm?v=${LC0_INPUT_ENCODER_WASM_VERSION}`;
+
 export class Lc0WasmInputEncoder {
   private readonly exports: Lc0InputEncoderExports;
   private readonly textEncoder = new TextEncoder();
@@ -41,6 +50,8 @@ export class Lc0WasmInputEncoder {
   constructor(instance: WebAssembly.Instance) {
     this.exports = instance.exports as Lc0InputEncoderExports;
     if (!(this.exports.memory instanceof WebAssembly.Memory)) throw new Error('LC0 WASM input encoder did not export memory');
+    // Older binaries took no historyFill argument and would silently ignore it.
+    if (this.exports.lc0_encode_fen_history.length < 2) throw new Error('LC0 WASM input encoder is stale: lc0_encode_fen_history takes no historyFill');
   }
 
   encodeFen(fen: string, options: { historyFill?: boolean } = {}): Lc0EncodedPlanes112 {
@@ -112,7 +123,7 @@ export class Lc0WasmInputEncoder {
   }
 }
 
-export async function createLc0WasmInputEncoder(source: Lc0WasmInputEncoderSource = '/lc0/lc0_input_encoder.wasm'): Promise<Lc0WasmInputEncoder> {
+export async function createLc0WasmInputEncoder(source: Lc0WasmInputEncoderSource = LC0_INPUT_ENCODER_WASM_URL): Promise<Lc0WasmInputEncoder> {
   if (source instanceof WebAssembly.Module) return new Lc0WasmInputEncoder(await WebAssembly.instantiate(source, {}));
   if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
     const bytes = source instanceof ArrayBuffer ? source : source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
