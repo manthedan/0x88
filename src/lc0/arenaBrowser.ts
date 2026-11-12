@@ -2589,6 +2589,27 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   return recklessEngines.getOrCreate(recklessVariantForKey(variantKey));
 }
 
+/**
+ * The shared CPU engines a game's seats use, so each game starts with an empty
+ * hash. Only this game's participants are reset; mirror seats share a worker.
+ * Reckless is skipped when its assets are missing (its seat then forfeits
+ * without a worker).
+ */
+function cpuEnginesToResetForGame(rows: readonly (EngineRow | undefined)[]): Set<BrowserUciEngine> {
+  const engines = new Set<BrowserUciEngine>();
+  for (const row of rows) {
+    if (row?.family === 'sf') engines.add(stockfishEngineFor(row.variant === 'full' ? 'full' : 'lite'));
+    else if (row?.family === 'reckless') {
+      const variant = recklessVariantForKey(row.variant);
+      if (variant.key === 'custom' || recklessVariantAssetStatus(variant) !== 'missing') engines.add(getRecklessFor(row.variant));
+    } else if (row?.family === 'viridithas') engines.add(getViridithasFor(row.variant));
+    else if (row?.family === 'berserk') engines.add(getBerserkFor(row.variant));
+    else if (row?.family === 'plentychess') engines.add(getPlentyChessFor(row.variant));
+    else if (row?.family === 'stormphrax') engines.add(getStormphraxFor(row.variant));
+  }
+  return engines;
+}
+
 function recklessMissingAssetMessage(variants: RecklessVariant[]): string {
   const urls = variants.flatMap((variant) => [variant.wasmUrl, ...(variant.nnueUrl ? [variant.nnueUrl] : [])]);
   return `Reckless asset missing: ${urls.join(', ')}. Build/publish Reckless artifacts with npm run reckless:build-production, or choose Stockfish/Centipawn/LC0 instead.`;
@@ -4337,16 +4358,9 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
           if (!searcher) continue;
           if (searcher.loaded) await searcher.resetTree();
         }
-        // Reset only this game's CPU participants; mirror seats share a worker.
-        const gameRows = [rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)];
-        const gameCpuEngines = new Set<BrowserUciEngine>();
-        for (const row of gameRows) {
-          if (row?.family === 'viridithas') gameCpuEngines.add(getViridithasFor(row.variant));
-          else if (row?.family === 'berserk') gameCpuEngines.add(getBerserkFor(row.variant));
-          else if (row?.family === 'plentychess') gameCpuEngines.add(getPlentyChessFor(row.variant));
-          else if (row?.family === 'stormphrax') gameCpuEngines.add(getStormphraxFor(row.variant));
+        for (const engine of cpuEnginesToResetForGame([rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)])) {
+          await engine.newGame(matchAbort.signal);
         }
-        for (const engine of gameCpuEngines) await engine.newGame(matchAbort.signal);
         if (isStaleMount(mountSignal) || matchAbort.signal.aborted) break;
         setBoardSideEngines(whiteEngine.id, whiteEngine.name, blackEngine.id, blackEngine.name);
         el('pairing').textContent = `Game ${i + 1} of ${schedule.length} · ${opening.name}`;

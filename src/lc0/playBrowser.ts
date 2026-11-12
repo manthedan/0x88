@@ -36,7 +36,7 @@ import {
   T3_NET,
 } from './bt4Engine.ts';
 import { writeClipboard } from './clipboard.ts';
-import { inactiveCpuEnginesToEvict } from './cpuEngineResidency.ts';
+import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineResidency.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
@@ -140,6 +140,7 @@ let centipawnLoadPromise: Promise<Evaluator> | null = null;
 let centipawnEvaluatorGeneration = 0;
 const playRuntimeFallbackAudits = new Map<string, BrowserRuntimeAuditDetail>();
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
+const pendingCpuNewGames = new PendingCpuNewGames();
 let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
 /** One-line model/cache status shown in the caption once Maia3 has loaded. */
 let maia3Status: string | null = null;
@@ -147,6 +148,7 @@ let maia3Status: string | null = null;
 interface CpuEngine {
   setOptions(options: { depth?: number; movetimeMs?: number; threads?: number; skillLevel?: number }): void;
   bestMove(fen: string, signal?: AbortSignal, opts?: { moves?: readonly string[] }): Promise<string | null>;
+  newGame?(signal?: AbortSignal): Promise<void>;
   dispose?(): void;
 }
 
@@ -692,6 +694,7 @@ function disposeCachedCpuEngine(id: string): void {
   const pending = cpuEnginePromises.get(id);
   if (!pending) return;
   cpuEnginePromises.delete(id);
+  pendingCpuNewGames.forget(id);
   void pending.then((engine) => engine.dispose?.()).catch(() => undefined);
 }
 
@@ -873,6 +876,8 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   const engine = await ctxCpuEngineFor(ctx, option);
+  // Clear the hash a resident engine kept from the previous game.
+  await pendingCpuNewGames.resetIfPending(option.id, engine, signal);
   if (option.family === 'sf') {
     engine.setOptions({ depth: visitsOrDepth, movetimeMs: undefined, skillLevel: SF_LEVELS[level].skill });
   } else {
@@ -1826,6 +1831,9 @@ function ctxApplyPlayHandoffForMount(ctx: PlayContext): boolean {
 }
 
 function ctxResetStartPosition(ctx: PlayContext): void {
+  // Engines stay resident across games and page mounts; clear their hash
+  // before their next move in this game.
+  pendingCpuNewGames.markAll(cpuEnginePromises.keys());
   if (ctx.practicePosition) {
     Object.assign(ctx, replayPlayPosition(ctx.practicePosition));
     ctx.practiceBoundary = ctx.moves.length;
