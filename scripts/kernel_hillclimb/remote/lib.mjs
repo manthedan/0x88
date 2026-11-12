@@ -91,19 +91,29 @@ function inside(root, p) {
  * no stale-owner reclamation (and no reclaim race) at all. Exit 75 on timeout.
  */
 /**
- * Include patterns that name model blobs, which the default excludes drop. rsync takes the first
- * matching rule and the default excludes come first, so such an include silently syncs nothing
- * (the page then fails to load its model). A pattern names a model blob when one of its path
- * segments is a model directory (`models`, `tensor-cache`) or contains a model-blob suffix.
+ * Include patterns that name something the default excludes drop. rsync takes the first matching
+ * rule and the default excludes come before the includes, so such an include silently syncs
+ * nothing (a page then fails to load its model). A pattern names an excluded item when one of its
+ * path segments is an excluded directory (exclude ending in `/`, e.g. `models/`), or is a literal
+ * file name (no wildcard) that an exclude glob matches (e.g. `net.onnx`). Broad globs such as
+ * `assets/**` are not flagged: the default excludes are meant to apply inside them.
  */
-export function modelIncludes(includes) {
-  const dirs = new Set(['models', 'tensor-cache']);
-  const tokens = ['.onnx', '.pb', '.pt', '.safetensors', '.nnue', '.lc0web', 'params_shard_'];
+export function excludedIncludes(includes, excludes) {
+  const toRe = (glob) =>
+    new RegExp(
+      `^${glob
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '[^/]*')
+        .replace(/\?/g, '[^/]')}$`,
+    );
+  const dirs = excludes.filter((e) => e.endsWith('/')).map((e) => toRe(e.slice(0, -1)));
+  const files = excludes.filter((e) => !e.endsWith('/')).map(toRe);
   return includes.filter((p) =>
     p
       .replace(/^\/+/, '')
       .split('/')
-      .some((seg) => dirs.has(seg) || tokens.some((t) => seg.includes(t))),
+      .filter(Boolean)
+      .some((seg) => dirs.some((re) => re.test(seg)) || (!/[*?[]/.test(seg) && files.some((re) => re.test(seg)))),
   );
 }
 

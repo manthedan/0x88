@@ -32,7 +32,7 @@ import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { lockCommand, makeRunId, modelIncludes, parseQueueList, q, slug, timingValidity, validateEstimate } from './lib.mjs';
+import { excludedIncludes, lockCommand, makeRunId, parseQueueList, q, slug, timingValidity, validateEstimate } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // The shared-Mac timing lock lives outside the repo; KERNEL_BENCHLOCK overrides its path.
@@ -111,6 +111,13 @@ try {
   estimate = validateEstimate(args['estimate-min'] ?? 5);
 } catch (e) {
   die(e.message);
+}
+
+// Refuse before any ssh/rsync/queue call: the default excludes precede --include rules, so an
+// include naming a model file (or other excluded item) would otherwise sync nothing.
+if (args.include && !args.fetch && !args['with-models']) {
+  const blocked = excludedIncludes(String(args.include).split(','), DEFAULT_EXCLUDES);
+  if (blocked.length) die(`--include ${blocked.join(',')} names files the default excludes drop (model blobs, source maps); add --with-models`);
 }
 
 main().catch((e) => die(String(e?.stack ?? e)));
@@ -439,8 +446,6 @@ function rsyncFilters() {
   for (const p of args.exclude ? String(args.exclude).split(',') : []) f.push(`--exclude=${p}`);
   if (!args['with-models']) for (const p of DEFAULT_EXCLUDES) f.push(`--exclude=${p}`);
   if (args.include) {
-    const blocked = args['with-models'] ? [] : modelIncludes(String(args.include).split(','));
-    if (blocked.length) die(`--include ${blocked.join(',')} names model blobs, which the default excludes drop; add --with-models`);
     for (const p of String(args.include).split(',')) {
       // include every parent directory of the pattern, then the pattern itself (and its contents if a dir)
       const parts = p.replace(/^\/+/, '').split('/');

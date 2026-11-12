@@ -56,7 +56,8 @@ Options (see the header of `run.mjs` for all of them):
 - Model blobs are excluded by default: `*.onnx`, `*.pt`, `*.safetensors`, `*.nnue`, `*.lc0web`,
   `models/`, `tensor-cache/`, `params_shard_*.bin` and `*.map`. Pass `--with-models` when the
   page needs them. The default excludes take precedence over `--include`, so an `--include` that
-  names model files without `--with-models` is refused before anything is synced or queued,
+  names an excluded directory (such as `models/`) or an excluded file by name without
+  `--with-models` is refused before any ssh, sync or queue step,
   instead of silently syncing nothing. Each run hard-links unchanged files against the previous run's dist on the
   host (`rsync --link-dest`), so a repeat upload costs only the changed files.
 - `--gpu-info` adds CDP `SystemInfo.getInfo` (the `chrome://gpu` data: GPU devices, driver,

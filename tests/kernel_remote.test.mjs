@@ -11,10 +11,10 @@ import { fileURLToPath } from 'node:url';
 import { publish, settleProbe } from '../lab/kernel-hillclimb/probe-contract.mjs';
 import {
   assessRun,
+  excludedIncludes,
   idleVerdict,
   lockCommand,
   makeRunId,
-  modelIncludes,
   parseAgxClients,
   parseQueueList,
   q,
@@ -369,32 +369,52 @@ for (const [host, failOn, extra] of [
   });
 }
 
-test('includes that name model blobs are flagged (default excludes would drop them)', () => {
-  assert.deepEqual(
-    modelIncludes([
-      'lab/kernel-hillclimb/**',
-      'assets/**',
-      'ort/**',
-      'models/lc0/manifest.json',
-      'models/lc0/t1-256x10.batch1.*',
-      'x/net.onnx',
-      'runtimes/tensor-cache/**',
-      'reckless/net.nnue',
-    ]),
-    ['models/lc0/manifest.json', 'models/lc0/t1-256x10.batch1.*', 'x/net.onnx', 'runtimes/tensor-cache/**', 'reckless/net.nnue'],
-  );
+test('includes that name excluded items are flagged; broad globs and look-alike names are not', () => {
+  const excludes = ['*.onnx', '*.onnx.data', '*.pt', '*.nnue', '*.lc0web/', 'models/', 'tensor-cache/', 'params_shard_*.bin', '*.map'];
+  const includes = [
+    'lab/kernel-hillclimb/**',
+    'assets/**',
+    'models/lc0/manifest.json',
+    'models/lc0/t1-256x10.batch1.*',
+    'x/net.onnx',
+    'runtimes/tensor-cache/**',
+    'reckless/net.nnue',
+    'nets/t1.lc0web/model.lc0web.json',
+    'p/params_shard_3.bin',
+    'assets/net.onnx.json',
+    'kernels/foo.ptx',
+    'p/params_shard_manifest.json',
+    'x/*.onnx',
+  ];
+  assert.deepEqual(excludedIncludes(includes, excludes), [
+    'models/lc0/manifest.json',
+    'models/lc0/t1-256x10.batch1.*',
+    'x/net.onnx',
+    'runtimes/tensor-cache/**',
+    'reckless/net.nnue',
+    'nets/t1.lc0web/model.lc0web.json',
+    'p/params_shard_3.bin',
+  ]);
 });
 
-test('run.mjs refuses a model --include without --with-models before syncing or queueing', () => {
-  const dist = mkdtempSync(join(tmpdir(), 'kr-dist-'));
-  const run = (extra) =>
-    spawnSync(process.execPath, [RUN, '--host', 'yukon', '--dist', dist, '--page', 'x.html', '--include', 'models/lc0/m.onnx', '--dry-run', ...extra], {
-      encoding: 'utf8',
-      timeout: 20000,
-    });
-  const refused = run([]);
+test('run.mjs refuses a model --include without --with-models before any ssh, rsync or queue call', {
+  skip: platform() === 'win32' && 'POSIX shell stubs',
+}, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kr-refuse-'));
+  const dist = join(dir, 'dist');
+  const bin = join(dir, 'bin');
+  const calls = join(dir, 'calls');
+  mkdirSync(dist);
+  mkdirSync(bin);
+  // Stub ssh and rsync so any remote step is recorded instead of reaching a real host.
+  for (const tool of ['ssh', 'rsync']) writeFileSync(join(bin, tool), `#!/bin/sh\necho ${tool} >> '${calls}'\nexit 99\n`, { mode: 0o755 });
+  const refused = spawnSync(process.execPath, [RUN, '--host', 'yukon', '--dist', dist, '--page', 'x.html', '--include', 'models/lc0/m.onnx', '--dry-run'], {
+    encoding: 'utf8',
+    timeout: 20000,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
   assert.equal(refused.status, 3);
-  assert.match(refused.stderr + refused.stdout, /names model blobs.*--with-models/);
-  assert.doesNotMatch(refused.stderr + refused.stdout, /rsync|gpu-queue|mkdir/);
-  rmSync(dist, { recursive: true, force: true });
+  assert.match(refused.stderr + refused.stdout, /names files the default excludes drop.*--with-models/);
+  assert.equal(existsSync(calls), false, 'no ssh or rsync call before the refusal');
+  rmSync(dir, { recursive: true, force: true });
 });
