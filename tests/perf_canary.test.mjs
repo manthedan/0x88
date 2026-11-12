@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { compareMetric, mad, median } from '../scripts/lib/perf_canary_stats.mjs';
-import { previousCanary, sameBaseline } from '../scripts/perf_canary.mjs';
+import { previousCanary, SHIPPED_BERSERK, sameBaseline } from '../scripts/perf_canary.mjs';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
@@ -45,7 +45,9 @@ test('canary dry-run plans the CPU harness and skips the browser fixture unless 
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.repeats, 3);
   assert.ok(plan.cpu.includes('scripts/emscripten_uci_bench.mjs'));
-  assert.ok(plan.cpu.includes('public/berserk/berserk-emscripten.js'));
+  // The shipped tier on any host with relaxed SIMD (every Node this repo supports).
+  assert.ok(plan.cpu.includes('public/berserk/berserk-emscripten-relaxed-simd128.js'), plan.cpu.join(' '));
+  assert.equal(SHIPPED_BERSERK.tier, 'relaxed-simd128');
   assert.equal(plan.browser, null);
 
   const browser = spawnSync(process.execPath, ['scripts/perf_canary.mjs', '--dry-run', '--browser', '--browser-port', '5188'], {

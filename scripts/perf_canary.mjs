@@ -8,11 +8,20 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { supportsWasmRelaxedSimd, supportsWasmSimd } from '../src/lc0/wasmFeatures.ts';
 import { parseScriptArgs } from './lib/cli.mjs';
 import { compareMetric, mad, median } from './lib/perf_canary_stats.mjs';
 
 const DEFAULT_OUT = '.local-dev-artifacts/perf-canary';
-const DEFAULT_JS = 'public/berserk/berserk-emscripten.js';
+// The tier Play/Analysis/Arena load on this host (defaultBerserkVariantKey):
+// relaxed SIMD where available, then SIMD, then scalar.
+const BERSERK_TIERS = [
+  { tier: 'relaxed-simd128', js: 'public/berserk/berserk-emscripten-relaxed-simd128.js', supported: supportsWasmRelaxedSimd },
+  { tier: 'simd128', js: 'public/berserk/berserk-emscripten-simd128.js', supported: supportsWasmSimd },
+  { tier: 'scalar', js: 'public/berserk/berserk-emscripten.js', supported: () => true },
+];
+export const SHIPPED_BERSERK = BERSERK_TIERS.find((entry) => entry.supported());
+const DEFAULT_JS = SHIPPED_BERSERK.js;
 const DEFAULT_DEPTH = 8;
 const DEFAULT_POSITIONS = 20;
 const DEFAULT_REPEATS = 3;
@@ -26,7 +35,7 @@ Write JSON under .local-dev-artifacts/perf-canary and diff it against the previo
 This is a canary, not a CI gate. Time it under the repo benchlock.
 
 Options:
-  --js PATH            Emscripten UCI artifact (default ${DEFAULT_JS})
+  --js PATH            Emscripten UCI artifact (default: the shipped Berserk tier here, ${DEFAULT_JS})
   --depth N            Fixed depth (default ${DEFAULT_DEPTH})
   --positions N        Rotated-FEN prefix length, max 20 (default ${DEFAULT_POSITIONS})
   --hash N             Hash MB (default ${DEFAULT_HASH_MB})
@@ -182,6 +191,10 @@ export function baselineKey(report) {
   };
 }
 
+function berserkTier(js) {
+  return BERSERK_TIERS.find((entry) => path.resolve(entry.js) === path.resolve(js))?.tier ?? 'custom';
+}
+
 export function sameBaseline(previousReport, current) {
   const prior = baselineKey(previousReport);
   return (
@@ -265,11 +278,11 @@ function main() {
     runtimeConfiguration: {
       schema: 'browser-engine.runtime-configuration.v1',
       engineFamily: 'berserk',
-      modelId: 'berserk-emscripten-scalar',
+      modelId: `berserk-emscripten-${berserkTier(args.js)}`,
       modelArtifact: { kind: 'wasm-engine', path: args.js },
       ruleset: { id: 'standard-chess' },
       runtimeBackend: 'wasm-engine',
-      runtimeConfigId: 'perf-canary-berserk-scalar',
+      runtimeConfigId: `perf-canary-berserk-${berserkTier(args.js)}`,
       threads: 1,
       hashMb: args.hash,
     },
