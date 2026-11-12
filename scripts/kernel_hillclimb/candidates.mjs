@@ -21,6 +21,9 @@ const ORT_WASM_PARITY = {
   thresholds: 'ort-profile.mjs PRESETS[*].parityMaxAbs',
 };
 
+/** Dynamic-batch Maia3 rewrite (einsum + promo passes); see the Maia3 graph candidates below. */
+const MAIA3_GRAPH_MODEL = '/models/maia3/candidates/maia3.einsum-promo.onnx';
+
 export const CANDIDATES = {
   peak: { page: 'peak', query: '', path: 'device', gate: { kind: 'none' } },
   'peak-gemm': { page: 'peak', query: 'tests=gemm,sgmatrix', path: 'device', gate: { kind: 'none' } },
@@ -33,6 +36,26 @@ export const CANDIDATES = {
   'ort-lqo': { page: 'ort-profile', query: 'preset=lqo', path: 'ort-webgpu', gate: ORT_WASM_PARITY },
   'ort-maia3': { page: 'ort-profile', query: 'preset=maia3', path: 'ort-webgpu', gate: ORT_WASM_PARITY },
   'ort-maia3-grid': { page: 'ort-profile', query: 'preset=maia3-grid', path: 'ort-webgpu', gate: ORT_WASM_PARITY },
+
+  // Maia3 graph rewrites (scripts/maia3_graph_rewrite.py, docs/maia3_graph_rewrite_2026-11.md).
+  // The candidate model is not shipped: copy it to <dist>/models/maia3/candidates/
+  // first; `--query model=...` swaps in another rewrite. Parity runs the
+  // preset's ORIGINAL model on ORT WASM as the reference.
+  'ort-maia3-graph': { page: 'ort-profile', query: `preset=maia3&model=${MAIA3_GRAPH_MODEL}`, path: 'ort-webgpu', gate: ORT_WASM_PARITY },
+  'ort-maia3-grid-graph': { page: 'ort-profile', query: `preset=maia3-grid&model=${MAIA3_GRAPH_MODEL}`, path: 'ort-webgpu', gate: ORT_WASM_PARITY },
+  // Paired candidate-vs-shipped (A = rewrite, B = shipped model), ABAB in one page session.
+  'ort-maia3-ab-graph': {
+    page: 'ort-profile',
+    query: `preset=maia3&model=${MAIA3_GRAPH_MODEL}&ab=maia3&profileInvokes=0&iters=10`,
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
+  'ort-maia3-grid-ab-graph': {
+    page: 'ort-profile',
+    query: `preset=maia3-grid&model=${MAIA3_GRAPH_MODEL}&ab=maia3-grid&profileInvokes=0&iters=10`,
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
 
   // Shipped TVMJS baseline (Centipawn) and the LC0 TVMJS research lanes.
   // Paired b1-vs-b8 Lc0 Small comparison (ABAB interleaved in one page session).
