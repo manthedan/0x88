@@ -30,7 +30,10 @@ node scripts/serve_isolated_static.mjs dist-client 5241   # COOP/COEP static ser
 
 `build_lab.mjs` symlinks `dist-client/runtimes/lc0-tvmjs-webgpu` to the main
 checkout's local (gitignored) copy when missing; without it only the Lc0
-TVMJS targets 404. Pages need cross-origin isolation (ORT threads), so serve
+TVMJS targets 404. It also copies any split-K candidates from the gitignored
+`artifacts/kernel-hillclimb/splitk/*.onnx` (written by `splitk_rewrite.py`, see
+[`docs/lc0_small_splitk_2026-11.md`](../../docs/lc0_small_splitk_2026-11.md))
+to `/models/lc0-splitk/`; without them the `ort-lc0-small-splitk*` candidates 404. Pages need cross-origin isolation (ORT threads), so serve
 with COOP/COEP; never `vite dev` (it masks built-worker ORT failures). The
 static server caches for 1h: force-reload after a rebuild.
 
@@ -62,7 +65,7 @@ in `#log`). Result object (`schema: "kernel-hillclimb.bench-result.v1"`):
 Query params per page:
 
 - `peak`: `tests=fma,bandwidth,overhead,gemm,sgmatrix` `trials=7` `gemmShapes=MxNxK,...`
-- `ort-profile`: `preset=lc0-small|lc0-small-b8|t3|bt4|lqo|maia3|maia3-grid` (or `model=URL&batch=N`), `warmup=5` `iters=30` `profileInvokes=5` `parity=wasm` `referenceModel=URL` `ortDequantFold=0` `ab=PRESET` (`abRounds=20` `abBlock=3`: ABAB-interleaved paired comparison in one page session; result `ab` carries per-position wall and GPU-busy ratios per round, the comparison to use on a loaded machine). A candidate model goes in `model=` next to the preset it replaces; parity then runs the preset's original model on ORT WASM as the reference (override with `referenceModel=`). With neither a preset nor `referenceModel`, parity fails.
+- `ort-profile`: `preset=lc0-small|lc0-small-b8|t3|bt4|lqo|maia3|maia3-grid` (or `model=URL&batch=N`), `warmup=5` `iters=30` `profileInvokes=5` `parity=wasm` `referenceModel=URL` `ortDequantFold=0` `ab=PRESET` (`abRounds=20` `abBlock=3` `abModel=URL` to run another model in arm B with the B preset's batch: ABAB-interleaved paired comparison in one page session; result `ab` carries per-position wall and GPU-busy ratios per round, the comparison to use on a loaded machine). A candidate model goes in `model=` next to the preset it replaces; parity then runs the preset's original model on ORT WASM as the reference (override with `referenceModel=`). With neither a preset nor `referenceModel`, parity fails.
 - `tvmjs-profile`: `target=centipawn|lc0-t1|lc0-t3|lc0-bt4` `manifest=URL` `batch=N` `warmup` `iters` `profileInvokes` `parity=ort` `tieEpsilon=0.01` `maxPriorAbs` `maxWdlAbs`
 
 Timestamps: Chrome quantizes `timestamp-query` to 65.536 µs unless launched

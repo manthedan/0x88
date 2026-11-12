@@ -42,6 +42,22 @@ export const CANDIDATES = {
     path: 'ort-webgpu',
     gate: ORT_WASM_PARITY,
   },
+  // Split-K graph rewrite of Lc0 Small b1 (scripts/kernel_hillclimb/splitk_rewrite.py, default
+  // options; docs/lc0_small_splitk_2026-11.md). The model is a local, gitignored candidate that
+  // build_lab.mjs stages under /models/lc0-splitk/; parity runs the shipped model on ORT WASM.
+  'ort-lc0-small-splitk': {
+    page: 'ort-profile',
+    query: 'preset=lc0-small&model=/models/lc0-splitk/t1.b1.qdq8.splitk-all.onnx',
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
+  // Paired split-K (A) vs shipped (B), ABAB in one page session.
+  'ort-lc0-small-splitk-ab': {
+    page: 'ort-profile',
+    query: 'preset=lc0-small&model=/models/lc0-splitk/t1.b1.qdq8.splitk-all.onnx&ab=lc0-small&abRounds=30&profileInvokes=0&iters=10',
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
   'tvmjs-centipawn': {
     page: 'tvmjs-profile',
     query: 'target=centipawn',

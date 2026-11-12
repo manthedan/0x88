@@ -19,6 +19,8 @@
 //                 per-position wall ratio and GPU-busy ratio per round, which
 //                 holds up under host load where absolute wall times do not
 //   abRounds=N (20)  abBlock=N (3 invokes per arm per round)
+//   abModel=URL   arm B runs this model instead of PRESET's (batch stays PRESET's),
+//                 e.g. two graph-rewrite candidates against each other
 import { parseFen } from '../../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
 import { boardToMaia3Tokens, maia3InternalsForTests } from '../../src/lc0/maia3.ts';
@@ -219,7 +221,9 @@ async function pairedComparison(prof, a, bPresetName) {
   if (!bPreset) throw new Error(`ab: unknown preset ${bPresetName}`);
   const rounds = intParam('abRounds', 20, 2, 500);
   const block = intParam('abBlock', 3, 1, 100);
-  const bSession = await ort.createOrtSession(bPreset.model);
+  const bModel = params.get('abModel') ?? bPreset.model;
+  const bSession = await ort.createOrtSession(bModel);
+  const bFold = ort.lastOrtDequantFoldSummary();
   const b = { session: bSession, feeds: (await buildFeeds(bSession, bPreset.batch)).feeds, batch: bPreset.batch, name: bPresetName };
   assertCpuOutputs(await b.session.run(b.feeds), `ab preset ${bPresetName}`);
   for (let i = 0; i < 5; i++) await b.session.run(b.feeds);
@@ -255,7 +259,7 @@ async function pairedComparison(prof, a, bPresetName) {
   await ort.releaseOrtSession(bSession);
   const out = {
     a: { name: a.name, batch: a.batch },
-    b: { name: b.name, batch: b.batch, model: bPreset.model },
+    b: { name: b.name, batch: b.batch, model: bModel, dequantFold: bFold },
     rounds,
     block,
     perPositionWallMs: { a: summarize(wall.a), b: summarize(wall.b) },

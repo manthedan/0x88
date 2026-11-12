@@ -8,6 +8,9 @@
 //   --lc0-runtimes DIR  symlink DIR as <dist>/runtimes/lc0-tvmjs-webgpu when the
 //                       product build lacks it (the LC0 TVMJS artifacts are
 //                       gitignored/local; default: the main checkout's copy).
+// Graph-rewrite candidate models (scripts/kernel_hillclimb/splitk_rewrite.py,
+// gitignored under artifacts/kernel-hillclimb/splitk/) are copied to
+// <dist>/models/lc0-splitk/ when present, for ort-profile.html?model=.
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,4 +60,17 @@ if (!existsSync(runtimeLink)) {
     linked = `linked -> ${source}`;
   } else linked = `missing (no ${source}); tvmjs-profile lc0 targets will 404`;
 }
-console.log(JSON.stringify({ status: 'KERNEL_LAB_BUILT', pages: inputs.map((p) => `/lab/kernel-hillclimb/${p.split('/').pop()}`), lc0TvmjsRuntimes: linked }));
+const splitkDir = join(repo, 'artifacts/kernel-hillclimb/splitk');
+const splitkModels = existsSync(splitkDir) ? readdirSync(splitkDir).filter((f) => f.endsWith('.onnx')) : [];
+if (splitkModels.length) {
+  mkdirSync(join(dist, 'models/lc0-splitk'), { recursive: true });
+  for (const f of splitkModels) cpSync(join(splitkDir, f), join(dist, 'models/lc0-splitk', f));
+}
+console.log(
+  JSON.stringify({
+    status: 'KERNEL_LAB_BUILT',
+    pages: inputs.map((p) => `/lab/kernel-hillclimb/${p.split('/').pop()}`),
+    lc0TvmjsRuntimes: linked,
+    splitkModels: splitkModels.map((f) => `/models/lc0-splitk/${f}`),
+  }),
+);
