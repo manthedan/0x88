@@ -38,15 +38,29 @@ export function selectLc0OrtModelUrl(modelUrl: string, placement: Pick<OrtSessio
   return lc0SmallSplitKUrl(modelUrl) ?? modelUrl;
 }
 
+/**
+ * The Lc0 Small model a product page loads, and whether the device rule may
+ * replace it. Any `?model=` override (even one naming the default file) is
+ * explicit and loads exactly that URL; only the page default opts in.
+ */
+export function lc0SmallModelRequest(
+  defaultUrl: string,
+  override: string | null | undefined,
+  resolveUrl: (url: string) => string = (url) => url,
+): { modelUrl: string; deviceSelection: boolean } {
+  if (override === null || override === undefined) return { modelUrl: defaultUrl, deviceSelection: true };
+  return { modelUrl: resolveUrl(override), deviceSelection: false };
+}
+
 type ModelBytes = string | Uint8Array | ArrayBuffer;
 
 export type Lc0OrtEvaluatorFromUrlOptions = {
   load?: Lc0ModelLoadOptions;
   evaluator?: Omit<Lc0OnnxEvaluatorOptions, 'wasmFallbackModel'>;
   /**
-   * Apply the device rule above. Product surfaces set it when they load the
-   * default Lc0 Small URL; explicit ?model= overrides and lab tools leave it
-   * off so they get exactly the bytes they named.
+   * Apply the device rule above. Product surfaces set it from
+   * lc0SmallModelRequest (no ?model= override); explicit overrides and lab
+   * tools leave it off so they get exactly the bytes they named.
    */
   deviceSelection?: boolean;
 };

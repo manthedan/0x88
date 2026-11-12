@@ -12,12 +12,6 @@ import type { EngineResourceBroker } from './resourceBroker.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 
 export const CRITICAL_LC0_MODEL = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
-/**
- * The model the report's Lc0 worker last ran (CRITICAL_LC0_MODEL, or its
- * split-K rewrite on Apple WebGPU). It is the provenance model, and so part of
- * the report cache key, so results from the two models are never mixed.
- */
-let lastCriticalLc0ServedModel: string | undefined;
 
 /** Own workers prevent a navigating interactive tab from resetting a report engine. Created only after consent. */
 export function createCriticalEngines(
@@ -115,7 +109,10 @@ export function createCriticalEngines(
   };
   const lc0Provenance: CriticalProvenance = {
     engine: 'Lc0 Small',
-    model: lastCriticalLc0ServedModel ?? CRITICAL_LC0_MODEL,
+    // Replaced by the model this job's worker actually loaded (the split-K
+    // rewrite on Apple WebGPU) in prepare(), before any cache lookup, so the
+    // report cache key never mixes results from the two models.
+    model: CRITICAL_LC0_MODEL,
     build: 't1-256x10-distilled-swa-2432500 · QDQ8',
     runtime: 'ORT auto (WebGPU / WASM)',
     budget: '400 visits',
@@ -148,6 +145,18 @@ export function createCriticalEngines(
       id: 'lc0',
       row: { family: 'lc0', variant: 'small', strength: 400 },
       provenance: lc0Provenance,
+      prepare: (_signal, progress) =>
+        protectedWork('critical-lc0', async (operationSignal) => {
+          const abort = () => stopWorker();
+          operationSignal.addEventListener('abort', abort, { once: true });
+          try {
+            progress('Loading Lc0 Small');
+            const ready = await initLc0(progress);
+            lc0Provenance.model = ready.servedModelUrl ?? CRITICAL_LC0_MODEL;
+          } finally {
+            operationSignal.removeEventListener('abort', abort);
+          }
+        }),
       evaluate: (moment, _signal, progress) =>
         protectedWork('critical-lc0', async (operationSignal) => {
           const abort = () => stopWorker();
@@ -155,9 +164,7 @@ export function createCriticalEngines(
           try {
             progress('Loading Lc0 Small');
             const ready = await initLc0(progress);
-            // runCriticalReport reads lane.provenance again after evaluate to key the stored result.
-            lastCriticalLc0ServedModel = ready.servedModelUrl ?? CRITICAL_LC0_MODEL;
-            lc0Provenance.model = lastCriticalLc0ServedModel;
+            lc0Provenance.model = ready.servedModelUrl ?? CRITICAL_LC0_MODEL;
             const response = await post<{ result: Lc0SearchLike }>(
               {
                 type: 'search',

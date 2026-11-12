@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { createCriticalReport, criticalMomentCacheKey, runCriticalReport } from '../src/lc0/criticalMoments.ts';
@@ -6,10 +7,17 @@ import {
   createLc0OnnxEvaluatorFromUrl,
   LC0_SMALL_BATCH1_QDQ8_PATH,
   LC0_SMALL_BATCH1_SPLITK_FILE,
+  lc0SmallModelRequest,
   lc0SmallSplitKUrl,
   selectLc0OrtModelUrl,
 } from '../src/lc0/lc0SmallModelSelection.ts';
-import { planOrtSessionAttempts, resolveOrtSessionPlacement, setRequestedOrtExecutionProviderForCurrentThread } from '../src/nn/ortRuntime.ts';
+import {
+  gpuAdapterVendor,
+  planOrtSessionAttempts,
+  resetWebGpuAdapterProbeForTests,
+  resolveOrtSessionPlacement,
+  setRequestedOrtExecutionProviderForCurrentThread,
+} from '../src/nn/ortRuntime.ts';
 
 const ORIGINAL = LC0_SMALL_BATCH1_QDQ8_PATH;
 const SPLITK = `/models/lc0/${LC0_SMALL_BATCH1_SPLITK_FILE}`;
@@ -115,40 +123,108 @@ test('an aborted split-K load is not retried with the original', async () => {
   await assert.rejects(createLc0OnnxEvaluatorFromUrl(ORIGINAL, { deviceSelection: true }, fake.deps), { name: 'AbortError' });
 });
 
-test('createOrtSession attempt plan: the WASM attempt uses wasmFallbackModel, not the WebGPU bytes', async () => {
+test('createOrtSession attempt plan: split-K attempts are WebGPU-only and the WASM attempt uses wasmFallbackModel', async () => {
   const prepared = { input: 'folded-splitk', original: 'raw-splitk' };
   const withModel = planOrtSessionAttempts(prepared, ['webgpu', 'wasm'], true, { wasmFallbackModel: async () => 'raw-original' });
+  // Not ['webgpu', 'wasm']: with wasm listed, ORT drops a WebGPU backend that fails
+  // to init and resolves a WASM session on the split-K bytes, so the fallback never runs.
   assert.deepEqual(
     withModel.map((a) => a.providers),
-    [['webgpu', 'wasm'], ['webgpu', 'wasm'], ['wasm']],
+    [['webgpu'], ['webgpu'], ['wasm']],
+  );
+  assert.deepEqual(
+    withModel.map((a) => a.kind),
+    ['primary', 'unfolded', 'wasm-fallback'],
   );
   assert.equal(withModel[0].input, 'folded-splitk');
   assert.equal(withModel[1].input, 'raw-splitk');
   assert.equal(typeof withModel[2].input, 'function');
   assert.equal(await withModel[2].input(), 'raw-original');
-  // Without the option the existing behaviour is unchanged: WASM reuses the unfolded primary bytes.
+  // Without the option the existing behaviour is unchanged: ['webgpu', 'wasm'], then WASM on the unfolded primary bytes.
   const plain = planOrtSessionAttempts(prepared, ['webgpu', 'wasm'], true);
+  assert.deepEqual(plain[0].providers, ['webgpu', 'wasm']);
   assert.equal(plain[2].input, 'raw-splitk');
   // Strict ep=webgpu has no WASM attempt at all.
   assert.equal(planOrtSessionAttempts(prepared, ['webgpu'], false, { wasmFallbackModel: async () => 'x' }).length, 2);
 });
 
-test('resolveOrtSessionPlacement reports the adapter vendor for a WebGPU session', async () => {
+async function withFakeAdapter(adapter, run) {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   Object.defineProperty(globalThis, 'navigator', {
-    value: { hardwareConcurrency: 8, gpu: { requestAdapter: async () => ({ info: { vendor: 'Apple', architecture: 'metal-3' } }) } },
+    value: { hardwareConcurrency: 8, gpu: { requestAdapter: async () => adapter } },
     configurable: true,
     writable: true,
   });
+  resetWebGpuAdapterProbeForTests();
   setRequestedOrtExecutionProviderForCurrentThread('auto');
   try {
+    return await run();
+  } finally {
+    setRequestedOrtExecutionProviderForCurrentThread(null);
+    resetWebGpuAdapterProbeForTests();
+    if (previous) Object.defineProperty(globalThis, 'navigator', previous);
+    else delete globalThis.navigator;
+  }
+}
+
+test('resolveOrtSessionPlacement reports the adapter vendor for a WebGPU session', async () => {
+  await withFakeAdapter({ info: { vendor: 'Apple', architecture: 'metal-3' } }, async () => {
     const placement = await resolveOrtSessionPlacement();
     assert.deepEqual(placement, { providers: ['webgpu', 'wasm'], adapterVendor: 'apple' });
     assert.equal(selectLc0OrtModelUrl(ORIGINAL, placement), SPLITK);
-  } finally {
-    setRequestedOrtExecutionProviderForCurrentThread(null);
-    if (previous) Object.defineProperty(globalThis, 'navigator', previous);
-    else delete globalThis.navigator;
+  });
+});
+
+test('unreadable adapter metadata leaves the vendor unknown but keeps WebGPU and the original model', async () => {
+  const throwingInfo = {
+    get info() {
+      throw new Error('info getter failed');
+    },
+  };
+  await withFakeAdapter(throwingInfo, async () => {
+    const placement = await resolveOrtSessionPlacement();
+    assert.deepEqual(placement, { providers: ['webgpu', 'wasm'] });
+    assert.equal(selectLc0OrtModelUrl(ORIGINAL, placement), ORIGINAL);
+  });
+  const throwingVendor = {
+    info: {
+      get vendor() {
+        throw new Error('vendor getter failed');
+      },
+    },
+  };
+  await withFakeAdapter(throwingVendor, async () => {
+    assert.deepEqual(await resolveOrtSessionPlacement(), { providers: ['webgpu', 'wasm'] });
+  });
+  assert.equal(await gpuAdapterVendor(throwingInfo), undefined);
+  // A throwing `info` still falls through to the older requestAdapterInfo().
+  const legacy = {
+    get info() {
+      throw new Error('no info');
+    },
+    requestAdapterInfo: async () => ({ vendor: 'Apple' }),
+  };
+  assert.equal(await gpuAdapterVendor(legacy), 'apple');
+});
+
+test('an explicit ?model= override, even naming the default file, loads exactly that URL', () => {
+  assert.deepEqual(lc0SmallModelRequest(ORIGINAL, null), { modelUrl: ORIGINAL, deviceSelection: true });
+  assert.deepEqual(lc0SmallModelRequest(ORIGINAL, undefined), { modelUrl: ORIGINAL, deviceSelection: true });
+  assert.deepEqual(lc0SmallModelRequest(ORIGINAL, ORIGINAL), { modelUrl: ORIGINAL, deviceSelection: false });
+  assert.deepEqual(lc0SmallModelRequest(ORIGINAL, SPLITK), { modelUrl: SPLITK, deviceSelection: false });
+  assert.deepEqual(
+    lc0SmallModelRequest('https://cdn.example/x.onnx', '/m.onnx', (url) => `https://cdn.example${url}`),
+    {
+      modelUrl: 'https://cdn.example/m.onnx',
+      deviceSelection: false,
+    },
+  );
+  // The product pages take the opt-in from the request, not from URL equality.
+  for (const file of ['analysisBrowser', 'playBrowser', 'arenaBrowser']) {
+    const source = readFileSync(new URL(`../src/lc0/${file}.ts`, import.meta.url), 'utf8');
+    assert.match(source, /lc0SmallModelRequest\(\s*DEFAULT_MODEL_URL,\s*isV0DeployProfile\(\) \? null : params\.get\('model'\)/, file);
+    assert.doesNotMatch(source, /(deviceSelection|deviceModelSelection): MODEL_URL === DEFAULT_MODEL_URL/, file);
+    assert.match(source, /(deviceSelection|deviceModelSelection): LC0_DEVICE_MODEL_SELECTION/, file);
   }
 });
 
@@ -176,4 +252,47 @@ test('critical-moment results are keyed by the model the Lc0 lane actually ran',
   assert.notEqual(splitKKey, originalKey);
   assert.deepEqual([...cache.keys()], [splitKKey]);
   assert.equal(report.cells.lc0[0].result.cacheKey, splitKKey);
+});
+
+test('critical moments settle the served model before accepting a cached result', async () => {
+  const moment = { fen: START_FEN, history: [START_FEN], move: { ply: 1 } };
+  const row = { family: 'lc0', variant: 'small', strength: 400 };
+  const line = { pvUci: ['e2e4'], scoreCp: 20, multipv: 1, pvSan: 'e4', scoreText: '+0.20', engine: 'Lc0' };
+  const makeLane = (servedModel) => {
+    // Starts out claiming split-K (as a previous job's worker did); prepare() reports this job's worker.
+    const provenance = { engine: 'Lc0 Small', model: SPLITK, build: 'b', runtime: 'r', budget: '400 visits', options: 'o' };
+    const lane = {
+      id: 'lc0',
+      row,
+      provenance,
+      evaluations: 0,
+      prepare: async () => {
+        provenance.model = servedModel;
+      },
+      evaluate: async () => {
+        lane.evaluations++;
+        return { cacheKey: '', provenance: { ...provenance }, line: { ...line, scoreCp: 99 } };
+      },
+    };
+    return lane;
+  };
+  const splitKKey = criticalMomentCacheKey(moment, { row, provenance: { ...makeLane(SPLITK).provenance } });
+  const seeded = () => new Map([[splitKKey, { cacheKey: splitKKey, provenance: { model: SPLITK }, line }]]);
+
+  // This job's worker fell back to the original model: the split-K result must not be reused.
+  const fellBack = makeLane(ORIGINAL);
+  const cache = seeded();
+  const report = createCriticalReport('sig', 'base', [moment], [fellBack]);
+  await runCriticalReport(report, [fellBack], cache, new AbortController().signal, () => {});
+  assert.equal(fellBack.evaluations, 1);
+  assert.equal(report.cells.lc0[0].cached, false);
+  assert.equal(report.cells.lc0[0].result.provenance.model, ORIGINAL);
+  assert.notEqual(report.cells.lc0[0].result.cacheKey, splitKKey);
+
+  // Same model as the cached result: the hit is accepted without a search.
+  const same = makeLane(SPLITK);
+  const sameReport = createCriticalReport('sig', 'base', [moment], [same]);
+  await runCriticalReport(sameReport, [same], seeded(), new AbortController().signal, () => {});
+  assert.equal(same.evaluations, 0);
+  assert.equal(sameReport.cells.lc0[0].cached, true);
 });

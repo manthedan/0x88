@@ -33,7 +33,7 @@ type InitMessage = {
   /**
    * Let the worker swap the default Lc0 Small model for its split-K rewrite on
    * Apple WebGPU (src/lc0/lc0SmallModelSelection.ts). Product callers set it
-   * for the default URL; omitted = load exactly modelUrl.
+   * when no ?model= override was given; omitted = load exactly modelUrl.
    */
   deviceModelSelection?: boolean;
   ep: OrtExecutionProviderPreference;

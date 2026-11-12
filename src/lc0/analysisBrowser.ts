@@ -217,7 +217,7 @@ import {
   stopHiddenTabResume,
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
-import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
+import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
@@ -279,7 +279,12 @@ type Ground = ReturnType<typeof Chessground>;
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
+// v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
+  DEFAULT_MODEL_URL,
+  isV0DeployProfile() ? null : params.get('model'),
+  resolvePublicAssetUrl,
+);
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
 const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_soap_rem_c19000_final.onnx';
@@ -845,7 +850,7 @@ function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown>
   const common = {
     type: 'init',
     modelUrl: MODEL_URL,
-    deviceModelSelection: MODEL_URL === DEFAULT_MODEL_URL,
+    deviceModelSelection: LC0_DEVICE_MODEL_SELECTION,
     ep: requestedEp(),
     cacheModel: true,
     requestPersistentModelStorage: true,
@@ -6077,7 +6082,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
         });
       } else {
         const created = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
-          deviceSelection: MODEL_URL === DEFAULT_MODEL_URL,
+          deviceSelection: LC0_DEVICE_MODEL_SELECTION,
           load: {
             cache: true,
             requestPersistentStorage: true,

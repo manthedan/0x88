@@ -146,7 +146,7 @@ import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
-import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
+import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, type Lc0OnnxEvaluator } from './onnxEvaluator.ts';
@@ -325,7 +325,12 @@ interface EngineOutputSnapshot {
 
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-const MODEL_URL = isV0DeployProfile() ? DEFAULT_MODEL_URL : resolvePublicAssetUrl(params.get('model') ?? DEFAULT_MODEL_URL);
+// v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
+  DEFAULT_MODEL_URL,
+  isV0DeployProfile() ? null : params.get('model'),
+  resolvePublicAssetUrl,
+);
 /** Model the ONNX evaluator runs: MODEL_URL or, on Apple WebGPU, its split-K rewrite. */
 let arenaLc0ServedModelUrl = '';
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
@@ -4489,7 +4494,7 @@ async function createSelectedLc0Evaluator(signal: AbortSignal): Promise<Lc0OnnxE
   const runtime = selectedLc0Runtime();
   if (runtime === 'onnx') {
     const created = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
-      deviceSelection: MODEL_URL === DEFAULT_MODEL_URL,
+      deviceSelection: LC0_DEVICE_MODEL_SELECTION,
       load: {
         cache: true,
         signal,

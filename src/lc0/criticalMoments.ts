@@ -56,6 +56,12 @@ export interface CriticalLane {
   id: string;
   provenance: CriticalProvenance;
   row: EngineRow;
+  /**
+   * Settle a provenance that depends on this job's engine (Lc0 Small: the model
+   * file its worker actually loaded) before any cached result is accepted. Runs
+   * once per report, before the lane's first cache lookup.
+   */
+  prepare?(signal: AbortSignal, progress: (text: string) => void): Promise<void>;
   evaluate(moment: CriticalMoment, signal: AbortSignal, progress: (text: string) => void): Promise<CriticalResult>;
 }
 
@@ -123,24 +129,29 @@ export async function runCriticalReport(
   await Promise.all(
     lanes.map(async (lane, laneIndex) => {
       const state = report.lanes[laneIndex];
+      let prepared = !lane.prepare;
       for (let i = 0; i < report.moments.length; i++) {
         if (signal.aborted) break;
         const cell = report.cells[lane.id][i];
         const moment = report.moments[i];
-        const key = criticalMomentCacheKey(moment, lane);
         cell.status = 'running';
         state.progress = `Moment ${i + 1} of ${report.moments.length}`;
         changed();
+        const progress = (text: string) => {
+          if (!signal.aborted) {
+            state.progress = `Moment ${i + 1} of ${report.moments.length} · ${text}`;
+            changed();
+          }
+        };
         try {
+          if (!prepared) {
+            await lane.prepare?.(signal, progress);
+            prepared = true;
+            if (signal.aborted) break;
+          }
+          const key = criticalMomentCacheKey(moment, lane);
           const cached = cache.get(key);
-          const result =
-            cached ??
-            (await lane.evaluate(moment, signal, (text) => {
-              if (!signal.aborted) {
-                state.progress = `Moment ${i + 1} of ${report.moments.length} · ${text}`;
-                changed();
-              }
-            }));
+          const result = cached ?? (await lane.evaluate(moment, signal, progress));
           if (signal.aborted) break;
           if (!result.line?.pvUci[0] && !result.policy) throw new Error('No scored best move returned.');
           if (result.line && (result.line.error || (!Number.isFinite(result.line.scoreCp) && !Number.isFinite(result.line.mateIn))))

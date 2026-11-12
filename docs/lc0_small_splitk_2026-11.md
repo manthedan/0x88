@@ -306,17 +306,23 @@ under "Not yet run" below.
   excluded because it was not shown to help (§5).
 - **Who opts in.** The callers that set `deviceSelection` are the
   search-worker init, the Analysis, Play and Arena main-thread loaders, and
-  Critical Moments, but only when they load the default URL. An explicit
-  `?model=` URL loads exactly the bytes it names. So do the lab tools
+  Critical Moments, but only when no `?model=` override is given. An
+  explicit `?model=` URL, even one naming the default file, loads exactly the
+  bytes it names. So do the lab tools
   `policyOnlyBrowser.ts` and `batchingStrengthMatch.ts`.
 - **Fallbacks.** If the split-K load fails, for example because the CDN does
-  not have it yet, the original model is served. If both WebGPU attempts fail,
-  `createOrtSession`'s WASM attempt loads the ORIGINAL URL through
-  `wasmFallbackModel`.
+  not have it yet, the original model is served. The split-K session requests
+  `['webgpu']` only. With `wasm` listed too, ORT would silently build a WASM
+  session from the split-K bytes when its WebGPU backend fails to start. If
+  the WebGPU attempts fail, `createOrtSession`'s WASM attempt loads the
+  ORIGINAL URL through `wasmFallbackModel`. Unreadable adapter metadata
+  leaves the vendor unknown, so the original model is served and WebGPU is
+  kept.
 - **Caches.** Each model's bytes are cached and sha256-verified under its own
   URL. The worker reports `servedModelUrl`, and that URL is part of the
   Analysis evaluation-cache key, the audit `modelUrl`, and the Critical
-  Moments cell key.
+  Moments cell key. A Critical Moments report starts its Lc0 worker before
+  accepting any cached Lc0 result, so the key names that worker's model.
 - **Gate run.** `ort-lc0-small-splitk --gate --repeat 3` passed 3/3 on Apple
   M4 (Metal 3), all 98 fold nodes folded. The max-abs differences were
   policy 0.042, WDL 0.0024 and MLH 0.125, against limits of 0.2, 0.006 and 2.
