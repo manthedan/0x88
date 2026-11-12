@@ -18,10 +18,11 @@ Lc0 network and not as a PUCT/search default.
 - The staged fp16 file is byte-identical to the upstream file at the pinned
   commit (the staging script refuses any other hash).
 
-## Derived artifact: maia3_simplified.qdq8.onnx (the default browser model)
+## Derived artifact: maia3_simplified.qdq8.onnx
 
-Promoted 2026-06-11 as `MAIA3_DEFAULT_MODEL_URL` (the browser loader falls
-back to the fp16 file when the QDQ artifact is not staged).
+Promoted 2026-06-11 as `MAIA3_DEFAULT_MODEL_URL`. Since the graph rewrite
+below it is the first fallback (the browser loader tries the rewritten file,
+then this one, then the fp16 file). It stays published for cached clients.
 
 - **This is a local modification of the upstream model**: weight-only int8
   quantization of the fp16 file. Derivation (reproduced by
@@ -37,6 +38,38 @@ back to the fp16 file when the QDQ artifact is not staged).
   fp16 over 40 positions × 4 elo conditions: 159/160 top-1 agreement, prior
   and value-probability drift ≤ 0.021. Speed neutral-or-better on both EPs
   (WebGPU 23.8 vs 30.4 ms/eval steady; wasm 136.7 vs 146.9).
+
+## Derived artifact: maia3_simplified.qdq8.graph.onnx (the default browser model)
+
+Promoted 2026-11-11 as `MAIA3_DEFAULT_MODEL_URL`.
+
+- **This is a further local modification**: a graph rewrite of
+  `maia3_simplified.qdq8.onnx` for ORT WebGPU. The weights, the int8 QDQ
+  tensors and the model I/O are unchanged. Derivation (reproduced by
+  `npm run maia3:stage-assets` when missing; the manifest entry records the
+  passes as `rewritePasses`):
+
+  ```sh
+  python -I scripts/maia3_graph_rewrite.py maia3_simplified.qdq8.onnx \
+    maia3_simplified.qdq8.graph.onnx --passes einsum,promo
+  ```
+
+  1. `einsum`: each `Einsum bhi,oi->bho` with a constant 2-D weight becomes
+     `MatMul` with a pre-transposed weight initializer.
+  2. `promo`: the promotion head's 256 scalar `Gather`/`Add`/`Unsqueeze`
+     chains become two vector `Gather`s with constant indices, one `Add` and
+     one `Concat`.
+- The batch dimension stays dynamic: one file serves b1 (Play, critical
+  moments), b6 (Analysis panel ratings) and b11 (Elo grid).
+- Size: `27,971,924` bytes
+- SHA-256: `3be705330f38fb0309c82e0ea2f95734ee6bd14fd72eabbad694356bba443246`
+  (deterministic with onnx 1.21.0 and numpy 2.4.6)
+- Gates (2026-11-11): Node ORT WASM parity against the QDQ8 file
+  (`scripts/maia3_graph_parity.mjs`, 57 positions, b1 and b11, conditions and
+  Elo grid) is bit-identical; the browser ORT WebGPU gate matches the QDQ8
+  file's WebGPU outputs. All 43 `DequantizeLinear` nodes still fold in the
+  browser. Timings and the full record:
+  [`docs/maia3_graph_rewrite_2026-11.md`](../maia3_graph_rewrite_2026-11.md).
 
 ## Licensing / compliance notes
 
@@ -57,10 +90,11 @@ If a deployed build serves `/models/maia3/maia3_simplified.onnx`:
   (GPL-3.0); model training/engine source lives at
   <https://github.com/CSSLab/maia3> (AGPL-3.0).
 - Local modifications statement: this repository adds a browser ORT runtime
-  (evaluator, worker, Play UI), and serves a locally derived int8-QDQ
-  quantization of the model as the default (see "Derived artifact" above for
-  the exact derivation recipe); the upstream fp16 file is also staged,
-  byte-identical, and used as the runtime fallback.
+  (evaluator, worker, Play UI), and serves locally derived artifacts: an
+  int8-QDQ quantization of the model and, as the default, a graph rewrite of
+  that quantization (see the "Derived artifact" sections above for the exact
+  derivation recipes; the scripts are in this repository). The upstream fp16
+  file is also staged, byte-identical, and used as the last runtime fallback.
 - A deployed site must surface this provenance document (or an equivalent
   notice) and the upstream repository links from its licensing/about page,
   through the same mechanism as the existing GPL engine corresponding-source

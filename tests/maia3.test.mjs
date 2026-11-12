@@ -1,8 +1,30 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { parseFen } from '../src/chess/board.ts';
-import { boardToMaia3Tokens, chooseFromMaia3Policy, maia3InternalsForTests, maia3MoveIndex } from '../src/lc0/maia3.ts';
+import {
+  boardToMaia3Tokens,
+  chooseFromMaia3Policy,
+  MAIA3_DEFAULT_MODEL_URL,
+  MAIA3_MODEL_FALLBACK_URLS,
+  maia3InternalsForTests,
+  maia3MoveIndex,
+} from '../src/lc0/maia3.ts';
+
+test('Maia3 load order is the graph rewrite, then its QDQ8 source, then upstream fp16, all in the manifest', () => {
+  const manifest = JSON.parse(readFileSync('public/models/maia3/manifest.json', 'utf8'));
+  const byUrl = new Map(manifest.models.map((entry) => [entry.url, entry]));
+  assert.equal(MAIA3_MODEL_FALLBACK_URLS[0], MAIA3_DEFAULT_MODEL_URL);
+  const chain = MAIA3_MODEL_FALLBACK_URLS.map((url) => byUrl.get(url));
+  assert.ok(chain.every(Boolean), 'every fallback URL has a manifest entry with its sha256');
+  // Each fallback is the artifact the previous one was derived from.
+  for (let i = 0; i + 1 < chain.length; i++) assert.equal(chain[i].derivedFrom, chain[i + 1].file);
+  assert.equal(chain[0].rewritePasses, 'einsum,promo');
+  assert.equal(chain.at(-1).derivedFrom, undefined);
+  // Distinct URLs and hashes: the model cache keys on the URL and verifies the hash.
+  assert.equal(new Set(chain.map((entry) => entry.sha256)).size, chain.length);
+});
 
 test('Maia3 move index matches 64x64 plus promotion layout', () => {
   assert.equal(maia3MoveIndex('a1a1'), 0);
