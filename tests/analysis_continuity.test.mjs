@@ -7,7 +7,7 @@ const worker = await readFile(new URL('../src/lc0/searchWorkerCore.ts', import.m
 
 test('Analysis opts into persistent model and bounded evaluation caching on both paths', () => {
   assert.match(source, /cacheModel: true,[\s\S]*?requestPersistentModelStorage: true,[\s\S]*?evalCacheEntries: 2048/);
-  assert.match(source, /loadLc0ModelForOrt\(MODEL_URL, \{\s*cache: true,\s*requestPersistentStorage: true/);
+  assert.match(source, /createLc0OnnxEvaluatorFromUrl\(MODEL_URL, \{[\s\S]*?load: \{\s*cache: true,\s*requestPersistentStorage: true/);
   assert.match(source, /new CachedLc0Evaluator\(nextEvaluator, \{ maxEntries: 2048 \}\)/);
 });
 

@@ -1299,13 +1299,143 @@ async function ensureWebGpuAdapterProbed(): Promise<void> {
   const requested = requestedOrtExecutionProvider();
   if (requested === 'wasm' || requested === 'webgpu') return;
   try {
-    probedWebGpuAdapterUsable = !!(await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' }));
+    const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
+    probedWebGpuAdapterUsable = !!adapter;
+    // gpuAdapterVendor never throws: unreadable metadata means "vendor unknown",
+    // not "adapter unusable".
+    if (adapter) probedWebGpuAdapterVendor = (await gpuAdapterVendor(adapter)) ?? '';
   } catch {
     probedWebGpuAdapterUsable = false;
   }
 }
 
-export async function createOrtSession(modelPath: OrtModelInput): Promise<ort.InferenceSession> {
+/**
+ * `GPUAdapterInfo.vendor`, lower-cased; `adapter.info` first, then the older
+ * `requestAdapterInfo()`. Never throws: a getter or API that throws just leaves
+ * the vendor unknown (so the caller keeps WebGPU and the default model).
+ */
+export async function gpuAdapterVendor(adapter: unknown): Promise<string | undefined> {
+  if (!adapter || typeof adapter !== 'object') return undefined;
+  const rec = adapter as { info?: { vendor?: unknown }; requestAdapterInfo?: () => Promise<{ vendor?: unknown }> };
+  let vendor: unknown;
+  try {
+    vendor = rec.info?.vendor;
+  } catch {
+    vendor = undefined;
+  }
+  if (typeof vendor !== 'string') {
+    try {
+      if (typeof rec.requestAdapterInfo === 'function') vendor = (await rec.requestAdapterInfo())?.vendor;
+    } catch {
+      /* optional API */
+    }
+  }
+  return typeof vendor === 'string' && vendor.trim() ? vendor.trim().toLowerCase() : undefined;
+}
+
+/** Test hook: forget this thread's adapter probe so the next session probes again. */
+export function resetWebGpuAdapterProbeForTests(): void {
+  probedWebGpuAdapterUsable = null;
+  probedWebGpuAdapterVendor = undefined;
+}
+
+/** undefined = not probed yet; '' = probed, no adapter or no vendor string. */
+let probedWebGpuAdapterVendor: string | undefined;
+
+async function webGpuAdapterVendor(): Promise<string | undefined> {
+  if (probedWebGpuAdapterVendor === undefined) {
+    probedWebGpuAdapterVendor = '';
+    try {
+      // Same request ORT makes (configureOrtRuntime sets powerPreference), so on a
+      // dual-GPU machine this names the adapter the session will run on.
+      const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
+      probedWebGpuAdapterVendor = (await gpuAdapterVendor(adapter)) ?? '';
+    } catch {
+      /* no adapter: vendor stays unknown */
+    }
+  }
+  return probedWebGpuAdapterVendor || undefined;
+}
+
+export type OrtSessionPlacement = {
+  /** Providers the next createOrtSession call will request, in order. */
+  providers: string[];
+  /** Lower-cased GPUAdapterInfo.vendor ('apple', 'nvidia', ...); only probed when providers include webgpu. */
+  adapterVendor?: string;
+};
+
+/**
+ * Where the next session on this thread will run, decided the same way
+ * createOrtSession decides it. Lets a caller pick device-specific model bytes
+ * before downloading them (src/lc0/lc0SmallModelSelection.ts).
+ */
+export async function resolveOrtSessionPlacement(): Promise<OrtSessionPlacement> {
+  await ensureWebGpuAdapterProbed();
+  const providers = resolvedOrtExecutionProviders();
+  if (!providers.includes('webgpu') || !webgpuAvailable()) return { providers };
+  const adapterVendor = await webGpuAdapterVendor();
+  return adapterVendor ? { providers, adapterVendor } : { providers };
+}
+
+type OrtModelSource = OrtModelInput | (() => Promise<OrtModelInput>);
+
+export type OrtSessionAttemptPlan = {
+  input: OrtModelSource;
+  providers: string[];
+  /** 'wasm-fallback' = the explicit WASM attempt after the WebGPU attempts failed. */
+  kind: 'primary' | 'unfolded' | 'wasm-fallback';
+  note: (message: string | null) => string | undefined;
+};
+
+export type CreateOrtSessionOptions = {
+  /**
+   * Model for the WebGPU -> WASM fallback attempt, loaded only if that attempt
+   * runs. Set when the primary model is a WebGPU-specific rewrite that is slower
+   * on WASM; the default reuses the primary model's unfolded bytes.
+   */
+  wasmFallbackModel?: () => Promise<OrtModelInput>;
+};
+
+/**
+ * Attempt order: folded model on the requested providers; the unfolded model on
+ * the same providers if ORT rejected the folded rewrite; then, when the
+ * requested provider preference allows it, WASM on `wasmFallbackModel` or else
+ * the unfolded model. Exported for tests.
+ *
+ * With `wasmFallbackModel` the primary attempts request WebGPU only. Given
+ * ['webgpu', 'wasm'], ORT itself drops WebGPU when its backend init fails and
+ * resolves a WASM session on the primary (WebGPU-specific) bytes, so the WASM
+ * model would never be used.
+ */
+export function planOrtSessionAttempts(
+  prepared: { input: OrtModelInput; original?: OrtModelInput },
+  providers: string[],
+  wasmFallback: boolean,
+  options: CreateOrtSessionOptions = {},
+): OrtSessionAttemptPlan[] {
+  const primaryProviders =
+    options.wasmFallbackModel && wasmFallback && providers.includes('webgpu') ? providers.filter((provider) => provider !== 'wasm') : providers;
+  const attempts: OrtSessionAttemptPlan[] = [{ input: prepared.input, providers: primaryProviders, kind: 'primary', note: () => describeDequantFold() }];
+  if (prepared.original !== undefined) {
+    attempts.push({
+      input: prepared.original,
+      providers: primaryProviders,
+      kind: 'unfolded',
+      note: (message) => `unfolded model after the folded one failed to load: ${message}`,
+    });
+  }
+  if (wasmFallback) {
+    attempts.push({
+      input: options.wasmFallbackModel ?? prepared.original ?? prepared.input,
+      providers: ['wasm'],
+      kind: 'wasm-fallback',
+      note: (message) => `fallback after WebGPU failure${options.wasmFallbackModel ? ' (WASM model)' : ''}: ${message}`,
+    });
+  }
+  return attempts;
+}
+
+export async function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSessionOptions = {}): Promise<ort.InferenceSession> {
   // Must precede resolvedOrtExecutionProviders(): both it and the artifact
   // selector read the probe result, and the locks below freeze that choice.
   await ensureWebGpuAdapterProbed();
@@ -1317,30 +1447,20 @@ export async function createOrtSession(modelPath: OrtModelInput): Promise<ort.In
   lockOrtRuntimeArtifactKind(providers);
   const prepared = await prepareOrtModelInput(modelPath);
   const wasmFallback = shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
-  // Attempt order: folded model on the requested providers; the unfolded model on the same
-  // providers if ORT rejected the folded rewrite; then WASM on the unfolded model when the
-  // requested provider preference allows a fallback.
-  const attempts: { input: OrtModelInput; providers: string[]; note: (message: string | null) => string | undefined }[] = [
-    { input: prepared.input, providers, note: () => describeDequantFold() },
-  ];
-  if (prepared.original !== undefined) {
-    attempts.push({ input: prepared.original, providers, note: (message) => `unfolded model after the folded one failed to load: ${message}` });
-  }
-  if (wasmFallback) {
-    attempts.push({ input: prepared.original ?? prepared.input, providers: ['wasm'], note: (message) => `fallback after WebGPU failure: ${message}` });
-  }
+  const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
   let lastMessage: string | null = null;
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i];
     const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     try {
-      const session = await ort.InferenceSession.create(attempt.input as never, sessionOptions(attempt.providers));
+      const input = typeof attempt.input === 'function' ? await attempt.input() : attempt.input;
+      const session = await ort.InferenceSession.create(input as never, sessionOptions(attempt.providers));
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
       createdOrtSessions += 1;
       recordSessionAttempt(attempt.providers, true, t1 - t0);
       lastOrtExecutionProviders = attempt.providers;
       lastOrtRuntimeFallback =
-        attempt.providers === providers ? undefined : { at: new Date().toISOString(), from: 'webgpu', to: 'wasm', reason: lastMessage ?? '' };
+        attempt.kind === 'wasm-fallback' ? { at: new Date().toISOString(), from: 'webgpu', to: 'wasm', reason: lastMessage ?? '' } : undefined;
       logOrtSessionReady(attempt.providers, t1 - t0, attempt.note(lastMessage));
       return session;
     } catch (err) {
@@ -1349,10 +1469,12 @@ export async function createOrtSession(modelPath: OrtModelInput): Promise<ort.In
       recordSessionAttempt(attempt.providers, false, t1 - t0, lastMessage);
       const next = attempts[i + 1];
       if (!next) throw err;
-      if (next.input !== attempt.input) {
+      if (next.kind !== 'wasm-fallback') {
         discardDequantFold(lastMessage);
         console.warn(`Centipawn: ORT session failed on the dequantize-folded model; retrying with the original bytes. ${lastMessage}`);
       } else {
+        // A separate WASM model is loaded as-is (unfolded), so the fold summary no longer applies.
+        if (typeof next.input === 'function') discardDequantFold(lastMessage);
         console.warn(`Centipawn: ORT WebGPU session failed; falling back to WASM. ${lastMessage}`);
       }
     }

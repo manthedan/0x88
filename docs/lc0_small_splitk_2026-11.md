@@ -288,6 +288,52 @@ in-graph: drop the FFN-up split, and look at the remaining head Gemms.
 
 ## 9. Release steps (not done here)
 
+**Status, branch `release/lc0-splitk`:** steps 1–3 and 6 are done in code.
+The R2 publish (step 5) is still pending, and so are the step 4 items listed
+under "Not yet run" below.
+
+- **Artifact.** `t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.splitk.onnx`
+  is 20,580,952 bytes, sha256
+  `3a5ccb636ebc596a66021b90a39a3d5b708fbd280048b07ff2d7855d240b37a1`. It was
+  made by step 1 with default options (97 MatMuls rewritten) and is
+  byte-identical to the gated `splitk-all` candidate. It is listed in
+  `manifest.json` and both `r2-*-present` manifests, with a matching
+  artifact-index update.
+- **Selection rule.** `src/lc0/lc0SmallModelSelection.ts` applies it in one
+  place. The model is split-K only when the first resolved ORT provider is
+  `webgpu` AND `GPUAdapterInfo.vendor` is `apple`. Everything else gets the
+  plain QDQ8 export, including NVIDIA, AMD, Intel and WASM. NVIDIA is
+  excluded because it was not shown to help (§5).
+- **Who opts in.** The callers that set `deviceSelection` are the
+  search-worker init, the Analysis, Play and Arena main-thread loaders, and
+  Critical Moments, but only when no `?model=` override is given. An
+  explicit `?model=` URL, even one naming the default file, loads exactly the
+  bytes it names. So do the lab tools
+  `policyOnlyBrowser.ts` and `batchingStrengthMatch.ts`.
+- **Fallbacks.** If the split-K load fails, for example because the CDN does
+  not have it yet, the original model is served. The split-K session requests
+  `['webgpu']` only. With `wasm` listed too, ORT would silently build a WASM
+  session from the split-K bytes when its WebGPU backend fails to start. If
+  the WebGPU attempts fail, `createOrtSession`'s WASM attempt loads the
+  ORIGINAL URL through `wasmFallbackModel`. Unreadable adapter metadata
+  leaves the vendor unknown, so the original model is served and WebGPU is
+  kept.
+- **Caches.** Each model's bytes are cached and sha256-verified under its own
+  URL. The worker reports `servedModelUrl`, and that URL is part of the
+  Analysis evaluation-cache key, the audit `modelUrl`, and the Critical
+  Moments cell key. A Critical Moments report starts its Lc0 worker before
+  accepting any cached Lc0 result, so the key names that worker's model.
+- **Gate run.** `ort-lc0-small-splitk --gate --repeat 3` passed 3/3 on Apple
+  M4 (Metal 3), all 98 fold nodes folded. The max-abs differences were
+  policy 0.042, WDL 0.0024 and MLH 0.125, against limits of 0.2, 0.006 and 2.
+  Best move matched in 10/10.
+- **Built-preview smokes.**
+  - Play and Analysis loaded only the split-K URL on WebGPU.
+  - Play with `?ep=wasm` loaded only the original.
+  - Non-Apple selection is covered by `tests/lc0_small_model_selection.test.mjs`.
+- **Not yet run.** The non-Apple GPU browser gate, an Arena smoke and the
+  paired search A/B.
+
 1. **Generate the artifact** from the shipped model, deterministically:
 
    ```sh
