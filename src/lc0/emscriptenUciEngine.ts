@@ -10,6 +10,9 @@ import {
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
 import { engineArtifactWorkerScript } from './engineArtifacts.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
+import { uciHistoryFromLastIrreversibleMove } from './uciGameHistory.ts';
+
+const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;
 
 /**
  * Shared adapter for the synchronous single-thread Emscripten UCI ports
@@ -37,6 +40,12 @@ export interface EmscriptenUciEngineConfig {
   factoryGlobal: string;
   /** Appended to glue/module load failures so a missing artifact names its rebuild command. */
   missingArtifactHint?: string;
+  /**
+   * Longest UCI command (in bytes) the engine reads without truncating it. A
+   * longer `position ... moves ...` is re-rooted at the last irreversible move,
+   * and rejected if it still does not fit.
+   */
+  maxCommandBytes?: number;
 }
 
 export function emscriptenGoCommand(options: EmscriptenUciOptions): string {
@@ -423,6 +432,17 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     this.lineWaiters = [];
   }
 
+  private positionCommand(fen: string, moves: readonly string[] = []): string {
+    const max = this.config.maxCommandBytes;
+    const command = uciPositionCommand(fen, moves);
+    if (max === undefined || utf8Bytes(command) <= max) return command;
+    const rooted = uciHistoryFromLastIrreversibleMove(fen, moves);
+    const shorter = uciPositionCommand(rooted.fen, rooted.moves);
+    const bytes = utf8Bytes(shorter);
+    if (bytes > max) throw new Error(`${this.config.label} UCI position command is ${bytes} bytes; the engine reads at most ${max}`);
+    return shorter;
+  }
+
   private async sendCommand(command: string, signal?: AbortSignal): Promise<void> {
     await this.request('command', { command }, signal);
   }
@@ -478,7 +498,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
 
   async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
-      const position = uciPositionCommand(fen, opts.moves);
+      const position = this.positionCommand(fen, opts.moves);
       await this.prewarmUnlocked(signal);
       this.lastInfoLines = [];
       await this.applyOptions(signal);
@@ -511,7 +531,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
       this.lastInfoLines = [];
       await this.applyOptions(opts.signal);
       await this.sendCommand(`setoption name MultiPV value ${multipv}`, opts.signal);
-      await this.sendCommand(uciPositionCommand(fen, opts.moves), opts.signal);
+      await this.sendCommand(this.positionCommand(fen, opts.moves), opts.signal);
       const searchStart = this.stdout.length;
       const searchOptions = { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs };
       const commandPromise = this.sendCommand(emscriptenGoCommand(searchOptions), opts.signal);

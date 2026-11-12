@@ -11,7 +11,7 @@ import { RecklessEngine } from '../src/lc0/recklessEngine.ts';
 import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
 import { StockfishEngine } from '../src/lc0/stockfishEngine.ts';
 import { StormphraxEngine } from '../src/lc0/stormphraxEngine.ts';
-import { fenAfterUciMoves, uciGameHistory } from '../src/lc0/uciGameHistory.ts';
+import { fenAfterUciMoves, uciGameHistory, uciHistoryFromLastIrreversibleMove } from '../src/lc0/uciGameHistory.ts';
 import { ViridithasEngine } from '../src/lc0/viridithasEngine.ts';
 
 function play(fen, moves) {
@@ -184,4 +184,36 @@ test('CPU arena games give each engine the start FEN and the moves played since'
     [start, ['f1f2', 'h8g8', 'f2f7']],
     [start, ['f1f2', 'h8g8', 'f2f7', 'g8h8']],
   ]);
+});
+
+test('uciHistoryFromLastIrreversibleMove re-roots at the last capture or pawn move', () => {
+  const moves = ['g1f3', 'g8f6', 'e2e4', 'f6e4', 'f3g1', 'e4f6', 'g1f3'];
+  const rooted = uciHistoryFromLastIrreversibleMove(START_FEN, moves);
+  assert.deepEqual(rooted.moves, ['f3g1', 'e4f6', 'g1f3']);
+  assert.equal(fenAfterUciMoves(rooted.fen, rooted.moves), fenAfterUciMoves(START_FEN, moves));
+  assert.deepEqual(uciHistoryFromLastIrreversibleMove(START_FEN, ['g1f3', 'g8f6']), { fen: START_FEN, moves: ['g1f3', 'g8f6'] });
+});
+
+test('Berserk re-roots a position command longer than its 8191-byte input buffer instead of truncating it', async (t) => {
+  install(t, EmscriptenWorker);
+  const shuffle = Array.from({ length: 425 }, () => ['g1f3', 'g8f6', 'f3g1', 'f6g8']).flat();
+  const tail = ['e2e4', 'g8f6', 'g1f3', 'f6g8', 'f3g1'];
+  const moves = [...shuffle, ...tail];
+  assert.ok(`position fen ${START_FEN} moves ${moves.join(' ')}`.length > 8191);
+  const berserk = new BerserkEngine({ depth: 2 });
+  const stormphrax = new StormphraxEngine({ depth: 2 });
+  t.after(() => {
+    berserk.dispose();
+    stormphrax.dispose();
+  });
+  const afterPawn = fenAfterUciMoves(START_FEN, [...shuffle, 'e2e4']);
+  assert.equal(await berserk.bestMove(START_FEN, undefined, { moves }), 'e2e4');
+  assert.equal(await stormphrax.bestMove(START_FEN, undefined, { moves }), 'e2e4');
+  await assert.rejects(berserk.bestMove(START_FEN, undefined, { moves: shuffle }), /Berserk UCI position command is \d+ bytes; the engine reads at most 8191/);
+  await flush();
+  const [berserkPositions, stormphraxPositions] = EmscriptenWorker.instances.map((worker) =>
+    worker.messages.filter((command) => command.startsWith('position ')),
+  );
+  assert.deepEqual(berserkPositions, [`position fen ${afterPawn} moves ${tail.slice(1).join(' ')}`]);
+  assert.deepEqual(stormphraxPositions, [`position fen ${START_FEN} moves ${moves.join(' ')}`], 'engines without a buffer limit get the whole game');
 });

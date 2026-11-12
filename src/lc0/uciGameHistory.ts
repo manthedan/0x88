@@ -52,6 +52,24 @@ export function uciGameHistory(positions: readonly BoardState[]): UciGameHistory
   return { fen: boardToFen(positions[start]), moves: moves.reverse() };
 }
 
+/**
+ * The same position history re-rooted at the last capture or pawn move (where
+ * the halfmove clock is 0). No repetition reaches back past such a move and
+ * the root FEN carries the halfmove clock, so the engine sees the same
+ * repetitions and 50-move count from a shorter `position` command.
+ */
+export function uciHistoryFromLastIrreversibleMove(fen: string, moves: readonly string[]): UciGameHistory {
+  let board = parseFen(fen);
+  let root = { fen, index: 0 };
+  for (let i = 0; i < moves.length; i += 1) {
+    const move = legalMoves(board).find((candidate) => moveToUci(candidate) === moves[i]);
+    if (!move) throw new Error(`Illegal move ${moves[i]} in UCI history from ${fen}`);
+    board = makeMove(board, move);
+    if (board.halfmove === 0) root = { fen: boardToFen(board), index: i + 1 };
+  }
+  return { fen: root.fen, moves: moves.slice(root.index) };
+}
+
 /** Apply legal UCI `moves` to `fen` and return the resulting FEN. */
 export function fenAfterUciMoves(fen: string, moves: readonly string[] = []): string {
   if (!moves.length) return fen;

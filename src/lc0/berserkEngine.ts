@@ -20,6 +20,9 @@ const BERSERK_CONFIG: EmscriptenUciEngineConfig = {
   label: 'Berserk',
   factoryGlobal: 'Berserk',
   missingArtifactHint: BERSERK_ARTIFACT_BUILD_HINT,
+  // The patched UCICommand copies each command into `static char in[8192]` with
+  // snprintf, which would silently cut a longer move list (a different position).
+  maxCommandBytes: 8191,
 };
 
 export function berserkGoCommand(options: BerserkOptions): string {
