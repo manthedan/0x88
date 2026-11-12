@@ -12,14 +12,14 @@ import {
 } from '../nn/ortRuntime.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 import type { Lc0WebEncoderKernelVariant, Lc0WebExecutionFootprint, Lc0WebHybridLegalPriorsBackend } from './hybridEvaluator.ts';
-import { describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
+import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
+import { describeLc0ModelLoad } from './modelCache.ts';
 import {
   CachedLc0Evaluator,
   type Lc0Evaluation,
   type Lc0EvaluationCacheFootprint,
   type Lc0EvaluationProvider,
   type Lc0EvaluatorInput,
-  Lc0OnnxEvaluator,
 } from './onnxEvaluator.ts';
 import { applyOrtExecutionProvider } from './ortWorkerExecutionProvider.ts';
 import { noteSearchCancel, takeSearchCancel } from './pendingSearchCancel.ts';
@@ -30,6 +30,12 @@ type InitMessage = {
   type: 'init';
   id: number;
   modelUrl: string;
+  /**
+   * Let the worker swap the default Lc0 Small model for its split-K rewrite on
+   * Apple WebGPU (src/lc0/lc0SmallModelSelection.ts). Product callers set it
+   * for the default URL; omitted = load exactly modelUrl.
+   */
+  deviceModelSelection?: boolean;
   ep: OrtExecutionProviderPreference;
   cacheModel: boolean;
   /** Explicit lab opt-out; product callers leave verification enabled. */
@@ -138,7 +144,16 @@ type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
 type SearchWorkerProgress = Lc0SearchProgress;
 
 type WorkerResponse =
-  | { type: 'ready'; id: number; backend: string; modelCache: string; ortWasm?: OrtRuntimeDiagnostics['wasm']; ortFallback?: OrtRuntimeDiagnostics['fallback'] }
+  | {
+      type: 'ready';
+      id: number;
+      backend: string;
+      modelCache: string;
+      ortWasm?: OrtRuntimeDiagnostics['wasm'];
+      ortFallback?: OrtRuntimeDiagnostics['fallback'];
+      /** ONNX runtime only: the model the session runs (differs from modelUrl when the split-K model was selected). */
+      servedModelUrl?: string;
+    }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'searchProgress'; id: number; progress: SearchWorkerProgress }
@@ -249,6 +264,7 @@ installWebGpuBufferAllocationProbe();
 let evaluator: WorkerEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
+let configuredServedModelUrl: string | undefined;
 let configuredInitKey: string | null = null;
 let configuredBackend = '';
 let configuredModelCacheStatus = '';
@@ -281,6 +297,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   const initKey = JSON.stringify({
     runtime: message.runtime ?? 'onnx',
     modelUrl: message.modelUrl,
+    deviceModelSelection: message.deviceModelSelection === true,
     ep: message.ep,
     cacheModel: message.cacheModel,
     allowUnverifiedModel: message.allowUnverifiedModel === true,
@@ -311,6 +328,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       modelCache: `${configuredModelCacheStatus} · reused existing worker session`,
       ortWasm: configuredOrtWasm,
       ortFallback: configuredOrtFallback,
+      ...(configuredServedModelUrl ? { servedModelUrl: configuredServedModelUrl } : {}),
     });
     return;
   }
@@ -340,6 +358,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     configuredModelCacheStatus = `whole-model-webgpu${cacheLabel}`;
     configuredOrtWasm = undefined;
     configuredOrtFallback = undefined;
+    configuredServedModelUrl = undefined;
     await previousEvaluator?.dispose?.();
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
@@ -367,6 +386,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     configuredModelCacheStatus = `hybrid-pack-lazy${cacheLabel}`;
     configuredOrtWasm = undefined;
     configuredOrtFallback = undefined;
+    configuredServedModelUrl = undefined;
     await previousEvaluator?.dispose?.();
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
@@ -374,21 +394,26 @@ async function handleInit(message: InitMessage): Promise<void> {
   // Throttle progress posts to ~2MB steps so a large net does not flood the
   // main thread with one message per network chunk.
   let lastReportedBytes = -Infinity;
-  const modelLoad = await loadLc0ModelForOrt(message.modelUrl, {
-    cache: message.cacheModel,
-    allowUnverified: message.allowUnverifiedModel,
-    requestPersistentStorage: message.requestPersistentModelStorage,
-    minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
-    onProgress: message.reportDownloadProgress
-      ? (loadedBytes, totalBytes) => {
-          if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
-          lastReportedBytes = loadedBytes;
-          post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
-        }
-      : undefined,
-  });
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
-  const baseEvaluator = await Lc0OnnxEvaluator.create(modelLoad.model, { physicalBatchMode });
+  const created = await createLc0OnnxEvaluatorFromUrl(message.modelUrl, {
+    deviceSelection: message.deviceModelSelection === true,
+    evaluator: { physicalBatchMode },
+    load: {
+      cache: message.cacheModel,
+      allowUnverified: message.allowUnverifiedModel,
+      requestPersistentStorage: message.requestPersistentModelStorage,
+      minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
+      onProgress: message.reportDownloadProgress
+        ? (loadedBytes, totalBytes) => {
+            if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
+            lastReportedBytes = loadedBytes;
+            post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
+          }
+        : undefined,
+    },
+  });
+  const baseEvaluator = created.evaluator;
+  const modelLoad = created.modelLoad;
   let nextEvaluator: WorkerEvaluator;
   let nextSearcher: Lc0PuctSearcher;
   let diagnostics: OrtRuntimeDiagnostics;
@@ -407,6 +432,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   evaluator = nextEvaluator;
   searcher = nextSearcher;
   configuredModelUrl = message.modelUrl;
+  configuredServedModelUrl = created.servedUrl;
   configuredInitKey = initKey;
   configuredBackend = diagnostics.describe;
   configuredModelCacheStatus = nextModelCacheStatus;
@@ -420,6 +446,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     modelCache: configuredModelCacheStatus,
     ortWasm: configuredOrtWasm,
     ortFallback: configuredOrtFallback,
+    servedModelUrl: configuredServedModelUrl,
   });
 }
 

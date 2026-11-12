@@ -145,11 +145,14 @@ export async function runCriticalReport(
           if (!result.line?.pvUci[0] && !result.policy) throw new Error('No scored best move returned.');
           if (result.line && (result.line.error || (!Number.isFinite(result.line.scoreCp) && !Number.isFinite(result.line.mateIn))))
             throw new Error('Engine returned no finite evaluation.');
-          result.cacheKey = key;
+          // Re-key after a fresh evaluation: a lane may refine its provenance while
+          // loading (Lc0 Small records which model file it actually ran).
+          const storedKey = cached ? key : criticalMomentCacheKey(moment, lane);
+          result.cacheKey = storedKey;
           cell.result = result;
           cell.cached = !!cached;
           cell.status = 'complete';
-          cache.set(key, result);
+          cache.set(storedKey, result);
           if (cache.size > 128) cache.delete(cache.keys().next().value!);
         } catch (error) {
           if (signal.aborted) break;

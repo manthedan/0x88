@@ -6,11 +6,18 @@ import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type CriticalLane, type CriticalMoment, type CriticalProvenance, type CriticalResult } from './criticalMoments.ts';
 import { cpuEngineHashMbForSurface } from './engineProvision.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
+import { LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
 import { MAIA3_DEFAULT_MODEL_URL, Maia3BrowserEvaluator } from './maia3.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 
-export const CRITICAL_LC0_MODEL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
+export const CRITICAL_LC0_MODEL = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
+/**
+ * The model the report's Lc0 worker last ran (CRITICAL_LC0_MODEL, or its
+ * split-K rewrite on Apple WebGPU). It is the provenance model, and so part of
+ * the report cache key, so results from the two models are never mixed.
+ */
+let lastCriticalLc0ServedModel: string | undefined;
 
 /** Own workers prevent a navigating interactive tab from resetting a report engine. Created only after consent. */
 export function createCriticalEngines(
@@ -21,7 +28,7 @@ export function createCriticalEngines(
   let sf: StockfishEngine | undefined;
   let worker: Worker | undefined;
   let maia: Maia3BrowserEvaluator | undefined;
-  let lc0Ready: Promise<{ backend: string }> | undefined;
+  let lc0Ready: Promise<{ backend: string; servedModelUrl?: string }> | undefined;
   let maiaReady: Promise<Maia3BrowserEvaluator> | undefined;
   let sequence = 0;
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; progress: (text: string) => void }>();
@@ -72,10 +79,11 @@ export function createCriticalEngines(
         for (const request of pending.values()) request.reject(new Error(event.message || 'Lc0 worker failed.'));
         pending.clear();
       });
-      lc0Ready = post<{ backend: string }>(
+      lc0Ready = post<{ backend: string; servedModelUrl?: string }>(
         {
           type: 'init',
           modelUrl: CRITICAL_LC0_MODEL,
+          deviceModelSelection: true,
           ep: 'auto',
           runtime: 'onnx',
           cacheModel: true,
@@ -107,7 +115,7 @@ export function createCriticalEngines(
   };
   const lc0Provenance: CriticalProvenance = {
     engine: 'Lc0 Small',
-    model: CRITICAL_LC0_MODEL,
+    model: lastCriticalLc0ServedModel ?? CRITICAL_LC0_MODEL,
     build: 't1-256x10-distilled-swa-2432500 · QDQ8',
     runtime: 'ORT auto (WebGPU / WASM)',
     budget: '400 visits',
@@ -147,6 +155,9 @@ export function createCriticalEngines(
           try {
             progress('Loading Lc0 Small');
             const ready = await initLc0(progress);
+            // runCriticalReport reads lane.provenance again after evaluate to key the stored result.
+            lastCriticalLc0ServedModel = ready.servedModelUrl ?? CRITICAL_LC0_MODEL;
+            lc0Provenance.model = lastCriticalLc0ServedModel;
             const response = await post<{ result: Lc0SearchLike }>(
               {
                 type: 'search',

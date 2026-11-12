@@ -80,7 +80,7 @@ test('product evaluator and worker default to declared physical batching', () =>
   const worker = readFileSync(new URL('../src/lc0/searchWorkerCore.ts', import.meta.url), 'utf8');
   assert.match(evaluator, /physicalBatchMode === 'logical' \? 'logical' : 'declared'/);
   assert.match(worker, /physicalBatchMode === 'logical' \? 'logical' : 'declared'/);
-  assert.match(worker, /Lc0OnnxEvaluator\.create\(modelLoad\.model, \{ physicalBatchMode \}\)/);
+  assert.match(worker, /createLc0OnnxEvaluatorFromUrl\(message\.modelUrl, \{[\s\S]*?evaluator: \{ physicalBatchMode \}/);
 });
 
 test('Play and LQO search constants stay locked to the product source', () => {
