@@ -31,7 +31,7 @@ import { readFileSync, writeFileSync, existsSync, statSync, mkdtempSync } from '
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
-import { makeRunId, validateEstimate, q, slug, lockCommand, parseQueueList } from './lib.mjs';
+import { makeRunId, validateEstimate, q, slug, lockCommand, parseQueueList, timingValidity } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BENCHLOCK = '/Users/macthedan/projects/lc0_browser/notes/kernel-hillclimb/benchlock.sh';
@@ -150,7 +150,8 @@ async function launch(home, runId, remoteDir) {
       `id=$(printf %s "$id" | tail -1 | tr -d '[:space:]'); printf %s "$id" > queue-job-id; echo "$id"`,
     ].join('\n');
     const r = sh(H, admit, { allowFail: true, timeoutMs: 420_000 });
-    if (r.timedOut) pendingUnknown(runId, remoteDir, 'gpu-queue admission/submit');
+    // Timeout or ssh transport failure (255): the submit may have happened. Uncertain -> 76.
+    if (r.timedOut || r.status === 255) return pendingUnknown(runId, remoteDir, 'gpu-queue admission/submit', r);
     const out = r.stdout.trim();
     if (r.status === 4) die(`a 0x88 job is already waiting in gpu-queue; policy: at most one. Nothing submitted (run dir ${remoteDir} left unused).`, 4);
     if (r.status !== 0) die(`gpu-queue submit failed (${r.status}): ${out} ${r.stderr}`);
@@ -160,7 +161,7 @@ async function launch(home, runId, remoteDir) {
   } else {
     // NB: `cd X && nohup … &` would background the whole list and keep ssh's stdout open.
     const r = sh(H, `cd ${q(remoteDir)} || exit 1; nohup ./job.sh > job.log 2>&1 < /dev/null & echo $! > ${q(remoteDir + '/job.pid')}; cat ${q(remoteDir + '/job.pid')}`, { allowFail: true });
-    if (r.timedOut) pendingUnknown(runId, remoteDir, 'detached job start');
+    if (r.timedOut || r.status === 255) return pendingUnknown(runId, remoteDir, 'detached job start', r);
     if (r.status !== 0) die(`starting the job failed (${r.status}): ${r.stderr}`);
     log(`started detached job on ${hostName} (pid ${r.stdout.trim()}); run id ${runId}`);
   }
@@ -255,9 +256,11 @@ async function waitForResult(runId, remoteDir) {
 
 // The remote side may or may not have acted (the ssh call timed out): report pending (76)
 // with the run id, so the caller collects or inspects it with --fetch instead of resubmitting.
-function pendingUnknown(runId, remoteDir, what) {
-  log(`${what} timed out; outcome unknown. Inspect/collect with: node scripts/kernel_hillclimb/remote/run.mjs --host ${hostName} --fetch ${runId}`);
-  finish({ j: null, jobId: null, runId, remoteDir, exit: 76, pending: true, failure: `${what}: ssh timed out, remote outcome unknown` });
+// Callers must `return` this (it never settles; finish() exits after stdout drains).
+function pendingUnknown(runId, remoteDir, what, r) {
+  const why = r.timedOut ? 'ssh timed out' : `ssh transport failed (exit ${r.status}): ${r.stderr.trim().slice(0, 200)}`;
+  log(`${what}: ${why}; outcome unknown. Inspect/collect with: node scripts/kernel_hillclimb/remote/run.mjs --host ${hostName} --fetch ${runId}`);
+  finish({ j: null, jobId: null, runId, remoteDir, exit: 76, pending: true, failure: `${what}: ${why}; remote outcome unknown` });
   return new Promise(() => {});
 }
 
@@ -266,12 +269,9 @@ function finish({ j, jobId, runId, remoteDir, failure, exit, pending }) {
   if (H?.ssh) {
     if (remoteDir) { try { runner.run = JSON.parse(sh(H, `cat ${q(remoteDir + '/run.json')}`, { allowFail: true, timeoutMs: 30_000 }).stdout); } catch {} }
   }
-  // Valid only when the agent positively verified the run was uncontended (meta.verified ===
-  // true: every during-run CPU/GPU attribution sample succeeded). Results from older agents
-  // without that field are not valid.
-  const verifiedClean = j?.meta?.verified === true && j?.meta?.contended === false;
-  if (H?.scheduler === 'idle-wait') runner.timingValid = !(runner.run?.noWait) && verifiedClean;
-  if (H?.scheduler === 'gpu-queue' || H?.scheduler === 'benchlock') runner.timingValid = verifiedClean;
+  // Positive evidence only (see lib timingValidity): results from older agents, or whose
+  // idle gate cannot be confirmed agent-side, are never timing-valid.
+  if (H) runner.timingValid = timingValidity({ scheduler: H.scheduler, j, run: runner.run });
   const out = j ? { ...j, runner } : { ok: false, result: null, error: failure, ...(pending ? { pending: true } : {}), runner };
   const text = JSON.stringify(out, null, 1);
   if (args.out) writeFileSync(args.out, text + '\n');

@@ -4,12 +4,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir, platform } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import {
   makeRunId, validateEstimate, q, resolveStatic, lockCommand, parseQueueList, idleVerdict,
-  waitForIdle, parseAgxClients, summarizeSamples, assessRun,
+  waitForIdle, parseAgxClients, summarizeSamples, assessRun, timingValidity,
 } from '../scripts/kernel_hillclimb/remote/lib.mjs';
 import { settleProbe, publish } from '../lab/kernel-hillclimb/probe-contract.mjs';
 
@@ -205,7 +206,8 @@ test('macOS: a foreign Metal job during the run is contended, not clean', () => 
   const s = [mac(0, { 'a/1': 100 }), mac(5_000, { 'a/1': 100, 'b/2': 2e9 }), mac(10_000, { 'a/1': 100, 'b/2': 5e9 })];
   const r = macRun(s);
   assert.equal(r.during.foreignGpuPct, 50);
-  assert.match(r.contendedReasons.join('|'), /foreign GPU 50% >= 10%/);
+  assert.equal(r.during.foreignGpuPctMax, 60); // intervals: 2 s/5 s = 40%, 3 s/5 s = 60%
+  assert.match(r.contendedReasons.join('|'), /foreign GPU peaked at 60% >= 10% .*run mean 50%/);
   assert.deepEqual(r.unverifiedReasons, []);
   const clean = macRun([mac(0, { 'a/1': 100 }), mac(10_000, { 'a/1': 100 + 1e6 })]);
   assert.deepEqual([clean.contendedReasons, clean.unverifiedReasons], [[], []]);
@@ -241,3 +243,67 @@ test('summarizeSamples ignores failed samples for maxima but counts them', () =>
   const d = summarizeSamples([okCpu(0, 1.5), { t: 1, load1: 2, cpuOk: false, foreignCpuCores: null, gpuOk: false }]);
   assert.equal(d.foreignCpuCoresMax, 1.5); assert.equal(d.cpuFailures, 1); assert.equal(d.gpuFailures, 2);
 });
+
+test('macOS: a short foreign GPU burst is caught per interval even when the run mean is low', () => {
+  // 30 one-second intervals; a foreign client burns 2 s of GPU time across two intervals.
+  const s = []; let ns = 0;
+  for (let i = 0; i <= 30; i++) { if (i === 11 || i === 12) ns += 1e9; s.push(mac(i * 1000, { 'w/404': 0, 'm/9': ns })); }
+  const r = macRun(s);
+  assert.ok(r.during.foreignGpuPct < 10, `mean ${r.during.foreignGpuPct}`);
+  assert.equal(r.during.foreignGpuPctMax, 100);
+  assert.equal(r.during.foreignGpuPeakAt, 11_000);
+  assert.match(r.contendedReasons.join('|'), /peaked at 100%/);
+});
+
+test('timing validity needs positive evidence, including agent-side proof the idle gate ran', () => {
+  const meta = { verified: true, contended: false, noWait: false, idleWait: { waitedS: 61 } };
+  const v = (scheduler, m, run) => timingValidity({ scheduler, j: { meta: m }, run });
+  assert.equal(v('idle-wait', meta, { noWait: false }), true);
+  assert.equal(v('idle-wait', meta, undefined), true); // run.json fetch failed: agent evidence suffices
+  assert.equal(v('idle-wait', { ...meta, noWait: true, idleWait: null }, undefined), false); // --no-wait, run.json lost
+  assert.equal(v('idle-wait', { ...meta, noWait: undefined }, undefined), false); // older agent: no evidence
+  assert.equal(v('idle-wait', { ...meta, idleWait: null }, undefined), false);
+  assert.equal(v('idle-wait', meta, { noWait: true }), false); // controller may only invalidate
+  assert.equal(v('idle-wait', { ...meta, verified: false }, {}), false);
+  assert.equal(v('idle-wait', { ...meta, contended: true }, {}), false);
+  assert.equal(v('gpu-queue', { verified: true, contended: false }), true);
+  assert.equal(v('gpu-queue', { contended: false }), false); // pre-verification agent
+  assert.equal(timingValidity({ scheduler: 'gpu-queue', j: null }), false);
+});
+
+// ---- uncertain launch -> pending 76 (review r3 #1, #2) ----
+const RUN = join(dirname(fileURLToPath(import.meta.url)), '../scripts/kernel_hillclimb/remote/run.mjs');
+function fakeRemote(failOn) {
+  const dir = mkdtempSync(join(tmpdir(), 'khc-fake-'));
+  const bin = join(dir, 'bin'); mkdirSync(bin); mkdirSync(join(dir, 'dist'));
+  writeFileSync(join(dir, 'dist', 'p.html'), '<p>');
+  writeFileSync(join(bin, 'rsync'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  // The last ssh argument is the remote command.
+  writeFileSync(join(bin, 'ssh'), `#!/bin/sh
+for a; do cmd=$a; done
+case "$cmd" in
+  *${failOn}*) echo "Connection reset by peer" >&2; exit 255 ;;
+  *'printf %s "$HOME"'*) printf %s /home/fake ;;
+  *'gpu-queue list'*) echo 'ID   State      Output               E-Level  Times(r/u/s)   Command [run=1/1]' ;;
+  *'command -v node'*) echo /usr/bin/node ;;
+  *) exit 0 ;;
+esac
+`, { mode: 0o755 });
+  return { dir, bin };
+}
+for (const [host, failOn, extra] of [['yukon', "'gpu-queue submit'", []], ['mac-mini', 'nohup', ['--no-wait']]]) {
+  test(`${host}: ssh transport failure during launch exits 76 pending with the run id`, () => {
+    const { dir, bin } = fakeRemote(failOn);
+    try {
+      const r = spawnSync(process.execPath, [RUN, '--host', host, '--dist', join(dir, 'dist'), '--page', 'p.html', ...extra],
+        { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 30_000 });
+      assert.equal(r.status, 76, `exit ${r.status}\n${r.stderr}`);
+      const j = JSON.parse(r.stdout);
+      assert.equal(j.pending, true); assert.equal(j.ok, false);
+      assert.match(j.error, /ssh transport failed \(exit 255\)/);
+      assert.match(j.runner.runId, /^\d{8}T\d{6}Z-p-[0-9a-f]{12}$/);
+      assert.equal(j.runner.timingValid, false);
+      assert.match(r.stderr, new RegExp(`--fetch ${j.runner.runId}`));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}

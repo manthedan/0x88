@@ -146,8 +146,19 @@ export function parseAgxClients(txt) {
 export function summarizeSamples(xs) {
   const cpu = xs.filter((x) => x.cpuOk).map((x) => x.foreignCpuCores);
   const gpu = xs.filter((x) => x.gpuOk);
-  let foreignGpuPct = null, foreignGpuTop = [];
+  let foreignGpuPct = null, foreignGpuTop = [], foreignGpuPctMax = null, foreignGpuPeakAt = null;
   const cl = gpu.filter((x) => x.foreignGpuClients);
+  // Per-interval utilisation between consecutive valid samples: a short foreign burst must
+  // not hide in the whole-run average. A client absent from the previous sample started
+  // during the interval and counts from 0.
+  for (let i = 1; i < cl.length; i++) {
+    const a = cl[i - 1], b = cl[i], dt = b.t - a.t;
+    if (!(dt > 0)) continue;
+    let ns = 0;
+    for (const [id, v] of Object.entries(b.foreignGpuClients)) ns += Math.max(0, v - (a.foreignGpuClients[id] ?? 0));
+    const pct = +(ns / 1e4 / dt).toFixed(2);
+    if (foreignGpuPctMax === null || pct > foreignGpuPctMax) { foreignGpuPctMax = pct; foreignGpuPeakAt = b.t; }
+  }
   if (cl.length >= 2) {
     const first = cl[0], last = cl[cl.length - 1], seen = new Map();
     for (const s of cl) for (const [id, ns] of Object.entries(s.foreignGpuClients)) {
@@ -168,7 +179,7 @@ export function summarizeSamples(xs) {
     foreignCpuCoresMax: cpu.length ? Math.max(...cpu) : null,
     foreignCpuCoresMean: cpu.length ? +(cpu.reduce((a, b) => a + b, 0) / cpu.length).toFixed(2) : null,
     foreignGpuApps: [...new Set(gpu.flatMap((x) => x.foreignGpuApps ?? []))],
-    foreignGpuPct, foreignGpuTop,
+    foreignGpuPct, foreignGpuPctMax, foreignGpuPeakAt, foreignGpuTop,
   };
 }
 
@@ -187,8 +198,8 @@ export function assessRun({ platform, samples, loadStart, loadEnd, gated, th }) 
   if (d.gpuFailures) unverified.push(`${d.gpuFailures}/${d.samples} during-run GPU attribution samples failed`);
   if (d.foreignGpuApps.length) contended.push(`foreign GPU compute apps during run: ${d.foreignGpuApps.join('; ')}`);
   if (platform === 'darwin') {
-    if (d.foreignGpuPct === null) unverified.push('no attributable GPU reading during run');
-    else if (d.foreignGpuPct >= th.gpuMax) contended.push(`foreign GPU ${d.foreignGpuPct}% >= ${th.gpuMax}% during run (${d.foreignGpuTop.join(', ')})`);
+    if (d.foreignGpuPctMax === null) unverified.push('no attributable GPU reading during run');
+    else if (d.foreignGpuPctMax >= th.gpuMax) contended.push(`foreign GPU peaked at ${d.foreignGpuPctMax}% >= ${th.gpuMax}% in one sampling interval (run mean ${d.foreignGpuPct}%; ${d.foreignGpuTop.join(', ')})`);
   }
   const util = (g) => g?.utilGpuPct ?? g?.deviceUtilPct ?? null;
   for (const [tag, l] of [['start', loadStart], ['end', loadEnd]]) {
@@ -205,4 +216,18 @@ export function assessRun({ platform, samples, loadStart, loadEnd, gated, th }) 
   if (gated && d.foreignCpuCoresMax !== null && d.foreignCpuCoresMax >= th.loadMax)
     contended.push(`foreign CPU ${d.foreignCpuCoresMax} cores >= ${th.loadMax} during run`);
   return { during: d, contendedReasons: contended, unverifiedReasons: unverified };
+}
+
+/**
+ * Whether a result's timing can be trusted. Requires positive evidence, never the absence of
+ * a negative: the agent verified the run (meta.verified === true, meta.contended === false),
+ * and on idle-gated hosts the agent itself reports that the idle gate ran
+ * (meta.noWait === false plus an idleWait record). Controller-side run.json is only ever
+ * allowed to *invalidate* (noWait: true), since fetching it can fail.
+ */
+export function timingValidity({ scheduler, j, run }) {
+  const m = j?.meta;
+  if (!(m?.verified === true && m?.contended === false)) return false;
+  if (scheduler === 'idle-wait') return m.noWait === false && m.idleWait != null && run?.noWait !== true;
+  return true;
 }

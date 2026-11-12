@@ -153,6 +153,7 @@ async function main() {
       loadStart, loadEnd, duringRun: during, idleWait,
       contended: contendedReasons.length > 0, contendedReasons,
       verified: unverifiedReasons.length === 0, unverifiedReasons,
+      noWait: !args['wait-idle'],
       console: state.console.slice(-60),
       ...(gpuInfo ? { gpuInfo } : {}),
       ...(outcome ? {} : { chromeStderrTail: state.chromeStderr.slice(-3000) }),
