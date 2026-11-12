@@ -12,9 +12,12 @@ import {
   selectLc0OrtModelUrl,
 } from '../src/lc0/lc0SmallModelSelection.ts';
 import {
+  collectOrtRuntimeDiagnostics,
+  gpuAdapterShaderF16,
   gpuAdapterVendor,
   planOrtSessionAttempts,
   resetWebGpuAdapterProbeForTests,
+  resolvedOrtExecutionProviders,
   resolveOrtSessionPlacement,
   setRequestedOrtExecutionProviderForCurrentThread,
 } from '../src/nn/ortRuntime.ts';
@@ -148,7 +151,7 @@ test('createOrtSession attempt plan: split-K attempts are WebGPU-only and the WA
   assert.equal(planOrtSessionAttempts(prepared, ['webgpu'], false, { wasmFallbackModel: async () => 'x' }).length, 2);
 });
 
-async function withFakeAdapter(adapter, run) {
+async function withFakeAdapter(adapter, run, ep = 'auto') {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   Object.defineProperty(globalThis, 'navigator', {
     value: { hardwareConcurrency: 8, gpu: { requestAdapter: async () => adapter } },
@@ -156,7 +159,7 @@ async function withFakeAdapter(adapter, run) {
     writable: true,
   });
   resetWebGpuAdapterProbeForTests();
-  setRequestedOrtExecutionProviderForCurrentThread('auto');
+  setRequestedOrtExecutionProviderForCurrentThread(ep);
   try {
     return await run();
   } finally {
@@ -205,6 +208,73 @@ test('unreadable adapter metadata leaves the vendor unknown but keeps WebGPU and
     requestAdapterInfo: async () => ({ vendor: 'Apple' }),
   };
   assert.equal(await gpuAdapterVendor(legacy), 'apple');
+});
+
+test('an adapter without shader-f16 resolves ORT to WASM: the f16 nets fail at first run there', async () => {
+  // Yukon 3090 with f16 hidden: session creation succeeded, then OrtRun threw
+  // "Program Transpose requires f16 but the device does not support it".
+  const noF16 = { features: new Set(['timestamp-query']), info: { vendor: 'Apple' } };
+  await withFakeAdapter(noF16, async () => {
+    const placement = await resolveOrtSessionPlacement();
+    assert.deepEqual(placement, { providers: ['wasm'] });
+    assert.equal(selectLc0OrtModelUrl(ORIGINAL, placement), ORIGINAL);
+    assert.deepEqual(resolvedOrtExecutionProviders(), ['wasm']);
+  });
+  await withFakeAdapter(noF16, async () => {
+    // The big-net support probe reads this, so its UI matches the worker's backend.
+    const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
+    assert.equal(diag.adapter?.ok, true);
+    assert.equal(diag.adapter?.shaderF16, false);
+    assert.deepEqual(diag.resolvedExecutionProviders, ['wasm']);
+  });
+  await withFakeAdapter(
+    noF16,
+    async () => {
+      // A strict page keeps WebGPU for itself, but the adapter verdict is still
+      // reported, so the big-net probe matches its ep:'auto' worker (WASM).
+      const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
+      assert.deepEqual(diag.resolvedExecutionProviders, ['webgpu']);
+      assert.equal(diag.adapter?.shaderF16, false);
+    },
+    'webgpu',
+  );
+  await withFakeAdapter(
+    noF16,
+    async () => {
+      await resolveOrtSessionPlacement();
+      assert.deepEqual(resolvedOrtExecutionProviders(), ['wasm']);
+    },
+    'webgpu,wasm',
+  );
+  // Strict ep=webgpu never degrades silently; it keeps WebGPU and surfaces the error.
+  await withFakeAdapter(
+    noF16,
+    async () => {
+      await resolveOrtSessionPlacement();
+      assert.deepEqual(resolvedOrtExecutionProviders(), ['webgpu']);
+    },
+    'webgpu',
+  );
+});
+
+test('an adapter with shader-f16, or one whose features are unreadable, keeps WebGPU', async () => {
+  await withFakeAdapter({ features: new Set(['shader-f16']), info: { vendor: 'Apple' } }, async () => {
+    assert.deepEqual(await resolveOrtSessionPlacement(), APPLE_WEBGPU);
+  });
+  const throwingFeatures = {
+    get features() {
+      throw new Error('features getter failed');
+    },
+    info: { vendor: 'NVIDIA' },
+  };
+  await withFakeAdapter(throwingFeatures, async () => {
+    assert.deepEqual(await resolveOrtSessionPlacement(), { providers: ['webgpu', 'wasm'], adapterVendor: 'nvidia' });
+  });
+  assert.equal(gpuAdapterShaderF16({ features: new Set(['shader-f16']) }), true);
+  assert.equal(gpuAdapterShaderF16({ features: new Set() }), false);
+  assert.equal(gpuAdapterShaderF16({}), null);
+  assert.equal(gpuAdapterShaderF16(null), null);
+  assert.equal(gpuAdapterShaderF16(throwingFeatures), null);
 });
 
 test('an explicit ?model= override, even naming the default file, loads exactly that URL', () => {
