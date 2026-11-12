@@ -132,8 +132,9 @@ def main():
 
     # Pass 1: eligible MatMuls, grouped by the weight tensor they read (the smolgen
     # weight-gen DequantizeLinear feeds all ten encoders, so its slices are shared).
+    # Nodes are keyed by graph index: ONNX node names are optional and may repeat.
     groups = {}
-    for node in g.node:
+    for idx, node in enumerate(g.node):
         if node.op_type != 'MatMul':
             continue
         if inc and not inc.search(node.name):
@@ -157,7 +158,7 @@ def main():
             continue
         if args.rows == 'tokens' and m == 1:
             continue
-        groups.setdefault(b_name, []).append((node, a_name, a_shape, a_type, m, k))
+        groups.setdefault(b_name, []).append((idx, a_name, a_shape, a_type, m, k))
 
     # Pass 2: per weight, check every consumer is eligible with one (M,K,N), pick S, re-dimension.
     plan = {}
@@ -198,16 +199,16 @@ def main():
                     a.i = 2
             if not any(a.name == 'axis' for a in dq.attribute) and not per_tensor:
                 dq.attribute.append(helper.make_attribute('axis', 2))
-        for node, a_name, a_shape, a_type, _, _ in uses:
-            plan[node.name] = (a_name, a_shape, a_type, m, k, n, s, base_wg, kind)
+        for idx, a_name, a_shape, a_type, _, _ in uses:
+            plan[idx] = (a_name, a_shape, a_type, m, k, n, s, base_wg, kind)
 
     # Pass 3: emit replacement nodes in place (topological order holds: a shared
     # Reshape/Transpose is emitted before its first consumer).
     replace = {}
-    for node in g.node:
-        if node.name not in plan:
+    for idx, node in enumerate(g.node):
+        if idx not in plan:
             continue
-        a_name, a_shape, a_type, m, k, n, s, base_wg, kind = plan[node.name]
+        a_name, a_shape, a_type, m, k, n, s, base_wg, kind = plan[idx]
         dynamic = a_shape[0] == -1
         b_name = node.input[1]
         ks = k // s
@@ -227,7 +228,7 @@ def main():
             split_input_cache[key] = out
         a_split = split_input_cache[key]
         partial = f'{tag}/partial'
-        nodes.append(helper.make_node('MatMul', [a_split, b_name], [partial], name=f'{node.name}/splitk{s}'))
+        nodes.append(helper.make_node('MatMul', [a_split, b_name], [partial], name=f'{node.name or tag}/splitk{s}'))
         y = node.output[0]
         # Rank > 2 outputs are reduced to [M,N] and reshaped back to [1,..,M,N].
         y_mn = y if len(a_shape) == 2 else f'{tag}/y_mn'
@@ -245,15 +246,15 @@ def main():
             nodes.append(helper.make_node('ReduceSum', [partial, const_i64([0])], [y_mn], name=f'{tag}/reduce', keepdims=0))
             if y_mn != y:
                 nodes.append(helper.make_node('Reshape', [y_mn, const_i64(a_shape[:-1] + [n])], [y], name=f'{tag}/y_reshape'))
-        replace[node.name] = nodes
+        replace[idx] = nodes
         rewritten.append({
-            'node': node.name, 'M': m, 'K': k, 'N': n, 'S': s, 'kPerSlice': ks,
+            'node': node.name or f'#{idx}', 'M': m, 'K': k, 'N': n, 'S': s, 'kPerSlice': ks,
             'workgroupsBefore': base_wg, 'workgroupsAfter': base_wg * s, 'weight': kind,
         })
 
     out_nodes = []
-    for node in g.node:
-        out_nodes.extend(replace.get(node.name, [node]))
+    for idx, node in enumerate(g.node):
+        out_nodes.extend(replace.get(idx, [node]))
     del g.node[:]
     g.node.extend(out_nodes)
     g.initializer.extend(new_inits)
@@ -287,10 +288,11 @@ def cpu_check(src, dst):
     b = ort.InferenceSession(dst, so, providers=['CPUExecutionProvider'])
     rng = np.random.default_rng(0)
     out = {}
+    feeds = {}
     for meta in a.get_inputs():
         shape = [d if isinstance(d, int) else 1 for d in meta.shape]
-        dtype = np.float16 if 'float16' in meta.type else np.float32
-        feeds = {meta.name: (rng.random(shape) < 0.1).astype(dtype)}
+        dtype = {'tensor(float16)': np.float16, 'tensor(int64)': np.int64, 'tensor(int32)': np.int32}.get(meta.type, np.float32)
+        feeds[meta.name] = (rng.random(shape) < 0.1).astype(dtype)
     ra = a.run(None, feeds)
     rb = b.run(None, feeds)
     for o, x, y in zip(a.get_outputs(), ra, rb):

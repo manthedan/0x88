@@ -210,21 +210,42 @@ model only to WebGPU sessions (see §8).
 ## 6. Variants and negative results
 
 Each variant was paired against another variant or against the shipped model
-with the same harness. The ratios are GPU-busy A/B.
+with the same harness. The ratios are GPU-busy A/B. The gate column is the §4
+gate with the variant as the gated model, either as `model=` in a gated run
+against the shipped model, or (lt64, lt64w0, mm) re-run after the
+`abModel=` fix below.
 
-| variant | vs | busy ratio | note |
-|---|---|---|---|
-| `mm`: M = 1 reduce as a ones-vector MatMul | all | 1.003 | noise |
-| `256`: target 256 workgroups, plus the rank-3 attention-input MatMuls (107 split) | mm | 0.998 | noise |
-| `lt64`: skip layers already at ≥ 64 workgroups (FFN up, smolgen dense2) | all | 1.020 | noise, even though FFN up is a per-dispatch loss |
-| `lt64w0`: lt64 plus weights under 4096 elements | lt64 | 1.020 | noise |
-| `gemv`: GEMVs only (M = 1) | mm | 1.386 | **worse**; the token-row GEMMs carry most of the gain |
-| `mmr`: token-row reduce as a ones MatMul | shipped | 0.684 | the reduce MatMul costs 17-20 µs, and 96 µs at N = 65536 |
-| bias fused back via Tile + Gemm | shipped | 0.837 | ORT does not constant-fold the Tile; the fused Gemm costs 35-172 µs |
-| `256i16`: target 256, min inner K 16 | shipped | 0.584 | worse than the default (~0.51) |
+| variant | vs | busy ratio | gate | note |
+|---|---|---|---|---|
+| `mm`: M = 1 reduce as a ones-vector MatMul | all | 1.003 | pass (legal 0.008) | noise |
+| `256`: target 256 workgroups, plus the rank-3 attention-input MatMuls (107 split) | mm | 0.998 | pass | noise |
+| `lt64`: skip layers already at ≥ 64 workgroups (FFN up, smolgen dense2) | all | 1.020 | **fail**: legal prob 0.0165 > 0.015 | noise, even though FFN up is a per-dispatch loss |
+| `lt64w0`: lt64 plus weights under 4096 elements | lt64 | 1.020 | **fail**: legal prob 0.0165 > 0.015 | noise |
+| `gemv`: GEMVs only (M = 1) | mm | 1.386 | pass | **worse**; the token-row GEMMs carry most of the gain |
+| `mmr`: token-row reduce as a ones MatMul | shipped | 0.684 | pass | the reduce MatMul costs 17-20 µs, and 96 µs at N = 65536 |
+| bias fused back via Tile + Gemm | shipped | 0.837 | pass | ORT does not constant-fold the Tile; the fused Gemm costs 35-172 µs |
+| `256i16`: target 256, min inner K 16 | shipped | 0.584 | pass | worse than the default (~0.51) |
 
-The default options are the simplest variant within noise of the best, so
-they are the candidate.
+The default options are the simplest variant that passes the gate and is
+within noise of the best, so they are the candidate.
+
+**Harness fix (review).** In variant-vs-variant pairs, the `abModel=`
+override ran in arm B. Before the fix, `parity=wasm` checked only arm A, so
+arm B was not gated. Now:
+
+- `ort-profile` gates an overridden arm B against its preset's original model
+  (`ab.b.parity`), and that result counts toward `ok`.
+- An `abModel=` run without `parity=wasm` is never `ok`.
+
+Every parity number in this doc comes from a run where the reported model was
+arm A (`model=`): §4, the sweep rows above, §5 (`ort-lc0-small-splitk-ab`)
+and §7. The variant pairs carried no parity claim. lt64 and lt64w0 were gated
+for the first time with the fix, and both fail.
+
+The fixed gate was checked both ways. A split-K copy with one FFN dequant
+scale multiplied by 1.5 fails as `abModel=` (ok false, arm A passes). It also
+fails as `model=`. The real candidate (`model=`) plus `mm` (`abModel=`) passes
+with ok true.
 
 ## 7. Stretch: smolgen compress GEMVs in t3, BT4 and LQO
 
