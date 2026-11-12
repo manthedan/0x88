@@ -32,7 +32,7 @@ import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { lockCommand, makeRunId, parseQueueList, q, slug, timingValidity, validateEstimate } from './lib.mjs';
+import { excludedIncludes, lockCommand, makeRunId, parseQueueList, q, slug, timingValidity, validateEstimate } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // The shared-Mac timing lock lives outside the repo; KERNEL_BENCHLOCK overrides its path.
@@ -111,6 +111,14 @@ try {
   estimate = validateEstimate(args['estimate-min'] ?? 5);
 } catch (e) {
   die(e.message);
+}
+
+// Refuse before any ssh/rsync/queue call: the default excludes precede --include rules, so an
+// include naming a model file (or other excluded item) would otherwise sync nothing. Local runs
+// serve --dist in place and never apply the excludes.
+if (hostName !== 'local' && args.include && !args.fetch && !args['with-models']) {
+  const blocked = excludedIncludes(String(args.include).split(','), DEFAULT_EXCLUDES);
+  if (blocked.length) die(`--include ${blocked.join(',')} names files the default excludes drop (model blobs, source maps); add --with-models`);
 }
 
 main().catch((e) => die(String(e?.stack ?? e)));

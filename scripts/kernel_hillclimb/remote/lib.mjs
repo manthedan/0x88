@@ -90,6 +90,39 @@ function inside(root, p) {
  * flock(1) on Linux) is released by the kernel when the holder dies, so there is
  * no stale-owner reclamation (and no reclaim race) at all. Exit 75 on timeout.
  */
+/**
+ * Include patterns that name something the default excludes drop. rsync takes the first matching
+ * rule and the default excludes come before the includes, so such an include silently syncs
+ * nothing (a page then fails to load its model). A pattern names an excluded item when one of its
+ * path segments, read as a literal string, matches an exclude glob: an excluded directory (exclude
+ * ending in `/`, e.g. `models/`) or an excluded file glob (e.g. `net.onnx`, `*.onnx`,
+ * `params_shard_*.bin`). The pattern's own wildcards can only match the exclude's `*` spans, so a
+ * flagged segment loses every file it could match. Directory excludes only match directories, so
+ * they apply to the last segment only when the include ends in `/`. Broad globs such as `assets/**`
+ * or `x/*` are not flagged: the default excludes are meant to apply inside them. The check is a
+ * best-effort guard, not a glob intersection: a bracket expression (`*.p[bt]`) or a pattern covered
+ * only by several excludes together is not flagged.
+ */
+export function excludedIncludes(includes, excludes) {
+  const toRe = (glob) =>
+    new RegExp(
+      `^${glob
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '[^/]*')
+        .replace(/\?/g, '[^/]')}$`,
+    );
+  const dirs = excludes.filter((e) => e.endsWith('/')).map((e) => toRe(e.slice(0, -1)));
+  const files = excludes.filter((e) => !e.endsWith('/')).map(toRe);
+  return includes.filter((p) => {
+    const segs = p.replace(/^\/+/, '').split('/').filter(Boolean);
+    const lastIsDir = p.endsWith('/');
+    // A `**` inside a segment can span slashes and reach non-excluded paths, so it is not flagged.
+    return segs.some(
+      (seg, i) => !seg.includes('**') && (((i < segs.length - 1 || lastIsDir) && dirs.some((re) => re.test(seg))) || files.some((re) => re.test(seg))),
+    );
+  });
+}
+
 export function lockCommand(platform, lockFile, timeoutS) {
   const t = String(Math.max(0, Math.floor(Number(timeoutS))));
   if (platform === 'darwin') return ['lockf', '-k', '-t', t, lockFile]; // lockf exits 75 (EX_TEMPFAIL) on timeout
