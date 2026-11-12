@@ -19,6 +19,10 @@
 //                 per-position wall ratio and GPU-busy ratio per round, which
 //                 holds up under host load where absolute wall times do not
 //   abRounds=N (20)  abBlock=N (3 invokes per arm per round)
+//   abModel=URL   arm B runs this model instead of PRESET's (batch stays PRESET's),
+//                 e.g. two graph-rewrite candidates against each other
+//                 With parity=wasm the override is gated too (result ab.b.parity, vs
+//                 PRESET's original model on WASM); without it the run is not ok.
 import { parseFen } from '../../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
 import { boardToMaia3Tokens, maia3InternalsForTests } from '../../src/lc0/maia3.ts';
@@ -209,6 +213,60 @@ const median = (xs) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+/** GPU outputs over the whole fixture corpus in physical-batch chunks (not the timing feeds). */
+async function gpuParityOutputs(session, batch) {
+  const corpus = await fixtureCorpus();
+  const isMaia3 = session.inputNames.includes('tokens');
+  // Maia3: each fixture under several unequal (self, opponent) ratings.
+  const rows = isMaia3 ? maia3ParityRows(corpus) : corpus.map((fen) => ({ fen }));
+  const out = await runChunked(rows, batch, async (chunk) => outputsToArrays(await session.run((await buildFeeds(session, batch, chunk)).feeds)));
+  return { corpus, isMaia3, rows, out };
+}
+
+/**
+ * Compare candidate GPU outputs with `referenceModel` on ORT WASM (no dequant
+ * fold). Thresholds: ~2x the shipped baseline's max-abs over the 10-position
+ * fixture corpus (M4, Chrome 157), i.e. a regression tripwire for f16
+ * accumulation-order noise, not a numerical proof (npm test pins ORT WASM to
+ * native lc0).
+ */
+async function wasmParity(gpu, { referenceModel, preset, batch, candidateModel }) {
+  const { corpus, isMaia3, rows, out: gpuOut } = gpu;
+  if (!referenceModel) return { reference: null, candidateModel, pass: false, failures: ['no reference model: pass preset= or referenceModel='] };
+  ort.setRequestedOrtExecutionProviderForCurrentThread('wasm');
+  const ref = await ort.InferenceSession.create(referenceModel, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+  // Same chunking as the candidate (the reference takes the same feed shapes).
+  const refOut = await runChunked(rows, batch, async (chunk) => outputsToArrays(await ref.run((await buildFeeds(ref, batch, chunk)).feeds)));
+  const raw = ortParity(gpuOut, refOut, preset?.parityMaxAbs ?? null);
+  // Legal-move policy gate (softmax over legal moves, best move, top-3
+  // order): the raw-logit max-abs above is only a drift tripwire.
+  const policyOutput = isMaia3 ? 'logits_move' : '/output/policy';
+  const legalRows = rows.map(({ fen }) => {
+    const board = parseFen(fen);
+    const legal = isMaia3 ? maia3InternalsForTests.legalMaia3Moves(board) : legalPolicyPriors(board, new Float32Array(1858), 1);
+    return { fen, indices: legal.map((m) => m.index), ucis: legal.map((m) => m.uci) };
+  });
+  const legalLimits = preset?.legalPolicy ?? null;
+  const legalPolicy =
+    legalLimits && gpuOut[policyOutput] && refOut[policyOutput]
+      ? legalPolicyParity(gpuOut[policyOutput], refOut[policyOutput], legalRows, legalLimits)
+      : { pass: false, problems: [legalLimits ? `no ${policyOutput} output` : 'no legalPolicy limits for this preset'] };
+  await ref.release();
+  return {
+    reference: 'ORT WASM, reference model, no dequant fold',
+    fixtures: corpus.length,
+    rows: rows.length,
+    eloConditions: isMaia3 ? [...new Set(rows.map((r) => `${r.eloSelf}/${r.eloOppo}`))] : null,
+    chunks: Math.ceil(rows.length / batch),
+    referenceModel,
+    candidateModel,
+    candidateIsReference: referenceModel === candidateModel,
+    ...raw,
+    legalPolicy,
+    pass: raw.pass && legalPolicy.pass,
+  };
+}
+
 /**
  * Interleaved A/B in one page session: per round, `block` timed invokes of A
  * then of B (order alternates each round), plus pass-mode GPU busy for both
@@ -219,9 +277,15 @@ async function pairedComparison(prof, a, bPresetName) {
   if (!bPreset) throw new Error(`ab: unknown preset ${bPresetName}`);
   const rounds = intParam('abRounds', 20, 2, 500);
   const block = intParam('abBlock', 3, 1, 100);
-  const bSession = await ort.createOrtSession(bPreset.model);
+  const bModel = params.get('abModel') ?? bPreset.model;
+  const overridden = bModel !== bPreset.model;
+  const bSession = await ort.createOrtSession(bModel);
+  const bFold = ort.lastOrtDequantFoldSummary();
   const b = { session: bSession, feeds: (await buildFeeds(bSession, bPreset.batch)).feeds, batch: bPreset.batch, name: bPresetName };
   assertCpuOutputs(await b.session.run(b.feeds), `ab preset ${bPresetName}`);
+  // An overridden arm B is a candidate too: keep its GPU outputs over the
+  // parity corpus so the main gate can check it against the preset's model.
+  const gpuParity = overridden && params.get('parity') === 'wasm' ? await gpuParityOutputs(bSession, bPreset.batch) : null;
   for (let i = 0; i < 5; i++) await b.session.run(b.feeds);
   const arms = { a, b };
   const wall = { a: [], b: [] };
@@ -255,7 +319,7 @@ async function pairedComparison(prof, a, bPresetName) {
   await ort.releaseOrtSession(bSession);
   const out = {
     a: { name: a.name, batch: a.batch },
-    b: { name: b.name, batch: b.batch, model: bPreset.model },
+    b: { name: b.name, batch: b.batch, model: bModel, overridden, dequantFold: bFold, gpuParity, parity: null },
     rounds,
     block,
     perPositionWallMs: { a: summarize(wall.a), b: summarize(wall.b) },
@@ -331,65 +395,32 @@ runMain(async () => {
     profile = { supported: false, reason: prof ? 'timestamp-query unavailable' : 'ORT created no instrumented WebGPU device (WASM fallback?)' };
   let parity = null;
   if (params.get('parity') === 'wasm') {
-    // Parity covers the whole fixture corpus in physical-batch chunks, not the
-    // timing feeds (b1 timing feeds are only the start position).
-    const corpus = await fixtureCorpus();
-    const isMaia3 = session.inputNames.includes('tokens');
-    // Maia3: each fixture under several unequal (self, opponent) ratings.
-    const rows = isMaia3 ? maia3ParityRows(corpus) : corpus.map((fen) => ({ fen }));
-    const gpuOut = await runChunked(rows, batch, async (chunk) => outputsToArrays(await session.run((await buildFeeds(session, batch, chunk)).feeds)));
-    ort.setRequestedOrtExecutionProviderForCurrentThread('wasm');
+    const gpu = await gpuParityOutputs(session, batch);
     // The reference is the ORIGINAL model (preset's shipped export unless
     // referenceModel= says otherwise), never the candidate URL: comparing a
     // candidate with itself on another EP would pass broken weights.
-    const referenceModel = params.get('referenceModel') ?? preset?.model ?? null;
-    // Thresholds: ~2x the shipped baseline's max-abs over the 10-position
-    // fixture corpus (M4, Chrome 157), i.e. a regression tripwire for f16 accumulation-order noise,
-    // not a numerical proof (npm test pins ORT WASM to native lc0).
-    const limits = preset?.parityMaxAbs ?? null;
-    if (!referenceModel) {
-      parity = { reference: null, candidateModel: model, pass: false, failures: ['no reference model: pass preset= or referenceModel='] };
-    } else {
-      const ref = await ort.InferenceSession.create(referenceModel, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
-      // Same chunking as the candidate (the reference takes the same feed shapes).
-      const refOut = await runChunked(rows, batch, async (chunk) => outputsToArrays(await ref.run((await buildFeeds(ref, batch, chunk)).feeds)));
-      const raw = ortParity(gpuOut, refOut, limits);
-      // Legal-move policy gate (softmax over legal moves, best move, top-3
-      // order): the raw-logit max-abs above is only a drift tripwire.
-      const policyOutput = isMaia3 ? 'logits_move' : '/output/policy';
-      const legalRows = rows.map(({ fen }) => {
-        const board = parseFen(fen);
-        const legal = isMaia3 ? maia3InternalsForTests.legalMaia3Moves(board) : legalPolicyPriors(board, new Float32Array(1858), 1);
-        return { fen, indices: legal.map((m) => m.index), ucis: legal.map((m) => m.uci) };
-      });
-      const legalLimits = preset?.legalPolicy ?? null;
-      const legalPolicy =
-        legalLimits && gpuOut[policyOutput] && refOut[policyOutput]
-          ? legalPolicyParity(gpuOut[policyOutput], refOut[policyOutput], legalRows, legalLimits)
-          : { pass: false, problems: [legalLimits ? `no ${policyOutput} output` : 'no legalPolicy limits for this preset'] };
-      parity = {
-        reference: 'ORT WASM, reference model, no dequant fold',
-        fixtures: corpus.length,
-        rows: rows.length,
-        eloConditions: isMaia3 ? [...new Set(rows.map((r) => `${r.eloSelf}/${r.eloOppo}`))] : null,
-        chunks: Math.ceil(rows.length / batch),
-        referenceModel,
-        candidateModel: model,
-        candidateIsReference: referenceModel === model,
-        ...raw,
-        legalPolicy,
-        pass: raw.pass && legalPolicy.pass,
-      };
-      await ref.release();
-    }
+    parity = await wasmParity(gpu, { referenceModel: params.get('referenceModel') ?? preset?.model ?? null, preset, batch, candidateModel: model });
     log('parity', parity);
+    // An abModel= override is a second candidate: gate it against its own preset's original model.
+    if (ab?.b.gpuParity) {
+      ab.b.parity = await wasmParity(ab.b.gpuParity, {
+        referenceModel: PRESETS[ab.b.name].model,
+        preset: PRESETS[ab.b.name],
+        batch: ab.b.batch,
+        candidateModel: ab.b.model,
+      });
+      log('ab.b parity', ab.b.parity);
+    }
   }
+  if (ab) ab.b.gpuParity = undefined; // outputs only; JSON drops it
+  // abModel= without parity=wasm leaves arm B ungated; that is reported, never ok.
+  const abGate = ab?.b.overridden ? (ab.b.parity?.pass ?? false) : true;
   const identity = await runtimeDeviceIdentity(prof);
   await ort.releaseOrtSession(session);
   const gpuUsed = /webgpu/.test(backend) && !!prof;
   return {
     bench: 'ort-profile',
-    ok: gpuUsed && !profiler.state.errors.length && profileComplete(profile) && (parity ? parity.pass : true),
+    ok: gpuUsed && !profiler.state.errors.length && profileComplete(profile) && (parity ? parity.pass : true) && abGate,
     device: identity,
     candidate: {
       runtime: 'ort-webgpu',
