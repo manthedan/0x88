@@ -25,7 +25,7 @@ import { createServer } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync, createReadStream, writeFileSync, renameSync, realpathSync } from 'node:fs';
 import { join, resolve, extname } from 'node:path';
 import os from 'node:os';
-import { resolveStatic, idleVerdict } from './lib.mjs';
+import { resolveStatic, waitForIdle, parseAgxClients, assessRun } from './lib.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const root = resolve(args.root ?? '.');
@@ -132,30 +132,15 @@ async function main() {
   }
   const loadEnd = await sampleLoad();
   loadEnd.gpuSettle = settle;
-  const during = summarizeSamples(state.samples);
-  const contendedReasons = [];
-  // During-run contention uses signals attributable to *other* processes: raw load1
-  // and (on macOS) ioreg GPU utilisation include our own Chrome, so a load1 or GPU
-  // reading taken mid-run cannot distinguish our work from someone else's. Review
-  // finding "include during-run load1Max" is applied in this attributed form.
-  if (during.foreignGpuApps.length) contendedReasons.push(`foreign GPU compute apps during run: ${during.foreignGpuApps.join('; ')}`);
-  if (during.samples === 0 || during.foreignCpuCoresMax === null) contendedReasons.push('no during-run load samples');
-  if (args['wait-idle'] || os.platform() === 'darwin') {
-    for (const [tag, l] of [['start', loadStart], ['end', loadEnd]]) {
-      if (l.loadavg[0] >= IDLE.loadMax) contendedReasons.push(`loadavg1 ${l.loadavg[0]} >= ${IDLE.loadMax} at ${tag}`);
-      const g = gpuUtil(l.gpu);
-      if (g === null) contendedReasons.push(`gpu util unknown at ${tag}`);
-      else if (g >= IDLE.gpuMax) contendedReasons.push(`gpu util ${g}% >= ${IDLE.gpuMax}% at ${tag}`);
-    }
-    if (during.foreignCpuCoresMax !== null && during.foreignCpuCoresMax >= IDLE.loadMax)
-      contendedReasons.push(`foreign CPU ${during.foreignCpuCoresMax} cores >= ${IDLE.loadMax} during run`);
-  } else {
-    for (const [tag, l] of [['start', loadStart], ['end', loadEnd]]) {
-      const apps = l.gpu?.computeApps ?? [];
-      if (apps.length) contendedReasons.push(`GPU compute apps at ${tag}: ${apps.join('; ')}`);
-      const g = gpuUtil(l.gpu); if (g !== null && g >= IDLE.gpuMax) contendedReasons.push(`gpu util ${g}% at ${tag}`);
-    }
-  }
+  // During-run contention uses only signals attributable to *other* processes (foreign
+  // CPU from ps; foreign GPU from nvidia-smi compute apps on Linux and per-client
+  // accumulatedGPUTime from ioreg on macOS). Raw load1 and device-wide GPU utilisation
+  // taken mid-run include our own Chrome, so they are deliberately not used mid-run.
+  // Any failed or missing reading makes the run *unverified* (never silently clean).
+  const { during, contendedReasons, unverifiedReasons } = assessRun({
+    platform: os.platform(), samples: state.samples, loadStart, loadEnd,
+    gated: Boolean(args['wait-idle']) || os.platform() === 'darwin', th: IDLE,
+  });
   const out = {
     ok: outcome?.kind === 'result',
     result: outcome?.kind === 'result' ? outcome.value : null,
@@ -167,6 +152,7 @@ async function main() {
       flags: extraFlags, url, wallMs: Date.now() - tStart,
       loadStart, loadEnd, duringRun: during, idleWait,
       contended: contendedReasons.length > 0, contendedReasons,
+      verified: unverifiedReasons.length === 0, unverifiedReasons,
       console: state.console.slice(-60),
       ...(gpuInfo ? { gpuInfo } : {}),
       ...(outcome ? {} : { chromeStderrTail: state.chromeStderr.slice(-3000) }),
@@ -195,23 +181,12 @@ function gpuUtil(g) { return g?.utilGpuPct ?? g?.deviceUtilPct ?? null; }
 async function waitIdle() {
   const t0 = Date.now(), end = t0 + IDLE.maxWaitS * 1000;
   const deadline = IDLE.waitUntil ? Math.min(end, IDLE.waitUntil) : end;
-  let idleSince = null, polls = 0, last = null;
-  while (true) {
-    const load1 = +os.loadavg()[0].toFixed(2), g = gpuUtil(gpuLoad());
-    last = { load1, gpuUtilPct: g };
-    const { ok, reason } = idleVerdict(last, IDLE);
-    polls++;
-    if (ok) {
-      idleSince ??= Date.now();
-      if (Date.now() - idleSince >= IDLE.holdS * 1000) break;
-    } else {
-      idleSince = null;
-      logErr(`waiting for idle (${reason}): load1=${load1} (max ${IDLE.loadMax}) gpu=${g}% (max ${IDLE.gpuMax}%) waited ${Math.round((Date.now() - t0) / 1000)}s`);
-    }
-    if (Date.now() > deadline) return busyExit(`host never idle for ${IDLE.holdS}s before the wait deadline (last load1=${load1}, gpu=${g}%: ${reason})`);
-    await sleep((ok ? Math.min(IDLE.pollS, 10) : IDLE.pollS) * 1000);
-  }
-  return { waitedS: Math.round((Date.now() - t0) / 1000), polls, thresholds: IDLE, last };
+  const r = await waitForIdle({
+    read: () => ({ load1: +os.loadavg()[0].toFixed(2), gpuUtilPct: gpuUtil(gpuLoad()) }),
+    th: IDLE, deadline, holdMs: IDLE.holdS * 1000, pollMs: IDLE.pollS * 1000, sleep, log: logErr,
+  });
+  if (!r.ok) return busyExit(`host never idle for ${IDLE.holdS}s before the wait deadline (last load1=${r.last?.load1}, gpu=${r.last?.gpuUtilPct}%: ${r.reason})`);
+  return { waitedS: Math.round(r.waitedMs / 1000), polls: r.polls, thresholds: IDLE, last: r.last };
 }
 function busyExit(msg) {
   // Never started: no Chrome or server exists yet. Returns a promise that never settles
@@ -222,33 +197,39 @@ function busyExit(msg) {
 function logErr(s) { process.stderr.write(`[agent ${new Date().toISOString()}] ${s}\n`); }
 
 // Load attributable to processes outside this agent and its Chrome process group:
-// CPU (cores, from ps %cpu) and, on Linux, NVIDIA compute apps.
+// CPU (cores, from ps %cpu), and GPU: NVIDIA compute apps on Linux, per-client
+// accumulated GPU time (ioreg AGXDeviceUserClient) on macOS. cpuOk / gpuOk record
+// whether each query succeeded, so a failed sample is never read as "idle".
 // Caveat: Linux ps %cpu is a lifetime average; macOS's is a decaying recent average.
 function foreignLoad() {
-  const s = { t: Date.now(), load1: +os.loadavg()[0].toFixed(2), foreignCpuCores: null, foreignGpuApps: [] };
+  const s = { t: Date.now(), load1: +os.loadavg()[0].toFixed(2), cpuOk: false, foreignCpuCores: null, gpuOk: false };
+  const pg = state.chrome?.pid; const pgidOf = new Map();
+  const ours = (pid) => pid === process.pid || (pg !== undefined && pgidOf.get(pid) === pg);
   try {
     const txt = execFileSync('ps', ['-A', '-o', 'pid=,pgid=,%cpu='], { encoding: 'utf8', timeout: 3000 });
-    const pg = state.chrome?.pid; let sum = 0; const pgidOf = new Map();
+    let sum = 0;
     for (const l of txt.trim().split('\n')) {
       const [pid, pgid, cpu] = l.trim().split(/\s+/).map(Number);
       pgidOf.set(pid, pgid);
-      if (pid === process.pid || pgid === pg) continue;
-      sum += cpu || 0;
+      if (!ours(pid)) sum += cpu || 0;
     }
-    s.foreignCpuCores = +(sum / 100).toFixed(2);
+    s.foreignCpuCores = +(sum / 100).toFixed(2); s.cpuOk = pgidOf.size > 0;
+  } catch (e) { s.cpuError = String(e.message ?? e).slice(0, 120); }
+  try {
+    if (!s.cpuOk) throw new Error('no process table to attribute GPU use');
     if (os.platform() === 'linux') {
       const apps = execFileSync('nvidia-smi', ['--query-compute-apps=pid,process_name,used_memory', '--format=csv,noheader,nounits'], { encoding: 'utf8', timeout: 3000 })
         .trim().split('\n').filter(Boolean).map((l) => l.split(',').map((x) => x.trim()));
-      s.foreignGpuApps = apps.filter(([pid]) => pgidOf.get(Number(pid)) !== pg).map((a) => a.join(' '));
+      s.foreignGpuApps = apps.filter(([pid]) => !ours(Number(pid))).map((a) => a.join(' '));
+      s.gpuOk = true;
+    } else if (os.platform() === 'darwin') {
+      const clients = parseAgxClients(execFileSync('ioreg', ['-r', '-c', 'AGXDeviceUserClient', '-l', '-w', '0'], { encoding: 'utf8', timeout: 3000, maxBuffer: 64 << 20 }));
+      if (!clients.length) throw new Error('no AGXDeviceUserClient entries');
+      s.foreignGpuClients = Object.fromEntries(clients.filter((c) => !ours(c.pid)).map((c) => [`${c.id}/${c.pid}`, c.gpuNs]));
+      s.gpuOk = true;
     }
-  } catch {}
+  } catch (e) { s.gpuError = String(e.message ?? e).slice(0, 120); }
   return s;
-}
-function summarizeSamples(xs) {
-  const f = xs.map((x) => x.foreignCpuCores).filter((x) => x !== null);
-  return { samples: xs.length, load1Max: xs.length ? Math.max(...xs.map((x) => x.load1)) : null,
-    foreignCpuCoresMax: f.length ? Math.max(...f) : null, foreignCpuCoresMean: f.length ? +(f.reduce((a, b) => a + b, 0) / f.length).toFixed(2) : null,
-    foreignGpuApps: [...new Set(xs.flatMap((x) => x.foreignGpuApps ?? []))] };
 }
 
 function pushConsole(s) {

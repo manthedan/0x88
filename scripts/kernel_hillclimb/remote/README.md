@@ -64,7 +64,10 @@ Options (see the header of `run.mjs` for all of them):
   result gets `runner.timingValid: false`.
 - `--max-wait S` sets how long the runner waits locally (default 6 h). Remote jobs are detached,
   so if the runner gives up or is killed, the job keeps going. Collect the result later with
-  `run.mjs --host <h> --fetch <run-id>`.
+  `run.mjs --host <h> --fetch <run-id>`. Every ssh call is bounded: ServerAlive catches a dead
+  link, and a command timeout (at most 120 s, never past the remaining budget) catches a hung
+  remote command. If a submit or start call times out, the runner can't tell whether it took
+  effect. It then exits 76 (pending) with the run id instead of failing or resubmitting.
 - `--chrome`, `--flags-json '[...]'` and `--add-flags=--a,--b` override the host's browser or flags.
 - `--out FILE` also writes the JSON to `FILE`. The JSON always goes to stdout, and progress goes
   to stderr.
@@ -93,9 +96,11 @@ plain `mkdir`, so a collision fails instead of sharing a directory.
     "host", "platform", "cpus", "cpuModel",
     "browser": { "binary", "product", "userAgent" }, "flags", "url", "wallMs",
     "loadStart", "loadEnd",            // loadavg, 500 ms CPU busy %, GPU (nvidia-smi or ioreg)
-    "duringRun": { "foreignCpuCoresMax", "foreignCpuCoresMean", "load1Max" },
+    "duringRun": { "samples", "cpuFailures", "gpuFailures", "foreignCpuCoresMax",
+                   "foreignCpuCoresMean", "load1Max", "foreignGpuApps", "foreignGpuPct", "foreignGpuTop" },
     "idleWait",                        // mac-mini: seconds waited, thresholds
-    "contended": false, "contendedReasons": [],
+    "contended": false, "contendedReasons": [],   // someone else measurably used the machine
+    "verified": true, "unverifiedReasons": [],    // false: a reading failed, so we can't say
     "console": [...], "gpuInfo": {...}
   },
   "runner": { "host", "runId", "remoteDir", "scheduler", "queueJobId", "timingValid", "run": {...} }
@@ -104,7 +109,16 @@ plain `mkdir`, so a collision fails instead of sharing a directory.
 
 `loadEnd` is sampled about 3 s after Chrome exits, so its GPU utilisation is other people's
 load, not ours. `duringRun.foreignCpuCores` sums `ps %cpu` over every process outside the
-agent and its Chrome process group.
+agent and its Chrome process group. During the run, foreign GPU use is attributed per process:
+- Linux: `nvidia-smi --query-compute-apps` pids outside our process group.
+- macOS: `ioreg -r -c AGXDeviceUserClient -l` per-client `accumulatedGPUTime` (ns, no root
+  needed) for clients outside our process group, as a % of wall time (`foreignGpuPct`).
+
+Samples are taken right after navigation, then every second, then once at the end. Each records
+whether its CPU and GPU queries succeeded. Any failed sample, fewer than 2 samples, or an unknown
+start or end GPU reading sets `verified: false`. **`runner.timingValid` is true only when
+`verified === true` and `contended === false`.** Results from agents older than this field are
+never timing-valid.
 
 ## Scheduling: the hosts are shared
 
@@ -152,13 +166,16 @@ Mac mini has no shared queue, and other projects run CPU arenas and Metal jobs t
    measured from job start and covers both the lock wait and the idle wait.
 4. Flags `meta.contended: true` (with reasons) in these cases:
    - the thresholds were crossed at start or end;
-   - a GPU reading was unknown;
-   - foreign CPU went over `--load-max` cores during the run.
+   - foreign CPU went over `--load-max` cores during the run;
+   - foreign GPU (`foreignGpuPct`, attributed as above) went over `--gpu-max` during the run.
 
-   Foreign CPU is the CPU used by processes outside the agent and its Chrome process group,
-   sampled every second. Raw load1 and ioreg GPU utilisation taken mid-run include our own
-   Chrome, so they are not used for the during-run check. `runner.timingValid` is false when
-   the run is contended or was started with `--no-wait`.
+   Unknown or failed readings set `verified: false` instead (see the result shape).
+   Device-wide load1 and ioreg utilisation taken mid-run include our own Chrome, so they are not
+   used during the run. `runner.timingValid` is false when the run is contended, unverified, or
+   was started with `--no-wait`.
+
+   The deadline is checked before a completed idle hold is accepted, and every poll sleep is
+   capped at the remaining budget. Chrome never launches after max-wait has passed.
 
 The job is started with `nohup` and runs detached, so a dropped ssh session does not kill it.
 It never stops or renices the other jobs.

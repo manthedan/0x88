@@ -36,6 +36,9 @@ import { makeRunId, validateEstimate, q, slug, lockCommand, parseQueueList } fro
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BENCHLOCK = '/Users/macthedan/projects/lc0_browser/notes/kernel-hillclimb/benchlock.sh';
 
+// ssh/rsync options: bounded connection setup and dead-link detection (see sh()).
+const SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4'];
+const RSYNC_SSH = ['-e', `ssh ${SSH_OPTS.join(' ')}`, '--timeout=120'];
 const COMMON_FLAGS = ['--headless=new', '--enable-unsafe-webgpu', '--enable-webgpu-developer-features'];
 export const HOSTS = {
   yukon: {
@@ -95,7 +98,9 @@ async function launch(home, runId, remoteDir) {
   if (!existsSync(dist) || !statSync(dist).isDirectory()) die(`--dist ${dist} is not a directory`);
   const filters = rsyncFilters();
   if (H.scheduler === 'gpu-queue' && !args['dry-run']) {
-    const waiting = queueRows().filter((r) => r.state === 'queued' && r.label.startsWith('[0x88:'));
+    const rows = queueRows();
+    if (!rows) die('could not read gpu-queue list');
+    const waiting = rows.filter((r) => r.state === 'queued' && r.label.startsWith('[0x88:'));
     if (waiting.length) die(`a 0x88 job is already waiting in gpu-queue (${waiting.map((r) => r.id).join(', ')}); policy: at most one. Use --fetch on it or wait.`, 4);
   }
   // Hard-link unchanged files against the most recent earlier dist on the host.
@@ -103,7 +108,7 @@ async function launch(home, runId, remoteDir) {
   const rs = ['-a', '--prune-empty-dirs', '--stats', ...filters, ...(prev ? [`--link-dest=${prev}`] : []), ...(args['dry-run'] ? ['--dry-run'] : [])];
   // Exclusive allocation: plain mkdir fails if the run dir already exists.
   sh(H, `mkdir -p ${q(`${home}/${H.base}`)} && mkdir ${q(remoteDir)} && mkdir ${q(remoteDir)}/dist`, { dry: args['dry-run'] });
-  const r1 = spawnSync('rsync', [...rs, `${dist}/`, `${H.ssh}:${remoteDir}/dist/`], { encoding: 'utf8' });
+  const r1 = spawnSync('rsync', [...RSYNC_SSH, ...rs, `${dist}/`, `${H.ssh}:${remoteDir}/dist/`], { encoding: 'utf8' });
   if (r1.status !== 0) die(`rsync failed: ${r1.stderr}`);
   const sent = r1.stdout.match(/Total transferred file size: ([\d,.]+\w*)/)?.[1];
   const total = r1.stdout.match(/Total file size: ([\d,.]+\w*)/)?.[1];
@@ -127,7 +132,7 @@ async function launch(home, runId, remoteDir) {
   const tmp = mkdtempSync(join(os.tmpdir(), 'khc-run-'));
   writeFileSync(join(tmp, 'job.sh'), job, { mode: 0o755 });
   writeFileSync(join(tmp, 'run.json'), JSON.stringify({ runId, host: hostName, page: args.page, dist, chrome, flags, scheduler: H.scheduler, noWait: !!args['no-wait'], submittedAt: new Date().toISOString() }, null, 1));
-  const r2 = spawnSync('rsync', ['-a', join(HERE, 'agent.mjs'), join(HERE, 'lib.mjs'), join(tmp, 'job.sh'), join(tmp, 'run.json'), `${H.ssh}:${remoteDir}/`], { encoding: 'utf8' });
+  const r2 = spawnSync('rsync', [...RSYNC_SSH, '-a', join(HERE, 'agent.mjs'), join(HERE, 'lib.mjs'), join(tmp, 'job.sh'), join(tmp, 'run.json'), `${H.ssh}:${remoteDir}/`], { encoding: 'utf8' });
   if (r2.status !== 0) die(`rsync tools failed: ${r2.stderr}`);
 
   if (H.scheduler === 'gpu-queue') {
@@ -138,20 +143,26 @@ async function launch(home, runId, remoteDir) {
       `exec 9>>${q(`${home}/${H.base}/.submit.flock`)}`,
       'flock -w 300 9 || { echo ADMISSION_LOCK_TIMEOUT; exit 5; }',
       `if gpu-queue list | awk '$2=="queued"' | grep -qF '[0x88:'; then echo ALREADY_WAITING; exit 4; fi`,
-      `cd ${q(remoteDir)} && gpu-queue submit -p 0x88 -e ${q(estimate)} -n ${q(name)} -o ${q(remoteDir + '/job.log')} -- ${q(remoteDir + '/job.sh')}`,
+      // The job id is recorded on the host in the same command, so --fetch works even if
+      // this ssh call dies after the submit.
+      `cd ${q(remoteDir)} || exit 3`,
+      `id=$(gpu-queue submit -p 0x88 -e ${q(estimate)} -n ${q(name)} -o ${q(remoteDir + '/job.log')} -- ${q(remoteDir + '/job.sh')}) || { echo "$id"; exit 6; }`,
+      `id=$(printf %s "$id" | tail -1 | tr -d '[:space:]'); printf %s "$id" > queue-job-id; echo "$id"`,
     ].join('\n');
-    const r = sh(H, admit, { allowFail: true });
+    const r = sh(H, admit, { allowFail: true, timeoutMs: 420_000 });
+    if (r.timedOut) pendingUnknown(runId, remoteDir, 'gpu-queue admission/submit');
     const out = r.stdout.trim();
     if (r.status === 4) die(`a 0x88 job is already waiting in gpu-queue; policy: at most one. Nothing submitted (run dir ${remoteDir} left unused).`, 4);
     if (r.status !== 0) die(`gpu-queue submit failed (${r.status}): ${out} ${r.stderr}`);
     const id = out.split('\n').pop().trim();
     if (!/^\d+$/.test(id)) die(`unexpected gpu-queue submit output: ${out}`);
-    sh(H, `printf %s ${id} > ${q(remoteDir + '/queue-job-id')}`);
     log(`submitted gpu-queue job ${id} (-p 0x88 -e ${estimate} -n ${name}); run id ${runId}`);
   } else {
     // NB: `cd X && nohup … &` would background the whole list and keep ssh's stdout open.
-    sh(H, `cd ${q(remoteDir)} || exit 1; nohup ./job.sh > job.log 2>&1 < /dev/null & echo $! > ${q(remoteDir + '/job.pid')}`);
-    log(`started detached job on ${hostName} (pid ${sh(H, `cat ${q(remoteDir + '/job.pid')}`).stdout.trim()}); run id ${runId}`);
+    const r = sh(H, `cd ${q(remoteDir)} || exit 1; nohup ./job.sh > job.log 2>&1 < /dev/null & echo $! > ${q(remoteDir + '/job.pid')}; cat ${q(remoteDir + '/job.pid')}`, { allowFail: true });
+    if (r.timedOut) pendingUnknown(runId, remoteDir, 'detached job start');
+    if (r.status !== 0) die(`starting the job failed (${r.status}): ${r.stderr}`);
+    log(`started detached job on ${hostName} (pid ${r.stdout.trim()}); run id ${runId}`);
   }
 }
 
@@ -181,57 +192,86 @@ exit $rc
 }
 
 async function waitForResult(runId, remoteDir) {
-  const t0 = Date.now();
-  let lastNote = '', lastLogAt = 0;
-  const jobId = sh(H, `cat ${q(remoteDir + '/queue-job-id')} 2>/dev/null`, { allowFail: true }).stdout.trim() || null;
+  const t0 = Date.now(), budgetEnd = t0 + maxWaitS * 1000;
+  // Each status call gets at most 120 s and never more than the remaining budget (min 5 s),
+  // so a hung ssh cannot hold the controller past --max-wait.
+  const rsh = (cmd) => sh(H, cmd, { allowFail: true, timeoutMs: Math.min(120_000, Math.max(5_000, budgetEnd - Date.now())) });
+  let lastNote = '', lastLogAt = 0, jobId = null;
+  const pendingOut = () => {
+    log(`local max-wait reached; the remote job keeps going. Collect later: node scripts/kernel_hillclimb/remote/run.mjs --host ${hostName} --fetch ${runId}`);
+    // Not 75: the job may still start (or be running). 75 is only for confirmed never-started.
+    return { j: null, jobId, runId, remoteDir, exit: 76, pending: true, failure: 'local max-wait reached (or remote status unconfirmable); job still pending remotely' };
+  };
   while (true) {
-    const r = sh(H, `cat ${q(remoteDir + '/result.json')} 2>/dev/null`, { allowFail: true });
+    let note;
+    const r = rsh(`cat ${q(remoteDir + '/result.json')} 2>/dev/null`);
     if (r.status === 0 && r.stdout.trim()) {
       const j = JSON.parse(r.stdout.trim().split('\n').pop());
+      if (!jobId && H.scheduler === 'gpu-queue') jobId = rsh(`cat ${q(remoteDir + '/queue-job-id')} 2>/dev/null`).stdout.trim() || null;
       return { j, jobId, runId, remoteDir };
     }
-    let note;
-    if (H.scheduler === 'gpu-queue') {
-      const rows = queueRows();
-      const row = rows.find((x) => x.id === jobId);
-      if (!row) return { j: null, jobId, runId, remoteDir, failure: `gpu-queue job ${jobId} not found` };
-      if (row.state === 'finished' || row.state === 'skipped') {
-        await sleep(2000);
-        if (sh(H, `test -s ${q(remoteDir + '/result.json')}`, { allowFail: true }).status === 0) continue;
-        const tail = sh(H, `tail -20 ${q(remoteDir + '/job.log')} 2>/dev/null; tail -5 ${q(remoteDir + '/agent.err')} 2>/dev/null`, { allowFail: true }).stdout;
-        return { j: null, jobId, runId, remoteDir, exit: row.elevel === '75' ? 75 : 3, failure: `gpu-queue job ${jobId} ${row.state} exit=${row.elevel} without result.json${row.elevel === '75' ? ' (never started: GPU busy for 30 min; investigate, do not resubmit in a loop)' : ''}\n${tail}` };
+    // Checked here (not only at the bottom) so no `continue` path can outlive the budget.
+    if (Date.now() >= budgetEnd) return pendingOut();
+    if (r.status !== 0 && r.status !== 1) note = 'status unknown (ssh failed or timed out); retrying';
+    else if (H.scheduler === 'gpu-queue') {
+      if (!jobId) {
+        const idr = rsh(`cat ${q(remoteDir + '/queue-job-id')} 2>/dev/null`);
+        if (idr.status === 0 && /^\d+$/.test(idr.stdout.trim())) jobId = idr.stdout.trim();
+        else if (idr.status === 1) return { j: null, jobId, runId, remoteDir, failure: `no gpu-queue job id recorded in ${remoteDir}` };
       }
-      const ahead = rows.filter((x) => (x.state === 'running' || x.state === 'queued') && Number(x.id) < Number(jobId));
-      note = `gpu-queue job ${jobId}: ${row.state}; ahead: ${ahead.map((x) => `${x.id}${x.label}`).join(' ') || 'none'}`;
+      const rows = jobId ? queueRows(rsh) : null;
+      if (!rows) note = 'gpu-queue status unknown (ssh failed or timed out); retrying';
+      else {
+        const row = rows.find((x) => x.id === jobId);
+        if (!row) return { j: null, jobId, runId, remoteDir, failure: `gpu-queue job ${jobId} not found` };
+        if (row.state === 'finished' || row.state === 'skipped') {
+          await sleep(2000);
+          const again = rsh(`test -s ${q(remoteDir + '/result.json')}`);
+          if (again.status !== 1) continue; // result appeared, or status unknown: re-check
+          const tail = rsh(`tail -20 ${q(remoteDir + '/job.log')} 2>/dev/null; tail -5 ${q(remoteDir + '/agent.err')} 2>/dev/null`).stdout;
+          return { j: null, jobId, runId, remoteDir, exit: row.elevel === '75' ? 75 : 3, failure: `gpu-queue job ${jobId} ${row.state} exit=${row.elevel} without result.json${row.elevel === '75' ? ' (never started: GPU busy for 30 min; investigate, do not resubmit in a loop)' : ''}\n${tail}` };
+        }
+        const ahead = rows.filter((x) => (x.state === 'running' || x.state === 'queued') && Number(x.id) < Number(jobId));
+        note = `gpu-queue job ${jobId}: ${row.state}; ahead: ${ahead.map((x) => `${x.id}${x.label}`).join(' ') || 'none'}`;
+      }
     } else {
-      const alive = sh(H, `kill -0 "$(cat ${q(remoteDir + '/job.pid')})" 2>/dev/null && echo alive`, { allowFail: true }).stdout.trim() === 'alive';
-      const errTail = sh(H, `tail -1 ${q(remoteDir + '/agent.err')} 2>/dev/null`, { allowFail: true }).stdout.trim();
-      if (!alive) {
+      const a = rsh(`if kill -0 "$(cat ${q(remoteDir + '/job.pid')})" 2>/dev/null; then echo alive; else echo dead; fi; tail -1 ${q(remoteDir + '/agent.err')} 2>/dev/null`);
+      const [state = '', errTail = ''] = a.stdout.split('\n');
+      if (a.status !== 0 || (state !== 'alive' && state !== 'dead')) note = 'job status unknown (ssh failed or timed out); retrying';
+      else if (state === 'dead') {
         await sleep(1000);
-        if (sh(H, `test -s ${q(remoteDir + '/result.json')}`, { allowFail: true }).status === 0) continue;
-        return { j: null, jobId, runId, remoteDir, failure: `remote job exited without result.json\n${sh(H, `tail -20 ${q(remoteDir + '/job.log')}; tail -20 ${q(remoteDir + '/agent.err')}`, { allowFail: true }).stdout}` };
-      }
-      note = errTail || 'running';
+        const again = rsh(`test -s ${q(remoteDir + '/result.json')}`);
+        if (again.status !== 1) continue;
+        return { j: null, jobId, runId, remoteDir, failure: `remote job exited without result.json\n${rsh(`tail -20 ${q(remoteDir + '/job.log')}; tail -20 ${q(remoteDir + '/agent.err')}`).stdout}` };
+      } else note = errTail.trim() || 'running';
     }
     // Log changes, but rate-limit repeated "waiting" lines that only differ in counters.
     const key = note.replace(/\[agent [^\]]*\]/, '').replace(/[\d.]+/g, '#');
     if (key !== lastNote || Date.now() - lastLogAt > 300_000) { log(note); lastNote = key; lastLogAt = Date.now(); }
-    if ((Date.now() - t0) / 1000 > maxWaitS) {
-      log(`local max-wait reached; the remote job keeps going. Collect later: node scripts/kernel_hillclimb/remote/run.mjs --host ${hostName} --fetch ${runId}`);
-      // Not 75: the job may still start (or be running). 75 is only for confirmed never-started.
-      return { j: null, jobId, runId, remoteDir, exit: 76, pending: true, failure: 'local max-wait reached; job still pending remotely' };
-    }
-    await sleep(H.scheduler === 'gpu-queue' ? 20_000 : 15_000);
+    if (Date.now() >= budgetEnd) return pendingOut();
+    await sleep(Math.max(0, Math.min(H.scheduler === 'gpu-queue' ? 20_000 : 15_000, budgetEnd - Date.now())));
   }
+}
+
+// The remote side may or may not have acted (the ssh call timed out): report pending (76)
+// with the run id, so the caller collects or inspects it with --fetch instead of resubmitting.
+function pendingUnknown(runId, remoteDir, what) {
+  log(`${what} timed out; outcome unknown. Inspect/collect with: node scripts/kernel_hillclimb/remote/run.mjs --host ${hostName} --fetch ${runId}`);
+  finish({ j: null, jobId: null, runId, remoteDir, exit: 76, pending: true, failure: `${what}: ssh timed out, remote outcome unknown` });
+  return new Promise(() => {});
 }
 
 function finish({ j, jobId, runId, remoteDir, failure, exit, pending }) {
   const runner = { host: hostName, runId, remoteDir, scheduler: H?.scheduler, queueJobId: jobId ?? null, fetchedAt: new Date().toISOString() };
   if (H?.ssh) {
-    try { runner.run = JSON.parse(sh(H, `cat ${q(remoteDir + '/run.json')}`, { allowFail: true }).stdout); } catch {}
+    if (remoteDir) { try { runner.run = JSON.parse(sh(H, `cat ${q(remoteDir + '/run.json')}`, { allowFail: true, timeoutMs: 30_000 }).stdout); } catch {} }
   }
-  if (H?.scheduler === 'idle-wait') runner.timingValid = !(runner.run?.noWait) && !j?.meta?.contended;
-  if (H?.scheduler === 'gpu-queue') runner.timingValid = !j?.meta?.contended; // inside the queue = clean unless something else showed up
+  // Valid only when the agent positively verified the run was uncontended (meta.verified ===
+  // true: every during-run CPU/GPU attribution sample succeeded). Results from older agents
+  // without that field are not valid.
+  const verifiedClean = j?.meta?.verified === true && j?.meta?.contended === false;
+  if (H?.scheduler === 'idle-wait') runner.timingValid = !(runner.run?.noWait) && verifiedClean;
+  if (H?.scheduler === 'gpu-queue' || H?.scheduler === 'benchlock') runner.timingValid = verifiedClean;
   const out = j ? { ...j, runner } : { ok: false, result: null, error: failure, ...(pending ? { pending: true } : {}), runner };
   const text = JSON.stringify(out, null, 1);
   if (args.out) writeFileSync(args.out, text + '\n');
@@ -250,7 +290,11 @@ function runLocal() {
   finish({ j, jobId: null, runId: 'local', remoteDir: null, failure: j ? null : `agent produced no JSON (exit ${r.status})` });
 }
 
-function queueRows() { return parseQueueList(sh(H, 'gpu-queue list').stdout); }
+// Returns null when the list could not be read (failure or timeout): status unknown.
+function queueRows(run = (cmd) => sh(H, cmd, { allowFail: true })) {
+  const r = run('gpu-queue list');
+  return r.status === 0 ? parseQueueList(r.stdout) : null;
+}
 
 function rsyncFilters() {
   const f = [];
@@ -268,12 +312,22 @@ function rsyncFilters() {
   return f;
 }
 
-function sh(h, cmd, { allowFail = false, dry = false } = {}) {
+// Every ssh call is bounded: ConnectTimeout covers connection setup, ServerAlive* a dead
+// established link, and the spawnSync timeout (default 120 s, or the caller's remaining
+// budget) a remote command that hangs. A timed-out call has r.timedOut = true and is a
+// failure (die unless allowFail). Callers that cannot tell whether the remote side acted
+// must treat a timeout as "unknown", never as "did not happen".
+function sh(h, cmd, { allowFail = false, dry = false, timeoutMs = 120_000 } = {}) {
   if (dry) { log(`[dry] ${h.ssh}: ${cmd}`); return { status: 0, stdout: '', stderr: '' }; }
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', h.ssh, `bash -lc ${q(`${h.pathPrefix ?? ''} ${cmd}`)}`], { encoding: 'utf8', maxBuffer: 256 << 20 });
-  if (r.status !== 0 && !allowFail) die(`ssh ${h.ssh} failed (${r.status}): ${cmd}\n${r.stderr}`);
+  const r = spawnSync('ssh', [...SSH_OPTS, h.ssh, `bash -lc ${q(`${h.pathPrefix ?? ''} ${cmd}`)}`],
+    { encoding: 'utf8', maxBuffer: 256 << 20, timeout: Math.max(1000, Math.round(timeoutMs)), killSignal: 'SIGKILL' });
+  r.timedOut = r.error?.code === 'ETIMEDOUT';
+  r.stdout ??= ''; r.stderr ??= '';
+  if (r.timedOut) r.status = null;
+  if (r.status !== 0 && !allowFail) die(`ssh ${h.ssh} ${r.timedOut ? `timed out after ${Math.round(timeoutMs / 1000)}s` : `failed (${r.status})`}: ${cmd}\n${r.stderr}`);
   return r;
 }
+
 function log(s) { process.stderr.write(`[run ${hostName} ${new Date().toISOString().slice(11, 19)}] ${s}\n`); }
 function die(msg, code = 3) { process.stderr.write(`run.mjs: ${msg}\n`); process.exit(code); }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
