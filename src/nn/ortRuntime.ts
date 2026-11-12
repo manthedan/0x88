@@ -474,9 +474,36 @@ function webgpuAvailable(): boolean {
 }
 
 let probedWebGpuAdapterUsable: boolean | null = null;
+/** null = not probed or the adapter does not report features; false = adapter lacks shader-f16. */
+let probedWebGpuShaderF16: boolean | null = null;
 
+/**
+ * Whether the adapter reports `shader-f16`. null when that is unknowable (no
+ * adapter, no `features` set-like, a throwing getter): unknown keeps WebGPU.
+ */
+export function gpuAdapterShaderF16(adapter: unknown): boolean | null {
+  if (!adapter || typeof adapter !== 'object') return null;
+  try {
+    const features = (adapter as { features?: { has?: (name: string) => boolean } }).features;
+    if (!features || typeof features.has !== 'function') return null;
+    return features.has('shader-f16') === true;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The WebGPU EP is used only when the probed adapter can run f16 shaders.
+ * The LC0 nets (and Maia3's fp16 fallback) are f16, and ORT compiles shaders
+ * lazily: without `shader-f16` the session is created fine and the first run
+ * fails ("Program Transpose requires f16 but the device does not support it"),
+ * after createOrtSession's WASM fallback can no longer help. So an adapter
+ * that reports no shader-f16 is treated like no adapter: auto and
+ * webgpu,wasm resolve to WASM. f32-only models lose WebGPU on such devices too,
+ * which is the safe side of that trade.
+ */
 function webgpuUsableForProviderSelection(): boolean {
-  return webgpuAvailable() && probedWebGpuAdapterUsable !== false;
+  return webgpuAvailable() && probedWebGpuAdapterUsable !== false && probedWebGpuShaderF16 !== false;
 }
 
 export function resolvedOrtExecutionProviders(): string[] {
@@ -1262,6 +1289,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
       const features = stringArrayFromSetLike(adapterRec?.features);
       const limits = selectedGpuLimits(adapterRec?.limits);
       probedWebGpuAdapterUsable = !!adapter;
+      probedWebGpuShaderF16 = gpuAdapterShaderF16(adapter);
       diag.resolvedExecutionProviders = resolvedOrtExecutionProviders();
       diag.describe = describeOrtBackendConfig();
       diag.adapter = adapter
@@ -1301,6 +1329,8 @@ async function ensureWebGpuAdapterProbed(): Promise<void> {
   try {
     const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
     probedWebGpuAdapterUsable = !!adapter;
+    probedWebGpuShaderF16 = gpuAdapterShaderF16(adapter);
+    if (probedWebGpuShaderF16 === false) console.info('Centipawn ORT: WebGPU adapter lacks shader-f16; ORT sessions run on WASM.');
     // gpuAdapterVendor never throws: unreadable metadata means "vendor unknown",
     // not "adapter unusable".
     if (adapter) probedWebGpuAdapterVendor = (await gpuAdapterVendor(adapter)) ?? '';
@@ -1336,6 +1366,7 @@ export async function gpuAdapterVendor(adapter: unknown): Promise<string | undef
 /** Test hook: forget this thread's adapter probe so the next session probes again. */
 export function resetWebGpuAdapterProbeForTests(): void {
   probedWebGpuAdapterUsable = null;
+  probedWebGpuShaderF16 = null;
   probedWebGpuAdapterVendor = undefined;
 }
 

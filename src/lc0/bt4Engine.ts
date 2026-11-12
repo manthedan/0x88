@@ -193,7 +193,9 @@ export async function probeBt4Support(): Promise<boolean> {
         return supportedCached;
       }
       const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
-      supportedCached = diag.webgpuAvailable === true && diag.adapter?.ok !== false;
+      // resolvedExecutionProviders also drops WebGPU for an adapter without
+      // shader-f16 (the f16 nets cannot run there), matching the worker's choice.
+      supportedCached = diag.webgpuAvailable === true && diag.adapter?.ok !== false && (diag.resolvedExecutionProviders ?? []).includes('webgpu');
     } catch {
       supportedCached = false;
     }
