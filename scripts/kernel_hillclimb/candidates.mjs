@@ -51,13 +51,13 @@ export const CANDIDATES = {
   // Paired rewrite-vs-pre-rewrite (A = shipped rewrite, B = pre-rewrite QDQ8), ABAB in one page session.
   'ort-maia3-ab-graph': {
     page: 'ort-profile',
-    query: `preset=maia3&referenceModel=${MAIA3_PRE_GRAPH_MODEL}&ab=maia3&abModel=${MAIA3_PRE_GRAPH_MODEL}&profileInvokes=0&iters=10`,
+    query: `preset=maia3&referenceModel=${MAIA3_PRE_GRAPH_MODEL}&ab=maia3&abModel=${MAIA3_PRE_GRAPH_MODEL}&parity=wasm&profileInvokes=0&iters=10`,
     path: 'ort-webgpu',
     gate: ORT_WASM_PARITY,
   },
   'ort-maia3-grid-ab-graph': {
     page: 'ort-profile',
-    query: `preset=maia3-grid&referenceModel=${MAIA3_PRE_GRAPH_MODEL}&ab=maia3-grid&abModel=${MAIA3_PRE_GRAPH_MODEL}&profileInvokes=0&iters=10`,
+    query: `preset=maia3-grid&referenceModel=${MAIA3_PRE_GRAPH_MODEL}&ab=maia3-grid&abModel=${MAIA3_PRE_GRAPH_MODEL}&parity=wasm&profileInvokes=0&iters=10`,
     path: 'ort-webgpu',
     gate: ORT_WASM_PARITY,
   },
