@@ -53,21 +53,27 @@ export function uciGameHistory(positions: readonly BoardState[]): UciGameHistory
 }
 
 /**
- * The same position history re-rooted at the last capture or pawn move (where
- * the halfmove clock is 0). No repetition reaches back past such a move and
- * the root FEN carries the halfmove clock, so the engine sees the same
- * repetitions and 50-move count from a shorter `position` command.
+ * The same position history re-rooted just before the last capture or pawn
+ * move, which is replayed as the first move. No repetition reaches back past
+ * such a move, and the engine resets its 50-move clock on it, so the engine
+ * sees the same repetitions and 50-move count from a shorter `position`
+ * command. Rooting before the move, not after it, keeps the engine's own
+ * en-passant bookkeeping: engines such as Berserk hash a FEN's en-passant
+ * square unconditionally but record one after a double push only when it can
+ * be captured, so a FEN root taken right after an uncapturable double push
+ * would hash differently from the replayed game and miss repetitions.
  */
 export function uciHistoryFromLastIrreversibleMove(fen: string, moves: readonly string[]): UciGameHistory {
   let board = parseFen(fen);
-  let root = { fen, index: 0 };
+  let root = { board, index: 0 };
   for (let i = 0; i < moves.length; i += 1) {
     const move = legalMoves(board).find((candidate) => moveToUci(candidate) === moves[i]);
     if (!move) throw new Error(`Illegal move ${moves[i]} in UCI history from ${fen}`);
+    const before = board;
     board = makeMove(board, move);
-    if (board.halfmove === 0) root = { fen: boardToFen(board), index: i + 1 };
+    if (board.halfmove === 0) root = { board: before, index: i };
   }
-  return { fen: root.fen, moves: moves.slice(root.index) };
+  return { fen: root.index === 0 ? fen : boardToFen(root.board), moves: moves.slice(root.index) };
 }
 
 /** Apply legal UCI `moves` to `fen` and return the resulting FEN. */

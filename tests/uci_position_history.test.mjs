@@ -186,11 +186,18 @@ test('CPU arena games give each engine the start FEN and the moves played since'
   ]);
 });
 
-test('uciHistoryFromLastIrreversibleMove re-roots at the last capture or pawn move', () => {
+test('uciHistoryFromLastIrreversibleMove re-roots just before the last capture or pawn move', () => {
   const moves = ['g1f3', 'g8f6', 'e2e4', 'f6e4', 'f3g1', 'e4f6', 'g1f3'];
   const rooted = uciHistoryFromLastIrreversibleMove(START_FEN, moves);
-  assert.deepEqual(rooted.moves, ['f3g1', 'e4f6', 'g1f3']);
+  assert.deepEqual(rooted.moves, ['f6e4', 'f3g1', 'e4f6', 'g1f3']);
+  assert.equal(rooted.fen, fenAfterUciMoves(START_FEN, moves.slice(0, 3)));
   assert.equal(fenAfterUciMoves(rooted.fen, rooted.moves), fenAfterUciMoves(START_FEN, moves));
+  // A double push is replayed, never baked into the root FEN: the root would
+  // otherwise carry an uncapturable en-passant square (e3) that engines like
+  // Berserk hash from a FEN but not after playing the push themselves.
+  const pushed = uciHistoryFromLastIrreversibleMove(START_FEN, ['g1f3', 'g8f6', 'e2e4', 'f6g8', 'f3g1']);
+  assert.deepEqual(pushed.moves, ['e2e4', 'f6g8', 'f3g1']);
+  assert.ok(pushed.fen.split(' ')[3] === '-', `root FEN carries no en-passant square: ${pushed.fen}`);
   assert.deepEqual(uciHistoryFromLastIrreversibleMove(START_FEN, ['g1f3', 'g8f6']), { fen: START_FEN, moves: ['g1f3', 'g8f6'] });
 });
 
@@ -206,7 +213,7 @@ test('Berserk re-roots a position command longer than its 8191-byte input buffer
     berserk.dispose();
     stormphrax.dispose();
   });
-  const afterPawn = fenAfterUciMoves(START_FEN, [...shuffle, 'e2e4']);
+  const beforePawn = fenAfterUciMoves(START_FEN, shuffle);
   assert.equal(await berserk.bestMove(START_FEN, undefined, { moves }), 'e2e4');
   assert.equal(await stormphrax.bestMove(START_FEN, undefined, { moves }), 'e2e4');
   await assert.rejects(berserk.bestMove(START_FEN, undefined, { moves: shuffle }), /Berserk UCI position command is \d+ bytes; the engine reads at most 8191/);
@@ -214,6 +221,6 @@ test('Berserk re-roots a position command longer than its 8191-byte input buffer
   const [berserkPositions, stormphraxPositions] = EmscriptenWorker.instances.map((worker) =>
     worker.messages.filter((command) => command.startsWith('position ')),
   );
-  assert.deepEqual(berserkPositions, [`position fen ${afterPawn} moves ${tail.slice(1).join(' ')}`]);
+  assert.deepEqual(berserkPositions, [`position fen ${beforePawn} moves ${tail.join(' ')}`]);
   assert.deepEqual(stormphraxPositions, [`position fen ${START_FEN} moves ${moves.join(' ')}`], 'engines without a buffer limit get the whole game');
 });
