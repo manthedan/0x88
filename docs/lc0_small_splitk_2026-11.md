@@ -196,8 +196,12 @@ inflates submit latency. The gate passed on all three repeats.
 
 ### RTX 3090 (Yukon, Chrome/Vulkan)
 
-Pending. The paired run is queued behind other projects' jobs on the shared
-GPU queue; this section will be filled when it completes.
+Not measured yet. The first attempt ran the gated A/B page with 30 rounds,
+the default `profileInvokes` and the default iterations. It hit the runner's
+hard deadline after 990 s and returned no result. Chrome's stderr shows a
+`SEGV_ACCERR` about 30 s into the run, with no console output. It needs a
+shorter re-run (`abRounds=10&profileInvokes=0`) and a check of whether the
+crash also happens with the shipped model alone.
 
 ### WASM EP (the fallback path)
 
