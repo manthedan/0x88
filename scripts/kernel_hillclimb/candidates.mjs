@@ -86,6 +86,37 @@ export const CANDIDATES = {
     path: 'ort-webgpu',
     gate: ORT_WASM_PARITY,
   },
+  // MultiHeadAttention graph rewrite of the big nets (scripts/kernel_hillclimb/mha_rewrite.py,
+  // docs/bignet_fused_attention_2026-11.md): ORT's WebGPU FlashAttention replaces the per-layer
+  // Transpose/MatMul/Mul/Add/Softmax chain. Local gitignored models staged by build_lab.mjs under
+  // /models/lc0-mha/; parity runs the shipped model on ORT WASM. The -ab variants pair the rewrite
+  // (A) with the shipped model (B), ABAB in one page session.
+  'ort-bt4-mha': { page: 'ort-profile', query: 'preset=bt4&iters=15&model=/models/lc0-mha/bt4.b8.qdq8.mha.onnx', path: 'ort-webgpu', gate: ORT_WASM_PARITY },
+  'ort-bt4-mha-ab': {
+    page: 'ort-profile',
+    query: 'preset=bt4&model=/models/lc0-mha/bt4.b8.qdq8.mha.onnx&ab=bt4&abRounds=12&abBlock=3&profileInvokes=3&iters=10',
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
+  'ort-t3-mha': { page: 'ort-profile', query: 'preset=t3&model=/models/lc0-mha/t3.b8.f16.mha.onnx', path: 'ort-webgpu', gate: ORT_WASM_PARITY },
+  'ort-t3-mha-ab': {
+    page: 'ort-profile',
+    query: 'preset=t3&model=/models/lc0-mha/t3.b8.f16.mha.onnx&ab=t3&abRounds=20&abBlock=3&profileInvokes=3&iters=10',
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
+  'ort-lqo-mha-ab': {
+    page: 'ort-profile',
+    query: 'preset=lqo&model=/models/lc0-mha/lqo.qdq8.mha.onnx&ab=lqo&abRounds=16&abBlock=3&profileInvokes=3&iters=10',
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
+  'ort-lc0-small-mha-ab': {
+    page: 'ort-profile',
+    query: 'preset=lc0-small&model=/models/lc0-mha/t1.b1.qdq8.mha.onnx&ab=lc0-small&abRounds=30&profileInvokes=5&iters=10',
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
   'tvmjs-centipawn': {
     page: 'tvmjs-profile',
     query: 'target=centipawn',
