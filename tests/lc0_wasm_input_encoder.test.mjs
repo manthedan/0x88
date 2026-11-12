@@ -125,3 +125,27 @@ test('SIMD WASM LC0 input encoder checks repetition against explicit history old
   const actual = wasm.encodeFenHistory(positions.map(boardToFen));
   assertEncodedEqual(actual, expected, 'long-repetition-history');
 });
+
+test('SIMD WASM LC0 input encoder recognizes the start board like JS whatever the castling letter order', async () => {
+  // LC0 compares castling rights as a set (a bitmask), so `QKqk` is still the
+  // start board and gets no history fill; startpos pieces with no castling
+  // rights or black to move are other boards and are filled from the root.
+  const wasm = await createLc0WasmInputEncoder(wasmBytes);
+  const filledSlots = (encoded) => {
+    let count = 0;
+    for (let slot = 0; slot < 8; slot++) if (encoded.masks.slice(slot * 13, slot * 13 + 12).some((mask) => mask !== 0n)) count += 1;
+    return count;
+  };
+  for (const [fen, moves, slots] of [
+    ['rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w QKqk - 0 1', [], 1],
+    ['rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w kqQK - 4 3', ['g1f3'], 2],
+    ['rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1', [], 8],
+    ['rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1', [], 8],
+  ]) {
+    const positions = buildBoardHistoryFromMoves(moves, fen);
+    const expected = encodeLc0Classical112({ positions });
+    assert.equal(filledSlots(expected), slots, fen);
+    assertEncodedEqual(wasm.encodeFenHistory(positions.map(boardToFen)), expected, fen);
+    if (!moves.length) assertEncodedEqual(wasm.encodeFen(fen), encodeLc0Classical112(fen), `bare ${fen}`);
+  }
+});
