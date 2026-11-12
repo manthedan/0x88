@@ -192,7 +192,7 @@
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.69.2",
     "agent-browser": "^0.31.2",
-    "binaryen": "^130.0.0",
+    "binaryen": "^132.0.0",
     "playwright": "^1.62.1",
     "smol-toml": "^1.7.1",
     "svelte": "^5.56.4",
