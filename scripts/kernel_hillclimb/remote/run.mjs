@@ -25,9 +25,10 @@
 //   --out FILE             also write the final JSON to FILE
 //   --dry-run              show what would be synced/submitted, then stop
 // Exit: 0 ok, 2 page error/timeout, 3 runner/agent failure, 4 refused (0x88 job already
-// waiting), 75 confirmed never started (host busy), 76 still pending remotely (--fetch later).
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+// waiting), 7 queue listing failed (nothing submitted), 75 confirmed never started (host busy),
+// 76 still pending remotely (--fetch later).
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

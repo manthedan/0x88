@@ -9,7 +9,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const a = Object.fromEntries(process.argv.slice(2).reduce((acc, x, i, arr) => (x.startsWith('--') ? [...acc, [x.slice(2), arr[i + 1]]] : acc), []));
+const a = Object.fromEntries(process.argv.slice(2).flatMap((x, i, arr) => (x.startsWith('--') ? [[x.slice(2), arr[i + 1]]] : [])));
 const m = JSON.parse(readFileSync(a.matrix, 'utf8'));
 const agent = join(dirname(fileURLToPath(import.meta.url)), 'agent.mjs');
 for (const [bn, bin] of Object.entries(m.binaries)) {
