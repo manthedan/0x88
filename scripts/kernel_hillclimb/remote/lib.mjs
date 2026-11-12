@@ -116,7 +116,10 @@ export function excludedIncludes(includes, excludes) {
   return includes.filter((p) => {
     const segs = p.replace(/^\/+/, '').split('/').filter(Boolean);
     const lastIsDir = p.endsWith('/');
-    return segs.some((seg, i) => ((i < segs.length - 1 || lastIsDir) && dirs.some((re) => re.test(seg))) || files.some((re) => re.test(seg)));
+    // A `**` inside a segment can span slashes and reach non-excluded paths, so it is not flagged.
+    return segs.some(
+      (seg, i) => !seg.includes('**') && (((i < segs.length - 1 || lastIsDir) && dirs.some((re) => re.test(seg))) || files.some((re) => re.test(seg))),
+    );
   });
 }
 

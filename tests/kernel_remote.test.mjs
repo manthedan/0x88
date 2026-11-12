@@ -391,6 +391,7 @@ test('includes that name excluded items are flagged; broad globs and look-alike 
     'x/net.onnx*',
     'assets/models',
     'assets/models/',
+    '**/params_shard_**.bin',
   ];
   assert.deepEqual(excludedIncludes(includes, excludes), [
     'models/lc0/manifest.json',
