@@ -58,7 +58,8 @@ Options (see the header of `run.mjs` for all of them):
   page needs them. The default excludes take precedence over `--include`, so an `--include` that
   names an excluded directory (such as `models/`) or only excluded files (such as `net.onnx` or
   `nets/*.onnx`) without `--with-models` is refused before any ssh, sync or queue step,
-  instead of silently syncing nothing. `--host local` serves `--dist` in place and is not checked. Each run hard-links unchanged files against the previous run's dist on the
+  instead of silently syncing nothing. `--host local` serves `--dist` in place and is not checked. The check is best-effort:
+  bracket expressions such as `*.p[bt]` are not analyzed. Each run hard-links unchanged files against the previous run's dist on the
   host (`rsync --link-dest`), so a repeat upload costs only the changed files.
 - `--gpu-info` adds CDP `SystemInfo.getInfo` (the `chrome://gpu` data: GPU devices, driver,
   feature status, ANGLE/Vulkan aux attributes) to `meta.gpuInfo`.

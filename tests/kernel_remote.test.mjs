@@ -389,6 +389,8 @@ test('includes that name excluded items are flagged; broad globs and look-alike 
     'x/*',
     'x/*.json',
     'x/net.onnx*',
+    'assets/models',
+    'assets/models/',
   ];
   assert.deepEqual(excludedIncludes(includes, excludes), [
     'models/lc0/manifest.json',
@@ -400,6 +402,7 @@ test('includes that name excluded items are flagged; broad globs and look-alike 
     'p/params_shard_3.bin',
     'x/*.onnx',
     'nets/params_shard_*.bin',
+    'assets/models/',
   ]);
 });
 
