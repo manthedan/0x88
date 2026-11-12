@@ -5,9 +5,11 @@ for Lc0 Small (`t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx`) at
 physical batch 1, without a custom kernel? This is option 1 of candidate #1 in
 [`kernel_hillclimb_roofline_2026-11.md`](kernel_hillclimb_roofline_2026-11.md) §5.
 
-**Verdict: yes.** A split-K rewrite of 97 MatMuls passes the existing ORT WASM
-parity gate unchanged. On the Apple M4 it is **~1.5× faster per invoke on wall
-time and ~1.95× on GPU busy time**, in paired ABAB runs. Product
+**Verdict: yes on the Apple M4, no on the RTX 3090.** A split-K rewrite of 97
+MatMuls passes the existing ORT WASM parity gate unchanged. On the Apple M4 it
+is **~1.5× faster per invoke on wall time and ~1.95× on GPU busy time**, in
+paired ABAB runs. On the RTX 3090 (Chrome/Vulkan) it saves only ~3% GPU time
+and is **~1.5× slower on wall time** because of the extra dispatches (§5). Product
 defaults, the shipped model and the manifest are unchanged. The release steps
 are at the end. The same rewrite for the smolgen compress GEMV in t3/BT4/LQO
 gives 4-8% per invoke.
@@ -196,12 +198,27 @@ inflates submit latency. The gate passed on all three repeats.
 
 ### RTX 3090 (Yukon, Chrome/Vulkan)
 
-Not measured yet. The first attempt ran the gated A/B page with 30 rounds,
-the default `profileInvokes` and the default iterations. It hit the runner's
-hard deadline after 990 s and returned no result. Chrome's stderr shows a
-`SEGV_ACCERR` about 30 s into the run, with no console output. It needs a
-shorter re-run (`abRounds=10&profileInvokes=0`) and a check of whether the
-crash also happens with the shipped model alone.
+**Split-K is slower here.** Two separate unpaired runs with default Chrome
+flags (`shader-f16` on), each 30 timed iterations plus 5 profiled invokes,
+`parity=wasm`:
+
+| model | wall median | GPU busy / invoke | dispatches / invoke | gate |
+|---|---|---|---|---|
+| shipped `batch1.f16.qdq8` | 9.86 ms (MAD 1.06) | 4.95 ms | 356 | pass |
+| split-K (`splitk-all`) | 15.07 ms | 4.78 ms | 595 | pass (legal-prob 0.009) |
+
+The 3090 already fills its SMs with the shipped small-M matmuls, so splitting K
+saves only ~3% GPU time. The 239 extra dispatches per invoke cost more in
+encode and submit time than that saves. The runs are not paired, so the wall
+ratio (~1.5× slower) is approximate, but the gap is several MADs wide.
+Results: `artifacts/kernel-hillclimb/results/yukon/lc0small-shipped-default.json`
+and `lc0small-splitk-solo.json`.
+
+The first attempt, a 30-round paired A/B with default iterations, crashed
+Chrome's GPU process (`SEGV_ACCERR` about 30 s in), restarted it, and then hit
+the runner's 990 s deadline with no result. The split-K model alone ran clean,
+and so did the shipped model alone. The crash was therefore not reproduced by
+either model on its own. The long paired run has not been retried.
 
 ### WASM EP (the fallback path)
 
@@ -309,7 +326,10 @@ in-graph: drop the FFN-up split, and look at the remaining head Gemms.
    `r2-stable-present.manifest.json`), then run `npm run artifact-index`
    (`tests/artifact_index.test.mjs` checks it).
 3. **Select the model by execution provider.** The split-K model is 1.21×
-   slower on WASM (§5), so do not just swap the URL:
+   slower on WASM, and ~1.5× slower on the RTX 3090 WebGPU (§5). Do not just
+   swap the URL. The gain is device-specific, so a release also needs a
+   device condition (for example Apple adapters only), or a short on-device
+   timing probe, measured on more GPUs first:
    - Map the default Lc0 Small URL to the split-K URL only when the resolved
      ORT providers include `webgpu`. The resolution happens in
      `createOrtSession` (`src/nn/ortRuntime.ts`), or in a helper the callers
