@@ -91,7 +91,8 @@ const PRESETS = {
   },
   maia3: {
     legalPolicy: { ...LEGAL(0.05), tieEpsilon: 0.02 }, // baseline 0.026; flip at fixture 7, 1500/1500, reference gap 0.013
-    model: '/models/maia3/maia3_simplified.qdq8.onnx',
+    // Shipped since the einsum,promo graph rewrite (bit-identical to the QDQ8 file on WASM).
+    model: '/models/maia3/maia3_simplified.qdq8.graph.onnx',
     batch: 1,
     family: 'maia3',
     shipped: 'Maia3 single eval (Play move)',
@@ -100,7 +101,7 @@ const PRESETS = {
   },
   'maia3-grid': {
     legalPolicy: { ...LEGAL(0.05), tieEpsilon: 0.02 }, // baseline 0.024; same fixture-7 flip
-    model: '/models/maia3/maia3_simplified.qdq8.onnx',
+    model: '/models/maia3/maia3_simplified.qdq8.graph.onnx',
     batch: 11,
     family: 'maia3',
     shipped: 'Maia3 Elo-grid evaluateConditions (11 conditions)',

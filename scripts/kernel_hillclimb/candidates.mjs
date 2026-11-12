@@ -21,8 +21,8 @@ const ORT_WASM_PARITY = {
   thresholds: 'ort-profile.mjs PRESETS[*].parityMaxAbs',
 };
 
-/** Dynamic-batch Maia3 rewrite (einsum + promo passes); see the Maia3 graph candidates below. */
-const MAIA3_GRAPH_MODEL = '/models/maia3/candidates/maia3.einsum-promo.onnx';
+/** Maia3 QDQ8 export before the einsum,promo graph rewrite (the shipped default until the rewrite). */
+const MAIA3_PRE_GRAPH_MODEL = '/models/maia3/maia3_simplified.qdq8.onnx';
 
 export const CANDIDATES = {
   peak: { page: 'peak', query: '', path: 'device', gate: { kind: 'none' } },
@@ -37,22 +37,27 @@ export const CANDIDATES = {
   'ort-maia3': { page: 'ort-profile', query: 'preset=maia3', path: 'ort-webgpu', gate: ORT_WASM_PARITY },
   'ort-maia3-grid': { page: 'ort-profile', query: 'preset=maia3-grid', path: 'ort-webgpu', gate: ORT_WASM_PARITY },
 
-  // Maia3 graph rewrites (scripts/maia3_graph_rewrite.py, docs/maia3_graph_rewrite_2026-11.md).
-  // The candidate model is not shipped: copy it to <dist>/models/maia3/candidates/
-  // first; `--query model=...` swaps in another rewrite. Parity runs the
-  // preset's ORIGINAL model on ORT WASM as the reference.
-  'ort-maia3-graph': { page: 'ort-profile', query: `preset=maia3&model=${MAIA3_GRAPH_MODEL}`, path: 'ort-webgpu', gate: ORT_WASM_PARITY },
-  'ort-maia3-grid-graph': { page: 'ort-profile', query: `preset=maia3-grid&model=${MAIA3_GRAPH_MODEL}`, path: 'ort-webgpu', gate: ORT_WASM_PARITY },
-  // Paired candidate-vs-shipped (A = rewrite, B = shipped model), ABAB in one page session.
+  // Maia3 graph rewrite (scripts/maia3_graph_rewrite.py, docs/maia3_graph_rewrite_2026-11.md).
+  // The presets now ship the rewritten model; these candidates keep judging it
+  // against the pre-rewrite QDQ8 model on ORT WASM. `--query model=...` swaps
+  // in another rewrite (copy it under <dist>/models/maia3/candidates/ first).
+  'ort-maia3-graph': { page: 'ort-profile', query: `preset=maia3&referenceModel=${MAIA3_PRE_GRAPH_MODEL}`, path: 'ort-webgpu', gate: ORT_WASM_PARITY },
+  'ort-maia3-grid-graph': {
+    page: 'ort-profile',
+    query: `preset=maia3-grid&referenceModel=${MAIA3_PRE_GRAPH_MODEL}`,
+    path: 'ort-webgpu',
+    gate: ORT_WASM_PARITY,
+  },
+  // Paired rewrite-vs-pre-rewrite (A = shipped rewrite, B = pre-rewrite QDQ8), ABAB in one page session.
   'ort-maia3-ab-graph': {
     page: 'ort-profile',
-    query: `preset=maia3&model=${MAIA3_GRAPH_MODEL}&ab=maia3&profileInvokes=0&iters=10`,
+    query: `preset=maia3&referenceModel=${MAIA3_PRE_GRAPH_MODEL}&ab=maia3&abModel=${MAIA3_PRE_GRAPH_MODEL}&parity=wasm&profileInvokes=0&iters=10`,
     path: 'ort-webgpu',
     gate: ORT_WASM_PARITY,
   },
   'ort-maia3-grid-ab-graph': {
     page: 'ort-profile',
-    query: `preset=maia3-grid&model=${MAIA3_GRAPH_MODEL}&ab=maia3-grid&profileInvokes=0&iters=10`,
+    query: `preset=maia3-grid&referenceModel=${MAIA3_PRE_GRAPH_MODEL}&ab=maia3-grid&abModel=${MAIA3_PRE_GRAPH_MODEL}&parity=wasm&profileInvokes=0&iters=10`,
     path: 'ort-webgpu',
     gate: ORT_WASM_PARITY,
   },

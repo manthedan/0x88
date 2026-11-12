@@ -49,7 +49,7 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`model_efficiency_metrics.md`](model_efficiency_metrics.md) — model efficiency comparison metrics.
 - [`model_provenance/`](model_provenance/) — per-model provenance and derivation recipes (license load-bearing):
   - [`model_provenance/bt4_soap_rem_c19000_final.md`](model_provenance/bt4_soap_rem_c19000_final.md) — Centipawn `bt4_soap_rem_c19000_final` model.
-  - [`model_provenance/maia3.md`](model_provenance/maia3.md) — Maia3 upstream file, QDQ8 derivation recipe and source offer.
+  - [`model_provenance/maia3.md`](model_provenance/maia3.md) — Maia3 upstream file, QDQ8 and graph-rewrite derivation recipes and source offer.
 
 ## Audits, parity records, and decision logs
 
@@ -121,7 +121,7 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`ort_native_webgpu_profiler_2026-10.md`](ort_native_webgpu_profiler_2026-10.md) — what kernel profiling ORT 1.27's native WebGPU EP actually offers.
 - [`batching_strength_2026-10.md`](batching_strength_2026-10.md) — batching strength re-gate; no product default changes.
 - [`kernel_hillclimb_roofline_2026-11.md`](kernel_hillclimb_roofline_2026-11.md) — WebGPU kernel roofline: per-dispatch GPU time vs measured peak for the shipped nets, and where hand-written kernels could pay off.
-- [`maia3_graph_rewrite_2026-11.md`](maia3_graph_rewrite_2026-11.md) — Maia3 ONNX graph rewrite (Einsum→MatMul, vectorized promotion head): bit-identical, ~0.76× b1 / ~0.68× grid wall on the M4; not shipped yet.
+- [`maia3_graph_rewrite_2026-11.md`](maia3_graph_rewrite_2026-11.md) — Maia3 ONNX graph rewrite (Einsum→MatMul, vectorized promotion head): bit-identical, ~0.76× b1 / ~0.68× grid wall on the M4; the default Maia3 model since 2026-11-11.
 - [`lc0_small_splitk_2026-11.md`](lc0_small_splitk_2026-11.md) — Lc0 Small split-K ONNX rewrite: ~1.5× wall / ~1.95× GPU per WebGPU invoke at batch 1, parity gate passes; not released.
 - [`centipawn_f16_2026-10.md`](centipawn_f16_2026-10.md) — Centipawn mixed-f16 TVMJS module: rejected at the numerical gate.
 - [`centipawn_padded_encoding.md`](centipawn_padded_encoding.md) — Centipawn TVMJS evaluator encodes real rows once and copies padding.

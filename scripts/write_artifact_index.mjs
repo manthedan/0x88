@@ -128,7 +128,7 @@ const MODEL_GROUPS = [
     manifest: 'public/models/maia3/manifest.json',
     prefix: 'maia3_simplified.',
     provenancePath: 'docs/model_provenance/maia3.md',
-    notes: 'Play and the Analysis Human tab load the locally derived QDQ8 file by default and fall back to the upstream fp16 file.',
+    notes: 'Play and the Analysis Human tab load the graph-rewritten QDQ8 file by default and fall back to the plain QDQ8 file, then the upstream fp16 file.',
   },
 ];
 

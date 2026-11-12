@@ -4,14 +4,19 @@ import { spawnSync } from 'node:child_process';
 //
 // The repo commits only the manifest and provenance. Model files are staged in
 // a sibling cache and exposed through ignored local symlinks.
-// Two artifacts:
+// Three artifacts:
 //  - maia3_simplified.onnx: downloaded byte-identical from the pinned
 //    upstream commit of CSSLab/maia-platform-frontend.
-//  - maia3_simplified.qdq8.onnx (the default browser model): derived locally
-//    from the fp16 file (opset 17->21 version_converter, then weight-only
-//    int8 QDQ via scripts/lc0_quantize_onnx_weights_qdq.py). Needs a python
-//    with onnx+numpy (.venv-onnx by default); if unavailable the fp16 model
-//    still works — the browser loader falls back to it.
+//  - maia3_simplified.qdq8.onnx: derived locally from the fp16 file (opset
+//    17->21 version_converter, then weight-only int8 QDQ via
+//    scripts/lc0_quantize_onnx_weights_qdq.py).
+//  - maia3_simplified.qdq8.graph.onnx (the default browser model): derived
+//    from the QDQ8 file by scripts/maia3_graph_rewrite.py with the manifest
+//    entry's `rewritePasses` (einsum,promo). Same weights and I/O, fewer
+//    WebGPU dispatches; see docs/maia3_graph_rewrite_2026-11.md.
+// Derived files need a python with onnx+numpy (.venv-onnx by default) and are
+// checked against the manifest sha256. If one is unavailable the browser
+// loader falls back along graph -> QDQ8 -> fp16.
 //
 //   npm run maia3:stage-assets
 //
@@ -71,22 +76,9 @@ if (await isStaged(upstream)) {
   actions.push({ file: upstream.file, action: 'downloaded', upstreamCommit: UPSTREAM_COMMIT });
 }
 
-// 2. Derived QDQ artifacts: re-derive locally when missing/mismatched.
-for (const entry of derived) {
-  if (await isStaged(entry)) {
-    actions.push({ file: entry.file, action: 'already-staged' });
-    continue;
-  }
-  if (!existsSync(python)) {
-    actions.push({
-      file: entry.file,
-      action: 'SKIPPED',
-      reason: `python not found at ${python} (set MAIA3_PYTHON); browser falls back to ${entry.derivedFrom}`,
-    });
-    continue;
-  }
-  const sourcePath = path.join(targetDir, entry.derivedFrom);
-  const targetPath = path.join(targetDir, entry.file);
+// 2. Derived artifacts: re-derive locally when missing/mismatched, parents
+// before children (the graph rewrite derives from the derived QDQ8 file).
+async function deriveQdq8(entry, sourcePath, targetPath) {
   const op21Path = path.join(tmpdir(), `maia3_op21_${process.pid}.onnx`);
   console.log(`Deriving ${entry.file} from ${entry.derivedFrom} (opset 21 + int8 QDQ)…`);
   const convert = spawnSync(
@@ -104,14 +96,72 @@ onnx.save(version_converter.convert_version(m, 21), ${JSON.stringify(op21Path)})
   );
   if (convert.status !== 0) throw new Error(`opset conversion failed for ${entry.file}`);
   const quantize = spawnSync(python, ['scripts/lc0_quantize_onnx_weights_qdq.py', '--in', op21Path, '--out', targetPath], { stdio: 'inherit' });
+  await rm(op21Path, { force: true });
   if (quantize.status !== 0) throw new Error(`quantization failed for ${entry.file}`);
-  const digest = await sha256(targetPath);
-  if (digest !== entry.sha256) {
-    throw new Error(
-      `${entry.file}: derived sha256 ${digest} does not match manifest ${entry.sha256} — onnx/numpy version drift? Re-derive and update the manifest deliberately.`,
-    );
+}
+
+async function deriveGraphRewrite(entry, sourcePath, targetPath) {
+  if (!/^[a-z,]+$/.test(entry.rewritePasses)) throw new Error(`${entry.file}: invalid rewritePasses ${JSON.stringify(entry.rewritePasses)}`);
+  console.log(`Deriving ${entry.file} from ${entry.derivedFrom} (scripts/maia3_graph_rewrite.py --passes ${entry.rewritePasses})…`);
+  const rewrite = spawnSync(python, ['-I', 'scripts/maia3_graph_rewrite.py', sourcePath, targetPath, '--passes', entry.rewritePasses], { stdio: 'inherit' });
+  if (rewrite.status !== 0) throw new Error(`graph rewrite failed for ${entry.file}`);
+}
+
+const byFile = new Map(entries.map((entry) => [entry.file, entry]));
+const derivedOrder = [];
+const visiting = new Set();
+function visit(entry) {
+  if (derivedOrder.includes(entry)) return;
+  if (visiting.has(entry.file)) throw new Error(`${MANIFEST}: derivedFrom cycle at ${entry.file}`);
+  visiting.add(entry.file);
+  const parent = byFile.get(entry.derivedFrom);
+  if (!parent) throw new Error(`${entry.file}: derivedFrom ${entry.derivedFrom} is not in ${MANIFEST}`);
+  if (parent.derivedFrom) visit(parent);
+  visiting.delete(entry.file);
+  derivedOrder.push(entry);
+}
+for (const entry of derived) visit(entry);
+
+for (const entry of derivedOrder) {
+  if (await isStaged(entry)) {
+    actions.push({ file: entry.file, action: 'already-staged' });
+    continue;
   }
-  actions.push({ file: entry.file, action: 'derived', sha256: digest });
+  if (!existsSync(python)) {
+    actions.push({
+      file: entry.file,
+      action: 'SKIPPED',
+      reason: `python not found at ${python} (set MAIA3_PYTHON); the browser falls back to ${entry.derivedFrom}`,
+    });
+    continue;
+  }
+  if (!(await isStaged(byFile.get(entry.derivedFrom)))) {
+    actions.push({ file: entry.file, action: 'SKIPPED', reason: `${entry.derivedFrom} is not staged` });
+    continue;
+  }
+  const sourcePath = path.join(targetDir, entry.derivedFrom);
+  const targetPath = path.join(targetDir, entry.file);
+  // Write beside the target and rename only after the hash matches, so a
+  // drifted derivation never leaves a wrong file under the published name.
+  const partialPath = path.join(targetDir, `.${entry.file}.${process.pid}.partial.onnx`);
+  const partialReport = partialPath.replace(/\.onnx$/, '.qdq-report.json');
+  try {
+    if (entry.rewritePasses) await deriveGraphRewrite(entry, sourcePath, partialPath);
+    else await deriveQdq8(entry, sourcePath, partialPath);
+    const digest = await sha256(partialPath);
+    if (digest !== entry.sha256) {
+      throw new Error(
+        `${entry.file}: derived sha256 ${digest} does not match manifest ${entry.sha256} — onnx/numpy version drift? Re-derive and update the manifest deliberately.`,
+      );
+    }
+    await rename(partialPath, targetPath);
+    // The quantizer writes <out>.qdq-report.json beside its output; keep it under the final name.
+    await rename(partialReport, targetPath.replace(/\.onnx$/, '.qdq-report.json')).catch(() => undefined);
+    actions.push({ file: entry.file, action: 'derived', sha256: digest });
+  } finally {
+    await rm(partialPath, { force: true });
+    await rm(partialReport, { force: true });
+  }
 }
 
 const links = [];

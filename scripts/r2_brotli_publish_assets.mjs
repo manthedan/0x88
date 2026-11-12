@@ -20,6 +20,8 @@ const shortCache = 'public, max-age=300';
 
 const targets = [
   ['models/maia3/manifest.json', 'public/models/maia3/manifest.json', 'application/json', shortCache],
+  // Default since the graph rewrite; the pre-rewrite QDQ8 file stays published for cached clients and as the first fallback.
+  ['models/maia3/maia3_simplified.qdq8.graph.onnx', 'public/models/maia3/maia3_simplified.qdq8.graph.onnx', 'application/octet-stream', immutable],
   ['models/maia3/maia3_simplified.qdq8.onnx', 'public/models/maia3/maia3_simplified.qdq8.onnx', 'application/octet-stream', immutable],
   ['models/maia3/maia3_simplified.onnx', 'public/models/maia3/maia3_simplified.onnx', 'application/octet-stream', immutable],
   ['models/lc0/manifest.json', 'public/models/lc0/manifest.json', 'application/json', shortCache],

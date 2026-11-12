@@ -115,10 +115,11 @@
       "manifestUrl": "/models/maia3/manifest.json",
       "provenancePath": "docs/model_provenance/maia3.md",
       "primaryUrls": [
+        "/models/maia3/maia3_simplified.qdq8.graph.onnx",
         "/models/maia3/maia3_simplified.qdq8.onnx",
         "/models/maia3/maia3_simplified.onnx"
       ],
-      "notes": "Play and the Analysis Human tab load the locally derived QDQ8 file by default and fall back to the upstream fp16 file."
+      "notes": "Play and the Analysis Human tab load the graph-rewritten QDQ8 file by default and fall back to the plain QDQ8 file, then the upstream fp16 file."
     },
     {
       "id": "centipawn-tvmjs-webgpu-v2",

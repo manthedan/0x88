@@ -1,6 +1,7 @@
 # Maia3 ONNX graph rewrite for ORT WebGPU (November 2026)
 
-The shipped Maia3 model (`maia3_simplified.qdq8.onnx`) has two graph-level
+The Maia3 model shipped before this work (`maia3_simplified.qdq8.onnx`,
+called "the shipped model" below) has two graph-level
 costs on ORT Web 1.27 WebGPU, both found in the kernel roofline
 ([`kernel_hillclimb_roofline_2026-11.md`](kernel_hillclimb_roofline_2026-11.md)).
 First, eight `Einsum bhi,oi->bho` attention-bias projections run as a generic
@@ -11,9 +12,9 @@ int8 QDQ weights, the model I/O and the dequant fold intact.
 **Result:** `einsum,promo` is the candidate worth releasing. On the M4 it cuts
 b1 move-eval wall time by about 24% and b11 grid wall time by about 32%
 (paired). It halves dispatches (817 to 424). Its outputs are bit-identical on
-ORT WASM and match the shipped model on the WebGPU gate. It is **not shipped**:
-the shipped model, manifest and defaults are unchanged. The release steps are
-in [§6](#6-release-steps).
+ORT WASM and match the shipped model on the WebGPU gate. It became the default
+Maia3 model on 2026-11-11 as `maia3_simplified.qdq8.graph.onnx`; the release
+record is in [§6](#6-release-steps).
 
 All numbers: Apple M4, headless Chrome, production `dist-client` with the lab
 overlay, every timing under `notes/kernel-hillclimb/benchlock.sh`. The machine
@@ -173,26 +174,56 @@ retry window ran out before this record was written.
 
 ## 6. Release steps
 
+The release branch (2026-11-11) followed these steps. The file is
+`public/models/maia3/maia3_simplified.qdq8.graph.onnx`, 27,971,924 bytes,
+sha256 `3be705330f38fb0309c82e0ea2f95734ee6bd14fd72eabbad694356bba443246`.
+
 1. Derive: `python -I scripts/maia3_graph_rewrite.py public/models/maia3/maia3_simplified.qdq8.onnx public/models/maia3/maia3_simplified.qdq8.graph.onnx --passes einsum,promo --report <report.json>`.
-   The expected sha256 is `3be705330f38fb0309c82e0ea2f95734ee6bd14fd72eabbad694356bba443246`
-   (27,971,924 bytes) with onnx 1.21.0.
+   The expected sha256 is the one above (onnx 1.21.0, numpy 2.4.6).
+   `npm run maia3:stage-assets` now runs this step itself (see step 3).
 2. Gate:
    - `node --experimental-strip-types scripts/maia3_graph_parity.mjs --candidate <new file> --batch 1 --batch 11`.
-   - Then `--gate` on `ort-maia3-graph` and `ort-maia3-grid-graph` from a built preview.
-   - Then the paired `ort-maia3-ab-graph` / `ort-maia3-grid-ab-graph` on at least one non-Apple GPU (Yukon).
-3. Add a `public/models/maia3/manifest.json` entry (file, url, bytes, sha256,
-   `derivedFrom: "maia3_simplified.qdq8.onnx"`, source naming the script).
-   Extend `scripts/stage_maia3_assets.mjs` to derive it from the qdq8 file and
-   check the sha256.
-4. Publish the new file to R2 under the new name: add it to
-   `scripts/r2_brotli_publish_assets.mjs` with immutable caching. Keep the old
-   file live for cached clients.
-5. Point `MAIA3_DEFAULT_MODEL_URL` (`src/lc0/maia3.ts`) at the new file.
-   Update the `maia3` / `maia3-grid` presets in `lab/kernel-hillclimb/ort-profile.mjs`,
-   `docs/model_provenance/maia3.md`, `public/models/maia3/README.md`,
-   `docs/hosted_artifacts.md`, and the artifact index (`scripts/write_artifact_index.mjs`).
-6. Run the Maia3 browser smoke and the Play/Analysis Maia paths on a **built**
-   preview (dev masks worker bundling problems). Keep the model dynamic-batch:
+     Release run: b1 conditions 228/228, b11 conditions 228/228, b11 grid
+     627/627, every difference 0, fold count 43 = 43.
+   - Then `--gate` on `ort-maia3-graph` and `ort-maia3-grid-graph` from a built
+     preview. Release run (M4): b1 move / value / legal prob 0.492 / 0.078 /
+     0.0263, 38/40; grid 0.500 / 0.110 / 0.0236, 38/40; 424 dispatches. Both
+     pass, and both match the §3 numbers.
+   - Then the paired `ort-maia3-ab-graph` / `ort-maia3-grid-ab-graph` on at
+     least one non-Apple GPU (Yukon). This one runs outside the release
+     branch.
+3. `public/models/maia3/manifest.json` has the entry (file, url, bytes,
+   sha256, `derivedFrom: "maia3_simplified.qdq8.onnx"`,
+   `rewritePasses: "einsum,promo"`). `scripts/stage_maia3_assets.mjs` derives
+   it from the QDQ8 file, checks the sha256 before the file takes its final
+   name, and links it under `public/models/maia3/`.
+4. Publish:
+   - `scripts/r2_brotli_publish_assets.mjs` lists the new file with immutable
+     caching.
+   - `assets.0x88.app` serves `/models/maia3/*` through the artifact Worker,
+     which resolves the path in the stable channel's release manifest. So a
+     release that includes the new manifest entry must be published to R2
+     and the channel flipped before the app deploy.
+     `scripts/write_artifact_release_manifests.mjs` already reads
+     `public/models/maia3/manifest.json`, so the new file and the new
+     `manifest.json` enter the release with no further source change.
+   - The old QDQ8 and fp16 entries stay in the release for cached clients.
+5. `MAIA3_DEFAULT_MODEL_URL` (`src/lc0/maia3.ts`) points at the new file. The
+   loader falls back to the QDQ8 file, then the fp16 file. That fallback also
+   covers a client that still sees the old `manifest.json` during the rollout.
+   - The `maia3` / `maia3-grid` presets in
+     `lab/kernel-hillclimb/ort-profile.mjs` load the new file.
+   - The `ort-maia3*-graph` candidates now judge it against the pre-rewrite
+     QDQ8 model.
+   - Also updated: `docs/model_provenance/maia3.md`,
+     `public/models/maia3/README.md`, `docs/hosted_artifacts.md` and the
+     artifact index.
+6. Run the Maia3 browser smoke and the Play and Analysis Maia paths on a
+   **built** preview (dev masks worker bundling problems). Release run: the
+   smoke passed (3 cycles, b11 grid, no browser errors). Play loaded the new
+   file (sha256 checked), and Maia answered 1.e4. The Analysis Human tab
+   filled its six-rating (b6) grid from Cache Storage. With the new file
+   removed, Play fell back to the QDQ8 file. The model stays dynamic-batch:
    the product needs b1, b6 and b11 from one file.
 
 ## 7. Reproduce
@@ -208,8 +239,9 @@ retry window ran out before this record was written.
 node --experimental-strip-types scripts/maia3_graph_parity.mjs \
   --candidate artifacts/maia3-graph/maia3.einsum-promo.onnx --batch 1 --batch 11
 
-# browser gates and paired timing (built dist-client + lab overlay)
-mkdir -p dist-client/models/maia3/candidates && cp artifacts/maia3-graph/maia3.einsum-promo.onnx dist-client/models/maia3/candidates/
+# browser gates and paired timing (built dist-client + lab overlay).
+# The ort-maia3*-graph candidates load the shipped rewrite; copy other
+# rewrites to dist-client/models/maia3/candidates/ and pass --query model=...
 node scripts/serve_isolated_static.mjs dist-client 5277 &
 B='--base-url=http://127.0.0.1:5277 --browser-args=--enable-unsafe-webgpu,--enable-webgpu-developer-features'
 notes/kernel-hillclimb/benchlock.sh maia3-graph -- node scripts/kernel_hillclimb/bench.mjs --candidate ort-maia3-graph --gate $B

@@ -174,7 +174,7 @@ export function createCriticalEngines(
     const provenance: CriticalProvenance = {
       engine: 'Maia3',
       model: MAIA3_DEFAULT_MODEL_URL,
-      build: 'maia3_simplified QDQ8 (fp16 fallback)',
+      build: 'maia3_simplified QDQ8 einsum,promo graph rewrite (QDQ8, then fp16 fallback)',
       runtime: 'ORT auto',
       budget: '1 policy inference',
       options: `self ${rating}; opponent ${rating}; temperature 1; WASM threads 1`,
