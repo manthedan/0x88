@@ -231,10 +231,17 @@ fail on it.
 ### End-to-end effect (splice)
 
 The fused kernel cannot run inside an ORT session without route (b) or (c).
-The `mha32` rewrite is an exact numerical proxy for it: its subgraph
-max-abs matches the f32 kernel to every printed digit at all three layers on
-both devices. So the full-model gate on `mha32` is the end-to-end effect of
-splicing this kernel in.
+The `mha32` rewrite (f32 attention inside ORT) is the closest available
+proxy, but it is not the kernel's numerics. Its subgraph max-abs against WASM
+matches the f32 kernel's at all three layers on both devices, yet the outputs
+differ element by element. ORT's FlashAttention scales Q before the dot product
+and normalizes the probabilities before P·V; the fused kernel scales after the
+dot product and normalizes after accumulating V. At BT4 layer 14, element
+374874, mha32 gives 1.128e-3 and the kernel 9.365e-4 (float64: 9.372e-4).
+Since the rows below show that small numerical changes can flip the
+full-model gate, the `mha32` results are an approximation of the end-to-end
+effect of splicing the kernel in. **The kernel's own full-model parity is
+unverified** until it runs inside a session (route (b) or (c)).
 
 | BT4 full model, ORT WASM parity gate (10 fixtures) | device | legal-prob max | policy max-abs | WDL | best move | gate |
 |---|---|---|---|---|---|---|
@@ -242,8 +249,8 @@ splicing this kernel in.
 | shipped (exported ops) | 3090 | 0.0147 | 0.211 | 0.0031 | 8/10 (2 tolerated ties) | pass |
 | MHA f16 (route a) | M4 | 0.0186 | 0.307 | 0.0044 | 9/10 | **fail**: row 6 top-3 order a7a8q > e1d2 reversed |
 | MHA f16 (route a) | 3090 | 0.0109 | 0.240 | 0.0026 | 8/10 (2 tolerated ties) | pass |
-| **mha32 = fused-kernel numerics** | M4 | 0.0127 | 0.311 | 0.0026 | 9/10 (1 tolerated tie) | pass |
-| **mha32 = fused-kernel numerics** | 3090 | 0.0110 | 0.166 | 0.0028 | 9/10 | **fail**: the same row 6 reversal |
+| **mha32 (f32 attention, proxy for the kernel)** | M4 | 0.0127 | 0.311 | 0.0026 | 9/10 (1 tolerated tie) | pass |
+| **mha32 (f32 attention, proxy for the kernel)** | 3090 | 0.0110 | 0.166 | 0.0028 | 9/10 | **fail**: the same row 6 reversal |
 
 Row 6 (`4k3/P6p/8/8/8/8/7P/4K3 w - - 0 1`) has a flat policy:
 - a7a8q ≈ 0.146, then king moves ≈ 0.13.
@@ -574,13 +581,17 @@ around them: the split would be the whole graph. The options are:
   - the route (a) paired full-model ratios and gate results;
   - the handoff costs.
 - **Projected:** the end-to-end gain of the fused kernel (§5). The
-  end-to-end numerics come by proxy (mha32).
+  end-to-end numerics: `mha32` is only an approximate proxy (different
+  scaling and normalization order), so the kernel's full-model parity is
+  unverified.
 - **Not built:** the ORT patch.
 
 ## Reproduce
 
 ```sh
-# activations + sub-models (onnx venv, isolated)
+# fixture planes (browser encoder), then activations + sub-models (onnx venv, isolated)
+node --experimental-strip-types scripts/kernel_hillclimb/dump_planes.mjs \
+  --fens fixtures/lc0/fen_only.json --out artifacts/kernel-hillclimb/planes
 .venv-onnx/bin/python -I scripts/kernel_hillclimb/mha_rewrite.py $M/BT4-…batch8.f16.qdq8.onnx \
   artifacts/kernel-hillclimb/mha/bt4.b8.qdq8.mha.onnx --check
 .venv-onnx/bin/python -I scripts/kernel_hillclimb/mha_rewrite.py $M/BT4-…batch8.f16.qdq8.onnx \
@@ -588,7 +599,7 @@ around them: the split would be the whole graph. The options are:
 .venv-onnx/bin/python -I scripts/kernel_hillclimb/fused_attn_data.py --net bt4 --model $M/BT4-…qdq8.onnx \
   --mha-model artifacts/kernel-hillclimb/mha/bt4.b8.qdq8.mha.onnx \
   --mha32-model artifacts/kernel-hillclimb/mha/bt4.b8.qdq8.mha32.onnx \
-  --planes <fixture planes from scripts/lc0_stq_dump_planes.mjs> --out artifacts/kernel-hillclimb/fused-attn
+  --planes artifacts/kernel-hillclimb/planes --out artifacts/kernel-hillclimb/fused-attn
 # (same for t3 with t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx)
 
 BUILD_SCOPE=product npm run build:client && node scripts/kernel_hillclimb/build_lab.mjs

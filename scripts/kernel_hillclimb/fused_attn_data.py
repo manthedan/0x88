@@ -10,7 +10,7 @@ OUT/<net>/:
   attn_mha.onnx    the same core after scripts/kernel_hillclimb/mha_rewrite.py
                    (com.microsoft MultiHeadAttention, ORT WebGPU FlashAttention)
   L<i>.{q,k,v,bias}.f16   inputs captured from ORT CPU on the full net for 8 fixture
-                   positions (fixtures/lc0/fen_only.json, planes from lc0_stq_dump_planes.mjs)
+                   positions (fixtures/lc0/fen_only.json, planes from scripts/kernel_hillclimb/dump_planes.mjs)
   L<i>.out_cpu.f16 ORT CPU output of attn_orig for those inputs
   L<i>.ref.f32     float64 numpy reference of the same math from the f16 inputs
   manifest.json
