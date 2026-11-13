@@ -679,10 +679,9 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     }
     const encodeMs = ort.tinyLeelaNowMs() - encodeStarted;
     const inputType = sessionInputType(this.session);
-    const inputTensor =
-      inputType === 'float16'
-        ? new ort.Tensor('float16', float32ToFloat16Array(encodedPlanes), [physicalBatchSize, 112, 8, 8])
-        : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
+    // f16 bits as a Uint16Array: the GPU-IO path writes these bytes as they are (an
+    // ort.Tensor may re-wrap them as a Float16Array in browsers that have one).
+    const inputData = inputType === 'float16' ? float32ToFloat16Array(encodedPlanes) : encodedPlanes;
     const webgpuBefore = ort.getOrtWebGpuDiagnosticsSnapshot();
     const ortRunStarted = ort.tinyLeelaNowMs();
     const downloadTiming: Record<string, number> = {};
@@ -693,7 +692,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     let allGetDataMs: number;
     if (this.gpuIo) {
       // run + the single staging readback; the outputs are already on the CPU.
-      const gpuOutputs = await this.gpuIo.run(inputTensor.data as Uint16Array | Float32Array);
+      const gpuOutputs = await this.gpuIo.run(inputData);
       ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
       const allGetDataStarted = ort.tinyLeelaNowMs();
       policy = gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_POLICY);
@@ -701,6 +700,10 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       mlhRaw = LC0_ONNX_OUTPUT_MLH in gpuOutputs ? gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_MLH) : undefined;
       allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     } else {
+      const inputTensor =
+        inputType === 'float16'
+          ? new ort.Tensor('float16', inputData, [physicalBatchSize, 112, 8, 8])
+          : new ort.Tensor('float32', inputData, [physicalBatchSize, 112, 8, 8]);
       const outputs = await this.session.run({
         [LC0_ONNX_INPUT_PLANES]: inputTensor,
       });

@@ -189,17 +189,21 @@ export class OrtGpuIoBinding {
   }
 
   /** One invoke: upload `data`, run, read every output back with one map. Serialized per binding. */
-  run(data: Uint16Array | Float32Array): Promise<OrtGpuIoOutputs> {
+  run(data: ArrayBufferView & { BYTES_PER_ELEMENT: number; byteLength: number }): Promise<OrtGpuIoOutputs> {
     const next = this.tail.then(() => this.runNow(data));
     this.tail = next.catch(() => undefined);
     return next;
   }
 
-  private async runNow(data: Uint16Array | Float32Array): Promise<OrtGpuIoOutputs> {
+  private async runNow(data: ArrayBufferView & { BYTES_PER_ELEMENT: number; byteLength: number }): Promise<OrtGpuIoOutputs> {
     if (this.disposed) throw new Error('OrtGpuIoBinding has been disposed');
     if (data.byteLength !== this.inputBytes) throw new Error(`OrtGpuIoBinding: input is ${data.byteLength} bytes, expected ${this.inputBytes}`);
-    const expected = this.input.type === 'float16' ? Uint16Array : Float32Array;
-    if (!(data instanceof expected)) throw new Error(`OrtGpuIoBinding: input must be a ${expected.name} for ${this.input.type}`);
+    // float16: the raw f16 bits (Uint16Array, or a Float16Array view of them).
+    const bytesPerElement = BYTES_PER_ELEMENT[this.input.type];
+    if (data.BYTES_PER_ELEMENT !== bytesPerElement || (this.input.type === 'float32' && !(data instanceof Float32Array)))
+      throw new Error(
+        `OrtGpuIoBinding: input must be ${this.input.type === 'float16' ? 'f16 bits (2-byte elements)' : 'a Float32Array'} for ${this.input.type}`,
+      );
     const { queue } = this.device;
     queue.writeBuffer(this.inputBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
     await this.session.run(this.feeds, this.fetches);

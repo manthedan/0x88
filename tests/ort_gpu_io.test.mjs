@@ -147,7 +147,13 @@ test('OrtGpuIoBinding: one upload, one run, one submit and one map per invoke, o
   assert.equal(b['/output/policy'][1857], 9);
   assert.equal(b['/output/mlh'][0], 11);
   assert.ok(a['/output/policy'] instanceof Uint16Array);
-  assert.deepEqual(gpu.log, ['writeBuffer', 'run', 'submit', 'mapAsync', 'writeBuffer', 'run', 'submit', 'mapAsync']);
+  assert.deepEqual(gpu.log.slice(0, 8), ['writeBuffer', 'run', 'submit', 'mapAsync', 'writeBuffer', 'run', 'submit', 'mapAsync']);
+  // A Float16Array view of the same f16 bits (what ort.Tensor re-wraps them as in browsers) is accepted as-is.
+  if (typeof Float16Array === 'function') {
+    const bits = input(0x3c00); // 1.0
+    const c = await binding.run(new Float16Array(bits.buffer));
+    assert.equal(c['/output/policy'][0], 0x3c00);
+  }
   await binding.dispose();
   assert.ok(gpu.buffers.every((buf) => buf.destroyed));
   await assert.rejects(binding.run(input(1)), /disposed/);
@@ -199,7 +205,7 @@ test('OrtGpuIoBinding rejects wrong input size or type, and a failed run does no
   const gpu = fakeGpu({ failRun: true });
   const binding = new OrtGpuIoBinding(gpu.session, gpu.device, gpu.Tensor, INPUT, OUTPUTS);
   await assert.rejects(binding.run(new Uint16Array(10)), /bytes, expected/);
-  await assert.rejects(binding.run(new Float32Array(112 * 32)), /must be a Uint16Array/);
+  await assert.rejects(binding.run(new Float32Array(112 * 32)), /must be f16 bits/);
   await assert.rejects(binding.run(new Uint16Array(112 * 64)), /ort failed/);
   await assert.rejects(binding.run(new Uint16Array(112 * 64)), /ort failed/);
   assert.equal(gpu.session.runs, 2);
