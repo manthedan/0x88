@@ -104,8 +104,11 @@ requested deadline; this is not a hard real-time clock.
 
 Warmup hooks load/initialize participating engines before timed play. The
 original rationale still matters: first-move model/WASM/WebGPU startup is not
-steady-state search speed. Lc0 uses a tiny search; CPU warmups initialize and
-run a shallow search. Keep startup/readiness separate from timed measurements.
+steady-state search speed. Lc0 uses a tiny search; on the serial Arena path CPU warmups initialize and
+run a shallow search. Eligible CPU-only tournaments run on private seats that
+skip that warmup and only call `prewarm()` and `newGame()` (`src/lc0/arenaCpuGame.ts`),
+so their first timed search still includes first-search effects. Keep
+startup/readiness separate from timed measurements.
 Policy-only inference is not a time-searchable opponent just because a budget
 control exists.
 
