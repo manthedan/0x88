@@ -1,5 +1,5 @@
 {
-  "source": "/releases/2026-11-12.kernel-releases.1.json",
+  "source": "/releases/2026-11-13.wave3.1.json",
   "schema": "lc0_browser.artifact_release_manifest.v2",
   "artifacts": {
     "/berserk/berserk-emscripten-relaxed-simd128.js": {

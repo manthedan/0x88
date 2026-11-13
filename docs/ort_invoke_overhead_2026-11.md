@@ -33,8 +33,8 @@ measured. On the M4 the search-level gain is larger than the invoke-level
 gain. The two ran at different load, in different contexts (page main thread
 vs the search worker), and the cause was not isolated.
 
-The branch `perf/ort-invoke-overhead` makes this the search-worker default for
-the device-selected Lc0 Small model (§5). Nothing is merged or released.
+This is the search-worker default for the device-selected Lc0 Small model
+(§5), released 2026-11-13 (`2026-11-13.wave3.1`).
 
 Setup: headless Chrome 157 on the Apple M4 (10-core GPU, `apple / metal-3`),
 Chrome for Testing 151 on Yukon (RTX 3090, Vulkan, runner default flags

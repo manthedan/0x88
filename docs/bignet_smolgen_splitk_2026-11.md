@@ -17,9 +17,8 @@ these as gated candidates that still needed a paired search A/B.
 So t3 joins Lc0 Small under the same rule: ORT WebGPU sessions on an Apple
 adapter load `t3-512x15x16h-distill-swa-2767500.batch8.f16.splitk.onnx`, and
 everything else keeps the shipped export (§6). BT4 and LQO keep their shipped
-models everywhere. The artifact is in `manifest.json` and the artifact index
-but is not published to R2. Publishing and the release manifests are left to
-the owner (§7).
+models everywhere. Released 2026-11-13 in `2026-11-13.wave3.1`: the
+artifact is on R2 and listed in `r2-v0-present.manifest.json` (§7).
 
 Setup is the one in the Lc0 Small doc: Apple M4 (10-core GPU, `apple /
 metal-3`), headless Chrome 157, the production `dist-client` plus the lab
@@ -279,7 +278,7 @@ The Lc0 Small mechanism is reused as is; t3 is one more row in its table.
   for all three nets, and the new `search-ab` page
   (`scripts/kernel_hillclimb/README.md`).
 
-## 7. Release steps left for the owner
+## 7. Release steps (done 2026-11-13, release `2026-11-13.wave3.1`)
 
 1. **Publish the artifact to R2** at
    `/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.splitk.onnx`
