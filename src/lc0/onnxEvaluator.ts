@@ -2,7 +2,7 @@ import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
-import { OrtGpuIoBinding, type OrtGpuIoOutputs, type OrtGpuIoTensorSpec } from '../nn/ortGpuIo.ts';
+import { OrtGpuIoBinding, type OrtGpuIoOutputs, type OrtGpuIoTensorSpec, ortGraphCaptureSessionOptions } from '../nn/ortGpuIo.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
 import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
@@ -588,7 +588,7 @@ async function createLc0GpuIoSession(
     if (placement.providers[0] !== 'webgpu') return null;
     session = await ort.createOrtSession(modelPath, {
       webgpuOnly: true,
-      webgpuSessionOptions: { preferredOutputLocation: 'gpu-buffer', ...(mode === 'gpu-capture' ? { enableGraphCapture: true } : {}) },
+      webgpuSessionOptions: { preferredOutputLocation: 'gpu-buffer', ...(mode === 'gpu-capture' ? ortGraphCaptureSessionOptions() : {}) },
     });
     const specs = lc0GpuIoSpecs(session);
     if ('reason' in specs) throw new Error(`model not eligible: ${specs.reason}`);

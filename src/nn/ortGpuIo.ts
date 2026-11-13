@@ -93,6 +93,20 @@ export function ortGpuIoLayout(outputs: readonly OrtGpuIoTensorSpec[]): {
 }
 
 /**
+ * Session options that really turn on ORT WebGPU graph capture.
+ *
+ * ORT-web 1.27 forwards `enableGraphCapture` to the native WebGPU EP as the EP
+ * option `enableGraphCapture=1` only when the WebGPU provider is given as an
+ * object (`{ name: 'webgpu' }`, lib/wasm/session-options.ts); with the string
+ * form `'webgpu'` the EP never sees it. The JS side still treats the session as
+ * captured (IO bound once, gpu-buffer IO required) while ORT re-records every
+ * kernel each run, so the string form gets the constraints without the benefit.
+ */
+export function ortGraphCaptureSessionOptions(): { enableGraphCapture: true; executionProviders: Array<{ name: 'webgpu' }> } {
+  return { enableGraphCapture: true, executionProviders: [{ name: 'webgpu' }] };
+}
+
+/**
  * Keep ORT's import of a caller-owned GPUBuffer alive across runs.
  *
  * ORT-web 1.27's native WebGPU EP imports a gpu-buffer tensor's GPUBuffer into

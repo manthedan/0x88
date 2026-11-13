@@ -6,7 +6,8 @@
 //   cpu      shipped: CPU input tensor, CPU outputs (ORT MemcpyToHost per output)
 //   gpuout   preferredOutputLocation=gpu-buffer, outputs read with getData() in parallel
 //   iobind   GPU input buffer (writeBuffer) + preallocated GPU outputs, one staging map (src/nn/ortGpuIo.ts)
-//   capture  iobind + enableGraphCapture (ORT replays its recorded dispatches)
+//   capture  iobind + graph capture (ORT replays its recorded dispatches; ortGraphCaptureSessionOptions)
+//   capture-jsflag  iobind + enableGraphCapture with the string EP form: JS-side capture constraints only
 //   bisection only: iobind-nopin / capture-nopin (no pinOrtGpuBufferImport), gpuin / capture-ortout
 //            (GPU input buffer, ORT-allocated GPU outputs read with getData())
 //
@@ -22,7 +23,7 @@ import { parseFen } from '../../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
 import { Lc0OnnxEvaluator, prepareLc0EvaluatorInput } from '../../src/lc0/onnxEvaluator.ts';
 import { f32ToF16Bits } from '../../src/nn/float16.ts';
-import { OrtGpuIoBinding, pinOrtGpuBufferImport } from '../../src/nn/ortGpuIo.ts';
+import { OrtGpuIoBinding, ortGraphCaptureSessionOptions, pinOrtGpuBufferImport } from '../../src/nn/ortGpuIo.ts';
 import * as ort from '../../src/nn/ortRuntime.ts';
 import { intParam, listParam, log, params, runMain, runtimeDeviceIdentity, summarize } from './common.mjs';
 import { installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
@@ -244,9 +245,11 @@ async function makeVariant(name, model, device) {
       },
     };
   }
-  if (name === 'iobind' || name === 'capture' || name === 'iobind-nopin' || name === 'capture-nopin') {
+  if (['iobind', 'capture', 'iobind-nopin', 'capture-nopin', 'capture-jsflag'].includes(name)) {
     const capture = name.startsWith('capture');
-    const webgpuSessionOptions = { preferredOutputLocation: 'gpu-buffer', ...(capture ? { enableGraphCapture: true } : {}) };
+    // capture-jsflag: enableGraphCapture with the string provider form, which never reaches the EP (see ortGraphCaptureSessionOptions).
+    const captureOptions = name === 'capture-jsflag' ? { enableGraphCapture: true } : ortGraphCaptureSessionOptions();
+    const webgpuSessionOptions = { preferredOutputLocation: 'gpu-buffer', ...(capture ? captureOptions : {}) };
     const session = await ort.createOrtSession(model, { webgpuOnly: true, webgpuSessionOptions });
     const binding = new OrtGpuIoBinding(
       session,
@@ -261,7 +264,7 @@ async function makeVariant(name, model, device) {
   }
   // Bisection variants: GPU input buffer with ORT-allocated GPU outputs read by getData().
   if (name === 'gpuin' || name === 'capture-ortout') {
-    const webgpuSessionOptions = { preferredOutputLocation: 'gpu-buffer', ...(name === 'capture-ortout' ? { enableGraphCapture: true } : {}) };
+    const webgpuSessionOptions = { preferredOutputLocation: 'gpu-buffer', ...(name === 'capture-ortout' ? ortGraphCaptureSessionOptions() : {}) };
     const session = await ort.createOrtSession(model, { webgpuOnly: true, webgpuSessionOptions });
     const dev = device ?? (await ort.env.webgpu.device);
     const inputBuffer = dev.createBuffer({ size: 112 * 64 * 2, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
