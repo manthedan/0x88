@@ -58,6 +58,12 @@ def main():
     ap.add_argument("dst")
     ap.add_argument("--layers", help="encoder indices to rewrite, e.g. 0-14 or 0,3 (default all)")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument(
+        "--compute",
+        choices=["native", "f32"],
+        default="native",
+        help="f32: Cast Q/K/V/bias to float32 around the MHA (ORT's FlashAttention then accumulates in f32)",
+    )
     args = ap.parse_args()
     layers = parse_layers(args.layers)
 
@@ -119,22 +125,32 @@ def main():
         shape_inits.append(numpy_helper.from_array(np.array([-1, tokens, d_model], dtype=np.int64), bsd))
         nodes = []
         names = []
+        f32 = args.compute == "f32"
+
+        def cast(src, name):
+            nodes.append(helper.make_node("Cast", [src], [name], name=f"{name}_cast", to=TensorProto.FLOAT))
+            return name
+
         for which, r in (("Q", q_r), ("K", k_r), ("V", v_r)):
             out = f"{p}/{which}/bsd"
             nodes.append(helper.make_node("Reshape", [r.input[0], bsd], [out], name=f"{p}/{which}/bsd_reshape"))
-            names.append(out)
+            names.append(cast(out, f"{out}_f32") if f32 else out)
+        attn_bias = cast(smolgen, f"{p}/smolgen_bias_f32") if f32 else smolgen
         mha_out = f"{p}/mha_fused"
+        mha_raw = f"{mha_out}_f32" if f32 else mha_out
         nodes.append(
             helper.make_node(
                 "MultiHeadAttention",
-                [names[0], names[1], names[2], "", "", smolgen],
-                [mha_out],
+                [names[0], names[1], names[2], "", "", attn_bias],
+                [mha_raw],
                 name=f"{p}/MultiHeadAttention",
                 domain="com.microsoft",
                 num_heads=heads,
                 scale=scale,
             )
         )
+        if f32:
+            nodes.append(helper.make_node("Cast", [mha_raw], [mha_out], name=f"{mha_out}_cast", to=TensorProto.FLOAT16))
         nodes.append(helper.make_node("Reshape", [mha_out, out_r.input[1]], [out_r.output[0]], name=f"{p}/out/reshape"))
         new_nodes[out_r.name] = nodes
         rewritten.append({"layer": layer, "heads": heads, "depth": depth, "scale": scale, "smolgen": smolgen})
