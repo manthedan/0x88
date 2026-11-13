@@ -77,8 +77,9 @@ runMain(async () => {
       ep: 'webgpu',
       cacheModel: false,
       evalCacheEntries: 2048,
-      // Always explicit: product inits that omit it get the worker default.
-      ortIoMode: mode,
+      // Explicit for every mode except 'default', which omits it like the product
+      // inits do and must get the worker default (captured GPU IO under deviceModelSelection).
+      ...(mode === 'default' ? {} : { ortIoMode: mode }),
     };
     let msg = await client.request(init);
     // reinit=1: a second init with a different key builds the replacement session while
@@ -87,7 +88,8 @@ runMain(async () => {
     clients[mode] = client;
     ready[mode] = { backend: msg.backend, servedModelUrl: msg.servedModelUrl, ortIoMode: msg.ortIoMode ?? null, reinit };
     log('ready', mode, ready[mode]);
-    if (msg.ortIoMode !== mode) throw new Error(`ort-search: ${mode} worker runs ${msg.ortIoMode}`);
+    const expected = mode === 'default' ? (deviceModelSelection ? 'gpu-capture' : 'cpu') : mode;
+    if (msg.ortIoMode !== expected) throw new Error(`ort-search: ${mode} worker runs ${msg.ortIoMode}, expected ${expected}`);
   }
 
   const search = async (mode, fen) => {
