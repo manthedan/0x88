@@ -29,7 +29,11 @@ K/S >= --min-inner, and (N/32) * rowTiles * S >= --target-wg.
 Run with the repo's onnx venv, isolated:
   .venv-onnx/bin/python -I scripts/kernel_hillclimb/splitk_rewrite.py IN.onnx OUT.onnx \
       [--target-wg 128] [--min-inner 32] [--max-s 64] [--include REGEX] [--exclude REGEX] \
-      [--rows all|gemv|tokens] [--gemv-reduce reducesum|matmul] [--check]
+      [--rows all|gemv|tokens] [--gemv-reduce reducesum|matmul] [--dispatch-probe N] [--check]
+
+--dispatch-probe N writes a control model instead: no MatMul is split, and N exact
+Neg pairs are inserted after each MatMul the other options select, so the extra
+dispatch count can be timed without any GEMM change.
 """
 import argparse
 import json
@@ -85,6 +89,10 @@ def main():
                     help='only split MatMuls whose unsplit ORT grid has fewer workgroups than this (0: no limit)')
     ap.add_argument('--min-weight', type=int, default=4096, help='skip weights with fewer than K*N elements (default 4096)')
     ap.add_argument('--rank3', action='store_true', help='also rewrite MatMuls whose input is [1,...,1,M,K] (smolgen weight gen)')
+    ap.add_argument('--dispatch-probe', type=int, default=0, metavar='N',
+                    help='control model, no split: keep every MatMul and insert N exact Neg pairs (2N cheap elementwise '
+                         'dispatches) after each MatMul the options would have rewritten (after its bias Add when '
+                         'one follows, so ORT still fuses the Gemm). Measures what extra dispatches alone cost.')
     ap.add_argument('--check', action='store_true', help='run original and rewrite on ORT CPU and print max-abs per output')
     ap.add_argument('--summary', default=None, help='write a JSON summary of the rewritten nodes here')
     args = ap.parse_args()
@@ -190,6 +198,10 @@ def main():
         if s == 1 or (args.max_base_wg and base_wg >= args.max_base_wg):
             continue
         ks = k // s
+        if args.dispatch_probe:
+            for idx, a_name, a_shape, a_type, _, _ in uses:
+                plan[idx] = (a_name, a_shape, a_type, m, k, n, s, base_wg, kind)
+            continue
         # Weight: re-dimension in place (row-major [K,N] == [S,K/S,N]).
         del w_init.dims[:]
         w_init.dims.extend([s, ks, n])
@@ -205,8 +217,10 @@ def main():
     # Pass 3: emit replacement nodes in place (topological order holds: a shared
     # Reshape/Transpose is emitted before its first consumer).
     replace = {}
+    if args.dispatch_probe:
+        replace, rewritten = dispatch_probe_nodes(g, plan, consumers, inits, args.dispatch_probe)
     for idx, node in enumerate(g.node):
-        if idx not in plan:
+        if idx not in plan or args.dispatch_probe:
             continue
         a_name, a_shape, a_type, m, k, n, s, base_wg, kind = plan[idx]
         dynamic = a_shape[0] == -1
@@ -269,13 +283,47 @@ def main():
     }
     for r in rewritten:
         print(f"{r['node']:44s} M={r['M']:<3d} K={r['K']:<5d} N={r['N']:<5d} S={r['S']:<3d} wg {r['workgroupsBefore']}->{r['workgroupsAfter']}")
-    print(f'{len(rewritten)} MatMuls rewritten -> {args.dst}', file=sys.stderr)
+    what = f'probed with {2 * args.dispatch_probe} Neg dispatches each' if args.dispatch_probe else 'rewritten'
+    print(f'{len(rewritten)} MatMuls {what} -> {args.dst}', file=sys.stderr)
     if args.check:
         summary['cpuCheck'] = cpu_check(args.src, args.dst)
         print(json.dumps(summary['cpuCheck']), file=sys.stderr)
     if args.summary:
         with open(args.summary, 'w') as f:
             json.dump(summary, f, indent=1)
+
+
+def dispatch_probe_nodes(g, plan, consumers, inits, pairs):
+    """Insert `pairs` Neg pairs after each planned MatMul (after its bias Add when the
+    MatMul feeds exactly one Add with an initializer operand, so MatMulAddFusion still
+    makes a Gemm). Neg(Neg(x)) == x exactly, so outputs are bit-identical; each Neg is
+    one elementwise dispatch on the MatMul's [M,N] output in ORT WebGPU."""
+    replace = {}
+    report = []
+    index_of = {id(n): i for i, n in enumerate(g.node)}
+    for idx in sorted(plan):
+        node = g.node[idx]
+        a_name, a_shape, a_type, m, k, n, s, base_wg, kind = plan[idx]
+        tap, tap_idx = node, idx
+        users = consumers.get(node.output[0], [])
+        if len(users) == 1 and users[0].op_type == 'Add' and any(i in inits for i in users[0].input):
+            tap, tap_idx = users[0], index_of[id(users[0])]
+        y = tap.output[0]
+        src = f'{y}/probe_src'
+        renamed = onnx.NodeProto()
+        renamed.CopyFrom(tap)
+        renamed.output[0] = src
+        nodes = [renamed]
+        prev = src
+        for j in range(2 * pairs):
+            out = y if j == 2 * pairs - 1 else f'{y}/probe_neg{j}'
+            nodes.append(helper.make_node('Neg', [prev], [out], name=f'{y}/probe_neg{j}'))
+            prev = out
+        replace[tap_idx] = nodes
+        report.append({'node': node.name or f'#{idx}', 'M': m, 'K': k, 'N': n, 'S': 1, 'kPerSlice': k,
+                       'workgroupsBefore': base_wg, 'workgroupsAfter': base_wg, 'weight': kind,
+                       'probeAfter': tap.op_type, 'probeDispatches': 2 * pairs})
+    return replace, report
 
 
 def cpu_check(src, dst):

@@ -31,8 +31,8 @@ import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 
 // The lab modules read location.search at import time.
 globalThis.location ??= { search: '' };
-const { aggregateProfile } = await import('../lab/kernel-hillclimb/gpu-profiler.mjs');
-const { summarize } = await import('../lab/kernel-hillclimb/common.mjs');
+const { aggregateProfile, sequenceMeanUs } = await import('../lab/kernel-hillclimb/gpu-profiler.mjs');
+const { abExtraModels, roundOrder, summarize } = await import('../lab/kernel-hillclimb/common.mjs');
 
 const peaks = { flops: 3e12, flopsByPrecision: { f32: 3e12, f16: 3e12 }, bw: 100e9, ridge: 30, gemmCeilingPlain: 2e12 };
 
@@ -491,4 +491,35 @@ test('an allowlisted drift flip passes only for its own position and move pair',
   assert.equal(legalPolicyParity(logits([0.3, 0.65, 0.05]), logits([0.65, 0.3, 0.05]), [row(fenA)], { ...limits, maxProbAbs: 1 }).pass, false);
   // Without the allowlist (blanket 0.01 epsilon), the measured flip fails.
   assert.equal(legalPolicyParity(swapped, ref, [row(fenA)], { ...limits, allowedFlips: [] }).pass, false);
+});
+
+test('roundOrder rotates every arm through every slot (two arms alternate AB, BA)', () => {
+  assert.deepEqual(
+    [0, 1, 2].map((r) => roundOrder(['a', 'b'], r).join('')),
+    ['ab', 'ba', 'ab'],
+  );
+  const arms = ['a', 'b', 'c1', 'c2'];
+  const slots = arms.map(() => new Set());
+  for (let r = 0; r < arms.length; r++) {
+    for (const [slot, arm] of roundOrder(arms, r).entries()) slots[slot].add(arm);
+  }
+  for (const s of slots) assert.equal(s.size, arms.length);
+});
+
+test('abExtraModels parses, dedupes and rejects cross-origin or excess arms', () => {
+  assert.deepEqual(abExtraModels(null), []);
+  assert.deepEqual(abExtraModels(''), []);
+  assert.deepEqual(abExtraModels('/m/a.onnx, /m/b.onnx,/m/a.onnx,'), ['/m/a.onnx', '/m/b.onnx']);
+  assert.throws(() => abExtraModels('https://evil.example/a.onnx'), /same-origin/);
+  assert.throws(() => abExtraModels('//evil.example/a.onnx'), /same-origin/);
+  assert.throws(() => abExtraModels(Array.from({ length: 9 }, (_, i) => `/m/${i}.onnx`).join(',')), /max 8/);
+});
+
+test('sequenceMeanUs averages per dispatch position and refuses mismatched invokes', () => {
+  const row = (invoke, name, ns) => ({ invoke, name, ns });
+  const rows = [row(0, 'Warm', 1), row(1, 'Gemm', 10000), row(1, 'Add', 2000), row(2, 'Gemm', 14000), row(2, 'Add', 4000)];
+  assert.deepEqual(sequenceMeanUs(rows, 2), [12, 3]);
+  assert.equal(sequenceMeanUs([row(1, 'Gemm', 1), row(2, 'MatMul', 1)], 2), null);
+  assert.equal(sequenceMeanUs([row(1, 'Gemm', 1), row(2, 'Gemm', 1), row(2, 'Add', 1)], 2), null);
+  assert.equal(sequenceMeanUs([], 1), null);
 });

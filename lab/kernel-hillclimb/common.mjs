@@ -24,6 +24,31 @@ export function listParam(name, fallback) {
     .filter(Boolean);
 }
 
+/**
+ * Arm order for round r of an interleaved comparison: a rotation by r, so with
+ * n arms every arm takes every slot once per n rounds (n = 2: AB, BA, AB, ...).
+ */
+export function roundOrder(arms, r) {
+  const n = arms.length;
+  return Array.from({ length: n }, (_, i) => arms[(i + r) % n]);
+}
+
+/** abExtra= value: comma-separated same-origin model paths, deduplicated, at most 8. */
+export function abExtraModels(raw) {
+  if (raw === null || raw === undefined || raw === '') return [];
+  const models = [
+    ...new Set(
+      String(raw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  ];
+  for (const m of models) if (!m.startsWith('/') || m.startsWith('//')) throw new Error(`abExtra: ${m} is not a same-origin path`);
+  if (models.length > 8) throw new Error(`abExtra: ${models.length} arms (max 8)`);
+  return models;
+}
+
 export function log(...parts) {
   const text = parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ');
   const el = document.getElementById('log');
