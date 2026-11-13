@@ -10,22 +10,28 @@ numbers below are paired ratios (lower is faster).
 
 | machine, model | invoke wall, capture / shipped | search time, capture / shipped |
 |---|---|---|
-| RTX 3090, plain qdq8 | **0.554** (MAD 0.038, p10-p90 0.477-0.603) | **0.560** (0.013, 0.503-0.578) |
-| Apple M4, split-K (the Apple default) | 0.770 (0.061, 0.455-0.837) | **0.541** (0.026, 0.433-0.573) |
-| Apple M4, plain qdq8 | 0.858 (0.028, 0.807-0.926) | **0.649** (0.079, 0.568-0.860) |
+| RTX 3090, plain qdq8 | **0.554** (MAD 0.038, p10-p90 0.477-0.603) | **0.583** (0.032, 0.511-0.632) |
+| Apple M4, split-K (the Apple default) | 0.770 (0.061, 0.455-0.837) | **0.451** (0.025, 0.416-0.527) |
+| Apple M4, plain qdq8 | 0.858 (0.028, 0.807-0.926) | **0.623** (0.088, 0.516-0.766) |
 
-Search time is a fixed 256-visit search, so 0.56 means ~1.8x the search
+Search time is a fixed 256-visit search, so 0.58 means ~1.7x the search
 throughput. Invoke rows: n=40 paired blocks; search rows: n=30 (3090) and
 n=40 (M4) paired searches.
 
+The first version of the capture path leaked about 3 native ORT tensor handles
+per evaluation (§4). The search column was re-measured on the fixed build; the
+invoke column is from the leaking variant, which does the same GPU work per
+invoke.
+
 The machines were not loaded the same way. The 3090 runs went through the shared
 gpu-queue and are `timingValid` (not contended, verified). The M4 was shared
-with other agents: load average 55-100 during the invoke runs and 5-35 during
-the search runs. On a lightly loaded M4 the GPU is busy for most of an invoke
-(§1), so the idle-machine M4 gain is probably smaller than these numbers; it
-was not measured. On the M4 the search-level gain is larger than the
-invoke-level gain. The two ran at different load, in different contexts (page
-main thread vs the search worker), and the cause was not isolated.
+with other agents: load average 55-100 during the invoke runs and 4-17 during
+the fixed-build search runs. On a lightly loaded M4 the GPU is busy for most of
+an invoke (§1), so a smaller gain on an idle M4 was expected, but the search
+gain held at the lower load (0.45 split-K, 0.62 qdq8). An idle M4 was not
+measured. On the M4 the search-level gain is larger than the invoke-level
+gain. The two ran at different load, in different contexts (page main thread
+vs the search worker), and the cause was not isolated.
 
 The branch `perf/ort-invoke-overhead` makes this the search-worker default for
 the device-selected Lc0 Small model (§5). Nothing is merged or released.
@@ -102,15 +108,27 @@ PV, value) must match across modes, and did in every row.
 Median search time (ms) per mode, and paired ratios against CPU IO, as
 median (MAD; p10-p90):
 
+Fixed build (capture with ORT-owned outputs, §4):
+
+| machine, model | n | CPU IO (shipped) | GPU IO + capture | capture / CPU IO |
+|---|---|---|---|---|
+| 3090, qdq8 | 30 | 2167 | 1287 | **0.583** (0.032; 0.511-0.632) |
+| M4, split-K | 40 | 2207 | 987 | **0.451** (0.025; 0.416-0.527) |
+| M4, qdq8 | 40 | 3176 | 1959 | **0.623** (0.088; 0.516-0.766) |
+
+The first build (leaking capture outputs), with GPU IO without capture as well:
+
 | machine, model | n | CPU IO (shipped) | GPU IO | GPU IO + capture | GPU IO / CPU IO | capture / CPU IO |
 |---|---|---|---|---|---|---|
-| 3090, qdq8 | 30 | 2252 | 1736 | 1269 | 0.767 (0.020; 0.683-0.796) | **0.560** (0.013; 0.503-0.578) |
-| M4, split-K | 40 | 3600 | 3294 | 1942 | 0.902 (0.049; 0.795-1.010) | **0.541** (0.026; 0.433-0.573) |
-| M4, qdq8 | 40 | 4521 | 4058 | 2897 | 0.879 (0.091; 0.711-1.019) | **0.649** (0.079; 0.568-0.860) |
+| 3090, qdq8 | 30 | 2252 | 1736 | 1269 | 0.767 (0.020; 0.683-0.796) | 0.560 (0.013; 0.503-0.578) |
+| M4, split-K | 40 | 3600 | 3294 | 1942 | 0.902 (0.049; 0.795-1.010) | 0.541 (0.026; 0.433-0.573) |
+| M4, qdq8 | 40 | 4521 | 4058 | 2897 | 0.879 (0.091; 0.711-1.019) | 0.649 (0.079; 0.568-0.860) |
 
-An earlier M4 run of the same page (n=20, 2 rounds, load 7-55) gave capture /
-CPU IO 0.504 (0.043) for split-K and 0.683 (0.048) for qdq8, consistent with
-the table. The M4 CPU-IO medians have large MADs (360-500 ms) because of load.
+On the 3090 the capture time is the same in both builds (1269 vs 1287 ms); the
+ratio moved because the CPU-IO baseline ran faster in the second run. The M4
+CPU-IO medians in the first build have large MADs (360-500 ms) because of load
+(55-100 then, 4-17 in the second). An earlier M4 run (n=20, load 7-55) gave
+0.504 (split-K) and 0.683 (qdq8).
 
 All three workers in a row serve the same model (the page checks the ready
 message). Each search makes 257 evaluations at batch 1, so on the 3090 a
@@ -135,6 +153,29 @@ search-level evaluation goes from ~8.8 ms to ~4.9 ms.
   JS side switches to capture rules (IO bound once) but the EP never captures:
   still 356 bind groups per invoke. `ortGraphCaptureSessionOptions()` returns
   the object form.
+- **Captured sessions leak preallocated outputs.** Checked in the bundled
+  `node_modules/onnxruntime-web/dist/ort.webgpu.mjs` (1.27.0; the app ships
+  the minified build of the same source). On a captured session the run
+  function binds IO only on the first run (`inputOutputBound`); afterwards its
+  `preAllocatedOutputs` list is empty. `_OrtRunWithBinding` still returns a
+  fresh native copy of every bound output, and the run wraps each in a
+  `gpu-buffer` tensor whose `dispose` would call `_OrtReleaseTensor`. The
+  session handler builds its result as
+  `outputArray[i] ?? decodeTensorMetadata(results[i])`, so when the caller
+  supplied fetch tensors those wrappers are dropped and never disposed. Net:
+  one leaked native handle per output per replay, 3 per Lc0 evaluation.
+  Releasing the session or the buffers does not free them. Measured on the
+  built M4 preview with a WASM tap that counts output handles read but never
+  released (5000 invokes per variant, all outputs exact): CPU IO 0, GPU IO
+  without capture 0, capture with preallocated fetches 15000 (3 per invoke,
+  16 bytes apart in the WASM heap, so ~48 B per evaluation), capture with
+  ORT-owned outputs 0. The WASM heap did not grow in 5000 invokes (125 MB
+  before and after, free slack absorbed it); at ~260 evaluations/s that is
+  ~45 MB per hour of continuous analysis, never returned until the worker
+  ends. GPU IO without capture binds on every run and passes the handles in
+  `preAllocatedOutputs`, so it does not leak. The fix is to pass no fetches:
+  ORT allocates the outputs on the first run, keeps them bound, and the
+  returned tensors' `dispose` releases each run's copies.
 - **f16 input bits.** In browsers that have `Float16Array`,
   `ort.Tensor('float16', Uint16Array)` re-wraps the data as a `Float16Array`.
   The GPU-IO path writes the f16 bits straight to the input buffer and never
@@ -144,10 +185,14 @@ search-level evaluation goes from ~8.8 ms to ~4.9 ms.
 
 ## 5. Product change (branch only)
 
-- `src/nn/ortGpuIo.ts`: `OrtGpuIoBinding` (persistent input buffer, 16-byte
-  aligned output buffers, one `MAP_READ` staging buffer, one copy encoder and
-  one `mapAsync` per invoke, runs serialized), `pinOrtGpuBufferImport`,
-  `ortGraphCaptureSessionOptions`.
+- `src/nn/ortGpuIo.ts`: `OrtGpuIoBinding` (persistent input buffer, one
+  `MAP_READ` staging buffer, one copy encoder and one `mapAsync` per invoke,
+  runs serialized), `pinOrtGpuBufferImport`, `ortGraphCaptureSessionOptions`.
+  Output mode `'preallocated'` (16-byte aligned output buffers passed as
+  fetches) is for uncaptured sessions. Output mode `'session'` is for captured
+  sessions: no fetches, the copy reads ORT's output buffers (type and size
+  checked every run), and every returned tensor is disposed, also when the run
+  throws.
 - `src/lc0/onnxEvaluator.ts`: `ioMode: 'cpu' | 'gpu' | 'gpu-capture'`. A GPU mode
   needs a WebGPU placement and a model with fixed shapes. The session is created
   WebGPU-only with GPU outputs and a zero-input warm-up run. Any failure there
@@ -167,7 +212,14 @@ search-level evaluation goes from ~8.8 ms to ~4.9 ms.
 - Tests: `tests/ort_gpu_io.test.mjs` (fake ORT register/unregister: layout,
   per-invoke call order, pin keeps the handle alive across runs, capture needs
   the pin, refusal when ORT does not register, input validation and recovery,
-  model eligibility, the object-form provider, the worker default).
+  model eligibility, the object-form provider, the worker default; a fake
+  captured session with ORT 1.27's output lifetimes shows preallocated fetches
+  leaking 9 handles over 4 runs and session-owned outputs leaking none, and
+  that a wrong output shape is refused with the copies still released).
+- Lab regression check: `ort-overhead.html?leak=N` counts live ORT output
+  handles per variant through a WASM tap (`lab/kernel-hillclimb/ort-wasm-tap.mjs`)
+  and fails `ok` if any variant other than `capture-prealloc` (the old,
+  leaking form, kept as the positive control) leaks.
 
 Not verified: graph capture on D3D12 (Windows), Android, Intel/AMD GPUs and
 Safari; and
@@ -194,6 +246,7 @@ notes/kernel-hillclimb/benchlock.sh ortov -- node scripts/kernel_hillclimb/bench
   --page ort-overhead --query 'variants=cpu,gpuout,iobind,capture&rounds=40&block=5&warmup=20&traceInvokes=30' \
   --base-url http://127.0.0.1:5264 --browser-args=--enable-unsafe-webgpu,--enable-webgpu-developer-features
 # split-K: add &model=/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.splitk.onnx
+# leak check: --query 'variants=cpu,iobind,capture-prealloc,capture&leak=5000&rounds=2&warmup=10&traceInvokes=0&gpuBusy=0&evaluator=0'
 # search: --page ort-search --query 'worker=/_app/immutable/workers/searchWorker-<hash>.js&modes=cpu,gpu,gpu-capture&rounds=4'
 #   (add &deviceModelSelection=0 for plain qdq8 on Apple)
 ```
@@ -203,4 +256,5 @@ yukon --dist dist-client --with-models` with an `--include` list of `lab/**`,
 `assets/**`, `_app/**`, `fixtures/lc0/**`, `lc0/**`, the
 `ort/ort-wasm-simd-threaded*` files and the model. Result JSON:
 `artifacts/kernel-hillclimb/results/` (`ort-overhead-*-full3.json`,
-`ort-search-*-full4.json`, `ortov-yukon-*.json`; local, not committed).
+`ort-search-*-full4.json` and `-full5.json` (fixed build), `ort-leak-5000.json`,
+`ortov-yukon-*.json`; local, not committed).
