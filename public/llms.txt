@@ -1,0 +1,16 @@
+# 0x88
+
+> 0x88 runs chess engines in a browser tab, on the visitor's own GPU and CPU. It compares engines on one position, runs engine tournaments and offers human-style opponents. There is no account and no server-side analysis: engine binaries and neural networks download once, cache in the browser and run locally. The code is open source under GPL-3.0-or-later.
+
+Engines include Lc0 (Leela Chess Zero) neural networks on WebGPU, Stockfish and other open-source alpha-beta engines compiled to WebAssembly, and Maia3 human-style opponents rated 600 to 2600. Neural engines need WebGPU; without it they fall back to a slower CPU path or are unavailable.
+
+## Workspaces
+
+- [Analysis](https://0x88.app/app/analysis/): compare several engines on one position or a PGN, side by side, with game review.
+- [Arena](https://0x88.app/app/arena/): engine matches, round-robins and gauntlets with standings and Elo estimates.
+- [Play](https://0x88.app/app/play/): play against an engine or a human-style opponent at a chosen rating.
+
+## Docs
+
+- [Documentation](https://0x88.app/docs/): how to use the workspaces, fix WebGPU and download problems, and find each engine's license and source.
+- [Source code](https://github.com/manthedan/0x88): the repository, including engine build scripts and design notes under `docs/`.
