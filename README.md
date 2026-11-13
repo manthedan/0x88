@@ -30,7 +30,7 @@ Maia 3 is not a catalog family: Play and Analysis load it directly
 
 | Family | Kind | Runtime |
 | --- | --- | --- |
-| **Lc0** | neural (t1-256x10, t3-512, BT4) | ORT WebGPU, WASM fallback |
+| **Lc0** | neural (t1-256x10, t3-512, BT4; Leela Queen Odds in Play) | ORT WebGPU, WASM fallback |
 | **Centipawn** | neural (SquareFormer + ThreatGraph, trained here) | TVMJS WebGPU, ORT fallback |
 | **Maia 3** (Play and Analysis only) | neural human model, Elo-conditioned | ORT WebGPU |
 | **Stockfish** | classical NNUE | WASM, threaded |

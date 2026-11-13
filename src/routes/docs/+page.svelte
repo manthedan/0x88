@@ -563,7 +563,7 @@ onMount(() => {
       <tr>
         <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Question</th>
         <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">Maia3 neural lane</th>
-        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">LQO / Monty contempt lane</th>
+        <th style="text-align:left; padding:8px 10px; border-bottom:2px solid var(--rule); font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)">LQO / contempt lane</th>
       </tr>
     </thead>
     <tbody>
@@ -745,6 +745,7 @@ onMount(() => {
       <li><strong>Lc0 (Small net) and Maia3</strong> run through ONNX Runtime and fall back to WebAssembly on the CPU, which is slower.</li>
       <li><strong>Centipawn</strong> tries its TVMJS WebGPU runtime first and falls back to ONNX Runtime automatically.</li>
       <li><strong>Large Lc0 nets (t3, BT4) and Leela Queen Odds</strong> fall back to the CPU in Analysis and Play. Play lowers their visit budgets and warns that each move can take several seconds. In Arena they need WebGPU, and a match that includes them will not start without it.</li>
+      <li><strong>WebGPU without 16-bit floats.</strong> Some GPUs offer WebGPU but not 16-bit float shaders (<code>shader-f16</code>), for example NVIDIA GPUs on Linux in a default Chrome install. The Lc0 nets, Leela Queen Odds and Maia3 need that feature, so on those GPUs they take the CPU fallbacks above.</li>
     </ul>
     <p>If your browser offers WebGPU behind a setting or flag, turn it on and reload the page so the check runs again.</p>
   </div>
@@ -1006,7 +1007,7 @@ onMount(() => {
 <!-- ===== CPU WASM RUNTIMES ===== -->
 <div class="runtime-block">
   <h3 id="cpu-wasm">CPU WASM runtimes <a class="anchor-link" href="#cpu-wasm" aria-label="Link to this section">#</a></h3>
-  <p class="lead">Stockfish, Reckless, Berserk, Viridithas, PlentyChess, Stormphrax, and the Monty lab port are CPU engines compiled to WebAssembly. Browser workers provide their UCI-style control layer.</p>
+  <p class="lead">Stockfish, Reckless, Berserk, Viridithas, PlentyChess, and Stormphrax are CPU engines compiled to WebAssembly. Browser workers provide their UCI-style control layer.</p>
 
   <div class="callout info">
     <h4 id="cpu-build-lanes">Two build lanes</h4>
@@ -1034,7 +1035,7 @@ onMount(() => {
       </tr>
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">Rust <code>wasm32-wasip1</code></td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Reckless, Viridithas, Monty lab</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Reckless, Viridithas</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)">Scalar fallback, <code>+simd128</code> preferred variants, and relaxed-SIMD as experimental until proven per engine.</td>
       </tr>
       <tr>
@@ -1105,7 +1106,7 @@ onMount(() => {
 <!-- ===== CDN ===== -->
 <div class="runtime-block">
   <h3 id="cdn">Artifact CDN &amp; caching <a class="anchor-link" href="#cdn" aria-label="Link to this section">#</a></h3>
-  <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from 130 KB to 60+ MB, so caching and compression are critical for the site to function.</p>
+  <p class="lead">Engine binaries and neural-network models are served from a Cloudflare R2 bucket fronted by a Worker that resolves friendly URLs to content-addressed blobs. Artifacts range from about 130 KB to about 190 MB, so caching and compression are critical for the site to function.</p>
 
   <div class="callout info">
     <h4 id="cdn-two-planes">Two-plane model</h4>
