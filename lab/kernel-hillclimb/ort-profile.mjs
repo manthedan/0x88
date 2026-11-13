@@ -27,14 +27,17 @@
 //                 order rotates over all arms each round, each extra arm reports
 //                 ratios over arm B (ab.extra[]) and is gated like abModel=.
 //   abProfile=N   after the rounds, N dispatch-mode profiled invokes of arm B and
-//                 each extra arm (ab.b.profile, ab.extra[].profile)
+//                 each extra arm (ab.b.profile, ab.extra[].profile). N is capped per
+//                 arm to what the profiler's timestamp capacity holds (requestedInvokes,
+//                 capped); an arm profile that still drops timestamps, or a per-round
+//                 pass-mode profile that does, fails ok (ab.incompleteProfiles names it)
 import { parseFen } from '../../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
 import { boardToMaia3Tokens, maia3InternalsForTests } from '../../src/lc0/maia3.ts';
 import { legalPolicyPriors } from '../../src/lc0/onnxEvaluator.ts';
 import * as ort from '../../src/nn/ortRuntime.ts';
 import { abExtraModels, intParam, log, params, roundOrder, runMain, runtimeDeviceIdentity, summarize } from './common.mjs';
-import { legalPolicyParity, maia3ParityRows, ortParity, profileComplete, runChunked } from './gates.mjs';
+import { abIncompleteProfiles, legalPolicyParity, maia3ParityRows, ortParity, profileComplete, profileInvokeCap, runChunked } from './gates.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile, sequenceMeanUs } from './gpu-profiler.mjs';
 
 // Legal-move policy gate (gates.mjs legalPolicyParity): max |legal prob diff|,
@@ -274,7 +277,11 @@ async function wasmParity(gpu, { referenceModel, preset, batch, candidateModel }
 }
 
 /** Compact dispatch-mode profile of one ab arm: per-kernel totals and the mean per-position sequence. */
-async function armDispatchProfile(prof, arm, invokes) {
+async function armDispatchProfile(prof, arm, requested, dispatchesPerInvoke, capacity) {
+  const { invokes, capped } = profileInvokeCap(requested, dispatchesPerInvoke, capacity);
+  if (capped)
+    log(`abProfile: arm ${arm.key} capped ${requested} -> ${invokes} invokes (${dispatchesPerInvoke} dispatches/invoke, ${capacity} timestamp slots)`);
+  if (invokes < 1) return { invokes: 0, requestedInvokes: requested, capped, complete: false, dropped: null };
   prof.arm();
   for (let i = 0; i < invokes; i++) {
     prof.nextInvoke();
@@ -284,7 +291,10 @@ async function armDispatchProfile(prof, arm, invokes) {
   const agg = aggregateProfile(collected, { invokes });
   return {
     invokes,
+    requestedInvokes: requested,
+    capped,
     complete: agg.complete,
+    dropped: agg.dropped,
     kernelMsPerInvoke: agg.kernelMsPerInvoke,
     dispatchesPerInvoke: agg.perInvoke[0]?.dispatches ?? 0,
     kernels: agg.kernels.map(({ name, dispatchesPerInvoke, msPerInvoke, meanUsPerDispatch }) => ({
@@ -305,7 +315,7 @@ async function armDispatchProfile(prof, arm, invokes) {
  * abExtra= adds candidate arms C1..Cn (B's batch); the round order then
  * rotates over all arms, and each extra arm gets its own ratios against B.
  */
-async function pairedComparison(prof, a, bPresetName) {
+async function pairedComparison(prof, a, bPresetName, { capacity }) {
   const bPreset = PRESETS[bPresetName];
   if (!bPreset) throw new Error(`ab: unknown preset ${bPresetName}`);
   const rounds = intParam('abRounds', 20, 2, 500);
@@ -329,7 +339,7 @@ async function pairedComparison(prof, a, bPresetName) {
   const extras = [];
   for (const [i, model] of extraModels.entries()) extras.push(await loadArm(`c${i + 1}`, model, `abExtra ${model}`));
   const arms = [{ ...a, key: 'a' }, b, ...extras];
-  const series = Object.fromEntries(arms.map((arm) => [arm.key, { wall: [], busy: [], dispatches: [], envelope: [], gap: [], submits: [] }]));
+  const series = Object.fromEntries(arms.map((arm) => [arm.key, { wall: [], busy: [], dispatches: [], envelope: [], gap: [], submits: [], dropped: 0 }]));
   const wallRatio = Object.fromEntries(arms.map((arm) => [arm.key, []]));
   const busyRatio = Object.fromEntries(arms.map((arm) => [arm.key, []]));
   for (let r = 0; r < rounds; r++) {
@@ -351,6 +361,7 @@ async function pairedComparison(prof, a, bPresetName) {
         s.envelope.push(pm.envelopeMs);
         s.gap.push(pm.gapMs);
         s.submits.push(pm.submitsPerInvoke);
+        s.dropped += pm.dropped;
       }
     }
     for (const arm of arms) {
@@ -365,7 +376,11 @@ async function pairedComparison(prof, a, bPresetName) {
   // abProfile=N: dispatch-mode attribution for arms B and C1..Cn (arm A uses profileInvokes).
   const abProfile = intParam('abProfile', 0, 0, 50);
   const armProfiles = {};
-  if (abProfile > 0 && prof?.supported) for (const arm of [b, ...extras]) armProfiles[arm.key] = await armDispatchProfile(prof, arm, abProfile);
+  if (abProfile > 0 && prof?.supported)
+    for (const arm of [b, ...extras]) {
+      const dispatches = Math.max(0, ...series[arm.key].dispatches); // the largest invoke seen bounds the slots
+      armProfiles[arm.key] = await armDispatchProfile(prof, arm, abProfile, dispatches, capacity);
+    }
   await ort.releaseOrtSession(b.session);
   for (const arm of extras) await ort.releaseOrtSession(arm.session);
   const passStats = (key) =>
@@ -375,6 +390,7 @@ async function pairedComparison(prof, a, bPresetName) {
           submitsPerInvoke: median(series[key].submits),
           envelopeMs: summarize(series[key].envelope),
           gapMs: summarize(series[key].gap),
+          dropped: series[key].dropped,
         }
       : null;
   const out = {
@@ -444,7 +460,9 @@ runMain(async () => {
   }
   const timing = summarize(runMs);
   log('session.run ms', timing);
-  const ab = params.get('ab') ? await pairedComparison(prof, { session, feeds, batch, name: presetName ?? model }, params.get('ab')) : null;
+  const ab = params.get('ab')
+    ? await pairedComparison(prof, { session, feeds, batch, name: presetName ?? model }, params.get('ab'), { capacity: profiler.state.capacity })
+    : null;
   let profile = null;
   if (profileInvokes > 0 && prof?.supported) {
     prof.arm();
@@ -510,7 +528,13 @@ runMain(async () => {
   if (ab) ab.b.gpuParity = undefined; // outputs only; JSON drops it
   for (const arm of ab?.extra ?? []) arm.gpuParity = undefined;
   // abModel= / abExtra= without parity=wasm leave those arms ungated; that is reported, never ok.
+  // Auxiliary profiles (arm B / extra arms, per-round pass mode) gate ok like arm A's.
+  if (ab) {
+    ab.incompleteProfiles = abIncompleteProfiles(ab);
+    if (ab.incompleteProfiles.length) log('ab incomplete profiles', ab.incompleteProfiles);
+  }
   const abGate =
+    !ab?.incompleteProfiles?.length &&
     (ab?.b.overridden ? (ab.b.parity?.pass ?? false) : true) &&
     (ab?.extra ?? []).every((arm) => arm.model === PRESETS[ab.b.name].model || arm.parity?.pass === true);
   const identity = await runtimeDeviceIdentity(prof);

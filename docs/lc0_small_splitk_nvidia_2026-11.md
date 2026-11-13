@@ -412,5 +412,10 @@ node scripts/kernel_hillclimb/remote/run.mjs --host yukon --dist dist-client --w
 shipped model on ORT WASM, records each arm's pass-mode busy, envelope, gap,
 dispatches and submits every round, and with `abProfile=N` adds an N-invoke
 dispatch-mode kernel profile (with a per-position `sequenceMeanUs`) for B and
-each extra arm after the rounds. `result.ok` is false when any arm fails its
-gate.
+each extra arm after the rounds. In dispatch mode every dispatch takes one
+of the profiler's 16,384 timestamp slots, so `abProfile` is capped per arm
+to the invokes that fit (`requestedInvokes`, `capped`). `result.ok` is false
+when any arm fails its gate, or when an arm's `abProfile` profile or a
+per-round pass-mode profile dropped timestamps (`ab.incompleteProfiles` names
+the arm). The two jobs here that used `abProfile=8` (yukon-multi-2 and -3)
+needed at most 5,952 slots per arm, and every profile in them is complete.

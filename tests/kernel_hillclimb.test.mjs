@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
+  abIncompleteProfiles,
   compareCentipawn,
   compareLc0,
   fixtureChunks,
@@ -11,6 +12,7 @@ import {
   manifestCheck,
   ortParity,
   profileComplete,
+  profileInvokeCap,
   runChunked,
 } from '../lab/kernel-hillclimb/gates.mjs';
 import { fmaKernel, gemmKernel, subgroupMatrixGemmKernel } from '../lab/kernel-hillclimb/wgsl-kernels.mjs';
@@ -215,6 +217,38 @@ test('profiles that dropped dispatches are incomplete', () => {
   assert.equal(profileComplete({ dropped: 0, passMode: { dropped: 3 } }), false);
   const agg = aggregateProfile({ rows: [], dropped: 7 }, { invokes: 1 });
   assert.equal(agg.complete, false);
+});
+
+test('abProfile invokes are capped to the timestamp capacity', () => {
+  // Shipped Lc0 Small: 356 dispatches/invoke; 50 invokes would need 17,800 of 16,384 slots.
+  assert.deepEqual(profileInvokeCap(50, 356, 16384), { invokes: 46, capped: true });
+  assert.deepEqual(profileInvokeCap(8, 744, 16384), { invokes: 8, capped: false });
+  assert.deepEqual(profileInvokeCap(46, 356, 16384), { invokes: 46, capped: false });
+  assert.deepEqual(profileInvokeCap(5, 20000, 16384), { invokes: 0, capped: true });
+  assert.deepEqual(profileInvokeCap(5, 0, 16384), { invokes: 5, capped: false }); // unknown: completeness still gates
+});
+
+test('incomplete auxiliary ab profiles are named and fail the gate', () => {
+  const full = (invokes = 8) => ({ invokes, requestedInvokes: invokes, capped: false, complete: true, dropped: 0 });
+  const ab = {
+    a: { pass: { dropped: 0 } },
+    b: { model: '/m/shipped.onnx', pass: { dropped: 0 }, profile: full() },
+    extra: [{ key: 'c1', model: '/m/c1.onnx', pass: { dropped: 0 }, profile: full() }],
+  };
+  assert.deepEqual(abIncompleteProfiles(ab), []);
+  assert.deepEqual(abIncompleteProfiles(null), []);
+  assert.deepEqual(abIncompleteProfiles({ ...ab, b: { ...ab.b, profile: null } }), []); // abProfile=0
+  const overflow = { ...ab, b: { ...ab.b, profile: { ...full(50), complete: false, dropped: 1416 } } };
+  assert.deepEqual(abIncompleteProfiles(overflow), [
+    { arm: 'b', model: '/m/shipped.onnx', profile: 'dispatch', invokes: 50, requestedInvokes: 50, dropped: 1416 },
+  ]);
+  const extraNoRoom = { ...ab, extra: [{ ...ab.extra[0], profile: { invokes: 0, requestedInvokes: 5, capped: true, complete: false, dropped: null } }] };
+  assert.deepEqual(
+    abIncompleteProfiles(extraNoRoom).map((e) => [e.arm, e.profile, e.invokes]),
+    [['c1', 'dispatch', 0]],
+  );
+  const passDrop = { ...ab, a: { pass: { dropped: 3 } } };
+  assert.deepEqual(abIncompleteProfiles(passDrop), [{ arm: 'a', model: null, profile: 'pass', dropped: 3 }]);
 });
 
 test('aggregateProfile reports busy, envelope and gap per invoke', () => {
