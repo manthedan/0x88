@@ -22,39 +22,65 @@ function slice(start, end) {
   return source.slice(from, to);
 }
 const keyFunctions = slice('function engineAnalysisCacheKey(', 'function activeEngineRows()');
-const bigNetFunctions = slice('async function workerBigNetLines(', '// Lc0 big nets use hosted ONNX assets');
+const bigNetFunctions = slice('/**\n * The big-net session options of an Analysis search', '// Lc0 big nets use hosted ONNX assets');
 const analyzeFunction = slice('async function analyzeCurrent(', 'let analysisGameTree = tree;');
 
 const T3_ORIGINAL = T3_NET.modelUrl;
 const T3_SPLITK = lc0SplitKUrl(T3_ORIGINAL);
 
-/** Bt4WorkerSearcher's observable contract: servedModelUrl is empty until init resolves. */
-class FakeBigNetSearcher {
-  servedModelUrl = '';
-  onDownloadProgress = null;
-  inits = 0;
+/**
+ * The real Bt4WorkerSearcher runs against this scripted worker, so init reuse,
+ * dispose-and-reload on other options and servedModelUrl are the shipped code.
+ * plan maps a model URL to the init outcomes of its successive workers:
+ * { servedModelUrl } or { error }. A search result carries its session's URL.
+ */
+class FakeWorker {
+  static plan = new Map();
+  static instances = [];
+  listeners = new Map();
   searches = 0;
-  constructor(config, servedUrl, failInit = null) {
-    this.config = config;
-    this.servedUrl = servedUrl;
-    this.failInit = failInit;
+  constructor() {
+    FakeWorker.instances.push(this);
   }
-  async init() {
-    if (this.servedModelUrl) return 'webgpu';
-    this.inits += 1;
-    await new Promise(setImmediate);
-    if (this.failInit) throw this.failInit;
-    this.servedModelUrl = this.servedUrl;
-    return 'webgpu';
+  addEventListener(type, listener) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
-  async search(_input, options) {
-    await this.init();
-    this.searches += 1;
-    await new Promise(setImmediate);
-    return { cancelled: false, move: 'e2e4', visits: options.visits };
+  emit(type, data) {
+    for (const listener of this.listeners.get(type) ?? []) listener(data);
   }
-  cancel() {}
+  reply(data) {
+    setImmediate(() => this.emit('message', { data }));
+  }
+  postMessage(message) {
+    if (message.type === 'init') {
+      this.init = message;
+      const outcome = FakeWorker.plan.get(message.modelUrl)?.shift() ?? {};
+      this.servedModelUrl = outcome.servedModelUrl;
+      if (outcome.error) this.reply({ type: 'error', id: message.id, error: outcome.error });
+      else this.reply({ type: 'ready', id: message.id, backend: 'webgpu', ...(outcome.servedModelUrl ? { servedModelUrl: outcome.servedModelUrl } : {}) });
+    } else if (message.type === 'search') {
+      this.searches += 1;
+      this.reply({ type: 'searchResult', id: message.id, result: { cancelled: false, move: 'e2e4', visits: message.visits, served: this.servedModelUrl } });
+    }
+  }
+  terminate() {
+    this.terminated = true;
+  }
 }
+
+async function withWorkers(plan, run) {
+  const original = globalThis.Worker;
+  globalThis.Worker = FakeWorker;
+  FakeWorker.plan = new Map(Object.entries(plan));
+  FakeWorker.instances = [];
+  try {
+    await run();
+  } finally {
+    globalThis.Worker = original;
+  }
+}
+
+const searches = () => FakeWorker.instances.map((worker) => worker.searches);
 
 function element() {
   return { textContent: '', toggleAttribute() {}, disabled: false, checked: false };
@@ -103,7 +129,7 @@ function analysisPage({ rows, searchers }) {
     const renderLines = () => published.push(lineCache.get(tree.current.fen));
     const renderEvalBar = () => {}, setShapes = () => {}, bestShapes = () => [], renderEngineComparison = () => {};
     const cacheEngineLines = (key, lines) => engineLineCache.set(key, lines);
-    const lc0AnalysisLines = (result, _fen, engine) => [{ engine, pvUci: [result.move], multipv: 1, scoreText: '+0.20', detail: '', pvSan: '' }];
+    const lc0AnalysisLines = (result, _fen, engine) => [{ engine, pvUci: [result.move], multipv: 1, scoreText: '+0.20', detail: result.served ?? '', pvSan: '' }];
     const analysisConsensus = () => 'consensus', hiddenAnalysisStopEnabled = () => false;
     const requestHiddenTabWork = (state) => ({ state }), stopHiddenTabResume = (reload, dispose) => ({ reload, dispose });
     ${keyFunctions}
@@ -133,90 +159,116 @@ function analysisPage({ rows, searchers }) {
 }
 
 const t3Row = { family: 'lc0', variant: 't3', strength: 64 };
+const bt4Row = { family: 'lc0', variant: 'bt4', strength: 64 };
+const urlPattern = (url) => new RegExp(url.replaceAll('.', '\\.'));
+
+/** The served URL in the run's keys is the URL of the session that ran the search. */
+function assertPublishedUnder(page, row, servedUrl) {
+  const lines = page.lineCache.get(START_FEN);
+  assert.equal(lines?.[0]?.pvUci?.[0], 'e2e4', 'completed lines were published');
+  assert.equal(lines[0].detail, servedUrl, 'the search ran on the session serving this URL');
+  assert.ok(page.published.length > 0);
+  const key = page.engineAnalysisCacheKey(row);
+  assert.match(key, urlPattern(servedUrl));
+  assert.deepEqual([...page.engineLineCache.keys()], [key]);
+  assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
+}
 
 for (const [device, servedUrl] of [
   ['Apple WebGPU (split-K)', T3_SPLITK],
   ['non-Apple (shipped export)', T3_ORIGINAL],
 ]) {
-  test(`first t3 analysis with an uninitialized searcher publishes and caches under the served URL: ${device}`, async () => {
-    const t3 = new FakeBigNetSearcher(T3_NET, servedUrl);
+  test(`first t3 analysis with an uninitialized searcher publishes and caches under the served URL: ${device}`, () =>
+    withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: servedUrl }] }, async () => {
+      const t3 = new Bt4WorkerSearcher(T3_NET);
+      const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+      assert.equal(t3.servedModelUrl, '');
+      await page.analyzeCurrent();
+      assert.equal(t3.servedModelUrl, servedUrl);
+      assertPublishedUnder(page, t3Row, servedUrl);
+      assert.deepEqual(searches(), [1]);
+      // The second visit hits the cache: no new search, no new session.
+      await page.analyzeCurrent();
+      assert.deepEqual(searches(), [1]);
+      t3.dispose();
+    }));
+}
+
+for (const [direction, before, after] of [
+  ['split-K -> shipped export (e.g. a WebGPU fallback)', T3_SPLITK, T3_ORIGINAL],
+  ['shipped export -> split-K (e.g. split-K became available)', T3_ORIGINAL, T3_SPLITK],
+]) {
+  test(`a pooled t3 session from Arena (2048 eval-cache entries) is reloaded before the keys: ${direction}`, () =>
+    withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: before }, { servedModelUrl: after }] }, async () => {
+      const t3 = new Bt4WorkerSearcher(T3_NET);
+      await t3.init({ evalCacheEntries: 2048 });
+      assert.equal(t3.servedModelUrl, before);
+      const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+      await page.analyzeCurrent();
+      // Analysis's options differ, so its session is a reload, and the reload's
+      // URL (not the pooled session's) is in the keys and ran the search.
+      assert.equal(FakeWorker.instances.length, 2);
+      assert.equal(FakeWorker.instances[0].terminated, true);
+      assert.equal(FakeWorker.instances[1].init.evalCacheEntries, 0);
+      assert.deepEqual(searches(), [0, 1]);
+      assertPublishedUnder(page, t3Row, after);
+      assert.doesNotMatch(page.engineAnalysisCacheKey(t3Row), urlPattern(before));
+      t3.dispose();
+    }));
+}
+
+test('a pooled t3 session already initialized with the Analysis options is reused as is', () =>
+  withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK }] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    await t3.init({ evalCacheEntries: 0 });
     const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
-    assert.equal(t3.servedModelUrl, '');
     await page.analyzeCurrent();
-    assert.equal(t3.servedModelUrl, servedUrl);
-    assert.equal(t3.searches, 1);
-    // The lines reach the page, are cached under the served model's key, and the
-    // completion marker uses the same identity that a later visit computes.
-    assert.equal(page.lineCache.get(START_FEN)?.[0]?.pvUci?.[0], 'e2e4');
-    assert.ok(page.published.length > 0, 'completed lines were published');
-    const key = page.engineAnalysisCacheKey(t3Row);
-    assert.match(key, new RegExp(servedUrl.replaceAll('.', '\\.')));
-    assert.deepEqual([...page.engineLineCache.keys()], [key]);
-    assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
-    // The second visit hits the cache: no new search.
+    assert.equal(FakeWorker.instances.length, 1);
+    assert.deepEqual(searches(), [1]);
+    assertPublishedUnder(page, t3Row, T3_SPLITK);
+    t3.dispose();
+  }));
+
+test('a big-net init failure stays that engine’s failed row and does not suppress the other engines', () =>
+  withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK }], [BT4_NET.modelUrl]: [{ error: 'model download failed' }] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    const bt4 = new Bt4WorkerSearcher(BT4_NET);
+    const page = analysisPage({
+      rows: [t3Row, bt4Row],
+      searchers: new Map([
+        ['t3', t3],
+        ['bt4', bt4],
+      ]),
+    });
     await page.analyzeCurrent();
-    assert.equal(t3.searches, 1);
-    assert.equal(t3.inits, 1);
-  });
-}
+    const lines = page.lineCache.get(START_FEN);
+    assert.equal(lines.length, 2);
+    assert.equal(lines[0].pvUci[0], 'e2e4');
+    assert.equal(lines[1].error, 'model download failed');
+    // The failed init is reported, not retried by the search.
+    assert.equal(FakeWorker.instances.filter((worker) => worker.init.modelUrl === BT4_NET.modelUrl).length, 1);
+    assert.deepEqual([...page.engineLineCache.keys()], [page.engineAnalysisCacheKey(t3Row)]);
+    assert.equal(page.completeAnalysisKeys.size, 0, 'a run with a failed engine is not marked complete');
+    t3.dispose();
+    bt4.dispose();
+  }));
 
-test('a big-net init failure stays that engine’s failed row and does not suppress the other engines', async () => {
-  const t3 = new FakeBigNetSearcher(T3_NET, T3_SPLITK);
-  const bt4 = new FakeBigNetSearcher(BT4_NET, BT4_NET.modelUrl, new Error('model download failed'));
-  const bt4Row = { family: 'lc0', variant: 'bt4', strength: 64 };
-  const page = analysisPage({
-    rows: [t3Row, bt4Row],
-    searchers: new Map([
-      ['t3', t3],
-      ['bt4', bt4],
-    ]),
-  });
-  await page.analyzeCurrent();
-  const lines = page.lineCache.get(START_FEN);
-  assert.equal(lines.length, 2);
-  assert.equal(lines[0].pvUci[0], 'e2e4');
-  assert.equal(lines[1].error, 'model download failed');
-  assert.equal(bt4.searches, 0);
-  assert.deepEqual([...page.engineLineCache.keys()], [page.engineAnalysisCacheKey(t3Row)]);
-  assert.equal(page.completeAnalysisKeys.size, 0, 'a run with a failed engine is not marked complete');
-});
-
-class FakeWorker {
-  static reply = {};
-  listeners = new Map();
-  addEventListener(type, listener) {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-  }
-  emit(type, data) {
-    for (const listener of this.listeners.get(type) ?? []) listener(data);
-  }
-  postMessage(message) {
-    if (message.type === 'init') {
-      this.init = message;
-      queueMicrotask(() => this.emit('message', { data: { type: 'ready', id: message.id, backend: 'webgpu', ...FakeWorker.reply } }));
-    }
-  }
-  terminate() {}
-}
-
-for (const [label, reply, expected] of [
+for (const [label, outcome, expected] of [
   ['Apple WebGPU worker reports the split-K model', { servedModelUrl: T3_SPLITK }, T3_SPLITK],
   ['non-Apple worker reports the shipped export', { servedModelUrl: T3_ORIGINAL }, T3_ORIGINAL],
   ['worker without a served URL means the shipped export', {}, T3_ORIGINAL],
 ]) {
-  test(`Bt4WorkerSearcher.servedModelUrl: ${label}`, async () => {
-    const original = globalThis.Worker;
-    globalThis.Worker = FakeWorker;
-    FakeWorker.reply = reply;
-    const searcher = new Bt4WorkerSearcher(T3_NET);
-    try {
+  test(`Bt4WorkerSearcher.servedModelUrl: ${label}`, () =>
+    withWorkers({ [T3_ORIGINAL]: [outcome] }, async () => {
+      const searcher = new Bt4WorkerSearcher(T3_NET);
       assert.equal(searcher.servedModelUrl, '');
-      await searcher.init();
+      assert.equal(searcher.isInitializedFor(), false);
+      await searcher.init({ evalCacheEntries: 2048 });
       assert.equal(searcher.servedModelUrl, expected);
+      assert.equal(searcher.isInitializedFor({ evalCacheEntries: 2048 }), true);
+      assert.equal(searcher.isInitializedFor({ evalCacheEntries: 0 }), false, 'other options would reload the session');
       searcher.dispose();
       assert.equal(searcher.servedModelUrl, '', 'a disposed searcher no longer claims a served model');
-    } finally {
-      globalThis.Worker = original;
-    }
-  });
+      assert.equal(searcher.isInitializedFor({ evalCacheEntries: 2048 }), false);
+    }));
 }

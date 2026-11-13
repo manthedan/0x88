@@ -1827,6 +1827,14 @@ function renderEngineSetupSummary(): void {
   renderEngineSummaries(lineCache.get(tree.current.fen) ?? []);
 }
 
+/**
+ * The big-net session options of an Analysis search (worker eval cache off, as
+ * before). The pool shares sessions with Play and Arena, which use 2048 or
+ * arenaCacheEntries(); a different size makes init dispose and reload the
+ * session. initBigNetsForRun and workerBigNetLines must both use this.
+ */
+const ANALYSIS_BIG_NET_SESSION = { evalCacheEntries: 0 } as const;
+
 async function workerBigNetLines(
   runId: number,
   variant: string,
@@ -1845,6 +1853,7 @@ async function workerBigNetLines(
       {
         visits,
         multiPv: requestedMultiPv,
+        evalCacheEntries: ANALYSIS_BIG_NET_SESSION.evalCacheEntries,
         batchSize: config.recommendedBatchSize,
         batchPipelineDepth: config.recommendedPipelineDepth,
         signal,
@@ -1861,18 +1870,20 @@ async function workerBigNetLines(
  * A big net picks its served model (the shipped export or its split-K rewrite)
  * when its worker initializes, and that URL is part of every cache and
  * selection key (engineAnalysisCacheKey). So, like the Lc0 Small backend before
- * analyzeCurrent proceeds, the selected big nets are initialized before a run
- * takes its keys. Keys taken before init would never match the ones taken after
- * it, and the run's results would be discarded. initBigNetsForRun returns the
- * init errors by net, which the run reports as that engine's failure without
- * retrying the download.
+ * analyzeCurrent proceeds, the selected big nets are initialized, with the
+ * options the search will pass, before a run takes its keys. Keys taken before
+ * that init would not match the session the search runs on (none yet, or a
+ * pooled one the search would reload), and the run's results would be discarded
+ * or cached under the wrong model. initBigNetsForRun returns the init errors by
+ * net, which the run reports as that engine's failure without retrying the
+ * download.
  */
 function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
   const keys = new Set<AnalysisBigNetKey>();
   for (const row of rows) {
     if (row.family !== 'lc0' || !isLc0BigNetVariant(row.variant)) continue;
     const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
-    if (!peekBigNetSearcher(key)?.servedModelUrl) keys.add(key);
+    if (!peekBigNetSearcher(key)?.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) keys.add(key);
   }
   return [...keys];
 }
@@ -1885,7 +1896,9 @@ async function initBigNetsForRun(keys: AnalysisBigNetKey[]): Promise<Map<Analysi
       const label = `Lc0 ${config.name}`;
       searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
       try {
-        await searcher.init();
+        await searcher.init(ANALYSIS_BIG_NET_SESSION);
+        // An init already in flight for other options resolves with those; reload once.
+        if (!searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) await searcher.init(ANALYSIS_BIG_NET_SESSION);
       } catch (error) {
         errors.set(key, error instanceof Error ? error : new Error(String(error)));
       } finally {

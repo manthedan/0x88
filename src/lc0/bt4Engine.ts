@@ -289,6 +289,10 @@ export function bt4LoadWarning(): string {
  * A lazily-initialized, worker-backed Lc0 big-net searcher. One instance owns
  * one searchWorker (one resident net). Call `dispose()` to free its memory.
  */
+function normalizedEvalCacheEntries(entries: number | undefined): number {
+  return Math.max(0, Math.floor(Number(entries ?? 0) || 0));
+}
+
 export class Bt4WorkerSearcher {
   readonly config: BigNetConfig;
   private worker: Worker | null = null;
@@ -330,9 +334,18 @@ export class Bt4WorkerSearcher {
     });
   }
 
+  /**
+   * True when init(options) would reuse the loaded session as is: ready, with the
+   * same eval-cache size. Otherwise init disposes and reloads it, and may then
+   * serve a different model (servedModelUrl).
+   */
+  isInitializedFor(options: { evalCacheEntries?: number } = {}): boolean {
+    return this.ready && this.configuredEvalCacheEntries === normalizedEvalCacheEntries(options.evalCacheEntries);
+  }
+
   /** Create + init the worker on first call (fetches the large net, then cached). */
   async init(options: { evalCacheEntries?: number } = {}): Promise<string> {
-    const evalCacheEntries = Math.max(0, Math.floor(Number(options.evalCacheEntries ?? 0) || 0));
+    const evalCacheEntries = normalizedEvalCacheEntries(options.evalCacheEntries);
     if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries) return this.backend;
     if (this.ready && this.configuredEvalCacheEntries !== evalCacheEntries) this.dispose();
     if (this.initPromise) return this.initPromise;
