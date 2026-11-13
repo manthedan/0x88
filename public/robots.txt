@@ -1,1 +1,8 @@
+# Cloudflare prepends a managed block that disallows AI training crawlers,
+# including Google-Extended. Google merges groups for the same user agent and
+# the least restrictive rule wins, so this group lets Gemini read the site
+# (Google-Extended governs both Gemini grounding and Gemini training).
+User-agent: Google-Extended
+Allow: /
+
 Sitemap: https://0x88.app/sitemap.xml

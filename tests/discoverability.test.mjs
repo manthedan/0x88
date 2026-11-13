@@ -24,6 +24,12 @@ test('robots.txt points crawlers at the sitemap and blocks nothing itself', () =
   assert.doesNotMatch(robots, /^Disallow:/im);
 });
 
+test('robots.txt re-allows Google-Extended so Gemini can read the site', () => {
+  // Cloudflare's managed robots.txt (prepended at the edge) disallows Google-Extended.
+  const robots = read('public/robots.txt');
+  assert.match(robots, /^User-agent: Google-Extended\nAllow: \/$/m);
+});
+
 test('llms.txt links every workspace and the docs', () => {
   const llms = read('public/llms.txt');
   assert.match(llms, /^# 0x88$/m);
