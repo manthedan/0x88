@@ -259,7 +259,10 @@ The Lc0 Small mechanism is reused as is; t3 is one more row in its table.
   that Play or Arena left with another eval-cache size. A stopped or left run
   makes no further init attempt. The run reads nothing else before that init
   and its position, MultiPV, engine rows, settings and keys only after it,
-  restarting if the engine selection changed meanwhile. The run then records each net's served URL
+  and it ends in favour of a fresh run if anything was queued for after it
+  meanwhile (an Lc0 runtime reload, engine disposal, a settings re-analysis)
+  or the engine rows changed, so it never searches a backend the new settings
+  replace. The run then records each net's served URL
   once (`analysisBigNetServedModel`, as `lc0ServedModelUrl` does for Lc0
   Small), and every key reads that record, never the live worker. A worker
   crash mid-run therefore changes no key, and if a search finds its session

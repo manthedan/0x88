@@ -4410,9 +4410,9 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     // Initialize the selected big nets first (initBigNetsForRun). The run reads
     // nothing else before this await and everything after it, synchronously, as
     // it did before the init step existed: position, history, MultiPV, engine
-    // rows, runtime/broker settings, served models, keys. So a change made during
-    // init is either in this run's settings, keys and searches alike, or (engine
-    // rows) restarts the run. A run with no uninitialized big net does not yield.
+    // rows, runtime/broker settings, served models, keys. A settings change made
+    // during init ends this run in favour of the queued one (below). A run with
+    // no uninitialized big net does not yield.
     const uninitializedBigNets = bigNetsAwaitingInit(rows);
     let bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
     if (uninitializedBigNets.length) {
@@ -4420,9 +4420,19 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
       bigNetInitErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
-      if (JSON.stringify(activeEngineRows()) !== JSON.stringify(rows)) {
-        // The engine selection changed during init, so this run's gates and init
-        // list are stale. Start over (the change may already have queued this).
+      // Anything else that happened during init either cancelled this run (any
+      // new analyzeCurrent/scheduleAnalyzeCurrent, Stop, hiding the tab, leaving)
+      // or was queued for after it through deferAnalysisSettingsRefresh: those
+      // flags were all clear when the run started (consumed or reset above). If
+      // one is set now, or the rows changed without one (refreshBt4Availability),
+      // this run's gates and backends are stale: end it so the finally applies
+      // the queued Lc0 reload / disposal and starts the deferred run.
+      if (
+        analyzeAfterActiveRun ||
+        reloadLc0AfterActiveRun ||
+        disposeUnusedEnginesAfterActiveRun ||
+        JSON.stringify(activeEngineRows()) !== JSON.stringify(rows)
+      ) {
         analyzeAfterActiveRun = true;
         return;
       }

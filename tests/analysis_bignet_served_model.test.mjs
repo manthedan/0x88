@@ -105,7 +105,7 @@ function element() {
   return { textContent: '', toggleAttribute() {}, disabled: false, checked: false };
 }
 
-function analysisPage({ rows, searchers }) {
+function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
   const code = ts.transpile(
     `
     let analysisAbort = null, analyzing = false, activeAnalysisRunId = 0, analysisRunForced = false;
@@ -113,7 +113,14 @@ function analysisPage({ rows, searchers }) {
     let analyzeAfterActiveRun = false, analysisReloadWantsSearch = false, reloadLc0AfterActiveRun = false;
     let disposeUnusedEnginesAfterActiveRun = false, hiddenResumeForce = false, hiddenTab = { hidden: false };
     let analysisReloadAbort = null, activeLc0BackendLoad = null, analyzeAfterLc0BackendLoad = false;
-    const reviewAbort = null, retry = false, criticalPanel = null, workerReady = false, searcher = null;
+    const reviewAbort = null, retry = false, criticalPanel = null, searcher = null;
+    // Lc0 Small: the selected runtime vs the one the loaded worker backend runs.
+    let currentRuntime = smallLc0Runtime ?? 'onnx', backendRuntime = currentRuntime;
+    const workerReady = smallLc0Runtime !== null, smallSearchLog = [];
+    const workerLc0Lines = async (_runId, _fen, _visits, _positions, searchedMultiPv, engine) => {
+      smallSearchLog.push(backendRuntime);
+      return [{ engine, pvUci: ['d2d4'], multipv: 1, scoreText: '+0.10', detail: backendRuntime, pvSan: '', searchedMultiPv }];
+    };
     const lc0ServedModelUrl = '', mountAbort = new AbortController();
     const engineLineCache = new Map(), lineCache = new Map(), completeAnalysisKeys = new Set();
     const published = [];
@@ -129,7 +136,7 @@ function analysisPage({ rows, searchers }) {
     const peekBigNetSearcher = (key) => searchers.get(key);
     const activeEngineRows = () => rows.map((row) => ({ ...row }));
     let currentMultiPv = 1;
-    const multiPv = () => currentMultiPv, selectedLc0Runtime = () => 'onnx', boardToFen = (board) => board.fen;
+    const multiPv = () => currentMultiPv, selectedLc0Runtime = () => currentRuntime, boardToFen = (board) => board.fen;
     const resourceBroker = { snapshot: () => ({ dial: 'balanced', cpuBudget: 1 }) };
     const engineResourceProfile = () => ({ resourceClass: 'gpu' });
     const parseFen = (fen) => ({ fen }), legalMoves = () => ['e2e4'];
@@ -142,7 +149,12 @@ function analysisPage({ rows, searchers }) {
       analysisAbort = null;
       analyzing = false;
     };
-    const retireAnalysisRunCentipawnKeys = () => {}, disposeUnusedEngines = () => {}, reloadLc0ForAnalysis = async () => {};
+    const retireAnalysisRunCentipawnKeys = () => {}, disposeUnusedEngines = () => {};
+    // As reloadLc0ForAnalysis: load the selected runtime's backend, then analyze.
+    const reloadLc0ForAnalysis = async (analyzeAfterLoad) => {
+      backendRuntime = currentRuntime;
+      if (analyzeAfterLoad) void analyzeCurrent({ force: true });
+    };
     const clearAnalysisSearchProgress = () => {}, syncBrokerParticipants = () => {}, clearEngineSearchProgress = () => {};
     const showIndeterminateSearchProgress = () => {}, showAnalysisProgress = () => {};
     const showModelProgress = () => {}, hideModelProgress = () => {};
@@ -171,6 +183,16 @@ function analysisPage({ rows, searchers }) {
         rows = next;
         settingsChanged();
       },
+      // As the lc0RuntimeSelect handler: deferAnalysisSettingsRefresh({ reloadLc0 })
+      // during a run, otherwise reloadLc0Backend.
+      setRuntime: (runtime) => {
+        currentRuntime = runtime;
+        if (analyzing && analysisAbort && !analysisAbort.signal.aborted) {
+          analyzeAfterActiveRun = true;
+          reloadLc0AfterActiveRun = true;
+        } else backendRuntime = runtime;
+      },
+      smallSearchLog,
       idle: () => !analyzing,
       stop: cancelActiveAnalysisRun,
       leave: () => mountAbort.abort(),
@@ -191,8 +213,9 @@ function analysisPage({ rows, searchers }) {
     'analysisResultCacheKey',
     'isLc0BigNetVariant',
     'finishedRunFollowUp',
+    'smallLc0Runtime',
     code,
-  )(START_FEN, BT4_NET, T3_NET, searchers, rows, element, analysisResultCacheKey, isLc0BigNetVariant, finishedRunFollowUp);
+  )(START_FEN, BT4_NET, T3_NET, searchers, rows, element, analysisResultCacheKey, isLc0BigNetVariant, finishedRunFollowUp, smallLc0Runtime);
 }
 
 const t3Row = { family: 'lc0', variant: 't3', strength: 64 };
@@ -347,6 +370,34 @@ test('an engine selection change during a pending big-net init restarts the run 
     assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
     t3.dispose();
     bt4.dispose();
+  }));
+
+test('an Lc0 Small runtime change during a pending big-net init: no old-backend lines under the new runtime key', () =>
+  withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK, hold: true }] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    const smallRow = { family: 'lc0', variant: 'small', strength: 64 };
+    const page = analysisPage({ rows: [smallRow, t3Row], searchers: new Map([['t3', t3]]), smallLc0Runtime: 'hybrid-a' });
+    const oldKey = page.engineAnalysisCacheKey(smallRow);
+    const run = page.analyzeCurrent();
+    await new Promise(setImmediate);
+    page.setRuntime('hybrid-b');
+    FakeWorker.instances[0].release();
+    await run;
+    await settled(page);
+    const newKey = page.engineAnalysisCacheKey(smallRow);
+    assert.notEqual(newKey, oldKey);
+    // The run in flight was abandoned before searching; the queued reload loaded
+    // the new runtime and the follow-up run searched on it.
+    assert.deepEqual(page.smallSearchLog, ['hybrid-b']);
+    assert.equal(page.engineLineCache.get(newKey)[0].detail, 'hybrid-b');
+    assert.equal(page.engineLineCache.has(oldKey), false);
+    assert.deepEqual(
+      page.lineCache.get(START_FEN).map((line) => line.detail),
+      ['hybrid-b', T3_SPLITK],
+    );
+    assert.deepEqual(FakeWorker.searchLog, [{ model: T3_ORIGINAL, multiPv: 1 }]);
+    assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
+    t3.dispose();
   }));
 
 test('a big-net worker crash mid-search shows its error row and still publishes the other engine', () =>
