@@ -235,8 +235,12 @@ figure hides large per-kernel changes in both directions. For example, the
 first smolgen dense1 goes from a 92.16 µs Gemm at `8x1x1` to a 9.22 µs MatMul
 at `8x1x16`. The added reshape/transpose/reduce/bias work and the 239 extra
 dispatches per invoke offset these gains. One explanation for the wall gap is
-the extra CPU-side encode and submit cost of those dispatches. That is a
-hypothesis; it was not measured.
+the extra CPU-side encode and submit cost of those dispatches. That was a
+hypothesis here. The follow-up
+[`lc0_small_splitk_nvidia_2026-11.md`](lc0_small_splitk_nvidia_2026-11.md)
+measured it. Once the profiler's per-dispatch floor is removed, split-K saves
+~36% of GPU time on the 3090 as well. Each extra dispatch, though, costs
+8-16 µs of CPU-side wall time on this host, and the 3090 run is CPU-bound.
 
 The first attempt, a 30-round paired A/B with default iterations, crashed
 Chrome's GPU process (`SEGV_ACCERR` about 30 s in), restarted it, and then hit
