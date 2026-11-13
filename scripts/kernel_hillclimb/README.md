@@ -12,6 +12,7 @@ fixed scale. Baseline numbers and the ranked candidate list are in
 | `lab/kernel-hillclimb/peak.html` | device peaks: f32/f16 FMA, read/copy bandwidth, dispatch/submit/readback overhead, tiled GEMM at real model shapes, `chromium-experimental-subgroup-matrix` GEMM when exposed |
 | `lab/kernel-hillclimb/ort-profile.html` | ORT WebGPU (shipped Lc0 / Maia3 path) timing + per-dispatch GPU profile + ORT WASM parity |
 | `lab/kernel-hillclimb/tvmjs-profile.html` | TVMJS WebGPU (shipped Centipawn path, Lc0 research lanes) timing + profile + ORT parity |
+| `lab/kernel-hillclimb/search-ab.html` | paired fixed-visit search A/B of two Lc0 ONNX models on ORT WebGPU (product `Lc0OnnxEvaluator` → `CachedLc0Evaluator` → `Lc0PuctSearcher` path, main thread): wall ratio, visits/s and tie-protocol search parity |
 | `lab/kernel-hillclimb/gpu-profiler.mjs` | runtime-agnostic WebGPU profiler (see below) |
 | `lab/kernel-hillclimb/gates.mjs` | pure correctness gates (ORT parity, Lc0 / Centipawn evaluator parity, profile completeness); unit-tested against broken candidates in `tests/kernel_hillclimb.test.mjs` |
 | `scripts/kernel_hillclimb/build_lab.mjs` | production-compiles the pages and overlays them onto `dist-client` |
@@ -52,7 +53,7 @@ in `#log`). Result object (`schema: "kernel-hillclimb.bench-result.v1"`):
 
 | field | meaning |
 |---|---|
-| `schema`, `generatedAt`, `bench` | `peak` / `ort-profile` / `tvmjs-profile` |
+| `schema`, `generatedAt`, `bench` | `peak` / `ort-profile` / `tvmjs-profile` / `search-ab` |
 | `ok` | correctness gate passed, no profiler/runtime errors, and the profile is complete (no dispatch ran untimed). Timing from a result with `ok: false` must not be used; `roofline.mjs` drops such repeats |
 | `device` | adapter vendor/architecture/description, subgroup min/max, subgroup-matrix configs, adapter + device features, limits, WGSL language features, UA + UA-CH high-entropy values, platform, cores, `crossOriginIsolated`, page URL + query |
 | `candidate` | runtime, preset/target, model or manifest, physical batch, dequant-fold summary, effective backend |
@@ -67,6 +68,7 @@ Query params per page:
 - `peak`: `tests=fma,bandwidth,overhead,gemm,sgmatrix` `trials=7` `gemmShapes=MxNxK,...`
 - `ort-profile`: `preset=lc0-small|lc0-small-b8|t3|bt4|lqo|maia3|maia3-grid` (or `model=URL&batch=N`), `warmup=5` `iters=30` `profileInvokes=5` `parity=wasm` `referenceModel=URL` `ortDequantFold=0` `ab=PRESET` (`abRounds=20` `abBlock=3` `abModel=URL` to run another model in arm B with the B preset's batch; with `parity=wasm` it is gated against the B preset's model as `ab.b.parity`, without it the run is not ok: ABAB-interleaved paired comparison in one page session; result `ab` carries per-position wall and GPU-busy ratios per round, the comparison to use on a loaded machine). A candidate model goes in `model=` next to the preset it replaces; parity then runs the preset's original model on ORT WASM as the reference (override with `referenceModel=`). With neither a preset nor `referenceModel`, parity fails.
 - `tvmjs-profile`: `target=centipawn|lc0-t1|lc0-t3|lc0-bt4` `manifest=URL` `batch=N` `warmup` `iters` `profileInvokes` `parity=ort` `tieEpsilon=0.01` `maxPriorAbs` `maxWdlAbs`
+- `search-ab`: `preset=t3|bt4|lqo` `model=URL` (arm A, required) `abModel=URL` (arm B, default the preset's shipped model) `abEp=wasm` (arm B on ORT WASM: a noise control, timing ratios then meaningless) `visits=64,256,800` `positions=N` (of 14: 12 ECO + 2 queen-odds starts) `repeats=1` `batch=8` `evalCache=2048` `parity=search` (the `--gate` marker; parity is always computed) `tieEpsilon=0.01` `contempt=0|1` (1 adds Play's drawScore/ScLimit; ScLimit samples `Math.random`, so searches stop being reproducible). Fresh tree and eval cache per search, arm order alternating. `ok` is false on any best-move flip the tie protocol does not tolerate (equal root visits for both moves in either tree, or a REFERENCE prior gap ≤ `tieEpsilon`).
 
 Timestamps: Chrome quantizes `timestamp-query` to 65.536 µs unless launched
 with `--enable-webgpu-developer-features`; `profile.timestampsQuantized` says
