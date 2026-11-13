@@ -1,8 +1,8 @@
 # Browser engine catalog and onboarding process
 
-Last updated: 2026-06-05
+Non-Centipawn cards checked against the current tree: 2026-11-12. Centipawn material is deferred.
 
-This is the working catalog for engine families exposed by `lc0-arena.html` and `lc0-analysis.html`. It records what we adapted, which artifacts/variants the UI can select, how complete the browser integration is, and where to resume optimization later.
+This is the working catalog for engine families exposed by `/app/arena/` and `/app/analysis/`. It records what we adapted, which artifacts/variants the UI can select, how complete the browser integration is, and where to resume optimization later.
 
 Status labels:
 
@@ -37,14 +37,14 @@ Every engine family should have one card with these fields:
 
 | Family | Variants in UI | Default posture | Main adapter | Version/source anchor | Footprint headline | Current note |
 | --- | --- | --- | --- | --- | --- | --- |
-| Lc0 | `small`, `bt4` | `small` stable; `bt4` gated/cautious | ORT/WebGPU/WASM worker + custom lc0web pack paths | Small `t1-256x10-distilled-swa-2432500`; BT4 `BT4-1024x15x32h-swa-6147500-policytune-332` | Small f32 ONNX 80.9 MB or f16 pack ~40.7 MB; BT4-it332 f16 ONNX 370.6 MB | Our browser-native neural/search lane. Most runtime variants are still benchmark-gated. |
+| Lc0 | `small`, `t3`, `bt4` | `small` stable; large nets explicit/gated | ORT/WebGPU/WASM worker + explicit research runtimes | Small `t1-256x10-distilled-swa-2432500`; t3 `distill-swa-2767500`; BT4 `policytune-332` | Small b1 f16 QDQ8; t3 b8 f16 ~163 MB; BT4 b8 f16 QDQ8 ~178 MB | Apple-only split-K selection is model-specific; see `lc0SmallModelSelection.ts` and dated outcome records. |
 | Centipawn | `bt4-ort` (production), legacy `bt4-auto`/`bt4-custom` in research builds | Production ORT baseline; legacy custom WebGPU explicit | Centipawn SquareFormer evaluator/search path | BT4 SOAP REM c19000 | Small public model relative to LC0 BT4 | Legacy `tiny` deep-links and URL overrides are accepted for compatibility. |
 | Stockfish | `lite`, `full` | Lite single-thread default opponent | NPM `stockfish` JS/WASM UCI worker | `stockfish@19.0.1` | Lite WASM ~1.8 MB; full WASM ~94 MB | Mature UCI baseline; strongest/large full variant is optional. |
-| Reckless | `simd`, `relaxed-simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `lite` | Relaxed SIMD if available; fixed SIMD fallback; scalar final fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; the default speed ladder is relaxed SIMD > fixed SIMD > scalar WASI/UCI. |
-| Viridithas | `relaxed-simd`, `simd`, `default` | Relaxed SIMD when the browser validates it; SIMD, then scalar | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` tag `v20.0.0` commit `0631113e` + v109 `sandhi-s2-b200.nnue.zst` + local patches | WASM ~53 MB with compressed NNUE embedded | Integration works for shallow arena/analysis, but stop/abort and throughput remain experimental. |
-| Berserk | `emscripten` (WASI `default`/`simd` planned only) | Experimental opt-in | Patched single-thread Emscripten UCI worker; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | JS glue + ~128 KB WASM per tier + one shared ~24 MB preload; tracked/deployable with manifest and corresponding source | Strong GPL C UCI candidate; staged UI integration is experimental while lifecycle/benchmark data accumulates. |
-| PlentyChess | `emscripten` | Experimental opt-in | Patched single-thread Emscripten UCI worker | `Yoshie2000/PlentyChess` tag `b-v8.0.0`, commit `50ad9f1b523063cbbbf599fe0547f42870fe2906` + network `0178r.bin` | JS ~71 KB + WASM ~392 KB + shared processed NNUE ~53 MB raw; release artifacts use LFS | See `docs/plentychess_upgrade_v8.md` for current native/WASM parity, strength, browser NPS, and compiler-flag gates. |
-| Stormphrax | `emscripten` | Experimental opt-in | Patched single-thread Emscripten UCI worker with wasm SIMD | `Ciekce/Stormphrax` tag `v8.0.0`, commit `582965517ed2032d41a6b4cd6c2e66b1b934e2ad` + `undertown.nnue` | JS ~71 KB + WASM ~697 KB + data 55.9 MB raw | Node UCI smoke passes; available in Play, Arena, and Analysis with depth/movetime and MultiPV. |
+| Reckless | `simd`, `relaxed-simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `wasi-simd-external`, `lite` | Relaxed SIMD if available; fixed SIMD fallback; scalar final fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; the default speed ladder is relaxed SIMD > fixed SIMD > scalar WASI/UCI. |
+| Viridithas | `relaxed-simd`, `simd`, `default` | Relaxed SIMD when the browser validates it; SIMD, then scalar | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` tag `v20.0.0` commit `0631113e` + v109 `sandhi-s2-b200.nnue.zst` + local patches | WASM ~53 MB with compressed NNUE embedded | Persistent cooperative cancellation is implemented with a watchdog; one-shot abort terminates. The family remains experimental. |
+| Berserk | `emscripten`, `emscripten-simd`, `emscripten-relaxed` (WASI planned only) | Relaxed → SIMD → scalar; family experimental | Patched single-thread Emscripten UCI worker; WASI still unpromoted | Upstream `jhonnold/berserk` tag `14` commit `8ae895a6151695be4a50d4fb65b0c131659c513a` + network `berserk-9b84c340af7e.nn` | JS glue + ~0.13–0.14 MB WASM per tier + one shared ~24 MB preload; tracked/deployable with manifest and corresponding source | Shipped relaxed tier uses `-O2 -flto`; see the dated SIMD and compiler-flag records. |
+| PlentyChess | `emscripten`, `emscripten-sse41`, `emscripten-relaxed` | Relaxed → SSE4.1 → base; family experimental | Patched single-thread Emscripten UCI worker | `Yoshie2000/PlentyChess` tag `b-v8.0.0`, commit `50ad9f1b523063cbbbf599fe0547f42870fe2906` + network `0178r.bin` | JS ~71 KB + WASM ~392 KB + shared processed NNUE ~53 MB raw; release artifacts use LFS | See `docs/plentychess_upgrade_v8.md` for current native/WASM parity, strength, browser NPS, and compiler-flag gates. |
+| Stormphrax | `emscripten`, `emscripten-relaxed` | Relaxed → baseline SIMD; family experimental | Patched single-thread Emscripten UCI worker with wasm SIMD | `Ciekce/Stormphrax` tag `v8.0.0`, commit `582965517ed2032d41a6b4cd6c2e66b1b934e2ad` + `undertown.nnue` | JS ~71 KB + WASM ~697 KB + data 55.9 MB raw | Node UCI smoke passes; available in Play, Arena, and Analysis with depth/movetime and MultiPV. |
 
 ## Asset prep/check fast path
 
@@ -78,24 +78,28 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 ### Lc0 family
 
 - **Family id / UI label:** `lc0` / `Lc0`.
-- **Integration status:** stable for the small model path; BT4 is gated by WebGPU support and a one-time memory/download warning.
+- **Integration status:** stable for Small; t3/BT4 are explicit large-net choices with capability/download warnings. Big nets have bounded WASM fallback levels; they are not WebGPU-only.
 - **Source/version anchors:**
   - Small model: `t1-256x10-distilled-swa-2432500`.
   - Stable browser pack: `/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json`.
-  - BT4 model: `/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch4.f16.onnx` (`BT4-it332`; manifest also records b1/b8 exports and the legacy swa-6147500 b1 export).
+  - Small ORT default: `/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx`; Apple WebGPU sessions may select its released split-K sibling.
+  - t3: `/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx`; current source selects its smolgen split-K sibling on Apple WebGPU (publication status is in `docs/bignet_smolgen_splitk_2026-11.md`).
+  - BT4 model: `/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx` (`BT4-it332`). The older b1/b4/b8 unquantized exports remain manifest history, not the current default.
   - Model manifest: `public/models/lc0/manifest.json` with bytes and sha256 values.
 - **Runtime adapter:**
   - Small/default: `searchWorker.ts` with ORT and the stable `lc0web-wgsl-encoder-ort-heads` path when requested.
   - Experimental LC0 runtime lanes include WGSL heads, WASM input encoder, WASM/GPU legal priors, deferred readback, TVM-packed kernels, and pipeline-depth experiments. The arena UI exposes the input backend, encoder kernel, and legal-prior backend as explicit LC0 opt-ins; their defaults remain JS input, hand WGSL encoder, and JS legal priors.
-  - BT4: lazy dedicated `Bt4WorkerSearcher`, WebGPU-only by policy, disposable worker per searcher.
+  - t3/BT4: lazy dedicated `Bt4WorkerSearcher`, disposable worker per searcher, WebGPU preferred with CPU fallback. `src/lc0/bt4Engine.ts` owns model identities, batch sizes and reduced WASM Play ladders.
 - **UI variants:**
   - `small`: label `Lc0`, strength unit `visits`.
-  - `bt4`: label `Lc0 BT4-it332`, strength unit `visits`, disabled until `probeBt4Support()` succeeds. Browser Arena uses the policytune-332 fixed batch-4 f16 ONNX export with search tree reuse and batch-4 leaf evaluation.
-- **Strength knob:** visits in arena/analysis; movetime paths exist in lower-level search APIs but the staged UI currently uses visits.
+  - `t3`: label `Lc0 t3-512`, batch-8 f16 distill export.
+  - `bt4`: label `Lc0 BT4-it332`, strength unit `visits`, capability-gated. Arena uses the policytune-332 batch-8 f16 QDQ8 export with tree reuse and batch-8 leaf evaluation, not unquantized batch 4.
+  - Play also offers Leela Queen Odds v2 for odds games; it is not a general analysis net.
+- **Strength knob:** visits in Analysis/Play; Arena supports fixed visits or equal movetime.
 - **Artifact footprint:**
   - f32 batch1 ONNX: 80,895,900 bytes.
   - f16 lc0web pack: metadata 296,585 bytes + shards 40,418,450 bytes.
-  - BT4-it332 f16 ONNX: 370,635,164 bytes (~353 MiB UI warning).
+  - Historical BT4-it332 unquantized f16 ONNX: 370,635,164 bytes. Current b8 QDQ8 warning is ~178 MB; t3 is ~163 MB. Use the manifest for exact per-artifact bytes.
   - Helper WASM: `lc0_input_encoder.wasm` ~6.5 KB; `lc0_legal_priors.wasm` ~16 KB.
 - **Feature parity:**
   - Move generation/search: yes for normal browser play/search.
@@ -103,9 +107,9 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - Abort: supported through worker cancellation for LC0 search paths; BT4 has explicit `cancel()` and worker disposal.
   - Threads: WebGPU/ORT worker model, not UCI thread controls.
   - Model caching: Cache API/local symlink flow exists; BT4 warns because of size.
-- **Speed snapshot:** see `docs/lc0web_custom_inference_checkpoint.md`. Representative final local 32 visits/batch 4: stable ORT heads ~65 visits/s; experimental WGSL heads ~110 visits/s. The 2026-06-05 recovered-state autoresearch lane favored the explicit opt-in `hybrid-wgsl-heads` + WASM input + `mixed-tvm-ffn` + JS legal priors + batch 4/depth 1 path at about `6.1 ms/eval` on the fixed suite after benchmark-harness cleanup; this is not a default and must be compared only against similarly cleaned controls.
+- **Speed snapshot:** the following is dated June custom-runtime evidence, not current ORT performance; see `docs/lc0web_custom_inference_checkpoint.md`. Released Small split-K and later ORT capture/IO outcomes are in `docs/lc0_small_splitk_2026-11.md` and `docs/ort_invoke_overhead_2026-11.md`. Representative final local 32 visits/batch 4: stable ORT heads ~65 visits/s; experimental WGSL heads ~110 visits/s. The 2026-06-05 recovered-state autoresearch lane favored the explicit opt-in `hybrid-wgsl-heads` + WASM input + `mixed-tvm-ffn` + JS legal priors + batch 4/depth 1 path at about `6.1 ms/eval` on the fixed suite after benchmark-harness cleanup; this is not a default and must be compared only against similarly cleaned controls.
 - **Validation:** `npm run lc0:browser-ci-smoke`, LC0 fixture parity tests, model manifest sha256 checks, and browser search matrix artifacts.
-- **Open work:** keep extracting shared catalog metadata into UI config; keep experimental LC0 runtime lanes opt-in until repeated parity, leak, and cross-host latency gates pass. After the naive WebGPU int8 FFN lane regressed throughput despite passing drift, the next high-ROI GPU lane is smolgen f16 tiling/generation. Historical opt-in evidence kept `mixed-tvm-ffn-smolgen-project`, now with 64-column smolgen project plus 8-lane smolgen dense1 with 2-step row-loop unroll, which confirmed at `4.863 ms/eval` on the cleaned mixed-TVM JS-legal 32-position fixed suite with 9-fixture drift passing; a short 2026-06-08 WGSL-head reconfirm was slower than nearby `mixed-tvm-ffn` and failed top-prior drift, so the current documented WGSL-head b4 lane remains `mixed-tvm-ffn` until smolgen-project gets a new cleaned full pass. Simple tiled smolgen-dense1, combined project+dense1, dense1+swish+LN1 fusion, row-split dense1 reduction, discarded dense1 shape/unroll/fma variants including the 3-step row-loop unroll that failed drift, paired-output/dense2-unroll variants, compress/head scalar unrolls/workgroup-size tweaks/packed-f16 buffers/linear-specialized shaders/value dense2+softmax fusion, hand QKV/output-projection larger K tiles, generated TVM `pick_lane` select rewrite, attention-score channel unroll, parallel score+softmax fusion, attention-value loop unrolls/workgroup reshapes, transposed-weight smolgen compress/dense1/dense2, paired-output smolgen project, smolgen dense2/compress workgroup-shape/reduction tweaks, mapped-policy 128-wide groups, 16/32/128/256-column project tiles, manual project-loop unrolling, project weight-index strength reduction, project final-barrier elision, shared-input smolgen dense2/compress, LN2 swish caching, project+TVM outproj/QKV, split-FFN TVM mixes, GPU/WASM legal priors, JS/WGSL input, and project+attention-score fusion attempts did not improve or failed drift, so future smolgen work needs a different generated/fused schedule with isolated parity first.
+- **Historical custom-runtime work ledger (2026-06):** shared catalog metadata is now centralized. Keep experimental runtime lanes opt-in until their gates pass; the following rejected schedules and measurements retain their original scope. After the naive WebGPU int8 FFN lane regressed throughput despite passing drift, the next high-ROI GPU lane is smolgen f16 tiling/generation. Historical opt-in evidence kept `mixed-tvm-ffn-smolgen-project`, now with 64-column smolgen project plus 8-lane smolgen dense1 with 2-step row-loop unroll, which confirmed at `4.863 ms/eval` on the cleaned mixed-TVM JS-legal 32-position fixed suite with 9-fixture drift passing; a short 2026-06-08 WGSL-head reconfirm was slower than nearby `mixed-tvm-ffn` and failed top-prior drift, so the current documented WGSL-head b4 lane remains `mixed-tvm-ffn` until smolgen-project gets a new cleaned full pass. Simple tiled smolgen-dense1, combined project+dense1, dense1+swish+LN1 fusion, row-split dense1 reduction, discarded dense1 shape/unroll/fma variants including the 3-step row-loop unroll that failed drift, paired-output/dense2-unroll variants, compress/head scalar unrolls/workgroup-size tweaks/packed-f16 buffers/linear-specialized shaders/value dense2+softmax fusion, hand QKV/output-projection larger K tiles, generated TVM `pick_lane` select rewrite, attention-score channel unroll, parallel score+softmax fusion, attention-value loop unrolls/workgroup reshapes, transposed-weight smolgen compress/dense1/dense2, paired-output smolgen project, smolgen dense2/compress workgroup-shape/reduction tweaks, mapped-policy 128-wide groups, 16/32/128/256-column project tiles, manual project-loop unrolling, project weight-index strength reduction, project final-barrier elision, shared-input smolgen dense2/compress, LN2 swish caching, project+TVM outproj/QKV, split-FFN TVM mixes, GPU/WASM legal priors, JS/WGSL input, and project+attention-score fusion attempts did not improve or failed drift, so future smolgen work needs a different generated/fused schedule with isolated parity first.
 
 ### Centipawn family
 
@@ -126,7 +130,7 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - `lite`: `Stockfish Lite`, URL `/stockfish/stockfish-19-lite-single.js` by default, or `/stockfish/stockfish-19-lite-single-relaxed.js` when the relaxed-SIMD probe passes.
   - `full`: `Stockfish`, URL `/stockfish/stockfish-19-single.js` in current arena/analysis wiring.
   - Threaded flavors exist (`lite-threaded`, `threaded`) and require same-origin cross-origin isolation. Relaxed full/threaded variants remain reproducible local candidates, but are not public selector artifacts yet.
-- **Strength knob:** depth by default; `movetimeMs`, `skillLevel`, and `threads` are supported in `StockfishOptions`. Staged UI uses depth.
+- **Strength knob:** depth by default; `movetimeMs`, `skillLevel`, and `threads` are supported in `StockfishOptions`. Arena supports depth or equal movetime; Analysis uses depth.
 - **Artifact footprint:**
   - Lite single WASM: ~1.76 MiB; npm JS ~28 KB, unminified relaxed JS ~159 KB.
   - Lite threaded WASM: ~1.62 MiB plus ~33 KB JS wrapper.
@@ -155,12 +159,13 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - `relaxed-simd`: `Reckless Full Relaxed SIMD`, `/reckless/reckless-relaxed-simd128.wasm`; first-choice default when Relaxed SIMD validates and the asset is present.
   - `simd`: `Reckless Full SIMD`, `/reckless/reckless-simd128.wasm`; fixed-SIMD fallback when Relaxed SIMD is unsupported or its default asset is missing.
   - `full`: `Reckless Full scalar fallback`, `/reckless/reckless.wasm`; final fallback when neither SIMD default is usable.
+  - `wasi-simd-external`: `/reckless/reckless-simd128-external.wasm` + `/reckless/reckless-v60-7f587dfb.nnue`; explicit non-default persistent WASI/UCI prototype.
   - `browser-api`: `/reckless/reckless-browser-api.wasm`.
   - `browser-api-simd`: `/reckless/reckless-browser-api-simd128.wasm`.
   - `browser-api-simd-external`: `/reckless/reckless-browser-api-simd128-external.wasm` + `/reckless/reckless-v60-7f587dfb.nnue`.
   - `lite`: `/reckless/reckless-v53-l1-512.wasm`, optional experimental smaller/weaker build.
   - `custom`: URL param escape hatch via `?recklessWasm=`.
-- **Strength knob:** depth in UI; movetime supported by benchmark/runtime plumbing.
+- **Strength knob:** depth in Analysis/Play; Arena also supports equal movetime.
 - **Artifact footprint:**
   - Full scalar/SIMD/browser-api integrated artifacts: ~62 MB each, because the NNUE is embedded.
   - External-NNUE browser API SIMD: ~1.2 MB WASM + ~60 MB cacheable NNUE.
@@ -170,7 +175,7 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - Analysis/MultiPV: yes via UCI-like info lines/direct API formatting.
   - Persistent process: yes in isolated browsers.
   - Hash/new-game reset: clear-hash/new-game path corrected and benchmarked.
-  - Stop/abort: abort terminates/recreates worker; graceful in-search `stop` cannot preserve the persistent wasm process in the current single-threaded patch.
+  - Stop/abort: persistent abort queues `stop` and allows 100 ms for natural completion, drains it without publishing cancelled output, and rejects with `AbortError`. Otherwise it terminates/recreates the worker. The synchronous UCI loop cannot reliably read stop during search.
   - Syzygy/tablebases: disabled for browser/WASI builds.
 - **Speed snapshot:** see `docs/reckless_browser_benchmarks.md`.
   - Corrected depth 7/8/9 run: SIMD WASI/UCI had ~2.6-2.7x engine-reported NPS over scalar at deeper depths.
@@ -184,32 +189,28 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 - **Integration status:** experimental opt-in. The Emscripten worker adapter passed Node and browser smokes and is available in staged arena/analysis selectors, but not as a default engine.
 - **Source/version anchor:** upstream `jhonnold/berserk` release tag `14`, commit `8ae895a6151695be4a50d4fb65b0c131659c513a`; default branch HEAD observed at `27212a24c16d9e5f9bc9180a75264c1c632808bb` during intake. The browser port pins tag `14` unless a newer release is deliberately selected.
 - **License/distribution:** GPL-3.0. Generated JS/WASM/data and copied NNUE assets must be treated as redistributable GPL engine artifacts with corresponding source/build instructions. Do not publish generated blobs unless the release satisfies `docs/engine_artifact_distribution.md`.
-- **Runtime adapter:** current first smoke is `patches/berserk-emscripten.patch` + `npm run berserk:build-emscripten`, exporting `command()`, `isReady()`, and `isSearching()` like Stockfish.js. It disables tablebases and uses synchronous single-thread search to avoid pthread/SAB requirements. WASI remains unpromoted unless it becomes useful later.
+- **Runtime adapter:** `BerserkEngine` extends the shared `EmscriptenUciEngine`, using `patches/berserk-emscripten.patch` and the scalar/SIMD/relaxed build scripts, exporting `command()`, `isReady()`, and `isSearching()` like Stockfish.js. It disables tablebases and uses synchronous single-thread search to avoid pthread/SAB requirements. WASI remains unpromoted unless it becomes useful later.
 - **UI variants:** defined in `src/lc0/berserkVariants.ts`.
-  - `emscripten`: current smoked worker path, `/berserk/berserk-emscripten.js` + `/berserk/berserk-emscripten.wasm` + `/berserk/berserk-emscripten.data`.
+  - `emscripten`: scalar fallback, `/berserk/berserk-emscripten.{js,wasm}`.
+  - `emscripten-simd`: SSE4.1-shaped SIMD, `/berserk/berserk-emscripten-simd128.{js,wasm}`.
+  - `emscripten-relaxed`: feature-detected first choice, `/berserk/berserk-emscripten-relaxed-simd128.{js,wasm}`. The released relaxed tier uses `-O2 -flto`; scalar/SIMD flag defaults are unchanged.
+  - All three share `/berserk/berserk-emscripten.data`.
   - `default`: planned scalar WASI/UCI candidate, expected URL `/berserk/berserk.wasm`; not exposed in normal staged selectors until it smokes.
   - `simd`: planned SIMD WASI candidate, expected URL `/berserk/berserk-simd128.wasm`; not exposed in normal staged selectors until it smokes.
   - `custom`: URL param escape hatch for local experiments via `?berserkJs=`/`?berserkData=` or future `?berserkWasm=` and optional `?berserkNnue=`.
 - **Expected NNUE assets:** upstream makefile uses `MAIN_NETWORK = berserk-9b84c340af7e.nn` from `https://github.com/jhonnold/berserk-networks/releases/download/networks/berserk-9b84c340af7e.nn`. The Emscripten smoke preloads this network into `berserk-emscripten.data`; `berserkVariants.ts` still models external `/berserk/berserk-9b84c340af7e.nn` for any future WASI/custom path.
-- **Strength knob:** depth in staged UI if promoted; movetime should be available in benchmarks once UCI `go movetime` is verified. Tentative defaults should mirror other alpha-beta engines until measured (`arena` shallow depth, `analysis` deeper depth).
+- **Strength knob:** Arena depth or equal movetime; Analysis depth. Catalog defaults are depth 4 / 12 for Arena / Analysis.
 - **Artifact footprint:** three tracked Emscripten JS/WASM tiers share one ~24 MB `.data` NNUE preload. The release manifest and matching corresponding-source archive are published beside them; regenerate the set together after any engine, patch, build, or network change.
-- **Feature parity to verify:**
-  - UCI handshake: `uci` / `uciok`, `isready` / `readyok`.
-  - Move search: `position startpos` and one non-startpos FEN with `go depth N`.
-  - Analysis/MultiPV: upstream exposes `MultiPV`; verify info-line parsing before enabling analysis UI.
-  - New game/hash reset: verify `ucinewgame`, `setoption name Hash`, and clear-hash behavior or document the fallback.
-  - Stop/abort: upstream has UCI `stop` support natively, but browser/WASI behavior is unknown; first adapter may terminate/recreate the worker on abort until graceful stop is proven.
-  - Threads/tablebases: upstream exposes `Threads` and `SyzygyPath`; browser intake should begin single-threaded and tablebases disabled.
-  - NNUE/model loading: decide embedded vs external; missing asset path must be visible in UI before promotion.
-- **Speed snapshot:** none yet. Use the Reckless/Viridithas rotated-FEN protocol after smoke, with cold/warm separation and engine-reported nodes/NPS.
+- **Feature parity:** handshake, repeated search/new-game, MultiPV/info parsing, missing-asset reporting and worker-restart abort recovery are implemented. Hash/Threads options are deduplicated because Hash changes clear TT. Browser builds remain single-threaded with tablebases disabled; NNUE is preloaded in the shared `.data`.
+- **Speed snapshot:** dated first-port browser data is in `docs/berserk_browser_benchmarks.md`; Node SIMD/relaxed comparisons are in `docs/cpu_engines_simd_audit.md`. The later relaxed-tier LTO gate gained ~29% paired browser wall NPS on M4 at depths 11/12; see `docs/cpu_engine_build_flags_matrix_2026-10.md`. These are separate controls, not one cumulative universal speedup.
 - **Validation:** `npm run berserk:build-emscripten` then `npm run berserk:smoke-emscripten` verifies `uci`, `isready`, `ucinewgame`, startpos search, and one non-startpos FEN search in Node. `lab/berserk-smoke.html` exercises the reusable `BerserkEngine` worker adapter in the browser; lifecycle smoke now covers repeated searches, MultiPV parsing, abort-by-worker-restart recovery, and missing-asset failure. Arena/analysis selector smokes and first sanity comparisons against Stockfish full single/Reckless SIMD are recorded in `docs/berserk_browser_benchmarks.md`. The reusable C/C++ intake process is captured in `docs/browser_c_engine_porting.md`.
-- **Open risks:** graceful in-search stop without losing the resident worker, pthread/SIMD follow-up, GPL source/archive obligations, deeper benchmark comparison against Stockfish/Reckless/Viridithas, and whether Berserk offers a browser-speed advantage after startup is amortized.
+- **Open risks:** graceful in-search stop without losing the resident worker, portability of measured compiler gains, source/archive obligations, and broader strength/latency evidence. SIMD is delivered; additional CPU threading is not an active promotion recommendation.
 
 ### PlentyChess family
 
-- **Family id / UI label:** proposed `plentychess` / `PlentyChess`.
+- **Family id / UI label:** `plentychess` / `PlentyChess`.
 - **Integration status:** experimental opt-in. Emscripten build, Node UCI smoke, reusable worker adapter, browser lifecycle smoke, first shallow benchmark, and arena/analysis selector smoke pass.
-- **Current release:** 8.0.0 (`b-v8.0.0`, `50ad9f1b`), network `0178r.bin`; see `docs/plentychess_upgrade_v8.md`. The following intake notes are historical.
+- **Current release:** 8.0.0 (`b-v8.0.0`, `50ad9f1b`), network `0178r.bin`; see `docs/plentychess_upgrade_v8.md`. Current variants are `emscripten-relaxed` → `emscripten-sse41` → `emscripten`, feature/asset-gated and sharing one processed-NNUE `.data`. Arena supports depth/equal movetime, Analysis depth. `PlentyChessEngine` uses the shared Emscripten adapter. The following intake notes, sizes and pending-task wording describe the original 7.0.66 port, not the current release.
 - **Source/version anchor:** initial reconnaissance used `https://github.com/Yoshie2000/PlentyChess.git` at commit `58d8ba2505ae2b49f48dd410d214a457d15c12c6` on the default branch. Current source reports `VERSION = "7.0.66"` and `network.txt = 0134-2r24-s0`. Latest GitHub release observed during intake was `b-v7.0.0` at commit `e2060ab4b3021babb7d74af3cbe908154c03b2fd`, but its `network.txt` value `0119` did not correspond to an immediately available `PlentyNetworks` asset under the Makefile's expected URL during this reconnaissance.
 - **License/distribution:** GPL-3.0. Generated JS/WASM and embedded/processed NNUE assets must stay ignored until a release manifest and matching source archive satisfy `docs/engine_artifact_distribution.md`.
 - **Runtime adapter:** current proof uses the standard C/C++ recipe in `docs/browser_c_engine_porting.md`: Emscripten, modular JS, exported `command(const char*)`, single-thread synchronous search, and tablebases inert. `src/lc0/plentychessEngine.ts` wraps it as a `BrowserUciEngine` worker adapter.
@@ -232,12 +233,12 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 - **Source/version anchor:** `Ciekce/Stormphrax` tag `v8.0.0`, commit `582965517ed2032d41a6b4cd6c2e66b1b934e2ad`; self-trained release network `undertown.nnue`, 55,914,848 bytes, SHA-256 `04d651e078b7c7334709dbd772d40a23c0a5480e93e19521a03020c7d633f2cf`.
 - **License/distribution:** GPL-3.0-or-later. Public JS/WASM/data requires the matching source archive and artifact manifest.
 - **Runtime adapter:** patched single-thread synchronous Emscripten UCI worker. A new 128-bit wasm SIMD backend maps the engine's vector operations to Emscripten SSE intrinsics; threat-input geometry uses a correctness-first scalar browser path.
-- **Variant:** `emscripten` (`Stormphrax 8`) plus same-origin custom sidecar overrides via `stormphraxJs`, `stormphraxWasm`, and `stormphraxData`.
+- **Variants:** `emscripten-relaxed` is preferred when supported, with `emscripten` baseline SIMD fallback. Both share one `.data`. Same-origin custom sidecar overrides use `stormphraxJs`, `stormphraxWasm`, and `stormphraxData`.
 - **Strength knob:** depth; movetime is supported by the adapter.
 - **Feature parity:** UCI handshake/readiness, repeated new games, start/non-start FEN search, MultiPV analysis, parsed info/PV/WDL output, and worker-restart abort recovery. Threads remain fixed at one; Syzygy is not loaded.
 - **Artifact footprint:** initial build emits JS 70,611 bytes, WASM 697,245 bytes, and data 55,914,848 bytes.
 - **Validation:** `npm run stormphrax:build-emscripten`, `npm run stormphrax:smoke-emscripten`, and browser selector smokes. See `docs/stormphrax_browser_port.md`.
-- **Open work:** browser benchmark matrix, broader fixed-depth parity against native, and a shared configurable Emscripten adapter to remove the remaining per-engine adapter duplication.
+- **Open work:** broader browser/native evidence. Shared Emscripten adapter and browser/deploy registries are implemented; see `docs/engine_integration_architecture.md`.
 
 ### Viridithas family
 
@@ -260,14 +261,14 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
   - Move search: yes for sequential searches and shallow arena games.
   - Analysis: yes through Stockfish/Reckless-style UCI info formatting.
   - Persistent process: works for sequential searches when SAB/cross-origin isolation are available.
-  - Stop/abort: currently terminates the worker rather than graceful in-search `stop`; native search-time stdin polling is disabled in wasm search, so robust interactive stop remains open.
+  - Stop/abort: isolated persistent mode uses a separate shared stop word, queues `stop`, drains the old `bestmove` and rejects the cancelled request without publishing output. A 100 ms watchdog terminates unresponsive/older/custom modules and cold startup. One-shot abort terminates. See `docs/cpu_coop_cancel_2026-10.md`.
   - Threads: native threadpool is replaced/flattened for wasm browser use.
   - NNUE caching: native temp-file/mmap cache is bypassed on wasm; decompressed network is leaked for process lifetime.
 - **Speed snapshot:** see `docs/viridithas_browser_benchmarks.md`.
   - Focused SIMD run showed engine-reported NPS gains around 3.4x-12.0x over scalar depending on budget.
   - Versus Reckless, Viridithas one-shot was much slower by wall time and NPS; batch/persistent probes show startup/decompression amortization is important.
 - **Validation:** `npm run viridithas:smoke`, browser persistent smoke JSON, arena smoke games, benchmark JSON artifacts.
-- **Open work:** graceful stop/abort, larger correctness gauntlet, repeated persistent benchmarks, direct browser API feasibility only if Viridithas remains interesting after SIMD/persistence tuning.
+- **Open work:** broader correctness/strength and repeated persistent benchmarks. Cooperative cancellation is implemented, with watchdog limits; a direct API still needs a measured reason.
 
 ## Next CPU engine inclusion backlog
 

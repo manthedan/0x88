@@ -1,7 +1,8 @@
 # Engine resource broker design
 
-Status: design accepted 2026-06-09; stage 1 (broker core + threaded
-Stockfish) implemented on `feature/engine-resource-broker`.
+Status: design accepted 2026-06-09. Broker core and threaded Stockfish are
+implemented. As of 2026-11-12, CPU-only Arena games also use bounded leases
+and private single-threaded seats. GPU evaluation arbitration remains deferred.
 
 ## Mission constraint
 
@@ -18,12 +19,11 @@ and arena results that remain meaningful as engines gain threads.
    LC0 vs Stockfish can give both sides nearly full resources
    simultaneously. Contention is intra-class: CPU-vs-CPU matches, multi-LC0
    analysis, and memory-tier conflicts (BT4).
-2. **Arena demand is naturally sequential.** Only one engine is on move at a
-   time, so the arena does not need fair sharing — it needs fair
-   *alternation*: an exclusive lease on the CPU budget for the engine on
-   move, zero threads for the idle engine (ponder stays off for rating
-   integrity anyway). True concurrent sharing only exists in multi-engine
-   analysis (N engines kibitzing one position) and parallel-game datagen.
+2. **Turns are sequential within a game, not across the Arena.** Neural or
+   threaded-engine schedules remain serial and use exclusive CPU leases.
+   Eligible CPU-only schedules can run bounded parallel games with private
+   single-threaded seats and memory admission. Ponder remains off. See
+   [`arena_parallel_games_2026-10.md`](./arena_parallel_games_2026-10.md).
 
 ## Architecture
 
@@ -45,8 +45,11 @@ A small per-page module between the catalog and the UCI adapters.
   Browser searches are short, so per-search granularity is responsive
   enough, and no engine needs dynamic resizing support.
 - **Policies per surface:**
-  - `exclusive` (arena): one CPU lease at a time, full budget to the holder;
-    later requests queue FIFO and are abortable. GPU leases never queue.
+  - `exclusive` (serial arena): one CPU lease at a time, full budget to the
+    holder; later requests queue FIFO and are abortable. GPU leases never queue.
+  - `bounded` (private CPU-game arena): up to `maxConcurrentCpu` CPU leases,
+    FIFO beyond that, with shared-policy grants. Arena registers each private
+    seat with `maxThreads: 1`; the game scheduler and memory gate bound K.
   - `shared` (analysis): never blocks; the budget is divided over the
     registered CPU participants by weight (quantized, minimum 1, clamped to
     the engine's `maxThreads`). Pages register exactly the engines selected
@@ -93,10 +96,13 @@ low-tier devices.
 2. **Calibration probe + dial UI**: one-time NPS scaling probe (1/2/4/N
    threads, knee detection) cached per device; surface the eco/balanced/max
    dial; visibility-change downshift.
-3. **Berserk threads** (Emscripten pthreads already proven), then Reckless
-   via the staged Emscripten route
-   (`reckless_wasm_next_exploration_notes.md`) — each is a catalog edit once
-   the engine ships a threaded build.
+3. **Additional CPU threading — superseded, not an active next step.** The
+   July Stormphrax/Node Lazy-SMP prototype rejected promotion on its measured
+   fixed-time workload; browser bootstrap was untested. This was not a direct
+   threaded-Reckless measurement. Historical alternatives are retained in
+   [`reckless_wasm_optimization_notes.md`](./reckless_wasm_optimization_notes.md#historical-threading-alternatives-2026-06-recommendation-superseded-in-july)
+   and the verdict in
+   [`threaded_emscripten_smp_prototype_2026-07-25.md`](./threaded_emscripten_smp_prototype_2026-07-25.md).
 4. **GPU eval-broker consolidation**: one evaluator service per model with
    weighted batch quotas for multi-LC0 analysis; BT4 tiered gate rides
    alongside.

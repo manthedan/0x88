@@ -29,7 +29,7 @@ A browser-native API should expose engine operations directly and return structu
 
 ### Stage 1: internal Rust facade
 
-Status: implemented for the local browser build path in `scripts/build_reckless_browser_api.mjs`, following the earlier native probe in [`reckless_browser_api_probe.md`](./reckless_browser_api_probe.md). The build script patches a temporary Reckless library facade and emits ignored artifact `/reckless/reckless-browser-api.wasm`.
+Status: implemented for the local browser build path in `scripts/build_reckless_browser_api.mjs`, following the 2026-06-04 native probe recorded below. The build script patches a temporary Reckless library facade and emits ignored artifact `/reckless/reckless-browser-api.wasm`.
 
 Add a `browser_api` module behind a feature flag in the local Reckless patch/build path:
 
@@ -96,7 +96,29 @@ Smoke/performance evidence:
 - Rotated-FEN browser benchmark, persistent depth 7/8/9, 20 positions × 20 warm passes: browser API was slower than persistent WASI/UCI (`0.88x`, `0.81x`, and `0.80x` as fast by wall-clock for depths 7/8/9). See [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
 - Browser API history-reset smoke after fixing correction-history clearing: scalar WASI/UCI, SIMD WASI/UCI, browser API scalar, and browser API SIMD all matched exactly across the 20-position suite at depths 7/8/9 with one warm rotated pass.
 - Corrected full browser benchmark, persistent depth 7/8/9, 20 positions × 20 warm passes: browser API SIMD remained slower than SIMD WASI/UCI (`0.88x`, `0.87x`, and `0.98x` as fast by wall-clock for depths 7/8/9), while preserving exact fixed-depth parity. Browser API scalar was modestly faster than scalar WASI/UCI but still slower than SIMD WASI/UCI.
-- External-NNUE browser API SIMD validation: `reckless-browser-api-simd128-external.wasm` is 1,260,734 bytes and loads `reckless-v60-7f587dfb.nnue` as a separate 63,266,880-byte asset; depth-4 startpos smoke returned the expected `c2c4`/210-node result, and a full rotated depth 7/8/9 run matched embedded browser API SIMD exactly in 1260/1260 fixed-depth pairs. See [`reckless_nnue_asset_size_plan.md`](./reckless_nnue_asset_size_plan.md) and [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
+- External-NNUE browser API SIMD validation: `reckless-browser-api-simd128-external.wasm` is 1,260,734 bytes and loads `reckless-v60-7f587dfb.nnue` as a separate 63,266,880-byte asset; depth-4 startpos smoke returned the expected `c2c4`/210-node result, and a full rotated depth 7/8/9 run matched embedded browser API SIMD exactly in 1260/1260 fixed-depth pairs. See [`reckless_wasm_optimization_notes.md`](./reckless_wasm_optimization_notes.md#nnue-section-size-evidence-and-external-loading-2026-06-04) and [`reckless_browser_benchmarks.md`](./reckless_browser_benchmarks.md).
+
+## Native facade probe (historical, 2026-06-04)
+
+`npm run reckless:probe-browser-api -- startpos 4` copied the ignored patched
+source into `.local_engines/reckless-browser-api-probe`, added temporary
+`lib.rs`/`browser_api` modules, and built a native `browser_api_probe` binary.
+It drove a Rust facade rather than UCI parsing/stdout capture:
+
+```json
+{"bestmove":"c2c4","elapsedMs":2,"lines":[{"multipv":1,"depth":4,"scoreCp":55,"mateIn":null,"nodes":210,"nps":72211,"pv":["c2c4","g8f6"]}]}
+```
+
+Native UCI spot-check at the same FEN/depth:
+
+```text
+info depth 4 seldepth 4 multipv 1 score cp 55 nodes 210 time 15 nps 13352 hashfull 0 tbhits 0 pv c2c4 g8f6
+bestmove c2c4
+```
+
+Bestmove, score, nodes, and PV matched. This narrow probe did not itself
+produce browser WASM, a worker, or graceful cancellation. The ABI and worker
+stages above subsequently landed; it did not replace WASI/UCI.
 
 ## Verification requirements
 

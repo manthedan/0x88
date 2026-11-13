@@ -16,7 +16,7 @@ Root dominance is the only mode that keeps the full-budget move. On 83 positions
 
 `kld-stable` defaults are minimum 32 visits, interval 8, KL threshold `1e-4`, and two stable checks. The in-code comment reserves it for datagen. This measurement used the defaults. No threshold was retuned.
 
-Play itself was fixed-visit. Small Lc0 and Centipawn levels are 8, 32, 100, 400, and 1600 (`src/lc0/engineCatalog.ts`). The UI default level is the middle step, 100 visits. No product page passed `earlyStop`. `docs/native-lc0-search-gap.md` section 5 already describes the three modes and names threshold-versus-strength tuning as the missing piece. This note is that measurement. `tests/search_metamorphic.test.mjs` already checks that root dominance fires on a fixed visit budget and that finishing exactly on the cap is not relabeled as an early stop.
+Play itself was fixed-visit. Small Lc0 and Centipawn levels are 8, 32, 100, 400, and 1600 (`src/lc0/engineCatalog.ts`). The UI default level is the middle step, 100 visits. No product page passed `earlyStop`. the historical early-stop context now preserved in `docs/lc0-search-parity-status.md` already describes the three modes and names threshold-versus-strength tuning as the missing piece. This note is that measurement. `tests/search_metamorphic.test.mjs` already checks that root dominance fires on a fixed visit budget and that finishing exactly on the cap is not relabeled as an early stop.
 
 ## Kill rule, fixed before the suite
 

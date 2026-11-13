@@ -15,23 +15,26 @@ inventories, agent handoff notes, and scratch working notes stay under
 Every tracked Markdown file under `docs/` is linked from this index;
 `tests/docs_index.test.mjs` fails otherwise.
 
+Descriptions distinguish current guides, dated records and unimplemented
+proposals. A historical record is not an instruction to restore its old defaults.
+
 ## Product and runtime
 
 - [`engine_catalog.md`](engine_catalog.md) — browser engine families and variant cards.
 - [`engine_integration_architecture.md`](engine_integration_architecture.md) — end-to-end engine onboarding architecture.
-- [`browser_runtime.md`](browser_runtime.md) — browser runtime notes.
+- [`browser_runtime.md`](browser_runtime.md) — current runtime/context guide, with separately scoped smoke notes.
 - [`browser_runtime_configuration_and_benchmark_schema.md`](browser_runtime_configuration_and_benchmark_schema.md) — runtime benchmark/config schema.
 - [`perf_canary.md`](perf_canary.md) — local CPU fixed-suite canary. Not a CI gate.
 - [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) — browser UCI adapter contract.
 - [`neural_browser_runtimes.md`](neural_browser_runtimes.md) — ONNX WebGPU, TVMJS, custom WGSL, WebNN, and ONNX QDQ runtime lanes.
 - [`cpu_wasm_runtimes.md`](cpu_wasm_runtimes.md) — CPU WebAssembly runtime choices and Emscripten/Rust WASM build targets.
 - [`browser_c_engine_porting.md`](browser_c_engine_porting.md) — C/C++ browser engine porting recipe.
-- [`move_encoding.md`](move_encoding.md) — move encoding reference.
+- [`move_encoding.md`](move_encoding.md) — Centipawn v1 move encoding reference (deferred).
 - [`human_vs_computer_play.md`](human_vs_computer_play.md) — Maia3 neural human modeling vs LQO/Monty-style contempt search for practical human play.
 - [`engine_upgrade_audit.md`](engine_upgrade_audit.md) — `npm run engine:upgrade-audit`: the browser-engine upgrade correctness audit tool.
-- [`search_contempt_design.md`](search_contempt_design.md) — search-contempt design; referenced from `src/lc0/playBrowser.ts`.
-- [`engine_resource_broker_design.md`](engine_resource_broker_design.md) — CPU/GPU budget arbitration; referenced from `src/lc0/resourceBroker.ts`.
-- [`arena_analysis_roadmap.md`](arena_analysis_roadmap.md) — staged arena/analysis design; referenced from `src/lc0/charts.ts`, `gameReview.ts`, and `tournament.ts`.
+- [`search_contempt_design.md`](search_contempt_design.md) — current Play contempt settings plus dated algorithm/experiment provenance; referenced from `src/lc0/playBrowser.ts`.
+- [`engine_resource_broker_design.md`](engine_resource_broker_design.md) — current CPU budgets and resource-class leases; GPU evaluation arbitration deferred. Referenced from `src/lc0/resourceBroker.ts`.
+- [`arena_analysis_roadmap.md`](arena_analysis_roadmap.md) — current capability/backlog map, with historical design appendix; referenced from `src/lc0/charts.ts`, `gameReview.ts`, and `tournament.ts`.
 
 ## Artifact distribution, hosting, and models
 
@@ -42,11 +45,9 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`artifact_hosting_cache_strategy.md`](artifact_hosting_cache_strategy.md) — artifact hosting cache strategy.
 - [`artifact_retention_rollback_policy.md`](artifact_retention_rollback_policy.md) — retention/rollback policy; enforced by `scripts/check_artifact_retention_policy.mjs`.
 - [`cloudflare_r2_artifact_validation.md`](cloudflare_r2_artifact_validation.md) — R2 artifact validation.
-- [`r2_model_hosting.md`](r2_model_hosting.md) — external model hosting policy.
-- [`asset_telemetry_plan.md`](asset_telemetry_plan.md) — privacy-preserving asset telemetry spec.
-- [`engine_packaging_reorg.md`](engine_packaging_reorg.md) — where patched engine sources live and why.
+- [`asset_telemetry_plan.md`](asset_telemetry_plan.md) — unimplemented privacy-preserving asset telemetry proposal.
 - [`model_manifest.md`](model_manifest.md) — historical: the removed project-level model manifest builder; points to the current per-artifact manifests.
-- [`model_efficiency_metrics.md`](model_efficiency_metrics.md) — model efficiency comparison metrics.
+- [`model_efficiency_metrics.md`](model_efficiency_metrics.md) — Centipawn model efficiency metrics (deferred).
 - [`model_provenance/`](model_provenance/) — per-model provenance and derivation recipes (license load-bearing):
   - [`model_provenance/bt4_soap_rem_c19000_final.md`](model_provenance/bt4_soap_rem_c19000_final.md) — Centipawn `bt4_soap_rem_c19000_final` model.
   - [`model_provenance/maia3.md`](model_provenance/maia3.md) — Maia3 upstream file, QDQ8 and graph-rewrite derivation recipes and source offer.
@@ -58,48 +59,36 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`cpu_engines_simd_audit.md`](cpu_engines_simd_audit.md) — SIMD ladder parity audit (40/40 across Berserk, Viridithas).
 - [`plentychess_simd_audit.md`](plentychess_simd_audit.md) — PlentyChess SIMD audit (40/40, plus the f32 tail that was silently scalar).
 - [`reckless_simd_kernel_fixes.md`](reckless_simd_kernel_fixes.md) — Reckless SIMD kernel fixes (60/60 exact parity).
-- [`threaded_emscripten_smp_prototype_2026-07-25.md`](threaded_emscripten_smp_prototype_2026-07-25.md) — threaded Emscripten SMP prototype: 4.4x raw NPS, zero extra plies at fixed movetime; the threading question is closed.
-- [`native-lc0-search-gap.md`](native-lc0-search-gap.md) — native LC0 search feature gap.
-- [`lc0-search-parity-status.md`](lc0-search-parity-status.md) — LC0 search parity status.
+- [`threaded_emscripten_smp_prototype_2026-07-25.md`](threaded_emscripten_smp_prototype_2026-07-25.md) — dated Stormphrax/Node SMP experiment: ~4.4x raw NPS, ~zero extra fixed-time plies; current Lazy-SMP promotion rejected on this measured workload, not a universal threading verdict.
+- [`lc0-search-parity-status.md`](lc0-search-parity-status.md) — browser-facing parity milestone record and current native-only boundaries.
 - [`lc0_search_parity_strictness.md`](lc0_search_parity_strictness.md) — what the search parity fixtures do and do not assert.
 - [`lc0_b4_depth1_safe_benchmark_protocol.md`](lc0_b4_depth1_safe_benchmark_protocol.md) — canonical local protocol for measured fixed-suite work.
-- [`enginebattle-feature-gap.md`](enginebattle-feature-gap.md) — feature gap against EngineBattle.
-- [`ui_reference_delta.md`](ui_reference_delta.md) — UI delta against reference sites.
-- [`arena-time-parity.md`](arena-time-parity.md) — arena time-control parity notes.
 
 ## LC0/WebGPU research lane
 
-- [`lc0web_custom_inference_checkpoint.md`](lc0web_custom_inference_checkpoint.md) — custom WGSL inference lane checkpoint.
-- [`lc0_tvmjs_research_runbook.md`](lc0_tvmjs_research_runbook.md) — TVMJS research runbook.
-- [`lc0_tvm_whole_onnx_webgpu_probe.md`](lc0_tvm_whole_onnx_webgpu_probe.md) — whole-ONNX TVM WebGPU probe.
+- [`lc0web_custom_inference_checkpoint.md`](lc0web_custom_inference_checkpoint.md) — dated custom-WGSL research ledger, including rejected schedules; not a production-default guide.
+- [`lc0_tvmjs_research_runbook.md`](lc0_tvmjs_research_runbook.md) — current LC0 self-hosted non-default TVMJS runbook, with dated probe/campaign evidence; v0 forces ONNX.
 - [`lc0_tvmjs_bt4it332_onboarding_2026-06-09.md`](lc0_tvmjs_bt4it332_onboarding_2026-06-09.md) — BT4 int8 332 onboarding, including the int4 verdict.
-- [`lc0_tvmjs_campaign_2026-06-09_and_bt4_plan.md`](lc0_tvmjs_campaign_2026-06-09_and_bt4_plan.md) — TVMJS campaign and BT4 plan.
 - [`lc0_post_upload_pack_release_audit.md`](lc0_post_upload_pack_release_audit.md) — pack release audit.
 - [`lc0_pack_serving_compression_audit.md`](lc0_pack_serving_compression_audit.md) — pack serving/compression audit.
-- [`ort_webgpu_readback_diagnostics_plan.md`](ort_webgpu_readback_diagnostics_plan.md) — ORT readback diagnostics lane.
+- [`ort_webgpu_readback_diagnostics_plan.md`](ort_webgpu_readback_diagnostics_plan.md) — diagnostic guide and dated readback experiments; native-EP kernel profiling is unavailable, not zero GPU time.
 - [`lc0_t3_qdq_webnn_2026-06-10.md`](lc0_t3_qdq_webnn_2026-06-10.md) — t3 QDQ/WebNN probe notes.
-- [`lc0_wasm_relaxed_simd_inference_design.md`](lc0_wasm_relaxed_simd_inference_design.md) — relaxed-SIMD WASM inference design.
-- [`lc0_fused_legal_topk_readback_plan.md`](lc0_fused_legal_topk_readback_plan.md) — fused legal top-k readback plan.
-- [`onnx_deploy_workflow.md`](onnx_deploy_workflow.md) — ONNX export/deploy workflow.
+- [`lc0_wasm_relaxed_simd_inference_design.md`](lc0_wasm_relaxed_simd_inference_design.md) — historical WASM/Relaxed SIMD proposal, linked to measured MMI verdicts and current ORT artifact/thread controls.
+- [`lc0_fused_legal_topk_readback_plan.md`](lc0_fused_legal_topk_readback_plan.md) — unimplemented fused legal top-k readback proposal with parity/throughput gates.
 
 ## CPU engine port notes, experiments, and benchmarks
 
-- [`reckless_wasi.md`](reckless_wasi.md) — Reckless WASI port notes.
-- [`reckless_browser_benchmarks.md`](reckless_browser_benchmarks.md) — Reckless browser benchmarks.
-- [`reckless_relaxed_simd_probe.md`](reckless_relaxed_simd_probe.md) — Reckless relaxed-SIMD probe.
-- [`reckless_wasm_optimization_notes.md`](reckless_wasm_optimization_notes.md) — running Reckless optimization notes; index into the experiment/probe docs below.
-- [`reckless_wasm_next_exploration_notes.md`](reckless_wasm_next_exploration_notes.md) — next-exploration notes (threats-accumulator swizzle, threading route).
+- [`reckless_browser_benchmarks.md`](reckless_browser_benchmarks.md) — dated browser/API/reset/NNUE measurements and current production ladder.
+- [`reckless_relaxed_simd_probe.md`](reckless_relaxed_simd_probe.md) — dated old f32-tail relaxed-SIMD probe; superseded artifact, preserved negative result.
+- [`reckless_wasm_optimization_notes.md`](reckless_wasm_optimization_notes.md) — current Reckless build/runtime guide, with dated external-NNUE evidence, unmeasured swizzle sketch, and historical threading alternatives.
 - [`reckless_wasm_opt_experiment.md`](reckless_wasm_opt_experiment.md) — wasm-opt experiment (negative result).
-- [`reckless_wasm_simd_inspection.md`](reckless_wasm_simd_inspection.md) — SIMD NNUE module inspection.
-- [`reckless_wasm_nnue_activate_probe.md`](reckless_wasm_nnue_activate_probe.md) — NNUE activate kernel probe.
+- [`reckless_wasm_simd_inspection.md`](reckless_wasm_simd_inspection.md) — dated SIMD NNUE inspection, before the later kernel fixes.
+- [`reckless_wasm_nnue_activate_probe.md`](reckless_wasm_nnue_activate_probe.md) — dated standalone NNUE activation probe; backend integration followed.
 - [`reckless_wasm_nnue_kernel_probe.md`](reckless_wasm_nnue_kernel_probe.md) — NNUE kernel probe.
-- [`reckless_hot_path_profile.md`](reckless_hot_path_profile.md) — native hot-path profile.
-- [`reckless_threaded_wasm_feasibility.md`](reckless_threaded_wasm_feasibility.md) — WASI threading feasibility: root-split workers over shared-memory threading.
-- [`reckless_browser_native_api_plan.md`](reckless_browser_native_api_plan.md) — browser-native API facade plan.
-- [`reckless_browser_api_probe.md`](reckless_browser_api_probe.md) — browser API probe.
-- [`reckless_nnue_asset_size_plan.md`](reckless_nnue_asset_size_plan.md) — external NNUE asset split.
+- [`reckless_hot_path_profile.md`](reckless_hot_path_profile.md) — dated native proxy profile, not browser codegen evidence.
+- [`reckless_browser_native_api_plan.md`](reckless_browser_native_api_plan.md) — implemented experimental API design, native probe history, and negative SIMD performance result.
 - [`reckless_lite.md`](reckless_lite.md) — Reckless Lite variant notes (registered non-default variant).
-- [`reckless_lite_standalone.md`](reckless_lite_standalone.md) — standalone Reckless Lite packaging sketch.
+- [`reckless_lite_standalone.md`](reckless_lite_standalone.md) — unimplemented standalone Reckless Lite packaging proposal (kept in place).
 - [`stockfish_relaxed_simd_experiment.md`](stockfish_relaxed_simd_experiment.md) — Stockfish relaxed-SIMD experiment; shipped in the Stockfish corresponding-source archive.
 - [`stormphrax_browser_port.md`](stormphrax_browser_port.md) — Stormphrax Emscripten port; shipped in the Stormphrax corresponding-source archive.
 - [`plentychess_browser_port.md`](plentychess_browser_port.md) — PlentyChess Emscripten port notes.

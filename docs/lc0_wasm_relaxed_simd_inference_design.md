@@ -1,13 +1,29 @@
 # LC0 WASM Relaxed SIMD inference design
 
-Status: proposed  
+Status: historical research proposal, with current-control notes checked 2026-11-12.
+
 Target: browser CPU inference for LC0-family ONNX models  
 Baseline: ONNX Runtime Web 1.27 WASM with fixed-width SIMD  
 Primary question: can a Relaxed SIMD runtime plus a genuinely integer LC0 graph materially improve non-WebGPU inference without unacceptable model drift or compatibility loss?
 
-## Decision summary
+## Current status and measured verdict
 
-Build this as an isolated research lane with three independently measured changes:
+The later MMI/Relaxed SIMD outcome is recorded in
+[`inference_caching_optimization_gap_audit_2026-07-14.md`](./inference_caching_optimization_gap_audit_2026-07-14.md#mmi-and-relaxed-simd):
+uint8/int8 MatMulInteger improved some Ryzen workloads, but drift exceeded
+matched QDQ, M4 regressed, and tested hosts lacked relaxed integer-dot dispatch.
+It remains research evidence, not a production default. The proposal below is
+retained to explain those experiments, not to restart already-tested lanes.
+
+Current ORT packaging and thread rules are in
+[`engine_integration_architecture.md`](./engine_integration_architecture.md#onnx-runtime-packaging).
+CPU-only sessions now select the plain pair; isolated built CPU-only workers
+can auto-thread. These are runtime-flavor/threading outcomes, not proof of a
+Relaxed SIMD win.
+
+## Original decision summary
+
+The proposal separated three independently measured changes:
 
 1. a matched ONNX Runtime Web WASM build that emits Relaxed SIMD;
 2. a true integer LC0 model whose large matrix multiplications remain quantized during execution;
@@ -64,13 +80,11 @@ not that `-mrelaxed-simd` automatically makes numerical code faster. The lesson
 is that Relaxed SIMD pays when a proven hot kernel maps to a relaxed operation
 that the browser can lower efficiently.
 
-## Current-state evidence
+## Original runtime inspection and current artifact controls
 
-The installed runtime is `onnxruntime-web@1.27.0`. Because the application
-imports `onnxruntime-web/webgpu`, the current glue resolves
-`ort-wasm-simd-threaded.asyncify.mjs` and
-`ort-wasm-simd-threaded.asyncify.wasm` even for a WASM-only session. That
-deployed Asyncify artifact was inspected locally:
+The original `onnxruntime-web@1.27.0` inspection used the Asyncify
+`ort-wasm-simd-threaded.asyncify.{mjs,wasm}` pair even for CPU sessions.
+That inspected artifact had:
 
 ```text
 bytes:              24,254,953
@@ -78,11 +92,13 @@ SIMD opcode count:      92,159
 Relaxed SIMD count:          0
 ```
 
-The package also includes plain and JSPI flavors, including a 13,479,978-byte
-`ort-wasm-simd-threaded.wasm`, but the current application does not select that
-artifact. Asyncify/plain/JSPI flavor must therefore be an explicit experimental
-dimension. A custom relaxed build without Asyncify cannot be compared directly
-to the deployed Asyncify control.
+The package also included the 13,479,978-byte
+`ort-wasm-simd-threaded.wasm`. The application now stages and selects all three
+matched pairs: plain CPU-only WASM, JSPI for supported production GPU sessions,
+and Asyncify GPU fallback (also Node's inlined-glue match). Artifact kind locks
+per thread; a CPU-only thread cannot later escalate to WebGPU. Keep
+Asyncify/plain/JSPI explicit in measurements. A custom relaxed build without
+Asyncify cannot isolate SIMD effects against an Asyncify control.
 
 ORT 1.27 exposes:
 
@@ -196,14 +212,14 @@ matrix shapes, browser lowering, and the cost of quantize/dequantize nodes.
 ### H3: thread count and model export can dominate the SIMD delta
 
 The default thread count is context-dependent in `src/nn/ortRuntime.ts`.
-Browser main-thread sessions, Node sessions, and production-built workers
-default to one thread. The production-worker default is a workaround for a
-bundled pthread-glue boot deadlock, not a performance policy. Development
-workers leave ORT thread settings unset and can inherit ORT's multi-threaded
-default in a cross-origin-isolated context. Explicit `ortThreads=N` is clamped
-to one only on a non-isolated main thread, while `ortThreads=auto` resolves to
-`clamp(hardwareConcurrency - 1, 2, 4)` when threading is available. Every
-benchmark cell must pin a thread count and record the effective value.
+Main-thread and Node sessions default to one. Development workers leave ORT's
+default unset. Built GPU-capable workers use one; built CPU-only workers use
+auto when isolated/SAB-capable, otherwise one. Auto is capped at four and half
+the logical cores; `ortThreads=auto` also stays at one on GPU-capable pairs.
+The old bundled-worker deadlock workaround was superseded by self-hosted
+pthread bootstraps, not restored as a universal performance policy. Explicit
+integer `ortThreads=N` remains a benchmark override (clamped on a non-isolated
+main thread). Pin and record the effective count and artifact kind per cell.
 
 Model dtype also matters: f16 reduces bytes, but browser CPU execution does not
 provide the same broadly useful native f16 vector path as WebGPU. The current
@@ -228,8 +244,9 @@ The Relaxed SIMD artifact must be built from the same ORT revision and with the
 same operator-reduction, threading, asyncify/JSPI, optimization, and exception
 settings as its matched fixed-SIMD control.
 
-Before building a custom runtime, benchmark the upstream plain and JSPI
-artifacts as explicit CPU-lane candidates. If either can replace Asyncify
+The original plan first benchmarked plain and JSPI as CPU-lane candidates;
+the plain CPU-only pair is now selected in production. For any new custom
+runtime experiment, keep the matched artifact flavor as a control. If either can replace Asyncify
 safely and improve CPU inference, record that as a separate runtime-flavor win,
 not a Relaxed SIMD win.
 

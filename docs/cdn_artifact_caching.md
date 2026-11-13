@@ -1,11 +1,11 @@
 # CDN artifact caching architecture
 
-Last updated: 2026-06-25
+Last updated: 2026-11-12 (source-checked; no new live CDN measurements).
 
 ## Overview
 
 Browser chess engines (WASM binaries, NNUE networks, ONNX models) range from
-130 KB to 60+ MB. Serving them efficiently from a CDN, with correct cache
+small glue/WASM files to hundreds of MB for large model exports. Serving them efficiently from a CDN, with correct cache
 semantics and compression, is critical for the analysis and arena pages to
 function. This document describes the two-plane serving architecture, the
 Cloudflare Worker that mediates R2 access, known failure modes, and the
@@ -67,8 +67,8 @@ The Worker sits in front of R2 and handles:
    to content-addressed keys by reading channel + release manifests from R2.
 
 2. **Edge caching:** Caches immutable artifact responses in Cloudflare's edge
-   cache (`caches.default`). Content-addressed keys are cached indefinitely;
-   logical aliases use a short TTL. HEAD metadata and full-body responses are
+   cache (`caches.default`). Content-addressed responses have a one-year policy;
+   logical responses receive a short client TTL while sharing canonical edge bodies. HEAD metadata and full-body responses are
    cached under separate keys to avoid slicing large blobs in Worker memory.
 
 3. **Range requests:** Delegates to R2's native range reader for `Range: bytes=`
@@ -87,8 +87,9 @@ The Worker sits in front of R2 and handles:
 
 - It does not compress responses. Brotli/gzip pre-compression is done at publish
   time (see below).
-- It does not validate artifact integrity. SHA-256 validation happens in the
-  browser via `modelCache.ts`.
+- It validates representation descriptors/metadata, not full-body SHA-256 on
+  every request. Body integrity is checked by the publisher/canary and browser
+  model cache.
 - It does not cache logical-alias responses in the edge cache (only
   content-addressed keys are edge-cached).
 
@@ -97,43 +98,50 @@ The Worker sits in front of R2 and handles:
 ### Publish-time pre-compression
 
 `scripts/precompress_engine_artifacts.mjs` generates `.br` and `.gz` sidecars
-during the Netlify build. Brotli quality is 11 for files under 64 MB and 5 for
-larger files (to avoid timeout on the 57 MB Viridithas and 64 MB Reckless WASMs).
+for local/all-in-one static builds. Brotli quality is 11 through 64 MiB and 5
+above it. Directory and extension coverage comes from
+`scripts/engine_artifact_registry.mjs`.
 
-`scripts/r2_brotli_publish_assets.mjs` uploads artifacts to R2 with correct
-`Content-Type`, `Content-Encoding`, and `Cache-Control` metadata.
+The current content-addressed release generator emits identity/Brotli
+representations and encoded/decoded metadata. Publish them with
+`scripts/publish_hashed_artifacts_to_r2.mjs`; the older
+`scripts/r2_brotli_publish_assets.mjs` logical-path helper is not the
+release/channel-last publication path.
 
 ### CDN behavior
 
-Cloudflare auto-negotiates compression based on `Accept-Encoding`. The Worker
-sets `no-transform` on binary types to prevent the CDN from re-compressing WASM.
-For text assets (JS glue, JSON manifests), the CDN handles brotli negotiation
-automatically.
+For v2 artifacts the Worker selects the recorded identity or Brotli
+representation from `Accept-Encoding`, with `Vary: Accept-Encoding`. Range
+requests select identity. Canonical physical representation URLs are distinct
+cache keys. `no-transform` prevents a second binary transformation; the Worker
+does not recompress the body.
 
-### Known issue: cache poisoning on large WASM files
+### Historical zero-length HEAD diagnosis: not proof of corruption
 
-If the origin (R2 Worker or publish pipeline) returns a 0-byte or truncated
-response even once, Cloudflare caches that bad response. This has been observed
-on `viridithas-relaxed-simd128.wasm` (57 MB), where `curl -H 'Accept-Encoding:
-br,gzip'` returns `Content-Length: 0` while `curl -H 'Accept-Encoding: identity'`
-returns the full file.
+The June incident notes reported `Content-Length: 0` for a negotiated
+`viridithas-relaxed-simd128.wasm` request (then described as 57 MB), versus a
+full identity response. That header observation alone does not establish a
+zero-byte body or poisoned cache: Workers may normalize cached synthetic HEAD
+responses to length zero.
 
-Symptoms: engine "searching" indefinitely with no error, eventually timing out.
-The WASM worker fetches the URL, receives 0 bytes, and either hangs or fails
-silently inside `WebAssembly.compile()`.
-
-Mitigation:
-- Purge the specific Cloudflare cache entry for the affected URL.
-- Use cache-busting query strings or content-addressed URLs on redeploy.
-- Monitor `Content-Length` vs `X-Artifact-Content-Length` header mismatches.
+An engine timeout can still come from missing/truncated bodies, failed compile,
+startup or search. Compare the release's decoded `X-Artifact-Content-Length`
+and SHA-256 with representation-specific `X-Artifact-Encoded-Length` and hash.
+Check an identity Range and, when needed, a tightly bounded full-body integrity
+canary. Only diagnose/purge a bad entry after proving a representation/body
+mismatch. Query-string cache busting is not a repair for canonical physical
+keys. See [`cloudflare_r2_artifact_validation.md`](./cloudflare_r2_artifact_validation.md).
 
 ## Browser-side caching
 
 ### Cache Storage (model cache)
 
 `src/lc0/modelCache.ts` uses the Cache Storage API to store model artifacts.
-On cache hit, it validates byte length and SHA-256 hash. A mismatch deletes the
-entry and re-fetches with `cache: "reload"` (not `force-cache`).
+New bytes are length/SHA-256 checked before caching. Ordinary warm hits use
+trusted IndexedDB verification metadata plus byte length, expected hash,
+schema/runtime version and age; missing/stale metadata triggers full rehash.
+A mismatch deletes bytes and metadata and re-fetches with `cache: "reload"`
+(not `force-cache`). Warm inference still reads the model bytes.
 
 ### WASM module cache (worker-side)
 
@@ -152,14 +160,17 @@ service worker cache small.
 
 | Artifact | Raw size | Notes |
 |---|---|---|
-| Stockfish lite single WASM | ~7 MB | Default SF opponent |
-| Viridithas WASM (all variants) | ~57 MB | Scalar, SIMD, relaxed SIMD |
-| Reckless WASM (all variants) | ~64 MB | Scalar, SIMD, relaxed SIMD |
-| Berserk WASM + data | ~10 MB | Emscripten with NNUE |
-| PlentyChess WASM + data | ~60 MB | Emscripten with NNUE |
-| LC0 small ONNX | ~21 MB | Default LC0 model |
-| LC0 BT4 ONNX | ~370 MB | Research/arena only |
-| Maia3 ONNX | ~50 MB | Human move model |
+| Stockfish 19.0.1 lite single WASM | 1,845,971 bytes baseline | Relaxed lite 1,845,006 bytes |
+| Viridithas v20 WASM | ~53.2 MiB each | Scalar, SIMD, relaxed; compressed NNUE embedded |
+| Reckless embedded WASM | ~62 MiB each | External prototypes split code + 63,266,880-byte NNUE |
+| Berserk WASM + data | ~0.13–0.14 MB + ~25 MB | Three code tiers, one shared NNUE preload |
+| PlentyChess v8 WASM + data | ~0.4 MB + ~53 MB | Shared processed NNUE; see upgrade manifest |
+| LC0 Small b1 QDQ8 ONNX | 20,558,031 bytes | Apple split-K sibling 20,580,952 bytes |
+| LC0 BT4 b8 QDQ8 ONNX | 186,676,343 bytes | Current large-net selection; old f16 export ~370 MB |
+| Maia3 graph QDQ8 ONNX | 27,971,924 bytes | Current human model; original f32 fallback 45,683,686 bytes |
+
+These are raw artifact sizes, not transfer size or resident memory. Exact pins
+and compression metadata live in per-engine/model manifests.
 
 ## Operational playbook
 
@@ -169,8 +180,8 @@ service worker cache small.
    ```sh
    curl -sI -H 'Accept-Encoding: br,gzip' https://assets.0x88.app/viridithas/viridithas-relaxed-simd128.wasm
    ```
-   If `Content-Length: 0` or the response is truncated, the CDN has a poisoned
-   cache entry.
+   A zero synthetic HEAD length is inconclusive. Compare decoded/encoded
+   artifact headers with the pinned release, then use the canary below.
 
 2. Compare with identity encoding:
    ```sh
@@ -186,30 +197,47 @@ service worker cache small.
    done
    ```
 
-4. If a cache entry is poisoned, purge it via the Cloudflare dashboard or API:
+4. Use `scripts/validate_artifact_cdn_headers.mjs --release <local-release.json>`
+   for immutable release metadata and a small identity Range check. Add
+   `--verify-bodies --limit 1` only when a full decoded integrity check is needed.
+   See `docs/cloudflare_r2_artifact_validation.md` for complete commands. If a
+   body/representation mismatch is proven, purge the affected canonical physical
+   URL(s), not just a logical alias. Example API shape (requires authorization):
    ```sh
    curl -X POST "https://api.cloudflare.com/client/v4/zones/<zone>/purge_cache" \
      -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" \
-     --data '{"files":["https://assets.0x88.app/viridithas/viridithas-relaxed-simd128.wasm"]}'
+     --data '{"files":["https://assets.0x88.app/artifacts/sha256/<decoded-sha>/identity"]}'
    ```
 
 ### Publishing new artifacts
 
-1. Build artifacts locally or in CI.
-2. Run `scripts/r2_brotli_publish_assets.mjs` to upload with correct metadata.
-3. Run `scripts/write_artifact_release_manifests.mjs` to generate release manifests
-   and content-addressed bodies under the ignored
-   `.local-dev-artifacts/artifact-releases/` staging root. Use `--out-dir` only
-   when an explicitly managed alternative staging root is required.
-4. Run `scripts/netlify_r2_release.mjs` to update the channel pointer.
-5. Purge the channel URL for immediate propagation.
+1. Build and validate the affected artifact/source/manifest set locally or in CI.
+2. Run `scripts/write_artifact_release_manifests.mjs` to generate the release
+   and content-addressed bodies under ignored
+   `.local-dev-artifacts/artifact-releases/`. Use `--out-dir` only for an
+   explicitly managed alternative staging root.
+3. Inspect `scripts/publish_hashed_artifacts_to_r2.mjs` without `--execute`.
+   After approval, publish immutable blobs and the release first, without a
+   channel mutation. Missing/corrupt bodies must block publication.
+4. Run the non-mutating release canary in
+   `docs/cloudflare_r2_artifact_validation.md`. It checks the exact hosted
+   release and its physical representations, not just the current stable alias.
+5. After approval and a passing canary, use the same publisher with the matching
+   `--channel-manifest`. It validates the release/channel relationship and
+   updates the channel last. Purge only the channel if immediate propagation
+   is needed. Do not overwrite immutable bodies.
+
+`scripts/netlify_r2_release.mjs` verifies/builds/deploys the pruned Netlify app
+shell. Its `--channel-url` bakes a URL into that shell; it does **not** publish
+or update the R2 channel.
 
 ### Adding a new engine family
 
 1. Add the WASM/JS/data files to `public/<engine>/`.
-2. Add entries to `scripts/r2_brotli_publish_assets.mjs` targets list.
-3. Add logical-alias routing in the Cloudflare Worker if using content-addressed
-   serving.
+2. Add inventory/preparation/external-hosting metadata to
+   `scripts/engine_artifact_registry.mjs`, rather than parallel directory lists.
+3. Include the new logical URLs in the generated release map. Review Worker
+   prefix support only if the new path is outside its supported families.
 4. Update `public/artifact-index.json` and `docs/hosted_artifacts.md`.
 5. Verify headers and Range support after the first deploy.

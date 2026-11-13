@@ -433,8 +433,9 @@ under "Not yet run" below are still open.
      A/B"). Outputs differ from the shipped model at the f16 reordering level,
      so best-move parity is expected rather than bit identity.
 5. **Publish and release** through the existing artifact flow:
-   - `npm run deploy:write-release-manifests`, which writes a new
-     `public/releases/<date>.json`;
+   - `npm run deploy:write-release-manifests`, which stages a new manifest at
+     `.local-dev-artifacts/artifact-releases/releases/<release-id>.json` by
+     default (override with `--out-dir` only for a managed alternative root);
    - publish the hashed artifact to R2;
    - then `npm run release:netlify-r2`.
 

@@ -1,19 +1,24 @@
 # Reckless Lite evaluation notes
 
-Reckless currently builds for the browser as a WASI module with an embedded NNUE. Most of the generated `.wasm` size is the embedded network, not JavaScript/WASI overhead.
+As of 2026-11-12, full Reckless is pinned to `0010617448bdef4c8cd7d4f4825b7e42c8bc262a`
+with the v60 network. Embedded relaxed SIMD → SIMD → scalar remains the
+default ladder; external-NNUE prototypes are non-default. See
+[`reckless_wasm_optimization_notes.md`](./reckless_wasm_optimization_notes.md).
+The v53 Lite experiment below is historical and remains local/non-default.
 
 ## Why compare against Stockfish Lite?
 
 Stockfish.js ships several browser flavors. Its “lite” builds are much smaller because they embed a smaller/weaker NNUE network rather than the full-size network. That is the useful pattern to copy for Reckless: keep the browser integration conservative and offer a smaller optional engine artifact for better load time.
 
-Approximate Stockfish.js sizes in the current dependency:
-
-- Full single-thread WASM: ~108 MiB
-- Lite single-thread WASM: ~7 MiB
+The current Stockfish.js 19.0.1 manifest records 1,845,971 bytes for the
+baseline lite-single WASM (1,845,006 for relaxed lite-single). See
+`public/stockfish/stockfish-19.0.1.manifest.json` for the full flavor sizes.
+The earlier comparison below used ~108 MiB full / ~7 MiB lite artifacts;
+those are not sizes of the current dependency.
 
 ## Current Reckless full WASI build
 
-Current Reckless `main` embeds:
+The approved Reckless full build embeds:
 
 - Network: `v60-7f587dfb.nnue`
 - NNUE size: ~60 MiB
@@ -80,7 +85,7 @@ A quick Node WASI `go movetime 500` benchmark, excluding network download and mo
 
 Treat this as preliminary. The browser benchmark now has enough matrix/reporting support to replace these ad-hoc Node numbers with browser measurements: enter multiple `Name | FEN` rows, depth budgets, and/or movetime budgets on `/lab/reckless-benchmark.html`, then export the JSON/CSV report.
 
-## Stockfish Lite comparison
+## Historical Stockfish Lite comparison (pre-19.0.1)
 
 An ad-hoc browser test on the isolated static server compared Stockfish single-thread flavors at `go movetime 500`:
 

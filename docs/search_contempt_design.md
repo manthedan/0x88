@@ -134,9 +134,9 @@ Two scorers:
   stable from ~20 moves. Simulated Maia 1900 → ≈1362 (−538) with a
   nearly flat likelihood profile above 1400.
 
-The 1900 miss is confounded: Play-page tail-trimmed *sampling* from old
-Maia-1900 may genuinely play below 1900 (an observation that also
-applies to our "Maia 1900" opponent as shipped!), and/or Maia3's
+The 1900 miss in this historical Maia-1 experiment is confounded:
+tail-trimmed *sampling* from old Maia-1900 may genuinely play below 1900
+(the Play opponent at that experiment's date, not today's Maia3), and/or Maia3's
 discrimination weakens toward the top of the range. Resolving needs
 real rated human games (e.g. lichess PGNs) as ground truth. For the
 product mode: self-reported rating remains the primary input; the
@@ -160,8 +160,10 @@ All mechanisms off (`0`) ⇒ bit-identical search (puct/lc0 parity suites).
 
 `scripts/contempt_vs_maia.mjs` (removed in commit `460c2a4`, 2026-06-18; recover with `git show 460c2a4^:scripts/contempt_vs_maia.mjs`)
 played Lc0 small (t1, fixed visits) against
-a Maia net sampling from its human-move distribution — the same opponent
-model the Play page ships. Arms are `--draw-scores` zipped with
+a Maia-1 net sampling from its human-move distribution — the Play opponent
+model at that experiment's date. Today's human-like opponent is Maia3
+(`src/lc0/playBrowser.ts`), using the graph QDQ8 model with QDQ8/upstream
+fallbacks (`src/lc0/maia3.ts`). Arms are `--draw-scores` zipped with
 `--sc-limits`. Queen odds (the Lc0 side starts without its queen) vs
 sampled Maia 1900:
 
@@ -204,17 +206,20 @@ knob denominated in Elo. Play-page defaults stay scLimit-based.
 - Settings are net- and scenario-dependent: re-run the harness when
   changing nets or ladders.
 
-## Current Play-page settings (`src/lc0/playBrowser.ts`)
+## Current Play-page settings (`src/lc0/playBrowser.ts`, checked 2026-11-12)
 
 | Opponent | drawScore | scLimit | cpuct |
 | --- | ---: | ---: | ---: |
 | Lc0 small / t3 / BT4 | −0.25 | 16 | default |
-| Leela Queen Odds | −0.5 | 24 | 1.5 |
-| Maia (human model) | — | — | — |
+| Leela Queen Odds as White | −0.4 | 40 | 1.5 |
+| Leela Queen Odds as Black | −0.6 | 32 | 1.5 |
+| Maia3 (human model) | — | — | — |
 
-LQO mirrors its README (DrawScore ±0.4–0.6, CPuct 1.5, ScLimit 32–40 at
-12–15k nodes) scaled to browser visit budgets; unlike t1, its value head
-is odds-calibrated, which is why drawScore stays on for it.
+LQO uses color-dependent settings from its README (DrawScore magnitude
+0.4–0.6, CPuct 1.5, ScLimit 32–40; the native bot uses 12–15k nodes).
+Play also sets FPU 0.4 and swaps colors when LQO plays Black. These are the
+current values, not the old −0.5/24 browser setting. Unlike t1, its value head
+is odds-calibrated, so drawScore stays on.
 
 Regular Lc0 opponents get the A/B-validated `scLimit 16` as well: the
 limit models the *opponent's* search ability, not ours, so it stays fixed
@@ -309,8 +314,9 @@ dependency.** The human-modeling side runs on Maia3 (45.7MB, cached,
 already shipping); the search side is native to our PUCT (0MB). The
 native Monty binary and extracted nets (`models/monty/`, ~947MB) are
 archival — re-extractable from the GitHub release binary if a
-re-validation is ever needed — and the wasm port remains a lab
-curiosity.
+re-validation is ever needed — and the wasm lab port was retired and deleted in 2026-11. Its mathematical
+provenance and frozen oracle samples remain useful; it is not a runtime
+dependency.
 
 Note: contempt cannot be injected into the classical UCI engines —
 modern Stockfish removed its Contempt option and the others never had
