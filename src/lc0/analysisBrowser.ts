@@ -1857,6 +1857,45 @@ async function workerBigNetLines(
   }
 }
 
+/**
+ * A big net picks its served model (the shipped export or its split-K rewrite)
+ * when its worker initializes, and that URL is part of every cache and
+ * selection key (engineAnalysisCacheKey). So, like the Lc0 Small backend before
+ * analyzeCurrent proceeds, the selected big nets are initialized before a run
+ * takes its keys. Keys taken before init would never match the ones taken after
+ * it, and the run's results would be discarded. initBigNetsForRun returns the
+ * init errors by net, which the run reports as that engine's failure without
+ * retrying the download.
+ */
+function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
+  const keys = new Set<AnalysisBigNetKey>();
+  for (const row of rows) {
+    if (row.family !== 'lc0' || !isLc0BigNetVariant(row.variant)) continue;
+    const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
+    if (!peekBigNetSearcher(key)?.servedModelUrl) keys.add(key);
+  }
+  return [...keys];
+}
+
+async function initBigNetsForRun(keys: AnalysisBigNetKey[]): Promise<Map<AnalysisBigNetKey, Error>> {
+  const errors = new Map<AnalysisBigNetKey, Error>();
+  await Promise.all(
+    keys.map(async (key) => {
+      const { config, searcher } = bigNetFor(key);
+      const label = `Lc0 ${config.name}`;
+      searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
+      try {
+        await searcher.init();
+      } catch (error) {
+        errors.set(key, error instanceof Error ? error : new Error(String(error)));
+      } finally {
+        hideModelProgress();
+      }
+    }),
+  );
+  return errors;
+}
+
 // Lc0 big nets use hosted ONNX assets and prefer WebGPU, with a slow CPU fallback.
 async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<void> {
   await Promise.all([
@@ -4330,7 +4369,8 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   // Snapshot after the terminal-position return, which skips the finally that clears it.
   analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
   const selectedLabels = rows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
-  const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
+  // Retaken below once the selected big nets have initialized (initBigNetsForRun).
+  let selectionCacheKey = analysisSelectionCacheKey(fen, rows);
   activeAnalysisSelectionKey = selectionCacheKey;
   el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
   clearAnalysisSearchProgress();
@@ -4340,6 +4380,13 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   let disposeDeferredEngines = false;
   let resumeForce = false;
   try {
+    // Every key below is taken after init, so they all carry the served models.
+    // A run with no uninitialized big net does not yield here.
+    const uninitializedBigNets = bigNetsAwaitingInit(rows);
+    const bigNetInitErrors = uninitializedBigNets.length ? await initBigNetsForRun(uninitializedBigNets) : new Map<AnalysisBigNetKey, Error>();
+    if (controller.signal.aborted || mountAbort.signal.aborted) return;
+    selectionCacheKey = analysisSelectionCacheKey(fen, rows);
+    activeAnalysisSelectionKey = selectionCacheKey;
     const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
     const publishLines = () => {
       if (controller.signal.aborted || analysisSelectionCacheKey(tree.current.fen) !== selectionCacheKey) return;
@@ -4386,8 +4433,11 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       const cacheKey = engineAnalysisCacheKey(fen, row);
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
+        const initError = bigNetInitErrors.get(row.variant === 't3' ? 't3' : 'bt4');
         pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () =>
-          workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv, controller.signal),
+          initError
+            ? Promise.reject(initError)
+            : workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv, controller.signal),
         );
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
