@@ -30,7 +30,7 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`human_vs_computer_play.md`](human_vs_computer_play.md) — Maia3 neural human modeling vs LQO/Monty-style contempt search for practical human play.
 - [`engine_upgrade_audit.md`](engine_upgrade_audit.md) — `npm run engine:upgrade-audit`: the browser-engine upgrade correctness audit tool.
 - [`search_contempt_design.md`](search_contempt_design.md) — search-contempt design; referenced from `src/lc0/playBrowser.ts`.
-- [`engine_resource_broker_design.md`](engine_resource_broker_design.md) — CPU/GPU budget arbitration; referenced from `src/lc0/resourceBroker.ts`.
+- [`engine_resource_broker_design.md`](engine_resource_broker_design.md) — current CPU budgets and resource-class leases; GPU evaluation arbitration deferred. Referenced from `src/lc0/resourceBroker.ts`.
 - [`arena_analysis_roadmap.md`](arena_analysis_roadmap.md) — staged arena/analysis design; referenced from `src/lc0/charts.ts`, `gameReview.ts`, and `tournament.ts`.
 
 ## Artifact distribution, hosting, and models
@@ -84,20 +84,15 @@ Every tracked Markdown file under `docs/` is linked from this index;
 
 ## CPU engine port notes, experiments, and benchmarks
 
-- [`reckless_wasi.md`](reckless_wasi.md) — Reckless WASI port notes.
 - [`reckless_browser_benchmarks.md`](reckless_browser_benchmarks.md) — Reckless browser benchmarks.
 - [`reckless_relaxed_simd_probe.md`](reckless_relaxed_simd_probe.md) — Reckless relaxed-SIMD probe.
-- [`reckless_wasm_optimization_notes.md`](reckless_wasm_optimization_notes.md) — running Reckless optimization notes; index into the experiment/probe docs below.
-- [`reckless_wasm_next_exploration_notes.md`](reckless_wasm_next_exploration_notes.md) — next-exploration notes (threats-accumulator swizzle, threading route).
+- [`reckless_wasm_optimization_notes.md`](reckless_wasm_optimization_notes.md) — current Reckless build/runtime guide, with dated external-NNUE evidence, unmeasured swizzle sketch, and historical threading alternatives.
 - [`reckless_wasm_opt_experiment.md`](reckless_wasm_opt_experiment.md) — wasm-opt experiment (negative result).
 - [`reckless_wasm_simd_inspection.md`](reckless_wasm_simd_inspection.md) — SIMD NNUE module inspection.
 - [`reckless_wasm_nnue_activate_probe.md`](reckless_wasm_nnue_activate_probe.md) — NNUE activate kernel probe.
 - [`reckless_wasm_nnue_kernel_probe.md`](reckless_wasm_nnue_kernel_probe.md) — NNUE kernel probe.
 - [`reckless_hot_path_profile.md`](reckless_hot_path_profile.md) — native hot-path profile.
-- [`reckless_threaded_wasm_feasibility.md`](reckless_threaded_wasm_feasibility.md) — WASI threading feasibility: root-split workers over shared-memory threading.
-- [`reckless_browser_native_api_plan.md`](reckless_browser_native_api_plan.md) — browser-native API facade plan.
-- [`reckless_browser_api_probe.md`](reckless_browser_api_probe.md) — browser API probe.
-- [`reckless_nnue_asset_size_plan.md`](reckless_nnue_asset_size_plan.md) — external NNUE asset split.
+- [`reckless_browser_native_api_plan.md`](reckless_browser_native_api_plan.md) — implemented experimental API design, native probe history, and negative SIMD performance result.
 - [`reckless_lite.md`](reckless_lite.md) — Reckless Lite variant notes (registered non-default variant).
 - [`reckless_lite_standalone.md`](reckless_lite_standalone.md) — standalone Reckless Lite packaging sketch.
 - [`stockfish_relaxed_simd_experiment.md`](stockfish_relaxed_simd_experiment.md) — Stockfish relaxed-SIMD experiment; shipped in the Stockfish corresponding-source archive.

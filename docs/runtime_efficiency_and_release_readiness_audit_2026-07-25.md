@@ -105,7 +105,7 @@ The remaining work is on the build side, and it splits cleanly by language:
   is the well-trodden path; Stockfish.wasm ships exactly this way. This is the
   high-value, moderate-risk work.
 - **Reckless, Viridithas (Rust / WASI)** — genuinely harder.
-  `docs/reckless_threaded_wasm_feasibility.md` analyses this properly and
+  the historical feasibility section in `docs/reckless_wasm_optimization_notes.md` analyses this properly and
   concludes root-split workers before shared-memory threading. That conclusion
   is sound and should stand. Note that the doc is scoped to Reckless only; the
   C++ engines were never given the same analysis, and the conclusion does not

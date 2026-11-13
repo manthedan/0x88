@@ -127,6 +127,6 @@ dot should widen there via VPDPBUSD lowering.
 
 ## Remaining exploration tracks
 
-See [`reckless_wasm_next_exploration_notes.md`](./reckless_wasm_next_exploration_notes.md)
-for the threats-accumulator swizzle design and the Emscripten-pthreads
-threading route.
+See [`reckless_wasm_optimization_notes.md`](./reckless_wasm_optimization_notes.md)
+for the unmeasured threats-accumulator swizzle sketch and historical
+threading alternatives, including the later decision not to pursue promotion.

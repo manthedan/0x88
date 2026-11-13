@@ -36,4 +36,9 @@ Result from 2026-06-04:
 }
 ```
 
-The probe is not wired into Reckless yet, but it confirms another NNUE sub-kernel maps cleanly to `core::arch::wasm32` SIMD with exact parity and a large standalone speedup. Together with the accumulator probe, this supports focusing a real WASM SIMD backend on feature accumulation plus `activate_ft`/output preparation before touching search control logic.
+At the 2026-06-04 probe stage, this was not wired into Reckless yet. It
+confirmed that this sub-kernel mapped to `core::arch::wasm32` SIMD with exact
+parity and a large standalone speedup. The backend was subsequently
+integrated; see [`reckless_wasm_simd_inspection.md`](./reckless_wasm_simd_inspection.md)
+and `scripts/build_reckless_wasi.mjs`. The 8.265× result above remains a
+microbenchmark, not an engine-wide speedup.
