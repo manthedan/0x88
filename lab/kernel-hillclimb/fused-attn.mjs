@@ -18,9 +18,25 @@
 //             output buffer on that same device (ort.env.webgpu.device). Reports wall
 //             per session.run in a 15-run chain vs the same GPU work, and the chain
 //             with a custom dispatch after every run.
+//   debugZeroOutput=1 negative check: the parity readback clears the output buffer
+//             instead of dispatching the kernel, so the gate must report ok:false.
+//
+// Gate (`ok`): every f32-accumulate kernel variant must match ORT WASM per element
+// within atol 2^-12 + rtol 2^-9 * |wasm| (>= 2 f16 ULPs) + |wasm - f64| (the reference's
+// own error; see FUSED_ATTN_PARITY_TOL in fused-attn-kernels.mjs), with no non-finite
+// outputs. WebGPU validation errors throw (page error, bench.mjs fails). f16-accumulate variants and the ORT WebGPU sessions are reported
+// but diagnostic only (`gate.diagnostic`). A failed gate publishes ok:false with
+// `gate.problems` (status "done (gate failed)"; bench.mjs exits 1).
 import * as ort from '../../src/nn/ortRuntime.ts';
 import { intParam, listParam, log, params, runMain, runtimeDeviceIdentity, summarize } from './common.mjs';
-import { fusedAttentionBytes, fusedAttentionFlops, fusedAttentionKernel } from './fused-attn-kernels.mjs';
+import {
+  fusedAttnDiffStats as diffStats,
+  FUSED_ATTN_PARITY_TOL,
+  fusedAttentionBytes,
+  fusedAttentionFlops,
+  fusedAttentionKernel,
+  fusedAttnGate,
+} from './fused-attn-kernels.mjs';
 import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
 
 const VARIANTS = {
@@ -46,33 +62,12 @@ async function fetchBin(url, Type) {
   return new Type(await r.arrayBuffer());
 }
 
-/** max |a-b|, mean |a-b|, and the worst element's reference value. */
-function diffStats(cand, ref) {
-  if (cand.length !== ref.length) throw new Error(`length mismatch ${cand.length} vs ${ref.length}`);
-  let max = 0;
-  let sum = 0;
-  let at = 0;
-  let nonFinite = 0;
-  for (let i = 0; i < ref.length; i++) {
-    if (!Number.isFinite(cand[i])) {
-      nonFinite++;
-      continue;
-    }
-    const d = Math.abs(cand[i] - ref[i]);
-    sum += d;
-    if (d > max) {
-      max = d;
-      at = i;
-    }
-  }
-  return { maxAbs: max, meanAbs: sum / ref.length, refAtMax: ref[at], nonFinite };
-}
-
 runMain(async () => {
   const net = params.get('net') ?? 'bt4';
   const iters = intParam('iters', 40, 3, 2000);
   const ortIters = intParam('ortIters', 10, 1, 200);
   const variantNames = listParam('variants', Object.keys(VARIANTS));
+  const debugZeroOutput = params.get('debugZeroOutput') === '1';
   const base = `/models/fused-attn/${net}/`;
   const manifest = await (await fetch(`${base}manifest.json`)).json();
   const { batch, heads, depth, dModel, scale, inputNames, outputName } = manifest;
@@ -187,7 +182,9 @@ runMain(async () => {
     return buf;
   };
   const outBytes = batch * 64 * dModel * 2;
-  const outBuf = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  // clearBuffer (debugZeroOutput) needs COPY_DST; the timed configuration keeps the plain usage.
+  const outUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | (debugZeroOutput ? GPUBufferUsage.COPY_DST : 0);
+  const outBuf = device.createBuffer({ size: outBytes, usage: outUsage });
   const readBuf = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const uni = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   device.queue.writeBuffer(uni, 0, new Float32Array([scale, 0, 0, 0]));
@@ -227,13 +224,16 @@ runMain(async () => {
     const parity = [];
     for (const [i, L] of layers.entries()) {
       const enc = device.createCommandEncoder();
-      dispatch(enc, groups[i]);
+      if (debugZeroOutput) enc.clearBuffer(outBuf);
+      else dispatch(enc, groups[i]);
       enc.copyBufferToBuffer(outBuf, 0, readBuf, 0, outBytes);
       device.queue.submit([enc.finish()]);
       await readBuf.mapAsync(GPUMapMode.READ);
       const out = f16ToF32Array(new Uint16Array(readBuf.getMappedRange().slice(0)));
       readBuf.unmap();
-      parity.push({ layer: L.layer, vsWasm: diffStats(out, L.wasm), vsF64: diffStats(out, L.ref) });
+      const vsWasm = diffStats(out, L.wasm, L.ref);
+      const w = vsWasm.worstIndex;
+      parity.push({ layer: L.layer, vsWasm, vsF64: diffStats(out, L.ref), atWorst: { index: w, kernel: out[w], wasm: L.wasm[w], f64: L.ref[w] } });
     }
     // Timing: `iters` dispatches, each its own timestamped pass (split mode), 15 per
     // submit like one invoke's worth of encoders.
@@ -259,6 +259,7 @@ runMain(async () => {
     const t = summarize(us);
     kernels[name] = {
       ...cfg,
+      gate: fusedAttnGate(name, cfg.acc, parity),
       workgroupSize: 64 * cfg.rows,
       workgroups: batch * heads,
       parity,
@@ -271,9 +272,23 @@ runMain(async () => {
   }
   if (gpuErrors.length) throw new Error(`WebGPU errors: ${gpuErrors.join(' | ')}`);
   const identity = await runtimeDeviceIdentity(prof);
+  const gatedVariants = variantNames.filter((n) => kernels[n].gate.gated);
+  const gateProblems = gatedVariants.flatMap((n) => kernels[n].gate.problems);
+  if (!gatedVariants.length) gateProblems.push('no f32-accumulate variant ran; nothing gates (add f32r1 or f32r2 to variants)');
+  const gate = {
+    policy: 'f32-accumulate kernels vs ORT WASM, per element |kernel - wasm| <= atol + rtol*|wasm| + |wasm - f64|, no non-finite outputs',
+    tolerance: FUSED_ATTN_PARITY_TOL,
+    gated: gatedVariants,
+    diagnostic: [...variantNames.filter((n) => !kernels[n].gate.gated), ...Object.keys(ortResults).map((k) => `ort.${k}`)],
+    debugZeroOutput,
+    problems: gateProblems,
+    pass: gateProblems.length === 0,
+  };
+  if (!gate.pass) log('GATE_FAILED', gateProblems);
   return {
     bench: 'fused-attn',
-    ok: Object.values(kernels).every((k) => k.parity.every((p) => p.vsWasm.nonFinite === 0)),
+    ok: gate.pass,
+    gate,
     device: identity,
     net,
     shape: { ...shapeInfo, dModel, scale, bytesPerDispatch: fusedAttentionBytes(shapeInfo), flopsPerDispatch: fusedAttentionFlops(shapeInfo) },

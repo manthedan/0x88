@@ -198,6 +198,36 @@ accumulation, ORT's or ours, inherits this.** Only f32 accumulation fixes it.
 f32 costs little: f32r2 is 8% slower than f16r2 on the 3090, and on the M4
 f16 was not reliably faster at all.
 
+### Page gate
+
+The page's `ok` is a parity gate on the f32-accumulate variants only. Every
+output element must satisfy
+
+|kernel − WASM| ≤ 2⁻¹² + 2⁻⁹·|WASM| + |WASM − f64|,
+
+with no non-finite outputs.
+
+- **The relative term** is at least two f16 ULPs at any magnitude. Both sides
+  store f16, and the largest f32 differences above are one ULP of the
+  reference (2.4e-4 at |0.26|, 9.8e-4 at |1.34|, 1.95e-3 at |2.45|).
+- **The absolute term** covers outputs near zero.
+- **The last term is the reference's own error** against the float64 result
+  on the same inputs. ORT WASM is not exact either: at BT4 layer 14 one
+  output is 5.26e-4 in WASM, while float64 and our kernel both give 9.37e-4
+  (cancellation). A tolerance on WASM alone failed our kernel on that
+  element.
+
+On the M4, every element of both nets sits at 0.33 of its allowance or less,
+about 3× headroom. The one exception is that BT4 layer 14 element, at 0.63,
+where our kernel is within 7e-7 of float64. A zeroed output fails on every
+element with |ref| above about 2.5e-4, and a 1% rescale on every element
+above about 0.03. The f16-accumulate variants and the ORT WebGPU sessions are
+reported but never gate; the result JSON lists them under `gate.diagnostic`.
+A failed gate publishes `ok: false` with `gate.problems`, and `bench.mjs`
+exits 1. `debugZeroOutput=1` clears the output buffer instead of running the
+kernel for the parity readback. It is a negative check, and the gate must
+fail on it.
+
 ### End-to-end effect (splice)
 
 The fused kernel cannot run inside an ORT session without route (b) or (c).
@@ -567,6 +597,10 @@ node scripts/serve_isolated_static.mjs dist-client 5291
 # M4, always under benchlock
 notes/kernel-hillclimb/benchlock.sh fa -- node scripts/kernel_hillclimb/bench.mjs --page fused-attn \
   --query 'net=bt4&handoff=1&iters=60' --repeat 3 --base-url http://127.0.0.1:5291 \
+  --browser-args=--enable-unsafe-webgpu,--enable-webgpu-developer-features
+# negative check: must print ok:false and exit 1
+notes/kernel-hillclimb/benchlock.sh fa -- node scripts/kernel_hillclimb/bench.mjs --page fused-attn \
+  --query 'net=bt4&iters=20&debugZeroOutput=1' --base-url http://127.0.0.1:5291 \
   --browser-args=--enable-unsafe-webgpu,--enable-webgpu-developer-features
 notes/kernel-hillclimb/benchlock.sh fa -- node scripts/kernel_hillclimb/bench.mjs \
   --candidate ort-bt4-mha-ab --gate --base-url http://127.0.0.1:5291 …   # also -mha32-ab, t3

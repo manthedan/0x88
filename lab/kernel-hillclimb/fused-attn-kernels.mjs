@@ -138,3 +138,88 @@ export function fusedAttentionBytes({ batch, heads, depth = 32, tokens = 64 }) {
 export function fusedAttentionFlops({ batch, heads, depth = 32, tokens = 64 }) {
   return 2 * 2 * batch * heads * tokens * tokens * depth;
 }
+
+/**
+ * Parity gate for the f32-accumulate variants against the ORT WASM run of the
+ * exported subgraph. Both sides store f16, so the unit is the f16 ULP of the
+ * reference value: the largest measured f32 differences (BT4/t3 L0/L7/L14, M4 and
+ * RTX 3090) are 1 ULP (2.4e-4 @ |0.26|, 9.8e-4 @ |1.34|, 1.95e-3 @ |2.45|).
+ * Per element: |cand - wasm| <= ATOL + RTOL * |wasm| + |wasm - f64|.
+ *   - RTOL = 2^-9 is >= 2 f16 ULPs at any magnitude (ULP <= 2^-10 * |x|).
+ *   - ATOL = 2^-12 (1 ULP at |0.25..0.5|) covers near-zero outputs.
+ *   - |wasm - f64| is the reference's own measured error against the float64 numpy
+ *     result on the same f16 inputs. WASM's f16 path is not exact either: at BT4
+ *     L14 one output is 5.26e-4 where f64 and the kernel both give 9.37e-4
+ *     (cancellation), which a WASM-only tolerance would blame on the kernel.
+ * Measured on the M4 (BT4 and t3, L0/L7/L14): every element sits at <= 0.33 of its
+ * allowance (3x headroom) except that BT4 L14 element, at 0.63 (the kernel is 7e-7
+ * from f64 there). A zeroed output fails on every element with |ref| > ~2.5e-4, a 1%
+ * rescale on every element with |ref| > ~0.03.
+ * f16-accumulate variants exceed this by design (up to 2.9 at BT4 L14); they are
+ * diagnostic only and never gate.
+ */
+export const FUSED_ATTN_PARITY_TOL = Object.freeze({ atol: 2 ** -12, rtol: 2 ** -9 });
+
+/**
+ * max |a-b|, mean |a-b|, the worst element's reference value, non-finite count, and
+ * the tolerance check: violations (elements over the allowance, non-finite counted
+ * too) and worstTolRatio (max |a-b| / allowance, < 1 passes). The allowance is
+ * atol + rtol*|ref|, plus |ref - truth| per element when a float64 `truth` is given.
+ */
+export function fusedAttnDiffStats(cand, ref, truth = null, tol = FUSED_ATTN_PARITY_TOL) {
+  if (cand.length !== ref.length) throw new Error(`length mismatch ${cand.length} vs ${ref.length}`);
+  if (truth && truth.length !== ref.length) throw new Error(`truth length mismatch ${truth.length} vs ${ref.length}`);
+  let max = 0;
+  let sum = 0;
+  let at = 0;
+  let nonFinite = 0;
+  let violations = 0;
+  let worstTolRatio = 0;
+  let worst = 0;
+  for (let i = 0; i < ref.length; i++) {
+    if (!Number.isFinite(cand[i])) {
+      nonFinite++;
+      continue;
+    }
+    const d = Math.abs(cand[i] - ref[i]);
+    sum += d;
+    if (d > max) {
+      max = d;
+      at = i;
+    }
+    const allow = tol.atol + tol.rtol * Math.abs(ref[i]) + (truth ? Math.abs(ref[i] - truth[i]) : 0);
+    const ratio = d / allow;
+    if (ratio > 1) violations++;
+    if (ratio > worstTolRatio) {
+      worstTolRatio = ratio;
+      worst = i;
+    }
+  }
+  return {
+    maxAbs: max,
+    meanAbs: sum / ref.length,
+    refAtMax: ref[at],
+    nonFinite,
+    violations: violations + nonFinite,
+    worstTolRatio,
+    worstIndex: worst,
+    worstRef: ref[worst],
+    worstCand: cand[worst],
+  };
+}
+
+/** Gate a kernel variant's per-layer parity rows ({ layer, vsWasm }); f16-accumulate variants never gate. */
+export function fusedAttnGate(name, acc, parity, tol = FUSED_ATTN_PARITY_TOL) {
+  if (acc !== 'f32') return { gated: false, pass: null, problems: [] };
+  const problems = [];
+  if (!parity.length) problems.push(`${name}: no parity rows`);
+  for (const p of parity) {
+    const s = p.vsWasm;
+    if (s.nonFinite) problems.push(`${name} L${p.layer}: ${s.nonFinite} non-finite outputs`);
+    if (s.violations > s.nonFinite)
+      problems.push(
+        `${name} L${p.layer}: ${s.violations - s.nonFinite} elements over ${tol.atol} + ${tol.rtol}*|wasm| + |wasm - f64| (worst ratio ${s.worstTolRatio.toFixed(2)}: ${s.worstCand} vs ${s.worstRef}; max-abs ${s.maxAbs} @ ${s.refAtMax})`,
+      );
+  }
+  return { gated: true, pass: problems.length === 0, problems };
+}
