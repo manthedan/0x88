@@ -257,7 +257,9 @@ The Lc0 Small mechanism is reused as is; t3 is one more row in its table.
   `analyzeCurrent` first initializes each selected big net with the options
   its search passes (`ANALYSIS_BIG_NET_SESSION`), including a pooled session
   that Play or Arena left with another eval-cache size. A stopped or left run
-  makes no further init attempt. The run then records each net's served URL
+  makes no further init attempt. The run reads nothing else before that init
+  and its position, MultiPV, engine rows, settings and keys only after it,
+  restarting if the engine selection changed meanwhile. The run then records each net's served URL
   once (`analysisBigNetServedModel`, as `lc0ServedModelUrl` does for Lc0
   Small), and every key reads that record, never the live worker. A worker
   crash mid-run therefore changes no key, and if a search finds its session

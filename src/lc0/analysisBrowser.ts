@@ -4396,41 +4396,50 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   analyzing = true;
   el('stop').toggleAttribute('disabled', false);
   el('analyze').toggleAttribute('disabled', true);
-  const fen = tree.current.fen;
-  const analysisPositions = tree.historyBoards();
-  const cpuPosition = analysisGamePosition(tree);
-  const analysisMultiPv = multiPv();
-  const board = parseFen(fen);
-  if (legalMoves(board).length === 0) {
+  if (legalMoves(parseFen(tree.current.fen)).length === 0) {
     analyzing = false;
     el('stop').toggleAttribute('disabled', true);
     el('analyze').toggleAttribute('disabled', false);
     return;
   }
-  // Snapshot after the terminal-position return, which skips the finally that clears it.
-  analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
-  const selectedLabels = rows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
-  // Retaken below once the selected big nets have initialized (initBigNetsForRun).
-  let selectionCacheKey = analysisSelectionCacheKey(fen, rows);
-  activeAnalysisSelectionKey = selectionCacheKey;
-  el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
-  clearAnalysisSearchProgress();
-  syncBrokerParticipants(rows);
   let runDeferredAnalysis = false;
   let reloadDeferredLc0 = false;
   let disposeDeferredEngines = false;
   let resumeForce = false;
   try {
-    // Every key below is taken after init, from the run's served-model snapshot.
-    // A run with no uninitialized big net does not yield here.
+    // Initialize the selected big nets first (initBigNetsForRun). The run reads
+    // nothing else before this await and everything after it, synchronously, as
+    // it did before the init step existed: position, history, MultiPV, engine
+    // rows, runtime/broker settings, served models, keys. So a change made during
+    // init is either in this run's settings, keys and searches alike, or (engine
+    // rows) restarts the run. A run with no uninitialized big net does not yield.
     const uninitializedBigNets = bigNetsAwaitingInit(rows);
-    const bigNetInitErrors = uninitializedBigNets.length
-      ? await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted)
-      : new Map<AnalysisBigNetKey, Error>();
-    if (controller.signal.aborted || mountAbort.signal.aborted) return;
+    let bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
+    if (uninitializedBigNets.length) {
+      activeAnalysisSelectionKey = ''; // no keys yet: navigation during init cancels this run
+      el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
+      bigNetInitErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+      if (controller.signal.aborted || mountAbort.signal.aborted) return;
+      if (JSON.stringify(activeEngineRows()) !== JSON.stringify(rows)) {
+        // The engine selection changed during init, so this run's gates and init
+        // list are stale. Start over (the change may already have queued this).
+        analyzeAfterActiveRun = true;
+        return;
+      }
+    }
     snapshotBigNetServedModels(rows);
-    selectionCacheKey = analysisSelectionCacheKey(fen, rows);
+    const fen = tree.current.fen;
+    const analysisPositions = tree.historyBoards();
+    const cpuPosition = analysisGamePosition(tree);
+    const analysisMultiPv = multiPv();
+    if (legalMoves(parseFen(fen)).length === 0) return;
+    analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
+    const selectedLabels = rows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
+    const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
     activeAnalysisSelectionKey = selectionCacheKey;
+    el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
+    clearAnalysisSearchProgress();
+    syncBrokerParticipants(rows);
     const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
     const publishLines = () => {
       if (controller.signal.aborted || analysisSelectionCacheKey(tree.current.fen) !== selectionCacheKey) return;

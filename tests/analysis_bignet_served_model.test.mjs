@@ -39,6 +39,7 @@ const T3_SPLITK = lc0SplitKUrl(T3_ORIGINAL);
 class FakeWorker {
   static plan = new Map();
   static instances = [];
+  static searchLog = [];
   listeners = new Map();
   searches = 0;
   constructor() {
@@ -67,10 +68,15 @@ class FakeWorker {
       else this.reply(ready);
     } else if (message.type === 'search') {
       this.searches += 1;
+      FakeWorker.searchLog.push({ model: this.init.modelUrl, multiPv: message.multiPv });
       if (this.outcome.crashOnSearch) setImmediate(() => this.emit('error', { message: 'injected GPU crash' }));
       else
         this.reply(
-          { type: 'searchResult', id: message.id, result: { cancelled: false, move: 'e2e4', visits: message.visits, served: this.servedModelUrl } },
+          {
+            type: 'searchResult',
+            id: message.id,
+            result: { cancelled: false, move: 'e2e4', visits: message.visits, multiPv: message.multiPv, served: this.servedModelUrl },
+          },
           this.outcome.searchTicks ?? 1,
         );
     }
@@ -85,6 +91,7 @@ async function withWorkers(plan, run) {
   globalThis.Worker = FakeWorker;
   FakeWorker.plan = new Map(Object.entries(plan));
   FakeWorker.instances = [];
+  FakeWorker.searchLog = [];
   try {
     await run();
   } finally {
@@ -120,8 +127,9 @@ function analysisPage({ rows, searchers }) {
       return { config: BIG_NETS[key], searcher: searchers.get(key) };
     };
     const peekBigNetSearcher = (key) => searchers.get(key);
-    const activeEngineRows = () => rows;
-    const multiPv = () => 1, selectedLc0Runtime = () => 'onnx', boardToFen = (board) => board.fen;
+    const activeEngineRows = () => rows.map((row) => ({ ...row }));
+    let currentMultiPv = 1;
+    const multiPv = () => currentMultiPv, selectedLc0Runtime = () => 'onnx', boardToFen = (board) => board.fen;
     const resourceBroker = { snapshot: () => ({ dial: 'balanced', cpuBudget: 1 }) };
     const engineResourceProfile = () => ({ resourceClass: 'gpu' });
     const parseFen = (fen) => ({ fen }), legalMoves = () => ['e2e4'];
@@ -141,14 +149,29 @@ function analysisPage({ rows, searchers }) {
     const renderLines = () => published.push(lineCache.get(tree.current.fen));
     const renderEvalBar = () => {}, setShapes = () => {}, bestShapes = () => [], renderEngineComparison = () => {};
     const cacheEngineLines = (key, lines) => engineLineCache.set(key, lines);
-    const lc0AnalysisLines = (result, _fen, engine) => [{ engine, pvUci: [result.move], multipv: 1, scoreText: '+0.20', detail: result.served ?? '', pvSan: '' }];
+    const lc0AnalysisLines = (result, _fen, engine) => [{ engine, pvUci: [result.move], multipv: 1, scoreText: '+0.20', detail: result.served ?? '', pvSan: '', searchedMultiPv: result.multiPv }];
     const analysisConsensus = () => 'consensus', hiddenAnalysisStopEnabled = () => false;
     const requestHiddenTabWork = (state) => ({ state }), stopHiddenTabResume = (reload, dispose) => ({ reload, dispose });
     ${keyFunctions}
     ${bigNetFunctions}
     ${analyzeFunction}
+    // As deferAnalysisSettingsRefresh: a settings change during a run queues a
+    // run after it; otherwise it starts one.
+    const settingsChanged = () => {
+      if (analyzing && analysisAbort && !analysisAbort.signal.aborted) analyzeAfterActiveRun = true;
+      else void analyzeCurrent();
+    };
     return {
       analyzeCurrent,
+      setMultiPv: (value) => {
+        currentMultiPv = value;
+        settingsChanged();
+      },
+      setRows: (next) => {
+        rows = next;
+        settingsChanged();
+      },
+      idle: () => !analyzing,
       stop: cancelActiveAnalysisRun,
       leave: () => mountAbort.abort(),
       engineAnalysisCacheKey: (row) => engineAnalysisCacheKey(tree.current.fen, row),
@@ -266,6 +289,65 @@ for (const how of ['stop', 'leave']) {
       t3.dispose();
     }));
 }
+
+async function settled(page) {
+  for (let quiet = 0, i = 0; quiet < 5 && i < 500; i++) {
+    await new Promise(setImmediate);
+    quiet = page.idle() ? quiet + 1 : 0;
+  }
+}
+
+test('a MultiPV change during a pending big-net init: the search, the key and the cache all use the new MultiPV', () =>
+  withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK, hold: true }] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+    const run = page.analyzeCurrent();
+    await new Promise(setImmediate);
+    page.setMultiPv(3);
+    FakeWorker.instances[0].release();
+    await run;
+    await settled(page);
+    // No 1-line search was cached under the 3-line key: every search asked for
+    // 3 lines, the only entry is the 3-line key, and the queued run reused it.
+    assert.deepEqual(FakeWorker.searchLog, [{ model: T3_ORIGINAL, multiPv: 3 }]);
+    assert.deepEqual([...page.engineLineCache.keys()], [page.engineAnalysisCacheKey(t3Row)]);
+    assert.equal(page.lineCache.get(START_FEN)[0].searchedMultiPv, 3);
+    assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
+    t3.dispose();
+  }));
+
+test('an engine selection change during a pending big-net init restarts the run with the new selection', () =>
+  withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK, hold: true }], [BT4_NET.modelUrl]: [{ servedModelUrl: BT4_NET.modelUrl }] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    const bt4 = new Bt4WorkerSearcher(BT4_NET);
+    const page = analysisPage({
+      rows: [t3Row],
+      searchers: new Map([
+        ['t3', t3],
+        ['bt4', bt4],
+      ]),
+    });
+    const run = page.analyzeCurrent();
+    await new Promise(setImmediate);
+    page.setRows([t3Row, bt4Row]);
+    FakeWorker.instances[0].release();
+    await run;
+    await settled(page);
+    // One search per engine of the new selection; nothing from the old one.
+    assert.deepEqual(
+      FakeWorker.searchLog.map((entry) => entry.model),
+      [T3_ORIGINAL, BT4_NET.modelUrl],
+    );
+    const lines = page.lineCache.get(START_FEN);
+    assert.deepEqual(
+      lines.map((line) => line.detail),
+      [T3_SPLITK, BT4_NET.modelUrl],
+    );
+    assert.deepEqual([...page.engineLineCache.keys()].sort(), [page.engineAnalysisCacheKey(t3Row), page.engineAnalysisCacheKey(bt4Row)].sort());
+    assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
+    t3.dispose();
+    bt4.dispose();
+  }));
 
 test('a big-net worker crash mid-search shows its error row and still publishes the other engine', () =>
   withWorkers(
