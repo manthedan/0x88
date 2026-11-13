@@ -636,6 +636,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   /** IO mode actually in use (a requested GPU mode can fall back to 'cpu'). */
   readonly ioMode: Lc0OrtIoMode;
   private disposed = false;
+  private closePromise: Promise<void> | null = null;
 
   constructor(session: ort.InferenceSession, options: Lc0OnnxEvaluatorOptions = {}, gpuIo: { binding: OrtGpuIoBinding; mode: Lc0OrtIoMode } | null = null) {
     this.session = session;
@@ -654,11 +655,18 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     return new Lc0OnnxEvaluator(await ort.createOrtSession(modelPath, { wasmFallbackModel: options.wasmFallbackModel }), options);
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) return;
-    this.disposed = true;
-    await ort.releaseOrtSession(this.session);
-    await this.gpuIo?.dispose();
+  dispose(): Promise<void> {
+    if (!this.closePromise) {
+      this.disposed = true;
+      this.closePromise = (async () => {
+        try {
+          await ort.releaseOrtSession(this.session);
+        } finally {
+          await this.gpuIo?.dispose();
+        }
+      })();
+    }
+    return this.closePromise;
   }
 
   private assertNotDisposed(): void {
