@@ -2376,21 +2376,24 @@ function renderAnalysisStatus(): void {
   if (retry) return;
   const status = document.getElementById('analysisStatus');
   if (!status) return;
-  const running = !(el('stop') as HTMLButtonElement).disabled;
+  const paused = hiddenTab.hidden && hiddenTab.suspended.includes('analysis');
+  const running = hasActiveAnalysisRun();
   const lines = lineCache.get(tree.current.fen) ?? [];
   const ready = new Set(lines.filter((line) => line.multipv === 1 && !line.error).map((line) => analysisEngineName(line.engine))).size;
   const failed = new Set(lines.filter((line) => line.error).map((line) => analysisEngineName(line.engine))).size;
-  const [state, text, title] = running
-    ? ['running', 'Analyzing…', 'Engines are searching this position']
-    : ready
-      ? [
-          'done',
-          failed ? `Done · ${failed} failed` : 'Done',
-          failed ? `Analysis complete; ${failed} engine${failed > 1 ? 's' : ''} unavailable` : 'Analysis complete for this position',
-        ]
-      : (el('analyze') as HTMLButtonElement).disabled
-        ? ['loading', 'Loading…', 'Preparing engines']
-        : ['idle', 'Not analyzed', 'Press Analyze to evaluate this position'];
+  const [state, text, title] = paused
+    ? ['paused', 'Paused', 'Analysis queued until this tab is visible']
+    : running
+      ? ['running', 'Analyzing…', 'Engines are searching this position']
+      : ready
+        ? [
+            'done',
+            failed ? `Done · ${failed} failed` : 'Done',
+            failed ? `Analysis complete; ${failed} engine${failed > 1 ? 's' : ''} unavailable` : 'Analysis complete for this position',
+          ]
+        : (el('analyze') as HTMLButtonElement).disabled
+          ? ['loading', 'Loading…', 'Preparing engines']
+          : ['idle', 'Not analyzed', 'Press Analyze to evaluate this position'];
   if (status.dataset.state !== state) status.dataset.state = state;
   if (status.textContent !== text) status.textContent = text;
   status.title = title;
