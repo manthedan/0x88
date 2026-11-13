@@ -16,7 +16,8 @@
 //   abEp=wasm                run arm B on ORT WASM (noise control: the shipped WebGPU path vs
 //                            its WASM reference; timing ratios are then meaningless)
 //   visits=64,256,800        visit budgets (Play's big-net levels 3-5)
-//   positions=N              use the first N positions of the suite (default all 14)
+//   positions=N              use N positions of the suite (default: all from start=)
+//   start=I (0)              first suite position (12 and 13 are the queen-odds starts)
 //   repeats=N (1)            passes over the suite per budget
 //   batch=N (8)              search leaf batch (= the nets' physical batch)
 //   evalCache=N (2048)       evaluator cache entries (Play/Analysis value)
@@ -114,7 +115,8 @@ runMain(async () => {
   if (!modelA) throw new Error('model= (arm A) is required');
   const modelB = params.get('abModel') ?? net.model;
   const budgets = listParam('visits', ['64', '256', '800']).map((v) => Math.max(1, Math.floor(Number(v))));
-  const positions = POSITIONS.slice(0, intParam('positions', POSITIONS.length, 1, POSITIONS.length));
+  const start = intParam('start', 0, 0, POSITIONS.length - 1);
+  const positions = POSITIONS.slice(start, start + intParam('positions', POSITIONS.length - start, 1, POSITIONS.length - start));
   const repeats = intParam('repeats', 1, 1, 50);
   const batch = intParam('batch', 8, 1, 64);
   const evalCache = intParam('evalCache', 2048, 0, 1e6);
@@ -169,7 +171,7 @@ runMain(async () => {
     ok: parityProblems === 0,
     device: await runtimeDeviceIdentity(null), // no profiler: dispatches stay unwrapped
     params: Object.fromEntries(params),
-    config: { preset: presetName, batch, evalCache, tieEpsilon, contempt, options, positions: positions.length, repeats },
+    config: { preset: presetName, batch, evalCache, tieEpsilon, contempt, options, start, positions: positions.length, repeats },
     arms: Object.fromEntries(Object.entries(arms).map(([k, v]) => [k, { model: v.model, ep: v.ep, sessionCreateMs: v.sessionCreateMs, dequantFold: v.fold }])),
     levels,
   };
