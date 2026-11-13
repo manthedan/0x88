@@ -256,10 +256,15 @@ The Lc0 Small mechanism is reused as is; t3 is one more row in its table.
   never shown as the other's. Because the URL is known only after init,
   `analyzeCurrent` first initializes each selected big net with the options
   its search passes (`ANALYSIS_BIG_NET_SESSION`), including a pooled session
-  that Play or Arena left with another eval-cache size, and only then takes
-  its keys. So the URL in the keys is the URL of the session that runs the
-  search (`tests/analysis_bignet_served_model.test.mjs`). The Arena status
-  line names the served URL.
+  that Play or Arena left with another eval-cache size. A stopped or left run
+  makes no further init attempt. The run then records each net's served URL
+  once (`analysisBigNetServedModel`, as `lc0ServedModelUrl` does for Lc0
+  Small), and every key reads that record, never the live worker. A worker
+  crash mid-run therefore changes no key, and if a search finds its session
+  no longer serves the recorded URL, that engine's row fails. So the URL in
+  the keys is the URL of the session that ran the search
+  (`tests/analysis_bignet_served_model.test.mjs`). The Arena status line
+  names the served URL.
 - **Download cost.** An Apple user who already cached the 171 MB t3 export
   downloads 171 MB again on the next t3 load. The old entry stays until the
   model cache's LRU bounds (8 entries, 1 GB) evict it. Users who never loaded
