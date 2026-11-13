@@ -10,7 +10,11 @@
 //                       gitignored/local; default: the main checkout's copy).
 // Graph-rewrite candidate models (scripts/kernel_hillclimb/splitk_rewrite.py,
 // gitignored under artifacts/kernel-hillclimb/splitk/) are copied to
-// <dist>/models/lc0-splitk/ when present, for ort-profile.html?model=.
+// <dist>/models/lc0-splitk/ when present, for ort-profile.html?model=. MultiHeadAttention
+// rewrites (scripts/kernel_hillclimb/mha_rewrite.py, artifacts/kernel-hillclimb/mha/) go to
+// <dist>/models/lc0-mha/ the same way, and the fused-attention activations and sub-models
+// (scripts/kernel_hillclimb/fused_attn_data.py, artifacts/kernel-hillclimb/fused-attn/<net>/)
+// to <dist>/models/fused-attn/<net>/ for fused-attn.html.
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,17 +64,25 @@ if (!existsSync(runtimeLink)) {
     linked = `linked -> ${source}`;
   } else linked = `missing (no ${source}); tvmjs-profile lc0 targets will 404`;
 }
-const splitkDir = join(repo, 'artifacts/kernel-hillclimb/splitk');
-const splitkModels = existsSync(splitkDir) ? readdirSync(splitkDir).filter((f) => f.endsWith('.onnx')) : [];
-if (splitkModels.length) {
-  mkdirSync(join(dist, 'models/lc0-splitk'), { recursive: true });
-  for (const f of splitkModels) cpSync(join(splitkDir, f), join(dist, 'models/lc0-splitk', f));
+function stageModels(artifactDir, distDir) {
+  const from = join(repo, 'artifacts/kernel-hillclimb', artifactDir);
+  const models = existsSync(from) ? readdirSync(from).filter((f) => f.endsWith('.onnx')) : [];
+  if (models.length) mkdirSync(join(dist, 'models', distDir), { recursive: true });
+  for (const f of models) cpSync(join(from, f), join(dist, 'models', distDir, f));
+  return models.map((f) => `/models/${distDir}/${f}`);
 }
+const splitkModels = stageModels('splitk', 'lc0-splitk');
+const mhaModels = stageModels('mha', 'lc0-mha');
+const fusedAttnDir = join(repo, 'artifacts/kernel-hillclimb/fused-attn');
+const fusedAttnNets = existsSync(fusedAttnDir) ? readdirSync(fusedAttnDir).filter((n) => existsSync(join(fusedAttnDir, n, 'manifest.json'))) : [];
+for (const n of fusedAttnNets) cpSync(join(fusedAttnDir, n), join(dist, 'models/fused-attn', n), { recursive: true });
 console.log(
   JSON.stringify({
     status: 'KERNEL_LAB_BUILT',
     pages: inputs.map((p) => `/lab/kernel-hillclimb/${p.split('/').pop()}`),
     lc0TvmjsRuntimes: linked,
-    splitkModels: splitkModels.map((f) => `/models/lc0-splitk/${f}`),
+    splitkModels,
+    mhaModels,
+    fusedAttnNets,
   }),
 );

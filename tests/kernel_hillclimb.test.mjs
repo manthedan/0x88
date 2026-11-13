@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
+import { FUSED_ATTN_PARITY_TOL, fusedAttnDiffStats, fusedAttnGate } from '../lab/kernel-hillclimb/fused-attn-kernels.mjs';
 import {
   abIncompleteProfiles,
   compareCentipawn,
@@ -556,4 +557,45 @@ test('sequenceMeanUs averages per dispatch position and refuses mismatched invok
   assert.equal(sequenceMeanUs([row(1, 'Gemm', 1), row(2, 'MatMul', 1)], 2), null);
   assert.equal(sequenceMeanUs([row(1, 'Gemm', 1), row(2, 'Gemm', 1), row(2, 'Add', 1)], 2), null);
   assert.equal(sequenceMeanUs([], 1), null);
+});
+
+test('fused-attn gate: measured 1-ULP f16 differences pass, zeroed/rescaled/NaN outputs fail, f16 variants never gate', () => {
+  // Worst measured f32-accumulate elements (BT4 L0/L7/L14 on M4 and RTX 3090): exactly 1 f16 ULP.
+  const ref = Float32Array.from([1.337, -0.263, 2.449, 0, 1e-5, -5.9]);
+  const oneUlp = Float32Array.from([1.337 + 2 ** -10, -0.263 + 2 ** -12, 2.449 - 2 ** -9, 2 ** -24, 1e-5, -5.9 + 2 ** -8]);
+  const rows = (cand) => [{ layer: 14, vsWasm: fusedAttnDiffStats(cand, ref) }];
+  const ok = fusedAttnGate('f32r1', 'f32', rows(oneUlp));
+  assert.deepEqual(ok, { gated: true, pass: true, problems: [] });
+  assert.ok(rows(oneUlp)[0].vsWasm.worstTolRatio < 0.5, 'measured worst element keeps >2x headroom');
+
+  const zero = fusedAttnGate('f32r1', 'f32', rows(new Float32Array(ref.length)));
+  assert.equal(zero.pass, false);
+  assert.match(zero.problems[0], /f32r1 L14: 4 elements over/);
+  assert.equal(fusedAttnGate('f32r2', 'f32', rows(ref.map((x) => x * 1.01))).pass, false, '1% rescale fails');
+  const nan = fusedAttnGate('f32r1', 'f32', rows(Float32Array.from(ref, (x, i) => (i === 2 ? Number.NaN : x))));
+  assert.equal(nan.pass, false);
+  assert.match(nan.problems.join(), /1 non-finite/);
+  assert.equal(fusedAttnGate('f32r1', 'f32', []).pass, false, 'no rows is not a pass');
+  // A non-finite reference or truth must fail rather than make the allowance NaN (NaN > 1 is false).
+  const nanRef = fusedAttnGate('f32r1', 'f32', [{ layer: 3, vsWasm: fusedAttnDiffStats(Float32Array.of(0), Float32Array.of(Number.NaN), Float32Array.of(1)) }]);
+  assert.equal(nanRef.pass, false);
+  assert.match(nanRef.problems.join(), /L3: 1 non-finite reference\/truth/);
+  const infRef = [{ layer: 3, vsWasm: fusedAttnDiffStats(Float32Array.of(0), Float32Array.of(Number.POSITIVE_INFINITY)) }];
+  assert.equal(fusedAttnGate('f32r1', 'f32', infRef).pass, false);
+  const nanTruth = [{ layer: 3, vsWasm: fusedAttnDiffStats(Float32Array.of(1), Float32Array.of(1), Float32Array.of(Number.NaN)) }];
+  assert.equal(fusedAttnGate('f32r1', 'f32', nanTruth).pass, false);
+
+  // BT4 L14 index 374874: WASM 5.26e-4, kernel 9.365e-4, f64 9.372e-4. The reference's own error is allowed;
+  // without the f64 truth the same element would be blamed on the kernel.
+  const wasm = Float32Array.from([5.26e-4, 1.337]);
+  const truth = Float32Array.from([9.372e-4, 1.337]);
+  const kernel = Float32Array.from([9.365e-4, 1.337]);
+  const withTruth = (cand) => [{ layer: 14, vsWasm: fusedAttnDiffStats(cand, wasm, truth) }];
+  assert.equal(fusedAttnGate('f32r1', 'f32', withTruth(kernel)).pass, true);
+  assert.equal(fusedAttnGate('f32r1', 'f32', [{ layer: 14, vsWasm: fusedAttnDiffStats(kernel, wasm) }]).pass, false);
+  assert.equal(fusedAttnGate('f32r1', 'f32', withTruth(new Float32Array(2))).pass, false, 'zeros fail even with the truth allowance');
+
+  const f16 = fusedAttnGate('f16r1', 'f16', rows(new Float32Array(ref.length)));
+  assert.deepEqual(f16, { gated: false, pass: null, problems: [] });
+  assert.equal(FUSED_ATTN_PARITY_TOL.rtol, 2 ** -9);
 });
