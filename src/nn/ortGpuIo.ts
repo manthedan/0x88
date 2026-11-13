@@ -211,6 +211,12 @@ export class OrtGpuIoBinding {
     if (this.inputBytes % 4 !== 0) throw new Error(`OrtGpuIoBinding: input ${input.name} is ${this.inputBytes} bytes; writeBuffer needs a multiple of 4`);
     this.layout = ortGpuIoLayout(outputs);
     const created: GPUBuffer[] = [];
+    const wrapped: ort.Tensor[] = [];
+    const wrap = (buffer: GPUBuffer, spec: OrtGpuIoTensorSpec): ort.Tensor => {
+      const tensor = Tensor.fromGpuBuffer(buffer as never, { dataType: spec.type, dims: spec.dims });
+      wrapped.push(tensor);
+      return tensor;
+    };
     try {
       this.inputBuffer = device.createBuffer({ size: alignUp(this.inputBytes), usage: USAGE_STORAGE | USAGE_COPY_DST | USAGE_COPY_SRC });
       created.push(this.inputBuffer);
@@ -221,19 +227,20 @@ export class OrtGpuIoBinding {
       });
       this.staging = device.createBuffer({ size: this.layout.stagingBytes, usage: USAGE_MAP_READ | USAGE_COPY_DST });
       created.push(this.staging);
+      this.pins = pin ? [this.inputBuffer, ...this.outputBuffers].map((buffer) => pinOrtGpuBufferImport(buffer)) : [];
+      if (!pin) this.pinsChecked = true;
+      this.feeds = { [input.name]: wrap(this.inputBuffer, input) };
+      this.fetches = outputMode === 'session' ? null : Object.fromEntries(this.layout.slots.map((slot, i) => [slot.name, wrap(this.outputBuffers[i], slot)]));
     } catch (error) {
-      for (const buffer of created) buffer.destroy();
+      // Keep the construction error while rolling back every caller-owned resource.
+      for (const tensor of wrapped) {
+        try { tensor.dispose(); } catch {}
+      }
+      for (const buffer of created) {
+        try { buffer.destroy(); } catch {}
+      }
       throw error;
     }
-    this.pins = pin ? [this.inputBuffer, ...this.outputBuffers].map((buffer) => pinOrtGpuBufferImport(buffer)) : [];
-    if (!pin) this.pinsChecked = true;
-    this.feeds = { [input.name]: Tensor.fromGpuBuffer(this.inputBuffer as never, { dataType: input.type, dims: input.dims }) };
-    this.fetches =
-      outputMode === 'session'
-        ? null
-        : Object.fromEntries(
-            this.layout.slots.map((slot, i) => [slot.name, Tensor.fromGpuBuffer(this.outputBuffers[i] as never, { dataType: slot.type, dims: slot.dims })]),
-          );
   }
 
   /** ORT-owned output buffers of one run, after checking they match the specs. */
