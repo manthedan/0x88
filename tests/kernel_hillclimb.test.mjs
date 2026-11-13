@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
+  abIncompleteProfiles,
   compareCentipawn,
   compareLc0,
   fixtureChunks,
@@ -11,6 +12,7 @@ import {
   manifestCheck,
   ortParity,
   profileComplete,
+  profileInvokeCap,
   runChunked,
 } from '../lab/kernel-hillclimb/gates.mjs';
 import { fmaKernel, gemmKernel, subgroupMatrixGemmKernel } from '../lab/kernel-hillclimb/wgsl-kernels.mjs';
@@ -31,8 +33,8 @@ import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 
 // The lab modules read location.search at import time.
 globalThis.location ??= { search: '' };
-const { aggregateProfile } = await import('../lab/kernel-hillclimb/gpu-profiler.mjs');
-const { summarize } = await import('../lab/kernel-hillclimb/common.mjs');
+const { aggregateProfile, sequenceMeanUs } = await import('../lab/kernel-hillclimb/gpu-profiler.mjs');
+const { abExtraModels, roundOrder, summarize } = await import('../lab/kernel-hillclimb/common.mjs');
 
 const peaks = { flops: 3e12, flopsByPrecision: { f32: 3e12, f16: 3e12 }, bw: 100e9, ridge: 30, gemmCeilingPlain: 2e12 };
 
@@ -215,6 +217,38 @@ test('profiles that dropped dispatches are incomplete', () => {
   assert.equal(profileComplete({ dropped: 0, passMode: { dropped: 3 } }), false);
   const agg = aggregateProfile({ rows: [], dropped: 7 }, { invokes: 1 });
   assert.equal(agg.complete, false);
+});
+
+test('abProfile invokes are capped to the timestamp capacity', () => {
+  // Shipped Lc0 Small: 356 dispatches/invoke; 50 invokes would need 17,800 of 16,384 slots.
+  assert.deepEqual(profileInvokeCap(50, 356, 16384), { invokes: 46, capped: true });
+  assert.deepEqual(profileInvokeCap(8, 744, 16384), { invokes: 8, capped: false });
+  assert.deepEqual(profileInvokeCap(46, 356, 16384), { invokes: 46, capped: false });
+  assert.deepEqual(profileInvokeCap(5, 20000, 16384), { invokes: 0, capped: true });
+  assert.deepEqual(profileInvokeCap(5, 0, 16384), { invokes: 5, capped: false }); // unknown: completeness still gates
+});
+
+test('incomplete auxiliary ab profiles are named and fail the gate', () => {
+  const full = (invokes = 8) => ({ invokes, requestedInvokes: invokes, capped: false, complete: true, dropped: 0 });
+  const ab = {
+    a: { pass: { dropped: 0 } },
+    b: { model: '/m/shipped.onnx', pass: { dropped: 0 }, profile: full() },
+    extra: [{ key: 'c1', model: '/m/c1.onnx', pass: { dropped: 0 }, profile: full() }],
+  };
+  assert.deepEqual(abIncompleteProfiles(ab), []);
+  assert.deepEqual(abIncompleteProfiles(null), []);
+  assert.deepEqual(abIncompleteProfiles({ ...ab, b: { ...ab.b, profile: null } }), []); // abProfile=0
+  const overflow = { ...ab, b: { ...ab.b, profile: { ...full(50), complete: false, dropped: 1416 } } };
+  assert.deepEqual(abIncompleteProfiles(overflow), [
+    { arm: 'b', model: '/m/shipped.onnx', profile: 'dispatch', invokes: 50, requestedInvokes: 50, dropped: 1416 },
+  ]);
+  const extraNoRoom = { ...ab, extra: [{ ...ab.extra[0], profile: { invokes: 0, requestedInvokes: 5, capped: true, complete: false, dropped: null } }] };
+  assert.deepEqual(
+    abIncompleteProfiles(extraNoRoom).map((e) => [e.arm, e.profile, e.invokes]),
+    [['c1', 'dispatch', 0]],
+  );
+  const passDrop = { ...ab, a: { pass: { dropped: 3 } } };
+  assert.deepEqual(abIncompleteProfiles(passDrop), [{ arm: 'a', model: null, profile: 'pass', dropped: 3 }]);
 });
 
 test('aggregateProfile reports busy, envelope and gap per invoke', () => {
@@ -491,4 +525,35 @@ test('an allowlisted drift flip passes only for its own position and move pair',
   assert.equal(legalPolicyParity(logits([0.3, 0.65, 0.05]), logits([0.65, 0.3, 0.05]), [row(fenA)], { ...limits, maxProbAbs: 1 }).pass, false);
   // Without the allowlist (blanket 0.01 epsilon), the measured flip fails.
   assert.equal(legalPolicyParity(swapped, ref, [row(fenA)], { ...limits, allowedFlips: [] }).pass, false);
+});
+
+test('roundOrder rotates every arm through every slot (two arms alternate AB, BA)', () => {
+  assert.deepEqual(
+    [0, 1, 2].map((r) => roundOrder(['a', 'b'], r).join('')),
+    ['ab', 'ba', 'ab'],
+  );
+  const arms = ['a', 'b', 'c1', 'c2'];
+  const slots = arms.map(() => new Set());
+  for (let r = 0; r < arms.length; r++) {
+    for (const [slot, arm] of roundOrder(arms, r).entries()) slots[slot].add(arm);
+  }
+  for (const s of slots) assert.equal(s.size, arms.length);
+});
+
+test('abExtraModels parses, dedupes and rejects cross-origin or excess arms', () => {
+  assert.deepEqual(abExtraModels(null), []);
+  assert.deepEqual(abExtraModels(''), []);
+  assert.deepEqual(abExtraModels('/m/a.onnx, /m/b.onnx,/m/a.onnx,'), ['/m/a.onnx', '/m/b.onnx']);
+  assert.throws(() => abExtraModels('https://evil.example/a.onnx'), /same-origin/);
+  assert.throws(() => abExtraModels('//evil.example/a.onnx'), /same-origin/);
+  assert.throws(() => abExtraModels(Array.from({ length: 9 }, (_, i) => `/m/${i}.onnx`).join(',')), /max 8/);
+});
+
+test('sequenceMeanUs averages per dispatch position and refuses mismatched invokes', () => {
+  const row = (invoke, name, ns) => ({ invoke, name, ns });
+  const rows = [row(0, 'Warm', 1), row(1, 'Gemm', 10000), row(1, 'Add', 2000), row(2, 'Gemm', 14000), row(2, 'Add', 4000)];
+  assert.deepEqual(sequenceMeanUs(rows, 2), [12, 3]);
+  assert.equal(sequenceMeanUs([row(1, 'Gemm', 1), row(2, 'MatMul', 1)], 2), null);
+  assert.equal(sequenceMeanUs([row(1, 'Gemm', 1), row(2, 'Gemm', 1), row(2, 'Add', 1)], 2), null);
+  assert.equal(sequenceMeanUs([], 1), null);
 });

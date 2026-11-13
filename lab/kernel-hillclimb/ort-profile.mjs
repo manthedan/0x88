@@ -23,14 +23,22 @@
 //                 e.g. two graph-rewrite candidates against each other
 //                 With parity=wasm the override is gated too (result ab.b.parity, vs
 //                 PRESET's original model on WASM); without it the run is not ok.
+//   abExtra=URL,URL  more candidate arms (PRESET's batch) in the same rounds; the
+//                 order rotates over all arms each round, each extra arm reports
+//                 ratios over arm B (ab.extra[]) and is gated like abModel=.
+//   abProfile=N   after the rounds, N dispatch-mode profiled invokes of arm B and
+//                 each extra arm (ab.b.profile, ab.extra[].profile). N is capped per
+//                 arm to what the profiler's timestamp capacity holds (requestedInvokes,
+//                 capped); an arm profile that still drops timestamps, or a per-round
+//                 pass-mode profile that does, fails ok (ab.incompleteProfiles names it)
 import { parseFen } from '../../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
 import { boardToMaia3Tokens, maia3InternalsForTests } from '../../src/lc0/maia3.ts';
 import { legalPolicyPriors } from '../../src/lc0/onnxEvaluator.ts';
 import * as ort from '../../src/nn/ortRuntime.ts';
-import { intParam, log, params, runMain, runtimeDeviceIdentity, summarize } from './common.mjs';
-import { legalPolicyParity, maia3ParityRows, ortParity, profileComplete, runChunked } from './gates.mjs';
-import { aggregateProfile, installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
+import { abExtraModels, intParam, log, params, roundOrder, runMain, runtimeDeviceIdentity, summarize } from './common.mjs';
+import { abIncompleteProfiles, legalPolicyParity, maia3ParityRows, ortParity, profileComplete, profileInvokeCap, runChunked } from './gates.mjs';
+import { aggregateProfile, installGpuProfiler, passModeProfile, sequenceMeanUs } from './gpu-profiler.mjs';
 
 // Legal-move policy gate (gates.mjs legalPolicyParity): max |legal prob diff|,
 // reference-measured tie epsilon for best-move / top-3 order flips.
@@ -268,65 +276,156 @@ async function wasmParity(gpu, { referenceModel, preset, batch, candidateModel }
   };
 }
 
+/** Compact dispatch-mode profile of one ab arm: per-kernel totals and the mean per-position sequence. */
+async function armDispatchProfile(prof, arm, requested, dispatchesPerInvoke, capacity) {
+  const { invokes, capped } = profileInvokeCap(requested, dispatchesPerInvoke, capacity);
+  if (capped)
+    log(`abProfile: arm ${arm.key} capped ${requested} -> ${invokes} invokes (${dispatchesPerInvoke} dispatches/invoke, ${capacity} timestamp slots)`);
+  if (invokes < 1) return { invokes: 0, requestedInvokes: requested, capped, complete: false, dropped: null };
+  prof.arm();
+  for (let i = 0; i < invokes; i++) {
+    prof.nextInvoke();
+    await arm.session.run(arm.feeds);
+  }
+  const collected = await prof.collect();
+  const agg = aggregateProfile(collected, { invokes });
+  return {
+    invokes,
+    requestedInvokes: requested,
+    capped,
+    complete: agg.complete,
+    dropped: agg.dropped,
+    kernelMsPerInvoke: agg.kernelMsPerInvoke,
+    dispatchesPerInvoke: agg.perInvoke[0]?.dispatches ?? 0,
+    kernels: agg.kernels.map(({ name, dispatchesPerInvoke, msPerInvoke, meanUsPerDispatch }) => ({
+      name,
+      dispatchesPerInvoke,
+      msPerInvoke,
+      meanUsPerDispatch,
+    })),
+    sequence: collected.rows.filter((r) => r.invoke === 1).map((r) => [r.name, r.workgroups?.join('x') ?? 'indirect']),
+    sequenceMeanUs: sequenceMeanUs(collected.rows, invokes),
+  };
+}
+
 /**
  * Interleaved A/B in one page session: per round, `block` timed invokes of A
  * then of B (order alternates each round), plus pass-mode GPU busy for both
  * arms. Ratios are A per position / B per position, one per round.
+ * abExtra= adds candidate arms C1..Cn (B's batch); the round order then
+ * rotates over all arms, and each extra arm gets its own ratios against B.
  */
-async function pairedComparison(prof, a, bPresetName) {
+async function pairedComparison(prof, a, bPresetName, { capacity }) {
   const bPreset = PRESETS[bPresetName];
   if (!bPreset) throw new Error(`ab: unknown preset ${bPresetName}`);
   const rounds = intParam('abRounds', 20, 2, 500);
   const block = intParam('abBlock', 3, 1, 100);
   const bModel = params.get('abModel') ?? bPreset.model;
   const overridden = bModel !== bPreset.model;
-  const bSession = await ort.createOrtSession(bModel);
-  const bFold = ort.lastOrtDequantFoldSummary();
-  const b = { session: bSession, feeds: (await buildFeeds(bSession, bPreset.batch)).feeds, batch: bPreset.batch, name: bPresetName };
-  assertCpuOutputs(await b.session.run(b.feeds), `ab preset ${bPresetName}`);
-  // An overridden arm B is a candidate too: keep its GPU outputs over the
-  // parity corpus so the main gate can check it against the preset's model.
-  const gpuParity = overridden && params.get('parity') === 'wasm' ? await gpuParityOutputs(bSession, bPreset.batch) : null;
-  for (let i = 0; i < 5; i++) await b.session.run(b.feeds);
-  const arms = { a, b };
-  const wall = { a: [], b: [] };
-  const busy = { a: [], b: [] };
-  const wallRatio = [];
-  const busyRatio = [];
+  const gated = params.get('parity') === 'wasm';
+  const loadArm = async (key, model, label) => {
+    const session = await ort.createOrtSession(model);
+    const dequantFold = ort.lastOrtDequantFoldSummary();
+    const arm = { key, session, feeds: (await buildFeeds(session, bPreset.batch)).feeds, batch: bPreset.batch, name: bPresetName, model, dequantFold };
+    assertCpuOutputs(await session.run(arm.feeds), label);
+    // An overridden arm is a candidate too: keep its GPU outputs over the
+    // parity corpus so the main gate can check it against the preset's model.
+    arm.gpuParity = model !== bPreset.model && gated ? await gpuParityOutputs(session, bPreset.batch) : null;
+    for (let i = 0; i < 5; i++) await session.run(arm.feeds);
+    return arm;
+  };
+  const b = await loadArm('b', bModel, `ab preset ${bPresetName}`);
+  const extraModels = abExtraModels(params.get('abExtra'));
+  const extras = [];
+  for (const [i, model] of extraModels.entries()) extras.push(await loadArm(`c${i + 1}`, model, `abExtra ${model}`));
+  const arms = [{ ...a, key: 'a' }, b, ...extras];
+  const series = Object.fromEntries(arms.map((arm) => [arm.key, { wall: [], busy: [], dispatches: [], envelope: [], gap: [], submits: [], dropped: 0 }]));
+  const wallRatio = Object.fromEntries(arms.map((arm) => [arm.key, []]));
+  const busyRatio = Object.fromEntries(arms.map((arm) => [arm.key, []]));
   for (let r = 0; r < rounds; r++) {
-    const order = r % 2 ? ['b', 'a'] : ['a', 'b'];
     const roundWall = {};
     const roundBusy = {};
-    for (const k of order) {
-      const arm = arms[k];
+    for (const arm of roundOrder(arms, r)) {
       const ms = [];
       for (let i = 0; i < block; i++) {
         const t = performance.now();
         await arm.session.run(arm.feeds);
         ms.push(performance.now() - t);
       }
-      roundWall[k] = median(ms) / arm.batch;
-      if (prof?.supported) roundBusy[k] = (await passModeProfile(prof, () => arm.session.run(arm.feeds), block)).busyMs / arm.batch;
+      roundWall[arm.key] = median(ms) / arm.batch;
+      if (prof?.supported) {
+        const pm = await passModeProfile(prof, () => arm.session.run(arm.feeds), block);
+        roundBusy[arm.key] = pm.busyMs / arm.batch;
+        const s = series[arm.key];
+        s.dispatches.push(pm.dispatchesPerInvoke);
+        s.envelope.push(pm.envelopeMs);
+        s.gap.push(pm.gapMs);
+        s.submits.push(pm.submitsPerInvoke);
+        s.dropped += pm.dropped;
+      }
     }
-    wall.a.push(roundWall.a);
-    wall.b.push(roundWall.b);
-    wallRatio.push(roundWall.a / roundWall.b);
-    if (roundBusy.a > 0 && roundBusy.b > 0) {
-      busy.a.push(roundBusy.a);
-      busy.b.push(roundBusy.b);
-      busyRatio.push(roundBusy.a / roundBusy.b);
+    for (const arm of arms) {
+      series[arm.key].wall.push(roundWall[arm.key]);
+      wallRatio[arm.key].push(roundWall[arm.key] / roundWall.b);
+      if (roundBusy[arm.key] > 0 && roundBusy.b > 0) {
+        series[arm.key].busy.push(roundBusy[arm.key]);
+        busyRatio[arm.key].push(roundBusy[arm.key] / roundBusy.b);
+      }
     }
   }
-  await ort.releaseOrtSession(bSession);
+  // abProfile=N: dispatch-mode attribution for arms B and C1..Cn (arm A uses profileInvokes).
+  const abProfile = intParam('abProfile', 0, 0, 50);
+  const armProfiles = {};
+  if (abProfile > 0 && prof?.supported)
+    for (const arm of [b, ...extras]) {
+      const dispatches = Math.max(0, ...series[arm.key].dispatches); // the largest invoke seen bounds the slots
+      armProfiles[arm.key] = await armDispatchProfile(prof, arm, abProfile, dispatches, capacity);
+    }
+  await ort.releaseOrtSession(b.session);
+  for (const arm of extras) await ort.releaseOrtSession(arm.session);
+  const passStats = (key) =>
+    series[key].dispatches.length
+      ? {
+          dispatchesPerInvoke: median(series[key].dispatches),
+          submitsPerInvoke: median(series[key].submits),
+          envelopeMs: summarize(series[key].envelope),
+          gapMs: summarize(series[key].gap),
+          dropped: series[key].dropped,
+        }
+      : null;
   const out = {
-    a: { name: a.name, batch: a.batch },
-    b: { name: b.name, batch: b.batch, model: bModel, overridden, dequantFold: bFold, gpuParity, parity: null },
+    a: { name: a.name, batch: a.batch, pass: passStats('a') },
+    b: {
+      name: b.name,
+      batch: b.batch,
+      model: bModel,
+      overridden,
+      dequantFold: b.dequantFold,
+      gpuParity: b.gpuParity,
+      parity: null,
+      pass: passStats('b'),
+      profile: armProfiles.b ?? null,
+    },
     rounds,
     block,
-    perPositionWallMs: { a: summarize(wall.a), b: summarize(wall.b) },
-    wallRatioAoverB: summarize(wallRatio),
-    perPositionGpuBusyMs: busy.a.length ? { a: summarize(busy.a), b: summarize(busy.b) } : null,
-    gpuBusyRatioAoverB: busyRatio.length ? summarize(busyRatio) : null,
+    perPositionWallMs: { a: summarize(series.a.wall), b: summarize(series.b.wall) },
+    wallRatioAoverB: summarize(wallRatio.a),
+    perPositionGpuBusyMs: series.a.busy.length ? { a: summarize(series.a.busy), b: summarize(series.b.busy) } : null,
+    gpuBusyRatioAoverB: busyRatio.a.length ? summarize(busyRatio.a) : null,
+    extra: extras.map((arm) => ({
+      key: arm.key,
+      model: arm.model,
+      batch: arm.batch,
+      dequantFold: arm.dequantFold,
+      gpuParity: arm.gpuParity,
+      parity: null,
+      pass: passStats(arm.key),
+      profile: armProfiles[arm.key] ?? null,
+      perPositionWallMs: summarize(series[arm.key].wall),
+      wallRatioOverB: summarize(wallRatio[arm.key]),
+      perPositionGpuBusyMs: series[arm.key].busy.length ? summarize(series[arm.key].busy) : null,
+      gpuBusyRatioOverB: busyRatio[arm.key].length ? summarize(busyRatio[arm.key]) : null,
+    })),
   };
   log('ab', { wallRatio: out.wallRatioAoverB.median, gpuBusyRatio: out.gpuBusyRatioAoverB?.median });
   return out;
@@ -361,7 +460,9 @@ runMain(async () => {
   }
   const timing = summarize(runMs);
   log('session.run ms', timing);
-  const ab = params.get('ab') ? await pairedComparison(prof, { session, feeds, batch, name: presetName ?? model }, params.get('ab')) : null;
+  const ab = params.get('ab')
+    ? await pairedComparison(prof, { session, feeds, batch, name: presetName ?? model }, params.get('ab'), { capacity: profiler.state.capacity })
+    : null;
   let profile = null;
   if (profileInvokes > 0 && prof?.supported) {
     prof.arm();
@@ -382,6 +483,7 @@ runMain(async () => {
     profile.sequence = collected.rows
       .filter((r) => r.invoke === 1)
       .map((r) => [r.name, Math.round(r.ns / 10) / 100, r.workgroups?.join('x') ?? 'indirect', r.bindBytes]);
+    profile.sequenceMeanUs = sequenceMeanUs(collected.rows, profileInvokes);
     profile.shaders = prof.shaders.map(({ code, ...rest }) => rest);
     log('profile', {
       kernelMsPerInvoke: profile.kernelMsPerInvoke,
@@ -412,10 +514,29 @@ runMain(async () => {
       });
       log('ab.b parity', ab.b.parity);
     }
+    for (const arm of ab?.extra ?? []) {
+      if (!arm.gpuParity) continue;
+      arm.parity = await wasmParity(arm.gpuParity, {
+        referenceModel: PRESETS[ab.b.name].model,
+        preset: PRESETS[ab.b.name],
+        batch: arm.batch,
+        candidateModel: arm.model,
+      });
+      log(`ab.${arm.key} parity`, { model: arm.model, pass: arm.parity.pass });
+    }
   }
   if (ab) ab.b.gpuParity = undefined; // outputs only; JSON drops it
-  // abModel= without parity=wasm leaves arm B ungated; that is reported, never ok.
-  const abGate = ab?.b.overridden ? (ab.b.parity?.pass ?? false) : true;
+  for (const arm of ab?.extra ?? []) arm.gpuParity = undefined;
+  // abModel= / abExtra= without parity=wasm leave those arms ungated; that is reported, never ok.
+  // Auxiliary profiles (arm B / extra arms, per-round pass mode) gate ok like arm A's.
+  if (ab) {
+    ab.incompleteProfiles = abIncompleteProfiles(ab);
+    if (ab.incompleteProfiles.length) log('ab incomplete profiles', ab.incompleteProfiles);
+  }
+  const abGate =
+    !ab?.incompleteProfiles?.length &&
+    (ab?.b.overridden ? (ab.b.parity?.pass ?? false) : true) &&
+    (ab?.extra ?? []).every((arm) => arm.model === PRESETS[ab.b.name].model || arm.parity?.pass === true);
   const identity = await runtimeDeviceIdentity(prof);
   await ort.releaseOrtSession(session);
   const gpuUsed = /webgpu/.test(backend) && !!prof;

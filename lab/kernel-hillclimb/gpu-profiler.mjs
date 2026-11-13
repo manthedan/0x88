@@ -400,6 +400,17 @@ export function aggregateProfile(collected, { invokes }) {
 }
 
 /**
+ * Mean µs per dispatch position over all profiled invokes (rows tagged 1..invokes),
+ * or null when the invokes did not dispatch the same kernels in the same order.
+ */
+export function sequenceMeanUs(rows, invokes) {
+  const per = Array.from({ length: invokes }, (_, i) => rows.filter((r) => r.invoke === i + 1));
+  const n = per[0]?.length ?? 0;
+  if (!n || per.some((list) => list.length !== n || list.some((r, j) => r.name !== per[0][j].name))) return null;
+  return per[0].map((_, j) => Math.round(per.reduce((s, list) => s + list[j].ns, 0) / invokes / 10) / 100);
+}
+
+/**
  * Time `invokes` calls of `run` with the runtime's own passes timestamped (no
  * splitting). Returns median per-invoke GPU busy / envelope / gap and wall.
  */
@@ -418,9 +429,11 @@ export async function passModeProfile(prof, run, invokes) {
     wall.push(performance.now() - t);
   }
   const submits = prof.submits;
+  const dispatches = prof.dispatchesSeen;
   const collected = await prof.collect();
   const agg = aggregateProfile(collected, { invokes });
   return {
+    dispatchesPerInvoke: dispatches / invokes,
     invokes,
     wallMs: med(wall),
     busyMs: med(agg.perInvoke.map((p) => p.busyMs)),

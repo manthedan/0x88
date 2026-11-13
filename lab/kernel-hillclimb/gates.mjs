@@ -156,6 +156,48 @@ export function profileComplete(profile) {
 }
 
 /**
+ * Profiled invokes that fit the profiler's timestamp capacity. In dispatch
+ * mode every dispatch takes one slot, so `requested` invokes of
+ * `dispatchesPerInvoke` overflow past `capacity` and the tail runs untimed.
+ * Unknown dispatch counts leave the request alone (completeness still gates).
+ */
+export function profileInvokeCap(requested, dispatchesPerInvoke, capacity) {
+  if (!(dispatchesPerInvoke > 0) || !(capacity > 0)) return { invokes: requested, capped: false };
+  const fit = Math.floor(capacity / dispatchesPerInvoke);
+  return fit >= requested ? { invokes: requested, capped: false } : { invokes: fit, capped: true };
+}
+
+/**
+ * Auxiliary ab profiles that are not trustworthy: an arm's abProfile
+ * dispatch-mode profile that dropped timestamps, did not run (capacity below
+ * one invoke) or reported complete:false, and per-round pass-mode profiles
+ * that dropped timestamps. Any entry fails the page's ok.
+ */
+export function abIncompleteProfiles(ab) {
+  if (!ab) return [];
+  const arms = [
+    { key: 'a', model: null, pass: ab.a?.pass, profile: null },
+    { key: 'b', model: ab.b?.model ?? null, pass: ab.b?.pass, profile: ab.b?.profile },
+    ...(ab.extra ?? []).map((arm) => ({ key: arm.key, model: arm.model, pass: arm.pass, profile: arm.profile })),
+  ];
+  const out = [];
+  for (const arm of arms) {
+    const p = arm.profile;
+    if (p && (p.complete !== true || p.dropped > 0 || !(p.invokes > 0)))
+      out.push({
+        arm: arm.key,
+        model: arm.model,
+        profile: 'dispatch',
+        invokes: p.invokes ?? null,
+        requestedInvokes: p.requestedInvokes ?? null,
+        dropped: p.dropped ?? null,
+      });
+    if (arm.pass?.dropped > 0) out.push({ arm: arm.key, model: arm.model, profile: 'pass', dropped: arm.pass.dropped });
+  }
+  return out;
+}
+
+/**
  * Split the full fixture corpus into physical-batch chunks for parity. The
  * last chunk is padded by repeating its final position (as the production
  * evaluators do); `real` is how many leading rows are fixtures. Parity runs
