@@ -1,6 +1,7 @@
 # BT4-it332 TVMJS/WebGPU onboarding results (2026-06-09)
 
-Executes the plan in `lc0_tvmjs_campaign_2026-06-09_and_bt4_plan.md` against
+Executes the historical BT4 plan now summarized in
+[`lc0_tvmjs_research_runbook.md`](./lc0_tvmjs_research_runbook.md#compact-t1-campaign-outcome-historical-2026-06-09) against
 **BT4-1024x15x32h-swa-6147500-policytune-332** (the "it332" policytune net,
 downloaded from lczero networks-contrib; NOT the swa-6147500 net already on
 disk). Same M-chip Mac WebGPU scope as the t1 campaign.

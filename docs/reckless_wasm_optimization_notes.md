@@ -8,7 +8,9 @@ gated by browser feature validation and implicit-asset availability in
 `0010617448bdef4c8cd7d4f4825b7e42c8bc262a` and the full v60 network.
 Reckless remains single-threaded (`maxThreads: 1`).
 
-Build the production WASI/UCI assets and corresponding-source archives with:
+For a complete release, use `npm run reckless:build-release`; it also builds
+the API variants and writes the release manifest. The production WASI/UCI
+assets and corresponding-source archives alone are built with:
 
 ```sh
 npm run reckless:build-production

@@ -18,25 +18,33 @@ Do not use `batchPipelineDepth>1`, standalone GPU legal priors, WASM legal prior
 
 ## Harness cleanup hygiene
 
-Before a measured fixed-suite run, clear only wrapper-owned browser harness state and benchmark Vite ports. This makes adjacent browser measurements less noisy; it is not a runtime optimization.
+Before measurement, settle only resources positively owned by this run.
+Use a unique browser session and record the exact session name and any server
+child handle/PID when launching it. Close only that named session. Stop a
+server only through the saved child handle, or after confirming the saved PID
+still belongs to that launch; a reused PID is not proof of ownership.
 
-```bash
-pkill -f '/node_modules/agent-browser/bin/agent-browser-darwin-arm64' >/dev/null 2>&1 || true
-pkill -f '/\.agent-browser/browsers/.*/Google Chrome for Testing' >/dev/null 2>&1 || true
-vite_pids="$( { lsof -tiTCP:5179 -sTCP:LISTEN 2>/dev/null; lsof -tiTCP:5180 -sTCP:LISTEN 2>/dev/null; } | sort -u || true )"
-if [[ -n "$vite_pids" ]]; then kill $vite_pids >/dev/null 2>&1 || true; fi
-sleep 20
-```
+A listening port or a browser/process-name match does not establish ownership.
+Never kill by pattern or terminate whoever occupies a benchmark port. If a
+requested port is occupied by an unrelated process, choose another free port
+and pass the harness's `--port`/`--base-url` controls. If ownership cannot be
+proved, leave the process alone and report the conflict. Let owned searches
+settle and the machine return to idle before timing. Cleanup reduces noise;
+it is not a runtime speedup.
 
 Use short run IDs/session names. The benchmark launchers now truncate/hash long `--session` values, but short names keep artifacts readable.
 
 ## 1. Fixture smoke / search parity
 
-Run a small fixture smoke before spending fixed-suite time:
+Run a small fixture smoke before spending fixed-suite time. The shared
+`lc0-webgpu-research-b4` preset selects `mixed-tvm-ffn-smolgen-project`, not
+this protocol's `mixed-tvm-ffn`. The explicit override below is required;
+record the resolved configuration, not just the preset name:
 
 ```bash
 node scripts/lc0_browser_hybrid_search_fixture_parity.mjs \
   --preset lc0-webgpu-research-b4 \
+  --encoder-kernel mixed-tvm-ffn \
   --fixture-limit 3 \
   --visits 32 \
   --batch-pipeline-depths 1 \

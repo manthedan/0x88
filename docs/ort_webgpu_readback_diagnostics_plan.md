@@ -19,13 +19,20 @@ The custom WGSL path currently exposes detailed telemetry and LC0-specific lever
 
 ## What to inspect in ORT
 
+Current correction (2026-11-12): ORT 1.27 production uses the native WebGPU
+EP through `initEp`, not JSEP for kernel execution. The JSEP paths below
+explain the JS backend and its profiling callback; they are not a complete
+trace of native-EP kernels. Inspect `wasm-core-impl.ts` for native EP/session
+wiring and use WebGPU API counters only when instrumentation actually installs.
+See [`ort_native_webgpu_profiler_2026-10.md`](./ort_native_webgpu_profiler_2026-10.md).
+
 Installed source paths worth reading/breakpointing:
 
 - `node_modules/onnxruntime-web/lib/wasm/jsep/backend-webgpu.ts`
 - `node_modules/onnxruntime-web/lib/wasm/jsep/webgpu/gpu-data-manager.ts`
 - `node_modules/onnxruntime-web/lib/wasm/wasm-core-impl.ts`
 
-The standard ORT WebGPU download path appears to be:
+The inspected JSEP WebGPU download path was:
 
 ```text
 create MAP_READ | COPY_DST read buffer
@@ -37,7 +44,8 @@ copy/clone bytes into CPU typed array
 destroy read buffer
 ```
 
-That is close enough to our WGSL readback path that we can compare mechanics directly.
+Compare those mechanics with WGSL, but do not infer native-EP kernel timing
+or dispatch coverage from JSEP source alone.
 
 ## Implemented diagnostic mode
 
@@ -81,11 +89,12 @@ postprocessMs             // legal-prior and search output prep
 totalEvalMs               // encode + ORT run + downloads + postprocess
 ```
 
-This separates GPU graph execution from CPU-visible output download.
+This separates `session.run()` API time from explicit CPU-visible downloads.
+It is not a direct measurement of native GPU kernel duration.
 
 ## ORT WebGPU profiling hook
 
-The diagnostic mode enables ORT's WebGPU timestamp profiling:
+The diagnostic mode requests ORT's WebGPU timestamp profiling:
 
 ```ts
 ort.env.webgpu.profiling.mode = 'default';
@@ -101,7 +110,13 @@ ortKernelCount
 ortKernelGpuMs
 ```
 
-Note: ORT only emits timestamp records when the browser/device exposes the required WebGPU timestamp-query features. On devices without those features, these fields can remain zero even while the WebGPU API monkey-patch counters are working.
+ORT 1.27's `profiling.ondata` callback is wired only in JSEP. Native WebGPU
+can produce zero events even when timestamp-query is supported. Zero events
+mean unavailable attribution, not zero GPU work or proof of WASM fallback.
+`src/nn/ortRuntime.ts` reports `status: 'unavailable'`, `eventCount: 0`, and
+`kernelGpuMsTotal: null` / `topPrograms: null` in that case. Real events remain
+authoritative if collected. API monkey-patch counters are a separate signal;
+they can work while kernel profiling is unavailable.
 
 ## WebGPU API monkey-patch
 
@@ -210,7 +225,7 @@ Interpretation:
 - `preferredOutputLocation=gpu-buffer` appears to move download/fence cost from `session.run()` into explicit `tensor.getData()`, as intended.
 - In this short noisy run, forcing GPU-backed outputs was slower end-to-end because downstream JS still immediately downloads all three outputs.
 - ORT still maps three output tensors and copies about 36 KB through `copyBufferToBuffer` per eval, even though the CPU-visible model outputs are only about 7.3 KB.
-- ORT timestamp kernel profiling remained unavailable on this browser/device (`ortKernelCount=0`), so WebGPU API counters are the reliable attribution signal here.
+- The historical output printed `ortKernelCount=0`. Native-EP kernel profiling is unavailable, not zero-duration; current summary fields use null/unavailable. Observable WebGPU API counters are the separate attribution signal here.
 
 ## Fixed-FEN strategy matrix
 
@@ -328,7 +343,12 @@ wgsl-pipe2 search readbackMs  35.92
 wgsl-pipe2 search bytes       23200
 ```
 
-Immediate implication: batch=4/depth=2 is now a valid matrix cell again, but this short local smoke did not show an end-to-end win. The earlier batch=2/depth=2 signal still suggests readback/fence overlap can matter, but the scheduler/resource path needs repeated fixed-suite runs before any promotion. GPU legal-prior byte reduction can now be tested directly with overlap via `wgsl-gpu-legal-pipe2` before any promotion decision.
+At this stage batch=4/depth=2 executed again, but the short smoke did not
+show an end-to-end win. Later strict work found that speculative pipeline
+depth changes search ordering and reduces fixed-search parity; it is not
+parity-preserving readback overlap. The observations below remain diagnostic,
+not a promotion recipe. See
+`docs/inference_caching_optimization_gap_audit_2026-07-14.md`.
 
 Combined GPU-legal + pipe2 smoke results:
 
@@ -364,7 +384,10 @@ pipe2-batch 4:
   wgsl-gpu-legal-pipe2    visits/s 48.71  searchMs 331.53  readbackMs 38.00  bytes  9612
 ```
 
-The combined strategy is therefore worth keeping in the matrix: with `pipe2-batch=2` it reduced bytes/readback wait but did not beat pipe1 E2E; with `pipe2-batch=4` it was the best cell in this noisy two-FEN smoke. Treat this only as a hypothesis for repeated fixed-suite/autoresearch validation, not as promotion evidence.
+In this noisy two-FEN smoke, `pipe2-batch=2` reduced bytes/readback wait but
+lost E2E; `pipe2-batch=4` was the best timing cell. Keep these as historical
+observations, not evidence of equivalent search or an instruction to promote
+speculative pipe2.
 
 ## Guardrails
 

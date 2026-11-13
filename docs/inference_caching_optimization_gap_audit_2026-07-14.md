@@ -788,7 +788,7 @@ tradeoff, do not prioritize:
 - `docs/lc0_pack_serving_compression_audit.md`
 - `docs/lc0_fused_legal_topk_readback_plan.md`
 - `docs/lc0web_custom_inference_checkpoint.md`
-- `docs/lc0_tvm_whole_onnx_webgpu_probe.md`
+- `docs/lc0_tvmjs_research_runbook.md` (includes the historical whole-ONNX probe results)
 - `docs/lc0_t3_qdq_webnn_2026-06-10.md`
 - `docs/lc0_wasm_relaxed_simd_inference_design.md`
 - `src/lc0/modelCache.ts`

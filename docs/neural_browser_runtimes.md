@@ -124,6 +124,47 @@ browser feature is unflagged for the target audience and each model passes the
 same fixture/search/parity gates as WebGPU. Keep WebNN probes as a forward-looking
 lane for non-WebGPU coverage and NPU/ANE experiments.
 
+## ONNX deploy-sibling workflow
+
+Keep training/source artifacts unchanged. Use the maintained onnxsim wrapper to
+write a separate deployment candidate:
+
+```sh
+npm run deploy:onnxsim -- \
+  --model artifacts/path/model.onnx \
+  --meta artifacts/path/model.meta.json \
+  --out artifacts/path/model.sim.onnx \
+  --meta-out artifacts/path/model.sim.meta.json
+```
+
+`onnxsim` can remove Cast/Shape/Unsqueeze/Concat/Reshape/Gather noise even when
+file size barely changes. `scripts/simplify_onnx_for_deploy.py` runs
+`onnx.checker`; that is structural validation, not semantic or search parity.
+`--no-large-tensor` defaults on to avoid Tile/ConstantOfShape graph bloat.
+Dynamic candidates default to `--check-n 0`; validate real chess inputs rather
+than trusting random-input simplifier checks. `onnx/optimizer` remains optional,
+not a mandatory second pass.
+
+The original simplification gate required policy/WDL and exported aux-head
+parity within `1e-5`, no illegal moves/runtime failures in PUCT, and latency no
+worse unless size/init benefit justified it. Preserve those semantic/search
+checks. Quantization or f16 reordering needs its own explicit model-specific
+tolerances; do not silently loosen a simplification gate.
+
+Use maintained, model-specific gates: LC0 fixture/search harnesses and the
+`ort-profile` / `search-ab` candidates in `scripts/kernel_hillclimb/`, or the
+Maia3 paired ORT reference workflow in
+[`maia3_graph_rewrite_2026-11.md`](./maia3_graph_rewrite_2026-11.md). Maia input
+encoding tests alone do not validate a rewritten output graph. Record the
+candidate/reference URLs, effective provider, threads, fixtures, numerical
+errors and search results before publication. The released Small outcome is in
+[`lc0_small_splitk_2026-11.md`](./lc0_small_splitk_2026-11.md).
+
+The old generic `eval/onnx_parity_check.mjs` and
+`eval/puct_batch_benchmark.mjs` were removed in commit `004504e` (2026-06-11).
+They are historical tools recoverable from that commit's parent, not the
+standard flow or a reason to pin today's ORT to four threads.
+
 ## Promotion checklist
 
 A neural runtime lane can be considered for product use only when it has:
@@ -138,5 +179,4 @@ A neural runtime lane can be considered for product use only when it has:
 
 Related docs: [`lc0_tvmjs_research_runbook.md`](lc0_tvmjs_research_runbook.md),
 [`lc0web_custom_inference_checkpoint.md`](lc0web_custom_inference_checkpoint.md),
-[`lc0_t3_qdq_webnn_2026-06-10.md`](lc0_t3_qdq_webnn_2026-06-10.md), and
-[`onnx_deploy_workflow.md`](onnx_deploy_workflow.md).
+[`lc0_t3_qdq_webnn_2026-06-10.md`](lc0_t3_qdq_webnn_2026-06-10.md).

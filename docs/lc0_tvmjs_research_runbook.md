@@ -2,16 +2,32 @@
 
 Status: **PROMOTED to visible non-default option 2026-06-10** (release-owner
 decision, self-hosted scope). The whole-model TVMJS/WebGPU runtime is now
-always listed in the arena/analysis LC0 runtime selector; ORT ONNX/WebGPU
-remains the default and the fallback, and the stable NN runtime plumbing
-(`src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`) stays
-TVMJS-free. Accepted caveats at promotion: no non-Apple GPU datapoint yet and
+listed in non-v0 Arena/Analysis LC0 runtime selectors. The v0 deploy profile
+forces ONNX, removes non-ONNX options and ignores TVMJS query opt-ins
+(`src/lc0/browserLc0Runtime.ts`). ORT ONNX/WebGPU remains the default/fallback.
+LC0 whole-model TVMJS stays page-level, outside the shared NN registry and
+evaluator (`src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`).
+This statement is LC0-specific; other families are out of scope here. Accepted caveats at promotion: no non-Apple GPU datapoint yet and
 no public hosting/cache policy (artifacts remain local/gitignored). Evidence
 basis: t1 94/94 fixed-suite search matches vs ORT f16 + Stockfish cp deltas
 0/0/0; t3 native 8/8 strict; BT4-it332 gated with tie tolerance.
 `scripts/check_lc0_tvmjs_research_only.mjs` (v2) enforces the new policy.
 
-## What is close to promotion
+## Current operational policy (source-checked 2026-11-13)
+
+Use this runbook for LC0 export, staging and evidence commands. Self-hosted
+non-v0 selection uses `lc0Runtime=whole-onnx-webgpu` (aliases include
+`tvmjs-webgpu`). It is visible but non-default, not a public artifact release or
+a default-runtime promotion. Generated bundles stay local/ignored unless a
+release owner approves a specific publication. Public-release/default blockers
+are exact bundle provenance, host/cache canaries, agreed drift/search gates,
+startup/footprint budgets and broader device coverage. Do not re-open completed
+BT4 onboarding: see [`lc0_tvmjs_bt4it332_onboarding_2026-06-09.md`](./lc0_tvmjs_bt4it332_onboarding_2026-06-09.md).
+
+The following readiness snapshot and experiment ledger predate that promotion.
+“Blocked” and “next” in dated records describe their stage, not today's selector.
+
+## Pre-promotion execution snapshot (historical)
 
 The whole-model LC0 f16 ONNX → TVM Relax → TVMJS/WebGPU path is mechanically real:
 
@@ -21,9 +37,12 @@ The whole-model LC0 f16 ONNX → TVM Relax → TVMJS/WebGPU path is mechanically
 - browser execution requests `shader-f16`, instantiates the TVM runtime asynchronously, initializes WebGPU, prebuilds pipelines, and runs the Relax VM;
 - smoke evidence compares real fixture eval/search rows against ORT f16 WebGPU.
 
-It is **not promotion-ready** yet because the evidence is still smoke-derived and generated artifacts are local/ignored. Promotion remains blocked by the checklist below.
+At this pre-2026-06-10 stage, it was not promotion-ready: evidence was
+smoke-derived and artifacts local/ignored. The later self-hosted non-default
+promotion accepted explicit caveats. It did not authorize public publication
+or a default change.
 
-## Promotion readiness snapshot
+## Historical readiness snapshot (before 2026-06-10)
 
 | Area | Current state | Promotion implication |
 | --- | --- | --- |
@@ -36,7 +55,7 @@ It is **not promotion-ready** yet because the evidence is still smoke-derived an
 | Fixed-suite evidence | Existing reports are fixed-suite-style but smoke-harness based. | Still blocked from promotion. |
 | Artifact release | Generated TVMJS wasm/runtime artifacts remain ignored/local. | Publication/hosting/cache policy required. |
 
-## Promotion blockers
+## Original promotion blockers (historical; public/default gates remain separate)
 
 - Expand direct same-session full-model TVMJS vs custom hybrid TVM/WGSL comparison beyond smoke-sized rows.
 - Production-style fixed-suite integration, not only `lab/lc0-tvmjs-webgpu-smoke.html`.
@@ -81,7 +100,7 @@ npm run lc0:check-tvmjs-webgpu-toolchain
 
 ## Export whole-model TVMJS/WebGPU wasm
 
-For the current default LC0 f16 b1/b4/b8 ONNX artifacts:
+For the t1 f16 b1/b4/b8 research exports (not today's QDQ8 product model):
 
 ```bash
 cd "$WEB"
@@ -152,7 +171,7 @@ npm run lc0:tvmjs-webgpu-summary -- \
   --out artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_b8_v16_ortf16_report.json
 ```
 
-Research-only fixed-suite bridge, using the same fixed FEN input style as `lc0_browser_runtime_fixed_suite.mjs` but without adding TVMJS to the stable runtime registry/UI.
+Research-only fixed-suite bridge, using the same fixed FEN input style as `lc0_browser_runtime_fixed_suite.mjs` but without registry/default promotion of LC0 whole-model TVMJS. Non-v0 page-level selection is allowed.
 The UHO-lite opening suites (`eval/opening_suite_uho_lite_v1.fen` and `_v2`)
 are no longer in this repository; they were removed in commit `004504e`
 (2026-06-11). Recover one with
@@ -578,7 +597,7 @@ Cross-batch sharing is now **proven** (2026-06-09):
 
 - b1 and b16 `--detach-params` builds dump **byte-identical** tensor-caches (matching sha256 for both `params_shard_*.bin` and `tensor-cache.json`).
 - `f16/v3-detached` now stages b1 + b16 wasms (`4.5 MB` each) with ONE shared sidecar (`55 MB` total staged versus `~89 MB` embedded for the same two batches).
-- End-to-end: the b1 wasm running against the b16-dumped sidecar passes native best-move parity `8/8` (`artifacts/tvm/lc0_tvmjs_detached_b1_shared_cache.json`; max top-prior abs diff `0.0059`). b1 search parity is not runnable due to the known b1 WDL/MLH 4-byte-alignment readback limitation; evaluator-level parity is the b1 evidence.
+- End-to-end: the b1 wasm running against the b16-dumped sidecar passed native best-move parity `8/8` (`artifacts/tvm/lc0_tvmjs_detached_b1_shared_cache.json`; max top-prior abs diff `0.0059`). At this stage b1 search parity was blocked by unaligned WDL/MLH readback. The 2026-06-10 runtime fix closed it; see the BT4 onboarding record's “Small debts cleared” and `docs/upstream/tvm-webgpu-unaligned-readback.patch`. These original evaluator measurements are unchanged.
 
 Fixed-suite bridge evidence now covers the new configs (the bridge accepts
 `--batch 16/32` and `--manifest`):
@@ -787,13 +806,14 @@ Suggested numeric promotion gates to ratify before stable exposure:
 - Startup: cold start and repeat-load cached start fit the accepted budget, including TVMJS wasm fetch/verify, instantiate, WebGPU pipeline prebuild, VM creation, tensor-cache load if used, and first useful search.
 - Footprint: raw/gzip/Brotli artifact footprint fits the accepted size budget; duplicated batch-specific weight storage is either removed or explicitly accepted.
 - Coverage: pass on at least the agreed Chrome/WebGPU device matrix, including a non-Apple GPU, plus documented fallback behavior when `shader-f16` or WebGPU is unavailable.
-- Isolation: TVMJS remains absent from stable runtime registry/UI/default arena flow until release owner approval explicitly changes that policy.
+- Isolation: LC0 whole-model TVMJS stays outside shared registry/default flow. Visible non-v0 page-level selection is approved; v0 still forces ONNX.
 
 Do not add TVMJS to `src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`, or the stable arena runtime UI as part of artifact publication alone.
 
-## Branch push/merge checklist for `tvmjs-hybrid-research-runbooks`
+## Historical branch closeout checklist (`tvmjs-hybrid-research-runbooks`)
 
-Before pushing or merging this research branch:
+This records the pre-promotion branch workflow, not current Git instructions.
+Its evidence does not establish a public release. At that stage:
 
 1. Confirm the worktree is clean except the Ralph task file in the parent coordination repo, if that repo tracks it separately.
 2. Confirm `git log --oneline main..tvmjs-hybrid-research-runbooks` contains only research-lane commits and no generated TVMJS wasm/runtime artifacts.
@@ -818,10 +838,10 @@ Before pushing or merging this research branch:
    git push -u origin tvmjs-hybrid-research-runbooks
    ```
 
-6. In the PR/merge notes, state explicitly that TVMJS remains research-only and is not added to `src/nn/runtimeRegistry.ts`, `src/nn/browserRuntimeEvaluator.ts`, stable runtime UI, or default arena flow.
+6. In current merge notes, distinguish approved non-default/non-v0 LC0 page selection from shared-registry/default promotion. Do not claim LC0 TVMJS is absent from all UI.
 7. Mention ignored/local artifact policy: generated TVMJS wasm/runtime files and evidence artifacts are not release payloads unless a release owner separately accepts the hosting/cache policy.
 8. Include the current evidence highlights: fixed-suite bridge `94/94` TVMJS-vs-ORT f16 search move matches, same-session TVMJS-vs-hybrid visit samples at `16/32/64`, GPU allocation-request telemetry, startup/amortization sidecar, bundle footprint sidecar, and local static `Content-Encoding` smoke.
-9. Treat merge as a research/runbook merge only; TVMJS promotion remains blocked by broader production fixed-suite evidence, release-host verification, f16 drift/tolerance policy, and accepted artifact publication policy.
+9. A research/runbook merge alone does not authorize public/default promotion. Broader fixed-suite evidence, release-host verification, drift policy and artifact-publication approval remain separate gates.
 
 ## Evidence naming convention
 
@@ -833,3 +853,250 @@ artifacts/tvm/<model-id>_<suite>_b<batch>_v<visits>_r<repeats>_tvmjs_vs_hybrid.j
 ```
 
 Keep generated artifacts ignored unless release policy changes.
+
+## Original whole-ONNX probe results (historical, 2026-06)
+
+The original probe used `scripts/lc0_tvm_whole_onnx_probe.py` and
+`scripts/run_lc0_tvm_whole_onnx_probe.sh`. The three import mitigations and
+browser-export commands are consolidated above. Optional
+`--capture-module-sources` / `CAPTURE_MODULE_SOURCES=1` captures WGSL/C next to
+the ignored JSON. Use the installed `apache-tvm-ffi` wheel, not an extra
+`3rdparty/tvm-ffi/python` entry on `PYTHONPATH`.
+
+### Native-export limitation and toolchain outcome
+
+The first `.tvm_export` was a macOS Mach-O shared library embedding WebGPU.
+Python could compile/export it but `tvm.device("webgpu", 0).exist == false`;
+loading a copied `.dylib` failed on `ffi.Module.load_from_bytes.webgpu`.
+That milestone was compile/source/export success, not browser parity/perf.
+The browser path instead used WebGPU target + wasm32 LLVM host and
+`tvm.contrib.tvmjs.create_tvmjs_wasm`. Native export is skipped in that mode:
+the platform C++ linker cannot link wasm32 host objects.
+
+The local toolchain used emcc 5.0.7, web runtime bitcode under
+`.deps/tvm-webgpu-src/web/dist/wasm/`, and an LLVM-enabled `build-tvmjs` with
+`TVM_LIBRARY_PATH` selecting its `lib/`. The wrapper assumes a `leelaweb`
+checkout; set `LC0_WEB_REPO` when the checkout has another name. The maintained
+build/check commands above replace the duplicated bootstrap recipes.
+
+Original ignored `artifacts/tvm/` native/source probe sizes:
+
+| batch | model bytes | export bytes | WGSL bytes | C bytes | kernels | Relax i64 tokens | `shape_to_tensor` tokens |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 40,491,226 | 41,864,688 | 732,713 | 1,053,493 | 39 | 0 | 0 |
+| 4 | 40,491,226 | 42,145,392 | 1,013,578 | 1,060,542 | 39 | 0 | 0 |
+| 8 | 40,491,226 | 44,258,928 | 1,018,009 | 1,060,560 | 39 | 0 | 0 |
+
+Stage timings: ONNX load `0.015–0.027s`, Relax import `0.045–0.080s`, WebGPU
+build `0.54–0.61s`, source capture `~0.004s`, native export `22–24s`.
+Browser model WASMs named
+`artifacts/tvm/t1-256x10-distilled-swa-2432500.batch{1,4,8}.f16.webgpu.tvmjs-wasm.probe.tvmjs.wasm`
+were respectively `44,308,011`, `44,611,496`, and `44,644,785` bytes.
+
+### Loader, invocation and fixture results
+
+`lab/lc0-tvmjs-webgpu-smoke.html` reported `SMOKE_OK` with
+`vm_load_executable` for b1/b4/b8: manifest fetch, SHA/size check,
+`shader-f16` device, asynchronous `tvmjs.instantiate` (sync compile is blocked
+for >8 MB WASM), `initWebGPU`, `systemLib`, and pipeline prebuild.
+Zero-input VM invocation uploaded `[batch,112,8,8]` f16, called
+`set_input` / `invoke_stateful`, retrieved outputs and synced/read back:
+
+| Batch | `invoke_stateful` smoke timing | Outputs |
+| --- | ---: | --- |
+| 1 | about `4.0 ms` | `[1,1858]`, `[1,3]`, `[1,1]` f16 |
+| 4 | about `4.1–5.5 ms` | `[4,1858]`, `[4,3]`, `[4,1]` f16 |
+| 8 | about `5.4–5.9 ms` | `[8,1858]`, `[8,3]`, `[8,1]` f16 |
+
+Fixture mode used `encodeLc0Classical112(..., {historyFill: "fen_only"})`,
+f16 conversion, legal-prior decoding, and native BLAS rows from
+`fixtures/lc0/native_fen_only_blas.jsonl`. The original b8 smoke matched native
+bestmove `8/8`: max top-prior diff `0.004802150612562506`, Q diff
+`0.004474531249999997`, MLH diff `0.2749999999999986`; observed invoke about
+`4.2 ms`.
+
+Original same-page ORT comparisons:
+
+| Artifact | ORT compare | Best move | Max top-prior abs diff | Max Q abs diff | Max MLH abs diff |
+| --- | --- | ---: | ---: | ---: | ---: |
+| batch8 vs ORT f16 WebGPU | f16 | `8/8` | `0.009859013926522886` | `0.003173828125` | `0.25` |
+| batch1 vs ORT f16 WebGPU | f16 | `1/1` | `0.0006974565401345473` | n/a | n/a |
+| batch1 vs ORT f32 WebGPU | f32 | `1/1` | `0.0004851487340732652` | n/a | n/a |
+
+At that stage b1 WDL/MLH reads were skipped because their byte lengths were
+not 4-byte aligned. This is fixed, not a current limitation: the 2026-06-10
+runtime patch pads copies and returns only requested bytes; b1 WDL is 6 B and
+MLH 2 B. See [`lc0_tvmjs_bt4it332_onboarding_2026-06-09.md`](./lc0_tvmjs_bt4it332_onboarding_2026-06-09.md)
+and [`upstream/PR_tvm_webgpu_readback.md`](./upstream/PR_tvm_webgpu_readback.md).
+Do not reinterpret the historical n/a cells as new measurements.
+
+All-10-fixture coverage report:
+`artifacts/tvm/lc0_tvmjs_webgpu_fixture_coverage_summary.json`. Native and ORT
+f16 bestmove both `10/10`; maximum native prior/Q/MLH differences remained
+`0.004802150612562506` / `0.004474531249999997` / `0.2749999999999986`;
+ORT f16 differences `0.009859013926522886` / `0.003173828125` / `0.25`.
+
+### Original search-smoke aggregate (v9)
+
+`lc0_browser.tvmjs_webgpu_search_smoke_summary.v9` covered 94 rows at visits
+4/16/32, all `94/94` TVMJS-vs-ORT f16 move matches. All-fixture 16- and
+32-visit runs each had native eval, ORT eval and search `10/10`. UHO-lite
+8-position v16 had ORT eval/search `8/8`. The 16-position repeat-2 run had
+ORT eval `16/16`, search `32/32`, TVMJS mean/median `43.356/40.185 ms` versus
+ORT `50.739/47.087 ms`. Stockfish-depth-3 runs with 4/8/16 positions had
+4/8/16 search/scored rows and 3/7/15 comparable cp deltas, all mean/min/max
+`0/0/0`. Maximum search wall was `82.760 ms` TVMJS / `93.840 ms` ORT.
+
+Original local evidence paths (not committed payloads):
+
+```text
+artifacts/tvm/lc0_tvmjs_webgpu_smoke_batch8.json
+artifacts/tvm/lc0_tvmjs_webgpu_smoke_batch8_ortf16_webgpu.json
+artifacts/tvm/lc0_tvmjs_webgpu_smoke_batch1_ortboth_webgpu.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v4_batch8_first2.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v16_batch8_first2.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v16_batch8_promotion2.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v16_batch8_all10.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v32_batch8_all10.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v16_batch8_uho_lite8.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v16_batch8_uho_lite16_repeat2.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v16_batch8_uho_lite4_sfdepth3.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v16_batch8_uho_lite8_sfdepth3.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_v16_batch8_uho_lite16_sfdepth3.json
+artifacts/tvm/lc0_tvmjs_webgpu_search_smoke_summary.json
+artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_uho_lite16_repeat2_report.json
+artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_uho_lite4_sfdepth3_report.json
+artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_uho_lite8_sfdepth3_report.json
+artifacts/tvm/lc0_tvmjs_webgpu_fixed_suite_uho_lite16_sfdepth3_report.json
+```
+
+The source corpus included the
+10 fixture rows and first 16 UHO-lite v1 rows. That v1 suite later proved to
+have a corrupt row; use the recovery/correction note above, not an assumed
+current sibling checkout. These are warm, short smoke slices, not a native
+visit-distribution or universal throughput claim. Report v1 was unscored;
+Stockfish-scored v2 explicitly remained smoke-derived rather than output of
+`lc0_browser_runtime_fixed_suite.mjs`. The original local evidence gate required
+all matches, at least 94 rows, 3 scored runs and 4 fixed-suite-style reports.
+The later self-hosted promotion is separate from those thresholds.
+
+## Compact t1 campaign outcome (historical, 2026-06-09)
+
+Scope: M-chip Mac WebGPU/WASM, f16 t1-256x10-distilled. This is not a current
+QDQ/graph-capture benchmark or a cross-GPU conclusion.
+
+| Question | Dated verdict |
+| --- | --- |
+| Visit loop v16/b8 | 86% GPU wait, JS search ≈2 ms (non-lever) |
+| GPU wait | ~9 ms real arithmetic, 229 passes, top four matmul families ≈63% |
+| Pipeline depth 2 | +27% slower; fragments batch fill |
+| Pass coalescing 5928→26 | No resolved gain |
+| Dlight default | Kernel −8%, end-to-end nil; Matmul applied to all 19 kernels |
+| Eight tile configs | Default local optimum; vec>1 illegal on N=3/1858 heads; tuning parked on this device |
+| Batch scaling | b8/b16/b32 costs 15.1/19.4/30.3 ms; b16 cuts v16/v32 search 22–26%; b32 wins from ~v64 |
+
+Bottom line: b16/v16 ≈39–40 ms versus ORT f16 ≈45–51 ms, `16/16` UHO move
+match and cp delta `0/0/0`. Detached params cut model WASM 44.6→4.5 MB plus
+~38 MB raw-f16 cache; ≤4096-element initializers stayed inline to preserve
+shape constants. b1/b16 caches were byte-identical. The shared bundle was
+54.7 MB raw / 36.8 MB Brotli; warm 40.2 MB cache read was 21 ms versus
+235 ms cold fetch/upload. The detailed records above retain controls/caveats.
+
+Reusable infrastructure included visit-loop/timestamp attribution,
+`--kernel-profile-invokes`, pass coalescing, `evaluateBatchSequence`,
+`--detach-params`, Dlight configs, fuse depth, fixed batch, JSON input dtype,
+gather mitigations, scheduler crash fallback, and parameterized manifests /
+model families. Keep pipeline depth 1. At the campaign date, non-Apple evidence
+and public hosting/cache policy were deferred; those caveats were accepted only
+for later self-hosted non-default selection.
+
+The old “next target BT4” export/stage/checklist is completed, not an open task.
+The policytune-332 results (including int8/int4, tie tolerance, detached sharing
+and the readback fix) live in
+[`lc0_tvmjs_bt4it332_onboarding_2026-06-09.md`](./lc0_tvmjs_bt4it332_onboarding_2026-06-09.md).
+
+# Centipawn (deferred)
+
+The following Tiny Leela probe subsection and campaign discipline bullet are
+retained verbatim. They are historical records, not a current Centipawn audit.
+
+## Tiny Leela (squareformer_v2) TVMJS probe (2026-06-09)
+
+First attempt at the project's own model family
+(`public/models/bt4_anneal_muon_best.onnx`, squareformer_v2 6×128, uint8
+compact-token inputs, PyTorch export). Status: **compiles, loads, and runs on
+WebGPU; numerics are wrong; blocked on upstream TVM frontend bugs.**
+
+What it took to compile (new probe capabilities, all opt-in):
+
+1. onnxsim with `overwrite_input_shapes` (batch fixed to 16) — folds all
+   `Shape`/`Gather`/`Concat` dim arithmetic; the raw export fails Relax import.
+2. `--dtype '{"tokens":"int32"}'` (JSON per-input dtype) — i64 graph input.
+3. `--trust-runtime-gather-indices` — the runtime embedding gathers otherwise
+   emit i64 `shape_to_tensor` wrap logic; this model clamps indices in-graph.
+4. Gather patch now skips Shape-typed data (PyTorch `Shape→Gather` pattern).
+5. `--max-fuse-depth 6` (`relax.FuseOps.max_depth`) — the 21-term embedding
+   sum otherwise fuses into one kernel needing 12 storage buffers vs the
+   device's 10/stage limit. Relax FuseOps ignores target `max_function_args`
+   (hardcoded 0 at `fuse_ops.cc:1053`; webgpu target kind doesn't declare it) —
+   upstream gap. `--no-fuse-ops` also exists but unfused bool intermediates
+   become `array<i8>` WGSL buffers, which WGSL rejects — second upstream gap.
+6. Dlight rule crash fall-through (rfactor `bind` fails on the head-sum
+   reduction with both the default scheduler and `dl.gpu.Reduction`); crashed
+   functions now go straight to `Fallback`.
+
+Browser result (`tiny-tvmjs-webgpu-smoke.html`, b16, synthetic inputs vs ORT
+on the same fixed-batch ONNX): pipelines build (needs adapter
+`maxStorageBuffersPerShaderStage` in requiredLimits), invoke+readback of all
+four outputs ≈ `29.6 ms`, all outputs finite — but `maxAbsDiff` vs ORT is
+~`36` on policy/`8` on wdl. TVM is internally consistent (CPU llvm build
+produces the same wrong values as WebGPU), so this is a deterministic
+op-conversion divergence in the Relax ONNX frontend (suspects:
+`LayerNormalization`/`Gemm`/`BitwiseAnd`/`Slice`/Clip-isnan paths — ops the
+LC0 lane never exercised). Separately, **unseeded imports are
+nondeterministic**: identical scripts produce all-NaN outputs on some runs and
+finite ones on others; pinning `PYTHONHASHSEED` makes builds deterministic.
+Both issues are upstream-class TVM bugs.
+
+### Numerics bisection result (2026-06-09, same day)
+
+The divergence was bisected to a **TVM compiler-pass bug in constant scalar
+Gather-index folding**, not the frontend and not fusion:
+
+- Coarse probes: the `/ReduceSum` piece-embedding sum is exact; the first wrong
+  tensor is in the embedding stem (`/Clip_2`, the rank-column clamp), with
+  integer-exact diffs.
+- Empirically, TVM's "rank" path computes `clamp(tokens[:,:,15], 0, 7)` — it
+  reads token column **15** (square) instead of column **12** (rank). The
+  imported Relax IR is verified correct (the scalar index wrap chains carry
+  `R.const 8/9/10/11/12` exactly as the ONNX specifies), so
+  LegalizeOps/FoldConstant/build mis-folds the `shape_to_tensor`/`take`/`where`
+  scalar-index chains. Reproduces identically with fusion on, with a forced
+  fusion boundary, and with FuseOps disabled (per-op kernels).
+- Deterministic repro: `artifacts/tvm-tiny/cut_add4_boundary.onnx` (45 nodes,
+  extracted via `onnx.utils.extract_model` to `/Add_4_output_0` +
+  `/Clip_2_output_0`) with `artifacts/tvm-tiny/repro_inputs.npz`; tiny cuts of
+  the same ops in isolation (2–3 nodes) are exact, so context (the constant
+  pool of the surrounding graph) is required.
+- Separately, larger programs built from the **byte-identical imported module**
+  show run-to-run output variance (one process produced four different outputs
+  from one build; others alternate clean/all-NaN per build) — an
+  uninitialized-memory-class bug in build/runtime. WebGPU's zero-initialized
+  buffers make the browser behavior deterministic (it matches the zero-heap CPU
+  outputs), which is why the browser smoke looked stably wrong.
+
+Practical consequences: the LC0 lane is structurally unaffected (no runtime
+scalar-index gather chains survive its import thanks to the gather patches, and
+its parity is gated against native fixtures per build), but per-build parity
+gating remains mandatory for ANY TVM export. The Tiny lane is blocked on the
+upstream pass bug; the repro above is the attachment for a TVM issue. A
+frontend-level workaround sketch (emit `R.const` scalar indices directly
+instead of wrap chains for in-range constant Gather indices) is already what
+`--trust-nonnegative-gather-indices` does — but the full patched model still
+diverges, so at least one more mis-folded pattern exists beyond the gather
+chains; finding it follows the same extract-and-cut method.
+
+- Mandatory discipline (reinforced by the Tiny lane bisection, commit
+  `e1ae54c`): **per-build parity gating against native fixtures for every TVM
+  artifact** — the TVM toolchain has demonstrated compiler-level correctness
+  bugs and build nondeterminism on other model shapes.

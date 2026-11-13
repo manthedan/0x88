@@ -47,7 +47,11 @@ same-shape tensors with different data no longer merge (which was the bug).
 `repro_constant_pool_dedup.py` (in this directory): builds
 `y = x + c_0 + ... + c_511` with 512 distinct 0-d int64 relax constants (kept
 unfoldable by the runtime input), compiles for llvm, and checks the sum.
-Fails on unpatched builds; passes with the fix.
+This synthetic check can fail on affected unpatched builds, but it can also
+pass when the standard-library map pre-compares hashes (notably libc++), as
+the repro's caveat explains. A passing synthetic check alone does not prove
+the fix is present. The end-to-end ONNX module and rebuild-bisection above
+provide the stronger reproduction evidence.
 
 ## Suggested unit test (tests/cpp, gtest)
 

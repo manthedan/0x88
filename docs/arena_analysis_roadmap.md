@@ -1,6 +1,6 @@
 # Arena & Analysis capability map and backlog
 
-Current source check: 2026-11-12. This is the delivered/backlog map for
+Current source check: 2026-11-13 (`814a2f35`). This is the delivered/backlog map for
 `/app/arena/`, `/app/analysis/`, and `/app/play/`, not a list of missing June
 features. The original design comparison is retained below.
 
@@ -60,6 +60,7 @@ the game aggregate is a per-side mean, not an identical review pipeline.
 ### Stage 4 — Remaining product backlog
 
 - Restricted candidate-move/focus UI (`rootMoves` exists in search).
+- Piece-placement position editor beyond the existing FEN input.
 - Puzzle/policy/value-head testing UI: top-N, KLD and rating/theme groups;
   ERET visualization. Dev-side suites are not this product surface.
 - Full opening-book import/tooling, book-exit evaluation/filtering and
