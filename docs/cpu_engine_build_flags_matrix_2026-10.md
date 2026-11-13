@@ -11,9 +11,15 @@
 
 The Berserk builder defaults LTO on only when `BERSERK_WASM_RELAXED_SIMD=1`, the already-promoted tier measured here. Its optimization level remains `-O2`; scalar and regular SIMD fallback defaults remain unchanged. `BERSERK_EMSCRIPTEN_LTO=0` restores the previous build. All three builders accept explicit `<ENGINE>_EMSCRIPTEN_LTO=1` independently of their existing `<ENGINE>_EMSCRIPTEN_OPT` knob. `-flto` is passed at compilation and linking in the single Emscripten invocation; this is full LTO, not ThinLTO.
 
-**Staged in the repo, not yet published (2026-11-11; archive and manifest regenerated 2026-11-12 on the release branch).** The committed relaxed-tier JS/WASM are now the `-O2 -flto` build, and the source archive and manifest were regenerated with them. The archive is not byte-reproducible (its hash changes between runs), so always regenerate the manifest after the final archive. Production keeps serving the no-LTO relaxed files until the next engine release.
+**Released in `2026-11-12.kernel-releases.1`.** The relaxed-tier JS/WASM use
+`-O2 -flto`; `scripts/engine_artifact_representations.json` pins the same LTO
+hashes listed below. This supersedes the 2026-11-11 staging-only status. The
+archive and manifest were regenerated on 2026-11-12. The archive is not
+byte-reproducible (its hash changes between runs), so regenerate the manifest
+after the final archive. This status is based on checked-in release metadata,
+not a new live-channel fetch.
 
-### Release note: what the next release must upload
+### Release preparation record (2026-11-11/12; publication completed)
 
 A clean rebuild with the default recipe (`BERSERK_WASM_RELAXED_SIMD=1`, no OPT/LTO overrides, emcc 5.0.7-git) reproduced the measured artifact byte for byte. The parity gate it was promoted on (`emscripten_uci_bench.mjs`, shipped relaxed vs new, depths 9 and 11, 20 positions, hash 16) passed again: **40/40 exact** (bestmove, score, depth, nodes, PV); depth-11 node total 513540 for both.
 
@@ -26,7 +32,7 @@ Four logical files change. Nothing else in the Berserk family (scalar, SIMD128, 
 | `/berserk/berserk-emscripten-single-thread-corresponding-source.tar.gz` | 18480277 | `ba5b5ab2e3a4ba9345ecf3cf9a578ee8acff4b5cd39ff69bca351ba49199fe3b` |
 | `/berserk/berserk-emscripten-single-thread.manifest.json` | 5885 | `bdb156c3883b84a8af278224f4c52d406d8b6b21e77d69c5e12827fbaed76593` |
 
-A local staging run of `write_artifact_release_manifests.mjs --base-release <2026-11-09.engine-upgrades.1.json> --manifest public/berserk/berserk-emscripten-single-thread.manifest.json` gave exactly those four as the changed entries. They are 8 new content-addressed objects (`identity` and `br` for each) under `artifacts/sha256/<sha>/`. Upload those 8, then the new release manifest, then flip `channels/stable.json` last, following the normal engine publish steps. The wasm, glue, archive and manifest must go up together; the archive includes the adapter sources at this commit, so regenerate archive and manifest together if `src/lc0/berserkEngine.ts` or another archived file changes before release.
+A local staging run of `write_artifact_release_manifests.mjs --base-release <2026-11-09.engine-upgrades.1.json> --manifest public/berserk/berserk-emscripten-single-thread.manifest.json` gave exactly those four as the changed entries. They are 8 new content-addressed objects (`identity` and `br` for each) under `artifacts/sha256/<sha>/`. The release procedure was to upload those 8, then the release manifest, then flip `channels/stable.json` last, following the normal engine publish steps. The wasm, glue, archive and manifest must go up together; the archive includes the adapter sources at this commit, so regenerate archive and manifest together if `src/lc0/berserkEngine.ts` or another archived file changes before release.
 
 ## Environment and controls
 
@@ -171,7 +177,7 @@ Selected Berserk cost: **+10701 raw bytes (+8.14%)**, **+3000 Brotli bytes (+5.9
 
 ## Artifact identity ledger
 
-`Current` lives under `public/<engine>/`; fresh variants live locally under `.local-dev-artifacts/cpu-flags/artifacts/<engine>/<o2|o3|o2-lto|o3-lto>/`. Each uses `<engine>-emscripten-relaxed-simd128.{js,wasm}` and canonical `<engine>-emscripten.data`. Full SHA-256 values, before the browser-only cache nonce:
+`Current` below names the October control, not today's release. It then lived under `public/<engine>/`; fresh variants live locally under `.local-dev-artifacts/cpu-flags/artifacts/<engine>/<o2|o3|o2-lto|o3-lto>/`. Each uses `<engine>-emscripten-relaxed-simd128.{js,wasm}` and canonical `<engine>-emscripten.data`. Full SHA-256 values, before the browser-only cache nonce:
 
 | Engine / flags | Wasm SHA-256 | Glue SHA-256 |
 |---|---|---|
@@ -247,4 +253,4 @@ Evidence under `.local-dev-artifacts/cpu-flags/` includes all build logs, pinned
 - Production `BUILD_SCOPE=product npm run build:client`: passed, SvelteKit runtime-ID check passed; real native browser checks passed on port 5193.
 - `git diff --check`: clean. Branch Codex review is a required closeout gate; its final outcome is reported with the commit, not inferred from benchmark parity.
 
-Open questions are limited to portability of this compiler win beyond M4/Chromium, true field cold-download/startup costs, and the unresolved Stormphrax byte-reproduction delta. There is no evidence here to promote PlentyChess or Stormphrax flags, no promise of a universal hardware speedup, and no reason to change the unmeasured Berserk fallback-tier defaults. Artifact, source and manifest rebuilding was done on 2026-11-11 (see the release note); publication remains outstanding.
+Open questions are limited to portability of this compiler win beyond M4/Chromium, true field cold-download/startup costs, and the unresolved Stormphrax byte-reproduction delta. There is no evidence here to promote PlentyChess or Stormphrax flags, no promise of a universal hardware speedup, and no reason to change the unmeasured Berserk fallback-tier defaults. Artifact rebuilding was done on 2026-11-11, with final archive/manifest regeneration on 2026-11-12; release `2026-11-12.kernel-releases.1` completed publication (see the release note).

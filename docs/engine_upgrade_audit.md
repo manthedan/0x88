@@ -34,11 +34,12 @@ manifests require `--manifest`. Existing files are checked against manifest hash
 regenerate candidate metadata rather than mixing old manifests and new binaries.
 The input directory is read-only, including when it is another worktree.
 
-Example, PlentyChess **v8 candidate**, not main's 7.0.66:
+Historical PlentyChess **v8 candidate** example. The current lock already
+pins 8.0.0; substitute a separate candidate tree for a new audit:
 
 ```sh
 npm run engine:upgrade-audit -- plentychess \
-  --artifacts /path/to/upgrade-plentychess-8/public/plentychess \
+  --artifacts .local_engines/upgrade-plentychess-8/public/plentychess \
   --native-cmd "ssh yukon \"bash -lc 'taskset -c 3 ~/upgrades/plentychess/upstream/new/engine'\"" \
   --json pc8-audit.json
 ```

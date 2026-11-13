@@ -1,8 +1,8 @@
 # Browser UCI adapter contract
 
-Last updated: 2026-06-05
+Last updated: 2026-11-12
 
-This contract applies to browser-hosted UCI-family engines used by `lc0-arena.html`, `lc0-analysis.html`, smoke tests, and benchmark pages. The typed source is `src/lc0/browserUciEngine.ts`; this document records the behavioral expectations that are hard to express in TypeScript.
+This contract applies to browser-hosted UCI-family engines used by `/app/arena/`, `/app/analysis/`, smoke tests, and benchmark pages (workspace routes: `src/lib/nav.ts`). The typed source is `src/lc0/browserUciEngine.ts`; this document records the behavioral expectations that are hard to express in TypeScript.
 
 ## Required adapter surface
 
@@ -25,7 +25,7 @@ Each browser UCI adapter should implement `BrowserUciEngine`:
 1. **Serialize UCI sessions per engine instance.** Concurrent searches against one worker/process must be queued or rejected; current adapters use an exclusive promise tail.
 2. **Handshake explicitly.** A resident UCI process must complete `uci` and `isready` before searches. Optimizations may skip repeated `uci` only after `uciok`, but `isready` remains the synchronization barrier.
 3. **Reset deliberately.** Benchmarks and game boundaries should call `newGame()` before timed searches when hash reuse would contaminate results.
-4. **Abort honestly.** If graceful `stop` is proven for a runtime, use it and resolve with the engine's current bestmove. Otherwise terminate/recreate the worker and surface an `AbortError`; do not pretend the persistent process survived.
+4. **Separate stop from cancellation.** An explicit stop may return best-so-far where the runtime supports it. An `AbortSignal` cancels the request: reject with `AbortError`, even if graceful stop drains a final `bestmove` and preserves the worker. Do not publish that cancelled output. If cooperative stop is unavailable or its watchdog expires, terminate/recreate the worker; do not pretend the persistent process survived.
 5. **Keep diagnostics current.** Runtime mode, persistent fallback/disabled state, asset URLs, and load progress should be visible through `runtimeStatus()` and rendered by the owning UI surface.
 6. **Own asset checks outside the core search method.** Variant modules should expose asset HEAD/status helpers so the UI can show missing local blobs before a search fails. The adapter should still include URL metadata in `runtimeStatus()`.
 7. **Parse info defensively.** UCI `info` parsing should tolerate missing `multipv`, `nodes`, or `nps`, preserve PV UCI moves, and sort by MultiPV rank.
@@ -37,7 +37,7 @@ Each browser UCI adapter should implement `BrowserUciEngine`:
 | --- | --- | --- |
 | `StockfishEngine` | Implements the standard method set. | `prewarm()` initializes the JS/WASM worker. `newGame()` sends `ucinewgame` then waits on `isready`. Abort sends UCI `stop`. Stockfish assets are package/public assets rather than dynamic variant downloads. |
 | `RecklessEngine` | Implements the standard method set. | Supports WASI one-shot, persistent WASI, and experimental browser API. Persistent prewarm and `newGame()` are implemented; abort terminates/recreates runtimes when graceful stop cannot preserve state. Variant modules own artifact checks. |
-| `ViridithasEngine` | Implements the standard method set. | Persistent prewarm is implemented when SAB/isolation is available. One-shot mode has no resident process to warm. Stop/abort still terminates the worker; robust graceful stop remains open. Variant modules own artifact checks. |
+| `ViridithasEngine` | Implements the standard method set. | Persistent prewarm is implemented when SAB/isolation is available. One-shot mode has no resident process to warm. Persistent abort sets a shared stop word, queues `stop`, drains the old `bestmove`, then rejects with `AbortError` without publishing it. A 100 ms watchdog terminates unresponsive/older/custom modules or cold startup. One-shot abort still terminates. See `cpu_coop_cancel_2026-10.md`. Variant modules own artifact checks. |
 | `BerserkEngine` | Implements the standard method set. | Single-thread Emscripten UCI worker that stays resident: `prewarm()` runs `uci`/`isready`, `newGame()` sends `ucinewgame` then waits on `isready`. Abort terminates the worker, which is recreated on the next call. Hash/option commands are deduplicated per worker because Berserk's Hash handler clears the TT. |
 | `PlentyChessEngine` | Implements the standard method set. | Same single-thread Emscripten worker lifecycle as Berserk: resident after `prewarm()`, `ucinewgame`/`isready` on `newGame()`, abort terminates and recreates the worker. |
 | `StormphraxEngine` | Implements the standard method set. | Same single-thread Emscripten worker lifecycle as Berserk and PlentyChess (synchronous search build); abort terminates and recreates the worker. |

@@ -38,7 +38,7 @@ threads rather than by neural rating conditioning.
 
 | Engine | Language/toolchain | Baseline target | SIMD targets | Primary scripts |
 | --- | --- | --- | --- | --- |
-| Stockfish | C++ via Stockfish.js/Emscripten | packaged single-thread lite/full | packaged threaded lite/full when isolated | `stockfish:*manifest`, package assets under `public/stockfish/` |
+| Stockfish | C++ via Stockfish.js/Emscripten | packaged single-thread lite/full | packaged threaded lite/full; promoted custom relaxed lite-single | `scripts/build_stockfish_relaxed_simd.mjs`, `stockfish:*manifest`, assets under `public/stockfish/` |
 | Berserk | C via Emscripten | scalar single-thread JS/WASM/data | `simd128`, relaxed SIMD | `npm run berserk:build-emscripten`, `berserk:build-simd-emscripten`, `berserk:build-relaxed-simd-emscripten` |
 | PlentyChess | C++ via Emscripten | scalar-ish single-thread JS/WASM/data | SSE4.1-shaped wasm SIMD, relaxed SIMD | `npm run plentychess:build-emscripten`, `plentychess:build-sse41-emscripten`, `plentychess:build-relaxed-simd-emscripten` |
 | Reckless | Rust `wasm32-wasip1` | scalar WASI/UCI | `+simd128`, `+simd128,+relaxed-simd`; browser API variants | `npm run reckless:build-wasi`, `reckless:build-simd-wasi`, `reckless:build-relaxed-simd-wasi`, `reckless:build-browser-api*` |
@@ -116,24 +116,24 @@ gates, relaxed SIMD stays a lab/benchmark variant.
 
 ## Relaxed SIMD benchmark snapshot
 
-The current relaxed-SIMD numbers are best described as browser engineering
-evidence, not universal engine-speed claims. They were measured locally in a
-Chromium browser on macOS with an Apple M4 chip, using the rotated-FEN fixed-depth
-suite and the browser WASM artifacts under promotion. The parity column is the
-strongest signal: the relaxed artifact must match the comparison artifact for
-best move, score, node count, and PV across the sampled positions.
+These are dated, runtime-specific measurements of browser WASM artifacts,
+not universal speed claims. Reckless, Berserk and PlentyChess figures below
+were measured in Node on Apple M4, not Chromium. Viridithas cites its v20
+upgrade run; Stockfish cites the separate SF19 Chromium result. The source
+records define each control and corpus. Exact parity means bestmove, score,
+node count and PV matched across the sampled positions.
 
-| Engine | Browser relaxed-SIMD result on Apple M4 / Chromium | Parity gate |
+| Engine | Dated relaxed-SIMD result / runtime | Parity gate |
 | --- | ---: | --- |
 | Reckless | `+24%` NPS vs old kernels | `60/60` exact fixed-depth parity |
 | Viridithas | `+16%` NPS over standard SIMD on the v20.0.0 tag (persistent startpos, movetime 1000 ms; see `viridithas_v20_upgrade.md`). The 2026-06-09 depth-10 figure was `+14%`. | `40/40` exact fixed-depth parity |
 | Berserk | `1.50M` NPS vs `1.38M` SIMD (`+8%`) | `40/40` exact fixed-depth parity |
 | PlentyChess | `992k` NPS vs `603k` default (`+64%`) | `40/40` exact fixed-depth parity |
-| Stockfish | not measured; current package is upstream Stockfish.js rather than a local relaxed-SIMD build | N/A |
+| Stockfish | SF19 lite-single, Chromium 149 on M4, depth 12: 1.086M aggregate wall NPS vs 0.863M baseline; 1.273× paired median. Custom builder: `scripts/build_stockfish_relaxed_simd.mjs`. | `600/600` browser-vs-native comparisons; see `stockfish_19_upgrade.md` |
 
 Treat the speedups as device/runtime-specific until the same harness is repeated
 on a wider browser and CPU matrix. They are still useful release evidence because
-they combine same-browser performance with exact engine-output parity.
+they combine same-runtime controls with exact engine-output parity.
 
 ## Promotion checklist
 

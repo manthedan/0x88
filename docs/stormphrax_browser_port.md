@@ -62,4 +62,12 @@ Stormphrax is an experimental family in Play, Arena, and Analysis. It uses depth
 
 The project has a real standardized **contract and release process**: typed `BrowserUciEngine`, engine cards, variant metadata, pinned builds, checksums, smoke requirements, asset checks, source archives, manifests, and R2 publication rules.
 
-The implementation is not yet a declarative plug-in system. C/C++ adapters and variant modules still repeat substantial boilerplate, and each new family must be threaded manually through Play, Arena, Analysis, diagnostics, deployment allowlists, and documentation. Stormphrax followed the standard process successfully, but its integration confirms that the next useful abstraction is a shared configurable Emscripten UCI worker adapter plus a central family registry consumed by all three UI surfaces and packaging scripts.
+At intake, adapter duplication suggested a shared Emscripten adapter and
+central registries as the next abstraction. Those are now implemented:
+`BerserkEngine`, `PlentyChessEngine` and `StormphraxEngine` extend
+`EmscriptenUciEngine`; `src/lc0/engineCatalog.ts` centralizes browser metadata,
+and `scripts/engine_artifact_registry.mjs` centralizes deployment inventory.
+This is still not a declarative plug-in system. Family-specific variants,
+assets and runtime behavior remain typed modules. See
+[`engine_integration_architecture.md`](./engine_integration_architecture.md)
+for the current onboarding boundaries.

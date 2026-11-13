@@ -26,12 +26,18 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-This unlocks two opt-in high-strength paths:
+This permits threaded CPU paths:
 
 - threaded Stockfish WASM (`sfFlavor=lite-threaded` or `sfFlavor=threaded`, optionally `sfThreads=N`);
 - threaded ORT WASM CPU inference (`ortThreads=auto` or `ortThreads=N`).
 
-Defaults remain conservative: Stockfish lite single-thread and ORT WASM thread count 1. The arena runtime badge reports isolation, `SharedArrayBuffer`, WebGPU availability, ORT provider/threads, and whether threaded Stockfish can be selected.
+Stockfish defaults to lite single-thread. ORT defaults depend on context:
+main-thread and Node sessions use one thread; dev workers leave ORT's default;
+isolated built CPU-only workers auto-thread (at most four and half the logical
+cores). Built GPU-capable workers stay at one, including `ortThreads=auto`.
+Explicit integer overrides are available for controlled experiments. The arena
+runtime badge reports isolation, `SharedArrayBuffer`, WebGPU, ORT provider/threads
+and threaded Stockfish availability.
 
 Vite dev/preview is configured with the isolation headers. For static built assets, use:
 
@@ -40,7 +46,14 @@ npm run build:client
 npm run web:isolated:static
 ```
 
-The full Stockfish assets are exposed through `public/stockfish/` as symlinks to the installed `stockfish` package so they can be loaded on demand without committing 100MB+ WASM blobs. ORT's threaded WASM sidecars are exposed through `public/ort/` for the same reason; this lets ORT load its pthread worker module when `ortThreads` is greater than 1.
+Stockfish assets are staged under `public/stockfish/` from the pinned package
+and maintained custom builds. ORT stages three matched glue/binary pairs under
+`/ort/`: GPU-capable Asyncify and JSPI, plus plain CPU-only WASM. JSPI is the
+production GPU choice when supported; Asyncify is the GPU fallback and Node's
+inlined-glue match. A thread committed to the CPU-only pair cannot later use
+WebGPU. Each glue supplies its own pthread bootstrap. See
+[`engine_integration_architecture.md`](./engine_integration_architecture.md#onnx-runtime-packaging)
+for the six-file allowlist and locked-artifact rules.
 
 ## Runtime audit and targeted productization smoke
 

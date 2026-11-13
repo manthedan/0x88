@@ -52,12 +52,29 @@ The registry is consumed by asset checks, R2 staging, external-asset pruning, re
 
 The application configures ONNX Runtime to load glue and WASM from the staged `/ort/` directory. `vite.config.ts` selects ONNX Runtime's `onnxruntime-web-use-extern-wasm` conditional export while retaining Vite's normal client resolution conditions.
 
-Production staging is intentionally allowlisted in `scripts/ort_runtime_assets.mjs`. The application imports only `onnxruntime-web/webgpu`; in ONNX Runtime 1.27 that entrypoint requests the Asyncify glue/binary pair for both accepted WebGPU sessions and WASM fallback sessions:
+Production staging is allowlisted in `scripts/ort_runtime_assets.mjs`. As of
+2026-11-12, it includes three matched glue/binary pairs (six files):
 
-- `ort-wasm-simd-threaded.asyncify.mjs`
-- `ort-wasm-simd-threaded.asyncify.wasm`
+- `ort-wasm-simd-threaded.asyncify.{mjs,wasm}`: GPU-capable fallback when JSPI is unavailable.
+- `ort-wasm-simd-threaded.jspi.{mjs,wasm}`: production GPU pair when JSPI APIs are available.
+- `ort-wasm-simd-threaded.{mjs,wasm}`: CPU-only WASM EP pair.
 
-This was verified with a production build running a Centipawn move through an accepted WebGPU provider while recording `/ort/` requests. The package's other JS bundles, source maps, base WASM, JSEP, and JSPI variants are not copied into the deployment shell. `npm run deploy:ort-runtime-assets-check` rejects missing or unexpected runtime variants, including compressed sidecars. `npm run deploy:ort-wasm-dedup-check` separately verifies that the canonical fallback WASM exists and no `ort-wasm*.wasm` files were emitted under `dist-client/_app/`.
+`src/nn/ortRuntime.ts` selects and locks the artifact kind per thread. CPU-only
+initialization cannot later escalate to WebGPU in that thread; use a fresh
+worker. A GPU-capable pair may still run WASM fallback. Glue and binary must
+match. Node's inlined glue uses Asyncify even for CPU sessions.
+
+Defaults are context-specific: main thread and Node use one thread; dev workers
+leave ORT's default; isolated built workers committed to the CPU-only pair use
+auto (at most four, at most half the logical cores). GPU-capable built workers
+stay at one, even for `ortThreads=auto`; explicit integer overrides are
+benchmark controls, not recommended defaults. Each staged glue is its own
+pthread bootstrap. Do not restore the old one-thread bundled-worker workaround
+or a two-file allowlist.
+
+Historical WebGPU verification (Centipawn evidence deferred):
+
+This was verified with a production build running a Centipawn move through an accepted WebGPU provider while recording `/ort/` requests. The package's other JS bundles, source maps and JSEP variants are not copied into the deployment shell. `npm run deploy:ort-runtime-assets-check` rejects missing or unexpected runtime variants, including compressed sidecars. `npm run deploy:ort-wasm-dedup-check` separately verifies that the canonical fallback WASM exists and no `ort-wasm*.wasm` files were emitted under `dist-client/_app/`.
 
 Run both checks against the final R2-pruned deployment directory, not only a development build.
 
@@ -101,6 +118,53 @@ npm run lc0:analysis-browser-smoke -- --base-url http://127.0.0.1:5181
 ```
 
 For runtime-sensitive changes, also select the affected engine in Play/Arena/Analysis and wait for an actual move or completed search before deployment.
+
+## Historical packaging/source extraction decision (2026-06-10)
+
+The `feature/engine-packaging-reorg` design proposed standalone per-engine
+packaging repos and a shared toolkit. This appendix records rationale and the
+in-tree result; sibling repositories and tagged releases are not verified
+onboarding dependencies.
+
+The June audit found build/patch/variant work spread across branches, duplicate
+`berserk_emscripten_bench.mjs` / `emscripten_uci_bench.mjs` harnesses, and
+Reckless's wasm32 NNUE backend hidden in a JavaScript string. That prevented
+rustfmt/clippy/rust-analyzer inspection and nearly hid the `nnz_bitmask` bug.
+C/C++ patch files also required apply/edit/regenerate cycles. Per-engine source
+pins, exactness proofs, variant ladders, inspection, benchmark records and
+source archives needed clearer ownership and repeatable gates.
+
+The license premise is per pin: Reckless is AGPL-3.0; the pinned Viridithas
+v20 is MIT (not AGPL), with CC0 network; Berserk and PlentyChess are GPL-3.0.
+See their `engines/<name>/upstream.lock.json` files and the distribution policy.
+Stockfish baseline pairs still come from the pinned npm package, but maintained
+custom relaxed builds now live in `scripts/build_stockfish_relaxed_simd.mjs`.
+
+### Stage-1 result
+
+- Reckless wasm32 NNUE shim and `find_nnz` are real Rust files under
+  `engines/reckless/src/`; the builder reads them. The original extraction
+  byte-compared the generated patched tree.
+- `engines/<name>/upstream.lock.json` records Reckless, Viridithas, Berserk and
+  PlentyChess pins. The PlentyChess branch was consolidated.
+- `scripts/emscripten_uci_bench.mjs` became the canonical shared harness name.
+
+The later-stage sketch was per-engine `src/`/`patches/`, `build/`, `bench/`,
+loader-only npm packages and `CORRESPONDING_SOURCE.md`, with a toolkit for
+WASI/Emscripten parity, opcode inspection, feature probes, precompression,
+manifests and archives. It proposed tagged GitHub binary releases rather than
+large networks in npm, CI parity before release, and an app-side
+`engines.lock.json` fetch layer. Draft sibling/byte-identity claims in the old
+plan are historical local claims only. Toolkit/org publication and replacing
+in-repo builds are not current instructions or evidence those releases exist.
+Do not delete builders or change tracked-artifact policy on that assumption.
+
+### Centipawn (deferred)
+
+Historical scope sentence, retained verbatim:
+
+Stockfish stays on its upstream npm build; LC0/Centipawn/BT4 stay in
+leelaweb — they are the project itself, not packaging.
 
 ## Scheduled production smoke
 

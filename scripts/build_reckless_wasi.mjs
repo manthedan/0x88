@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Patched wasm32 Rust sources live as real files (rustfmt/clippy-visible) in
-// engines/reckless/src; see docs/engine_packaging_reorg.md.
+// engines/reckless/src; see docs/engine_integration_architecture.md.
 function engineSource(name) {
   return fileURLToPath(new URL(`../engines/reckless/src/${name}`, import.meta.url));
 }

@@ -89,7 +89,13 @@ Only climb this ladder when benchmark data says the engine deserves more time:
 5. Add pthread flavor (`USE_PTHREADS`, worker sidecars, SAB/COOP/COEP requirement) and compare NPS/latency against single-thread.
 6. Consider direct browser API bypassing UCI text only if UCI overhead is visible in profiling.
 
-For Berserk, stop at step 1 for now: the adapter works, speed is acceptable for an experimental opponent, and Stockfish remains the expected speed/strength anchor.
+The early Berserk advice stopped at step 1. That is no longer its current
+status: scalar → SIMD → relaxed SIMD tiers are implemented, with relaxed-first
+selection. The promoted relaxed tier also ships `-O2 -flto` in release
+`2026-11-12.kernel-releases.1`. See [`cpu_engines_simd_audit.md`](./cpu_engines_simd_audit.md)
+and [`cpu_engine_build_flags_matrix_2026-10.md`](./cpu_engine_build_flags_matrix_2026-10.md)
+for the dated gates and portability limits. The intake ladder still applies to
+new engines; it is not an instruction to undo shipped tiers.
 
 ## Distribution gate
 
