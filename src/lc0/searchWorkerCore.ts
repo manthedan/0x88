@@ -16,6 +16,7 @@ import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
 import { describeLc0ModelLoad } from './modelCache.ts';
 import {
   CachedLc0Evaluator,
+  defaultLc0OrtIoMode,
   type Lc0Evaluation,
   type Lc0EvaluationCacheFootprint,
   type Lc0EvaluationProvider,
@@ -62,7 +63,7 @@ type InitMessage = {
    * (symbolic leading dim runs as serial batch-1). 'logical' is one session.run.
    */
   physicalBatchMode?: 'declared' | 'logical';
-  /** ORT IO mode for the ONNX runtime (Lc0OnnxEvaluatorOptions.ioMode); omitted = evaluator default. */
+  /** ORT IO mode for the ONNX runtime (Lc0OnnxEvaluatorOptions.ioMode); omitted = defaultLc0OrtIoMode(deviceModelSelection). */
   ortIoMode?: Lc0OrtIoMode;
   ortWasmArtifact?: OrtWasmArtifactSelection;
   ortWasmThreads?: number;
@@ -407,7 +408,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   const created = await createLc0OnnxEvaluatorFromUrl(message.modelUrl, {
     deviceSelection: message.deviceModelSelection === true,
-    evaluator: { physicalBatchMode, ...(message.ortIoMode ? { ioMode: message.ortIoMode } : {}) },
+    evaluator: { physicalBatchMode, ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true) },
     load: {
       cache: message.cacheModel,
       allowUnverified: message.allowUnverifiedModel,

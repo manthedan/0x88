@@ -84,6 +84,17 @@ export interface Lc0OnnxEvaluatorOptions {
 
 export type Lc0OrtIoMode = 'cpu' | 'gpu' | 'gpu-capture';
 
+/**
+ * The IO mode a search-worker init gets when it names none. The device-selected
+ * Lc0 Small default (product pages without ?model=) runs graph-captured GPU IO:
+ * fewer CPU-side WebGPU calls per invoke, same outputs
+ * (docs/ort_invoke_overhead_2026-11.md). Explicit model URLs, lab tools and the
+ * big nets keep CPU IO.
+ */
+export function defaultLc0OrtIoMode(deviceModelSelection: boolean): Lc0OrtIoMode {
+  return deviceModelSelection ? 'gpu-capture' : 'cpu';
+}
+
 export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput | Lc0PreparedEvaluatorInput;
 
 export interface Lc0EvaluationProvider {

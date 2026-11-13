@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { lc0GpuIoSpecs } from '../src/lc0/onnxEvaluator.ts';
-import { OrtGpuIoBinding, ortGpuIoLayout, pinOrtGpuBufferImport } from '../src/nn/ortGpuIo.ts';
+import { defaultLc0OrtIoMode, lc0GpuIoSpecs } from '../src/lc0/onnxEvaluator.ts';
+import { OrtGpuIoBinding, ortGpuIoLayout, ortGraphCaptureSessionOptions, pinOrtGpuBufferImport } from '../src/nn/ortGpuIo.ts';
 
 const INPUT = { name: '/input/planes', type: 'float16', dims: [1, 112, 8, 8] };
 const OUTPUTS = [
@@ -227,4 +228,17 @@ test('lc0GpuIoSpecs accepts fixed-shape float models only', () => {
   assert.deepEqual(ok.outputs, OUTPUTS);
   assert.match(lc0GpuIoSpecs(session(['batch', 112, 8, 8])).reason, /dynamic shape/);
   assert.match(lc0GpuIoSpecs(session([1, 112, 8, 8], 'int64')).reason, /type int64/);
+});
+
+test('graph capture is requested with the object-form webgpu provider', () => {
+  // ORT-web forwards enableGraphCapture to the native EP only for an object entry;
+  // the string form 'webgpu' runs uncaptured (356 bind groups per invoke on Lc0 Small).
+  assert.deepEqual(ortGraphCaptureSessionOptions(), { enableGraphCapture: true, executionProviders: [{ name: 'webgpu' }] });
+});
+
+test('search worker defaults the device-selected Lc0 Small model to captured GPU IO', () => {
+  assert.equal(defaultLc0OrtIoMode(true), 'gpu-capture');
+  assert.equal(defaultLc0OrtIoMode(false), 'cpu');
+  const worker = readFileSync(new URL('../src/lc0/searchWorkerCore.ts', import.meta.url), 'utf8');
+  assert.match(worker, /ioMode: message\.ortIoMode \?\? defaultLc0OrtIoMode\(message\.deviceModelSelection === true\)/);
 });

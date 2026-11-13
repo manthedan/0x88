@@ -59,6 +59,7 @@ runMain(async () => {
   const visits = intParam('visits', 256, 1, 100000);
   const rounds = intParam('rounds', 3, 1, 100);
   const warmupSearches = intParam('warmupSearches', 2, 0, 100);
+  const reinit = params.get('reinit') === '1';
   const fixtures = await (await fetch('/fixtures/lc0/fen_only.json')).json();
   const fens = fixtures
     .map((f) => f.fen)
@@ -69,19 +70,24 @@ runMain(async () => {
   const ready = {};
   for (const mode of modes) {
     const client = new WorkerClient(workerUrl, `ort-search-${mode}`);
-    const msg = await client.request({
+    const init = {
       type: 'init',
       modelUrl: model,
       deviceModelSelection,
       ep: 'webgpu',
       cacheModel: false,
       evalCacheEntries: 2048,
-      ...(mode === 'cpu' ? {} : { ortIoMode: mode }),
-    });
+      // Always explicit: product inits that omit it get the worker default.
+      ortIoMode: mode,
+    };
+    let msg = await client.request(init);
+    // reinit=1: a second init with a different key builds the replacement session while
+    // the first is still alive (the worker's reinit path), then searches use the new one.
+    if (reinit) msg = await client.request({ ...init, evalCacheEntries: 2047 });
     clients[mode] = client;
-    ready[mode] = { backend: msg.backend, servedModelUrl: msg.servedModelUrl, ortIoMode: msg.ortIoMode ?? null };
+    ready[mode] = { backend: msg.backend, servedModelUrl: msg.servedModelUrl, ortIoMode: msg.ortIoMode ?? null, reinit };
     log('ready', mode, ready[mode]);
-    if (mode !== 'cpu' && msg.ortIoMode !== mode) throw new Error(`ort-search: ${mode} worker fell back to ${msg.ortIoMode}`);
+    if (msg.ortIoMode !== mode) throw new Error(`ort-search: ${mode} worker runs ${msg.ortIoMode}`);
   }
 
   const search = async (mode, fen) => {
@@ -116,7 +122,7 @@ runMain(async () => {
     bench: 'ort-search',
     ok: mismatches.length === 0,
     candidate: { model, deviceModelSelection, modes, ready },
-    params: { visits, rounds, positions: fens.length, warmupSearches },
+    params: { visits, rounds, positions: fens.length, warmupSearches, reinit },
     searchMs: Object.fromEntries(modes.map((m) => [m, summarize(elapsed[m])])),
     // < 1: the mode is faster than the reference at the same visits.
     ratioVsReference: Object.fromEntries(modes.slice(1).map((m) => [m, summarize(ratios[m])])),
