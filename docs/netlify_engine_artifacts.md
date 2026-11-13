@@ -4,25 +4,27 @@ This repo has a Netlify-oriented path for generated browser-engine sidecars, but
 
 ## Build path
 
-`netlify.toml` uses:
+`netlify.toml` configures the production R2/pruned build, with the artifact
+channel and asset-origin environment variables:
 
 ```sh
-npm run build:netlify
+npm run build:netlify:r2
 ```
 
-That command runs the normal Vite build and then precompresses generated engine artifacts copied into `dist-client/`:
+Large externally hosted files are pruned from the app shell. The optional
+all-in-one `npm run build:netlify` command instead builds and precompresses
+local artifacts copied into `dist-client/`:
 
 ```sh
 npm run build:client
 npm run engine-artifacts:precompress-dist
 ```
 
-The precompress step writes `.br` and `.gz` sidecars for files under:
-
-- `dist-client/berserk/`
-- `dist-client/plentychess/`
-
-It currently targets generated `.js`, `.wasm`, `.data`, `.nn`, `.nnue`, and `.bin` files. Missing engine artifact directories are allowed so normal app deployments without local generated GPL artifacts still build.
+The precompress step writes `.br` and `.gz` sidecars using
+`PRECOMPRESS_ARTIFACT_DIRECTORIES` and `COMPRESSIBLE_ARTIFACT_EXTENSIONS` in
+`scripts/engine_artifact_registry.mjs`. This includes the registered engine
+families plus ORT/models and the legacy local Monty directory, with `.js`,
+`.mjs`, `.wasm`, `.data`, `.nn`, `.nnue`, `.bin` and `.onnx` extensions. Missing engine artifact directories are allowed so normal app deployments without local generated GPL artifacts still build.
 
 ## Runtime behavior on Netlify
 
@@ -36,7 +38,7 @@ Netlify no longer force-rewrites those stable URLs to `.br` sidecars and no long
 
 If a production host serves precompressed sidecars, it must do so through proven `Accept-Encoding` negotiation, object metadata, or edge/Worker code that reliably sets `Content-Encoding` and `Vary: Accept-Encoding`. Long-lived immutable caching is reserved for content-addressed paths such as `/artifacts/sha256/<hash>/...`.
 
-For PlentyChess, prior local estimates were:
+For the original PlentyChess 7.0.66 port, prior local estimates were:
 
 - raw total: 63,484,805 bytes / 60.54 MiB
 - brotli total: 32,587,527 bytes / 31.08 MiB
@@ -52,7 +54,8 @@ To create sidecars in `public/` for local inspection:
 npm run engine-artifacts:precompress
 ```
 
-To test the production static shape locally:
+To test optional all-in-one static compression locally (not the configured
+R2/pruned production shape):
 
 ```sh
 npm run build:netlify

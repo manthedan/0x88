@@ -1,6 +1,6 @@
 # Artifact hosting and cache strategy
 
-Last updated: 2026-07-14
+Current implementation notes checked: 2026-11-12. The July strategy and unresolved deployment work remain below.
 
 ## Recommendation
 
@@ -27,8 +27,8 @@ npm run deploy:content-addressed-release -- \
   --root .release-public \
   --release-id 2026-07-14.<release-sha> \
   --channel stable \
-  --asset lc0-small=/path/to/model.onnx \
-  --asset engine=/path/to/engine.wasm
+  --asset lc0-small=.local_engines/model.onnx \
+  --asset engine=.local_engines/engine.wasm
 ```
 
 The command streams the decoded hash, stores equal identity bytes exactly once
@@ -81,7 +81,7 @@ The main production risks are around caching semantics and mutable heavy URLs:
 - Never purge immutable blobs as part of a normal release.
 - Treat a mismatch at a content-addressed URL as corruption or an origin/CDN invariant violation.
 - Keep ORT WebGPU as the stable default runtime; hosting changes must not promote TVMJS or other research paths.
-- Keep generated artifacts out of git unless the release policy explicitly changes.
+- Keep generated artifacts out of git except the explicit per-family tracked/LFS release sets in [`engine_artifact_distribution.md`](./engine_artifact_distribution.md). Do not apply a blanket ignore rule to those exceptions.
 
 ## Headers
 
@@ -190,9 +190,10 @@ For resumable downloads, prefer fixed content-hashed shards, for example 16–32
 
 ## Browser cache implementation changes
 
-### Correctness fix
+### Correctness fix (implemented)
 
-`src/lc0/modelCache.ts` should not recover from a stale/corrupt Cache Storage entry by refetching with `cache: "force-cache"`.
+`src/lc0/modelCache.ts` deletes stale/corrupt Cache Storage entries and their
+verification metadata, then refetches with `cache: "reload"`, not `force-cache`.
 
 After a byte-length or SHA-256 mismatch:
 
@@ -211,15 +212,17 @@ Content-hashed URLs should make routine stale recovery unnecessary. A repeated m
 
 ### Warm-start optimization
 
-Current warm loads can read the full cached model and recompute SHA-256. That makes startup CPU work proportional to model size.
+Implemented in `src/lc0/modelCache.ts`: SHA-256 validation on insertion,
+IndexedDB verification metadata tied to content identity, and ordinary warm
+checks of length, expected hash, schema/runtime version and metadata age.
+Warm loads still read bytes for inference, but valid metadata avoids an
+unconditional full rehash. Missing/stale metadata causes full validation;
+`rehashAfterMs` controls periodic/diagnostic rehash (default 30 days).
+Known-length streamed downloads preallocate their decoded target buffer.
 
-Next revision:
-
-- Validate SHA-256 when inserting an asset.
-- Store verification metadata keyed by content hash in IndexedDB.
-- On ordinary warm loads, check expected byte length and trusted metadata.
-- Rehash periodically, after runtime failure, or in diagnostic mode.
-- During streamed download, preallocate one `Uint8Array(expectedBytes)` when the expected length is known instead of retaining chunks and concatenating them.
+These completed changes do not close publisher-side trustworthy digest
+metadata or deployment of sharded layouts for larger models. The resumable
+shard loader exists; deciding/publishing each model's shard layout is separate.
 
 ### Storage UI optimization
 
@@ -237,6 +240,71 @@ The UI should not clone every cached response and materialize each body as a blo
 8. Remove obsolete browser cache entries lazily after the new release has loaded successfully.
 
 Rollback should only repoint the channel manifest.
+
+## Asset-origin setup and local smoke
+
+The app shell is hosted separately from large R2 assets. Build-time
+`VITE_LC0_BROWSER_ASSET_BASE_URL` applies to supported engine/model prefixes;
+`VITE_LC0_MODEL_BASE_URL` is the model-only fallback alias. Local query controls
+are `?assetBase=` and `?modelBase=`. On deployed pages, overrides must name the
+configured asset host or the page's own origin; arbitrary origins are allowed
+only locally (`src/lc0/assetUrls.ts`).
+
+For a configured asset origin `https://models.example.com`, set:
+
+```text
+VITE_LC0_BROWSER_ASSET_BASE_URL=https://models.example.com
+```
+
+Use `npm run build:netlify:r2` for the pruned app shell. Optional
+`build:netlify` is an all-in-one local build, not the configured production
+path. A one-off local smoke can use these current routes without rebuilding:
+
+```text
+http://127.0.0.1:5173/app/play/?assetBase=https://models.example.com
+http://127.0.0.1:5173/app/analysis/?assetBase=https://models.example.com
+http://127.0.0.1:5173/app/arena/?assetBase=https://models.example.com
+```
+
+### R2 CORS bootstrap
+
+Use actual preview/custom app origins. Localhost entries below are only for
+local smoke. Worker responses also need the CORS/CORP/timing headers described
+above; bucket CORS alone is not the full serving policy.
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://YOUR_NETLIFY_SITE.netlify.app",
+      "https://YOUR_CUSTOM_APP_DOMAIN",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["Range", "Content-Type"],
+    "ExposeHeaders": ["Accept-Ranges", "Content-Length", "Content-Range", "ETag"],
+    "MaxAgeSeconds": 86400
+  }
+]
+```
+
+The old bootstrap mirrored `public/models/` paths and uploaded a minimal model
+set to mutable logical names with immutable headers. Do not repeat that upload
+recipe. Logical aliases now resolve through the release/channel map, and model
+selection includes the released Maia3 graph and Apple-only Small split-K
+siblings. Generate content-addressed bodies, publish the immutable release,
+validate it, then promote the channel last with
+`scripts/publish_hashed_artifacts_to_r2.mjs`. See
+[`cdn_artifact_caching.md`](./cdn_artifact_caching.md#publishing-new-artifacts).
+
+For a local/preview smoke, request the selected model URL with an `Origin`
+header and check CORS/CORP, mutability-appropriate cache policy, decoded and
+encoded lengths/hashes, and an identity Range response. Then complete an actual
+move/search on the three routes above. A synthetic HEAD `Content-Length: 0`
+is not enough to diagnose corruption. Use the maintained non-mutating canary in
+[`cloudflare_r2_artifact_validation.md`](./cloudflare_r2_artifact_validation.md)
+before production promotion.
 
 ## Observability
 
@@ -311,7 +379,7 @@ Validate at least:
 1. Hash public model/engine URLs or route them through release manifests.
 2. Remove forced Brotli rewrites from the Netlify path.
 3. Add Cloudflare cache rules for asset, model, engine, release, and channel paths.
-4. Fix `modelCache.ts` mismatch recovery to use `cache: "reload"`.
-5. Add IndexedDB verification metadata and avoid full warm-load rehashes by default.
+4. Done: `modelCache.ts` mismatch recovery uses `cache: "reload"`.
+5. Done: IndexedDB verification metadata avoids ordinary full warm-load rehashes.
 6. Add lightweight asset-load telemetry.
 7. Introduce sharded content-addressed model layout for the largest networks.

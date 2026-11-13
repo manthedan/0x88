@@ -42,7 +42,6 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`artifact_hosting_cache_strategy.md`](artifact_hosting_cache_strategy.md) — artifact hosting cache strategy.
 - [`artifact_retention_rollback_policy.md`](artifact_retention_rollback_policy.md) — retention/rollback policy; enforced by `scripts/check_artifact_retention_policy.mjs`.
 - [`cloudflare_r2_artifact_validation.md`](cloudflare_r2_artifact_validation.md) — R2 artifact validation.
-- [`r2_model_hosting.md`](r2_model_hosting.md) — external model hosting policy.
 - [`asset_telemetry_plan.md`](asset_telemetry_plan.md) — privacy-preserving asset telemetry spec.
 - [`model_manifest.md`](model_manifest.md) — historical: the removed project-level model manifest builder; points to the current per-artifact manifests.
 - [`model_efficiency_metrics.md`](model_efficiency_metrics.md) — model efficiency comparison metrics.

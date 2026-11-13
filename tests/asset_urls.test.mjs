@@ -60,7 +60,7 @@ test('a deployed page honours an override naming the asset host or its own origi
   assert.equal(resolvePublicAssetUrl(MODEL), `https://0x88.app${MODEL}`);
 });
 
-// docs/r2_model_hosting.md and the local benchmark flows point a local page at
+// docs/artifact_hosting_cache_strategy.md and local benchmark flows point a local page at
 // another asset origin; that keeps working.
 test('local pages honour any override', () => {
   at('http://127.0.0.1:5173/app/play/?assetBase=https://models.example.com', { configuredBase: 'https://assets.0x88.app' });
