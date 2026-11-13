@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
-import { START_FEN } from '../src/chess/board.ts';
-import { analysisResultCacheKey } from '../src/lc0/analysisCache.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
+import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from '../src/lc0/analysisRunSnapshot.ts';
 import { BT4_NET, Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
 import { isLc0BigNetVariant } from '../src/lc0/engineCatalog.ts';
 import { finishedRunFollowUp } from '../src/lc0/hiddenTabPause.ts';
@@ -68,6 +68,7 @@ class FakeWorker {
       else this.reply(ready);
     } else if (message.type === 'search') {
       this.searches += 1;
+      (this.searchMessages ??= []).push(message);
       FakeWorker.searchLog.push({ model: this.init.modelUrl, multiPv: message.multiPv });
       if (this.outcome.crashOnSearch) setImmediate(() => this.emit('error', { message: 'injected GPU crash' }));
       else
@@ -108,6 +109,8 @@ function element() {
 function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
   const code = ts.transpile(
     `
+    const { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen } = snapshotHelpers;
+    const analysisBackendGeneration = 1;
     let analysisAbort = null, analyzing = false, activeAnalysisRunId = 0, analysisRunForced = false;
     let activeAnalysisSelectionKey = '', analysisRunCentipawnKeys = [];
     let analyzeAfterActiveRun = false, analysisReloadWantsSearch = false, reloadLc0AfterActiveRun = false;
@@ -124,7 +127,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     const lc0ServedModelUrl = '', mountAbort = new AbortController();
     const engineLineCache = new Map(), lineCache = new Map(), completeAnalysisKeys = new Set();
     const published = [];
-    const tree = { current: { fen: START_FEN }, historyBoards: () => [{ fen: START_FEN }] };
+    const tree = { current: { fen: START_FEN }, historyBoards: () => [parseFen(START_FEN)] };
     const elements = new Map();
     const el = (id) => elements.get(id) ?? (elements.set(id, element()), elements.get(id));
     const document = { getElementById: el };
@@ -136,11 +139,11 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     const peekBigNetSearcher = (key) => searchers.get(key);
     const activeEngineRows = () => rows.map((row) => ({ ...row }));
     let currentMultiPv = 1;
-    const multiPv = () => currentMultiPv, selectedLc0Runtime = () => currentRuntime, boardToFen = (board) => board.fen;
+    const multiPv = () => currentMultiPv, selectedLc0Runtime = () => currentRuntime;
     const resourceBroker = { snapshot: () => ({ dial: 'balanced', cpuBudget: 1 }) };
     const engineResourceProfile = () => ({ resourceClass: 'gpu' });
-    const parseFen = (fen) => ({ fen }), legalMoves = () => ['e2e4'];
-    const analysisGamePosition = () => null, centipawnEvaluatorKeysForRows = () => [];
+    const legalMoves = () => ['e2e4'];
+    const analysisGamePosition = () => ({ fen: START_FEN, moves: [] }), centipawnEvaluatorKeysForRows = () => [];
     const analysisEngineName = (label) => label, rowLabel = (row) => row.variant;
     const criticalAnalysisRefresh = { defer() {} }, deferHiddenTabWork = () => false;
     const rememberDeferredForce = (previous, force) => previous || force;
@@ -210,13 +213,39 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     'searchers',
     'rows',
     'element',
-    'analysisResultCacheKey',
+    'snapshotHelpers',
     'isLc0BigNetVariant',
     'finishedRunFollowUp',
     'smallLc0Runtime',
     code,
-  )(START_FEN, BT4_NET, T3_NET, searchers, rows, element, analysisResultCacheKey, isLc0BigNetVariant, finishedRunFollowUp, smallLc0Runtime);
+  )(START_FEN, BT4_NET, T3_NET, searchers, rows, element, { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen }, isLc0BigNetVariant, finishedRunFollowUp, smallLc0Runtime);
 }
+
+test('post-capture controls cannot relabel search arguments, cached rows or completed coverage', () =>
+  withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK }] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    try {
+      await t3.init({ evalCacheEntries: 0 });
+      const row = { family: 'lc0', variant: 't3', strength: 64 };
+      const page = analysisPage({ rows: [row], searchers: new Map([['t3', t3]]) });
+      const first = page.analyzeCurrent(); // ready session: capture happens before returning
+      const originalKey = page.analysisSelectionCacheKey();
+      row.strength = 128;
+      page.setMultiPv(3);
+      const nextKey = page.analysisSelectionCacheKey();
+      assert.notEqual(originalKey, nextKey);
+      await first;
+      for (let i = 0; i < 20 && !page.idle(); i++) await new Promise(setImmediate);
+      assert.equal(page.idle(), true);
+      const messages = FakeWorker.instances[0].searchMessages;
+      assert.deepEqual(messages.map(({ visits, multiPv }) => [visits, multiPv]), [[64, 1], [128, 3]]);
+      assert.deepEqual(messages[0].input.positions.map(boardToFen), [START_FEN]);
+      assert.deepEqual([...page.engineLineCache.keys()], [originalKey, nextKey]);
+      assert.deepEqual([...page.completeAnalysisKeys], [originalKey, nextKey]);
+      assert.equal(page.engineLineCache.get(originalKey)[0].searchedMultiPv, 1);
+      assert.equal(page.lineCache.get(START_FEN)[0].searchedMultiPv, 3, 'only the current selection publishes');
+    } finally { t3.dispose(); }
+  }));
 
 const t3Row = { family: 'lc0', variant: 't3', strength: 64 };
 const bt4Row = { family: 'lc0', variant: 'bt4', strength: 64 };

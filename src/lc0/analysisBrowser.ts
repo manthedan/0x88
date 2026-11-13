@@ -120,6 +120,7 @@ import {
   sharedMarkerPosition,
 } from './analysisPresentation.ts';
 import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
+import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from './analysisRunSnapshot.ts';
 import { positionShareUrl } from './analysisShare.ts';
 import { analysisStatus } from './analysisStatus.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -553,6 +554,8 @@ let analyzeAfterActiveRun = false;
 // must queue behind it rather than start a reload, because a reload disposes the
 // worker that this load is still waiting on.
 let activeLc0BackendLoad: { cancelled: () => boolean } | null = null;
+// Observational only; not an admission guard or a cache-key component.
+let analysisBackendGeneration = 0;
 let analyzeAfterLc0BackendLoad = false;
 let reloadLc0AfterActiveRun = false;
 let disposeUnusedEnginesAfterActiveRun = false;
@@ -1706,24 +1709,14 @@ function rowLabel(row: EngineRow): string {
 }
 
 function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tree.current, requestedMultiPv = multiPv()): string {
-  // The served model is part of the runtime identity: Lc0 Small and the big nets
-  // run either the shipped model or its split-K rewrite depending on the device.
-  const runtime =
-    row.family !== 'lc0'
-      ? ''
-      : isLc0BigNetVariant(row.variant)
-        ? (analysisBigNetServedModel.get(row.variant === 't3' ? 't3' : 'bt4') ?? '')
-        : `${selectedLc0Runtime()}|${lc0ServedModelUrl}`;
-  const { dial, cpuBudget } = resourceBroker.snapshot();
-  const participants = [
-    ...new Set(
-      [...activeEngineRows(), row]
-        .filter((entry) => engineResourceProfile(entry.family).resourceClass === 'cpu')
-        .map((entry) => `${entry.family}:${entry.variant}`),
-    ),
-  ].sort();
-  const cpu = engineResourceProfile(row.family).resourceClass === 'cpu' ? JSON.stringify([dial, cpuBudget, participants]) : '';
-  return analysisResultCacheKey(fen, tree.historyBoards(node).map(boardToFen), row, { multiPv: requestedMultiPv, runtime, cpu });
+  return analysisRunRowKey({
+    fen,
+    positions: tree.historyBoards(node),
+    multiPv: requestedMultiPv,
+    runtime: selectedLc0Runtime(),
+    servedModels: { small: lc0ServedModelUrl, ...Object.fromEntries(analysisBigNetServedModel) },
+    broker: analysisRunBroker([...activeEngineRows(), row], resourceBroker.snapshot()),
+  }, row);
 }
 
 function analysisSelectionCacheKey(fen: string, rows = activeEngineRows()): string {
@@ -4435,19 +4428,30 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       }
     }
     snapshotBigNetServedModels(rows);
-    const fen = tree.current.fen;
-    const analysisPositions = tree.historyBoards();
-    const cpuPosition = analysisGamePosition(tree);
-    const analysisMultiPv = multiPv();
+    const snapshot = captureAnalysisRun({
+      fen: tree.current.fen,
+      positions: tree.historyBoards(),
+      cpuPosition: analysisGamePosition(tree),
+      rows,
+      multiPv: multiPv(),
+      runtime: selectedLc0Runtime(),
+      backendGeneration: analysisBackendGeneration,
+      servedModels: { small: lc0ServedModelUrl, ...Object.fromEntries(analysisBigNetServedModel) },
+      broker: analysisRunBroker(rows, resourceBroker.snapshot()),
+    });
+    const { fen, multiPv: analysisMultiPv, selectionKey: selectionCacheKey } = snapshot;
+    // Move generation uses mutable scratch boards; keep the snapshot untouched.
+    const analysisPositions = snapshot.positions.map((board) => ({ ...board, squares: [...board.squares] }));
+    const cpuPosition = { fen: snapshot.cpuPosition.fen, moves: [...snapshot.cpuPosition.moves] };
+    const runRows = [...snapshot.rows];
     if (legalMoves(parseFen(fen)).length === 0) return;
-    analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
-    const selectedLabels = rows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
-    const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
+    analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(runRows);
+    const selectedLabels = runRows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
     activeAnalysisSelectionKey = selectionCacheKey;
     el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
     clearAnalysisSearchProgress();
-    syncBrokerParticipants(rows);
-    const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
+    syncBrokerParticipants(runRows);
+    const lineGroups: AnalysisLine[][] = snapshot.rowKeys.map((key) => (!options.force ? (engineLineCache.get(key) ?? []) : []));
     const publishLines = () => {
       if (controller.signal.aborted || analysisSelectionCacheKey(tree.current.fen) !== selectionCacheKey) return;
       lineCache.set(fen, lineGroups.flat());
@@ -4488,14 +4492,14 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
         })(),
       );
     };
-    for (let index = 0; index < rows.length; index++) {
-      const row = rows[index];
-      const cacheKey = engineAnalysisCacheKey(fen, row);
+    for (let index = 0; index < runRows.length; index++) {
+      const row = runRows[index];
+      const cacheKey = snapshot.rowKeys[index];
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
         const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
         const initError = bigNetInitErrors.get(key);
-        const servedModelUrl = analysisBigNetServedModel.get(key) ?? '';
+        const servedModelUrl = snapshot.servedModels[key] ?? '';
         pushTask(index, cacheKey, `Lc0 ${BIG_NETS[key].name}`, () =>
           initError
             ? Promise.reject(initError)
@@ -4713,7 +4717,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     if (message)
       message.textContent = hadTaskFailure
         ? `Analysis completed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`
-        : rows.length > 1
+        : snapshot.rows.length > 1
           ? analysisConsensus((lineCache.get(fen) ?? []).filter((line) => line.multipv === 1 && !line.error))
           : `Analysis complete · ${selectedLabels}`;
   } catch (error) {
@@ -6140,6 +6144,7 @@ async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = 
   const loadCancelled = () => isStaleMount(mountSignal) || operationSignal?.aborted === true;
   if (loadCancelled()) return false;
   const load = { cancelled: loadCancelled };
+  analysisBackendGeneration += 1;
   activeLc0BackendLoad = load;
   try {
     return await loadLc0BackendOwned(runAutoAnalyze, loadCancelled, operationSignal);
