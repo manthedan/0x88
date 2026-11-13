@@ -605,7 +605,11 @@ async function createLc0GpuIoSession(
     if ('reason' in specs) throw new Error(`model not eligible: ${specs.reason}`);
     const device = (await (ort.env.webgpu as unknown as { device?: unknown }).device) as ConstructorParameters<typeof OrtGpuIoBinding>[1] | undefined;
     if (!device) throw new Error('ORT exposed no WebGPU device');
-    const binding = new OrtGpuIoBinding(session, device, ort.Tensor as never, specs.input, specs.outputs);
+    // Captured sessions keep ORT's own output buffers bound across replays; preallocated
+    // fetches leak a native OrtValue per output per replay there (OrtGpuIoOutputMode).
+    const binding = new OrtGpuIoBinding(session, device, ort.Tensor as never, specs.input, specs.outputs, {
+      outputMode: mode === 'gpu-capture' ? 'session' : 'preallocated',
+    });
     // One zero-input invoke: ORT allocates (and, with capture, records) on the first
     // run, so a rejection surfaces here, where the CPU-IO fallback can still run.
     const elements = specs.input.dims.reduce((a, b) => a * b, 1);
@@ -690,9 +694,9 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     }
     const encodeMs = ort.tinyLeelaNowMs() - encodeStarted;
     const inputType = sessionInputType(this.session);
-    // f16 bits as a Uint16Array: the GPU-IO path writes these bytes as they are (an
-    // ort.Tensor may re-wrap them as a Float16Array in browsers that have one).
-    const inputData = inputType === 'float16' ? float32ToFloat16Array(encodedPlanes) : encodedPlanes;
+    // f16 inputs as Uint16Array bits: the GPU-IO path writes these bytes as they are
+    // (an ort.Tensor may re-wrap them as a Float16Array in browsers that have one).
+    const f16Input = inputType === 'float16' ? float32ToFloat16Array(encodedPlanes) : undefined;
     const webgpuBefore = ort.getOrtWebGpuDiagnosticsSnapshot();
     const ortRunStarted = ort.tinyLeelaNowMs();
     const downloadTiming: Record<string, number> = {};
@@ -703,7 +707,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     let allGetDataMs: number;
     if (this.gpuIo) {
       // run + the single staging readback; the outputs are already on the CPU.
-      const gpuOutputs = await this.gpuIo.run(inputData);
+      const gpuOutputs = await this.gpuIo.run(f16Input ?? encodedPlanes);
       ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
       const allGetDataStarted = ort.tinyLeelaNowMs();
       policy = gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_POLICY);
@@ -711,10 +715,9 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       mlhRaw = LC0_ONNX_OUTPUT_MLH in gpuOutputs ? gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_MLH) : undefined;
       allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     } else {
-      const inputTensor =
-        inputType === 'float16'
-          ? new ort.Tensor('float16', inputData, [physicalBatchSize, 112, 8, 8])
-          : new ort.Tensor('float32', inputData, [physicalBatchSize, 112, 8, 8]);
+      const inputTensor = f16Input
+        ? new ort.Tensor('float16', f16Input, [physicalBatchSize, 112, 8, 8])
+        : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
       const outputs = await this.session.run({
         [LC0_ONNX_INPUT_PLANES]: inputTensor,
       });

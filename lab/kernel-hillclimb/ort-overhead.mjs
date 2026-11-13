@@ -6,7 +6,9 @@
 //   cpu      shipped: CPU input tensor, CPU outputs (ORT MemcpyToHost per output)
 //   gpuout   preferredOutputLocation=gpu-buffer, outputs read with getData() in parallel
 //   iobind   GPU input buffer (writeBuffer) + preallocated GPU outputs, one staging map (src/nn/ortGpuIo.ts)
-//   capture  iobind + graph capture (ORT replays its recorded dispatches; ortGraphCaptureSessionOptions)
+//   capture  graph capture (ORT replays its recorded dispatches; ortGraphCaptureSessionOptions) with a GPU
+//            input buffer and ORT-owned GPU outputs, one staging map (OrtGpuIoBinding outputMode 'session')
+//   capture-prealloc  graph capture with preallocated output fetches: leaks native OrtValues (see leak=N)
 //   capture-jsflag  iobind + enableGraphCapture with the string EP form: JS-side capture constraints only
 //   bisection only: iobind-nopin / capture-nopin (no pinOrtGpuBufferImport), gpuin / capture-ortout
 //            (GPU input buffer, ORT-allocated GPU outputs read with getData())
@@ -18,6 +20,8 @@
 //   model=URL (default shipped Lc0 Small b1 qdq8)   variants=cpu,gpuout,iobind,capture
 //   warmup=N (10)  rounds=N (20)  block=N (5)  traceInvokes=N (20, 0 disables)
 //   gpuBusy=1 (pass-mode GPU busy per variant)  evaluator=1 (Lc0OnnxEvaluator phase timings on cpu and the GPU-IO variants)
+//   leak=N (0): N more invokes per variant with a tap on ORT's wasm module (ort-wasm-tap.mjs):
+//            leaked native output handles per invoke and wasm heap growth
 
 import { parseFen } from '../../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../../src/lc0/encoder112.ts';
@@ -27,6 +31,7 @@ import { OrtGpuIoBinding, ortGraphCaptureSessionOptions, pinOrtGpuBufferImport }
 import * as ort from '../../src/nn/ortRuntime.ts';
 import { intParam, listParam, log, params, runMain, runtimeDeviceIdentity, summarize } from './common.mjs';
 import { installGpuProfiler, passModeProfile } from './gpu-profiler.mjs';
+import { installOrtWasmTap } from './ort-wasm-tap.mjs';
 
 const DEFAULT_MODEL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
 const INPUT = '/input/planes';
@@ -245,7 +250,7 @@ async function makeVariant(name, model, device) {
       },
     };
   }
-  if (['iobind', 'capture', 'iobind-nopin', 'capture-nopin', 'capture-jsflag'].includes(name)) {
+  if (['iobind', 'capture', 'capture-prealloc', 'iobind-nopin', 'capture-nopin', 'capture-jsflag'].includes(name)) {
     const capture = name.startsWith('capture');
     // capture-jsflag: enableGraphCapture with the string provider form, which never reaches the EP (see ortGraphCaptureSessionOptions).
     const captureOptions = name === 'capture-jsflag' ? { enableGraphCapture: true } : ortGraphCaptureSessionOptions();
@@ -257,7 +262,7 @@ async function makeVariant(name, model, device) {
       ort.Tensor,
       { name: INPUT, type: 'float16', dims: [1, 112, 8, 8] },
       outputSpecs(session),
-      { pin: !name.endsWith('-nopin') },
+      { pin: !name.endsWith('-nopin'), outputMode: name === 'capture' ? 'session' : 'preallocated' },
     );
     for (const buffer of [binding.inputBuffer, ...binding.outputBuffers]) watchDestroy(buffer, name);
     return { name, session, binding, createMs: performance.now() - t0, invoke: (f16) => binding.run(f16) };
@@ -304,6 +309,9 @@ runMain(async () => {
   const rounds = intParam('rounds', 20, 2, 1000);
   const block = intParam('block', 5, 1, 100);
   const traceInvokes = intParam('traceInvokes', 20, 0, 1000);
+  const leakInvokes = intParam('leak', 0, 0, 1_000_000);
+  // Before the first session: ORT loads its glue on the first session create.
+  const tap = leakInvokes > 0 ? installOrtWasmTap(ort.env) : null;
   const fens = await fixtureFens();
   const inputs = fens.map(f16Planes);
 
@@ -335,6 +343,28 @@ runMain(async () => {
   log('exactness', exactness);
   const runtimeDestroyed = destroyedWatched.slice();
   log('buffers destroyed by the runtime before timing', runtimeDestroyed);
+
+  // Native leak check: N invokes per variant; output handles still live afterwards were never released.
+  let leak = null;
+  if (tap) {
+    leak = {};
+    for (const v of variants) {
+      const before = tap.snapshot();
+      for (let i = 0; i < leakInvokes; i++) await v.invoke(inputs[i % inputs.length]);
+      const after = tap.snapshot();
+      leak[v.name] = {
+        invokes: leakInvokes,
+        leakedHandles: after.liveOutputHandles - before.liveOutputHandles,
+        leakedHandlesPerInvoke: (after.liveOutputHandles - before.liveOutputHandles) / leakInvokes,
+        outputHandlesRead: after.gotData - before.gotData,
+        handlesReleased: after.released - before.released,
+        heapGrowthBytes: after.heapBytes - before.heapBytes,
+        probeAddressDelta: after.probeAddress - before.probeAddress,
+        heapBytesAfter: after.heapBytes,
+      };
+      log('leak', v.name, leak[v.name]);
+    }
+  }
 
   // Timeline breakdown per variant.
   const traces = {};
@@ -429,14 +459,18 @@ runMain(async () => {
     await v.binding?.dispose();
   }
   const exact = Object.values(exactness).every((e) => e.identical);
+  // Every variant except the known-leaky capture-prealloc must release all its output handles.
+  const leakFree = !leak || Object.entries(leak).every(([name, l]) => name === 'capture-prealloc' || l.leakedHandles === 0);
   return {
     bench: 'ort-overhead',
-    ok: exact && !profiler.state.errors.length,
+    ok: exact && leakFree && !profiler.state.errors.length,
+    leakFree,
     device: identity,
     candidate: { runtime: 'ort-webgpu', model, variants: names, createMs: Object.fromEntries(variants.map((v) => [v.name, v.createMs])) },
-    params: { warmup, rounds, block, traceInvokes, fixtures: fens.length },
+    params: { warmup, rounds, block, traceInvokes, leakInvokes, fixtures: fens.length },
     exactness,
     runtimeDestroyed,
+    leak,
     traces,
     gpu,
     evaluatorPhases,

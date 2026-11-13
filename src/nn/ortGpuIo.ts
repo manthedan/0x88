@@ -15,6 +15,10 @@
 // `enableGraphCapture`, which lets ORT replay its recorded dispatches instead of
 // re-running per-kernel CPU work.
 //
+// Captured sessions must use `outputs: 'session'` (ORT-owned output buffers),
+// not preallocated fetches: see OrtGpuIoOutputMode for the native leak the
+// fetch form causes under capture.
+//
 // Invokes are serialized: the buffers are shared, so a second run waits for the
 // first one's readback.
 import type * as ort from 'onnxruntime-web/webgpu';
@@ -53,6 +57,30 @@ export type OrtGpuIoTensorCtor = {
 type TensorCtor = OrtGpuIoTensorCtor;
 
 type SessionLike = Pick<ort.InferenceSession, 'run'>;
+
+/**
+ * Where the outputs live.
+ *
+ * - 'preallocated': our own GPU buffers, passed to run() as fetches. ORT binds
+ *   them on every run and releases what it binds. Use this without graph capture.
+ * - 'session': ORT allocates the output buffers. Under graph capture they stay
+ *   bound to the session and are reused by every replay. run() returns them as
+ *   gpu-buffer tensors, and we dispose each one after the copy, which releases
+ *   the per-run native OrtValue that ORT-web hands back.
+ *
+ * Captured sessions need 'session'. ORT-web 1.27 binds IO only on a captured
+ * session's first run. On every later run, OrtRunWithBinding returns three new
+ * native OrtValue copies of the bound outputs (GetBoundOutputValues). Because
+ * those runs no longer list the fetches as pre-allocated, wasm-core-impl keeps
+ * the copies alive for the returned tensors' dispose(). InferenceSession.run then
+ * returns the caller's fetch tensors instead (`outputArray[i] ?? decode(...)`),
+ * so nothing can ever dispose the copies. That leaks a few dozen bytes of wasm
+ * heap per output per run, which the 'session' form avoids. Measured in
+ * docs/ort_invoke_overhead_2026-11.md section 4.
+ */
+export type OrtGpuIoOutputMode = 'preallocated' | 'session';
+
+type GpuBufferTensor = { location?: string; gpuBuffer?: unknown; type?: string; dims?: readonly number[]; dispose(): void };
 
 const BYTES_PER_ELEMENT: Record<OrtGpuIoTensorType, number> = { float16: 2, float32: 4 };
 // ORT's own gpu-buffer downloader rounds sizes up to 16 bytes; copyBufferToBuffer
@@ -152,11 +180,13 @@ export class OrtGpuIoBinding {
   private readonly device: GPUDevice;
   private readonly inputBuffer: GPUBuffer;
   private readonly inputBytes: number;
+  /** Our output buffers ('preallocated' only; empty for 'session'). */
   private readonly outputBuffers: GPUBuffer[];
   private readonly staging: GPUBuffer;
   private readonly layout: ReturnType<typeof ortGpuIoLayout>;
   private readonly feeds: Record<string, ort.Tensor>;
-  private readonly fetches: Record<string, ort.Tensor>;
+  private readonly fetches: Record<string, ort.Tensor> | null;
+  readonly outputMode: OrtGpuIoOutputMode;
   private readonly pins: Array<() => boolean>;
   private pinsChecked = false;
   private tail: Promise<unknown> = Promise.resolve();
@@ -169,13 +199,14 @@ export class OrtGpuIoBinding {
     Tensor: TensorCtor,
     input: OrtGpuIoTensorSpec,
     outputs: readonly OrtGpuIoTensorSpec[],
-    { pin = true }: { pin?: boolean } = {},
+    { pin = true, outputMode = 'preallocated' }: { pin?: boolean; outputMode?: OrtGpuIoOutputMode } = {},
   ) {
     if (!outputs.length) throw new Error('OrtGpuIoBinding: no outputs');
     this.session = session;
     this.device = device;
     this.input = input;
     this.outputs = outputs;
+    this.outputMode = outputMode;
     this.inputBytes = elementCount(input.dims) * BYTES_PER_ELEMENT[input.type];
     if (this.inputBytes % 4 !== 0) throw new Error(`OrtGpuIoBinding: input ${input.name} is ${this.inputBytes} bytes; writeBuffer needs a multiple of 4`);
     this.layout = ortGpuIoLayout(outputs);
@@ -183,7 +214,7 @@ export class OrtGpuIoBinding {
     try {
       this.inputBuffer = device.createBuffer({ size: alignUp(this.inputBytes), usage: USAGE_STORAGE | USAGE_COPY_DST | USAGE_COPY_SRC });
       created.push(this.inputBuffer);
-      this.outputBuffers = this.layout.slots.map((slot) => {
+      this.outputBuffers = (outputMode === 'session' ? [] : this.layout.slots).map((slot) => {
         const buffer = device.createBuffer({ size: slot.paddedBytes, usage: USAGE_STORAGE | USAGE_COPY_SRC | USAGE_COPY_DST });
         created.push(buffer);
         return buffer;
@@ -197,9 +228,24 @@ export class OrtGpuIoBinding {
     this.pins = pin ? [this.inputBuffer, ...this.outputBuffers].map((buffer) => pinOrtGpuBufferImport(buffer)) : [];
     if (!pin) this.pinsChecked = true;
     this.feeds = { [input.name]: Tensor.fromGpuBuffer(this.inputBuffer as never, { dataType: input.type, dims: input.dims }) };
-    this.fetches = Object.fromEntries(
-      this.layout.slots.map((slot, i) => [slot.name, Tensor.fromGpuBuffer(this.outputBuffers[i] as never, { dataType: slot.type, dims: slot.dims })]),
-    );
+    this.fetches =
+      outputMode === 'session'
+        ? null
+        : Object.fromEntries(
+            this.layout.slots.map((slot, i) => [slot.name, Tensor.fromGpuBuffer(this.outputBuffers[i] as never, { dataType: slot.type, dims: slot.dims })]),
+          );
+  }
+
+  /** ORT-owned output buffers of one run, after checking they match the specs. */
+  private sessionOutputBuffers(results: Record<string, GpuBufferTensor>): GPUBuffer[] {
+    return this.layout.slots.map((slot) => {
+      const tensor = results[slot.name];
+      if (!tensor || tensor.location !== 'gpu-buffer' || !tensor.gpuBuffer)
+        throw new Error(`OrtGpuIoBinding: output ${slot.name} is not a gpu-buffer tensor (create the session with preferredOutputLocation 'gpu-buffer')`);
+      if (tensor.type !== slot.type || elementCount(tensor.dims ?? []) !== slot.elements)
+        throw new Error(`OrtGpuIoBinding: output ${slot.name} is ${tensor.type} [${tensor.dims?.join(',')}], expected ${slot.type} [${slot.dims.join(',')}]`);
+      return tensor.gpuBuffer as GPUBuffer;
+    });
   }
 
   /** One invoke: upload `data`, run, read every output back with one map. Serialized per binding. */
@@ -220,18 +266,29 @@ export class OrtGpuIoBinding {
       );
     const { queue } = this.device;
     queue.writeBuffer(this.inputBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
-    await this.session.run(this.feeds, this.fetches);
-    if (!this.pinsChecked) {
-      // If ORT ever stops registering buffers the way pinOrtGpuBufferImport expects, refuse
-      // rather than run on buffers ORT may have destroyed.
-      if (!this.pins.every((pinned) => pinned())) throw new Error('OrtGpuIoBinding: ORT did not register the IO buffers as expected; cannot keep them alive');
-      this.pinsChecked = true;
+    const results = (this.fetches ? await this.session.run(this.feeds, this.fetches) : await this.session.run(this.feeds)) as unknown as Record<
+      string,
+      GpuBufferTensor
+    >;
+    try {
+      if (!this.pinsChecked) {
+        // If ORT ever stops registering buffers the way pinOrtGpuBufferImport expects, refuse
+        // rather than run on buffers ORT may have destroyed.
+        if (!this.pins.every((pinned) => pinned())) throw new Error('OrtGpuIoBinding: ORT did not register the IO buffers as expected; cannot keep them alive');
+        this.pinsChecked = true;
+      }
+      // ORT-owned outputs are 16-byte padded like ours (its own downloader copies the padded size).
+      const sources = this.fetches ? this.outputBuffers : this.sessionOutputBuffers(results);
+      const encoder = this.device.createCommandEncoder();
+      this.layout.slots.forEach((slot, i) => {
+        encoder.copyBufferToBuffer(sources[i], 0, this.staging, slot.offset, slot.paddedBytes);
+      });
+      queue.submit([encoder.finish()]);
+    } finally {
+      // 'session': release ORT's per-run OrtValue for each output. The buffers stay bound to the
+      // session, and the copy above is already queued.
+      if (!this.fetches) for (const tensor of Object.values(results)) tensor.dispose();
     }
-    const encoder = this.device.createCommandEncoder();
-    this.layout.slots.forEach((slot, i) => {
-      encoder.copyBufferToBuffer(this.outputBuffers[i], 0, this.staging, slot.offset, slot.paddedBytes);
-    });
-    queue.submit([encoder.finish()]);
     await this.staging.mapAsync(MAP_MODE_READ);
     let bytes: ArrayBuffer;
     try {

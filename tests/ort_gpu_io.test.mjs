@@ -135,6 +135,95 @@ function fakeGpu({ failRun = false, captureBinding = false } = {}) {
   return { device, Tensor, session, log, buffers };
 }
 
+/**
+ * A captured ORT-web 1.27 session (wasm-core-impl.ts + session-handler-inference.ts),
+ * reduced to what decides native OrtValue lifetimes:
+ * - IO is bound on the first run only; OrtRunWithBinding returns one new native
+ *   OrtValue copy per output on every run.
+ * - First run: the fetches are "pre-allocated outputs", so the copies are released.
+ *   Later runs: they are not, so each copy is kept for a returned tensor's dispose(),
+ *   and InferenceSession.run returns the caller's fetch tensors instead: the copies leak.
+ * - No fetches: ORT allocates the outputs once (bound, reused by replays) and returns
+ *   gpu-buffer tensors whose dispose() releases that run's copies.
+ */
+function fakeCapturedSession(gpu) {
+  const native = new Set();
+  let nextValue = 1;
+  let owned = null;
+  const session = {
+    runs: 0,
+    native,
+    async run(feeds, fetches) {
+      this.runs += 1;
+      const first = this.runs === 1;
+      const tensors = [...Object.values(feeds), ...Object.values(fetches ?? {})];
+      for (const t of tensors) ortRegister(t.buffer);
+      try {
+        await Promise.resolve();
+        const seed = new Uint16Array(feeds['/input/planes'].buffer.bytes.buffer)[0];
+        if (!fetches) owned ??= OUTPUTS.map((o) => gpu.device.createBuffer({ size: o.dims.reduce((a, b) => a * b, 1) * 2 + 16, usage: 0x84 }));
+        const targets = fetches ? Object.values(fetches).map((t) => t.buffer) : owned;
+        targets.forEach((buffer, i) => {
+          new Uint16Array(buffer.bytes.buffer).fill(seed + i);
+        });
+        const copies = OUTPUTS.map(() => {
+          const id = nextValue++;
+          native.add(id);
+          return id;
+        });
+        if (fetches) {
+          if (first) for (const id of copies) native.delete(id);
+          return fetches;
+        }
+        return Object.fromEntries(
+          OUTPUTS.map((o, i) => [o.name, { location: 'gpu-buffer', gpuBuffer: owned[i], type: o.type, dims: o.dims, dispose: () => native.delete(copies[i]) }]),
+        );
+      } finally {
+        for (const t of tensors) ortUnregister(t.buffer);
+      }
+    },
+  };
+  return session;
+}
+
+test("captured sessions: preallocated fetches leak ORT's per-run output copies, session-owned outputs do not", async () => {
+  const input = (v) => new Uint16Array(112 * 64).fill(v);
+  const leaky = fakeGpu();
+  const leakySession = fakeCapturedSession(leaky);
+  const a = new OrtGpuIoBinding(leakySession, leaky.device, leaky.Tensor, INPUT, OUTPUTS);
+  for (const v of [1, 2, 3, 4]) await a.run(input(v));
+  assert.equal(leakySession.native.size, 3 * 3, 'three leaked copies per replay (run 1 is released)');
+
+  const gpu = fakeGpu();
+  const session = fakeCapturedSession(gpu);
+  const b = new OrtGpuIoBinding(session, gpu.device, gpu.Tensor, INPUT, OUTPUTS, { outputMode: 'session' });
+  assert.equal(b.outputMode, 'session');
+  for (const v of [5, 6, 7, 8]) {
+    const out = await b.run(input(v));
+    assert.equal(out['/output/policy'][0], v);
+    assert.equal(out['/output/wdl'][2], v + 1);
+    assert.equal(out['/output/mlh'][0], v + 2);
+  }
+  assert.equal(session.native.size, 0, 'every returned output copy is disposed');
+  await b.dispose();
+  // our own buffers (input + staging) are destroyed; ORT-owned outputs belong to the session
+  assert.equal(gpu.buffers.filter((buf) => buf.destroyed).length, 2);
+});
+
+test('session-owned outputs: wrong output shape is refused and the copies are still released', async () => {
+  const gpu = fakeGpu();
+  const session = fakeCapturedSession(gpu);
+  const wrong = OUTPUTS.map((o, i) => (i === 0 ? { ...o, dims: [1, 1857] } : o));
+  const binding = new OrtGpuIoBinding(session, gpu.device, gpu.Tensor, INPUT, wrong, { outputMode: 'session' });
+  await assert.rejects(binding.run(new Uint16Array(112 * 64)), /expected float16 \[1,1857\]/);
+  assert.equal(session.native.size, 0);
+});
+
+test('the evaluator gives captured sessions session-owned outputs', () => {
+  const source = readFileSync(new URL('../src/lc0/onnxEvaluator.ts', import.meta.url), 'utf8');
+  assert.match(source, /outputMode: mode === 'gpu-capture' \? 'session' : 'preallocated'/);
+});
+
 test('OrtGpuIoBinding: one upload, one run, one submit and one map per invoke, outputs per invoke', async () => {
   const gpu = fakeGpu();
   const binding = new OrtGpuIoBinding(gpu.session, gpu.device, gpu.Tensor, INPUT, OUTPUTS);
