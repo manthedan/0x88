@@ -127,7 +127,11 @@ Parity uses the f16 tie protocol of
 [`lc0_tvmjs_bt4it332_onboarding_2026-06-09.md`](lc0_tvmjs_bt4it332_onboarding_2026-06-09.md):
 a different best move is tolerated when the two moves have equal root visits in
 either tree, or the reference (shipped) prior gap is ≤ 0.01. Anything else is
-a flip.
+a flip. (The runs below kept only each tree's top 8 root children for this
+check, so a move ranked lower in the other tree would have read as a flip with
+an undefined prior gap. The page now keeps them all. No row below was affected:
+every non-matching row had both moves in both top 8s and a finite gap, and
+every flip's gap is ≥ 0.036.)
 
 | net | visits | wall ratio median (MAD) [p10-p90] | ms per move A vs B (median) | visits/s A vs B | best move: match / tolerated / flip |
 |---|---|---|---|---|---|

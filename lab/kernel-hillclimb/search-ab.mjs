@@ -100,7 +100,9 @@ async function runSearch(arm, fen, visits, batch, evalCache, options) {
     move: result.move,
     visits: result.visits,
     value: result.value,
-    children: result.children.slice(0, 8).map(({ uci, visits: v, prior, q }) => ({ uci, visits: v, prior, q })),
+    // All root children: parityRow needs the other arm's move wherever it ranks.
+    // Only the published rows are trimmed (slim, below).
+    children: result.children.map(({ uci, visits: v, prior, q }) => ({ uci, visits: v, prior, q })),
     wallMs,
     evalCalls: stats.evalCalls,
     batchEvalCalls: stats.batchEvalCalls,
