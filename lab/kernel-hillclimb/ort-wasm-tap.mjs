@@ -8,8 +8,9 @@
 // The tap counts native output OrtValues: a handle is "live" from the time ORT reads it
 // with _OrtGetTensorData until something calls _OrtReleaseTensor on it. Handles still
 // live after an invoke's outputs have been consumed (and disposed, where the caller
-// disposes) are leaked. It also reports the wasm heap size, and the address of a 1 MiB
-// probe allocation (malloc then free): a rising address means the allocator's top grew.
+// disposes) are leaked. A handle is the OrtValue's address in the wasm heap, so the
+// spacing between consecutively leaked handles is the heap bytes each one holds. It also
+// reports the wasm heap size (HEAPU8.length), which only grows once free heap runs out.
 
 export function installOrtWasmTap(env) {
   const state = { module: null, live: new Set(), gotData: 0, released: 0 };
@@ -56,9 +57,7 @@ export function installOrtWasmTap(env) {
     snapshot() {
       const m = state.module;
       if (!m) throw new Error('ort-wasm-tap: ORT module not captured (glue not loaded through env.wasm.wasmPaths?)');
-      const probe = m._malloc(1 << 20);
-      m._free(probe);
-      return { liveOutputHandles: state.live.size, gotData: state.gotData, released: state.released, heapBytes: m.HEAPU8.length, probeAddress: probe };
+      return { live: new Set(state.live), liveOutputHandles: state.live.size, gotData: state.gotData, released: state.released, heapBytes: m.HEAPU8.length };
     },
   };
 }

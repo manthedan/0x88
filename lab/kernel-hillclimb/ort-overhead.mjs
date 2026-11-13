@@ -291,6 +291,14 @@ async function makeVariant(name, model, device) {
   throw new Error(`unknown variant ${name}`);
 }
 
+// Median spacing between leaked handle addresses (OrtValue pointers): heap bytes per leaked object.
+function handleStride(handles) {
+  const sorted = handles.map(Number).sort((x, y) => x - y);
+  const gaps = [];
+  for (let i = 1; i < sorted.length; i++) gaps.push(sorted[i] - sorted[i - 1]);
+  return gaps.length ? median(gaps) : null;
+}
+
 const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b);
   const m = s.length >> 1;
@@ -359,8 +367,8 @@ runMain(async () => {
         outputHandlesRead: after.gotData - before.gotData,
         handlesReleased: after.released - before.released,
         heapGrowthBytes: after.heapBytes - before.heapBytes,
-        probeAddressDelta: after.probeAddress - before.probeAddress,
         heapBytesAfter: after.heapBytes,
+        leakedHandleStrideBytes: handleStride([...after.live].filter((h) => !before.live.has(h))),
       };
       log('leak', v.name, leak[v.name]);
     }
