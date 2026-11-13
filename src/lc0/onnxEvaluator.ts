@@ -637,6 +637,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   readonly ioMode: Lc0OrtIoMode;
   private disposed = false;
   private closePromise: Promise<void> | null = null;
+  private admitted = new Set<Promise<unknown>>();
 
   constructor(session: ort.InferenceSession, options: Lc0OnnxEvaluatorOptions = {}, gpuIo: { binding: OrtGpuIoBinding; mode: Lc0OrtIoMode } | null = null) {
     this.session = session;
@@ -659,6 +660,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     if (!this.closePromise) {
       this.disposed = true;
       this.closePromise = (async () => {
+        await Promise.allSettled(this.admitted);
         try {
           await ort.releaseOrtSession(this.session);
         } finally {
@@ -677,8 +679,17 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     return (await this.evaluateBatch([boardOrFen]))[0];
   }
 
-  private async runPhysicalBatch(inputs: Lc0EvaluatorInput[], physicalBatchSize: number): Promise<Lc0Evaluation[]> {
+  // Admit whole logical calls so later physical batches can finish during close.
+  private admit<T>(work: () => Promise<T>): Promise<T> {
     this.assertNotDisposed();
+    const pending = Promise.resolve().then(work);
+    this.admitted.add(pending);
+    const settled = () => { this.admitted.delete(pending); };
+    void pending.then(settled, settled);
+    return pending;
+  }
+
+  private async runPhysicalBatch(inputs: Lc0EvaluatorInput[], physicalBatchSize: number): Promise<Lc0Evaluation[]> {
     if (!inputs.length) return [];
     const totalStarted = ort.tinyLeelaNowMs();
     const encodedPlanes = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
@@ -805,7 +816,10 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
-    this.assertNotDisposed();
+    return this.admit(() => this.evaluateBatchNow(inputs));
+  }
+
+  private async evaluateBatchNow(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     if (!inputs.length) return [];
     const declared = sessionDeclaredFirstDim(this.session);
     const out: Lc0Evaluation[] = [];
@@ -821,8 +835,10 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   }
 
   async evaluateBatchSequence(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
-    const out: Lc0Evaluation[][] = [];
-    for (const batch of batches) out.push(await this.evaluateBatch(batch));
-    return out;
+    return this.admit(async () => {
+      const out: Lc0Evaluation[][] = [];
+      for (const batch of batches) out.push(await this.evaluateBatchNow(batch));
+      return out;
+    });
   }
 }

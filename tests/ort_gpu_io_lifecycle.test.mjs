@@ -138,3 +138,78 @@ test('a normal ORT run rejection leaves the evaluator and serialized IO queue us
   assert.equal(gpu.uploads(), 3);
   await gpu.evaluator.dispose();
 });
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+test('ORT evaluator drains active and queued invokes, including readback, before session release', async () => {
+  const started = deferred(), finishRun = deferred(), mapping = deferred(), finishMap = deferred();
+  let runs = 0, releases = 0;
+  const gpu = evaluatorWithGpu(async (_feeds, fetches) => {
+    assert.equal(releases, 0);
+    if (++runs === 1) { started.resolve(); await finishRun.promise; }
+    return fetches;
+  }, async () => { releases++; });
+  gpu.buffers.at(-1).mapAsync = async () => { mapping.resolve(); await finishMap.promise; };
+  const first = gpu.evaluator.evaluate(START_FEN);
+  const second = gpu.evaluator.evaluate(START_FEN);
+  await started.promise;
+  const close = gpu.evaluator.dispose();
+  assert.strictEqual(gpu.evaluator.dispose(), close);
+  await Promise.resolve();
+  assert.equal(releases, 0, 'session remains alive during run');
+  finishRun.resolve();
+  await mapping.promise;
+  assert.equal(releases, 0, 'session remains alive during readback');
+  assert.ok(gpu.buffers.every((buffer) => buffer.destroys === 0));
+  finishMap.resolve();
+  await Promise.all([first, second, close]);
+  assert.equal(runs, 2);
+  assert.equal(releases, 1);
+  assert.ok(gpu.buffers.every((buffer) => buffer.destroys === 1));
+});
+
+for (const method of ['evaluateBatch', 'evaluateBatchSequence']) {
+  test(`ORT close drains all physical batches of an admitted ${method}`, async () => {
+    let runs = 0, releases = 0;
+    const gpu = evaluatorWithGpu(async (_feeds, fetches) => {
+      assert.equal(releases, 0);
+      runs++;
+      return fetches;
+    }, async () => { releases++; });
+    const inputs = [START_FEN, START_FEN];
+    const run = gpu.evaluator[method](method === 'evaluateBatch' ? inputs : [inputs, inputs]);
+    const close = gpu.evaluator.dispose();
+    for (const [api, argument] of [['evaluate', START_FEN], ['evaluateBatch', inputs], ['evaluateBatchSequence', [inputs]]]) {
+      await assert.rejects(gpu.evaluator[api](argument), /disposed/);
+    }
+    const results = await run;
+    await close;
+    assert.equal(results.flat().length, method === 'evaluateBatch' ? 2 : 4);
+    assert.equal(runs, method === 'evaluateBatch' ? 2 : 4);
+    assert.equal(gpu.uploads(), runs, 'rejected requests never upload');
+    await assert.rejects(gpu.evaluator.evaluate(START_FEN), /disposed/);
+    assert.equal(gpu.uploads(), runs);
+    assert.equal(releases, 1);
+  });
+}
+
+test('ORT CPU IO close waits for an admitted run rejection before releasing', async () => {
+  const started = deferred(), finish = deferred();
+  let released = false;
+  const evaluator = new Lc0OnnxEvaluator({
+    async run() { started.resolve(); await finish.promise; throw new Error('injected CPU run failure'); },
+    async release() { released = true; },
+  });
+  const run = assert.rejects(evaluator.evaluate(START_FEN), /CPU run failure/);
+  await started.promise;
+  const close = evaluator.dispose();
+  await Promise.resolve();
+  assert.equal(released, false);
+  finish.resolve();
+  await Promise.all([run, close]);
+  assert.equal(released, true);
+});
