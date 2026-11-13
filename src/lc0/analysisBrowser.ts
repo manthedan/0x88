@@ -578,7 +578,7 @@ function syncBrokerParticipants(rows: EngineRow[]): void {
 type AnalysisBigNetKey = Extract<BigNetKey, 'bt4' | 't3'>;
 const ANALYSIS_BIG_NET_KEYS: readonly AnalysisBigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
-  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
+  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
   return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
 }
 let ground: Ground | null = null;
@@ -1705,9 +1705,14 @@ function rowLabel(row: EngineRow): string {
 }
 
 function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tree.current, requestedMultiPv = multiPv()): string {
-  // The served model is part of the runtime identity: Lc0 Small runs either the
-  // shipped model or its split-K rewrite depending on the device.
-  const runtime = row.family === 'lc0' && !isLc0BigNetVariant(row.variant) ? `${selectedLc0Runtime()}|${lc0ServedModelUrl}` : '';
+  // The served model is part of the runtime identity: Lc0 Small and the big nets
+  // run either the shipped model or its split-K rewrite depending on the device.
+  const runtime =
+    row.family !== 'lc0'
+      ? ''
+      : isLc0BigNetVariant(row.variant)
+        ? (analysisBigNetServedModel.get(row.variant === 't3' ? 't3' : 'bt4') ?? '')
+        : `${selectedLc0Runtime()}|${lc0ServedModelUrl}`;
   const { dial, cpuBudget } = resourceBroker.snapshot();
   const participants = [
     ...new Set(
@@ -1822,6 +1827,22 @@ function renderEngineSetupSummary(): void {
   renderEngineSummaries(lineCache.get(tree.current.fen) ?? []);
 }
 
+/**
+ * The big-net session options of an Analysis search (worker eval cache off, as
+ * before). The pool shares sessions with Play and Arena, which use 2048 or
+ * arenaCacheEntries(); a different size makes init dispose and reload the
+ * session. initBigNetsForRun and workerBigNetLines must both use this.
+ */
+const ANALYSIS_BIG_NET_SESSION = { evalCacheEntries: 0 } as const;
+
+/**
+ * The served model URL of each big net as of the latest run's start, the way
+ * lc0ServedModelUrl holds Lc0 Small's. Every cache and selection key reads this
+ * snapshot (engineAnalysisCacheKey), never the live worker, whose
+ * servedModelUrl a crash clears mid-run.
+ */
+const analysisBigNetServedModel = new Map<AnalysisBigNetKey, string>();
+
 async function workerBigNetLines(
   runId: number,
   variant: string,
@@ -1829,10 +1850,15 @@ async function workerBigNetLines(
   visits: number,
   positions: BoardState[],
   requestedMultiPv: number,
+  servedModelUrl: string,
   signal?: AbortSignal,
 ): Promise<AnalysisLine[]> {
   const { config, searcher } = bigNetFor(variant);
   const label = `Lc0 ${config.name}`;
+  // The run's keys name servedModelUrl; never search on another session under them.
+  if (!searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION) || searcher.servedModelUrl !== servedModelUrl) {
+    throw new Error(`${label} session changed during analysis; analyze again`);
+  }
   searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
   try {
     const result = await searcher.search(
@@ -1840,6 +1866,7 @@ async function workerBigNetLines(
       {
         visits,
         multiPv: requestedMultiPv,
+        evalCacheEntries: ANALYSIS_BIG_NET_SESSION.evalCacheEntries,
         batchSize: config.recommendedBatchSize,
         batchPipelineDepth: config.recommendedPipelineDepth,
         signal,
@@ -1849,6 +1876,64 @@ async function workerBigNetLines(
     return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
   } finally {
     hideModelProgress();
+  }
+}
+
+/**
+ * A big net picks its served model (the shipped export or its split-K rewrite)
+ * when its worker initializes, and that URL is part of every cache and
+ * selection key (engineAnalysisCacheKey). So, like the Lc0 Small backend before
+ * analyzeCurrent proceeds, the selected big nets are initialized, with the
+ * options the search will pass, before a run takes its keys. Keys taken before
+ * that init would not match the session the search runs on (none yet, or a
+ * pooled one the search would reload), and the run's results would be discarded
+ * or cached under the wrong model. initBigNetsForRun returns the init errors by
+ * net, which the run reports as that engine's failure without retrying the
+ * download.
+ */
+function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
+  const keys = new Set<AnalysisBigNetKey>();
+  for (const row of rows) {
+    if (row.family !== 'lc0' || !isLc0BigNetVariant(row.variant)) continue;
+    const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
+    if (!peekBigNetSearcher(key)?.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) keys.add(key);
+  }
+  return [...keys];
+}
+
+async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boolean): Promise<Map<AnalysisBigNetKey, Error>> {
+  const errors = new Map<AnalysisBigNetKey, Error>();
+  await Promise.all(
+    keys.map(async (key) => {
+      const { config, searcher } = bigNetFor(key);
+      const label = `Lc0 ${config.name}`;
+      searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
+      try {
+        // Checked before each attempt: a stopped run must not reload a pooled
+        // session that Play or Arena may have taken back.
+        if (cancelled()) return;
+        await searcher.init(ANALYSIS_BIG_NET_SESSION);
+        // An init already in flight for other options resolves with those; reload once.
+        if (cancelled() || searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) return;
+        await searcher.init(ANALYSIS_BIG_NET_SESSION);
+      } catch (error) {
+        errors.set(key, error instanceof Error ? error : new Error(String(error)));
+      } finally {
+        hideModelProgress();
+      }
+    }),
+  );
+  return errors;
+}
+
+/** After initBigNetsForRun: record the URL of the session each selected big net's search will use. */
+function snapshotBigNetServedModels(rows: EngineRow[]): void {
+  for (const row of rows) {
+    if (row.family !== 'lc0' || !isLc0BigNetVariant(row.variant)) continue;
+    const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
+    const searcher = peekBigNetSearcher(key);
+    if (searcher?.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) analysisBigNetServedModel.set(key, searcher.servedModelUrl);
+    else analysisBigNetServedModel.delete(key);
   }
 }
 
@@ -4311,30 +4396,60 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
   analyzing = true;
   el('stop').toggleAttribute('disabled', false);
   el('analyze').toggleAttribute('disabled', true);
-  const fen = tree.current.fen;
-  const analysisPositions = tree.historyBoards();
-  const cpuPosition = analysisGamePosition(tree);
-  const analysisMultiPv = multiPv();
-  const board = parseFen(fen);
-  if (legalMoves(board).length === 0) {
+  if (legalMoves(parseFen(tree.current.fen)).length === 0) {
     analyzing = false;
     el('stop').toggleAttribute('disabled', true);
     el('analyze').toggleAttribute('disabled', false);
     return;
   }
-  // Snapshot after the terminal-position return, which skips the finally that clears it.
-  analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
-  const selectedLabels = rows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
-  const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
-  activeAnalysisSelectionKey = selectionCacheKey;
-  el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
-  clearAnalysisSearchProgress();
-  syncBrokerParticipants(rows);
   let runDeferredAnalysis = false;
   let reloadDeferredLc0 = false;
   let disposeDeferredEngines = false;
   let resumeForce = false;
   try {
+    // Initialize the selected big nets first (initBigNetsForRun). The run reads
+    // nothing else before this await and everything after it, synchronously, as
+    // it did before the init step existed: position, history, MultiPV, engine
+    // rows, runtime/broker settings, served models, keys. A settings change made
+    // during init ends this run in favour of the queued one (below). A run with
+    // no uninitialized big net does not yield.
+    const uninitializedBigNets = bigNetsAwaitingInit(rows);
+    let bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
+    if (uninitializedBigNets.length) {
+      activeAnalysisSelectionKey = ''; // no keys yet: navigation during init cancels this run
+      el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
+      bigNetInitErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+      if (controller.signal.aborted || mountAbort.signal.aborted) return;
+      // Anything else that happened during init either cancelled this run (any
+      // new analyzeCurrent/scheduleAnalyzeCurrent, Stop, hiding the tab, leaving)
+      // or was queued for after it through deferAnalysisSettingsRefresh: those
+      // flags were all clear when the run started (consumed or reset above). If
+      // one is set now, or the rows changed without one (refreshBt4Availability),
+      // this run's gates and backends are stale: end it so the finally applies
+      // the queued Lc0 reload / disposal and starts the deferred run.
+      if (
+        analyzeAfterActiveRun ||
+        reloadLc0AfterActiveRun ||
+        disposeUnusedEnginesAfterActiveRun ||
+        JSON.stringify(activeEngineRows()) !== JSON.stringify(rows)
+      ) {
+        analyzeAfterActiveRun = true;
+        return;
+      }
+    }
+    snapshotBigNetServedModels(rows);
+    const fen = tree.current.fen;
+    const analysisPositions = tree.historyBoards();
+    const cpuPosition = analysisGamePosition(tree);
+    const analysisMultiPv = multiPv();
+    if (legalMoves(parseFen(fen)).length === 0) return;
+    analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(rows);
+    const selectedLabels = rows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
+    const selectionCacheKey = analysisSelectionCacheKey(fen, rows);
+    activeAnalysisSelectionKey = selectionCacheKey;
+    el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
+    clearAnalysisSearchProgress();
+    syncBrokerParticipants(rows);
     const lineGroups: AnalysisLine[][] = rows.map((row) => (!options.force ? (engineLineCache.get(engineAnalysisCacheKey(fen, row)) ?? []) : []));
     const publishLines = () => {
       if (controller.signal.aborted || analysisSelectionCacheKey(tree.current.fen) !== selectionCacheKey) return;
@@ -4381,8 +4496,13 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       const cacheKey = engineAnalysisCacheKey(fen, row);
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[row.variant as AnalysisBigNetKey].name}`, () =>
-          workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv, controller.signal),
+        const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
+        const initError = bigNetInitErrors.get(key);
+        const servedModelUrl = analysisBigNetServedModel.get(key) ?? '';
+        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[key].name}`, () =>
+          initError
+            ? Promise.reject(initError)
+            : workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv, servedModelUrl, controller.signal),
         );
       } else if (row.family === 'lc0') {
         const label = 'Lc0';

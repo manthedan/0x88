@@ -289,6 +289,10 @@ export function bt4LoadWarning(): string {
  * A lazily-initialized, worker-backed Lc0 big-net searcher. One instance owns
  * one searchWorker (one resident net). Call `dispose()` to free its memory.
  */
+function normalizedEvalCacheEntries(entries: number | undefined): number {
+  return Math.max(0, Math.floor(Number(entries ?? 0) || 0));
+}
+
 export class Bt4WorkerSearcher {
   readonly config: BigNetConfig;
   private worker: Worker | null = null;
@@ -303,6 +307,12 @@ export class Bt4WorkerSearcher {
   private configuredEvalCacheEntries = -1;
   backend = '';
   fallback: OrtRuntimeDiagnostics['fallback'];
+  /**
+   * URL of the model the worker runs: config.modelUrl, or its split-K rewrite on
+   * Apple WebGPU (src/lc0/lc0SmallModelSelection.ts). Empty until loaded; part
+   * of the identity of any cached result.
+   */
+  servedModelUrl = '';
   /** Model download progress during the first init (not called on reloads). */
   onDownloadProgress: ((loadedBytes: number, totalBytes?: number) => void) | null = null;
 
@@ -324,9 +334,18 @@ export class Bt4WorkerSearcher {
     });
   }
 
+  /**
+   * True when init(options) would reuse the loaded session as is: ready, with the
+   * same eval-cache size. Otherwise init disposes and reloads it, and may then
+   * serve a different model (servedModelUrl).
+   */
+  isInitializedFor(options: { evalCacheEntries?: number } = {}): boolean {
+    return this.ready && this.configuredEvalCacheEntries === normalizedEvalCacheEntries(options.evalCacheEntries);
+  }
+
   /** Create + init the worker on first call (fetches the large net, then cached). */
   async init(options: { evalCacheEntries?: number } = {}): Promise<string> {
-    const evalCacheEntries = Math.max(0, Math.floor(Number(options.evalCacheEntries ?? 0) || 0));
+    const evalCacheEntries = normalizedEvalCacheEntries(options.evalCacheEntries);
     if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries) return this.backend;
     if (this.ready && this.configuredEvalCacheEntries !== evalCacheEntries) this.dispose();
     if (this.initPromise) return this.initPromise;
@@ -369,9 +388,11 @@ export class Bt4WorkerSearcher {
       // Big nets opt into app-owned Cache Storage so immutable model bytes
       // survive route changes even when the browser HTTP cache skips large
       // entries. Quota-limited browsers fall back to URL-loading in the worker.
-      const ready = await this.post<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback'] }>({
+      const ready = await this.post<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>({
         type: 'init',
         modelUrl: this.config.modelUrl,
+        // Big-net URLs are fixed (no ?model= override), so the device rule always applies.
+        deviceModelSelection: true,
         ep,
         cacheModel: true,
         evalCacheEntries,
@@ -384,6 +405,7 @@ export class Bt4WorkerSearcher {
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;
       this.fallback = ready.ortFallback;
+      this.servedModelUrl = ready.servedModelUrl ?? this.config.modelUrl;
       return this.backend;
     })();
     this.initPromise = initializing;
@@ -470,6 +492,7 @@ export class Bt4WorkerSearcher {
     this.configuredEvalCacheEntries = -1;
     this.backend = '';
     this.fallback = undefined;
+    this.servedModelUrl = '';
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
     this.activeSearchId = null;

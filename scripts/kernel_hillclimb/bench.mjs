@@ -74,11 +74,13 @@ async function runOnce() {
   let last;
   while (Date.now() < deadline) {
     const data = await agent(['eval', '--stdin'], {
-      input: `(() => JSON.stringify({ r: window.__kernelBenchResult ?? null, e: window.__kernelBenchError ?? null, tail: (document.getElementById('log')?.textContent ?? '').slice(-400) }))()`,
+      input: `(() => JSON.stringify({ r: window.__kernelBenchResult ?? null, e: window.__kernelBenchError ?? null, href: location.href, tail: (document.getElementById('log')?.textContent ?? '').slice(-400) }))()`,
     });
     const value = typeof data?.result === 'string' ? data.result : typeof data === 'string' ? data : (data?.result ?? data?.value);
     last = typeof value === 'string' ? JSON.parse(value) : value;
     if (last?.e) throw new Error(`bench page error: ${last.e}`);
+    // A crashed renderer leaves the session on about:blank; polling it would only run out the timeout.
+    if (last?.href && !last.href.startsWith(url.origin)) throw new Error(`bench page lost (now at ${last.href}); the renderer probably crashed`);
     if (last?.r) {
       load.after = loadavg();
       return { result: last.r, load };

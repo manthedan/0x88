@@ -24,6 +24,30 @@ const ORT_WASM_PARITY = {
 /** Maia3 QDQ8 export before the einsum,promo graph rewrite (the shipped default until the rewrite). */
 const MAIA3_PRE_GRAPH_MODEL = '/models/maia3/maia3_simplified.qdq8.onnx';
 
+const SEARCH_TIE_GATE =
+  'Fixed-visit search parity, A vs the shipped model B on ORT WebGPU (lab/kernel-hillclimb/search-ab.mjs): same best move, or a tie under the f16 protocol (equal root visits for both moves in either tree, or reference prior gap <= tieEpsilon).';
+
+function bigNetSplitKCandidates(files) {
+  const out = {};
+  for (const [preset, file] of Object.entries(files)) {
+    const model = `/models/lc0-splitk/${file}`;
+    out[`ort-${preset}-splitk`] = { page: 'ort-profile', query: `preset=${preset}&model=${model}`, path: 'ort-webgpu', gate: ORT_WASM_PARITY };
+    out[`ort-${preset}-splitk-ab`] = {
+      page: 'ort-profile',
+      query: `preset=${preset}&model=${model}&ab=${preset}&abRounds=20&profileInvokes=0&iters=10`,
+      path: 'ort-webgpu',
+      gate: ORT_WASM_PARITY,
+    };
+    out[`search-${preset}-splitk-ab`] = {
+      page: 'search-ab',
+      query: `preset=${preset}&model=${model}`,
+      path: 'ort-webgpu',
+      gate: { kind: 'in-page', query: 'parity=search&tieEpsilon=0.01', description: SEARCH_TIE_GATE },
+    };
+  }
+  return out;
+}
+
 export const CANDIDATES = {
   peak: { page: 'peak', query: '', path: 'device', gate: { kind: 'none' } },
   'peak-gemm': { page: 'peak', query: 'tests=gemm,sgmatrix', path: 'device', gate: { kind: 'none' } },
@@ -86,6 +110,14 @@ export const CANDIDATES = {
     path: 'ort-webgpu',
     gate: ORT_WASM_PARITY,
   },
+  // Smolgen-compress split-K of the big nets (splitk_rewrite.py --include 'smolgen/dense1/w$'
+  // --assume-m 8; docs/bignet_smolgen_splitk_2026-11.md). Gated against each preset's shipped model
+  // on ORT WASM; the -ab candidates pair split-K (A) with shipped (B).
+  ...bigNetSplitKCandidates({
+    t3: 't3-512x15x16h-distill-swa-2767500.batch8.f16.splitk.onnx',
+    bt4: 'BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.splitk.onnx',
+    lqo: 'lqo_v2.f16.qdq8.splitk.onnx',
+  }),
   'tvmjs-centipawn': {
     page: 'tvmjs-profile',
     query: 'target=centipawn',

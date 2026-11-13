@@ -75,7 +75,8 @@ const MODEL_GROUPS = [
     versionOrSource: 't3-512x15x16h-distill-swa-2767500',
     manifest: 'public/models/lc0/manifest.json',
     prefix: 't3-512x15x16h-distill-swa-2767500.',
-    notes: 'The t3-512 option loads the batch-8 f16 export (T3_NET in src/lc0/bt4Engine.ts).',
+    notes:
+      'The t3-512 option loads the batch-8 f16 export (T3_NET in src/lc0/bt4Engine.ts), or its smolgen split-K rewrite (batch8.f16.splitk) when ORT runs on WebGPU with an Apple adapter.',
   },
   {
     id: 'lc0-bt4-it332',

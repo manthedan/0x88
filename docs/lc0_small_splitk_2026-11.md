@@ -11,7 +11,7 @@ is **~1.5× faster per invoke on wall time and ~1.95× on GPU busy time**, in
 paired ABAB runs. On the RTX 3090 (Chrome/Vulkan) a paired run makes it
 **~1.46× slower on wall time** (§5). Since release
 2026-11-12.kernel-releases.1 it is served to Apple WebGPU sessions only (§9). The same rewrite for the smolgen compress GEMV in t3/BT4/LQO
-gives 4-8% per invoke.
+gives 4-8% per invoke (§7).
 
 Setup matches the roofline doc: Apple M4 (10-core GPU, `apple / metal-3`),
 headless Chrome 157, the production `dist-client` plus the lab overlay, served
@@ -308,8 +308,10 @@ under its own preset gate.
 All three pass their existing gates. The gain is 4-8%, smaller than the
 roofline doc's estimate (−4.5 to −5 ms per invoke). At b8 these nets are
 dominated by the large GEMMs (§5 candidate #3), and the saved dense1 time is
-partly offset by the extra dispatches. These are candidates, not a release
-recommendation. A paired search A/B would be needed first.
+partly offset by the extra dispatches. The follow-up, with regenerated
+artifacts, three-repeat paired runs, the RTX 3090, and a paired search A/B, is
+[`bignet_smolgen_splitk_2026-11.md`](bignet_smolgen_splitk_2026-11.md):
+the t3 rewrite is wired for Apple WebGPU sessions (0.90-0.94× per move, pending the owner's R2 publish); BT4 and LQO keep their shipped models.
 
 ## 8. Is a custom kernel still needed?
 
