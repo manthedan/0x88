@@ -31,7 +31,7 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`engine_upgrade_audit.md`](engine_upgrade_audit.md) — `npm run engine:upgrade-audit`: the browser-engine upgrade correctness audit tool.
 - [`search_contempt_design.md`](search_contempt_design.md) — search-contempt design; referenced from `src/lc0/playBrowser.ts`.
 - [`engine_resource_broker_design.md`](engine_resource_broker_design.md) — current CPU budgets and resource-class leases; GPU evaluation arbitration deferred. Referenced from `src/lc0/resourceBroker.ts`.
-- [`arena_analysis_roadmap.md`](arena_analysis_roadmap.md) — staged arena/analysis design; referenced from `src/lc0/charts.ts`, `gameReview.ts`, and `tournament.ts`.
+- [`arena_analysis_roadmap.md`](arena_analysis_roadmap.md) — current capability/backlog map, with historical design appendix; referenced from `src/lc0/charts.ts`, `gameReview.ts`, and `tournament.ts`.
 
 ## Artifact distribution, hosting, and models
 
@@ -59,13 +59,9 @@ Every tracked Markdown file under `docs/` is linked from this index;
 - [`plentychess_simd_audit.md`](plentychess_simd_audit.md) — PlentyChess SIMD audit (40/40, plus the f32 tail that was silently scalar).
 - [`reckless_simd_kernel_fixes.md`](reckless_simd_kernel_fixes.md) — Reckless SIMD kernel fixes (60/60 exact parity).
 - [`threaded_emscripten_smp_prototype_2026-07-25.md`](threaded_emscripten_smp_prototype_2026-07-25.md) — threaded Emscripten SMP prototype: 4.4x raw NPS, zero extra plies at fixed movetime; the threading question is closed.
-- [`native-lc0-search-gap.md`](native-lc0-search-gap.md) — native LC0 search feature gap.
 - [`lc0-search-parity-status.md`](lc0-search-parity-status.md) — LC0 search parity status.
 - [`lc0_search_parity_strictness.md`](lc0_search_parity_strictness.md) — what the search parity fixtures do and do not assert.
 - [`lc0_b4_depth1_safe_benchmark_protocol.md`](lc0_b4_depth1_safe_benchmark_protocol.md) — canonical local protocol for measured fixed-suite work.
-- [`enginebattle-feature-gap.md`](enginebattle-feature-gap.md) — feature gap against EngineBattle.
-- [`ui_reference_delta.md`](ui_reference_delta.md) — UI delta against reference sites.
-- [`arena-time-parity.md`](arena-time-parity.md) — arena time-control parity notes.
 
 ## LC0/WebGPU research lane
 
