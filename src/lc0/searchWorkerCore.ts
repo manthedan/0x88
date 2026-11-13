@@ -16,10 +16,12 @@ import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
 import { describeLc0ModelLoad } from './modelCache.ts';
 import {
   CachedLc0Evaluator,
+  defaultLc0OrtIoMode,
   type Lc0Evaluation,
   type Lc0EvaluationCacheFootprint,
   type Lc0EvaluationProvider,
   type Lc0EvaluatorInput,
+  type Lc0OrtIoMode,
 } from './onnxEvaluator.ts';
 import { applyOrtExecutionProvider } from './ortWorkerExecutionProvider.ts';
 import { noteSearchCancel, takeSearchCancel } from './pendingSearchCancel.ts';
@@ -61,6 +63,8 @@ type InitMessage = {
    * (symbolic leading dim runs as serial batch-1). 'logical' is one session.run.
    */
   physicalBatchMode?: 'declared' | 'logical';
+  /** ORT IO mode for the ONNX runtime (Lc0OnnxEvaluatorOptions.ioMode); omitted = defaultLc0OrtIoMode(deviceModelSelection). */
+  ortIoMode?: Lc0OrtIoMode;
   ortWasmArtifact?: OrtWasmArtifactSelection;
   ortWasmThreads?: number;
   /** Stream model download progress back as 'downloadProgress' messages. */
@@ -153,6 +157,8 @@ type WorkerResponse =
       ortFallback?: OrtRuntimeDiagnostics['fallback'];
       /** ONNX runtime only: the model the session runs (differs from modelUrl when the split-K model was selected). */
       servedModelUrl?: string;
+      /** ONNX runtime only: the ORT IO mode in use (a requested GPU mode may have fallen back to 'cpu'). */
+      ortIoMode?: Lc0OrtIoMode;
     }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
@@ -264,6 +270,7 @@ installWebGpuBufferAllocationProbe();
 let evaluator: WorkerEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
 let configuredModelUrl: string | null = null;
+let configuredOrtIoMode: Lc0OrtIoMode | undefined;
 let configuredServedModelUrl: string | undefined;
 let configuredInitKey: string | null = null;
 let configuredBackend = '';
@@ -319,6 +326,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     ortWasmArtifact: message.ortWasmArtifact ?? null,
     ortWasmThreads: message.ortWasmThreads ?? null,
     physicalBatchMode: message.physicalBatchMode === 'logical' ? 'logical' : 'declared',
+    ortIoMode: message.ortIoMode ?? null,
   });
   if (evaluator && configuredInitKey === initKey) {
     post({
@@ -329,6 +337,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       ortWasm: configuredOrtWasm,
       ortFallback: configuredOrtFallback,
       ...(configuredServedModelUrl ? { servedModelUrl: configuredServedModelUrl } : {}),
+      ...(configuredOrtIoMode ? { ortIoMode: configuredOrtIoMode } : {}),
     });
     return;
   }
@@ -359,6 +368,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     configuredOrtWasm = undefined;
     configuredOrtFallback = undefined;
     configuredServedModelUrl = undefined;
+    configuredOrtIoMode = undefined;
     await previousEvaluator?.dispose?.();
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
@@ -387,6 +397,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     configuredOrtWasm = undefined;
     configuredOrtFallback = undefined;
     configuredServedModelUrl = undefined;
+    configuredOrtIoMode = undefined;
     await previousEvaluator?.dispose?.();
     post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
     return;
@@ -397,7 +408,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   const created = await createLc0OnnxEvaluatorFromUrl(message.modelUrl, {
     deviceSelection: message.deviceModelSelection === true,
-    evaluator: { physicalBatchMode },
+    evaluator: { physicalBatchMode, ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true) },
     load: {
       cache: message.cacheModel,
       allowUnverified: message.allowUnverifiedModel,
@@ -433,6 +444,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   searcher = nextSearcher;
   configuredModelUrl = message.modelUrl;
   configuredServedModelUrl = created.servedUrl;
+  configuredOrtIoMode = baseEvaluator.ioMode;
   configuredInitKey = initKey;
   configuredBackend = diagnostics.describe;
   configuredModelCacheStatus = nextModelCacheStatus;
@@ -447,6 +459,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     ortWasm: configuredOrtWasm,
     ortFallback: configuredOrtFallback,
     servedModelUrl: configuredServedModelUrl,
+    ortIoMode: configuredOrtIoMode,
   });
 }
 

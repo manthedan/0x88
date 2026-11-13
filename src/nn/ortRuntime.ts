@@ -1434,6 +1434,13 @@ export type CreateOrtSessionOptions = {
    * on WASM; the default reuses the primary model's unfolded bytes.
    */
   wasmFallbackModel?: () => Promise<OrtModelInput>;
+  /**
+   * Extra session options for the WebGPU attempts only (never the WASM
+   * fallback), e.g. `enableGraphCapture` for GPU-resident IO (src/nn/ortGpuIo.ts).
+   */
+  webgpuSessionOptions?: Partial<ort.InferenceSession.SessionOptions>;
+  /** Request WebGPU alone and never fall back to WASM: the caller handles failure. */
+  webgpuOnly?: boolean;
 };
 
 /**
@@ -1479,14 +1486,16 @@ export async function createOrtSession(modelPath: OrtModelInput, options: Create
   // Must precede resolvedOrtExecutionProviders(): both it and the artifact
   // selector read the probe result, and the locks below freeze that choice.
   await ensureWebGpuAdapterProbed();
-  const providers = resolvedOrtExecutionProviders();
+  const resolved = resolvedOrtExecutionProviders();
+  if (options.webgpuOnly && !resolved.includes('webgpu')) throw new Error('createOrtSession: webgpuOnly requested but WebGPU is not a resolved provider');
+  const providers = options.webgpuOnly ? ['webgpu'] : resolved;
   // Both locks run before the first InferenceSession.create so the artifact is
   // decided (and frozen) before ORT initializes its worker-global wasm module;
   // the WebGPU->WASM fallback below then reuses the same binary.
   lockRequestedOrtWasmArtifact();
   lockOrtRuntimeArtifactKind(providers);
   const prepared = await prepareOrtModelInput(modelPath);
-  const wasmFallback = shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
+  const wasmFallback = !options.webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
   const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
   let lastMessage: string | null = null;
   for (let i = 0; i < attempts.length; i++) {
@@ -1494,7 +1503,8 @@ export async function createOrtSession(modelPath: OrtModelInput, options: Create
     const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     try {
       const input = typeof attempt.input === 'function' ? await attempt.input() : attempt.input;
-      const session = await ort.InferenceSession.create(input as never, sessionOptions(attempt.providers));
+      const extra = attempt.providers.includes('webgpu') ? options.webgpuSessionOptions : undefined;
+      const session = await ort.InferenceSession.create(input as never, { ...sessionOptions(attempt.providers), ...extra });
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
       createdOrtSessions += 1;
       recordSessionAttempt(attempt.providers, true, t1 - t0);

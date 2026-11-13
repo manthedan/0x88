@@ -2,6 +2,7 @@ import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
+import { OrtGpuIoBinding, type OrtGpuIoOutputs, type OrtGpuIoTensorSpec, ortGraphCaptureSessionOptions } from '../nn/ortGpuIo.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
 import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
@@ -71,6 +72,27 @@ export interface Lc0OnnxEvaluatorOptions {
   physicalBatchMode?: OrtPhysicalBatchMode;
   /** Passed to createOrtSession: the model for its WebGPU -> WASM fallback attempt. */
   wasmFallbackModel?: () => Promise<string | Uint8Array | ArrayBuffer>;
+  /**
+   * How invokes move data (docs/ort_invoke_overhead_2026-11.md). 'cpu' (default):
+   * CPU input and output tensors. 'gpu': persistent GPU input/output buffers and
+   * one staging readback per invoke. 'gpu-capture': 'gpu' plus ORT graph
+   * capture. Both GPU modes need a fixed-shape model on WebGPU; anything else
+   * (WASM placement, dynamic batch, session failure) falls back to 'cpu'.
+   */
+  ioMode?: Lc0OrtIoMode;
+}
+
+export type Lc0OrtIoMode = 'cpu' | 'gpu' | 'gpu-capture';
+
+/**
+ * The IO mode a search-worker init gets when it names none. The device-selected
+ * Lc0 Small default (product pages without ?model=) runs graph-captured GPU IO:
+ * fewer CPU-side WebGPU calls per invoke, same outputs
+ * (docs/ort_invoke_overhead_2026-11.md). Explicit model URLs, lab tools and the
+ * big nets keep CPU IO.
+ */
+export function defaultLc0OrtIoMode(deviceModelSelection: boolean): Lc0OrtIoMode {
+  return deviceModelSelection ? 'gpu-capture' : 'cpu';
 }
 
 export type Lc0EvaluatorInput = BoardState | string | Lc0PositionHistoryInput | Lc0PreparedEvaluatorInput;
@@ -514,21 +536,121 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
   }
 }
 
+function gpuIoOutput(outputs: OrtGpuIoOutputs, binding: OrtGpuIoBinding, name: string): number[] | Float32Array {
+  const data = outputs[name];
+  if (!data) throw new Error(`LC0 ONNX output ${name} missing`);
+  const spec = binding.outputs.find((output) => output.name === name);
+  return coerceTensorData({ type: spec?.type }, data);
+}
+
+function fixedDims(shape: readonly unknown[] | undefined): number[] | null {
+  if (!shape?.length) return null;
+  return shape.every((d) => typeof d === 'number' && Number.isInteger(d) && d > 0) ? (shape as number[]) : null;
+}
+
+/**
+ * Tensor specs for GPU-resident IO, or the reason the session cannot use it.
+ * Needs one float input and float outputs, all with fixed (numeric) shapes.
+ * Exported for tests.
+ */
+export function lc0GpuIoSpecs(
+  session: Pick<ort.InferenceSession, 'inputNames' | 'outputNames' | 'inputMetadata' | 'outputMetadata'>,
+): { input: OrtGpuIoTensorSpec; outputs: OrtGpuIoTensorSpec[] } | { reason: string } {
+  const spec = (meta: unknown, name: string): OrtGpuIoTensorSpec | string => {
+    const m = meta as { isTensor?: boolean; type?: string; shape?: readonly unknown[] } | undefined;
+    if (!m) return `${name}: no metadata`;
+    if (m.type !== 'float16' && m.type !== 'float32') return `${name}: type ${m.type}`;
+    const dims = fixedDims(m.shape);
+    if (!dims) return `${name}: dynamic shape`;
+    return { name, type: m.type, dims };
+  };
+  if (session.inputNames.length !== 1 || session.inputNames[0] !== LC0_ONNX_INPUT_PLANES) return { reason: `inputs ${session.inputNames.join(',')}` };
+  const input = spec(
+    session.inputMetadata.find((m) => m.name === LC0_ONNX_INPUT_PLANES),
+    LC0_ONNX_INPUT_PLANES,
+  );
+  if (typeof input === 'string') return { reason: input };
+  const outputs: OrtGpuIoTensorSpec[] = [];
+  for (const name of session.outputNames) {
+    const out = spec(
+      session.outputMetadata.find((m) => m.name === name),
+      name,
+    );
+    if (typeof out === 'string') return { reason: out };
+    outputs.push(out);
+  }
+  if (!outputs.some((o) => o.name === LC0_ONNX_OUTPUT_POLICY) || !outputs.some((o) => o.name === LC0_ONNX_OUTPUT_WDL))
+    return { reason: 'missing policy/wdl output' };
+  return { input, outputs };
+}
+
+/**
+ * A WebGPU session with GPU-resident IO, or null (with a console warning) when
+ * the placement is not WebGPU, the model has dynamic shapes, or ORT rejects the
+ * session; the caller then builds the ordinary session.
+ */
+async function createLc0GpuIoSession(
+  modelPath: string | Uint8Array | ArrayBuffer,
+  mode: 'gpu' | 'gpu-capture',
+): Promise<{ session: ort.InferenceSession; binding: OrtGpuIoBinding } | null> {
+  let session: ort.InferenceSession | undefined;
+  try {
+    const placement = await ort.resolveOrtSessionPlacement();
+    if (placement.providers[0] !== 'webgpu') return null;
+    session = await ort.createOrtSession(modelPath, {
+      webgpuOnly: true,
+      webgpuSessionOptions: { preferredOutputLocation: 'gpu-buffer', ...(mode === 'gpu-capture' ? ortGraphCaptureSessionOptions() : {}) },
+    });
+    const specs = lc0GpuIoSpecs(session);
+    if ('reason' in specs) throw new Error(`model not eligible: ${specs.reason}`);
+    const device = (await (ort.env.webgpu as unknown as { device?: unknown }).device) as ConstructorParameters<typeof OrtGpuIoBinding>[1] | undefined;
+    if (!device) throw new Error('ORT exposed no WebGPU device');
+    // Captured sessions keep ORT's own output buffers bound across replays; preallocated
+    // fetches leak a native OrtValue per output per replay there (OrtGpuIoOutputMode).
+    const binding = new OrtGpuIoBinding(session, device, ort.Tensor as never, specs.input, specs.outputs, {
+      outputMode: mode === 'gpu-capture' ? 'session' : 'preallocated',
+    });
+    // One zero-input invoke: ORT allocates (and, with capture, records) on the first
+    // run, so a rejection surfaces here, where the CPU-IO fallback can still run.
+    const elements = specs.input.dims.reduce((a, b) => a * b, 1);
+    try {
+      await binding.run(specs.input.type === 'float16' ? new Uint16Array(elements) : new Float32Array(elements));
+    } catch (error) {
+      await binding.dispose();
+      throw error;
+    }
+    return { session, binding };
+  } catch (error) {
+    if (session) await ort.releaseOrtSession(session).catch(() => undefined);
+    console.warn(`Lc0: GPU-resident ORT IO (${mode}) unavailable, using CPU IO. ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   readonly policyTemperature: number;
   readonly historyFill: Lc0HistoryFill;
   private readonly physicalBatchMode: OrtPhysicalBatchMode;
   private readonly session: ort.InferenceSession;
+  private readonly gpuIo: OrtGpuIoBinding | null;
+  /** IO mode actually in use (a requested GPU mode can fall back to 'cpu'). */
+  readonly ioMode: Lc0OrtIoMode;
   private disposed = false;
 
-  constructor(session: ort.InferenceSession, options: Lc0OnnxEvaluatorOptions = {}) {
+  constructor(session: ort.InferenceSession, options: Lc0OnnxEvaluatorOptions = {}, gpuIo: { binding: OrtGpuIoBinding; mode: Lc0OrtIoMode } | null = null) {
     this.session = session;
+    this.gpuIo = gpuIo?.binding ?? null;
+    this.ioMode = gpuIo?.mode ?? 'cpu';
     this.policyTemperature = options.policyTemperature ?? LC0_DEFAULT_POLICY_TEMPERATURE;
     this.historyFill = options.historyFill ?? 'fen_only';
     this.physicalBatchMode = options.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   }
 
   static async create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0OnnxEvaluator> {
+    if (options.ioMode === 'gpu' || options.ioMode === 'gpu-capture') {
+      const gpu = await createLc0GpuIoSession(modelPath, options.ioMode);
+      if (gpu) return new Lc0OnnxEvaluator(gpu.session, options, { binding: gpu.binding, mode: options.ioMode });
+    }
     return new Lc0OnnxEvaluator(await ort.createOrtSession(modelPath, { wasmFallbackModel: options.wasmFallbackModel }), options);
   }
 
@@ -536,6 +658,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     if (this.disposed) return;
     this.disposed = true;
     await ort.releaseOrtSession(this.session);
+    await this.gpuIo?.dispose();
   }
 
   private assertNotDisposed(): void {
@@ -571,38 +694,54 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     }
     const encodeMs = ort.tinyLeelaNowMs() - encodeStarted;
     const inputType = sessionInputType(this.session);
-    const inputTensor =
-      inputType === 'float16'
-        ? new ort.Tensor('float16', float32ToFloat16Array(encodedPlanes), [physicalBatchSize, 112, 8, 8])
-        : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
+    // f16 inputs as Uint16Array bits: the GPU-IO path writes these bytes as they are
+    // (an ort.Tensor may re-wrap them as a Float16Array in browsers that have one).
+    const f16Input = inputType === 'float16' ? float32ToFloat16Array(encodedPlanes) : undefined;
     const webgpuBefore = ort.getOrtWebGpuDiagnosticsSnapshot();
     const ortRunStarted = ort.tinyLeelaNowMs();
-    const outputs = await this.session.run({
-      [LC0_ONNX_INPUT_PLANES]: inputTensor,
-    });
-    const ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
     const downloadTiming: Record<string, number> = {};
-    const allGetDataStarted = ort.tinyLeelaNowMs();
-    // Older/smaller nets (e.g. Maia) have no moves-left head; treat MLH as 0.
-    const hasMlh = LC0_ONNX_OUTPUT_MLH in outputs;
     let policy: number[] | Float32Array;
     let wdlRaw: number[] | Float32Array;
     let mlhRaw: number[] | Float32Array | undefined;
-    try {
-      [policy, wdlRaw, mlhRaw] = await Promise.all([
-        tensorDataTimed(outputs, LC0_ONNX_OUTPUT_POLICY, 'ortPolicy', downloadTiming),
-        tensorDataTimed(outputs, LC0_ONNX_OUTPUT_WDL, 'ortWdl', downloadTiming),
-        hasMlh ? tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming) : Promise.resolve(undefined),
-      ]);
-    } finally {
-      ort.releaseOrtGpuOutputs(outputs);
+    let ortRunMs: number;
+    let allGetDataMs: number;
+    if (this.gpuIo) {
+      // run + the single staging readback; the outputs are already on the CPU.
+      const gpuOutputs = await this.gpuIo.run(f16Input ?? encodedPlanes);
+      ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
+      const allGetDataStarted = ort.tinyLeelaNowMs();
+      policy = gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_POLICY);
+      wdlRaw = gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_WDL);
+      mlhRaw = LC0_ONNX_OUTPUT_MLH in gpuOutputs ? gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_MLH) : undefined;
+      allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
+    } else {
+      const inputTensor = f16Input
+        ? new ort.Tensor('float16', f16Input, [physicalBatchSize, 112, 8, 8])
+        : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
+      const outputs = await this.session.run({
+        [LC0_ONNX_INPUT_PLANES]: inputTensor,
+      });
+      ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
+      const allGetDataStarted = ort.tinyLeelaNowMs();
+      // Older/smaller nets (e.g. Maia) have no moves-left head; treat MLH as 0.
+      const hasMlh = LC0_ONNX_OUTPUT_MLH in outputs;
+      try {
+        [policy, wdlRaw, mlhRaw] = await Promise.all([
+          tensorDataTimed(outputs, LC0_ONNX_OUTPUT_POLICY, 'ortPolicy', downloadTiming),
+          tensorDataTimed(outputs, LC0_ONNX_OUTPUT_WDL, 'ortWdl', downloadTiming),
+          hasMlh ? tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming) : Promise.resolve(undefined),
+        ]);
+      } finally {
+        ort.releaseOrtGpuOutputs(outputs);
+      }
+      allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     }
-    const allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     await ort.waitForOrtWebGpuDiagnostics();
     const postprocessStarted = ort.tinyLeelaNowMs();
     const webgpuDelta = ort.subtractOrtWebGpuDiagnosticsSnapshot(ort.getOrtWebGpuDiagnosticsSnapshot(), webgpuBefore);
     const baseTiming: Record<string, number | string | null | undefined> = {
       backend: 'ort-onnx',
+      ortIoMode: this.ioMode,
       inputBuildMs: encodeMs,
       ortRunMs,
       sessionRunMs: ortRunMs,
