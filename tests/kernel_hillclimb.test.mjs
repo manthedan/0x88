@@ -511,6 +511,14 @@ test('fused-attn gate: measured 1-ULP f16 differences pass, zeroed/rescaled/NaN 
   assert.equal(nan.pass, false);
   assert.match(nan.problems.join(), /1 non-finite/);
   assert.equal(fusedAttnGate('f32r1', 'f32', []).pass, false, 'no rows is not a pass');
+  // A non-finite reference or truth must fail rather than make the allowance NaN (NaN > 1 is false).
+  const nanRef = fusedAttnGate('f32r1', 'f32', [{ layer: 3, vsWasm: fusedAttnDiffStats(Float32Array.of(0), Float32Array.of(Number.NaN), Float32Array.of(1)) }]);
+  assert.equal(nanRef.pass, false);
+  assert.match(nanRef.problems.join(), /L3: 1 non-finite reference\/truth/);
+  const infRef = [{ layer: 3, vsWasm: fusedAttnDiffStats(Float32Array.of(0), Float32Array.of(Number.POSITIVE_INFINITY)) }];
+  assert.equal(fusedAttnGate('f32r1', 'f32', infRef).pass, false);
+  const nanTruth = [{ layer: 3, vsWasm: fusedAttnDiffStats(Float32Array.of(1), Float32Array.of(1), Float32Array.of(Number.NaN)) }];
+  assert.equal(fusedAttnGate('f32r1', 'f32', nanTruth).pass, false);
 
   // BT4 L14 index 374874: WASM 5.26e-4, kernel 9.365e-4, f64 9.372e-4. The reference's own error is allowed;
   // without the f64 truth the same element would be blamed on the kernel.

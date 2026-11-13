@@ -161,7 +161,8 @@ export function fusedAttentionFlops({ batch, heads, depth = 32, tokens = 64 }) {
 export const FUSED_ATTN_PARITY_TOL = Object.freeze({ atol: 2 ** -12, rtol: 2 ** -9 });
 
 /**
- * max |a-b|, mean |a-b|, the worst element's reference value, non-finite count, and
+ * max |a-b|, mean |a-b|, the worst element's reference value, non-finite counts (candidate;
+ * reference or truth, which fail the element rather than yield a NaN allowance), and
  * the tolerance check: violations (elements over the allowance, non-finite counted
  * too) and worstTolRatio (max |a-b| / allowance, < 1 passes). The allowance is
  * atol + rtol*|ref|, plus |ref - truth| per element when a float64 `truth` is given.
@@ -176,7 +177,14 @@ export function fusedAttnDiffStats(cand, ref, truth = null, tol = FUSED_ATTN_PAR
   let violations = 0;
   let worstTolRatio = 0;
   let worst = 0;
+  let refNonFinite = 0;
   for (let i = 0; i < ref.length; i++) {
+    // A non-finite reference or truth makes the allowance NaN/Infinity, and `ratio > 1` would then
+    // silently pass any candidate. Count it as a violation instead of comparing.
+    if (!Number.isFinite(ref[i]) || (truth && !Number.isFinite(truth[i]))) {
+      refNonFinite++;
+      continue;
+    }
     if (!Number.isFinite(cand[i])) {
       nonFinite++;
       continue;
@@ -200,7 +208,8 @@ export function fusedAttnDiffStats(cand, ref, truth = null, tol = FUSED_ATTN_PAR
     meanAbs: sum / ref.length,
     refAtMax: ref[at],
     nonFinite,
-    violations: violations + nonFinite,
+    refNonFinite,
+    violations: violations + nonFinite + refNonFinite,
     worstTolRatio,
     worstIndex: worst,
     worstRef: ref[worst],
@@ -215,10 +224,12 @@ export function fusedAttnGate(name, acc, parity, tol = FUSED_ATTN_PARITY_TOL) {
   if (!parity.length) problems.push(`${name}: no parity rows`);
   for (const p of parity) {
     const s = p.vsWasm;
+    const refNonFinite = s.refNonFinite ?? 0;
+    if (refNonFinite) problems.push(`${name} L${p.layer}: ${refNonFinite} non-finite reference/truth values`);
     if (s.nonFinite) problems.push(`${name} L${p.layer}: ${s.nonFinite} non-finite outputs`);
-    if (s.violations > s.nonFinite)
+    if (s.violations > s.nonFinite + refNonFinite)
       problems.push(
-        `${name} L${p.layer}: ${s.violations - s.nonFinite} elements over ${tol.atol} + ${tol.rtol}*|wasm| + |wasm - f64| (worst ratio ${s.worstTolRatio.toFixed(2)}: ${s.worstCand} vs ${s.worstRef}; max-abs ${s.maxAbs} @ ${s.refAtMax})`,
+        `${name} L${p.layer}: ${s.violations - s.nonFinite - refNonFinite} elements over ${tol.atol} + ${tol.rtol}*|wasm| + |wasm - f64| (worst ratio ${s.worstTolRatio.toFixed(2)}: ${s.worstCand} vs ${s.worstRef}; max-abs ${s.maxAbs} @ ${s.refAtMax})`,
       );
   }
   return { gated: true, pass: problems.length === 0, problems };
