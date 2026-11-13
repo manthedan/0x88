@@ -1078,24 +1078,32 @@ test('standalone replay bounds inherited pipe draining and terminates owned desc
         engine,
         `import { createInterface } from 'node:readline'; import { spawn } from 'node:child_process'; import { writeFileSync } from 'node:fs';
       for await (const line of createInterface({ input: process.stdin })) {
-        if (line === 'uci') console.log('uciok');
+        if (line === 'uci') {
+          // Spawn the descendant before any shutdown bound starts. Spawning it on
+          // 'quit' let a loaded machine hit the 100 ms bound and kill the engine
+          // before the pid file existed.
+          const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: ${inheritsPipes ? "['ignore', 1, 2]" : "'ignore'"} });
+          writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); child.unref();
+          console.log('uciok');
+        }
         if (line === 'isready') console.log('readyok');
         if (line.startsWith('go ')) console.log('info depth 1 nodes 100 score cp 0 pv e2e4\\nbestmove e2e4');
-        if (line === 'quit') {
-          const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: ${inheritsPipes ? "['ignore', 1, 2]" : "'ignore'"} });
-          writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); child.unref(); process.exit(0);
-        }
+        if (line === 'quit') process.exit(0);
       }`,
       );
+      // The inherited case must hit the drain bound, so it stays short. The
+      // clean case only has to spawn a child and exit, which can take well over
+      // 100 ms when the full suite (or other work) loads the machine; a tight
+      // bound there made this test flaky without exercising anything new.
       const result = runCell(
         { label: 'fixture', command: process.execPath, args: [engine] },
-        { defaults: ['startpos'], benchDepth: 1, positions: 0, timeout: 5000, shutdownTimeout: 100 },
+        { defaults: ['startpos'], benchDepth: 1, positions: 0, timeout: 5000, shutdownTimeout: inheritsPipes ? 100 : 3000 },
       );
       if (inheritsPipes) await assert.rejects(result, /shutdown timed out while draining output/);
       else assert.equal((await result).benchSignature, '100');
       const pid = Number(readFileSync(pidFile, 'utf8'));
       let alive = true;
-      for (let i = 0; i < 100; i += 1) {
+      for (let i = 0; i < 400; i += 1) {
         try {
           process.kill(pid, 0);
         } catch {
