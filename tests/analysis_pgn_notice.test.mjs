@@ -5,6 +5,7 @@ import { compile } from 'svelte/compiler';
 import ts from 'typescript';
 import { describePgnWarning, parseFirstPgnGame } from '../src/chess/pgn.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
+import { analysisStatus } from '../src/lc0/analysisStatus.ts';
 
 // Run the actual import/status functions without mounting the page or loading engines.
 const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
@@ -56,7 +57,9 @@ function controller() {
   `,
     { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
   );
-  const api = new Function('document', 'GameTree', 'parseFirstPgnGame', 'describePgnWarning', code)(document, GameTree, parseFirstPgnGame, describePgnWarning);
+  const api = new Function('document', 'GameTree', 'parseFirstPgnGame', 'describePgnWarning', 'analysisStatus', code)(
+    document, GameTree, parseFirstPgnGame, describePgnWarning, analysisStatus,
+  );
   return { ...api, notice: () => document.getElementById('pgnImportNotice')?.textContent ?? '', elements };
 }
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { analysisStatus } from '../src/lc0/analysisStatus.ts';
 import { hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork } from '../src/lc0/hiddenTabPause.ts';
 
 const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
@@ -36,8 +37,8 @@ function statusPage({ hidden = false, active = false, aborted = false, reload = 
     ${slice('function renderAnalysisStatus(', 'function activeEngineNames(')}
     return { deferHiddenTabWork, renderAnalysisStatus, state: () => hiddenTab, el };
   `, { target: ts.ScriptTarget.ES2022 });
-  return new Function('el', 'initialHiddenTabPause', 'requestHiddenTabWork', 'hiddenAnalysisStopEnabled', 'hidden', 'active', 'aborted', 'reload', code)(
-    el, initialHiddenTabPause, requestHiddenTabWork, hiddenAnalysisStopEnabled, hidden, active, aborted, reload,
+  return new Function('el', 'initialHiddenTabPause', 'requestHiddenTabWork', 'hiddenAnalysisStopEnabled', 'hidden', 'active', 'aborted', 'reload', 'analysisStatus', code)(
+    el, initialHiddenTabPause, requestHiddenTabWork, hiddenAnalysisStopEnabled, hidden, active, aborted, reload, analysisStatus,
   );
 }
 
