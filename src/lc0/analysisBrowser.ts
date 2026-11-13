@@ -578,7 +578,7 @@ function syncBrokerParticipants(rows: EngineRow[]): void {
 type AnalysisBigNetKey = Extract<BigNetKey, 'bt4' | 't3'>;
 const ANALYSIS_BIG_NET_KEYS: readonly AnalysisBigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
-  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
+  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
   return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
 }
 let ground: Ground | null = null;
@@ -1705,9 +1705,14 @@ function rowLabel(row: EngineRow): string {
 }
 
 function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tree.current, requestedMultiPv = multiPv()): string {
-  // The served model is part of the runtime identity: Lc0 Small runs either the
-  // shipped model or its split-K rewrite depending on the device.
-  const runtime = row.family === 'lc0' && !isLc0BigNetVariant(row.variant) ? `${selectedLc0Runtime()}|${lc0ServedModelUrl}` : '';
+  // The served model is part of the runtime identity: Lc0 Small and the big nets
+  // run either the shipped model or its split-K rewrite depending on the device.
+  const runtime =
+    row.family !== 'lc0'
+      ? ''
+      : isLc0BigNetVariant(row.variant)
+        ? (peekBigNetSearcher(row.variant === 't3' ? 't3' : 'bt4')?.servedModelUrl ?? '')
+        : `${selectedLc0Runtime()}|${lc0ServedModelUrl}`;
   const { dial, cpuBudget } = resourceBroker.snapshot();
   const participants = [
     ...new Set(

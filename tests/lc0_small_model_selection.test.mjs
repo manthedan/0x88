@@ -5,10 +5,12 @@ import { START_FEN } from '../src/chess/board.ts';
 import { createCriticalReport, criticalMomentCacheKey, runCriticalReport } from '../src/lc0/criticalMoments.ts';
 import {
   createLc0OnnxEvaluatorFromUrl,
+  LC0_BIG_NET_SPLITK_FILES,
   LC0_SMALL_BATCH1_QDQ8_PATH,
   LC0_SMALL_BATCH1_SPLITK_FILE,
   lc0SmallModelRequest,
   lc0SmallSplitKUrl,
+  lc0SplitKUrl,
   selectLc0OrtModelUrl,
 } from '../src/lc0/lc0SmallModelSelection.ts';
 import {
@@ -25,6 +27,11 @@ import {
 const ORIGINAL = LC0_SMALL_BATCH1_QDQ8_PATH;
 const SPLITK = `/models/lc0/${LC0_SMALL_BATCH1_SPLITK_FILE}`;
 const APPLE_WEBGPU = { providers: ['webgpu', 'wasm'], adapterVendor: 'apple' };
+// Big nets (docs/bignet_smolgen_splitk_2026-11.md): only t3 serves its smolgen split-K
+// rewrite; BT4 (within noise) and LQO (small gain, gate WDL at its limit) keep their shipped model.
+const BIG_NETS = [['/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx', '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.splitk.onnx']];
+const BT4 = '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx';
+const LQO = '/models/lc0/lqo_v2.f16.qdq8.onnx';
 
 test('split-K URL maps only the shipped QDQ8 file and keeps the prefix', () => {
   assert.equal(lc0SmallSplitKUrl(ORIGINAL), SPLITK);
@@ -42,8 +49,52 @@ test('selection: Apple + WebGPU gets split-K; non-Apple WebGPU and WASM keep the
   }
   assert.equal(selectLc0OrtModelUrl(ORIGINAL, { providers: ['wasm'], adapterVendor: 'apple' }), ORIGINAL);
   assert.equal(selectLc0OrtModelUrl(ORIGINAL, { providers: ['wasm'] }), ORIGINAL);
-  // Other models are never swapped, whatever the device.
-  assert.equal(selectLc0OrtModelUrl('/models/lc0/lqo_v2.f16.qdq8.onnx', APPLE_WEBGPU), '/models/lc0/lqo_v2.f16.qdq8.onnx');
+  // Models without a split-K rewrite are never swapped, whatever the device.
+  for (const url of ['/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx', BT4, LQO, '/models/maia3/maia3_simplified.qdq8.graph.onnx']) {
+    assert.equal(selectLc0OrtModelUrl(url, APPLE_WEBGPU), url);
+  }
+});
+
+test('big-net split-K: the table names exactly t3, and maps by file name', () => {
+  assert.deepEqual(Object.keys(LC0_BIG_NET_SPLITK_FILES).sort(), BIG_NETS.map(([original]) => original.split('/').pop()).sort());
+  for (const [original, splitk] of BIG_NETS) {
+    assert.equal(lc0SplitKUrl(original), splitk);
+    assert.equal(lc0SplitKUrl(`https://assets.0x88.app${original}?v=2`), `https://assets.0x88.app${splitk}?v=2`);
+    assert.equal(lc0SplitKUrl(splitk), undefined);
+    // The Lc0 Small helper keeps its old meaning.
+    assert.equal(lc0SmallSplitKUrl(original), undefined);
+  }
+  assert.equal(lc0SplitKUrl(ORIGINAL), SPLITK);
+  assert.equal(lc0SplitKUrl(BT4), undefined);
+  assert.equal(lc0SplitKUrl(LQO), undefined);
+  assert.equal(lc0SplitKUrl('/models/lc0/toString'), undefined);
+});
+
+test('big-net split-K selection follows the same Apple + WebGPU rule', () => {
+  for (const [original, splitk] of BIG_NETS) {
+    assert.equal(selectLc0OrtModelUrl(original, APPLE_WEBGPU), splitk);
+    for (const placement of [
+      { providers: ['webgpu', 'wasm'], adapterVendor: 'nvidia' },
+      { providers: ['webgpu'] },
+      { providers: ['wasm'], adapterVendor: 'apple' },
+    ]) {
+      assert.equal(selectLc0OrtModelUrl(original, placement), original, JSON.stringify(placement));
+    }
+  }
+});
+
+test('big-net WebGPU failure: the WASM fallback runs the ORIGINAL big net', async () => {
+  for (const [original, splitk] of BIG_NETS) {
+    const ok = fakeDeps(APPLE_WEBGPU);
+    const served = await createLc0OnnxEvaluatorFromUrl(original, { deviceSelection: true }, ok.deps);
+    assert.deepEqual(ok.loads, [splitk]);
+    assert.equal(served.servedUrl, splitk);
+    const failing = fakeDeps(APPLE_WEBGPU, { sessionFails: true });
+    const fellBack = await createLc0OnnxEvaluatorFromUrl(original, { deviceSelection: true }, failing.deps);
+    assert.deepEqual(failing.loads, [splitk, original]);
+    assert.deepEqual(failing.sessions, [{ input: `bytes:${original}`, providers: ['wasm'] }]);
+    assert.equal(fellBack.servedUrl, original);
+  }
 });
 
 /** Fake loader/session factory; `sessionFails` makes the WebGPU attempt fail like createOrtSession would. */

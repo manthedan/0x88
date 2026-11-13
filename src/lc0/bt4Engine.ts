@@ -303,6 +303,12 @@ export class Bt4WorkerSearcher {
   private configuredEvalCacheEntries = -1;
   backend = '';
   fallback: OrtRuntimeDiagnostics['fallback'];
+  /**
+   * URL of the model the worker runs: config.modelUrl, or its split-K rewrite on
+   * Apple WebGPU (src/lc0/lc0SmallModelSelection.ts). Empty until loaded; part
+   * of the identity of any cached result.
+   */
+  servedModelUrl = '';
   /** Model download progress during the first init (not called on reloads). */
   onDownloadProgress: ((loadedBytes: number, totalBytes?: number) => void) | null = null;
 
@@ -369,9 +375,11 @@ export class Bt4WorkerSearcher {
       // Big nets opt into app-owned Cache Storage so immutable model bytes
       // survive route changes even when the browser HTTP cache skips large
       // entries. Quota-limited browsers fall back to URL-loading in the worker.
-      const ready = await this.post<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback'] }>({
+      const ready = await this.post<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>({
         type: 'init',
         modelUrl: this.config.modelUrl,
+        // Big-net URLs are fixed (no ?model= override), so the device rule always applies.
+        deviceModelSelection: true,
         ep,
         cacheModel: true,
         evalCacheEntries,
@@ -384,6 +392,7 @@ export class Bt4WorkerSearcher {
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.backend = ready.backend;
       this.fallback = ready.ortFallback;
+      this.servedModelUrl = ready.servedModelUrl ?? this.config.modelUrl;
       return this.backend;
     })();
     this.initPromise = initializing;
@@ -470,6 +479,7 @@ export class Bt4WorkerSearcher {
     this.configuredEvalCacheEntries = -1;
     this.backend = '';
     this.fallback = undefined;
+    this.servedModelUrl = '';
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
     this.activeSearchId = null;

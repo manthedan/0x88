@@ -139,6 +139,14 @@
       "sha256": "fff9de3cb7e90ef113f87954156ab0cbb84973151471e3a22e36513994251cb1"
     },
     {
+      "file": "t3-512x15x16h-distill-swa-2767500.batch8.f16.splitk.onnx",
+      "url": "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.splitk.onnx",
+      "mode": "symlink",
+      "source": "../models/lc0-bestnets/onnx/t3-512x15x16h-distill-swa-2767500.batch8.f16.splitk.onnx",
+      "bytes": 171021068,
+      "sha256": "ffb4dbdc37a359b25076465d8b29b9a114846b306094b7b768b3a755e1e7f75f"
+    },
+    {
       "file": "t3-512x15x16h-distill-swa-2767500.batch16.f16.onnx",
       "url": "/models/lc0/t3-512x15x16h-distill-swa-2767500.batch16.f16.onnx",
       "mode": "symlink",
