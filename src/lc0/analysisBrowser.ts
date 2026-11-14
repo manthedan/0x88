@@ -1894,7 +1894,13 @@ async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boo
     keys.map(async (key) => {
       const { config, searcher } = bigNetFor(key);
       const label = `Lc0 ${config.name}`;
-      searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
+      // A cancelled run no longer owns the shared model progress slot:
+      // cancelAnalysisOperation already cleared it, and the next run or mount
+      // may have shown its own. The pooled init keeps going, so its late
+      // callbacks and this finally must not touch the slot.
+      searcher.onDownloadProgress = (loaded, total) => {
+        if (!cancelled()) showModelProgress(label, loaded, total, 'Downloading');
+      };
       try {
         // Checked before each attempt: a stopped run must not reload a pooled
         // session that Play or Arena may have taken back.
@@ -1906,7 +1912,7 @@ async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boo
       } catch (error) {
         errors.set(key, error instanceof Error ? error : new Error(String(error)));
       } finally {
-        hideModelProgress();
+        if (!cancelled()) hideModelProgress();
       }
     }),
   );
