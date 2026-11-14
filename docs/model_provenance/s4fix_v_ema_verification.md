@@ -184,16 +184,22 @@ tests/squareformer_tvm_readback.test.mjs
 
 ## Release and reviewer notes
 
-The repository generator now writes v2 release manifests. Generation was:
+The repository generator writes v2 release manifests. The published release
+carries forward the live production release (`2026-11-13.wave3.1`, its body
+checked byte-identical against the R2 copy) and changes only the Centipawn
+manifest:
 
 ```sh
 node scripts/write_artifact_release_manifests.mjs \
-  --release-id 2026-11-13.centipawn-s4fix-v-ema.1 \
-  --generated-at 2026-11-13T00:00:00.000Z \
+  --release-id 2026-11-14.centipawn-s4fix.1 \
+  --base-release <copy of releases/2026-11-13.wave3.1.json> \
   --manifest public/models/centipawn.manifest.json \
-  --base-release public/releases/2026-07-14.centipawn-tvmjs.1.json \
-  --out-dir .local-dev-artifacts/centipawn-s4fix/release --no-brotli
+  --out-dir .local-dev-artifacts/release-s4fix
 ```
+
+Against the base it adds `/models/s4fix_v_ema.onnx` and
+`/models/s4fix_v_ema.meta.json` and changes `/models/centipawn.manifest.json`;
+the other 106 artifacts are carried forward unchanged.
 
 Only the resulting new release and stable channel JSON were copied to
 `public/releases/` and `public/channels/`. All old release JSON and model

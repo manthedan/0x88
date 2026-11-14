@@ -1,8 +1,8 @@
 {
   "schema": "lc0_browser.artifact_channel_manifest.v2",
   "channel": "stable",
-  "releaseId": "2026-11-13.centipawn-s4fix-v-ema.1",
-  "releaseManifestUrl": "/releases/2026-11-13.centipawn-s4fix-v-ema.1.json",
-  "releaseUrl": "/releases/2026-11-13.centipawn-s4fix-v-ema.1.json",
-  "generatedAt": "2026-11-13T00:00:00.000Z"
+  "releaseId": "2026-11-14.centipawn-s4fix.1",
+  "releaseManifestUrl": "/releases/2026-11-14.centipawn-s4fix.1.json",
+  "releaseUrl": "/releases/2026-11-14.centipawn-s4fix.1.json",
+  "generatedAt": "2026-11-14T09:08:02.663Z"
 }
