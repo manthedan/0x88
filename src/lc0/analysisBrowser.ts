@@ -3699,22 +3699,33 @@ async function runGameReview(): Promise<void> {
   // not consume queued maintenance and reload/dispose the reviewer's runtime.
   // The next interactive analysis applies these flags before taking cache keys.
   void dispatchAnalysis({ type: 'MODE_ENTER', mode: 'review' });
-  analysisAbort = null;
-  retireAnalysisRunCentipawnKeys();
-  clearAnalysisSearchProgress();
-  el('message').textContent = 'Position analysis paused for game review.';
-  el('stop').toggleAttribute('disabled', true);
-  el('analyze').toggleAttribute('disabled', false);
-  selectEl('lc0RuntimeSelect').disabled = false;
-  hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
-  const { engine, row, label, depth } = reviewEngineChoice();
-  clearReviewState();
-  const reviewTree = tree;
   // Review remains a single-PV search. A MultiPV=3 interactive line is not
   // equivalent to MultiPV=1 at fixed depth, so it deliberately cannot hit.
   const reviewMultiPv = 1;
-  const cacheKeys = nodes.map((node) => engineAnalysisCacheKey(node.fen, row, node, reviewMultiPv));
-  syncBrokerParticipants([...activeEngineRows(), row]);
+  let reviewer: ReviewEngineChoice;
+  let cacheKeys: string[];
+  try {
+    analysisAbort = null;
+    retireAnalysisRunCentipawnKeys();
+    clearAnalysisSearchProgress();
+    el('message').textContent = 'Position analysis paused for game review.';
+    el('stop').toggleAttribute('disabled', true);
+    el('analyze').toggleAttribute('disabled', false);
+    selectEl('lc0RuntimeSelect').disabled = false;
+    hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
+    // Acquire the reviewer only after the handoff cancelled backend work, which
+    // disposes runtime engines.
+    reviewer = reviewEngineChoice();
+    clearReviewState();
+    cacheKeys = nodes.map((node) => engineAnalysisCacheKey(node.fen, reviewer.row, node, reviewMultiPv));
+    syncBrokerParticipants([...activeEngineRows(), reviewer.row]);
+  } catch (error) {
+    // Setup failed (e.g. unsupported reviewer) before reviewAbort owns the mode.
+    void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'review' });
+    throw error;
+  }
+  const { engine, row, label, depth } = reviewer;
+  const reviewTree = tree;
   let cacheHits = 0;
   const controller = new AbortController();
   reviewAbort = controller;

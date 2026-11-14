@@ -112,11 +112,13 @@ function reviewHandoffPage() {
     let maia3PanelTimer = null;
     const maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelStatusText = '';
     const retireAnalysisRunCentipawnKeys = () => {}, clearAnalysisSearchProgress = () => {};
-    const closePvPreview = () => {}, hidePromotionOverlay = () => {}, syncBrokerParticipants = () => {};
+    let failChoice = false, failSetup = false;
+    const closePvPreview = () => {}, hidePromotionOverlay = () => {};
+    const syncBrokerParticipants = () => { if (failSetup) throw new Error('setup failed'); };
     const quarantineRetryPanels = () => () => {}, renderMistakeRetry = () => {};
     const renderAll = () => {}, renderAnalysisStatus = () => {}, scheduleMaia3Panel = () => {};
     const activeEngineRows = () => [], reviewer = { engine: {}, row: { family: 'sf', variant: 'lite', strength: 12 }, label: 'SF Lite', depth: 12 };
-    const reviewEngineChoice = () => reviewer;
+    const reviewEngineChoice = () => { if (failChoice) throw new Error('unsupported reviewer'); return reviewer; };
     const retryProblems = () => [{}];
     class MistakeRetry { cancel() {} }
     const clearReviewState = () => {};
@@ -139,6 +141,7 @@ function reviewHandoffPage() {
       send: dispatchAnalysis, state: () => state, effects, el,
       hideWithWork: () => { hiddenTab = transitionHiddenTab(hiddenTab, true, ['analysis', 'maia']).state; },
       hidden: () => hiddenTab, visibility: applyHiddenTab,
+      failChoice: (value) => { failChoice = value; }, failSetup: (value) => { failSetup = value; },
     };
   `, { target: ts.ScriptTarget.ES2022 });
   return new Function('GameTree', 'helpers', code)(GameTree, { initialAnalysisRunState, transitionAnalysis, analysisOperationId, initialHiddenTabPause, cancelHiddenTabWork, transitionHiddenTab, cachedReviewPosition });
@@ -163,6 +166,23 @@ for (const cancel of [false, true]) {
     assert.equal(page.effects.some((effect) => effect.type === 'maintain'), false);
   });
 }
+
+test('review setup failure never leaves review admission held', async () => {
+  const page = reviewHandoffPage();
+  await page.send({ type: 'REQUEST', intent: { requestId: 100, force: true }, delayMs: 0 });
+  page.failChoice(true);
+  await assert.rejects(page.review(), /unsupported reviewer/);
+  // As before the reducer, the handoff cancels the search; only the mode is released.
+  assert.deepEqual(page.state().modes, []);
+  assert.equal(page.state().execution.tag, 'idle');
+  page.failChoice(false);
+  page.failSetup(true);
+  await assert.rejects(page.review(), /setup failed/);
+  assert.deepEqual(page.state().modes, []);
+  page.failSetup(false);
+  await page.send({ type: 'REQUEST', intent: { requestId: 101, force: false }, delayMs: 0 });
+  assert.equal(page.state().execution.tag, 'preparing');
+});
 
 test('retry handoff clears hidden analysis/Maia resumes and restores auto without restarting search', async () => {
   const page = reviewHandoffPage();
