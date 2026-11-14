@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
 import { createCentipawnEvaluatorCache } from '../src/lc0/centipawnEvaluatorCache.ts';
-import { S4FIX_V_EMA_MODEL_ID, squareformerModelSettings } from '../src/nn/runtimeRegistry.ts';
+import { BT4_SOAP_REM_C19000_FINAL_MODEL_ID, centipawnModelIdForUrls, S4FIX_V_EMA_MODEL_ID, squareformerModelSettings } from '../src/nn/runtimeRegistry.ts';
 import { centipawnSearchOptions } from '../src/search/centipawn.ts';
 import { montyLitePuctPolicy } from '../src/search/puct.ts';
 
@@ -34,8 +34,10 @@ test('research URL overrides do not inherit the shipped model settings', () => {
     const start = source.indexOf('function centipawnModel()');
     const end = source.indexOf('\nfunction ', start + 1);
     const body = stripTypeScriptTypes(source.slice(start, end));
-    const model = new Function('LEGACY_CENTIPAWN_OVERRIDE', 'CENTIPAWN_MODEL_URL', 'CENTIPAWN_META_URL', `${body}\nreturn centipawnModel();`);
+    const extracted = new Function('centipawnModelIdForUrls', 'LEGACY_CENTIPAWN_OVERRIDE', 'CENTIPAWN_MODEL_URL', 'CENTIPAWN_META_URL', `${body}\nreturn centipawnModel();`);
+    const model = (...args) => extracted(centipawnModelIdForUrls, ...args);
     const shipped = model(false, '/models/s4fix_v_ema.onnx', '/models/s4fix_v_ema.meta.json');
+    assert.equal(model(false, '/models/bt4_soap_rem_c19000_final.onnx', '/models/bt4_soap_rem_c19000_final.meta.json').modelId, BT4_SOAP_REM_C19000_FINAL_MODEL_ID);
     assert.equal(shipped.modelId, S4FIX_V_EMA_MODEL_ID);
     const custom = model(false, '/models/other.onnx', '/models/other.meta.json');
     assert.deepEqual(squareformerModelSettings(custom.modelId), { policyTemperature: 1, nativeHistory: false });
