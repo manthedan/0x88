@@ -87,14 +87,14 @@ test('static LC0 and Stockfish variants expose labels and gating metadata', () =
   assert.equal(stockfishEngineLabel('lite', 'arena'), 'Stockfish Lite');
   assert.equal(stockfishEngineLabel('lite', 'analysis'), 'SF Lite');
   assert.equal(centipawnEngineLabel('bt4-ort'), 'Centipawn · ORT');
-  assert.equal(centipawnEngineLabel('bt4-custom'), 'Centipawn · TVMJS strict');
+  assert.equal(centipawnEngineLabel('bt4-custom'), 'Centipawn · ORT (legacy runtime setting)');
   assert.deepEqual(
     centipawnVariantOptions().map((option) => option.value),
-    ['bt4-auto', 'bt4-ort', 'bt4-custom'],
+    ['bt4-auto', 'bt4-ort'],
   );
   assert.deepEqual(
     centipawnVariantOptions().map((option) => option.label),
-    ['v1 · TVMJS auto', 'v1 · ORT', 'v1 · TVMJS strict'],
+    ['s4fix · ORT auto', 's4fix · ORT'],
   );
   assert.deepEqual(ENGINE_FAMILY_DEFINITIONS.centipawn.variants.v0Allowed, ['bt4-auto', 'bt4-ort']);
   assert.equal(ENGINE_FAMILY_DEFINITIONS.centipawn.play.options[0]?.variant, 'bt4-auto');

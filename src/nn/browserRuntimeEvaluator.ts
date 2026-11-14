@@ -7,6 +7,8 @@ import {
   type BrowserRuntimeSelector,
   BT4_ANNEAL_MUON_BEST_MODEL_ID,
   BT4_SOAP_REM_C19000_FINAL_MODEL_ID,
+  S4FIX_V_EMA_MODEL_ID,
+  squareformerModelSettings,
   normalizeRuntimeModelKey,
   parseBrowserRuntimeSelector,
   promotedCustomRuntimeForModel,
@@ -52,6 +54,7 @@ async function loadJson(url: string): Promise<unknown> {
 }
 
 function inferRuntimeModelId(spec: BrowserSquareformerRuntimeSpec): string {
+  if (`${spec.onnx} ${spec.meta}`.includes('s4fix_v_ema')) return S4FIX_V_EMA_MODEL_ID;
   if (spec.modelId) return normalizeRuntimeModelKey(spec.modelId);
   if (spec.id) {
     const normalizedId = normalizeRuntimeModelKey(spec.id);
@@ -99,6 +102,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta));
   const modelId = inferRuntimeModelId(spec);
   const requestedRuntime = parseBrowserRuntimeSelector(options.runtime ?? spec.runtime ?? params?.get('runtime'));
+  const createOrtEvaluator = () => SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId));
   const fallback = options.fallback ?? (params ? runtimeFallbackEnabled(params, true) : true);
   const tvmjsEntry = promotedTvmjsRuntimeForModel(modelId);
   const customEntry = promotedCustomRuntimeForModel(modelId);
@@ -120,6 +124,17 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     manifestUrl,
     ...options.audit,
   };
+
+  // The compiled graphs belong to the old model, even if a persisted strict selector supplies a manifest.
+  if (modelId === S4FIX_V_EMA_MODEL_ID) {
+    const compiledRequested = requestedRuntime === 'tvmjs-webgpu' || requestedRuntime === 'custom-webgpu';
+    const fallbackReason = compiledRequested ? 's4fix-v-ema is ORT-only; compiled runtimes target an older graph' : undefined;
+    const resolvedRuntime = compiledRequested ? `${requestedRuntime}-fallback-ort` as const : 'ort';
+    if (fallbackReason) console.warn('Centipawn compiled runtime unavailable; falling back to ORT SquareFormer.', { modelId, fallbackReason });
+    const evaluator = await createOrtEvaluator();
+    publishBrowserRuntimeAudit({ ...auditBase, resolvedRuntime, fallbackReason });
+    return { evaluator, meta, modelId, requestedRuntime, resolvedRuntime, fallbackReason };
+  }
 
   if (requestedRuntime === 'custom-webgpu' && !entry && !manifestUrl) {
     throw new Error(`No promoted custom WebGPU runtime is registered for ${modelId}`);

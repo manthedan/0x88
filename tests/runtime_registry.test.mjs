@@ -6,6 +6,9 @@ import {
   parseBrowserRuntimeSelector,
   promotedTvmjsRuntimeForModel,
   shouldAttemptTvmjsRuntime,
+  shouldAttemptCustomRuntime,
+  S4FIX_V_EMA_MODEL_ID,
+  squareformerModelSettings,
 } from '../src/nn/runtimeRegistry.ts';
 
 test('Centipawn TVMJS runtime is promoted with ORT fallback metadata', () => {
@@ -21,5 +24,16 @@ test('Centipawn TVMJS runtime is promoted with ORT fallback metadata', () => {
 test('runtime selector accepts TVMJS aliases', () => {
   for (const value of ['tvmjs', 'tvmjs-webgpu', 'webgpu-tvmjs', 'compiled-webgpu']) {
     assert.equal(parseBrowserRuntimeSelector(value), 'tvmjs-webgpu');
+  }
+});
+
+test('s4fix is ORT-only with model-scoped temperature and native history', () => {
+  assert.deepEqual(squareformerModelSettings(S4FIX_V_EMA_MODEL_ID), { policyTemperature: 2, nativeHistory: true });
+  assert.deepEqual(squareformerModelSettings(BT4_SOAP_REM_C19000_FINAL_MODEL_ID), { policyTemperature: 1, nativeHistory: false });
+  assert.deepEqual(squareformerModelSettings('unregistered'), { policyTemperature: 1, nativeHistory: false });
+  assert.equal(promotedTvmjsRuntimeForModel(S4FIX_V_EMA_MODEL_ID), undefined);
+  for (const selector of ['auto', 'ort', 'tvmjs-webgpu', 'custom-webgpu']) {
+    assert.equal(shouldAttemptTvmjsRuntime(S4FIX_V_EMA_MODEL_ID, selector), false);
+    assert.equal(shouldAttemptCustomRuntime(S4FIX_V_EMA_MODEL_ID, selector), false);
   }
 });

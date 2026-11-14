@@ -17,7 +17,8 @@ import {
   clearRuntimeFallbackWarning,
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
-import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
+import { chooseMove } from '../search/puct.ts';
+import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -39,7 +40,7 @@ import {
 import { writeClipboard } from './clipboard.ts';
 import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineResidency.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
-import { CENTIPAWN_NET_HISTORY_POSITIONS, type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
+import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
@@ -78,9 +79,8 @@ const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0
   isV0DeployProfile() ? null : params.get('model'),
   resolvePublicAssetUrl,
 );
-const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.onnx');
-const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/bt4_soap_rem_c19000_final.meta.json');
-const CENTIPAWN_TVMJS_MANIFEST_URL = resolvePublicAssetUrl('/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json');
+const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/s4fix_v_ema.onnx');
+const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/s4fix_v_ema.meta.json');
 
 type PlayFamily = 'maia3' | EngineFamily;
 
@@ -441,8 +441,8 @@ function playOptionMatchesRuntimeAudit(option: PlayEngineOption, detail: Browser
     option.id === 'centipawn' &&
     detail.family === 'centipawn' &&
     detail.engineLabel === 'Centipawn' &&
-    detail.modelId === 'bt4-soap-rem-c19000-final' &&
-    detail.requestedRuntime === 'auto'
+    detail.modelId === 's4fix-v-ema' &&
+    detail.requestedRuntime === 'ort'
   );
 }
 
@@ -578,17 +578,15 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Centipawn…');
     centipawnLoadPromise = createBrowserSquareformerRuntimeEvaluator(
       {
-        id: 'bt4-soap-rem-c19000-final',
-        modelId: 'bt4-soap-rem-c19000-final',
+        id: 's4fix-v-ema',
+        modelId: 's4fix-v-ema',
         label: 'Centipawn',
         onnx: CENTIPAWN_MODEL_URL,
         meta: CENTIPAWN_META_URL,
-        runtime: 'auto',
-        manifestUrl: CENTIPAWN_TVMJS_MANIFEST_URL,
+        runtime: 'ort',
       },
       {
-        runtime: 'auto',
-        manifestUrl: CENTIPAWN_TVMJS_MANIFEST_URL,
+        runtime: 'ort',
         fallback: true,
         audit: { surface: 'play' },
       },
@@ -605,7 +603,6 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
           includeHistory: true,
           includeLegalMoves: true,
           label: `centipawn-play:${loaded.resolvedRuntime}`,
-          maxHistoryPositions: CENTIPAWN_NET_HISTORY_POSITIONS,
         });
         if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
         return centipawnEvaluator;
@@ -805,8 +802,8 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         earlyStop: 'root-dominance',
         batchSize: Math.max(1, Math.min(32, visitsOrDepth)),
         signal,
-        historyFens: searchHistoryFens(ctx.positions, CENTIPAWN_NET_HISTORY_POSITIONS),
-        searchPolicy: montyLitePuctPolicy,
+        historyFens: searchHistoryFens(ctx.positions, ctx.positions.length),
+        ...centipawnSearchOptions,
         includePv: true,
         onProgress: (progress) => {
           if (!signal.aborted)
@@ -926,7 +923,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
     } else if (option.family === 'centipawn') {
       const evaluator = await ctxEnsureCentipawn(ctx);
       await evaluator.evaluate(ctx.board, {
-        historyFens: searchHistoryFens(ctx.positions, CENTIPAWN_NET_HISTORY_POSITIONS),
+        historyFens: searchHistoryFens(ctx.positions, ctx.positions.length),
         legalMoves: legalMoves(ctx.board),
       });
     } else if (option.family === 'lc0' && option.variant === 'small') {
@@ -1458,7 +1455,7 @@ function ctxRenderEngineCaution(_ctx: PlayContext): void {
     caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}${cpu}`.trimEnd();
     caution.hidden = false;
   } else if (option.family === 'centipawn') {
-    caution.textContent = 'First use downloads about 26MB for the Centipawn TVMJS runtime. ORT downloads only if the WebGPU runtime needs to fall back.';
+    caution.textContent = 'First use downloads the 6.2MB Centipawn model and ONNX Runtime Web.';
     caution.hidden = false;
   } else {
     caution.hidden = true;

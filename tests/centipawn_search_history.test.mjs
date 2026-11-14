@@ -94,14 +94,14 @@ test('CachedEvaluator bounds history for keys and the net, so a longer search hi
   assert.deepEqual(evaluator.metrics().hits, 1);
 });
 
-test('Play, Analysis and Arena pass Centipawn the long history and bound only the net input', () => {
+test('Play, Analysis and Arena retain the long history for native repetition features', () => {
   const source = (file) => readFileSync(new URL(`../src/lc0/${file}`, import.meta.url), 'utf8');
   for (const page of ['playBrowser.ts', 'analysisBrowser.ts', 'arenaBrowser.ts']) {
     assert.doesNotMatch(source(page), /reverse\(\)\.slice\(0, 16\)/, `${page} still slices search history`);
-    assert.match(source(page), /searchHistoryFens\([^)]*, CENTIPAWN_NET_HISTORY_POSITIONS\)/, page);
+    assert.match(source(page), /searchHistoryFens\([^)]*, (?:ctx\.)?positions.length\)/, page);
   }
-  // Play builds its own CachedEvaluator; Analysis and Arena share createCentipawnEvaluatorCache.
-  assert.match(source('playBrowser.ts'), /maxHistoryPositions: CENTIPAWN_NET_HISTORY_POSITIONS/);
-  assert.match(source('centipawnEvaluatorCache.ts'), /maxHistoryPositions: CENTIPAWN_NET_HISTORY_POSITIONS/);
+  // The new model scans older positions for repetition; legacy nets retain the bound.
+  assert.doesNotMatch(source('playBrowser.ts'), /maxHistoryPositions:/);
+  assert.match(source('centipawnEvaluatorCache.ts'), /nativeHistory \? undefined : CENTIPAWN_NET_HISTORY_POSITIONS/);
   for (const page of ['analysisBrowser.ts', 'arenaBrowser.ts']) assert.match(source(page), /createCentipawnEvaluatorCache\(/, page);
 });

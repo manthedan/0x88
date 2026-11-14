@@ -140,11 +140,14 @@ function compactRepetitionFlags(board: BoardState, historyBoards: Array<BoardSta
   return keys.map((key, i) => (key == null ? 0 : keys.slice(i + 1).some((older) => older === key) ? 1 : 0));
 }
 
+export type SquareFormerSettings = { policyTemperature?: number; nativeHistory?: boolean };
+
 export function squareformerCompactInput(
   board: BoardState,
   meta: SquareFormerMeta,
   historyFens: string[] = [],
   dtype: CompactIndexDtype = compactIndexDtype(meta),
+  settings: SquareFormerSettings = {},
 ): CompactIndexArray {
   const history = meta.history_plies;
   const stride = meta.token_features ?? history + 9;
@@ -152,7 +155,11 @@ export function squareformerCompactInput(
   const historyBoards: Array<BoardState | null> = Array(history).fill(null);
   addCompactBoard(data, board, 0, stride);
   for (let h = 0; h < history; h++) {
-    if (!historyFens[h]) continue;
+    // Native FEN-only midgame inputs repeat the current piece plane, not repetition flags.
+    if (!historyFens[h]) {
+      if (settings.nativeHistory && !historyFens.length && board.fullmove > 1) addCompactBoard(data, board, h + 1, stride);
+      continue;
+    }
     const historyBoard = parseFen(historyFens[h]);
     historyBoards[h] = historyBoard;
     addCompactBoard(data, historyBoard, h + 1, stride);
@@ -173,7 +180,11 @@ export function squareformerCompactInput(
     if (base + 7 < stride) setCompact(data, sq * stride + base + 7, sq);
   }
   if (stride >= history + 9 + history + 1) {
-    const repFlags = compactRepetitionFlags(board, historyBoards, history);
+    const repFlags = settings.nativeHistory
+      ? [board, ...historyBoards].map((position, i) =>
+          position && historyFens.slice(i).some((fen) => fen.trim().split(/\s+/).slice(0, 4).join(' ') === repetitionKeyCached(position)) ? 1 : 0,
+        )
+      : compactRepetitionFlags(board, historyBoards, history);
     const repBase = history + 9;
     for (let sq = 0; sq < 64; sq++) {
       for (let i = 0; i < Math.min(history + 1, repFlags.length); i++) setCompact(data, sq * stride + repBase + i, repFlags[i]);
@@ -932,12 +943,14 @@ export class SquareFormerEvaluator implements Evaluator {
   // release() while a run is suspended (WebGPU/asyncify), so runs are queued
   // and destroy() releases the session only after the queue drains.
   private runTail: Promise<unknown> = Promise.resolve();
-  constructor(session: ort.InferenceSession, meta: SquareFormerMeta) {
+  private settings: SquareFormerSettings;
+  constructor(session: ort.InferenceSession, meta: SquareFormerMeta, settings: SquareFormerSettings = {}) {
     this.session = session;
     this.meta = meta;
+    this.settings = settings;
   }
-  static async create(modelPath: string | Uint8Array | ArrayBuffer, meta: SquareFormerMeta): Promise<SquareFormerEvaluator> {
-    return new SquareFormerEvaluator(await ort.createOrtSession(modelPath), meta);
+  static async create(modelPath: string | Uint8Array | ArrayBuffer, meta: SquareFormerMeta, settings: SquareFormerSettings = {}): Promise<SquareFormerEvaluator> {
+    return new SquareFormerEvaluator(await ort.createOrtSession(modelPath), meta, settings);
   }
   async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {
     return (await this.evaluateBatch([board], [context]))[0];
@@ -947,7 +960,9 @@ export class SquareFormerEvaluator implements Evaluator {
     const key = encodedInputKey(board, historyFens, compact);
     const cached = lruGet(this.inputCache, key);
     if (cached) return cached;
-    const encoded = compact ? squareformerCompactInput(board, this.meta, historyFens) : squareformerFloatInput(board, this.meta, historyFens);
+    const encoded = compact
+      ? squareformerCompactInput(board, this.meta, historyFens, compactIndexDtype(this.meta), this.settings)
+      : squareformerFloatInput(board, this.meta, historyFens);
     lruPut(this.inputCache, key, encoded, INPUT_CACHE_ENTRIES);
     return encoded;
   }
@@ -1043,7 +1058,7 @@ export class SquareFormerEvaluator implements Evaluator {
       const evalLegal = evalContexts[i]?.legalMoves ?? legalMoves(evalBoards[i]);
       const policyRow = policyRaw.subarray(i * policySize, (i + 1) * policySize);
       const logits = evalLegal.map((move) => Number(policyRow[moveToSquareformerPolicyIndex(move)] ?? -100));
-      const probs = softmax(logits);
+      const probs = softmax(logits.map((logit) => logit / (this.settings.policyTemperature ?? 1)));
       const policy = new Map<number, number>();
       const actionValues = avRaw ? new Map<number, number>() : undefined;
       const rankScores = rankRaw ? new Map<number, number>() : undefined;

@@ -15,6 +15,11 @@ export type RuntimeRegistryEntry = {
 export const BT4_ANNEAL_MUON_BEST_MODEL_ID = 'bt4-anneal-muon-best';
 export const BT4_ANNEAL_MUON_BEST_TVM_HYBRID_LEGACY_MODEL_ID = 'bt4-anneal-muon-best-tvm-hybrid';
 export const BT4_SOAP_REM_C19000_FINAL_MODEL_ID = 'bt4-soap-rem-c19000-final';
+export const S4FIX_V_EMA_MODEL_ID = 's4fix-v-ema';
+
+export function squareformerModelSettings(modelId: string): { policyTemperature: number; nativeHistory: boolean } {
+  return modelId === S4FIX_V_EMA_MODEL_ID ? { policyTemperature: 2, nativeHistory: true } : { policyTemperature: 1, nativeHistory: false };
+}
 
 export const CENTIPAWN_TVMJS_WEBGPU_V2: RuntimeRegistryEntry = {
   modelId: BT4_SOAP_REM_C19000_FINAL_MODEL_ID,
@@ -88,13 +93,13 @@ export function promotedTvmjsRuntimeForModel(modelId: string): RuntimeRegistryEn
 }
 
 export function shouldAttemptCustomRuntime(modelId: string, selector: BrowserRuntimeSelector): boolean {
-  if (selector === 'ort') return false;
+  if (modelId === S4FIX_V_EMA_MODEL_ID || selector === 'ort') return false;
   if (selector === 'custom-webgpu') return true;
   return promotedCustomRuntimeForModel(modelId)?.status === 'promoted';
 }
 
 export function shouldAttemptTvmjsRuntime(modelId: string, selector: BrowserRuntimeSelector): boolean {
-  if (selector === 'ort' || selector === 'custom-webgpu') return false;
+  if (modelId === S4FIX_V_EMA_MODEL_ID || selector === 'ort' || selector === 'custom-webgpu') return false;
   if (selector === 'tvmjs-webgpu') return true;
   return promotedTvmjsRuntimeForModel(modelId)?.status === 'promoted';
 }

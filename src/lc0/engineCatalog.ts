@@ -80,13 +80,12 @@ export const LC0_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
   { value: 'bt4', label: 'BT4-it332', experimental: true },
 ];
 
-/** Newest history positions the Centipawn nets read; search keeps longer histories for draws. */
+/** Legacy net history bound; s4fix repetition features need the whole line. */
 export const CENTIPAWN_NET_HISTORY_POSITIONS = 16;
 
 export const CENTIPAWN_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
-  { value: 'bt4-auto', label: 'v1 · TVMJS auto' },
-  { value: 'bt4-ort', label: 'v1 · ORT' },
-  { value: 'bt4-custom', label: 'v1 · TVMJS strict', experimental: true },
+  { value: 'bt4-auto', label: 's4fix · ORT auto' },
+  { value: 'bt4-ort', label: 's4fix · ORT' },
 ];
 
 export const STOCKFISH_ENGINE_VARIANTS: readonly EngineVariantOption[] = [
@@ -287,7 +286,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     shortLabel: 'Centi',
     status: 'mixed',
     docHref: 'docs/engine_catalog.md#centipawn-family',
-    note: 'Centipawn SquareFormer neural family; TVMJS WebGPU is primary with automatic ORT fallback.',
+    note: 'Centipawn s4fix-v-ema SquareFormer model on ONNX Runtime Web.',
     runtime: 'neural',
     resource: { resourceClass: 'gpu', maxThreads: 1 },
     strength: {
@@ -300,7 +299,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
       options: CENTIPAWN_ENGINE_VARIANTS,
       v0Allowed: ['bt4-auto', 'bt4-ort'],
       v0Fallback: 'bt4-auto',
-      label: (variant) => (variant === 'bt4-ort' ? 'Centipawn · ORT' : variant === 'bt4-custom' ? 'Centipawn · TVMJS strict' : 'Centipawn'),
+      label: (variant) => (variant === 'bt4-ort' ? 'Centipawn · ORT' : variant === 'bt4-custom' ? 'Centipawn · ORT (legacy runtime setting)' : 'Centipawn'),
     },
     play: {
       options: [{ id: 'centipawn', label: 'Centipawn', variant: 'bt4-auto', group: 'engine', order: 11, v0: true }],

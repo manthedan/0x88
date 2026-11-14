@@ -19,7 +19,8 @@ import {
   reconcileRuntimeFallbackWarning,
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
-import { chooseMove, montyLitePuctPolicy } from '../search/puct.ts';
+import { chooseMove } from '../search/puct.ts';
+import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import { mountAnalysisDisclosure } from './analysisDisclosure.ts';
@@ -164,7 +165,6 @@ import {
 } from './bt4Engine.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import {
-  CENTIPAWN_NET_HISTORY_POSITIONS,
   canonicalEngineFamily,
   centipawnEngineLabel,
   centipawnVariantOptions,
@@ -286,8 +286,8 @@ const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0
 );
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
-const DEFAULT_CENTIPAWN_MODEL_URL = '/models/bt4_soap_rem_c19000_final.onnx';
-const DEFAULT_CENTIPAWN_META_URL = '/models/bt4_soap_rem_c19000_final.meta.json';
+const DEFAULT_CENTIPAWN_MODEL_URL = '/models/s4fix_v_ema.onnx';
+const DEFAULT_CENTIPAWN_META_URL = '/models/s4fix_v_ema.meta.json';
 const LEGACY_CENTIPAWN_MODEL_URL = '/models/bt4_anneal_muon_best.onnx';
 const LEGACY_CENTIPAWN_META_URL = '/models/bt4_anneal_muon_best.meta.json';
 const DEFAULT_CENTIPAWN_TVMJS_MANIFEST_URL = '/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json';
@@ -1203,12 +1203,14 @@ function centipawnRuntimeFallbackForVariant(variant: string): boolean {
 }
 
 function centipawnHybridManifestStatusText(): string {
+  if (!LEGACY_CENTIPAWN_OVERRIDE) return 'Centipawn s4fix-v-ema · ORT Web only';
   if (centipawnHybridManifestStatus === 'present') return `Centipawn TVMJS bundle present (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
   if (centipawnHybridManifestStatus === 'missing') return `Centipawn TVMJS bundle missing; auto uses ORT fallback (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
   return `Centipawn TVMJS bundle checking (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
 }
 
 async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.signal): Promise<void> {
+  if (!LEGACY_CENTIPAWN_OVERRIDE) return;
   let status: typeof centipawnHybridManifestStatus;
   try {
     const res = await fetch(resolvePublicAssetUrl(CENTIPAWN_HYBRID_MANIFEST_URL), { method: 'HEAD', cache: 'no-store' });
@@ -1230,7 +1232,7 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
 function centipawnModel(): { modelId: string; onnx: string; meta: string } {
   return LEGACY_CENTIPAWN_OVERRIDE
     ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
-    : { modelId: 'bt4-soap-rem-c19000-final', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
+    : { modelId: 's4fix-v-ema', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
 }
 
 function centipawnEvaluatorCacheKey(variant: string): string {
@@ -1290,7 +1292,7 @@ function centipawnEvaluator(variant: string): Promise<Evaluator> {
 }
 
 function centipawnHistoryFens(positions: BoardState[]): string[] {
-  return searchHistoryFens(positions, CENTIPAWN_NET_HISTORY_POSITIONS);
+  return searchHistoryFens(positions, positions.length);
 }
 
 function disposeCentipawnEvaluators(): void {
@@ -4469,7 +4471,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
             batchSize: Math.max(1, Math.min(256, Math.floor(Number(params.get('centipawnBatch') ?? params.get('tinyBatch') ?? '32') || 32))),
             signal: controller.signal,
             historyFens: centipawnHistoryFens(positions),
-            searchPolicy: montyLitePuctPolicy,
+            ...centipawnSearchOptions,
             includePv: true,
             multiPv: analysisMultiPv,
             pvDepth: 12,
