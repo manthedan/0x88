@@ -196,6 +196,13 @@ interface PlayContext {
   orientation: 'white' | 'black';
   gameOver: { result: GameResultCode; reason: string } | null;
   engineThinking: boolean;
+  /**
+   * UI-only: the thinking indicator is showing. It trails engineThinking by
+   * THINKING_SHOW_DELAY_MS so fast replies do not flash "Thinking…" and the
+   * status block; gating (move blocking, aria-busy) still uses engineThinking.
+   */
+  thinkingShown: boolean;
+  thinkingShowTimer: ReturnType<typeof setTimeout> | null;
   pendingPromotion: Move[] | null;
   /**
    * Browsed ply (position after N half-moves) or null when following the live
@@ -250,6 +257,8 @@ function createPlayContext(): PlayContext {
     orientation: 'white',
     gameOver: null,
     engineThinking: false,
+    thinkingShown: false,
+    thinkingShowTimer: null,
     pendingPromotion: null,
     viewPly: null,
     searchProgress: null,
@@ -976,10 +985,26 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
 // Game flow (context-scoped)
 // ---------------------------------------------------------------------------
 
+const THINKING_SHOW_DELAY_MS = 400;
+
+function ctxSetEngineThinking(ctx: PlayContext, thinking: boolean): void {
+  ctx.engineThinking = thinking;
+  if (ctx.thinkingShowTimer) clearTimeout(ctx.thinkingShowTimer);
+  ctx.thinkingShowTimer = null;
+  ctx.thinkingShown = false;
+  if (!thinking) return;
+  ctx.thinkingShowTimer = setTimeout(() => {
+    ctx.thinkingShowTimer = null;
+    if (ctx.disposed || !ctx.engineThinking) return;
+    ctx.thinkingShown = true;
+    ctxRender(ctx);
+  }, THINKING_SHOW_DELAY_MS);
+}
+
 function ctxCancelEngineTurn(ctx: PlayContext): void {
   ctx.abort.abort();
   ctx.abort = new AbortController();
-  ctx.engineThinking = false;
+  ctxSetEngineThinking(ctx, false);
   ctx.preparingEngine = false;
   ctx.enginePreparationGeneration += 1;
   ctxHideDownloadProgress();
@@ -1024,7 +1049,7 @@ function ctxPhase(ctx: PlayContext): PlayPhase {
 async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   if (ctx.gameOver || ctx.board.turn === ctx.humanColor) return;
   const signal = ctx.abort.signal;
-  ctx.engineThinking = true;
+  ctxSetEngineThinking(ctx, true);
   ctx.lastProgressAnnouncement = -1;
   el('progressAnnouncement').textContent = '';
   const releaseWakeLock = await wakeLocks.acquire(signal);
@@ -1038,7 +1063,7 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
     uci = await ctxRequestEngineMove(ctx, signal);
   } catch (error) {
     if (signal.aborted) return;
-    ctx.engineThinking = false;
+    ctxSetEngineThinking(ctx, false);
     ctx.engineReady = false;
     ctxSetEngineFailure(ctx, error);
     ctxRender(ctx);
@@ -1048,7 +1073,7 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   }
   if (signal.aborted || ctx.disposed) return;
   ctx.engineReady = true;
-  ctx.engineThinking = false;
+  ctxSetEngineThinking(ctx, false);
   const move = uci ? legalMoves(ctx.board).find((m) => moveToUci(m) === uci) : undefined;
   if (!move) {
     ctx.gameOver = { result: ctx.humanColor === 'w' ? '1-0' : '0-1', reason: uci ? `engine played illegal move ${uci}` : 'engine returned no move' };
@@ -1156,7 +1181,9 @@ function ctxNewGame(ctx: PlayContext): void {
   for (const key of BIG_NET_KEYS) {
     const searcher = peekBigNetSearcher(key);
     if (!searcher) continue;
-    if (searcher.loaded) void searcher.resetTree();
+    // Best effort: the same click may release this net (new opponent) and
+    // dispose its worker before the reset replies; nothing waits on it.
+    if (searcher.loaded) searcher.resetTree().catch(() => undefined);
   }
   ctxSetEngineNote('');
   ctxDisarmResign(ctx);
@@ -1279,7 +1306,8 @@ function ctxLiveStatusText(ctx: PlayContext): string {
   if (ctx.gameOver) return ctxVerdictText(ctx);
   if (ctx.pendingPromotion) return 'Choose a promotion piece';
   if (ctx.preparingEngine) return `Preparing ${ctxSelectedEngine(ctx).label} before the first move…`;
-  if (ctx.engineThinking) return `${ctxOpponentName(ctxSelectedEngine(ctx))} is thinking…`;
+  if (ctx.thinkingShown) return `${ctxOpponentName(ctxSelectedEngine(ctx))} is thinking…`;
+  if (ctx.engineThinking) return `${ctxOpponentName(ctxSelectedEngine(ctx))} to move`;
   if (ctx.practicePosition && !ctx.started) return 'Choose your side and opponent, then press Play.';
   if (!ctx.engineReady) return `${ctxSelectedEngine(ctx).label} is not ready. Retry the engine or choose another opponent.`;
   if (ctxPhase(ctx) === 'setup') return 'Press Play or make a move.';
@@ -1563,7 +1591,8 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   const state = q('[data-state]');
   let text = '';
   let kind = '';
-  if (!isHuman && ctx.engineThinking) [text, kind] = ['Thinking…', 'thinking'];
+  if (!isHuman && ctx.thinkingShown) [text, kind] = ['Thinking…', 'thinking'];
+  else if (!isHuman && ctx.engineThinking) [text, kind] = ['', ''];
   else if (!isHuman && ctx.preparingEngine) [text, kind] = ['Loading…', 'thinking'];
   else if (!isHuman && ctx.practicePosition && !ctx.started && !ctx.engineReady) [text, kind] = ['Loads on Play', 'ready'];
   else if (!isHuman && !ctx.engineReady && !ctx.gameOver) [text, kind] = buttonEl('retryEngine').hidden ? ['Loading…', 'thinking'] : ['Error · retry', 'error'];
@@ -1586,7 +1615,7 @@ function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   main.dataset.pendingOpponent = ctx.opponent.pending?.engineId ?? '';
   const hasNotice = !buttonEl('retryEngine').hidden || !el('runtimeWarning').hidden || !el('dlProgress').hidden;
   main.dataset.quiet = String(
-    !hasNotice && ctx.engineReady && !ctx.preparingEngine && !ctx.engineThinking && !ctx.pendingPromotion && ctx.viewPly === null && !boardCheck(ctx.board),
+    !hasNotice && ctx.engineReady && !ctx.preparingEngine && !ctx.thinkingShown && !ctx.pendingPromotion && ctx.viewPly === null && !boardCheck(ctx.board),
   );
   main.dataset.config = ctx.configOpen && phase !== 'setup' ? 'open' : 'closed';
   const option = ctxSelectedEngine(ctx);
