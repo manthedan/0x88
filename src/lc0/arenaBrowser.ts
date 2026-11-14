@@ -719,7 +719,11 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
 function centipawnModel(): { modelId: string; onnx: string; meta: string } {
   return LEGACY_CENTIPAWN_OVERRIDE
     ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
-    : { modelId: 's4fix-v-ema', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL };
+    : {
+        modelId: CENTIPAWN_MODEL_URL.includes('/s4fix_v_ema.onnx') ? 's4fix-v-ema' : CENTIPAWN_MODEL_URL,
+        onnx: CENTIPAWN_MODEL_URL,
+        meta: CENTIPAWN_META_URL,
+      };
 }
 
 function centipawnEvaluatorCacheKey(variant: string): string {

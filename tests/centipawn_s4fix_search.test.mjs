@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
 import { createCentipawnEvaluatorCache } from '../src/lc0/centipawnEvaluatorCache.ts';
@@ -24,6 +25,20 @@ test('all Centipawn product PUCT paths use the native model constants', () => {
     const source = readFileSync(new URL(`../src/lc0/${surface}Browser.ts`, import.meta.url), 'utf8');
     assert.equal((source.match(/\.\.\.centipawnSearchOptions/g) ?? []).length, paths, surface);
     assert.match(source, /\/models\/s4fix_v_ema.onnx/);
+  }
+});
+
+test('research URL overrides do not inherit the shipped model settings', () => {
+  for (const surface of ['analysis', 'arena']) {
+    const source = readFileSync(new URL(`../src/lc0/${surface}Browser.ts`, import.meta.url), 'utf8');
+    const start = source.indexOf('function centipawnModel()');
+    const end = source.indexOf('\nfunction ', start + 1);
+    const body = stripTypeScriptTypes(source.slice(start, end));
+    const model = new Function('LEGACY_CENTIPAWN_OVERRIDE', 'CENTIPAWN_MODEL_URL', 'CENTIPAWN_META_URL', `${body}\nreturn centipawnModel();`);
+    const shipped = model(false, '/models/s4fix_v_ema.onnx', '/models/s4fix_v_ema.meta.json');
+    assert.equal(shipped.modelId, S4FIX_V_EMA_MODEL_ID);
+    const custom = model(false, '/models/other.onnx', '/models/other.meta.json');
+    assert.deepEqual(squareformerModelSettings(custom.modelId), { policyTemperature: 1, nativeHistory: false });
   }
 });
 

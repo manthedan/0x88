@@ -120,8 +120,9 @@ tests/engine_catalog.test.mjs
 | `node-test --test-timeout=120000` with all 33 matching test files below | 289 / 0 / 0 | Passed, including old TVMJS/subgroup tests |
 | `npm test` (exactly once) | 1981 / 1 / 4 | One v1-only URL assertion in stage_lc0_test_assets; no timeout failures |
 | `node-test --test-concurrency=1 --test-timeout=120000 tests/stage_lc0_test_assets.test.mjs` plus the focused set | 28 / 0 / 0 | Passed after using the normalized v2 representation URL in that assertion |
-| `node-test --test-timeout=120000` with the 33 matching files plus `tests/stage_lc0_test_assets.test.mjs` | 295 / 0 / 0 | Final targeted check passed after all source corrections |
-| `npm run typecheck` | 0 errors / 0 warnings | Both standalone runs passed; npm test's embedded typecheck also passed |
+| `node-test --test-timeout=120000` with the 33 matching files plus `tests/stage_lc0_test_assets.test.mjs` | 295 / 0 / 0 | Passed after the full-suite assertion correction |
+| Same 34-file command after the research-override guard and regression test | 296 / 0 / 0 | Final source-tree targeted check passed |
+| `npm run typecheck` | 0 errors / 0 warnings | All three standalone runs passed; npm test's embedded typecheck also passed |
 | `node --experimental-strip-types scripts/check_centipawn_s4fix_search.mjs .local-dev-artifacts/centipawn-s4fix/search.json` | 50 / 51 move agreement | Gate passed, including all decisive positions |
 | `BUILD_SCOPE=product npm run -s build:client` (exactly once) | Passed | dist-client contains byte-identical new ONNX, metadata and Centipawn manifest; no fp16/batch16 variant |
 | `node scripts/write_artifact_index.mjs --check` | Passed | Generated index current |
@@ -134,7 +135,12 @@ the generated LC0 policy table/source comparison (external C++ source
 unavailable). The full-suite failure was not ignored: its six-test file and
 all focused tests passed serially after correction. The full suite was not
 run a second time, as requested. The build emitted a Node localstorage-file
-warning and informational plugin timing output, not a build failure.
+warning and informational plugin timing output, not a build failure. A final
+inspection then corrected Analysis/Arena research URL overrides so other models
+do not inherit the shipped model id/settings. That guard and its regression
+test passed typecheck and the final 296-test run. The default shipped route
+is unchanged; the product build was not repeated after this guard, honoring
+the one-build limit.
 
 The matching test command was built from
 `git grep -il -e centipawn -e squareformer -e runtimeRegistry -- tests/`,
@@ -201,6 +207,11 @@ representations. Publishing must account for v1-to-v2 identity migration
 sources, not just upload the two new model files. Publish/validate immutable
 bodies and the new release before promoting the stable channel or app shell.
 Nothing was uploaded here.
+
+The model id for Analysis/Arena research URL overrides is derived from the
+chosen ONNX path, so unrelated custom model/meta pairs retain temperature 1
+and legacy history encoding. The shipped URL retains temperature 2 and the
+ORT-only guard.
 
 Remaining risks are untested browser/provider performance, unqualified
 batch>1 strength, longer-history cache-key/encoding overhead, the absence of
