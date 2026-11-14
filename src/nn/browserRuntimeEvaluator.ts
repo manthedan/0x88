@@ -7,15 +7,16 @@ import {
   type BrowserRuntimeSelector,
   BT4_ANNEAL_MUON_BEST_MODEL_ID,
   BT4_SOAP_REM_C19000_FINAL_MODEL_ID,
-  S4FIX_V_EMA_MODEL_ID,
-  squareformerModelSettings,
+  centipawnModelIdForUrls,
   normalizeRuntimeModelKey,
   parseBrowserRuntimeSelector,
   promotedCustomRuntimeForModel,
   promotedTvmjsRuntimeForModel,
   runtimeFallbackEnabled,
+  S4FIX_V_EMA_MODEL_ID,
   shouldAttemptCustomRuntime,
   shouldAttemptTvmjsRuntime,
+  squareformerModelSettings,
 } from './runtimeRegistry.ts';
 import { SquareFormerMetaSchema } from './squareFormerMetaSchema.ts';
 import { SquareFormerEvaluator, type SquareFormerMeta } from './squareformerEvaluator.ts';
@@ -54,16 +55,13 @@ async function loadJson(url: string): Promise<unknown> {
 }
 
 function inferRuntimeModelId(spec: BrowserSquareformerRuntimeSpec): string {
-  if (`${spec.onnx} ${spec.meta}`.includes('s4fix_v_ema')) return S4FIX_V_EMA_MODEL_ID;
+  if (centipawnModelIdForUrls(spec.onnx, spec.meta) === S4FIX_V_EMA_MODEL_ID) return S4FIX_V_EMA_MODEL_ID;
   if (spec.modelId) return normalizeRuntimeModelKey(spec.modelId);
   if (spec.id) {
     const normalizedId = normalizeRuntimeModelKey(spec.id);
     if (normalizedId === BT4_ANNEAL_MUON_BEST_MODEL_ID || normalizedId === BT4_SOAP_REM_C19000_FINAL_MODEL_ID) return normalizedId;
   }
-  const urls = `${spec.onnx} ${spec.meta}`;
-  if (urls.includes('bt4_anneal_muon_best') || urls.includes('bt4-anneal-muon-best')) return BT4_ANNEAL_MUON_BEST_MODEL_ID;
-  if (urls.includes('bt4_soap_rem_c19000_final') || urls.includes('bt4-soap-rem-c19000-final')) return BT4_SOAP_REM_C19000_FINAL_MODEL_ID;
-  return spec.id ?? spec.onnx;
+  return centipawnModelIdForUrls(spec.onnx, spec.meta) ?? spec.id ?? spec.onnx;
 }
 
 async function createHybridEvaluator(
@@ -129,7 +127,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   if (modelId === S4FIX_V_EMA_MODEL_ID) {
     const compiledRequested = requestedRuntime === 'tvmjs-webgpu' || requestedRuntime === 'custom-webgpu';
     const fallbackReason = compiledRequested ? 's4fix-v-ema is ORT-only; compiled runtimes target an older graph' : undefined;
-    const resolvedRuntime = compiledRequested ? `${requestedRuntime}-fallback-ort` as const : 'ort';
+    const resolvedRuntime = compiledRequested ? (`${requestedRuntime}-fallback-ort` as const) : 'ort';
     if (fallbackReason) console.warn('Centipawn compiled runtime unavailable; falling back to ORT SquareFormer.', { modelId, fallbackReason });
     const evaluator = await createOrtEvaluator();
     publishBrowserRuntimeAudit({ ...auditBase, resolvedRuntime, fallbackReason });

@@ -37,3 +37,13 @@ test('s4fix is ORT-only with model-scoped temperature and native history', () =>
     assert.equal(shouldAttemptCustomRuntime(S4FIX_V_EMA_MODEL_ID, selector), false);
   }
 });
+
+test('Centipawn model ids follow served file names, so research overrides keep their compiled runtimes', async () => {
+  const registry = await import('../src/nn/runtimeRegistry.ts');
+  const { centipawnModelIdForUrls } = registry;
+  assert.equal(centipawnModelIdForUrls('/models/s4fix_v_ema.onnx', '/models/s4fix_v_ema.meta.json'), registry.S4FIX_V_EMA_MODEL_ID);
+  assert.equal(centipawnModelIdForUrls('/models/bt4_soap_rem_c19000_final.onnx', '/models/bt4_soap_rem_c19000_final.meta.json'), registry.BT4_SOAP_REM_C19000_FINAL_MODEL_ID);
+  assert.equal(centipawnModelIdForUrls('/models/bt4_anneal_muon_best.onnx'), registry.BT4_ANNEAL_MUON_BEST_MODEL_ID);
+  assert.equal(centipawnModelIdForUrls('/models/unregistered.onnx', '/models/unregistered.meta.json'), null);
+  assert.ok(registry.promotedTvmjsRuntimeForModel(centipawnModelIdForUrls('/models/bt4_soap_rem_c19000_final.onnx')));
+});
