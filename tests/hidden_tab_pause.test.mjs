@@ -107,7 +107,7 @@ test('a hidden suspended analysis keeps Stop available', async () => {
   const pauseAt = source.indexOf("if (transition.pause.includes('analysis'))");
   const pauseBlock = source.slice(pauseAt, pauseAt + 1400);
   const clearAt = pauseBlock.indexOf('clearAnalysisSearchProgress()');
-  const idleAt = pauseBlock.indexOf('analyzing = false');
+  const idleAt = pauseBlock.indexOf("dispatchAnalysis({ type: 'VISIBILITY', visible: false");
   const dropAt = pauseBlock.indexOf('lineCache.delete(tree.current.fen)');
   const renderAt = pauseBlock.indexOf('renderLines()');
   assert.ok(pauseAt >= 0);

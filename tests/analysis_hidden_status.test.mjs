@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { analysisStatus } from '../src/lc0/analysisStatus.ts';
+import { analysisIsAnalyzing } from '../src/lc0/analysisRunState.ts';
 import { hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork } from '../src/lc0/hiddenTabPause.ts';
 
 const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
@@ -25,20 +26,18 @@ function statusPage({ hidden = false, active = false, aborted = false, reload = 
   };
   const code = ts.transpile(`
     let hiddenTab = initialHiddenTabPause(hidden);
-    const analyzing = active;
-    const analysisAbort = active ? { signal: { aborted } } : null;
-    const analysisReloadAbort = reload ? { signal: { aborted: false } } : null;
+    const analysisRunState = { execution: { tag: reload ? 'maintaining' : active && !aborted ? 'running' : 'idle' } };
     const retry = null, lineCache = new Map(), tree = { current: { fen: 'current' } };
     const document = { getElementById: el };
     const renderPgnImportNotice = () => {};
     const analysisEngineName = (name) => name;
-    ${slice('function hasActiveAnalysisRun(', 'function hiddenTabActive(')}
+    ${slice('function hasActiveAnalysisRun(', 'function applyAnalysisEvent(')}
     ${slice('function deferHiddenTabWork(', 'function applyHiddenTab(')}
     ${slice('function renderAnalysisStatus(', 'function activeEngineNames(')}
     return { deferHiddenTabWork, renderAnalysisStatus, state: () => hiddenTab, el };
   `, { target: ts.ScriptTarget.ES2022 });
-  return new Function('el', 'initialHiddenTabPause', 'requestHiddenTabWork', 'hiddenAnalysisStopEnabled', 'hidden', 'active', 'aborted', 'reload', 'analysisStatus', code)(
-    el, initialHiddenTabPause, requestHiddenTabWork, hiddenAnalysisStopEnabled, hidden, active, aborted, reload, analysisStatus,
+  return new Function('el', 'initialHiddenTabPause', 'requestHiddenTabWork', 'hiddenAnalysisStopEnabled', 'hidden', 'active', 'aborted', 'reload', 'analysisStatus', 'analysisIsAnalyzing', code)(
+    el, initialHiddenTabPause, requestHiddenTabWork, hiddenAnalysisStopEnabled, hidden, active, aborted, reload, analysisStatus, analysisIsAnalyzing,
   );
 }
 

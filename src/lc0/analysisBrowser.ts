@@ -121,6 +121,7 @@ import {
 } from './analysisPresentation.ts';
 import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
 import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from './analysisRunSnapshot.ts';
+import { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, initialAnalysisRunState, transitionAnalysis, type AnalysisEffect, type AnalysisEventInput, type Intent, type Maintenance, type Owner } from './analysisRunState.ts';
 import { positionShareUrl } from './analysisShare.ts';
 import { analysisStatus } from './analysisStatus.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -208,15 +209,11 @@ import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import {
   cancelHiddenTabWork,
   classifyHiddenReload,
-  finishedRunFollowUp,
   type HiddenTabPause,
   type HiddenTabWork,
   hiddenAnalysisStopEnabled,
   initialHiddenTabPause,
-  rememberDeferredForce,
   requestHiddenTabWork,
-  shouldResumeHiddenAnalysis,
-  stopHiddenTabResume,
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
@@ -548,18 +545,12 @@ function initialPerformanceDial(): PerformanceDial {
 // page; GPU engines (Lc0, Centipawn) run without a CPU lease.
 const resourceBroker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: 2, dial: initialPerformanceDial() });
 const registeredBrokerEngines = new Set<string>();
-let scheduledAnalysisTimer: ReturnType<typeof setTimeout> | null = null;
-let analyzeAfterActiveRun = false;
-// Set while loadLc0Backend owns the LC0 worker/evaluator lifecycle. analyzeCurrent
-// must queue behind it rather than start a reload, because a reload disposes the
-// worker that this load is still waiting on.
-let activeLc0BackendLoad: { cancelled: () => boolean } | null = null;
+let analysisRunState = initialAnalysisRunState();
+let nextAnalysisOperationId = 0;
+const analysisOperations = new Map<number, AbortController>();
+const analysisTimers = new Map<number, ReturnType<typeof setTimeout>>();
 // Observational only; not an admission guard or a cache-key component.
 let analysisBackendGeneration = 0;
-let analyzeAfterLc0BackendLoad = false;
-let reloadLc0AfterActiveRun = false;
-let disposeUnusedEnginesAfterActiveRun = false;
-let analysisRunForced = false;
 
 function syncBrokerParticipants(rows: EngineRow[]): void {
   const desired = new Map<string, EngineFamily>();
@@ -612,15 +603,11 @@ let analysisPagehideHandler: ((event: PageTransitionEvent) => void) | null = nul
 let analysisAuditHandler: ((event: Event) => void) | null = null;
 let hiddenTab: HiddenTabPause = initialHiddenTabPause(false);
 let hiddenTabListener: (() => void) | null = null;
-let hiddenResumeForce = false;
-let hiddenResumeReload = false;
-let hiddenResumeDispose = false;
 let analysisWorkerProgressMessages = 0;
 let analysisUiProgressSamples = 0;
 let orientation: 'white' | 'black' = 'white';
 let analysisAbort: AbortController | null = null;
 let analysisReloadAbort: AbortController | null = null;
-let analysisReloadWantsSearch = false;
 let criticalPanel: ReturnType<typeof mountCriticalMomentsPanel> | null = null;
 const criticalAnalysisRefresh = new CriticalAnalysisRefresh();
 let criticalDeferredMaia = false;
@@ -639,7 +626,6 @@ let retryHumanGeneration = 0;
 let retryOriginalShapes: DrawShape[] = [];
 let retryModeGeneration = 0;
 const reviewMetadata = new WeakMap<GameTree, { tags: Record<string, string>; result: string; signature: string }>();
-let analyzing = false;
 let activeAnalysisSelectionKey = '';
 const lineCache = new Map<string, AnalysisLine[]>();
 const engineLineCache = new Map<string, AnalysisLine[]>();
@@ -1046,7 +1032,7 @@ function progressKey(runId: number, label: string): string {
 }
 
 function showAnalysisProgress(runId: number, fen: string, label: string, progress: WorkerSearchProgress): void {
-  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen) return;
   analysisUiProgressSamples += 1;
   const completed = progress.completedVisits ?? progress.visits;
   const elapsedMs = progress.elapsedMs ?? 0;
@@ -1084,7 +1070,7 @@ function showMoveSearchProgress(
 }
 
 function showIndeterminateSearchProgress(runId: number, fen: string, label: string): void {
-  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analyzing || tree.current.fen !== fen) return;
+  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen) return;
   searchProgressByEngine.set(progressKey(runId, label), { label, units: 'search', indeterminate: true });
   renderAnalysisSearchProgress();
   renderEngineComparison(lineCache.get(fen) ?? []);
@@ -1232,7 +1218,9 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
   if (isStaleMount(mountSignal)) return;
   centipawnHybridManifestStatus = status;
   if (centipawnHybridManifestStatus === 'missing') {
+    const previousRows = JSON.stringify(engineRows);
     for (const row of engineRows) if (row.family === 'centipawn' && row.variant === 'bt4-custom') row.variant = 'bt4-auto';
+    if (JSON.stringify(engineRows) !== previousRows) invalidateAnalysisSettings();
     renderEngineList();
   }
   renderRecklessRuntimeInfo();
@@ -1425,13 +1413,8 @@ function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?
   engineProfileMessage(`Loaded engine setup “${profile.name}”.`);
   lineCache.clear();
   completeAnalysisKeys.clear();
-  if (deferAnalysisSettingsRefresh({ reloadLc0: runtimeChanged, disposeUnusedEngines: true })) {
-    for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
-    return;
-  }
-  disposeUnusedEngines();
-  if (runtimeChanged) void reloadLc0Backend('force');
-  else void analyzeCurrent();
+  deferAnalysisSettingsRefresh({ reloadLc0: runtimeChanged, disposeUnusedEngines: true });
+  for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
 }
 function saveCurrentEngineProfile(): void {
   const name = inputEl('engineProfileName').value.trim();
@@ -1780,6 +1763,7 @@ function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
 
 function renderEngineList(): void {
   if (retry) return;
+  const previousRows = JSON.stringify(engineRows);
   engineRows = engineRows.map((row, index) => {
     Object.assign(row, normalizeDeployEngineRow(row, 'analysis', index));
     const options = variantOptions(row.family);
@@ -1789,6 +1773,7 @@ function renderEngineList(): void {
     }
     return row;
   });
+  if (JSON.stringify(engineRows) !== previousRows) invalidateAnalysisSettings();
   const families = analysisEngineFamilyOptions();
   el('engineList').innerHTML = engineRows
     .map((row, i) => {
@@ -1939,9 +1924,11 @@ async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<
     checkBigNetAsset(BIG_NETS.t3, whileAnalysisMounted(renderRecklessRuntimeInfo)),
   ]);
   if (isStaleMount(mountSignal)) return;
+  const previousRows = JSON.stringify(engineRows);
   for (const row of engineRows) {
     if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
   }
+  if (JSON.stringify(engineRows) !== previousRows) invalidateAnalysisSettings();
   renderEngineList();
   renderRecklessRuntimeInfo();
 }
@@ -2489,7 +2476,7 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv} on the board`)}"${preview.steps.length ? '' : ' disabled'} title="Preview this line on the board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button></div></li>`;
   });
   if (!rows.length)
-    rows.push(`<li class="result-line pending-line"><span class="pending-text">${analyzing ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
+    rows.push(`<li class="result-line pending-line"><span class="pending-text">${analysisIsAnalyzing(analysisRunState) ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
 }
 
@@ -2542,19 +2529,19 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const progressRows = [...searchProgressByEngine.values()].map(
       (progress) => `<tr><td>${htmlEscape(analysisEngineName(progress.label))}</td><td colspan="3" class="small">Searching…</td></tr>`,
     );
-    el('engineConsensus').textContent = progressRows.length ? 'Analysis in progress.' : analyzing ? 'Preparing selected engines.' : 'No analysis yet.';
+    el('engineConsensus').textContent = progressRows.length ? 'Analysis in progress.' : analysisIsAnalyzing(analysisRunState) ? 'Preparing selected engines.' : 'No analysis yet.';
     if (lines.some((line) => line.error) && !progressRows.length)
       el('engineConsensus').textContent = 'No engine results available. Check engine lines for errors.';
     patchAnalysisResults(
       body,
       progressRows.length
         ? progressRows.join('')
-        : `<tr><td colspan="4" class="small">${analyzing ? 'Preparing selected engines…' : 'Run analysis to compare selected engines.'}</td></tr>`,
+        : `<tr><td colspan="4" class="small">${analysisIsAnalyzing(analysisRunState) ? 'Preparing selected engines…' : 'Run analysis to compare selected engines.'}</td></tr>`,
     );
     return;
   }
   const failed = new Set(lines.filter((line) => line.error).map((line) => line.engine)).size;
-  const { pending, unavailable } = analysisAvailability(activeEngineRows().length, bestByEngine.length, failed, analyzing);
+  const { pending, unavailable } = analysisAvailability(activeEngineRows().length, bestByEngine.length, failed, analysisIsAnalyzing(analysisRunState));
   const status = (pending ? ` · ${pending} pending` : '') + (unavailable ? ` · ${unavailable} unavailable` : '');
   el('engineConsensus').textContent =
     bestByEngine.length === 1
@@ -3495,11 +3482,9 @@ function startMistakeRetry(): void {
     el('retryEntryStatus').textContent = `No mistakes or blunders to retry for ${side === 'w' ? 'White' : 'Black'} at this depth.`;
     return;
   }
-  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, retire: true });
   analysisAbort = null;
-  analyzing = false;
   hiddenTab = cancelHiddenTabWork(cancelHiddenTabWork(hiddenTab, 'analysis'), 'maia');
-  hiddenResumeForce = false;
   maia3PanelTask?.invalidate();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   maia3PanelTimer = null;
@@ -3710,9 +3695,8 @@ async function runGameReview(): Promise<void> {
   // Hand off ownership from the cancelled position search. Its finally must
   // not consume queued maintenance and reload/dispose the reviewer's runtime.
   // The next interactive analysis applies these flags before taking cache keys.
-  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, retire: true });
   analysisAbort = null;
-  analyzing = false;
   retireAnalysisRunCentipawnKeys();
   clearAnalysisSearchProgress();
   el('message').textContent = 'Position analysis paused for game review.';
@@ -3862,18 +3846,50 @@ async function copyReviewPgn(): Promise<void> {
 }
 
 function hasActiveAnalysisRun(): boolean {
-  return (analyzing && analysisAbort !== null && !analysisAbort.signal.aborted) || (analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted);
+  return analysisIsAnalyzing(analysisRunState) || analysisRunState.execution.tag === 'maintaining';
+}
+
+function applyAnalysisEvent(event: AnalysisEventInput) {
+  const transition = transitionAnalysis(analysisRunState, { ...event, admit: !reviewAbort && !retry && !criticalPanel?.isBusy(), nextId: ++nextAnalysisOperationId });
+  analysisRunState = transition.state;
+  return transition.effects;
+}
+
+function dispatchAnalysis(event: AnalysisEventInput): Promise<void> {
+  return executeAnalysisEffects(applyAnalysisEvent(event));
+}
+
+async function executeAnalysisEffects(effects: AnalysisEffect[]): Promise<void> {
+  const pending: Promise<void>[] = [];
+  for (const effect of effects) {
+    if (effect.type === 'cancel') cancelAnalysisOperation(effect.operationId);
+    else if (effect.type === 'clearTimer') {
+      clearTimeout(analysisTimers.get(effect.ticket));
+      analysisTimers.delete(effect.ticket);
+    } else if (effect.type === 'schedule') {
+      analysisTimers.set(effect.ticket, setTimeout(() => {
+        analysisTimers.delete(effect.ticket);
+        void dispatchAnalysis({ type: 'DEBOUNCE_FIRED', ticket: effect.ticket });
+      }, effect.delayMs));
+    } else if (effect.type === 'prepare') pending.push(performAnalysis(effect.owner, effect.intent));
+    else if (effect.type === 'maintain') pending.push(performAnalysisMaintenance(effect.operationId, effect.maintenance));
+  }
+  await Promise.all(pending);
+}
+
+function analysisIntent(force = false): Intent {
+  return { requestId: ++nextAnalysisOperationId, force };
 }
 
 function hiddenTabActive(): HiddenTabWork[] {
   const active: HiddenTabWork[] = [];
   const reloadClass = classifyHiddenReload(
-    analyzing && analysisAbort !== null && !analysisAbort.signal.aborted,
-    analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
-    analysisReloadWantsSearch,
-    analyzeAfterActiveRun,
+    analysisIsAnalyzing(analysisRunState),
+    analysisRunState.execution.tag === 'maintaining',
+    analysisRunState.wanted !== null,
+    analysisRunState.wanted !== null,
   );
-  if (reloadClass.analysis) active.push('analysis');
+  if (reloadClass.analysis || analysisRunState.wanted || analysisRunState.execution.tag === 'scheduled') active.push('analysis');
   if (maia3PanelTimer !== null || maia3PanelEvaluating) active.push('maia');
   if (analysisAssetPrefetchControllers.size > 0) active.push('prefetch');
   return active;
@@ -3893,23 +3909,12 @@ function deferHiddenTabWork(kind: HiddenTabWork): boolean {
 function applyHiddenTab(hidden: boolean): void {
   if (retry) {
     hiddenTab = initialHiddenTabPause(hidden);
+    void dispatchAnalysis({ type: 'VISIBILITY', visible: !hidden, resumeSearch: false });
     return;
   }
   if (hidden) workspaceAutosave?.flush();
-  const wasHidden = hiddenTab.hidden;
-  const reloadClass = classifyHiddenReload(
-    analyzing && analysisAbort !== null && !analysisAbort.signal.aborted,
-    analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
-    analysisReloadWantsSearch,
-    analyzeAfterActiveRun,
-  );
   const transition = transitionHiddenTab(hiddenTab, hidden, hiddenTabActive());
   hiddenTab = transition.state;
-  if (hidden && !wasHidden && reloadClass.pauseReload) {
-    // Stop's reload must come back as a reload, not as a search.
-    hiddenResumeReload = true;
-    cancelActiveAnalysisRun();
-  }
   if (transition.pause.includes('prefetch')) cancelAllAnalysisAssetPrefetches();
   if (transition.pause.includes('maia')) {
     maia3PanelTask?.invalidate();
@@ -3917,20 +3922,8 @@ function applyHiddenTab(hidden: boolean): void {
     maia3PanelTimer = null;
   }
   if (transition.pause.includes('analysis')) {
-    // Snapshot before cancel. The aborted run's finally must not see these flags
-    // and start a reload while the tab is still hidden.
-    hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, analysisRunForced);
-    hiddenResumeReload = reloadLc0AfterActiveRun;
-    hiddenResumeDispose = disposeUnusedEnginesAfterActiveRun;
-    analysisRunForced = false;
-    reloadLc0AfterActiveRun = false;
-    disposeUnusedEnginesAfterActiveRun = false;
-    analyzeAfterActiveRun = false;
-    cancelActiveAnalysisRun();
-    // Cancel aborts the run but leaves `analyzing` and the progress map set
-    // until the run's finally. The comparison table reads both, and that
-    // finally only clears the progress bar, so render the idle copy now.
-    analyzing = false;
+    void dispatchAnalysis({ type: 'VISIBILITY', visible: false, resumeSearch: false });
+    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
     clearAnalysisSearchProgress();
     lineCache.delete(tree.current.fen);
     renderLines();
@@ -3942,31 +3935,13 @@ function applyHiddenTab(hidden: boolean): void {
     for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
   }
   if (transition.resume.includes('maia')) scheduleMaia3Panel();
-  if (shouldResumeHiddenAnalysis(hidden, transition.resume, hiddenResumeReload, hiddenResumeDispose) && !mountAbort.signal.aborted) {
-    const resumeAnalysis = transition.resume.includes('analysis');
-    const force = resumeAnalysis && hiddenResumeForce;
-    const reload = hiddenResumeReload;
-    const dispose = hiddenResumeDispose;
-    hiddenResumeForce = false;
-    hiddenResumeReload = false;
-    hiddenResumeDispose = false;
-    if (resumeAnalysis) {
-      // The search is still wanted, so a queued reload runs and then the search restarts.
-      if (dispose) disposeUnusedEnginesAfterActiveRun = true;
-      if (reload) reloadLc0AfterActiveRun = true;
-      void analyzeCurrent(force ? { force: true } : {});
-    } else {
-      // Stop kept the maintenance and dropped the search. Match a visible Stop:
-      // dispose or reload, and do not start analysis afterwards.
-      if (dispose) disposeUnusedEngines();
-      if (reload) void reloadLc0ForAnalysis(false);
-    }
-  }
+  if (!mountAbort.signal.aborted) void dispatchAnalysis({ type: 'VISIBILITY', visible: !hidden, resumeSearch: transition.resume.includes('analysis') });
 }
 
 function installHiddenTabPause(): void {
   if (hiddenTabListener) document.removeEventListener('visibilitychange', hiddenTabListener);
   hiddenTab = initialHiddenTabPause(document.visibilityState === 'hidden');
+  void dispatchAnalysis({ type: 'VISIBILITY', visible: !hiddenTab.hidden, resumeSearch: false });
   hiddenTabListener = () => applyHiddenTab(document.visibilityState === 'hidden');
   document.addEventListener('visibilitychange', hiddenTabListener);
 }
@@ -3977,50 +3952,42 @@ function removeHiddenTabPause(): void {
   hiddenTabListener = null;
 }
 
-function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): boolean {
+function invalidateAnalysisSettings(maintenance: Maintenance = { reloadLc0: false, disposeUnused: false }, request = analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null): void {
+  if (request && hiddenTab.hidden) deferHiddenTabWork('analysis');
+  void dispatchAnalysis({ type: 'SETTINGS_CHANGED', revision: analysisRunState.revision + 1, intent: analysisIntent(), maintenance, request });
+}
+
+function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): void {
   stopGameReview('Review cancelled after engine settings changed.');
   renderReviewEngineChoices();
   criticalPanel?.sync();
-  if (!hasActiveAnalysisRun()) return false;
-  analyzeAfterActiveRun = true;
-  reloadLc0AfterActiveRun ||= options.reloadLc0 === true;
-  disposeUnusedEnginesAfterActiveRun ||= options.disposeUnusedEngines === true;
-  return true;
+  invalidateAnalysisSettings({ reloadLc0: options.reloadLc0 === true, disposeUnused: options.disposeUnusedEngines === true }, analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null || !options.reloadLc0 || options.disposeUnusedEngines === true || inputEl('autoAnalyze').checked);
 }
 
-function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
-  analyzeAfterActiveRun = false;
-  // Any caller that wants analysis after an in-flight backend load re-queues it
-  // after cancelling (analyzeCurrent, forced reloads), so Stop must drop it.
-  analyzeAfterLc0BackendLoad = false;
-  if (!options.preserveDeferredMaintenance) {
-    reloadLc0AfterActiveRun = false;
-    disposeUnusedEnginesAfterActiveRun = false;
-  }
-  if (scheduledAnalysisTimer) {
-    clearTimeout(scheduledAnalysisTimer);
-    scheduledAnalysisTimer = null;
-  }
-  const reloadController = analysisReloadAbort;
-  analysisReloadAbort = null;
-  analysisReloadWantsSearch = false;
-  reloadController?.abort();
-  if (reloadController) {
+function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean; retire?: boolean } = {}): void {
+  void dispatchAnalysis({ type: 'STOP', preserveMaintenance: options.preserveDeferredMaintenance === true, retire: options.retire });
+}
+
+function cancelAnalysisOperation(operationId: number): void {
+  const controller = analysisOperations.get(operationId);
+  if (!controller) return;
+  controller.abort();
+  if (analysisAbort === controller) retireAnalysisRunCentipawnKeys();
+  clearAnalysisSearchProgress();
+  hideModelProgress();
+  el('analyze').toggleAttribute('disabled', false);
+  selectEl('lc0RuntimeSelect').disabled = false;
+  if (analysisReloadAbort === controller || analysisAbort !== controller) {
+    analysisReloadAbort = null;
     disposeRuntimeResources();
-    analyzing = false;
-    clearAnalysisSearchProgress();
-    hideModelProgress();
     el('stop').toggleAttribute('disabled', true);
-    el('analyze').toggleAttribute('disabled', false);
-    selectEl('lc0RuntimeSelect').disabled = false;
     el('backend').textContent = 'not loaded';
     el('message').textContent = 'Analysis stopped during LC0 backend reload.';
   }
-  analysisAbort?.abort();
+  if (analysisAbort !== controller) return;
   if (activeWorkerSearchId !== null && searchWorker) {
     if (workerRuntime.startsWith('hybrid-') && !workerSearchWarm) {
       resetSearchWorker('LC0 hybrid worker initialization cancelled');
-      analyzing = false;
       clearAnalysisSearchProgress();
       hideModelProgress();
       el('stop').toggleAttribute('disabled', true);
@@ -4041,18 +4008,8 @@ function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250
     criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
     return;
   }
-  if (scheduledAnalysisTimer) clearTimeout(scheduledAnalysisTimer);
-  if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
-    analyzeAfterActiveRun = true;
-    analysisReloadWantsSearch = true;
-    hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
-    return;
-  }
-  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
-  scheduledAnalysisTimer = setTimeout(() => {
-    scheduledAnalysisTimer = null;
-    void analyzeCurrent(options);
-  }, delayMs);
+  if (hiddenTab.hidden) deferHiddenTabWork('analysis');
+  void dispatchAnalysis({ type: 'REQUEST', intent: analysisIntent(options.force), delayMs });
 }
 
 async function withCpuLease<T>(engineId: string, signal: AbortSignal, task: (lease: { threads: number }) => Promise<T>): Promise<T> {
@@ -4296,44 +4253,28 @@ async function analyzeCpuPosition(
   }
 }
 
-async function reloadLc0ForAnalysis(analyzeAfterLoad: boolean): Promise<void> {
-  if (mountAbort.signal.aborted) return;
-  if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
-    analyzeAfterActiveRun ||= analyzeAfterLoad;
-    analysisReloadWantsSearch ||= analyzeAfterLoad;
-    return;
-  }
+async function performAnalysisMaintenance(operationId: number, maintenance: Maintenance): Promise<void> {
   const controller = new AbortController();
-  analysisReloadWantsSearch = analyzeAfterLoad;
-  analysisReloadAbort = controller;
-  analyzing = false;
-  clearAnalysisSearchProgress();
-  el('stop').toggleAttribute('disabled', false);
-  const loaded = await reloadLc0Backend('none', controller.signal);
-  if (analysisReloadAbort !== controller) return;
-  analysisReloadAbort = null;
-  analysisReloadWantsSearch = false;
-  if (!loaded && !controller.signal.aborted && (reloadLc0AfterActiveRun || disposeUnusedEnginesAfterActiveRun)) {
-    // Settings changed while this load was running; a failed superseded load
-    // must not strand them. analyzeCurrent consumes the flags, so this cannot loop.
-    void analyzeCurrent({ force: true });
-    return;
+  analysisOperations.set(operationId, controller);
+  let loaded = false;
+  try {
+    if (maintenance.disposeUnused) disposeUnusedEngines();
+    if (maintenance.reloadLc0) {
+      analysisReloadAbort = controller;
+      clearAnalysisSearchProgress();
+      el('stop').toggleAttribute('disabled', false);
+      loaded = await reloadLc0Backend('none', controller.signal, operationId);
+    } else loaded = true;
+  } finally {
+    analysisOperations.delete(operationId);
+    if (analysisReloadAbort === controller) analysisReloadAbort = null;
+    if (analysisOperationId(analysisRunState.execution) === operationId) {
+      el('stop').toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+      el('analyze').toggleAttribute('disabled', false);
+      selectEl('lc0RuntimeSelect').disabled = false;
+    }
+    void dispatchAnalysis({ type: 'SETTLED', operationId, failed: !loaded });
   }
-  if (!loaded || controller.signal.aborted) {
-    el('stop').toggleAttribute('disabled', true);
-    el('analyze').toggleAttribute('disabled', false);
-    selectEl('lc0RuntimeSelect').disabled = false;
-    return;
-  }
-  if (reloadLc0AfterActiveRun || disposeUnusedEnginesAfterActiveRun) {
-    analyzeAfterActiveRun ||= analyzeAfterLoad;
-    void analyzeCurrent({ force: true });
-    return;
-  }
-  const shouldAnalyze = analyzeAfterLoad || analyzeAfterActiveRun;
-  analyzeAfterActiveRun = false;
-  el('stop').toggleAttribute('disabled', true);
-  if (shouldAnalyze) void analyzeCurrent({ force: true });
 }
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
@@ -4342,60 +4283,37 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
     return;
   }
-  if (deferHiddenTabWork('analysis')) {
-    hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
-    return;
-  }
-  if (analysisReloadAbort && !analysisReloadAbort.signal.aborted) {
-    analyzeAfterActiveRun = true;
-    analysisReloadWantsSearch = true;
-    hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, options.force === true);
-    return;
-  }
-  const reloadBeforeRun = reloadLc0AfterActiveRun;
-  const disposeBeforeRun = disposeUnusedEnginesAfterActiveRun;
-  // A replacement search must apply settings maintenance before it snapshots
-  // rows/cache keys, otherwise a newly selected runtime can run on the old worker.
-  cancelActiveAnalysisRun();
-  // The cancelled run's finally no longer owns cleanup (its controller is not
-  // current), so retire its Centipawn snapshot here.
+  deferHiddenTabWork('analysis');
+  await dispatchAnalysis({ type: 'REQUEST', intent: analysisIntent(options.force), delayMs: 0 });
+}
+
+async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
+  const options = { force: intent.force };
+  const runId = owner.runId;
+  activeAnalysisRunId = runId;
   retireAnalysisRunCentipawnKeys();
-  if (disposeBeforeRun) disposeUnusedEngines();
-  if (reloadBeforeRun) {
-    analysisAbort = null;
-    analyzing = false;
-    clearAnalysisSearchProgress();
-    void reloadLc0ForAnalysis(true);
-    return;
-  }
   const rows = activeEngineRows();
   if (!rows.length) {
     el('message').textContent = 'Add an engine to analyze.';
+    void dispatchAnalysis({ type: 'SETTLED', operationId: runId });
     return;
   }
   const needsSmallLc0Backend = rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
   if (needsSmallLc0Backend && !workerReady && !searcher) {
-    if (activeLc0BackendLoad && !activeLc0BackendLoad.cancelled()) analyzeAfterLc0BackendLoad = true;
-    else void reloadLc0ForAnalysis(true);
+    void dispatchAnalysis({ type: 'NEEDS_BACKEND', owner });
     return;
   }
-  const runId = ++activeAnalysisRunId;
-  analysisRunForced = options.force === true;
-  const controller = new AbortController();
-  analysisAbort = controller;
-  analyzing = true;
   el('stop').toggleAttribute('disabled', false);
   el('analyze').toggleAttribute('disabled', true);
   if (legalMoves(parseFen(tree.current.fen)).length === 0) {
-    analyzing = false;
     el('stop').toggleAttribute('disabled', true);
     el('analyze').toggleAttribute('disabled', false);
+    void dispatchAnalysis({ type: 'SETTLED', operationId: runId });
     return;
   }
-  let runDeferredAnalysis = false;
-  let reloadDeferredLc0 = false;
-  let disposeDeferredEngines = false;
-  let resumeForce = false;
+  const controller = new AbortController();
+  analysisOperations.set(runId, controller);
+  analysisAbort = controller;
   try {
     // Initialize the selected big nets first (initBigNetsForRun). The run reads
     // nothing else before this await and everything after it, synchronously, as
@@ -4410,23 +4328,8 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
       bigNetInitErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
-      // Anything else that happened during init either cancelled this run (any
-      // new analyzeCurrent/scheduleAnalyzeCurrent, Stop, hiding the tab, leaving)
-      // or was queued for after it through deferAnalysisSettingsRefresh: those
-      // flags were all clear when the run started (consumed or reset above). If
-      // one is set now, or the rows changed without one (refreshBt4Availability),
-      // this run's gates and backends are stale: end it so the finally applies
-      // the queued Lc0 reload / disposal and starts the deferred run.
-      if (
-        analyzeAfterActiveRun ||
-        reloadLc0AfterActiveRun ||
-        disposeUnusedEnginesAfterActiveRun ||
-        JSON.stringify(activeEngineRows()) !== JSON.stringify(rows)
-      ) {
-        analyzeAfterActiveRun = true;
-        return;
-      }
     }
+    if (!analysisCanPrepare(analysisRunState, owner)) return;
     snapshotBigNetServedModels(rows);
     const snapshot = captureAnalysisRun({
       fen: tree.current.fen,
@@ -4439,6 +4342,8 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
       servedModels: { small: lc0ServedModelUrl, ...Object.fromEntries(analysisBigNetServedModel) },
       broker: analysisRunBroker(rows, resourceBroker.snapshot()),
     });
+    const admission = applyAnalysisEvent({ type: 'PREPARED', owner, revision: owner.preparationRevision, snapshot });
+    if (!admission.some((effect) => effect.type === 'search')) return;
     const { fen, multiPv: analysisMultiPv, selectionKey: selectionCacheKey } = snapshot;
     // Move generation uses mutable scratch boards; keep the snapshot untouched.
     const analysisPositions = snapshot.positions.map((board) => ({ ...board, squares: [...board.squares] }));
@@ -4471,7 +4376,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
           if (controller.signal.aborted || mountAbort.signal.aborted) return;
           try {
             const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
-            if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analyzing || controller.signal.aborted || mountAbort.signal.aborted) return;
+            if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analysisIsAnalyzing(analysisRunState) || controller.signal.aborted || mountAbort.signal.aborted) return;
             if (lines.length) cacheEngineLines(cacheKey, lines);
             else engineLineCache.delete(cacheKey);
             lineGroups[index] = lines;
@@ -4481,7 +4386,7 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
             hadTaskFailure = true;
             const errMsg = (error as Error)?.message ?? String(error);
             console.warn(`${label} analysis failed`, error);
-            if (runId === activeAnalysisRunId && analysisAbort === controller && analyzing) {
+            if (runId === activeAnalysisRunId && analysisAbort === controller && analysisIsAnalyzing(analysisRunState)) {
               engineLineCache.delete(cacheKey);
               lineGroups[index] = [{ engine: label, pvUci: [], multipv: 1, scoreText: '—', detail: 'failed', pvSan: '', error: errMsg }];
               publishLines();
@@ -4726,43 +4631,18 @@ async function analyzeCurrent(options: { force?: boolean } = {}) {
     if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message && runId === activeAnalysisRunId && analysisAbort === controller)
       message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
-    if (analysisAbort === controller && runId === activeAnalysisRunId && !mountAbort.signal.aborted) {
-      analyzing = false;
+    analysisOperations.delete(runId);
+    const owns = analysisOperationId(analysisRunState.execution) === runId;
+    const effects = applyAnalysisEvent({ type: 'SETTLED', operationId: runId });
+    if (owns && !mountAbort.signal.aborted) {
       analysisAbort = null;
       retireAnalysisRunCentipawnKeys();
-      runDeferredAnalysis = analyzeAfterActiveRun;
-      reloadDeferredLc0 = reloadLc0AfterActiveRun;
-      disposeDeferredEngines = disposeUnusedEnginesAfterActiveRun;
-      resumeForce = analysisRunForced;
-      analyzeAfterActiveRun = false;
-      reloadLc0AfterActiveRun = false;
-      disposeUnusedEnginesAfterActiveRun = false;
-      analysisRunForced = false;
       clearAnalysisSearchProgress();
       renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
       document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
       document.getElementById('analyze')?.toggleAttribute('disabled', false);
     }
-    // A cancelled run returns early from the try. Stop still wants queued
-    // maintenance, but that work must not start while the tab is hidden: Stop
-    // aborts before hide, so the pause snapshot never sees this run.
-    const followUp = finishedRunFollowUp(hiddenTab.hidden, {
-      reload: reloadDeferredLc0,
-      dispose: disposeDeferredEngines,
-      analyzeAgain: runDeferredAnalysis,
-    });
-    if (!followUp.start) {
-      if (followUp.reload) hiddenResumeReload = true;
-      if (followUp.dispose) hiddenResumeDispose = true;
-      if (followUp.analyzeAgain) {
-        hiddenResumeForce = rememberDeferredForce(hiddenResumeForce, resumeForce);
-        hiddenTab = requestHiddenTabWork(hiddenTab, 'analysis').state;
-      }
-    } else {
-      if (followUp.dispose) disposeUnusedEngines();
-      if (followUp.reload) void reloadLc0ForAnalysis(followUp.analyzeAgain);
-      else if (followUp.analyzeAgain) void analyzeCurrent();
-    }
+    void executeAnalysisEffects(effects);
   }
 }
 
@@ -4772,12 +4652,12 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   if (retry) return;
   saveAnalysisWorkspace();
   if (pvPreview && (pvPreview.root !== tree.current || pvPreview.line.rootFen !== tree.current.fen)) closePvPreview();
-  hiddenResumeForce = false;
   if (analysisGameTree !== tree) {
     analysisGameTree = tree;
     stopGameReview('Review cancelled for the new game.');
     clearReviewState('Load a PGN or play moves, then review the mainline.');
-    cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+    if (analysisIsAnalyzing(analysisRunState)) cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+    else void dispatchAnalysis({ type: 'DROP_REQUEST' });
     searcher?.resetTree();
     (mainEvaluator as CachedLc0Evaluator | null)?.clearCache?.();
     // Queued behind any cancelled search, so that search cannot repopulate the
@@ -4789,7 +4669,7 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   const fen = tree.current.fen;
   const rows = activeEngineRows();
   const selectionKey = analysisSelectionCacheKey(fen, rows);
-  if (analyzing && analysisAbort && !analysisAbort.signal.aborted && activeAnalysisSelectionKey !== selectionKey) cancelActiveAnalysisRun();
+  if (analysisIsAnalyzing(analysisRunState) && activeAnalysisSelectionKey !== selectionKey) cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
   // A transposition can have the same FEN but a different neural/repetition
   // history. A completed-key marker is not provenance for the FEN-only view.
   const positionLines = completeAnalysisKeys.has(selectionKey)
@@ -4811,9 +4691,7 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
     // A cached position, or auto-analyze off, must not restart the search that
     // was paused on the position we just left.
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
-    const keptMaintenance = stopHiddenTabResume(hiddenResumeReload, hiddenResumeDispose);
-    hiddenResumeReload = keptMaintenance.reload;
-    hiddenResumeDispose = keptMaintenance.dispose;
+    if (!analysisIsAnalyzing(analysisRunState)) void dispatchAnalysis({ type: 'DROP_REQUEST' });
     renderEvalBar();
     setShapes(bestShapes());
   }
@@ -5600,7 +5478,6 @@ function wireEvents() {
       return;
     }
     updatePendingAnalysisInput({ type: 'discarded' });
-    cancelActiveAnalysisRun();
     tree = saved.tree;
     workspaceHeaders = saved.headers;
     workspaceResult = saved.result;
@@ -5640,10 +5517,6 @@ function wireEvents() {
   el('stop').addEventListener('click', () => {
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
-    hiddenResumeForce = false;
-    const kept = stopHiddenTabResume(hiddenResumeReload, hiddenResumeDispose);
-    hiddenResumeReload = kept.reload;
-    hiddenResumeDispose = kept.dispose;
     cancelAllAnalysisAssetPrefetches();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
@@ -5687,12 +5560,8 @@ function wireEvents() {
     reconcileActiveRuntimeFallbackWarning();
     persistManualEngineRows();
     lineCache.delete(tree.current.fen);
-    if (deferAnalysisSettingsRefresh({ disposeUnusedEngines: true })) {
-      prefetchAnalysisAssetsForAddedRow(engineRows[i]);
-      return;
-    }
-    disposeUnusedEngines();
-    scheduleAnalyzeCurrent();
+    deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
+    prefetchAnalysisAssetsForAddedRow(engineRows[i]);
   });
   el('engineProfileSelect').addEventListener('change', () => {
     const value = selectEl('engineProfileSelect').value;
@@ -5712,12 +5581,8 @@ function wireEvents() {
       renderEngineList();
       lineCache.clear();
       completeAnalysisKeys.clear();
-      if (deferAnalysisSettingsRefresh({ disposeUnusedEngines: true })) {
-        for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
-        return;
-      }
-      disposeUnusedEngines();
-      scheduleAnalyzeCurrent();
+      deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
+      for (const row of engineRows) prefetchAnalysisAssetsForAddedRow(row);
     }
   });
   el('saveEngineProfile').addEventListener('click', saveCurrentEngineProfile);
@@ -5740,9 +5605,7 @@ function wireEvents() {
     persistManualEngineRows();
     renderEngineList();
     lineCache.delete(tree.current.fen);
-    if (deferAnalysisSettingsRefresh({ disposeUnusedEngines: true })) return;
-    disposeUnusedEngines();
-    scheduleAnalyzeCurrent();
+    deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
   });
   const addEngineRow = () => {
     const family = nextEngineFamily();
@@ -5751,21 +5614,18 @@ function wireEvents() {
     persistManualEngineRows();
     renderEngineList();
     lineCache.delete(tree.current.fen);
-    if (deferAnalysisSettingsRefresh()) {
-      prefetchAnalysisAssetsForAddedRow(engineRows[engineRows.length - 1]);
-      return;
-    }
-    scheduleAnalyzeCurrent();
+    deferAnalysisSettingsRefresh();
+    prefetchAnalysisAssetsForAddedRow(engineRows[engineRows.length - 1]);
   };
   // The inline row under the engine summaries and the manager dialog add engines identically.
   el('addEngine').addEventListener('click', addEngineRow);
   el('addEngineInManager').addEventListener('click', addEngineRow);
   el('lc0RuntimeSelect').addEventListener('change', () => {
-    if (!deferAnalysisSettingsRefresh({ reloadLc0: true })) void reloadLc0Backend();
+    deferAnalysisSettingsRefresh({ reloadLc0: true });
   });
   el('multiPvInput').addEventListener('change', () => {
     lineCache.delete(tree.current.fen);
-    if (!deferAnalysisSettingsRefresh()) scheduleAnalyzeCurrent();
+    deferAnalysisSettingsRefresh();
   });
   criticalPanel = mountCriticalMomentsPanel({
     broker: resourceBroker,
@@ -5788,9 +5648,8 @@ function wireEvents() {
       resourceBroker.getDial(),
     ],
     pauseAnalysis: () => {
-      cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+      cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, retire: true });
       analysisAbort = null;
-      analyzing = false;
       clearAnalysisSearchProgress();
       // Go through the busy guard so interrupted debounces/inference are hidden
       // and replayed, even when the board does not move during the report.
@@ -5803,6 +5662,7 @@ function wireEvents() {
       const pending = criticalAnalysisRefresh.take(analysisSelectionCacheKey(tree.current.fen));
       if (criticalDeferredMaia) scheduleMaia3Panel();
       if (pending) scheduleAnalyzeCurrent(pending);
+      else void dispatchAnalysis({ type: 'RESUME' });
     },
     updateView: (moment, lines) => {
       const node = mainlineNodes()[moment.move.ply - 1];
@@ -6063,9 +5923,6 @@ function disposeRuntimeResources(): void {
   analysisAbort?.abort();
   analysisAbort = null;
   analysisRunCentipawnKeys = new Set();
-  analyzeAfterActiveRun = false;
-  reloadLc0AfterActiveRun = false;
-  disposeUnusedEnginesAfterActiveRun = false;
   cancelAllAnalysisAssetPrefetches();
   preparedCpuEngineKeys.clear();
   const reviewWasRunning = reviewAbort !== null;
@@ -6111,9 +5968,9 @@ function disposePageResources(): void {
   workspaceAutosave?.flush();
   workspaceAutosave = null;
   removeHiddenTabPause();
+  void dispatchAnalysis({ type: 'DISPOSE' });
   analysisReloadAbort?.abort();
   analysisReloadAbort = null;
-  analysisReloadWantsSearch = false;
   disposeRuntimeResources();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   void maia3PanelEvaluator?.dispose();
@@ -6140,29 +5997,34 @@ function disposePageResources(): void {
   ground = null;
 }
 
-async function loadLc0Backend(runAutoAnalyze = true, mountSignal: AbortSignal = mountAbort.signal, operationSignal?: AbortSignal): Promise<boolean> {
-  const loadCancelled = () => isStaleMount(mountSignal) || operationSignal?.aborted === true;
+async function loadLc0Backend(runAutoAnalyze: boolean | 'force' = true, mountSignal: AbortSignal = mountAbort.signal, operationSignal?: AbortSignal, schedulerOperation?: number): Promise<boolean> {
+  const controller = new AbortController();
+  operationSignal ??= controller.signal;
+  const loadCancelled = () => isStaleMount(mountSignal) || operationSignal.aborted;
   if (loadCancelled()) return false;
-  const load = { cancelled: loadCancelled };
+  const operationId = schedulerOperation ?? ++nextAnalysisOperationId;
+  if (schedulerOperation === undefined) {
+    analysisOperations.set(operationId, controller);
+    void dispatchAnalysis({ type: 'BACKEND_STARTED', operationId, intent: runAutoAnalyze === 'force' ? analysisIntent(true) : null });
+  }
   analysisBackendGeneration += 1;
-  activeLc0BackendLoad = load;
+  let loaded = false;
   try {
-    return await loadLc0BackendOwned(runAutoAnalyze, loadCancelled, operationSignal);
+    loaded = await loadLc0BackendOwned(loadCancelled, operationSignal);
+    return loaded;
   } finally {
-    if (activeLc0BackendLoad === load) {
-      activeLc0BackendLoad = null;
-      analyzeAfterLc0BackendLoad = false;
+    if (schedulerOperation === undefined) {
+      analysisOperations.delete(operationId);
+      if (loaded && !loadCancelled() && runAutoAnalyze === true && inputEl('autoAnalyze').checked && analysisRunState.execution.tag === 'maintaining' && analysisRunState.execution.operationId === operationId && !analysisRunState.wanted) {
+        deferHiddenTabWork('analysis');
+        void dispatchAnalysis({ type: 'REQUEST', intent: analysisIntent(), delayMs: 0 });
+      }
+      void dispatchAnalysis({ type: 'SETTLED', operationId, failed: !loaded });
     }
   }
 }
 
-function analyzeAfterLc0BackendReady(runAutoAnalyze: boolean, loadCancelled: () => boolean): void {
-  const queued = analyzeAfterLc0BackendLoad;
-  analyzeAfterLc0BackendLoad = false;
-  if (!loadCancelled() && (queued || (runAutoAnalyze && inputEl('autoAnalyze').checked))) void analyzeCurrent();
-}
-
-async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
+async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
@@ -6177,7 +6039,6 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
-    analyzeAfterLc0BackendReady(runAutoAnalyze, loadCancelled);
     return true;
   } catch (workerError) {
     // resetSearchWorker rejects pending init with AbortError when a newer load
@@ -6250,7 +6111,6 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
       hideModelProgress();
-      analyzeAfterLc0BackendReady(runAutoAnalyze, loadCancelled);
       return true;
     } catch (error) {
       if (loadCancelled()) return false;
@@ -6262,7 +6122,7 @@ async function loadLc0BackendOwned(runAutoAnalyze: boolean, loadCancelled: () =>
   }
 }
 
-async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'auto', operationSignal?: AbortSignal): Promise<boolean> {
+async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'auto', operationSignal?: AbortSignal, schedulerOperation?: number): Promise<boolean> {
   lineCache.clear();
   completeAnalysisKeys.clear();
   criticalPanel?.invalidate();
@@ -6270,10 +6130,7 @@ async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'a
   if (operationSignal?.aborted) return false;
   reconcileActiveRuntimeFallbackWarning();
   renderRecklessRuntimeInfo();
-  // A forced re-run goes through the load's queued-analysis dispatch so a move
-  // made during loading cannot start a second, cancelling analyzeCurrent.
-  if (analyzeAfterLoad === 'force') analyzeAfterLc0BackendLoad = true;
-  const loaded = await loadLc0Backend(analyzeAfterLoad === 'auto', mountAbort.signal, operationSignal);
+  const loaded = await loadLc0Backend(analyzeAfterLoad === 'force' ? 'force' : analyzeAfterLoad === 'auto', mountAbort.signal, operationSignal, schedulerOperation);
   return loaded;
 }
 
@@ -6361,10 +6218,7 @@ function resetAnalysisPageState(): void {
   orientation = 'white';
   analysisAbort = null;
   analysisReloadAbort = null;
-  analysisReloadWantsSearch = false;
-  analyzeAfterActiveRun = false;
-  reloadLc0AfterActiveRun = false;
-  disposeUnusedEnginesAfterActiveRun = false;
+  analysisRunState = initialAnalysisRunState();
   reviewAbort?.abort();
   reviewAbort = null;
   lastReview = null;
@@ -6379,7 +6233,6 @@ function resetAnalysisPageState(): void {
   restoreRetryPanels = null;
   criticalAnalysisRefresh.clear();
   criticalDeferredMaia = false;
-  analyzing = false;
   lineCache.clear();
   nodeIndex.clear();
   engineRows = defaultAnalysisEngineRows();
@@ -6439,11 +6292,14 @@ export function mountAnalysisBrowser(): () => void {
     void onUserMove(from as Key, to as Key);
   };
   const schedulingStateHook = () => ({
-    analyzing,
-    searchActive: analysisAbort !== null && !analysisAbort.signal.aborted,
-    reloadActive: analysisReloadAbort !== null && !analysisReloadAbort.signal.aborted,
-    reloadQueued: reloadLc0AfterActiveRun,
-    disposeQueued: disposeUnusedEnginesAfterActiveRun,
+    analyzing: analysisIsAnalyzing(analysisRunState),
+    searchActive: analysisIsAnalyzing(analysisRunState),
+    reloadActive: analysisRunState.execution.tag === 'maintaining',
+    reloadQueued: analysisRunState.maintenance.reloadLc0,
+    disposeQueued: analysisRunState.maintenance.disposeUnused,
+    phase: analysisRunState.execution.tag,
+    runId: analysisOperationId(analysisRunState.execution),
+    revision: analysisRunState.revision,
     runtime: selectedLc0Runtime(),
     workerRuntime,
     hidden: hiddenTab.hidden,
