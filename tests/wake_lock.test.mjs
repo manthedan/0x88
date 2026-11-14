@@ -96,6 +96,9 @@ test('a turn aborted or disposed while acquiring a wake lock never renders or st
       ctxRequestEngineMove: () => {
         searches++;
       },
+      ctxSetEngineThinking: (target, thinking) => {
+        target.engineThinking = thinking;
+      },
     };
     const engineTurn = new Function(...Object.keys(dependencies), `${stripTypeScriptTypes(turn)}; return ctxEngineTurn;`)(...Object.values(dependencies));
     const running = engineTurn(ctx);
@@ -109,4 +112,53 @@ test('a turn aborted or disposed while acquiring a wake lock never renders or st
     assert.equal(searches, 0);
     assert.equal(releases, 1);
   }
+});
+
+test('the thinking indicator only shows when an engine turn outlasts the show delay', () => {
+  const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
+  const helper = source.slice(source.indexOf('const THINKING_SHOW_DELAY_MS'), source.indexOf('function ctxCancelEngineTurn('));
+  const timers = new Map();
+  let nextTimer = 0,
+    renders = 0;
+  const dependencies = {
+    setTimeout: (fn, ms) => {
+      timers.set(++nextTimer, { fn, ms });
+      return nextTimer;
+    },
+    clearTimeout: (id) => timers.delete(id),
+    ctxRender: () => {
+      renders++;
+    },
+  };
+  const setThinking = new Function(...Object.keys(dependencies), `${stripTypeScriptTypes(helper)}; return ctxSetEngineThinking;`)(...Object.values(dependencies));
+  const fire = () => {
+    const pending = [...timers.values()];
+    timers.clear();
+    for (const timer of pending) timer.fn();
+  };
+  const ctx = { engineThinking: false, thinkingShown: false, thinkingShowTimer: null, disposed: false };
+
+  // Fast reply: the turn ends before the delay, so nothing ever shows.
+  setThinking(ctx, true);
+  assert.equal(ctx.engineThinking, true);
+  assert.equal(ctx.thinkingShown, false);
+  setThinking(ctx, false);
+  assert.equal(timers.size, 0);
+  assert.equal(renders, 0);
+
+  // Slow reply: shows once the delay elapses, and hides with the turn.
+  setThinking(ctx, true);
+  assert.equal([...timers.values()][0].ms, 400);
+  fire();
+  assert.equal(ctx.thinkingShown, true);
+  assert.equal(renders, 1);
+  setThinking(ctx, false);
+  assert.equal(ctx.thinkingShown, false);
+
+  // A disposed page never renders from a late timer.
+  setThinking(ctx, true);
+  ctx.disposed = true;
+  fire();
+  assert.equal(ctx.thinkingShown, false);
+  assert.equal(renders, 1);
 });
