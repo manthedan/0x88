@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const MODEL_URL = '/models/bt4_soap_rem_c19000_final.onnx';
-const META_URL = '/models/bt4_soap_rem_c19000_final.meta.json';
+const MODEL_URL = '/models/s4fix_v_ema.onnx';
+const META_URL = '/models/s4fix_v_ema.meta.json';
 const TVMJS_MANIFEST_PATH = 'public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json';
 const TVMJS_MANIFEST_URL = TVMJS_MANIFEST_PATH.replace(/^public/, '');
 
@@ -38,11 +38,11 @@ test('stable artifact release maps the Centipawn logical URLs to immutable blobs
   for (const logicalUrl of logicalUrls) {
     const artifact = release.artifacts.find((entry) => entry.logicalUrl === logicalUrl);
     assert.ok(artifact, `missing ${logicalUrl}`);
-    assert.match(artifact.artifactUrl, /^https:\/\/assets\.0x88\.app\/artifacts\/sha256\/[a-f0-9]{64}\//);
+    assert.match(artifact.url ?? artifact.artifactUrl, /^https:\/\/assets\.0x88\.app\/artifacts\/sha256\/[a-f0-9]{64}\//);
   }
 });
 
-test('promoted Centipawn TVMJS manifest matches every staged runtime artifact', async () => {
+test('historical Centipawn TVMJS manifest matches every staged runtime artifact', async () => {
   const manifest = JSON.parse(await readFile(TVMJS_MANIFEST_PATH, 'utf8'));
   assert.equal(manifest.modelFamily, 'bt4-soap-rem-c19000-final');
   assert.equal(manifest.version, 'v2-shape-k16');

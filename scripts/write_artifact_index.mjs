@@ -114,12 +114,12 @@ const MODEL_GROUPS = [
     family: 'centipawn',
     uiLabel: 'Centipawn',
     status: 'default',
-    versionOrSource: 'bt4_soap_rem_c19000_final',
+    versionOrSource: 's4fix_v_ema',
     manifest: 'public/models/centipawn.manifest.json',
-    prefix: 'bt4_soap_rem_c19000_final.',
-    provenancePath: 'docs/model_provenance/bt4_soap_rem_c19000_final.md',
+    prefix: 's4fix_v_ema.',
+    provenancePath: 'docs/model_provenance/s4fix_v_ema.md',
     notes:
-      'Centipawn ORT model and the fallback for the promoted TVMJS runtime. BT4/SquareFormer + ThreatGraph TG1 trained in this project from LC0 public data with Stockfish labels.',
+      'Centipawn eight-layer SquareFormer + ThreatGraph TG1 EMA model, float32 dynamic-batch ONNX Runtime Web only. Search policy temperature 2; see provenance for strength limitations.',
   },
   {
     id: 'maia3',
@@ -138,11 +138,11 @@ const TVMJS_RUNTIMES = [
   {
     id: 'centipawn-tvmjs-webgpu-v2',
     family: 'centipawn',
-    uiLabel: 'Centipawn · TVMJS',
-    status: 'default',
+    uiLabel: 'Centipawn · TVMJS (old model)',
+    status: 'historical-research',
     manifest: 'public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json',
     notes:
-      'Promoted TVMJS WebGPU runtime for Centipawn (CENTIPAWN_TVMJS_WEBGPU_V2 in src/nn/runtimeRegistry.ts); falls back to the ORT model when WebGPU is unavailable.',
+      'Retained TVMJS WebGPU runtime for bt4-soap-rem-c19000-final only; incompatible with s4fix-v-ema and not selected by the served model.',
   },
 ];
 

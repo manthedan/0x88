@@ -34,6 +34,7 @@ function removeMatchingFiles(dir, predicate) {
 // hosts the app shell.
 removeMatchingFiles(join(root, 'models', 'lc0'), (name, _path, isDir) => (isDir ? name.endsWith('.lc0web') : /\.onnx(?:\.(?:br|gz))?$/.test(name)));
 removeMatchingFiles(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && /\.onnx(?:\.(?:br|gz))?$/.test(name));
+remove(join(root, 'models', 's4fix_v_ema.onnx'));
 remove(join(root, 'models', 'bt4_soap_rem_c19000_final.onnx'));
 remove(join(root, 'models', 'monty'));
 remove(join(root, 'monty'));

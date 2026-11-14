@@ -97,15 +97,15 @@
       "family": "centipawn",
       "uiLabel": "Centipawn",
       "status": "default",
-      "versionOrSource": "bt4_soap_rem_c19000_final",
+      "versionOrSource": "s4fix_v_ema",
       "deploymentStatus": "tracked-deployable",
       "manifestUrl": "/models/centipawn.manifest.json",
-      "provenancePath": "docs/model_provenance/bt4_soap_rem_c19000_final.md",
+      "provenancePath": "docs/model_provenance/s4fix_v_ema.md",
       "primaryUrls": [
-        "/models/bt4_soap_rem_c19000_final.onnx",
-        "/models/bt4_soap_rem_c19000_final.meta.json"
+        "/models/s4fix_v_ema.onnx",
+        "/models/s4fix_v_ema.meta.json"
       ],
-      "notes": "Centipawn ORT model and the fallback for the promoted TVMJS runtime. BT4/SquareFormer + ThreatGraph TG1 trained in this project from LC0 public data with Stockfish labels."
+      "notes": "Centipawn eight-layer SquareFormer + ThreatGraph TG1 EMA model, float32 dynamic-batch ONNX Runtime Web only. Search policy temperature 2; see provenance for strength limitations."
     },
     {
       "id": "maia3",
@@ -126,8 +126,8 @@
     {
       "id": "centipawn-tvmjs-webgpu-v2",
       "family": "centipawn",
-      "uiLabel": "Centipawn · TVMJS",
-      "status": "default",
+      "uiLabel": "Centipawn · TVMJS (old model)",
+      "status": "historical-research",
       "versionOrSource": "bt4-soap-rem-c19000-final f32 v2-shape-k16 (TVM v0.26.dev0-6-g94398e51f-dirty)",
       "deploymentStatus": "tracked-deployable",
       "manifestUrl": "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json",
@@ -138,7 +138,7 @@
         "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/bt4-soap-rem-c19000-final.batch16.f32.webgpu.tvmjs-wasm.probe.json",
         "/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/tvm-vector-size-storage-rewrite.patch"
       ],
-      "notes": "Promoted TVMJS WebGPU runtime for Centipawn (CENTIPAWN_TVMJS_WEBGPU_V2 in src/nn/runtimeRegistry.ts); falls back to the ORT model when WebGPU is unavailable."
+      "notes": "Retained TVMJS WebGPU runtime for bt4-soap-rem-c19000-final only; incompatible with s4fix-v-ema and not selected by the served model."
     },
     {
       "id": "lc0-tvmjs-webgpu",

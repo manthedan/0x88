@@ -14,7 +14,7 @@ concurrency:
 
 env:
   # LFS objects the tests and the build read. Everything else stays a pointer.
-  LFS_INCLUDE: public/models/bt4_soap_rem_c19000_final.onnx,public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm,public/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/squareformer-ffn/**
+  LFS_INCLUDE: public/models/s4fix_v_ema.onnx,public/models/bt4_soap_rem_c19000_final.onnx,public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm,public/runtimes/squareformer-tvm-hybrid/bt4-anneal-muon-best/v1/squareformer-ffn/**
 
 # Lint, audit, tests and build are independent jobs, so one failure never hides
 # another's result. Branch pushes already run CI, so a pull_request run is only

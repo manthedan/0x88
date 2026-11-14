@@ -167,7 +167,7 @@ function findForbiddenExternalAssets(root) {
   }
   walk(join(root, 'models', 'lc0'), (name, _path, isDir) => (isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx')));
   walk(join(root, 'models', 'maia3'), (name, _path, isDir) => !isDir && name.endsWith('.onnx'));
-  walk(join(root, 'models'), (name, _path, isDir) => !isDir && name === 'bt4_soap_rem_c19000_final.onnx');
+  walk(join(root, 'models'), (name, _path, isDir) => !isDir && ['s4fix_v_ema.onnx', 'bt4_soap_rem_c19000_final.onnx'].includes(name));
   walk(join(root, 'models', 'monty'), (_name, _path, _isDir) => true);
   walk(join(root, 'monty'), (_name, _path, _isDir) => true);
   for (const dir of EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES) {

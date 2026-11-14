@@ -19,7 +19,7 @@ export function shouldSkipR2PublicAsset(relPath, isDir) {
   if (parts[0] === 'artifacts') return true;
   if (parts[0] === 'models' && parts[1] === 'lc0') return isDir ? name.endsWith('.lc0web') : name.endsWith('.onnx');
   if (parts[0] === 'models' && parts[1] === 'maia3') return !isDir && name.endsWith('.onnx');
-  if (parts[0] === 'models' && !isDir && name === 'bt4_soap_rem_c19000_final.onnx') return true;
+  if (parts[0] === 'models' && !isDir && ['s4fix_v_ema.onnx', 'bt4_soap_rem_c19000_final.onnx'].includes(name)) return true;
   if (parts[0] === 'ort' && !isDir) return !isRequiredOrtRuntimeAsset(name);
   if (!isDir && isSameOriginThreadedStockfishScript(normalized)) return false;
   if (externalArtifactDirectories.has(parts[0])) return !isDir && isExternalArtifactName(name);

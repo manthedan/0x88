@@ -1,21 +1,21 @@
 {
   "schema": "0x88.centipawn-model-manifest.v1",
-  "generatedAt": "2026-07-09T00:00:00.000Z",
+  "generatedAt": "2026-11-13T00:00:00.000Z",
   "models": [
     {
-      "id": "bt4-soap-rem-c19000-final",
-      "file": "bt4_soap_rem_c19000_final.onnx",
-      "url": "/models/bt4_soap_rem_c19000_final.onnx",
-      "bytes": 4464375,
-      "sha256": "de2dd68518f6e2ed162da5ee27c67a5a4795567d6e39972e3705824572b7660e",
+      "id": "s4fix-v-ema",
+      "file": "s4fix_v_ema.onnx",
+      "url": "/models/s4fix_v_ema.onnx",
+      "bytes": 6224461,
+      "sha256": "58090183f9e3d7a50c68009a04a46da22222a7455127252904c9d16d03533027",
       "mode": "tracked-lfs"
     },
     {
-      "id": "bt4-soap-rem-c19000-final-meta",
-      "file": "bt4_soap_rem_c19000_final.meta.json",
-      "url": "/models/bt4_soap_rem_c19000_final.meta.json",
-      "bytes": 9047,
-      "sha256": "5b78093585ea34d3bcda599ed62d2c01fa4c1839114d9e81ee5b1f6dac4b1b22",
+      "id": "s4fix-v-ema-meta",
+      "file": "s4fix_v_ema.meta.json",
+      "url": "/models/s4fix_v_ema.meta.json",
+      "bytes": 4180,
+      "sha256": "7264cd1dcc86a530361d69b39ce87ba0581f12c63b4ef9acc8999ce1d52f6179",
       "mode": "tracked"
     }
   ]

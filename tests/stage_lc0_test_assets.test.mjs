@@ -89,7 +89,7 @@ test('the committed release catalog matches the committed LC0 manifest for every
       sha256: (entry.artifact.raw?.sha256 ?? entry.artifact.sha256).toLowerCase(),
     };
     assert.deepEqual(published, pinned.get(logicalUrl), logicalUrl);
-    assert.match(entry.artifact.artifactUrl, /^https:\/\/assets\.0x88\.app\/artifacts\/sha256\//);
+    assert.match(entry.representation?.url ?? entry.artifact.artifactUrl, /^https:\/\/assets\.0x88\.app\/artifacts\/sha256\//);
   }
 });
 
