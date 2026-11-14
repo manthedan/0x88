@@ -6,7 +6,7 @@ import { boardToFen, parseFen, squareName } from '../src/chess/board.ts';
 import { normalizePositionForStmWhite, normalizedMoveToOriginal } from '../src/chess/boardNormalization.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../src/chess/moveEncodings.ts';
-import { legalMoves } from '../src/chess/movegen.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { softmax } from '../src/nn/numerics.ts';
 import * as ort from '../src/nn/ortRuntime.ts';
 import { S4FIX_V_EMA_MODEL_ID, squareformerModelSettings } from '../src/nn/runtimeRegistry.ts';
@@ -95,4 +95,22 @@ test('s4fix ORT Web outputs and evaluator T=2 priors match the native fixture', 
   } finally {
     await session.release();
   }
+});
+
+test('s4fix repetition flag ignores an uncapturable en-passant square on the earlier occurrence', () => {
+  // 1.e4 leaves "e3" in the FEN although no black pawn can capture; the knight
+  // shuffle 1...Nf6 2.Nf3 Ng8 3.Ng1 returns to it with "-". Native keys match them.
+  const line = ['e2e4', 'g8f6', 'g1f3', 'f6g8', 'f3g1'];
+  let board = parseFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  const fens = [boardToFen(board)];
+  for (const uci of line) {
+    board = makeMove(board, legalMoves(board).find((move) => moveToUci(move) === uci));
+    fens.push(boardToFen(board));
+  }
+  const historyFens = fens.slice(0, -1).reverse();
+  assert.match(historyFens.at(-2), / e3 /);
+  const normalized = normalizePositionForStmWhite(board, historyFens);
+  const tokens = squareformerCompactInput(normalized.board, meta, normalized.historyFens, 'int64', settings);
+  const repBase = meta.history_plies + 9;
+  assert.equal(Number(tokens[repBase]), 1, 'current position is a repetition');
 });

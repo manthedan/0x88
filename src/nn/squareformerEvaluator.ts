@@ -3,6 +3,7 @@ import { isStmWhiteRankflip, normalizedMoveToOriginal, normalizePositionForStmWh
 import { type Move, moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import { isSquareAttacked, legalMoves } from '../chess/movegen.ts';
+import { repetitionKey, repetitionKeyFromFen, rootRepetitionKeyFromFen } from '../chess/drawRules.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import * as ort from './ortRuntime.ts';
@@ -140,6 +141,21 @@ function compactRepetitionFlags(board: BoardState, historyBoards: Array<BoardSta
   return keys.map((key, i) => (key == null ? 0 : keys.slice(i + 1).some((older) => older === key) ? 1 : 0));
 }
 
+// Native flags scan the whole line with the search's draw-rule keys: earlier
+// positions carry only a capturable en-passant square, the FEN root (oldest
+// entry) is compared as given.
+function nativeRepetitionFlags(board: BoardState, historyBoards: Array<BoardState | null>, historyFens: string[]): number[] {
+  return [board, ...historyBoards].map((position, i) => {
+    if (!position) return 0;
+    const key = repetitionKey(position);
+    for (let k = i; k < historyFens.length; k++) {
+      const older = k === historyFens.length - 1 ? rootRepetitionKeyFromFen(historyFens[k]) : repetitionKeyFromFen(historyFens[k]);
+      if (older === key) return 1;
+    }
+    return 0;
+  });
+}
+
 export type SquareFormerSettings = { policyTemperature?: number; nativeHistory?: boolean };
 
 export function squareformerCompactInput(
@@ -180,11 +196,7 @@ export function squareformerCompactInput(
     if (base + 7 < stride) setCompact(data, sq * stride + base + 7, sq);
   }
   if (stride >= history + 9 + history + 1) {
-    const repFlags = settings.nativeHistory
-      ? [board, ...historyBoards].map((position, i) =>
-          position && historyFens.slice(i).some((fen) => fen.trim().split(/\s+/).slice(0, 4).join(' ') === repetitionKeyCached(position)) ? 1 : 0,
-        )
-      : compactRepetitionFlags(board, historyBoards, history);
+    const repFlags = settings.nativeHistory ? nativeRepetitionFlags(board, historyBoards, historyFens) : compactRepetitionFlags(board, historyBoards, history);
     const repBase = history + 9;
     for (let sq = 0; sq < 64; sq++) {
       for (let i = 0; i < Math.min(history + 1, repFlags.length); i++) setCompact(data, sq * stride + repBase + i, repFlags[i]);
