@@ -94,3 +94,28 @@ test('BigNetSessionPool releaseUnused schedules only inactive retained nets', ()
   assert.equal(bt4.disposeCalls, 0);
   assert.equal(t3.disposeCalls, 1);
 });
+
+test('default scheduler calls the timer globals unbound (browsers reject a foreign receiver)', () => {
+  const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
+  const calls = [];
+  globalThis.setTimeout = function (fn, delay) {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+    calls.push(['set', delay]);
+    return 7;
+  };
+  globalThis.clearTimeout = function (handle) {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+    calls.push(['clear', handle]);
+  };
+  try {
+    const pool = new BigNetSessionPool((config) => new FakeSearcher(config));
+    pool.acquire('t3');
+    pool.release('t3', 1000);
+    pool.acquire('t3');
+    assert.deepEqual(calls, [['set', 1000], ['clear', 7]]);
+  } finally {
+    globalThis.setTimeout = realSet;
+    globalThis.clearTimeout = realClear;
+  }
+});

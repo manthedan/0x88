@@ -10,6 +10,13 @@ type TimerScheduler = {
   clearTimeout: typeof clearTimeout;
 };
 
+// Browsers throw "Illegal invocation" when setTimeout is called as a method of
+// another object, so the default scheduler calls the globals directly.
+const defaultScheduler: TimerScheduler = {
+  setTimeout: ((handler: () => void, timeout?: number) => setTimeout(handler, timeout)) as typeof setTimeout,
+  clearTimeout: (handle) => clearTimeout(handle),
+};
+
 type DisposableSearcher = {
   dispose(): void;
 };
@@ -25,7 +32,7 @@ export class BigNetSessionPool<T extends DisposableSearcher> {
   private readonly scheduler: TimerScheduler;
   private readonly defaultIdleTtlMs: number;
 
-  constructor(factory: (config: BigNetConfig) => T, scheduler: TimerScheduler = { setTimeout, clearTimeout }, defaultIdleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS) {
+  constructor(factory: (config: BigNetConfig) => T, scheduler: TimerScheduler = defaultScheduler, defaultIdleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS) {
     this.factory = factory;
     this.scheduler = scheduler;
     this.defaultIdleTtlMs = defaultIdleTtlMs;
