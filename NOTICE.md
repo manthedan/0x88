@@ -73,7 +73,8 @@ rather than guessing.
 | Maia 3 `maia3_simplified.onnx` (fp16, byte-identical to [CSSLab/maia-platform-frontend](https://github.com/CSSLab/maia-platform-frontend) at `0013cc8e`) and the local `maia3_simplified.qdq8.onnx` derivation | [CSSLab/maia3](https://github.com/CSSLab/maia3) | Maia3 AGPL-3.0; platform frontend GPL-3.0 (see `docs/model_provenance/maia3.md`) |
 | Lc0 networks: `t1-256x10-distilled-swa-2432500`, `t3-512x15x16h-distill-swa-2767500`, `BT4-1024x15x32h-swa-6147500`, `BT4-1024x15x32h-swa-6147500-policytune-332` (ONNX exports and quantizations) | Leela Chess Zero project | Licence not recorded here — to be confirmed by the maintainer. `public/models/lc0/manifest.json` records URLs, sizes and hashes only. |
 | Leela Queen Odds `lqo_v2` (`lqo_v2.f16.onnx` and its QDQ8 derivation) | [notune/LeelaQueenOdds](https://github.com/notune/LeelaQueenOdds) | Licence not recorded here — to be confirmed by the maintainer. |
-| Centipawn `bt4_soap_rem_c19000_final` (ONNX and the TVMJS WebGPU export) | Trained in this project; provenance in `docs/model_provenance/bt4_soap_rem_c19000_final.md` | Licence not recorded here — to be confirmed by the maintainer. The provenance doc states none; the repository itself is GPL-3.0-or-later. |
+| Centipawn `s4fix_v_ema` (served ONNX model) | Trained in this project; provenance in `docs/model_provenance/s4fix_v_ema.md` | Model licence not stated in the ship bundle — maintainer confirmation required. The repository is GPL-3.0-or-later. |
+| Historical Centipawn `bt4_soap_rem_c19000_final` (ONNX and the TVMJS WebGPU export) | Trained in this project; provenance in `docs/model_provenance/bt4_soap_rem_c19000_final.md` | Licence not recorded here — to be confirmed by the maintainer. The provenance doc states none; the repository itself is GPL-3.0-or-later. |
 
 Maia 3 is AGPL-3.0 upstream. `docs/model_provenance/maia3.md` records the
 source offer (upstream links plus the QDQ8 derivation recipe) that a deployed

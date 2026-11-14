@@ -743,7 +743,7 @@ onMount(() => {
     <ul>
       <li><strong>CPU engines are unaffected.</strong> Stockfish, Reckless, Berserk, Viridithas, PlentyChess and Stormphrax always run as WebAssembly on the CPU.</li>
       <li><strong>Lc0 (Small net) and Maia3</strong> run through ONNX Runtime and fall back to WebAssembly on the CPU, which is slower.</li>
-      <li><strong>Centipawn</strong> tries its TVMJS WebGPU runtime first and falls back to ONNX Runtime automatically.</li>
+      <li><strong>Centipawn</strong> runs the s4fix EMA model with ONNX Runtime Web only.</li>
       <li><strong>Large Lc0 nets (t3, BT4) and Leela Queen Odds</strong> fall back to the CPU in Analysis and Play. Play lowers their visit budgets and warns that each move can take several seconds. In Arena they need WebGPU, and a match that includes them will not start without it.</li>
       <li><strong>WebGPU without 16-bit floats.</strong> Some GPUs offer WebGPU but not 16-bit float shaders (<code>shader-f16</code>), for example NVIDIA GPUs on Linux in a default Chrome install. The Lc0 nets, Leela Queen Odds and Maia3 need that feature, so on those GPUs they take the CPU fallbacks above.</li>
     </ul>
@@ -760,7 +760,7 @@ onMount(() => {
         <tr><td>Lc0 t3-512 net</td><td>163&nbsp;MB</td></tr>
         <tr><td>Leela Queen Odds net</td><td>96&nbsp;MB</td></tr>
         <tr><td>Maia3 model</td><td>28&nbsp;MB</td></tr>
-        <tr><td>Centipawn TVMJS runtime</td><td>26&nbsp;MB</td></tr>
+        <tr><td>Centipawn s4fix EMA model</td><td>6.2&nbsp;MB plus ONNX Runtime Web</td></tr>
       </tbody>
     </table>
     <ul>
@@ -796,7 +796,7 @@ onMount(() => {
       <tr><th scope="row"><a href="#engines-lc0">Leela Chess Zero</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Neural network (Small, t3, BT4) with 0x88’s PUCT search</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0-or-later</span></td></tr>
       <tr><th scope="row"><a href="#engines-lqo">Leela Queen Odds</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Queen-odds network with 0x88’s PUCT search</td><td>Play</td><td><span class="lic agpl">AGPL-3.0</span></td></tr>
       <tr><th scope="row"><a href="#engines-maia3">Maia3</a></th><td>GPU<span class="sub">CPU fallback</span></td><td>Rating-conditioned human-move model, no search</td><td>Play, Analysis (Human tab)</td><td><span class="lic agpl">AGPL-3.0</span></td></tr>
-      <tr><th scope="row"><a href="#engines-centipawn">Centipawn</a></th><td>GPU<span class="sub">ORT fallback</span></td><td>0x88’s experimental neural engine</td><td>Analysis, Arena, Play</td><td><span class="lic own">0x88 project</span></td></tr>
+      <tr><th scope="row"><a href="#engines-centipawn">Centipawn</a></th><td>ORT Web<span class="sub">WebGPU or WASM</span></td><td>0x88’s experimental neural engine</td><td>Analysis, Arena, Play</td><td><span class="lic own">0x88 project</span></td></tr>
       <tr><th scope="row"><a href="#engines-stockfish">Stockfish 19</a></th><td>CPU</td><td>Alpha-beta search with NNUE, Lite and full builds</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0</span></td></tr>
       <tr><th scope="row"><a href="#engines-berserk">Berserk</a></th><td>CPU</td><td>Principal-variation search with bucketed NNUE</td><td>Analysis, Arena, Play</td><td><span class="lic gpl">GPL-3.0</span></td></tr>
       <tr><th scope="row"><a href="#engines-viridithas">Viridithas</a></th><td>CPU</td><td>Search with NNUE evaluation</td><td>Analysis, Arena, Play</td><td><span class="lic mit">MIT (pinned)</span></td></tr>
@@ -864,7 +864,7 @@ onMount(() => {
     <dl class="engine-meta">
       <dt>Packaging</dt><dd><a href="https://github.com/manthedan/0x88" rel="noopener">github.com/manthedan/0x88</a> (in-house)</dd>
     </dl>
-    <p>Centipawn is 0x88's own edge-deployed neural chess engine, and it is experimental. It evaluates the SquareFormer/BT4 network family in the browser with TVMJS WebGPU as the primary runtime and automatic ONNX Runtime WebGPU fallback, and appears on the Play, Analysis, and Arena pages at five strength levels.</p>
+    <p>Centipawn is 0x88's experimental neural chess engine. The served s4fix V EMA model has eight SquareFormer layers and runs in ONNX Runtime Web. Search uses legal-move policy temperature 2; WDL is unchanged. Play offers five visit budgets, and Analysis and Arena accept a chosen search budget. Historical TVMJS artifacts target an older graph and are not used for this model.</p>
   </div>
 
   <div class="engine-entry">
@@ -960,7 +960,7 @@ onMount(() => {
 
   <div class="callout info">
     <h4 id="neural-stable-baseline">Stable baseline</h4>
-    <p><strong>ONNX Runtime WebGPU</strong> is the stable neural baseline and rollback path. TVMJS, custom WGSL, WebNN, and QDQ artifacts all need to prove themselves against ORT WebGPU with fixture drift and search-move gates before they can become product defaults. The TVMJS lane has cleared those gates for Centipawn, where it is the promoted primary runtime with automatic ORT fallback; everywhere else the rule still applies.</p>
+    <p><strong>ONNX Runtime WebGPU</strong> is the stable neural baseline and rollback path. TVMJS, custom WGSL, WebNN, and QDQ artifacts all need to prove themselves against ORT WebGPU with fixture drift and search-move gates before they can become product defaults. Historical Centipawn TVMJS artifacts cleared gates for an older model only. The served s4fix EMA model is ORT-only; it has no compiled runtime.</p>
   </div>
 
   <table style="width:100%; border-collapse:collapse; font-size:13px; margin:8px 0 24px">
@@ -990,7 +990,7 @@ onMount(() => {
       <tr>
         <td style="padding:10px; border-bottom:1px solid var(--rule); font-weight:600">TVMJS WebGPU</td>
         <td style="padding:10px; border-bottom:1px solid var(--rule)">Compiler path from ONNX to TVM Relax to browser-loadable TVMJS wasm plus WebGPU pipelines.</td>
-        <td style="padding:10px; border-bottom:1px solid var(--rule)">Promoted primary runtime for Centipawn with automatic ORT fallback; other models remain research/opt-in pending separate hosting, provenance, and cross-device gates.</td>
+        <td style="padding:10px; border-bottom:1px solid var(--rule)">Historical Centipawn model only, not the served s4fix EMA graph. Other compiled models remain research/opt-in pending separate hosting, provenance, and cross-device gates.</td>
       </tr>
       <tr>
         <td style="padding:10px; font-weight:600">ORT WebNN EP</td>

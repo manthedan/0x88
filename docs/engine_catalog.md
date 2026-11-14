@@ -1,6 +1,6 @@
 # Browser engine catalog and onboarding process
 
-Non-Centipawn cards checked against the current tree: 2026-11-12. Centipawn material is deferred.
+Non-Centipawn cards checked against the current tree: 2026-11-12. Centipawn updated for the 2026-11-13 s4fix EMA bundle.
 
 This is the working catalog for engine families exposed by `/app/arena/` and `/app/analysis/`. It records what we adapted, which artifacts/variants the UI can select, how complete the browser integration is, and where to resume optimization later.
 
@@ -38,7 +38,7 @@ Every engine family should have one card with these fields:
 | Family | Variants in UI | Default posture | Main adapter | Version/source anchor | Footprint headline | Current note |
 | --- | --- | --- | --- | --- | --- | --- |
 | Lc0 | `small`, `t3`, `bt4` | `small` stable; large nets explicit/gated | ORT/WebGPU/WASM worker + explicit research runtimes | Small `t1-256x10-distilled-swa-2432500`; t3 `distill-swa-2767500`; BT4 `policytune-332` | Small b1 f16 QDQ8; t3 b8 f16 ~163 MB; BT4 b8 f16 QDQ8 ~178 MB | Apple-only split-K selection is model-specific; see `lc0SmallModelSelection.ts` and dated outcome records. |
-| Centipawn | `bt4-ort` (production), legacy `bt4-auto`/`bt4-custom` in research builds | Production ORT baseline; legacy custom WebGPU explicit | Centipawn SquareFormer evaluator/search path | BT4 SOAP REM c19000 | Small public model relative to LC0 BT4 | Legacy `tiny` deep-links and URL overrides are accepted for compatibility. |
+| Centipawn | `bt4-auto`, `bt4-ort` | ONNX Runtime Web only | Centipawn SquareFormer evaluator/search path | s4fix V EMA, eight layers | Float32 dynamic-batch model, 6.2 MB | Persisted compiled selectors fall back to ORT; legacy `tiny` deep-links remain accepted. |
 | Stockfish | `lite`, `full` | Lite single-thread default opponent | NPM `stockfish` JS/WASM UCI worker | `stockfish@19.0.1` | Lite WASM ~1.8 MB; full WASM ~94 MB | Mature UCI baseline; strongest/large full variant is optional. |
 | Reckless | `simd`, `relaxed-simd`, `full`, `browser-api`, `browser-api-simd`, `browser-api-simd-external`, `wasi-simd-external`, `lite` | Relaxed SIMD if available; fixed SIMD fallback; scalar final fallback | Patched Rust `wasm32-wasip1` UCI; optional direct browser API | Upstream `codedeliveryservice/Reckless` commit `0010617448bd` + local patches | Integrated full WASM ~62 MB; external API WASM ~1.2 MB + NNUE ~60 MB | Best current non-Stockfish browser engine candidate; the default speed ladder is relaxed SIMD > fixed SIMD > scalar WASI/UCI. |
 | Viridithas | `relaxed-simd`, `simd`, `default` | Relaxed SIMD when the browser validates it; SIMD, then scalar | Patched Rust `wasm32-wasip1` UCI, one-shot/persistent/batch | Upstream `cosmobobak/viridithas` tag `v20.0.0` commit `0631113e` + v109 `sandhi-s2-b200.nnue.zst` + local patches | WASM ~53 MB with compressed NNUE embedded | Persistent cooperative cancellation is implemented with a watchdog; one-shot abort terminates. The family remains experimental. |
@@ -114,9 +114,9 @@ Generated large/GPL/AGPL blobs remain local unless the release follows `docs/eng
 ### Centipawn family
 
 - **Family id / UI label:** `centipawn` / `Centipawn`.
-- **Integration status:** mixed; an active family while old research/ops artifacts are removed.
-- **Runtime adapter:** Centipawn SquareFormer evaluator with ORT baseline and explicit custom WebGPU variant.
-- **UI variants:** `bt4-auto`, `bt4-ort`, `bt4-custom`.
+- **Integration status:** served `s4fix-v-ema`; see `docs/model_provenance/s4fix_v_ema.md` for the contract and strength limits.
+- **Runtime adapter:** ONNX Runtime Web only. Historical compiled graphs cannot run this model; persisted compiled selectors resolve to ORT with a fallback warning.
+- **UI variants:** `bt4-auto`, `bt4-ort`. The stored `bt4-custom` key is still handled safely.
 - **Naming note:** previously called "Tiny Leela". The legacy family key `tiny` is still accepted on input (deep-links such as `?engine=tiny`, seat specs, and the `tinyModel`/`tinyMeta`/`tinyManifest` overrides) via `canonicalEngineFamily`, and the hybrid manifest loader still accepts the legacy `tiny-leela.squareformer-tvm-hybrid.v1` schema. The shared NN-runtime infra (`tinyLeela*` timing/env/localStorage) keeps its name for now.
 
 ### Stockfish family

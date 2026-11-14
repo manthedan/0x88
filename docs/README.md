@@ -49,7 +49,9 @@ proposals. A historical record is not an instruction to restore its old defaults
 - [`model_manifest.md`](model_manifest.md) — historical: the removed project-level model manifest builder; points to the current per-artifact manifests.
 - [`model_efficiency_metrics.md`](model_efficiency_metrics.md) — Centipawn model efficiency metrics (deferred).
 - [`model_provenance/`](model_provenance/) — per-model provenance and derivation recipes (license load-bearing):
-  - [`model_provenance/bt4_soap_rem_c19000_final.md`](model_provenance/bt4_soap_rem_c19000_final.md) — Centipawn `bt4_soap_rem_c19000_final` model.
+  - [`model_provenance/s4fix_v_ema.md`](model_provenance/s4fix_v_ema.md) — served Centipawn model, contract, search settings and strength limits.
+  - [`model_provenance/s4fix_v_ema_verification.md`](model_provenance/s4fix_v_ema_verification.md) — local parity/search results, option comparison and publication cautions.
+  - [`model_provenance/bt4_soap_rem_c19000_final.md`](model_provenance/bt4_soap_rem_c19000_final.md) — historical Centipawn model.
   - [`model_provenance/maia3.md`](model_provenance/maia3.md) — Maia3 upstream file, QDQ8 and graph-rewrite derivation recipes and source offer.
 
 ## Audits, parity records, and decision logs

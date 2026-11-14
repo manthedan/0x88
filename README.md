@@ -31,7 +31,7 @@ Maia 3 is not a catalog family: Play and Analysis load it directly
 | Family | Kind | Runtime |
 | --- | --- | --- |
 | **Lc0** | neural (t1-256x10, t3-512, BT4; Leela Queen Odds in Play) | ORT WebGPU, WASM fallback |
-| **Centipawn** | neural (SquareFormer + ThreatGraph, trained here) | TVMJS WebGPU, ORT fallback |
+| **Centipawn** | neural (SquareFormer + ThreatGraph, trained here) | ONNX Runtime Web (s4fix EMA) |
 | **Maia 3** (Play and Analysis only) | neural human model, Elo-conditioned | ORT WebGPU |
 | **Stockfish** | classical NNUE | WASM, threaded |
 | **Reckless** | classical NNUE (Rust) | WASI, relaxed SIMD |
@@ -123,7 +123,7 @@ objects at clone time and fetch only what the app runs from `public/`:
 ```sh
 GIT_LFS_SKIP_SMUDGE=1 git clone <url> 0x88
 cd 0x88
-git lfs pull --include="public/stockfish/*.wasm,public/berserk/*.wasm,public/berserk/*.data,public/plentychess/*.wasm,public/plentychess/*.data,public/stormphrax/*.wasm,public/stormphrax/*.data,public/viridithas/*.wasm,public/models/bt4_soap_rem_c19000_final.onnx,public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm"
+git lfs pull --include="public/stockfish/*.wasm,public/berserk/*.wasm,public/berserk/*.data,public/plentychess/*.wasm,public/plentychess/*.data,public/stormphrax/*.wasm,public/stormphrax/*.data,public/viridithas/*.wasm,public/models/s4fix_v_ema.onnx,public/models/bt4_soap_rem_c19000_final.onnx,public/runtimes/centipawn-tvmjs-webgpu/**/*.wasm"
 ```
 
 Until they are pulled, those files are small LFS pointer files and the engines
