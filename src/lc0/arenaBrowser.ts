@@ -2966,10 +2966,17 @@ function buildEngines() {
     (engineId: string, row: EngineRow): ArenaEngine['move'] =>
     async (positions, signal) => {
       const { config, searcher } = bigNetFor(row.variant);
-      const onAbort = () => searcher.cancel();
+      // A stopped move gives up its progress display at once; its late download
+      // callbacks and finally must not touch the next operation's display.
+      const onAbort = () => {
+        searcher.cancel();
+        hideDownloadProgress();
+      };
       signal.addEventListener('abort', onAbort, { once: true });
       const label = engines.get(engineId)?.name ?? `Lc0 ${config.name}`;
-      searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(label, loaded, total, 'Downloading');
+      searcher.onDownloadProgress = (loaded, total) => {
+        if (!signal.aborted) showDownloadProgress(label, loaded, total, 'Downloading');
+      };
       try {
         const timed = arenaBudgetMode() === 'movetime';
         const result = await searcher.search(
@@ -2990,7 +2997,7 @@ function buildEngines() {
         return result.move ?? null;
       } finally {
         signal.removeEventListener('abort', onAbort);
-        hideDownloadProgress();
+        if (!signal.aborted) hideDownloadProgress();
         clearArenaSearchProgress(engineId);
       }
     };
@@ -3131,7 +3138,12 @@ function buildEngines() {
   };
   const lc0BigNetWarmup = (variant: string) => async (signal: AbortSignal) => {
     const { config, searcher } = bigNetFor(variant);
-    searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(`Lc0 ${config.name}`, loaded, total, 'Downloading');
+    // Same ownership as a move: Stop hides this warmup's display immediately.
+    const onAbort = () => hideDownloadProgress();
+    signal.addEventListener('abort', onAbort, { once: true });
+    searcher.onDownloadProgress = (loaded, total) => {
+      if (!signal.aborted) showDownloadProgress(`Lc0 ${config.name}`, loaded, total, 'Downloading');
+    };
     try {
       await searcher.search(
         { positions: warmupPositions },
@@ -3145,7 +3157,8 @@ function buildEngines() {
       );
       if (!signal.aborted) await searcher.resetTree();
     } finally {
-      hideDownloadProgress();
+      signal.removeEventListener('abort', onAbort);
+      if (!signal.aborted) hideDownloadProgress();
     }
   };
   const centipawnWarmup = (row: EngineRow) => async (signal: AbortSignal) => {

@@ -278,8 +278,14 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     if (this.disposed) throw this.disposedError();
     this.workerObjectUrl = URL.createObjectURL(new Blob([emscriptenUciWorkerScript(this.config)], { type: 'text/javascript' }));
     const worker = new Worker(this.workerObjectUrl);
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.handleMessage(event.data);
-    worker.onerror = (event) => this.failAll(new Error(event.message || `${this.config.label} worker error`));
+    // stdout lines and errors carry no command id: only the current worker may
+    // deliver them, so a retired worker's queued events cannot reach its replacement.
+    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+      if (this.worker === worker) this.handleMessage(event.data);
+    };
+    worker.onerror = (event) => {
+      if (this.worker === worker) this.failAll(new Error(event.message || `${this.config.label} worker error`));
+    };
     this.worker = worker;
     return worker;
   }

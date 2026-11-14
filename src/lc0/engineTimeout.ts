@@ -9,8 +9,10 @@ export async function withEngineTimeout<T>(label: string, parentSignal: AbortSig
     abortReject = reject;
   });
   const onAbort = () => {
-    controller.abort();
+    // Claim the cancellation first, as the deadline does: a task that settles
+    // from its own abort listener must not turn Cancel into a partial result.
     abortReject?.(new DOMException('Analysis aborted', 'AbortError'));
+    controller.abort();
   };
   parentSignal.addEventListener('abort', onAbort, { once: true });
   try {
