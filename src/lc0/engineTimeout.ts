@@ -18,8 +18,10 @@ export async function withEngineTimeout<T>(label: string, parentSignal: AbortSig
     taskPromise.catch(() => undefined);
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        controller.abort();
+        // Claim the deadline before abort listeners can settle the task with
+        // a partial success or AbortError (which Analysis treats as Cancel).
         reject(new Error(timeoutMessage));
+        controller.abort();
       }, timeoutMs);
     });
     return await Promise.race([taskPromise, timeoutPromise, abortPromise]);

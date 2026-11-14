@@ -3131,17 +3131,20 @@ function buildEngines() {
   };
   const lc0BigNetWarmup = (variant: string) => async (signal: AbortSignal) => {
     const { config, searcher } = bigNetFor(variant);
-    const onAbort = () => searcher.cancel();
-    signal.addEventListener('abort', onAbort, { once: true });
     searcher.onDownloadProgress = (loaded, total) => showDownloadProgress(`Lc0 ${config.name}`, loaded, total, 'Downloading');
     try {
       await searcher.search(
         { positions: warmupPositions },
-        { visits: 1, batchSize: config.recommendedBatchSize, batchPipelineDepth: config.recommendedPipelineDepth, evalCacheEntries: arenaCacheEntries() },
+        {
+          visits: 1,
+          batchSize: config.recommendedBatchSize,
+          batchPipelineDepth: config.recommendedPipelineDepth,
+          evalCacheEntries: arenaCacheEntries(),
+          signal,
+        },
       );
-      await searcher.resetTree();
+      if (!signal.aborted) await searcher.resetTree();
     } finally {
-      signal.removeEventListener('abort', onAbort);
       hideDownloadProgress();
     }
   };

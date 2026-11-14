@@ -761,13 +761,15 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
         ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
         progressShown = true;
-        searcher.onDownloadProgress = (loaded, total) => ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
+        searcher.onDownloadProgress = (loaded, total) => {
+          if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
+        };
       }
       const evaluation = await (async () => {
         try {
           return await searcher.evaluate({ positions: ctx.positions }, { evalCacheEntries: 2048 });
         } finally {
-          if (progressShown) ctxHideDownloadProgress();
+          if (progressShown && !signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress();
         }
       })();
       if (signal.aborted) return null;
@@ -965,7 +967,11 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
     } else {
       const engine = await ctxCpuEngineFor(ctx, option);
       engine.setOptions({ depth: 1, movetimeMs: undefined });
-      await engine.bestMove(boardToFen(ctx.board), signal);
+      const uci = await engine.bestMove(boardToFen(ctx.board), signal);
+      // A cancelled probe has no answer to check; the guard below returns.
+      if (!signal.aborted && (!uci || !legalMoves(ctx.board).some((move) => moveToUci(move) === uci))) {
+        throw new Error(`${option.label} readiness check returned ${uci ? `illegal move ${uci}` : 'no move'}.`);
+      }
     }
     if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
     ctx.engineReady = true;

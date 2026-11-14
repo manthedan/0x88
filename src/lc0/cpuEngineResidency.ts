@@ -10,10 +10,10 @@
  * cleared only after the reset succeeds, so an aborted reset is retried.
  */
 export class PendingCpuNewGames {
-  private readonly ids = new Set<string>();
+  private readonly ids = new Map<string, symbol>();
 
   markAll(ids: Iterable<string>): void {
-    for (const id of ids) this.ids.add(id);
+    for (const id of ids) this.ids.set(id, Symbol());
   }
 
   forget(id: string): void {
@@ -25,9 +25,11 @@ export class PendingCpuNewGames {
   }
 
   async resetIfPending(id: string, engine: { newGame?(signal?: AbortSignal): Promise<void> }, signal?: AbortSignal): Promise<void> {
-    if (!this.ids.has(id)) return;
+    const mark = this.ids.get(id);
+    if (mark === undefined) return;
     await engine.newGame?.(signal);
-    this.ids.delete(id);
+    // A newer game (or replacement engine with the same id) owns its own reset.
+    if (this.ids.get(id) === mark) this.ids.delete(id);
   }
 }
 

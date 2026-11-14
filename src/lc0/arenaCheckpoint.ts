@@ -329,10 +329,18 @@ function openDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined') return Promise.reject(new Error('IndexedDB is unavailable'));
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(ARENA_CHECKPOINT_DB, 1);
+    let abandoned = false;
     request.onupgradeneeded = () => request.result.createObjectStore(ARENA_CHECKPOINT_STORE);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      // A blocked open cannot be cancelled and may succeed after we rejected it.
+      if (abandoned) request.result.close();
+      else resolve(request.result);
+    };
     request.onerror = () => reject(request.error ?? new Error('Cannot open tournament storage'));
-    request.onblocked = () => reject(new Error('Tournament storage is blocked by another tab'));
+    request.onblocked = () => {
+      abandoned = true;
+      reject(new Error('Tournament storage is blocked by another tab'));
+    };
   });
 }
 export async function loadArenaCheckpoint(): Promise<ArenaCheckpoint | null> {

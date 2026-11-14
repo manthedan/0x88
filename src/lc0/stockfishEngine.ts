@@ -241,6 +241,8 @@ export class StockfishEngine implements BrowserUciEngine {
   private rejectAnalyze: ((error: Error) => void) | null = null;
   private resolveReady: (() => void) | null = null;
   private rejectReady: ((error: Error) => void) | null = null;
+  /** `readyok` replies still owed to cancelled `isready` requests (UCI answers in order). */
+  private staleReadyoks = 0;
   private rejectInit: ((error: Error) => void) | null = null;
   private analyzeLines: Map<number, StockfishInfoLine> | null = null;
   private lastInfoLines: StockfishInfoLine[] = [];
@@ -322,6 +324,7 @@ export class StockfishEngine implements BrowserUciEngine {
     this.rejectAnalyze = null;
     this.resolveReady = null;
     this.rejectReady = null;
+    this.staleReadyoks = 0;
     this.rejectInit = null;
     this.analyzeLines = null;
     this.lastInfoLines = [];
@@ -334,6 +337,23 @@ export class StockfishEngine implements BrowserUciEngine {
     rejectAnalyze?.(error);
     rejectReady?.(error);
     rejectInit?.(error);
+  }
+
+  /**
+   * Wait for startup, but let the caller stop waiting. Startup itself keeps
+   * going: Analysis cancels runs on every navigation, and killing a cold start
+   * there would restart the download each time. Owners that want the worker
+   * gone (Arena's private seats, page teardown) call dispose().
+   */
+  private awaitInit(signal?: AbortSignal): Promise<void> {
+    if (this.disposed || signal?.aborted) return Promise.reject(abortError());
+    const ready = this.init();
+    if (!signal) return ready;
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = () => reject(abortError());
+      signal.addEventListener('abort', onAbort, { once: true });
+      ready.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+    });
   }
 
   private init(): Promise<void> {
@@ -350,6 +370,7 @@ export class StockfishEngine implements BrowserUciEngine {
         const worker = new Worker(workerUrl.url);
         this.worker = worker;
         worker.onmessage = (event: MessageEvent) => {
+          if (this.worker !== worker) return;
           const line = typeof event.data === 'string' ? event.data : String(event.data);
           if (line === 'uciok') {
             this.applyOptions();
@@ -357,6 +378,10 @@ export class StockfishEngine implements BrowserUciEngine {
             return;
           }
           if (line === 'readyok') {
+            if (this.staleReadyoks > 0) {
+              this.staleReadyoks--;
+              return;
+            }
             if (this.resolveReady) {
               const resolveReady = this.resolveReady;
               this.resolveReady = null;
@@ -401,6 +426,7 @@ export class StockfishEngine implements BrowserUciEngine {
           // the browser from also reporting the same handled worker event as
           // an uncaught global error.
           event.preventDefault?.();
+          if (this.worker !== worker) return;
           const error = new Error(event.message || 'Stockfish worker error');
           this.failActive(error);
           reject(error);
@@ -424,8 +450,11 @@ export class StockfishEngine implements BrowserUciEngine {
     if (!this.worker) return Promise.reject(new Error('Stockfish worker was not initialized'));
     return new Promise<void>((resolve, reject) => {
       const onAbort = () => {
+        // UCI readyok has no request ID, but replies arrive in order: drop the
+        // one this request is still owed so it cannot complete a later barrier.
         this.resolveReady = null;
         this.rejectReady = null;
+        this.staleReadyoks++;
         reject(abortError());
       };
       this.resolveReady = () => {
@@ -444,7 +473,7 @@ export class StockfishEngine implements BrowserUciEngine {
   /** Start the worker and complete the UCI/isready handshake before a real search. */
   async prewarm(signal?: AbortSignal): Promise<void> {
     return this.runExclusive(async () => {
-      await this.init();
+      await this.awaitInit(signal);
       if (signal?.aborted) throw abortError();
     });
   }
@@ -452,7 +481,7 @@ export class StockfishEngine implements BrowserUciEngine {
   /** Reset Stockfish state/hash for a fresh game and wait for `readyok`. */
   async newGame(signal?: AbortSignal): Promise<void> {
     return this.runExclusive(async () => {
-      await this.init();
+      await this.awaitInit(signal);
       if (!this.worker || signal?.aborted) throw abortError();
       this.worker.postMessage('ucinewgame');
       await this.waitReady(signal);
@@ -493,7 +522,7 @@ export class StockfishEngine implements BrowserUciEngine {
   async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
       const position = uciPositionCommand(fen, opts.moves);
-      await this.init();
+      await this.awaitInit(signal);
       if (!this.worker || signal?.aborted) return null;
       this.lastInfoLines = [];
       this.analyzeLines = new Map();
@@ -531,7 +560,7 @@ export class StockfishEngine implements BrowserUciEngine {
   /** MultiPV analysis of a FEN: returns one info line per PV, sorted by rank. */
   async analyze(fen: string, opts: BrowserUciAnalysisOptions = {}): Promise<StockfishInfoLine[]> {
     return this.runExclusive(async () => {
-      await this.init();
+      await this.awaitInit(opts.signal);
       if (!this.worker || opts.signal?.aborted) return [];
       const position = uciPositionCommand(fen, opts.moves);
       const multipv = Math.max(1, Math.floor(opts.multipv ?? 1));
