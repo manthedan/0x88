@@ -216,6 +216,9 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     const isStaleMount = (signal) => signal.aborted || signal !== mountAbort.signal;
     const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {};
     let centipawnHybridManifestStatus = 'unknown';
+    // The TVMJS manifest fallback only runs for the legacy research override;
+    // the shipped s4fix model is ORT-only and skips the manifest probe.
+    const LEGACY_CENTIPAWN_OVERRIDE = true;
     const CENTIPAWN_HYBRID_MANIFEST_URL = 'fake-manifest', resolvePublicAssetUrl = (url) => url;
     const fetch = async () => ({ ok: false }), renderEngineList = () => {};
     const centipawnVariants = [], centipawnCache = { has: () => true };
@@ -234,7 +237,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
       if (held) await held.promise;
       return {};
     };
-    const chooseMove = async () => ({}), montyLitePuctPolicy = {}, centipawnHistoryFens = () => [];
+    const chooseMove = async () => ({}), centipawnSearchOptions = {}, centipawnHistoryFens = () => [];
     const centipawnPuctAnalysisLines = (_result, _fen, label) => [{ engine: label, pvUci: ['e2e4'], multipv: 1, scoreText: '+0.10' }];
     const params = new URLSearchParams();
     const clearAnalysisSearchProgress = () => {}, syncBrokerParticipants = () => {}, clearEngineSearchProgress = () => {};
