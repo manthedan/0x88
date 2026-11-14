@@ -7,7 +7,8 @@ import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from '../src
 import { BT4_NET, Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
 import { isLc0BigNetVariant } from '../src/lc0/engineCatalog.ts';
 import { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab } from '../src/lc0/hiddenTabPause.ts';
-import { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
+import { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, appendAnalysisTransitionLog, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
+import { CriticalAnalysisRefresh } from '../src/lc0/criticalMoments.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 
 // A big net picks its served model (the shipped export or, on Apple WebGPU, its
@@ -27,11 +28,12 @@ const bigNetFunctions = slice('/**\n * The big-net session options of an Analysi
 const analyzeFunction = slice('async function performAnalysisMaintenance(', 'let analysisGameTree = tree;');
 const schedulerFunctions = slice('function hasActiveAnalysisRun(', 'function hiddenTabActive(');
 const cancelFunctions = slice('function cancelActiveAnalysisRun(', 'function scheduleAnalyzeCurrent(');
+const scheduleFunction = slice('function scheduleAnalyzeCurrent(', 'async function withCpuLease');
 const invalidateFunction = slice('function invalidateAnalysisSettings(', 'function deferAnalysisSettingsRefresh(');
 const backendFunction = slice('async function loadLc0Backend(', 'async function loadLc0BackendOwned(');
 const reloadFunction = slice('async function reloadLc0Backend(', 'async function init(');
 const hiddenFunctions = slice('function hiddenTabActive(', 'function installHiddenTabPause(');
-const criticalSettlement = slice('    settled: () => {', '    updateView: (moment, lines) => {');
+const criticalHandoff = slice('    pauseAnalysis: () => {', '    updateView: (moment, lines) => {');
 const navigationFunction = slice('let analysisGameTree = tree;', '// ---------------------------------------------------------------------------\n// Human moves');
 const centipawnAvailability = slice('async function refreshCentipawnHybridManifestStatus(', 'function centipawnModel(');
 const centipawnPins = slice('function retireAnalysisRunCentipawnKeys(', 'function centipawnEvaluator(');
@@ -127,7 +129,8 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
   const code = ts.transpile(
     `
     const { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen } = snapshotHelpers;
-    const { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, initialAnalysisRunState, transitionAnalysis } = stateHelpers;
+    const { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, appendAnalysisTransitionLog, initialAnalysisRunState, transitionAnalysis } = stateHelpers;
+    let analysisTransitionLog = Object.freeze([]);
     const { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab } = hiddenHelpers;
     let analysisBackendGeneration = 1;
     let analysisAbort = null, activeAnalysisRunId = 0;
@@ -178,7 +181,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     const analysisGamePosition = () => ({ fen: START_FEN, moves: cpuHistory });
     const centipawnEvaluatorKeysForRows = (rows) => new Set(rows.filter((row) => row.family === 'centipawn').map((row) => row.variant));
     const analysisEngineName = (label) => label, rowLabel = (row) => row.variant;
-    const criticalAnalysisRefresh = { defer() {}, navigate() {}, take() { return null; } };
+    const criticalAnalysisRefresh = new stateHelpers.CriticalAnalysisRefresh();
     const pvPreview = null, mainEvaluator = null, saveAnalysisWorkspace = () => {}, clearStalePgnDatabaseSearchResults = () => {}, clearReviewIfMainlineChanged = () => {}, renderAll = () => {};
     const stopGameReview = () => {}, clearReviewState = () => {};
     const pinRetentions = [];
@@ -249,13 +252,14 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     ${hiddenFunctions}
     ${invalidateFunction}
     ${cancelFunctions}
+    ${scheduleFunction}
     ${backendFunction}
     ${centipawnAvailability}
     ${centipawnPins}
     ${reloadFunction}
     ${analyzeFunction}
     ${navigationFunction}
-    const criticalCallbacks = { ${criticalSettlement} };
+    const criticalCallbacks = { ${criticalHandoff} };
     const settingsChanged = (maintenance) => invalidateAnalysisSettings(maintenance, true);
     return {
       analyzeCurrent, holdBackend, admissions: stateHelpers.admissions,
@@ -265,8 +269,17 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
       navigateAutoOff: (replaceTree = false) => { inputEl('autoAnalyze').checked = false; if (replaceTree) tree = { ...tree, current: { ...tree.current } }; afterNavigation(); },
       refreshCentipawn: refreshCentipawnHybridManifestStatus, centipawnVariants, holdCentipawn, pinRetentions,
       snapshotPins: () => [...analysisRunCentipawnKeys],
-      enterCritical: () => { criticalBusy = true; cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, retire: true }); },
+      enterCritical: () => { criticalBusy = true; criticalCallbacks.pauseAnalysis(); },
       settleCritical: () => { criticalBusy = false; criticalCallbacks.settled(); },
+      enterMode: (mode) => dispatchAnalysis({ type: 'MODE_ENTER', mode }),
+      exitMode: (mode) => dispatchAnalysis({ type: 'MODE_EXIT', mode }),
+      schedule: (force) => scheduleAnalyzeCurrent({ force }, 0),
+      fireScheduled: () => {
+        const ticket = analysisRunState.execution.ticket;
+        clearTimeout(analysisTimers.get(ticket)); analysisTimers.delete(ticket);
+        return dispatchAnalysis({ type: 'DEBOUNCE_FIRED', ticket });
+      },
+      dropCriticalRefresh: () => criticalAnalysisRefresh.navigate('other-history', true),
       setMultiPv: (value) => {
         currentMultiPv = value;
         settingsChanged();
@@ -313,7 +326,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     'smallLc0Runtime',
     'hiddenHelpers',
     code,
-  )(START_FEN, BT4_NET, T3_NET, searchers, rows, element, { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen }, isLc0BigNetVariant, { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, initialAnalysisRunState, transitionAnalysis: observeTransition, admissions }, smallLc0Runtime, { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab });
+  )(START_FEN, BT4_NET, T3_NET, searchers, rows, element, { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen }, isLc0BigNetVariant, { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, initialAnalysisRunState, appendAnalysisTransitionLog, CriticalAnalysisRefresh, transitionAnalysis: observeTransition, admissions }, smallLc0Runtime, { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab });
 }
 
 test('post-capture controls cannot relabel search arguments, cached rows or completed coverage', () =>
@@ -747,6 +760,60 @@ for (const change of ['MultiPV', 'runtime', 'maintenance-only', 'cached navigati
     }
     assert.equal(page.state().execution.tag, 'idle');
     assert.deepEqual(page.state().maintenance, { reloadLc0: false, disposeUnused: false });
+  });
+}
+
+for (const mode of ['review', 'retry', 'critical']) {
+  test(`${mode} handoff retires held big-net preparation and preserves queued reviewer maintenance`, () =>
+    withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK, hold: true }] }, async () => {
+      const t3 = new Bt4WorkerSearcher(T3_NET);
+      try {
+        const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+        const first = page.analyzeCurrent({ force: true });
+        await until(() => FakeWorker.instances[0]?.release);
+        page.setRows([t3Row], { reloadLc0: false, disposeUnused: true });
+        if (mode === 'critical') page.enterCritical();
+        else await page.enterMode(mode);
+        await page.analyzeCurrent({ force: true });
+        FakeWorker.instances[0].release();
+        await first;
+        assert.deepEqual(page.admissions, []);
+        assert.deepEqual(page.pinRetentions, [], 'old preparation cannot dispose reviewer resources');
+        assert.equal(page.state().maintenance.disposeUnused, true);
+        assert.deepEqual(page.state().modes, [mode]);
+        if (mode === 'critical') {
+          page.settleCritical();
+          assert.equal(page.state().execution.tag, 'scheduled', 'exact refresh retains its debounce');
+          await page.fireScheduled();
+        } else {
+          await page.exitMode(mode);
+          assert.equal(page.state().execution.tag, 'idle', 'review/retry exit does not drain maintenance');
+          await page.analyzeCurrent();
+        }
+        await settled(page);
+        assert.equal(page.pinRetentions.length, 1);
+        assert.equal(page.admissions.length, 1);
+        assert.deepEqual(searches(), [1]);
+      } finally { t3.dispose(); }
+    }));
+}
+
+for (const keepSelection of [false, true]) {
+  test(`critical exact-selection force refresh survives only its own selection (${keepSelection})`, async () => {
+    const page = analysisPage({ rows: [{ family: 'lc0', variant: 'small', strength: 64 }], searchers: new Map(), smallLc0Runtime: 'onnx' });
+    await page.analyzeCurrent();
+    page.enterCritical();
+    await page.analyzeCurrent({ force: true });
+    page.schedule(false);
+    assert.equal(page.state().wanted, null, 'the keyed refresh is not a second reducer request');
+    if (!keepSelection) page.dropCriticalRefresh();
+    page.settleCritical();
+    if (keepSelection) await page.fireScheduled();
+    await settled(page);
+    assert.deepEqual(page.smallSearchLog, keepSelection ? ['onnx', 'onnx'] : ['onnx'], 'force must bypass the cached row only for the matching selection');
+    assert.deepEqual(page.state().modes, []);
+    page.settleCritical();
+    assert.equal(page.state().execution.tag, 'idle', 'settlement never replays twice');
   });
 }
 

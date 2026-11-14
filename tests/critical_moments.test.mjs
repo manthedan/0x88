@@ -14,6 +14,7 @@ import {
 import { criticalAgreement, criticalPositionLines, criticalReportMarkup } from '../src/lc0/criticalMomentsPresentation.ts';
 import { reviewGame } from '../src/lc0/gameReview.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
+import { initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
 
 const line = (uci = 'e2e4', scoreCp = 20, engine = 'Stockfish Lite') => ({
   engine,
@@ -75,6 +76,40 @@ test('normal uncached navigation can queue its own refresh but cannot inherit a 
   refresh.defer('position-B');
   refresh.navigate('position-B', false);
   assert.deepEqual(refresh.take('position-B'), { force: false });
+});
+
+test('cancelled critical lanes keep admission until drain and cannot release a newer review handoff', async () => {
+  let state = initialAnalysisRunState(), id = 0;
+  const send = (event) => {
+    const next = transitionAnalysis(state, { ...event, nextId: ++id });
+    state = next.state;
+    return next.effects;
+  };
+  send({ type: 'MODE_ENTER', mode: 'critical' });
+  let release, started;
+  const held = new Promise((resolve) => { release = resolve; });
+  const entered = new Promise((resolve) => { started = resolve; });
+  const controller = new AbortController();
+  const running = run([lane('sf', async () => {
+    started();
+    await held;
+    return { provenance: provenance(), line: line() };
+  })], [moment()], new Map(), controller.signal);
+  await entered;
+  controller.abort();
+  send({ type: 'SETTINGS_CHANGED', revision: 1, maintenance: { reloadLc0: true, disposeUnused: true }, intent: { requestId: 1, force: true }, request: true });
+  assert.deepEqual(state.modes, ['critical'], 'abort is not settlement');
+  send({ type: 'MODE_ENTER', mode: 'review' });
+  release();
+  const report = await running;
+  assert.equal(report.state, 'cancelled');
+  assert.equal(report.cells.sf[0].result, undefined, 'late lane results cannot publish');
+  assert.deepEqual(send({ type: 'MODE_EXIT', mode: 'critical', resume: true }), []);
+  assert.deepEqual(state.modes, ['review']);
+  assert.equal(state.execution.tag, 'idle');
+  assert.deepEqual(state.maintenance, { reloadLc0: true, disposeUnused: true });
+  send({ type: 'MODE_EXIT', mode: 'review' });
+  assert.equal(state.execution.tag, 'idle', 'review retains next-interactive-request maintenance policy');
 });
 
 test('same best move agrees even when engine-specific evaluations differ greatly', () => {

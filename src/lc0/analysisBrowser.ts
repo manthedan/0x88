@@ -121,7 +121,7 @@ import {
 } from './analysisPresentation.ts';
 import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
 import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from './analysisRunSnapshot.ts';
-import { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, initialAnalysisRunState, transitionAnalysis, type AnalysisEffect, type AnalysisEventInput, type Intent, type Maintenance, type Owner } from './analysisRunState.ts';
+import { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, analysisRunStateSnapshot, appendAnalysisTransitionLog, initialAnalysisRunState, transitionAnalysis, type AnalysisEffect, type AnalysisEventInput, type AnalysisTransitionEntry, type Intent, type Maintenance, type Owner } from './analysisRunState.ts';
 import { positionShareUrl } from './analysisShare.ts';
 import { analysisStatus } from './analysisStatus.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -546,6 +546,7 @@ function initialPerformanceDial(): PerformanceDial {
 const resourceBroker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: 2, dial: initialPerformanceDial() });
 const registeredBrokerEngines = new Set<string>();
 let analysisRunState = initialAnalysisRunState();
+let analysisTransitionLog: readonly AnalysisTransitionEntry[] = Object.freeze([]);
 let nextAnalysisOperationId = 0;
 const analysisOperations = new Map<number, AbortController>();
 const analysisTimers = new Map<number, ReturnType<typeof setTimeout>>();
@@ -3332,6 +3333,7 @@ function stopGameReview(message = 'Review cancelled. Completed positions are cac
   const controller = reviewAbort;
   if (!controller) return;
   reviewAbort = null;
+  void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'review' });
   reviewRunSignature = '';
   controller.abort();
   el('reviewGame').toggleAttribute('disabled', false);
@@ -3482,7 +3484,7 @@ function startMistakeRetry(): void {
     el('retryEntryStatus').textContent = `No mistakes or blunders to retry for ${side === 'w' ? 'White' : 'Black'} at this depth.`;
     return;
   }
-  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, retire: true });
+  void dispatchAnalysis({ type: 'MODE_ENTER', mode: 'retry' });
   analysisAbort = null;
   hiddenTab = cancelHiddenTabWork(cancelHiddenTabWork(hiddenTab, 'analysis'), 'maia');
   maia3PanelTask?.invalidate();
@@ -3652,6 +3654,7 @@ function exitMistakeRetry(render = true): void {
   hidePromotionOverlay(el('ground'));
   retryModeGeneration += 1;
   retry = null;
+  void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'retry' });
   retryReviewer = null;
   retryHumanGeneration += 1;
   restoreRetryPanels?.();
@@ -3695,7 +3698,7 @@ async function runGameReview(): Promise<void> {
   // Hand off ownership from the cancelled position search. Its finally must
   // not consume queued maintenance and reload/dispose the reviewer's runtime.
   // The next interactive analysis applies these flags before taking cache keys.
-  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, retire: true });
+  void dispatchAnalysis({ type: 'MODE_ENTER', mode: 'review' });
   analysisAbort = null;
   retireAnalysisRunCentipawnKeys();
   clearAnalysisSearchProgress();
@@ -3807,6 +3810,7 @@ async function runGameReview(): Promise<void> {
   } finally {
     if (reviewAbort === controller) {
       reviewAbort = null;
+      void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'review' });
       reviewRunSignature = '';
       progress.hidden = true;
       el('reviewGame').toggleAttribute('disabled', false);
@@ -3850,7 +3854,8 @@ function hasActiveAnalysisRun(): boolean {
 }
 
 function applyAnalysisEvent(event: AnalysisEventInput) {
-  const transition = transitionAnalysis(analysisRunState, { ...event, admit: !reviewAbort && !retry && !criticalPanel?.isBusy(), nextId: ++nextAnalysisOperationId });
+  const transition = transitionAnalysis(analysisRunState, { ...event, nextId: ++nextAnalysisOperationId });
+  analysisTransitionLog = appendAnalysisTransitionLog(analysisTransitionLog, analysisRunState, event, transition);
   analysisRunState = transition.state;
   return transition.effects;
 }
@@ -3964,8 +3969,8 @@ function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnu
   invalidateAnalysisSettings({ reloadLc0: options.reloadLc0 === true, disposeUnused: options.disposeUnusedEngines === true }, analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null || !options.reloadLc0 || options.disposeUnusedEngines === true || inputEl('autoAnalyze').checked);
 }
 
-function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean; retire?: boolean } = {}): void {
-  void dispatchAnalysis({ type: 'STOP', preserveMaintenance: options.preserveDeferredMaintenance === true, retire: options.retire });
+function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
+  void dispatchAnalysis({ type: 'STOP', preserveMaintenance: options.preserveDeferredMaintenance === true });
 }
 
 function cancelAnalysisOperation(operationId: number): void {
@@ -4003,8 +4008,8 @@ function cancelAnalysisOperation(operationId: number): void {
 }
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
-  if (reviewAbort || retry) return;
-  if (criticalPanel?.isBusy()) {
+  if (analysisRunState.modes.includes('review') || analysisRunState.modes.includes('retry')) return;
+  if (analysisRunState.modes.includes('critical')) {
     criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
     return;
   }
@@ -4278,8 +4283,8 @@ async function performAnalysisMaintenance(operationId: number, maintenance: Main
 }
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
-  if (mountAbort.signal.aborted || reviewAbort || retry) return;
-  if (criticalPanel?.isBusy()) {
+  if (mountAbort.signal.aborted || analysisRunState.modes.includes('review') || analysisRunState.modes.includes('retry')) return;
+  if (analysisRunState.modes.includes('critical')) {
     criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
     return;
   }
@@ -5648,7 +5653,7 @@ function wireEvents() {
       resourceBroker.getDial(),
     ],
     pauseAnalysis: () => {
-      cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, retire: true });
+      void dispatchAnalysis({ type: 'MODE_ENTER', mode: 'critical' });
       analysisAbort = null;
       clearAnalysisSearchProgress();
       // Go through the busy guard so interrupted debounces/inference are hidden
@@ -5661,8 +5666,8 @@ function wireEvents() {
     settled: () => {
       const pending = criticalAnalysisRefresh.take(analysisSelectionCacheKey(tree.current.fen));
       if (criticalDeferredMaia) scheduleMaia3Panel();
+      void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'critical', resume: !pending });
       if (pending) scheduleAnalyzeCurrent(pending);
-      else void dispatchAnalysis({ type: 'RESUME' });
     },
     updateView: (moment, lines) => {
       const node = mainlineNodes()[moment.move.ply - 1];
@@ -5929,6 +5934,7 @@ function disposeRuntimeResources(): void {
   reviewAbort?.abort();
   reviewAbort = null;
   if (reviewWasRunning) {
+    void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'review' });
     reviewRunSignature = '';
     const progress = document.getElementById('reviewProgress');
     if (progress) progress.hidden = true;
@@ -6219,6 +6225,7 @@ function resetAnalysisPageState(): void {
   analysisAbort = null;
   analysisReloadAbort = null;
   analysisRunState = initialAnalysisRunState();
+  analysisTransitionLog = Object.freeze([]);
   reviewAbort?.abort();
   reviewAbort = null;
   lastReview = null;
@@ -6291,7 +6298,8 @@ export function mountAnalysisBrowser(): () => void {
   const hook = (from: string, to: string) => {
     void onUserMove(from as Key, to as Key);
   };
-  const schedulingStateHook = () => ({
+  const schedulingStateHook = () => Object.freeze({
+    state: analysisRunStateSnapshot(analysisRunState),
     analyzing: analysisIsAnalyzing(analysisRunState),
     searchActive: analysisIsAnalyzing(analysisRunState),
     reloadActive: analysisRunState.execution.tag === 'maintaining',
@@ -6309,15 +6317,18 @@ export function mountAnalysisBrowser(): () => void {
     uiProgressSamples: analysisUiProgressSamples,
     message: document.getElementById('message')?.textContent ?? '',
   });
+  const transitionLogHook = () => analysisTransitionLog;
   const setHiddenHook = (hidden: boolean) => applyHiddenTab(hidden);
   type AnalysisSmokeGlobal = typeof globalThis & {
     __analysisUserMove?: typeof hook;
     __analysisSchedulingState?: typeof schedulingStateHook;
+    __analysisTransitionLog?: typeof transitionLogHook;
     __analysisSetHidden?: typeof setHiddenHook;
   };
   const smokeGlobal = globalThis as AnalysisSmokeGlobal;
   smokeGlobal.__analysisUserMove = hook;
   smokeGlobal.__analysisSchedulingState = schedulingStateHook;
+  smokeGlobal.__analysisTransitionLog = transitionLogHook;
   smokeGlobal.__analysisSetHidden = setHiddenHook;
   const pvResize = new ResizeObserver(() => fitAnalysisPvRows(el('engineSummaries')));
   pvResize.observe(el('engineSummaries'));
@@ -6404,6 +6415,7 @@ export function mountAnalysisBrowser(): () => void {
     // installed its own).
     if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
     if (smokeGlobal.__analysisSchedulingState === schedulingStateHook) delete smokeGlobal.__analysisSchedulingState;
+    if (smokeGlobal.__analysisTransitionLog === transitionLogHook) delete smokeGlobal.__analysisTransitionLog;
     if (smokeGlobal.__analysisSetHidden === setHiddenHook) delete smokeGlobal.__analysisSetHidden;
   };
 }

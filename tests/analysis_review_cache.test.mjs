@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import { analysisOperationId, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
+import { cancelHiddenTabWork, initialHiddenTabPause, transitionHiddenTab } from '../src/lc0/hiddenTabPause.ts';
 import { boardToFen, START_FEN } from '../src/chess/board.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from '../src/lc0/analysisCache.ts';
 import { evalBarWhitePercent, stockfishAnalysisLines } from '../src/lc0/analysisFormat.ts';
@@ -69,6 +73,117 @@ test('review ignores errors, missing top lines and unscored cache entries', () =
   assert.equal(cachedReviewPosition([{ multipv: 1 }], 20), undefined);
   assert.equal(cachedReviewPosition([{ multipv: 1, scoreCp: NaN }], 20), undefined);
   assert.equal(cachedReviewPosition([{ multipv: 1, mateIn: Infinity }], 20), undefined);
+});
+
+function reviewHandoffPage() {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const slice = (start, end) => {
+    const from = source.indexOf(start), to = source.indexOf(end, from);
+    assert.ok(from >= 0 && to > from);
+    return source.slice(from, to);
+  };
+  const code = ts.transpile(`
+    const { initialAnalysisRunState, transitionAnalysis, analysisOperationId, initialHiddenTabPause, cancelHiddenTabWork, transitionHiddenTab } = helpers;
+    let state = initialAnalysisRunState(), id = 0;
+    const effects = [];
+    const dispatchAnalysis = (event) => {
+      const next = transitionAnalysis(state, { ...event, nextId: ++id });
+      state = next.state; effects.push(...next.effects);
+      return Promise.resolve();
+    };
+    const tree = new GameTree(); tree.addUci('e2e4');
+    const mainlineNodes = () => tree.lineTo();
+    const reviewSignature = () => 'mainline';
+    let reviewAbort = null, reviewRunSignature = '', lastReview = null, lastReviewReviewer = null;
+    let lastReviewNodes = [], lastReviewSignature = '', retry = null, retryReviewer = null;
+    let analysisAbort = null, hiddenTab = initialHiddenTabPause(false);
+    let retryModeGeneration = 0, retryHumanGeneration = 0, orientation = 'white';
+    let retryOriginalOrientation, retryOriginalAuto, retryOriginalShapes = [], restoreRetryPanels = null;
+    const elements = new Map();
+    const el = (id) => elements.get(id) ?? (elements.set(id, {
+      textContent: '', hidden: false, checked: true, value: id === 'retrySide' ? 'w' : '',
+      toggleAttribute() {}, focus() {}, querySelector() { return {}; }, scrollTop: 0,
+    }), elements.get(id));
+    const inputEl = el, selectEl = el;
+    const workspace = { dataset: {} }, document = { querySelector: () => workspace };
+    const criticalPanel = { invalidate() {}, sync() {}, isBusy: () => false };
+    const ground = { state: { drawable: { shapes: [] } }, setShapes() {} }, keyboardBoard = { focus() {} };
+    const maia3PanelTask = { invalidate() {} };
+    let maia3PanelTimer = null;
+    const maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelStatusText = '';
+    const retireAnalysisRunCentipawnKeys = () => {}, clearAnalysisSearchProgress = () => {};
+    const closePvPreview = () => {}, hidePromotionOverlay = () => {}, syncBrokerParticipants = () => {};
+    const quarantineRetryPanels = () => () => {}, renderMistakeRetry = () => {};
+    const renderAll = () => {}, renderAnalysisStatus = () => {}, scheduleMaia3Panel = () => {};
+    const activeEngineRows = () => [], reviewer = { engine: {}, row: { family: 'sf', variant: 'lite', strength: 12 }, label: 'SF Lite', depth: 12 };
+    const reviewEngineChoice = () => reviewer;
+    const retryProblems = () => [{}];
+    class MistakeRetry { cancel() {} }
+    const clearReviewState = () => {};
+    const engineAnalysisCacheKey = (_fen, _row, node) => node.id;
+    const engineLineCache = new Map(mainlineNodes().map((node) => [node.id, [{ multipv: 1, scoreCp: 20, pvUci: ['e2e4'] }]]));
+    const cachedReviewPosition = helpers.cachedReviewPosition;
+    const parseFen = () => ({ turn: 'w' }), legalMoves = () => Array(20);
+    const terminalReviewPosition = () => null, moveToUci = () => 'e2e4';
+    const reviewGame = () => ({ moves: [{ class: 'mistake', ply: 1 }] });
+    const retrySideFromTags = () => 'w', reviewMetadata = new Map();
+    const renderReview = () => {}, analysisEngineName = (label) => label;
+    const matchMedia = () => ({ matches: false });
+    ${slice('function stopGameReview(', 'function clearReviewIfMainlineChanged(')}
+    ${slice('function startMistakeRetry(', 'function renderMistakeRetry(')}
+    ${slice('function exitMistakeRetry(', 'async function runGameReview(')}
+    ${slice('async function runGameReview(', 'function reviewedPgn(')}
+    ${slice('function applyHiddenTab(', 'function installHiddenTabPause(')}
+    return {
+      review: runGameReview, stopReview: stopGameReview, startRetry: startMistakeRetry, exitRetry: exitMistakeRetry,
+      send: dispatchAnalysis, state: () => state, effects, el,
+      hideWithWork: () => { hiddenTab = transitionHiddenTab(hiddenTab, true, ['analysis', 'maia']).state; },
+      hidden: () => hiddenTab, visibility: applyHiddenTab,
+    };
+  `, { target: ts.ScriptTarget.ES2022 });
+  return new Function('GameTree', 'helpers', code)(GameTree, { initialAnalysisRunState, transitionAnalysis, analysisOperationId, initialHiddenTabPause, cancelHiddenTabWork, transitionHiddenTab, cachedReviewPosition });
+}
+
+for (const cancel of [false, true]) {
+  test(`review ${cancel ? 'cancellation' : 'completion'} releases admission without draining reviewer maintenance`, async () => {
+    const page = reviewHandoffPage();
+    await page.send({ type: 'REQUEST', intent: { requestId: 100, force: true }, delayMs: 0 });
+    const operationId = analysisOperationId(page.state().execution);
+    await page.send({ type: 'SETTINGS_CHANGED', revision: 1, intent: { requestId: 101, force: true }, request: true, maintenance: { reloadLc0: true, disposeUnused: true } });
+    const review = page.review();
+    assert.deepEqual(page.state().modes, ['review']);
+    assert.equal(page.state().wanted, null);
+    await page.send({ type: 'SETTLED', operationId });
+    assert.equal(page.effects.some((effect) => effect.type === 'maintain'), false);
+    if (cancel) page.stopReview();
+    await review;
+    assert.deepEqual(page.state().modes, []);
+    assert.equal(page.state().execution.tag, 'idle');
+    assert.deepEqual(page.state().maintenance, { reloadLc0: true, disposeUnused: true });
+    assert.equal(page.effects.some((effect) => effect.type === 'maintain'), false);
+  });
+}
+
+test('retry handoff clears hidden analysis/Maia resumes and restores auto without restarting search', async () => {
+  const page = reviewHandoffPage();
+  await page.review();
+  await page.send({ type: 'REQUEST', intent: { requestId: 100, force: true }, delayMs: 250 });
+  page.hideWithWork();
+  page.startRetry();
+  assert.deepEqual(page.state().modes, ['retry']);
+  assert.equal(page.state().wanted, null);
+  assert.deepEqual(page.hidden().suspended, []);
+  assert.equal(page.el('autoAnalyze').checked, false);
+  page.visibility(true);
+  page.visibility(false);
+  assert.deepEqual(page.state().modes, ['retry']);
+  assert.equal(page.state().visible, true);
+  assert.deepEqual(page.hidden().suspended, []);
+  page.exitRetry(false);
+  assert.deepEqual(page.state().modes, []);
+  assert.equal(page.el('autoAnalyze').checked, true);
+  assert.equal(page.state().execution.tag, 'idle');
+  assert.equal(page.effects.some((effect) => effect.type === 'search'), false);
 });
 
 test('review retains original finite evals for export and ignores a corrupt mate field', () => {
