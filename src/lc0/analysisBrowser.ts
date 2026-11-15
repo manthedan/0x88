@@ -1846,7 +1846,15 @@ async function workerBigNetLines(
   if (!searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION) || searcher.servedModelUrl !== servedModelUrl) {
     throw new Error(`${label} session changed during analysis; analyze again`);
   }
-  searcher.onDownloadProgress = (loaded, total) => showModelProgress(label, loaded, total, 'Downloading');
+  // Like initBigNetsForRun: once this run is cancelled (Stop, a new run, or
+  // unmount), cancelAnalysisOperation has already cleared the shared model
+  // progress slot and the next owner may have shown its own. The cancelled
+  // search still settles later, so neither its callbacks nor its finally may
+  // touch the slot after that.
+  const cancelled = () => signal?.aborted === true || mountAbort.signal.aborted;
+  searcher.onDownloadProgress = (loaded, total) => {
+    if (!cancelled()) showModelProgress(label, loaded, total, 'Downloading');
+  };
   try {
     const result = await searcher.search(
       { positions },
@@ -1862,7 +1870,7 @@ async function workerBigNetLines(
     );
     return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
   } finally {
-    hideModelProgress();
+    if (!cancelled()) hideModelProgress();
   }
 }
 
