@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { parseScriptArgs } from './lib/cli.mjs';
 import { waitForOutput } from './lib/server.mjs';
@@ -25,7 +26,9 @@ const USAGE = `Usage: node scripts/dist_browser_smoke.mjs [options]
 Serves a built static client with scripts/serve_isolated_static.mjs (COOP/COEP)
 and loads Home, Play, Analysis and Arena in headless Chromium. Fails on page
 errors, actionable console errors, failed same-origin requests, or a page that
-never initializes. Needs no GPU: it does not start an engine.
+never initializes. Needs no GPU. Paths that netlify.toml proxies to the artifact
+host (status 200 rewrites, such as the Stockfish wasm) are proxied the same way
+here, because the static server alone would answer them with 404.
 
 Requires a Playwright Chromium build: npx playwright install chromium
 
@@ -63,6 +66,25 @@ function parseArgs(argv) {
   return args;
 }
 
+/** The `[[redirects]]` that netlify.toml serves as status-200 proxies to another host. */
+export function externalProxyRewrites(netlifyToml) {
+  const rewrites = [];
+  for (const block of netlifyToml.split(/^\[\[redirects\]\]\s*$/m).slice(1)) {
+    const body = block.split(/^\[/m)[0];
+    const field = (name) => body.match(new RegExp(`^\\s*${name}\\s*=\\s*"?([^"\\n]*)"?\\s*$`, 'm'))?.[1];
+    const from = field('from');
+    const to = field('to');
+    if (field('status') === '200' && from && !from.includes('*') && /^https?:\/\//.test(to ?? '')) rewrites.push({ from, to });
+  }
+  return rewrites;
+}
+
+async function routeExternalProxies(context, origin, rewrites) {
+  for (const { from, to } of rewrites) {
+    await context.route(`${origin}${from}`, async (route) => route.fulfill({ response: await route.fetch({ url: to }) }));
+  }
+}
+
 function startStaticServer(args) {
   const server = spawn(process.execPath, ['scripts/serve_isolated_static.mjs', resolve(args.dist), String(args.port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -75,6 +97,8 @@ async function checkPage(page, origin, spec, timeoutMs) {
   const pageErrors = [];
   const consoleErrors = [];
   const failedRequests = [];
+  // Every 4xx/5xx from any host, so a bare "Failed to load resource" console error can name its URL.
+  const errorResponses = [];
   const onPageError = (error) => pageErrors.push({ level: 'error', text: `Uncaught ${error?.stack ?? error}` });
   const onConsole = (message) => {
     if (message.type() === 'error') consoleErrors.push({ level: 'error', text: message.text() });
@@ -86,7 +110,9 @@ async function checkPage(page, origin, spec, timeoutMs) {
     if (request.url().startsWith(origin) && errorText !== 'net::ERR_ABORTED') failedRequests.push({ url: request.url(), errorText });
   };
   const onResponse = (response) => {
-    if (response.url().startsWith(origin) && response.status() >= 400) failedRequests.push({ url: response.url(), status: response.status() });
+    if (response.status() < 400) return;
+    errorResponses.push({ url: response.url(), status: response.status() });
+    if (response.url().startsWith(origin)) failedRequests.push({ url: response.url(), status: response.status() });
   };
   page.on('pageerror', onPageError);
   page.on('console', onConsole);
@@ -103,7 +129,8 @@ async function checkPage(page, origin, spec, timeoutMs) {
     if (!crossOriginIsolated) throw new Error(`${spec.path} is not cross-origin isolated`);
     await delay(SETTLE_MS);
     const errors = [...actionableErrorEntries(pageErrors), ...actionableErrorEntries(consoleErrors)];
-    if (errors.length) throw new Error(`${spec.path} emitted actionable browser errors: ${JSON.stringify(errors)}`);
+    if (errors.length)
+      throw new Error(`${spec.path} emitted actionable browser errors: ${JSON.stringify(errors)}; error responses: ${JSON.stringify(errorResponses)}`);
     const failed = failedRequestEntries(failedRequests);
     if (failed.length) throw new Error(`${spec.path} had failed requests: ${JSON.stringify(failed)}`);
     return { path: spec.path, status: 'ok', ms: Date.now() - started };
@@ -124,12 +151,17 @@ async function main() {
   try {
     await server.ready;
     browser = await chromium.launch();
+    const rewrites = externalProxyRewrites(await readFile('netlify.toml', 'utf8'));
+    report.proxied = rewrites.map(({ from }) => from);
     // A fresh context per page: no service-worker or storage carry-over hides a cold-load failure.
     for (const spec of PAGES) {
       const context = await browser.newContext();
+      await routeExternalProxies(context, origin, rewrites);
       try {
         report.pages.push(await checkPage(await context.newPage(), origin, spec, args.timeoutMs));
       } finally {
+        // A proxied wasm download can still be in flight when the page check ends.
+        await context.unrouteAll({ behavior: 'ignoreErrors' });
         await context.close();
       }
     }
@@ -150,7 +182,9 @@ async function main() {
   if (report.status !== 'DIST_BROWSER_SMOKE_DONE') process.exitCode = 1;
 }
 
-main().catch((error) => {
-  console.error(error?.stack ?? error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error?.stack ?? error);
+    process.exitCode = 1;
+  });
+}

@@ -19,10 +19,10 @@ import {
   reconcileRuntimeFallbackWarning,
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
-import { chooseMove } from '../search/puct.ts';
-import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { centipawnModelIdForUrls } from '../nn/runtimeRegistry.ts';
-import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
+import { centipawnSearchOptions } from '../search/centipawn.ts';
+import { chooseMove } from '../search/puct.ts';
+import { cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
 import { mountAnalysisDisclosure } from './analysisDisclosure.ts';
 import {
@@ -123,7 +123,21 @@ import {
 } from './analysisPresentation.ts';
 import { createPvPreview, insertPvPrefix, type PvPreview } from './analysisPv.ts';
 import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from './analysisRunSnapshot.ts';
-import { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, analysisRunStateSnapshot, appendAnalysisTransitionLog, initialAnalysisRunState, transitionAnalysis, type AnalysisEffect, type AnalysisEventInput, type AnalysisTransitionEntry, type Intent, type Maintenance, type Owner } from './analysisRunState.ts';
+import {
+  type AnalysisEffect,
+  type AnalysisEventInput,
+  type AnalysisTransitionEntry,
+  analysisCanPrepare,
+  analysisIsAnalyzing,
+  analysisOperationId,
+  analysisRunStateSnapshot,
+  appendAnalysisTransitionLog,
+  type Intent,
+  initialAnalysisRunState,
+  type Maintenance,
+  type Owner,
+  transitionAnalysis,
+} from './analysisRunState.ts';
 import { positionShareUrl } from './analysisShare.ts';
 import { analysisStatus } from './analysisStatus.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -1034,7 +1048,8 @@ function progressKey(runId: number, label: string): string {
 }
 
 function showAnalysisProgress(runId: number, fen: string, label: string, progress: WorkerSearchProgress): void {
-  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen) return;
+  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen)
+    return;
   analysisUiProgressSamples += 1;
   const completed = progress.completedVisits ?? progress.visits;
   const elapsedMs = progress.elapsedMs ?? 0;
@@ -1072,7 +1087,8 @@ function showMoveSearchProgress(
 }
 
 function showIndeterminateSearchProgress(runId: number, fen: string, label: string): void {
-  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen) return;
+  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen)
+    return;
   searchProgressByEngine.set(progressKey(runId, label), { label, units: 'search', indeterminate: true });
   renderAnalysisSearchProgress();
   renderEngineComparison(lineCache.get(fen) ?? []);
@@ -1700,14 +1716,17 @@ function rowLabel(row: EngineRow): string {
 }
 
 function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tree.current, requestedMultiPv = multiPv()): string {
-  return analysisRunRowKey({
-    fen,
-    positions: tree.historyBoards(node),
-    multiPv: requestedMultiPv,
-    runtime: selectedLc0Runtime(),
-    servedModels: { small: lc0ServedModelUrl, ...Object.fromEntries(analysisBigNetServedModel) },
-    broker: analysisRunBroker([...activeEngineRows(), row], resourceBroker.snapshot()),
-  }, row);
+  return analysisRunRowKey(
+    {
+      fen,
+      positions: tree.historyBoards(node),
+      multiPv: requestedMultiPv,
+      runtime: selectedLc0Runtime(),
+      servedModels: { small: lc0ServedModelUrl, ...Object.fromEntries(analysisBigNetServedModel) },
+      broker: analysisRunBroker([...activeEngineRows(), row], resourceBroker.snapshot()),
+    },
+    row,
+  );
 }
 
 function analysisSelectionCacheKey(fen: string, rows = activeEngineRows()): string {
@@ -2498,7 +2517,9 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv} on the board`)}"${preview.steps.length ? '' : ' disabled'} title="Preview this line on the board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button></div></li>`;
   });
   if (!rows.length)
-    rows.push(`<li class="result-line pending-line"><span class="pending-text">${analysisIsAnalyzing(analysisRunState) ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`);
+    rows.push(
+      `<li class="result-line pending-line"><span class="pending-text">${analysisIsAnalyzing(analysisRunState) ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`,
+    );
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
 }
 
@@ -2551,7 +2572,11 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const progressRows = [...searchProgressByEngine.values()].map(
       (progress) => `<tr><td>${htmlEscape(analysisEngineName(progress.label))}</td><td colspan="3" class="small">Searching…</td></tr>`,
     );
-    el('engineConsensus').textContent = progressRows.length ? 'Analysis in progress.' : analysisIsAnalyzing(analysisRunState) ? 'Preparing selected engines.' : 'No analysis yet.';
+    el('engineConsensus').textContent = progressRows.length
+      ? 'Analysis in progress.'
+      : analysisIsAnalyzing(analysisRunState)
+        ? 'Preparing selected engines.'
+        : 'No analysis yet.';
     if (lines.some((line) => line.error) && !progressRows.length)
       el('engineConsensus').textContent = 'No engine results available. Check engine lines for errors.';
     patchAnalysisResults(
@@ -3904,10 +3929,13 @@ async function executeAnalysisEffects(effects: AnalysisEffect[]): Promise<void> 
       clearTimeout(analysisTimers.get(effect.ticket));
       analysisTimers.delete(effect.ticket);
     } else if (effect.type === 'schedule') {
-      analysisTimers.set(effect.ticket, setTimeout(() => {
-        analysisTimers.delete(effect.ticket);
-        void dispatchAnalysis({ type: 'DEBOUNCE_FIRED', ticket: effect.ticket });
-      }, effect.delayMs));
+      analysisTimers.set(
+        effect.ticket,
+        setTimeout(() => {
+          analysisTimers.delete(effect.ticket);
+          void dispatchAnalysis({ type: 'DEBOUNCE_FIRED', ticket: effect.ticket });
+        }, effect.delayMs),
+      );
     } else if (effect.type === 'prepare') pending.push(performAnalysis(effect.owner, effect.intent));
     else if (effect.type === 'maintain') pending.push(performAnalysisMaintenance(effect.operationId, effect.maintenance));
   }
@@ -3989,7 +4017,10 @@ function removeHiddenTabPause(): void {
   hiddenTabListener = null;
 }
 
-function invalidateAnalysisSettings(maintenance: Maintenance = { reloadLc0: false, disposeUnused: false }, request = analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null): void {
+function invalidateAnalysisSettings(
+  maintenance: Maintenance = { reloadLc0: false, disposeUnused: false },
+  request = analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null,
+): void {
   if (request && hiddenTab.hidden) deferHiddenTabWork('analysis');
   void dispatchAnalysis({ type: 'SETTINGS_CHANGED', revision: analysisRunState.revision + 1, intent: analysisIntent(), maintenance, request });
 }
@@ -3998,7 +4029,14 @@ function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnu
   stopGameReview('Review cancelled after engine settings changed.');
   renderReviewEngineChoices();
   criticalPanel?.sync();
-  invalidateAnalysisSettings({ reloadLc0: options.reloadLc0 === true, disposeUnused: options.disposeUnusedEngines === true }, analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null || !options.reloadLc0 || options.disposeUnusedEngines === true || inputEl('autoAnalyze').checked);
+  invalidateAnalysisSettings(
+    { reloadLc0: options.reloadLc0 === true, disposeUnused: options.disposeUnusedEngines === true },
+    analysisIsAnalyzing(analysisRunState) ||
+      analysisRunState.wanted !== null ||
+      !options.reloadLc0 ||
+      options.disposeUnusedEngines === true ||
+      inputEl('autoAnalyze').checked,
+  );
 }
 
 function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
@@ -4413,7 +4451,14 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
           if (controller.signal.aborted || mountAbort.signal.aborted) return;
           try {
             const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
-            if (runId !== activeAnalysisRunId || analysisAbort !== controller || !analysisIsAnalyzing(analysisRunState) || controller.signal.aborted || mountAbort.signal.aborted) return;
+            if (
+              runId !== activeAnalysisRunId ||
+              analysisAbort !== controller ||
+              !analysisIsAnalyzing(analysisRunState) ||
+              controller.signal.aborted ||
+              mountAbort.signal.aborted
+            )
+              return;
             if (lines.length) cacheEngineLines(cacheKey, lines);
             else engineLineCache.delete(cacheKey);
             lineGroups[index] = lines;
@@ -6035,7 +6080,12 @@ function disposePageResources(): void {
   ground = null;
 }
 
-async function loadLc0Backend(runAutoAnalyze: boolean | 'force' = true, mountSignal: AbortSignal = mountAbort.signal, operationSignal?: AbortSignal, schedulerOperation?: number): Promise<boolean> {
+async function loadLc0Backend(
+  runAutoAnalyze: boolean | 'force' = true,
+  mountSignal: AbortSignal = mountAbort.signal,
+  operationSignal?: AbortSignal,
+  schedulerOperation?: number,
+): Promise<boolean> {
   const controller = new AbortController();
   operationSignal ??= controller.signal;
   const loadCancelled = () => isStaleMount(mountSignal) || operationSignal.aborted;
@@ -6053,7 +6103,15 @@ async function loadLc0Backend(runAutoAnalyze: boolean | 'force' = true, mountSig
   } finally {
     if (schedulerOperation === undefined) {
       analysisOperations.delete(operationId);
-      if (loaded && !loadCancelled() && runAutoAnalyze === true && inputEl('autoAnalyze').checked && analysisRunState.execution.tag === 'maintaining' && analysisRunState.execution.operationId === operationId && !analysisRunState.wanted) {
+      if (
+        loaded &&
+        !loadCancelled() &&
+        runAutoAnalyze === true &&
+        inputEl('autoAnalyze').checked &&
+        analysisRunState.execution.tag === 'maintaining' &&
+        analysisRunState.execution.operationId === operationId &&
+        !analysisRunState.wanted
+      ) {
         deferHiddenTabWork('analysis');
         void dispatchAnalysis({ type: 'REQUEST', intent: analysisIntent(), delayMs: 0 });
       }
@@ -6160,7 +6218,11 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
   }
 }
 
-async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'auto', operationSignal?: AbortSignal, schedulerOperation?: number): Promise<boolean> {
+async function reloadLc0Backend(
+  analyzeAfterLoad: 'auto' | 'force' | 'none' = 'auto',
+  operationSignal?: AbortSignal,
+  schedulerOperation?: number,
+): Promise<boolean> {
   lineCache.clear();
   completeAnalysisKeys.clear();
   criticalPanel?.invalidate();
@@ -6168,7 +6230,12 @@ async function reloadLc0Backend(analyzeAfterLoad: 'auto' | 'force' | 'none' = 'a
   if (operationSignal?.aborted) return false;
   reconcileActiveRuntimeFallbackWarning();
   renderRecklessRuntimeInfo();
-  const loaded = await loadLc0Backend(analyzeAfterLoad === 'force' ? 'force' : analyzeAfterLoad === 'auto', mountAbort.signal, operationSignal, schedulerOperation);
+  const loaded = await loadLc0Backend(
+    analyzeAfterLoad === 'force' ? 'force' : analyzeAfterLoad === 'auto',
+    mountAbort.signal,
+    operationSignal,
+    schedulerOperation,
+  );
   return loaded;
 }
 
@@ -6330,25 +6397,26 @@ export function mountAnalysisBrowser(): () => void {
   const hook = (from: string, to: string) => {
     void onUserMove(from as Key, to as Key);
   };
-  const schedulingStateHook = () => Object.freeze({
-    state: analysisRunStateSnapshot(analysisRunState),
-    analyzing: analysisIsAnalyzing(analysisRunState),
-    searchActive: analysisIsAnalyzing(analysisRunState),
-    reloadActive: analysisRunState.execution.tag === 'maintaining',
-    reloadQueued: analysisRunState.maintenance.reloadLc0,
-    disposeQueued: analysisRunState.maintenance.disposeUnused,
-    phase: analysisRunState.execution.tag,
-    runId: analysisOperationId(analysisRunState.execution),
-    revision: analysisRunState.revision,
-    runtime: selectedLc0Runtime(),
-    workerRuntime,
-    hidden: hiddenTab.hidden,
-    suspended: hiddenTab.suspended.join(','),
-    fen: tree.current.fen,
-    workerProgressMessages: analysisWorkerProgressMessages,
-    uiProgressSamples: analysisUiProgressSamples,
-    message: document.getElementById('message')?.textContent ?? '',
-  });
+  const schedulingStateHook = () =>
+    Object.freeze({
+      state: analysisRunStateSnapshot(analysisRunState),
+      analyzing: analysisIsAnalyzing(analysisRunState),
+      searchActive: analysisIsAnalyzing(analysisRunState),
+      reloadActive: analysisRunState.execution.tag === 'maintaining',
+      reloadQueued: analysisRunState.maintenance.reloadLc0,
+      disposeQueued: analysisRunState.maintenance.disposeUnused,
+      phase: analysisRunState.execution.tag,
+      runId: analysisOperationId(analysisRunState.execution),
+      revision: analysisRunState.revision,
+      runtime: selectedLc0Runtime(),
+      workerRuntime,
+      hidden: hiddenTab.hidden,
+      suspended: hiddenTab.suspended.join(','),
+      fen: tree.current.fen,
+      workerProgressMessages: analysisWorkerProgressMessages,
+      uiProgressSamples: analysisUiProgressSamples,
+      message: document.getElementById('message')?.textContent ?? '',
+    });
   const transitionLogHook = () => analysisTransitionLog;
   const setHiddenHook = (hidden: boolean) => applyHiddenTab(hidden);
   type AnalysisSmokeGlobal = typeof globalThis & {

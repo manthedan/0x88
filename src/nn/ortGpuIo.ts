@@ -234,10 +234,14 @@ export class OrtGpuIoBinding {
     } catch (error) {
       // Keep the construction error while rolling back every caller-owned resource.
       for (const tensor of wrapped) {
-        try { tensor.dispose(); } catch {}
+        try {
+          tensor.dispose();
+        } catch {}
       }
       for (const buffer of created) {
-        try { buffer.destroy(); } catch {}
+        try {
+          buffer.destroy();
+        } catch {}
       }
       throw error;
     }

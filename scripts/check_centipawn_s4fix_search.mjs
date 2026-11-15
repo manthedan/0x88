@@ -53,7 +53,10 @@ export async function checkCentipawnSearch({ onPosition = () => {} } = {}) {
         siteValue: result.value,
         completedVisits: result.stats.completedVisits,
         agrees: siteMove === position.bestmove,
-        siteTop: [...result.policy].sort((a, b) => b.visits - a.visits).slice(0, 5).map((entry) => ({ move: moveToUci(entry.move), visits: entry.visits, q: entry.q })),
+        siteTop: [...result.policy]
+          .sort((a, b) => b.visits - a.visits)
+          .slice(0, 5)
+          .map((entry) => ({ move: moveToUci(entry.move), visits: entry.visits, q: entry.q })),
       };
       rows.push(row);
       onPosition(row);
@@ -79,7 +82,9 @@ export async function checkCentipawnSearch({ onPosition = () => {} } = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const report = await checkCentipawnSearch({ onPosition: (row) => console.error(`${row.agrees ? 'agree' : 'DIFFER'} ${row.label}: ${row.nativeMove} / ${row.siteMove}`) });
+  const report = await checkCentipawnSearch({
+    onPosition: (row) => console.error(`${row.agrees ? 'agree' : 'DIFFER'} ${row.label}: ${row.nativeMove} / ${row.siteMove}`),
+  });
   const text = `${JSON.stringify(report, null, 2)}\n`;
   if (process.argv[2]) writeFileSync(process.argv[2], text);
   console.log(text);

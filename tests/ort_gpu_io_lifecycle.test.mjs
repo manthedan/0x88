@@ -5,37 +5,69 @@ import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { OrtGpuIoBinding } from '../src/nn/ortGpuIo.ts';
 
 const input = { name: 'input', type: 'float32', dims: [1] };
-const outputs = [{ name: 'output', type: 'float32', dims: [1] }, { name: 'other', type: 'float32', dims: [1] }];
+const outputs = [
+  { name: 'output', type: 'float32', dims: [1] },
+  { name: 'other', type: 'float32', dims: [1] },
+];
 function fakeGpu({ failAllocation = -1, failPin = -1, failWrap = -1, failTensorDispose = false } = {}) {
-  const buffers = [], tensors = [];
-  let wraps = 0, uploads = 0;
+  const buffers = [],
+    tensors = [];
+  let wraps = 0,
+    uploads = 0;
   const device = {
     createBuffer({ size }) {
       if (buffers.length === failAllocation) throw new Error('injected allocation failure');
       const buffer = {
-        bytes: new ArrayBuffer(size), destroys: 0,
-        async mapAsync() {}, getMappedRange() { return this.bytes; }, unmap() {},
-        destroy() { this.destroys++; },
+        bytes: new ArrayBuffer(size),
+        destroys: 0,
+        async mapAsync() {},
+        getMappedRange() {
+          return this.bytes;
+        },
+        unmap() {},
+        destroy() {
+          this.destroys++;
+        },
       };
       if (buffers.length === failPin) Object.preventExtensions(buffer);
       buffers.push(buffer);
       return buffer;
     },
-    createCommandEncoder() { return { copyBufferToBuffer() {}, finish() { return {}; } }; },
-    queue: { writeBuffer() { uploads++; }, submit() {} },
+    createCommandEncoder() {
+      return {
+        copyBufferToBuffer() {},
+        finish() {
+          return {};
+        },
+      };
+    },
+    queue: {
+      writeBuffer() {
+        uploads++;
+      },
+      submit() {},
+    },
   };
   const Tensor = {
     fromGpuBuffer(buffer) {
       if (wraps++ === failWrap) throw new Error('injected tensor-wrap failure');
       const tensor = {
-        buffer, disposes: 0,
-        dispose() { this.disposes++; if (failTensorDispose) throw new Error('injected cleanup failure'); },
+        buffer,
+        disposes: 0,
+        dispose() {
+          this.disposes++;
+          if (failTensorDispose) throw new Error('injected cleanup failure');
+        },
       };
       tensors.push(tensor);
       return tensor;
     },
   };
-  const session = { async run(_feeds, fetches) { return fetches; } };
+  const session = {
+    async run(_feeds, fetches) {
+      return fetches;
+    },
+  };
   return { buffers, tensors, device, Tensor, session, uploads: () => uploads };
 }
 
@@ -43,19 +75,33 @@ function evaluatorWithGpu(run = async (_feeds, fetches) => fetches, release = as
   const gpu = fakeGpu();
   const session = {
     inputMetadata: [{ name: '/input/planes', type: 'float32', shape: [1, 112, 8, 8] }],
-    run, release,
+    run,
+    release,
   };
-  const binding = new OrtGpuIoBinding(session, gpu.device, gpu.Tensor,
+  const binding = new OrtGpuIoBinding(
+    session,
+    gpu.device,
+    gpu.Tensor,
     { name: '/input/planes', type: 'float32', dims: [1, 112, 8, 8] },
-    [{ name: '/output/policy', type: 'float32', dims: [1, 1858] }, { name: '/output/wdl', type: 'float32', dims: [1, 3] }],
-    { pin: false });
+    [
+      { name: '/output/policy', type: 'float32', dims: [1, 1858] },
+      { name: '/output/wdl', type: 'float32', dims: [1, 3] },
+    ],
+    { pin: false },
+  );
   const evaluator = new Lc0OnnxEvaluator(session, {}, { binding, mode: 'gpu' });
   return { ...gpu, binding, evaluator };
 }
 
 function assertRolledBack(gpu) {
-  assert.ok(gpu.buffers.every((buffer) => buffer.destroys === 1), 'every acquired caller buffer destroyed once');
-  assert.ok(gpu.tensors.every((tensor) => tensor.disposes === 1), 'every wrapped tensor disposed once');
+  assert.ok(
+    gpu.buffers.every((buffer) => buffer.destroys === 1),
+    'every acquired caller buffer destroyed once',
+  );
+  assert.ok(
+    gpu.tensors.every((tensor) => tensor.disposes === 1),
+    'every wrapped tensor disposed once',
+  );
 }
 
 for (const outputMode of ['preallocated', 'session']) {
@@ -97,7 +143,10 @@ test('ORT rollback continues through tensor cleanup errors and preserves the con
 test('ORT evaluator releases its binding even if the session release rejects', async () => {
   const failure = new Error('injected release failure');
   let releases = 0;
-  const gpu = evaluatorWithGpu(undefined, async () => { releases++; throw failure; });
+  const gpu = evaluatorWithGpu(undefined, async () => {
+    releases++;
+    throw failure;
+  });
   const close = gpu.evaluator.dispose();
   assert.strictEqual(gpu.evaluator.dispose(), close, 'concurrent callers share close completion');
   await assert.rejects(close, (error) => error === failure);
@@ -107,10 +156,13 @@ test('ORT evaluator releases its binding even if the session release rejects', a
 });
 
 test('ORT concurrent and later dispose calls return one promise and release once', async () => {
-  let finishRelease, releases = 0;
+  let finishRelease,
+    releases = 0;
   const gpu = evaluatorWithGpu(undefined, () => {
     releases++;
-    return new Promise((resolve) => { finishRelease = resolve; });
+    return new Promise((resolve) => {
+      finishRelease = resolve;
+    });
   });
   const close = gpu.evaluator.dispose();
   assert.strictEqual(gpu.evaluator.dispose(), close);
@@ -141,19 +193,36 @@ test('a normal ORT run rejection leaves the evaluator and serialized IO queue us
 
 function deferred() {
   let resolve;
-  const promise = new Promise((done) => { resolve = done; });
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
 test('ORT evaluator drains active and queued invokes, including readback, before session release', async () => {
-  const started = deferred(), finishRun = deferred(), mapping = deferred(), finishMap = deferred();
-  let runs = 0, releases = 0;
-  const gpu = evaluatorWithGpu(async (_feeds, fetches) => {
-    assert.equal(releases, 0);
-    if (++runs === 1) { started.resolve(); await finishRun.promise; }
-    return fetches;
-  }, async () => { releases++; });
-  gpu.buffers.at(-1).mapAsync = async () => { mapping.resolve(); await finishMap.promise; };
+  const started = deferred(),
+    finishRun = deferred(),
+    mapping = deferred(),
+    finishMap = deferred();
+  let runs = 0,
+    releases = 0;
+  const gpu = evaluatorWithGpu(
+    async (_feeds, fetches) => {
+      assert.equal(releases, 0);
+      if (++runs === 1) {
+        started.resolve();
+        await finishRun.promise;
+      }
+      return fetches;
+    },
+    async () => {
+      releases++;
+    },
+  );
+  gpu.buffers.at(-1).mapAsync = async () => {
+    mapping.resolve();
+    await finishMap.promise;
+  };
   const first = gpu.evaluator.evaluate(START_FEN);
   const second = gpu.evaluator.evaluate(START_FEN);
   await started.promise;
@@ -174,16 +243,26 @@ test('ORT evaluator drains active and queued invokes, including readback, before
 
 for (const method of ['evaluateBatch', 'evaluateBatchSequence']) {
   test(`ORT close drains all physical batches of an admitted ${method}`, async () => {
-    let runs = 0, releases = 0;
-    const gpu = evaluatorWithGpu(async (_feeds, fetches) => {
-      assert.equal(releases, 0);
-      runs++;
-      return fetches;
-    }, async () => { releases++; });
+    let runs = 0,
+      releases = 0;
+    const gpu = evaluatorWithGpu(
+      async (_feeds, fetches) => {
+        assert.equal(releases, 0);
+        runs++;
+        return fetches;
+      },
+      async () => {
+        releases++;
+      },
+    );
     const inputs = [START_FEN, START_FEN];
     const run = gpu.evaluator[method](method === 'evaluateBatch' ? inputs : [inputs, inputs]);
     const close = gpu.evaluator.dispose();
-    for (const [api, argument] of [['evaluate', START_FEN], ['evaluateBatch', inputs], ['evaluateBatchSequence', [inputs]]]) {
+    for (const [api, argument] of [
+      ['evaluate', START_FEN],
+      ['evaluateBatch', inputs],
+      ['evaluateBatchSequence', [inputs]],
+    ]) {
       await assert.rejects(gpu.evaluator[api](argument), /disposed/);
     }
     const results = await run;
@@ -198,11 +277,18 @@ for (const method of ['evaluateBatch', 'evaluateBatchSequence']) {
 }
 
 test('ORT CPU IO close waits for an admitted run rejection before releasing', async () => {
-  const started = deferred(), finish = deferred();
+  const started = deferred(),
+    finish = deferred();
   let released = false;
   const evaluator = new Lc0OnnxEvaluator({
-    async run() { started.resolve(); await finish.promise; throw new Error('injected CPU run failure'); },
-    async release() { released = true; },
+    async run() {
+      started.resolve();
+      await finish.promise;
+      throw new Error('injected CPU run failure');
+    },
+    async release() {
+      released = true;
+    },
   });
   const run = assert.rejects(evaluator.evaluate(START_FEN), /CPU run failure/);
   await started.promise;

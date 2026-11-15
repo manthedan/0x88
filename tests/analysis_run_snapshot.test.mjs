@@ -11,17 +11,33 @@ function inputs() {
     { family: 'lc0', variant: 't3', strength: 64 },
     { family: 'sf', variant: 'lite', strength: 12 },
   ];
-  return { fen: START_FEN, positions: [parseFen(START_FEN)], cpuPosition: { fen: START_FEN, moves: [] }, rows,
-    multiPv: 3, runtime: 'onnx', backendGeneration: 7, servedModels: { small: '/small.onnx', t3: '/t3.splitk.onnx' },
-    broker: { ...analysisRunBroker(rows, { dial: 'balanced', cpuBudget: 2 }) } };
+  return {
+    fen: START_FEN,
+    positions: [parseFen(START_FEN)],
+    cpuPosition: { fen: START_FEN, moves: [] },
+    rows,
+    multiPv: 3,
+    runtime: 'onnx',
+    backendGeneration: 7,
+    servedModels: { small: '/small.onnx', t3: '/t3.splitk.onnx' },
+    broker: { ...analysisRunBroker(rows, { dial: 'balanced', cpuBudget: 2 }) },
+  };
 }
 
 test('snapshot keys preserve existing CPU, small and big-net cache identities', () => {
-  const input = inputs(), run = captureAnalysisRun(input);
+  const input = inputs(),
+    run = captureAnalysisRun(input);
   const runtimes = ['onnx|/small.onnx', '/t3.splitk.onnx', ''];
-  assert.deepEqual(run.rowKeys, input.rows.map((row, i) => analysisResultCacheKey(START_FEN, [START_FEN], row, {
-    multiPv: 3, runtime: runtimes[i], cpu: i === 2 ? JSON.stringify(['balanced', 2, ['sf:lite']]) : '',
-  })));
+  assert.deepEqual(
+    run.rowKeys,
+    input.rows.map((row, i) =>
+      analysisResultCacheKey(START_FEN, [START_FEN], row, {
+        multiPv: 3,
+        runtime: runtimes[i],
+        cpu: i === 2 ? JSON.stringify(['balanced', 2, ['sf:lite']]) : '',
+      }),
+    ),
+  );
   assert.equal(run.selectionKey, run.rowKeys.join('\u0001'));
   assert.equal(run.backendGeneration, 7);
   const history = captureAnalysisRun({ ...input, positions: [...input.positions, parseFen(START_FEN)] });
@@ -30,7 +46,9 @@ test('snapshot keys preserve existing CPU, small and big-net cache identities', 
 });
 
 test('controls, maps and scratch-board mutations cannot change a captured run or its coverage', () => {
-  const input = inputs(), run = captureAnalysisRun(input), original = JSON.stringify(run);
+  const input = inputs(),
+    run = captureAnalysisRun(input),
+    original = JSON.stringify(run);
   input.rows[0].strength = 1000;
   input.rows.pop();
   input.multiPv = 1;
@@ -42,9 +60,15 @@ test('controls, maps and scratch-board mutations cannot change a captured run or
   input.cpuPosition.moves.push('e2e4');
   input.positions[0].squares[0] = null;
   assert.equal(JSON.stringify(run), original);
-  assert.throws(() => { run.rows[0].strength++; }, TypeError);
-  assert.throws(() => { run.positions[0].squares[0] = null; }, TypeError);
-  assert.throws(() => { run.cpuPosition.moves.push('e2e4'); }, TypeError);
+  assert.throws(() => {
+    run.rows[0].strength++;
+  }, TypeError);
+  assert.throws(() => {
+    run.positions[0].squares[0] = null;
+  }, TypeError);
+  assert.throws(() => {
+    run.cpuPosition.moves.push('e2e4');
+  }, TypeError);
   const scratch = run.positions.map((board) => ({ ...board, squares: [...board.squares] }));
   assert.equal(legalMoves(scratch[0]).length, 20, 'search scratch boards still support mutable move generation');
   assert.equal(boardToFen(scratch[0]), START_FEN);

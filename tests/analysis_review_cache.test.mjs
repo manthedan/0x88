@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import ts from 'typescript';
-import { analysisOperationId, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
-import { cancelHiddenTabWork, initialHiddenTabPause, transitionHiddenTab } from '../src/lc0/hiddenTabPause.ts';
 import { boardToFen, START_FEN } from '../src/chess/board.ts';
 import { analysisResultCacheKey, cachedAnalysisSelection, cachedReviewPosition } from '../src/lc0/analysisCache.ts';
 import { evalBarWhitePercent, stockfishAnalysisLines } from '../src/lc0/analysisFormat.ts';
+import { analysisOperationId, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
+import { cancelHiddenTabWork, initialHiddenTabPause, transitionHiddenTab } from '../src/lc0/hiddenTabPause.ts';
 
 const row = { family: 'sf', variant: 'lite', strength: 12 };
 const settings = { multiPv: 1, runtime: '', cpu: 'balanced/2/sf-lite' };
@@ -78,11 +78,13 @@ test('review ignores errors, missing top lines and unscored cache entries', () =
 function reviewHandoffPage() {
   const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
   const slice = (start, end) => {
-    const from = source.indexOf(start), to = source.indexOf(end, from);
+    const from = source.indexOf(start),
+      to = source.indexOf(end, from);
     assert.ok(from >= 0 && to > from);
     return source.slice(from, to);
   };
-  const code = ts.transpile(`
+  const code = ts.transpile(
+    `
     const { initialAnalysisRunState, transitionAnalysis, analysisOperationId, initialHiddenTabPause, cancelHiddenTabWork, transitionHiddenTab } = helpers;
     let state = initialAnalysisRunState(), id = 0;
     const effects = [];
@@ -143,8 +145,18 @@ function reviewHandoffPage() {
       hidden: () => hiddenTab, visibility: applyHiddenTab,
       failChoice: (value) => { failChoice = value; }, failSetup: (value) => { failSetup = value; },
     };
-  `, { target: ts.ScriptTarget.ES2022 });
-  return new Function('GameTree', 'helpers', code)(GameTree, { initialAnalysisRunState, transitionAnalysis, analysisOperationId, initialHiddenTabPause, cancelHiddenTabWork, transitionHiddenTab, cachedReviewPosition });
+  `,
+    { target: ts.ScriptTarget.ES2022 },
+  );
+  return new Function('GameTree', 'helpers', code)(GameTree, {
+    initialAnalysisRunState,
+    transitionAnalysis,
+    analysisOperationId,
+    initialHiddenTabPause,
+    cancelHiddenTabWork,
+    transitionHiddenTab,
+    cachedReviewPosition,
+  });
 }
 
 for (const cancel of [false, true]) {
@@ -152,18 +164,30 @@ for (const cancel of [false, true]) {
     const page = reviewHandoffPage();
     await page.send({ type: 'REQUEST', intent: { requestId: 100, force: true }, delayMs: 0 });
     const operationId = analysisOperationId(page.state().execution);
-    await page.send({ type: 'SETTINGS_CHANGED', revision: 1, intent: { requestId: 101, force: true }, request: true, maintenance: { reloadLc0: true, disposeUnused: true } });
+    await page.send({
+      type: 'SETTINGS_CHANGED',
+      revision: 1,
+      intent: { requestId: 101, force: true },
+      request: true,
+      maintenance: { reloadLc0: true, disposeUnused: true },
+    });
     const review = page.review();
     assert.deepEqual(page.state().modes, ['review']);
     assert.equal(page.state().wanted, null);
     await page.send({ type: 'SETTLED', operationId });
-    assert.equal(page.effects.some((effect) => effect.type === 'maintain'), false);
+    assert.equal(
+      page.effects.some((effect) => effect.type === 'maintain'),
+      false,
+    );
     if (cancel) page.stopReview();
     await review;
     assert.deepEqual(page.state().modes, []);
     assert.equal(page.state().execution.tag, 'idle');
     assert.deepEqual(page.state().maintenance, { reloadLc0: true, disposeUnused: true });
-    assert.equal(page.effects.some((effect) => effect.type === 'maintain'), false);
+    assert.equal(
+      page.effects.some((effect) => effect.type === 'maintain'),
+      false,
+    );
   });
 }
 
@@ -203,7 +227,10 @@ test('retry handoff clears hidden analysis/Maia resumes and restores auto withou
   assert.deepEqual(page.state().modes, []);
   assert.equal(page.el('autoAnalyze').checked, true);
   assert.equal(page.state().execution.tag, 'idle');
-  assert.equal(page.effects.some((effect) => effect.type === 'search'), false);
+  assert.equal(
+    page.effects.some((effect) => effect.type === 'search'),
+    false,
+  );
 });
 
 test('review retains original finite evals for export and ignores a corrupt mate field', () => {

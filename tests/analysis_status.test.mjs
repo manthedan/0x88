@@ -8,11 +8,18 @@ for (const [name, input, state, text, title] of [
   ['all failed', { failed: 2 }, 'done', 'Done · 2 failed', 'Analysis complete; 2 engines unavailable'],
   // A terminal score is ready even without a principal-variation move.
   ['terminal position result', { ready: 1 }, 'done', 'Done', 'Analysis complete for this position'],
-  ['paused over draining/loading', { hidden: true, suspended: true, activeRun: true, loading: true }, 'paused', 'Paused', 'Analysis queued until this tab is visible'],
+  [
+    'paused over draining/loading',
+    { hidden: true, suspended: true, activeRun: true, loading: true },
+    'paused',
+    'Paused',
+    'Analysis queued until this tab is visible',
+  ],
   ['running', { activeRun: true, ready: 1 }, 'running', 'Analyzing…', 'Engines are searching this position'],
   ['loading', { loading: true }, 'loading', 'Loading…', 'Preparing engines'],
   ['idle', {}, 'idle', 'Not analyzed', 'Press Analyze to evaluate this position'],
   ['visible suspended intent', { suspended: true }, 'idle', 'Not analyzed', 'Press Analyze to evaluate this position'],
-]) test(`Analysis status: ${name}`, () => {
-  assert.deepEqual(analysisStatus({ ...idle, ...input }), { state, text, title });
-});
+])
+  test(`Analysis status: ${name}`, () => {
+    assert.deepEqual(analysisStatus({ ...idle, ...input }), { state, text, title });
+  });

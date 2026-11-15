@@ -19,9 +19,9 @@ export type RunSnapshot = Readonly<{
 }>;
 
 export function analysisRunBroker(rows: readonly EngineRow[], budget: { dial: PerformanceDial; cpuBudget: number }): RunSnapshot['broker'] {
-  const participants = [...new Set(rows
-    .filter((row) => engineResourceProfile(row.family).resourceClass === 'cpu')
-    .map((row) => `${row.family}:${row.variant}`))].sort();
+  const participants = [
+    ...new Set(rows.filter((row) => engineResourceProfile(row.family).resourceClass === 'cpu').map((row) => `${row.family}:${row.variant}`)),
+  ].sort();
   return Object.freeze({ dial: budget.dial, cpuBudget: budget.cpuBudget, participantsKey: JSON.stringify(participants) });
 }
 
@@ -29,11 +29,12 @@ type KeyInputs = Pick<RunSnapshot, 'fen' | 'positions' | 'multiPv' | 'runtime' |
 
 /** Shared by captured runs and the live view's cache lookup. */
 export function analysisRunRowKey(input: KeyInputs, row: EngineRow): string {
-  const runtime = row.family !== 'lc0'
-    ? ''
-    : isLc0BigNetVariant(row.variant)
-      ? (input.servedModels[row.variant === 't3' ? 't3' : 'bt4'] ?? '')
-      : `${input.runtime}|${input.servedModels.small ?? ''}`;
+  const runtime =
+    row.family !== 'lc0'
+      ? ''
+      : isLc0BigNetVariant(row.variant)
+        ? (input.servedModels[row.variant === 't3' ? 't3' : 'bt4'] ?? '')
+        : `${input.runtime}|${input.servedModels.small ?? ''}`;
   const { dial, cpuBudget, participantsKey } = input.broker;
   const cpu = engineResourceProfile(row.family).resourceClass === 'cpu' ? JSON.stringify([dial, cpuBudget, JSON.parse(participantsKey)]) : '';
   return analysisResultCacheKey(input.fen, input.positions.map(boardToFen), row, { multiPv: input.multiPv, runtime, cpu });
@@ -41,11 +42,13 @@ export function analysisRunRowKey(input: KeyInputs, row: EngineRow): string {
 
 /** Capture synchronously after preparation validation; no controls or workers are retained. */
 export function captureAnalysisRun(input: Omit<RunSnapshot, 'positionKey' | 'selectionKey' | 'rowKeys'>): RunSnapshot {
-  const positions = Object.freeze(input.positions.map((board) => {
-    const squares = [...board.squares];
-    Object.freeze(squares);
-    return Object.freeze({ ...board, squares });
-  }));
+  const positions = Object.freeze(
+    input.positions.map((board) => {
+      const squares = [...board.squares];
+      Object.freeze(squares);
+      return Object.freeze({ ...board, squares });
+    }),
+  );
   const snapshot = {
     ...input,
     positions,

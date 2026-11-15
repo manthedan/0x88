@@ -684,7 +684,9 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     this.assertNotDisposed();
     const pending = Promise.resolve().then(work);
     this.admitted.add(pending);
-    const settled = () => { this.admitted.delete(pending); };
+    const settled = () => {
+      this.admitted.delete(pending);
+    };
     void pending.then(settled, settled);
     return pending;
   }

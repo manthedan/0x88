@@ -9,7 +9,10 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
   test('s4fix runtime routing (transform legacy TypeScript syntax)', () => {
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
-    const child = spawnSync(process.execPath, ['--experimental-transform-types', '--no-warnings', '--test-reporter=tap', fileURLToPath(import.meta.url)], { encoding: 'utf8', env });
+    const child = spawnSync(process.execPath, ['--experimental-transform-types', '--no-warnings', '--test-reporter=tap', fileURLToPath(import.meta.url)], {
+      encoding: 'utf8',
+      env,
+    });
     assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
     assert.match(child.stdout, /^# pass 1$/m);
   });
@@ -31,12 +34,15 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       return evaluator;
     });
     for (const runtime of ['auto', 'ort', 'tvmjs', 'custom-webgpu']) {
-      const loaded = await createBrowserSquareformerRuntimeEvaluator({
-        modelId: BT4_SOAP_REM_C19000_FINAL_MODEL_ID,
-        onnx: '/models/s4fix_v_ema.onnx',
-        meta: '/models/s4fix_v_ema.meta.json',
-        manifestUrl: CENTIPAWN_TVMJS_WEBGPU_V2.artifact.manifestUrl,
-      }, { runtime, fallback: false });
+      const loaded = await createBrowserSquareformerRuntimeEvaluator(
+        {
+          modelId: BT4_SOAP_REM_C19000_FINAL_MODEL_ID,
+          onnx: '/models/s4fix_v_ema.onnx',
+          meta: '/models/s4fix_v_ema.meta.json',
+          manifestUrl: CENTIPAWN_TVMJS_WEBGPU_V2.artifact.manifestUrl,
+        },
+        { runtime, fallback: false },
+      );
       assert.equal(loaded.modelId, S4FIX_V_EMA_MODEL_ID, 'model URL takes precedence over stale model id');
       assert.equal(loaded.evaluator, evaluator);
       assert.match(loaded.resolvedRuntime, /ort$/);

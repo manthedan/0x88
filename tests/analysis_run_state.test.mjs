@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import ts from 'typescript';
-import { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, analysisRunStateSnapshot, appendAnalysisTransitionLog, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
+import {
+  analysisCanPrepare,
+  analysisIsAnalyzing,
+  analysisOperationId,
+  analysisRunStateSnapshot,
+  appendAnalysisTransitionLog,
+  initialAnalysisRunState,
+  transitionAnalysis,
+} from '../src/lc0/analysisRunState.ts';
 
 const none = { reloadLc0: false, disposeUnused: false };
 const both = { reloadLc0: true, disposeUnused: true };
@@ -18,8 +26,12 @@ function freeze(value) {
 
 // Timers and preparation/maintenance completions are deferred independently.
 function machine() {
-  let state = initialAnalysisRunState(), id = 0, now = 0;
-  const timers = new Map(), effects = [], publishers = new Set();
+  let state = initialAnalysisRunState(),
+    id = 0,
+    now = 0;
+  const timers = new Map(),
+    effects = [],
+    publishers = new Set();
   const send = (event) => {
     const previous = freeze(state);
     const result = transitionAnalysis(previous, { revision: state.revision + 1, ...event, nextId: ++id });
@@ -43,7 +55,8 @@ function machine() {
     return result.effects;
   };
   return {
-    send, effects,
+    send,
+    effects,
     state: () => state,
     owner: () => state.execution.owner,
     operation: () => analysisOperationId(state.execution),
@@ -53,10 +66,11 @@ function machine() {
     settle: (operationId = analysisOperationId(state.execution), failed = false) => send({ type: 'SETTLED', operationId, failed }),
     tick: (ms) => {
       now += ms;
-      for (const [ticket, at] of [...timers]) if (at <= now) {
-        timers.delete(ticket);
-        send({ type: 'DEBOUNCE_FIRED', ticket });
-      }
+      for (const [ticket, at] of [...timers])
+        if (at <= now) {
+          timers.delete(ticket);
+          send({ type: 'DEBOUNCE_FIRED', ticket });
+        }
     },
   };
 }
@@ -99,7 +113,10 @@ test('fake-clock debounce ignores replaced tickets and force survives coalescing
   m.request(false, 250);
   m.tick(1000);
   assert.equal(m.state().wanted.force, true);
-  assert.equal(m.effects.some((e) => e.type === 'prepare'), false);
+  assert.equal(
+    m.effects.some((e) => e.type === 'prepare'),
+    false,
+  );
   m.send({ type: 'VISIBILITY', visible: true, resumeSearch: true });
   assert.equal(m.state().execution.intent.force, true);
   assert.equal(m.prepared()[0].type, 'search');
@@ -141,7 +158,10 @@ for (const invalidation of ['revision', 'queued request', 'reload', 'dispose', '
     if (invalidation === 'owner revision') event.owner = { ...owner, preparationRevision: -1 };
     if (invalidation === 'mode') m.send({ type: 'MODE_ENTER', mode: 'review' });
     assert.deepEqual(m.send(event), []);
-    assert.equal(m.effects.some((e) => e.type === 'search'), false);
+    assert.equal(
+      m.effects.some((e) => e.type === 'search'),
+      false,
+    );
   });
 }
 
@@ -155,7 +175,10 @@ test('queued maintenance survives hide, Stop, stale finally and maintenance sett
   m.settle(old.runId);
   assert.deepEqual(m.state().maintenance, both);
   assert.equal(m.state().wanted, null);
-  assert.equal(m.effects.some((e) => e.type === 'maintain'), false);
+  assert.equal(
+    m.effects.some((e) => e.type === 'maintain'),
+    false,
+  );
   m.send({ type: 'VISIBILITY', visible: true, resumeSearch: false });
   const operation = m.operation();
   m.settings(both, false);
@@ -166,7 +189,10 @@ test('queued maintenance survives hide, Stop, stale finally and maintenance sett
   assert.deepEqual(m.state().execution.maintenance, both);
   m.settle();
   assert.equal(m.state().execution.tag, 'idle');
-  assert.equal(m.effects.some((e) => e.type === 'search'), false);
+  assert.equal(
+    m.effects.some((e) => e.type === 'search'),
+    false,
+  );
 });
 
 test('a hidden maintenance operation is replaced without letting its old callback consume work', () => {
@@ -226,7 +252,10 @@ test('Stop during a backend load consumes maintenance but never resurrects searc
   assert.equal(m.state().execution.tag, 'maintaining');
   m.settle();
   assert.equal(m.state().execution.tag, 'idle');
-  assert.equal(m.effects.some((e) => e.type === 'prepare'), false);
+  assert.equal(
+    m.effects.some((e) => e.type === 'prepare'),
+    false,
+  );
 });
 
 for (const mode of ['review', 'retry', 'critical']) {
@@ -241,7 +270,10 @@ for (const mode of ['review', 'retry', 'critical']) {
     m.send({ type: 'VISIBILITY', visible: false, resumeSearch: false });
     m.send({ type: 'VISIBILITY', visible: true, resumeSearch: false });
     assert.deepEqual(m.state().maintenance, both);
-    assert.equal(m.effects.some((e) => e.type === 'maintain'), false);
+    assert.equal(
+      m.effects.some((e) => e.type === 'maintain'),
+      false,
+    );
     m.send({ type: 'MODE_EXIT', mode });
     m.request();
     assert.equal(m.state().execution.tag, 'maintaining');
@@ -261,7 +293,10 @@ test('admission resume drains queued settings but not a stopped search', () => {
   m.settle();
   m.send({ type: 'MODE_EXIT', mode: 'critical', resume: true });
   assert.equal(m.state().execution.tag, 'idle');
-  assert.equal(m.effects.some((e) => e.type === 'prepare'), false);
+  assert.equal(
+    m.effects.some((e) => e.type === 'prepare'),
+    false,
+  );
 });
 
 for (const mode of ['review', 'retry', 'critical']) {
@@ -272,7 +307,8 @@ for (const mode of ['review', 'retry', 'critical']) {
       else m.request(true, phase === 'scheduled' ? 250 : 0);
       if (phase === 'running') m.prepared();
       if (phase === 'hidden') m.send({ type: 'VISIBILITY', visible: false, resumeSearch: false });
-      const old = m.owner(), operation = m.operation();
+      const old = m.owner(),
+        operation = m.operation();
       const effects = m.send({ type: 'MODE_ENTER', mode });
       assert.equal(m.state().execution.tag, 'idle');
       assert.deepEqual(m.state().modes, [mode]);
@@ -332,7 +368,10 @@ for (const mode of ['review', 'retry', 'critical']) {
     assert.equal(m.state().execution.tag, 'maintaining');
     m.settle();
     assert.equal(m.state().execution.tag, 'idle');
-    assert.equal(m.effects.some((effect) => effect.type === 'prepare'), false);
+    assert.equal(
+      m.effects.some((effect) => effect.type === 'prepare'),
+      false,
+    );
   });
 }
 
@@ -356,7 +395,8 @@ test('critical drain cannot release review ownership or consume its maintenance'
 test('diagnostic snapshots are detached, deeply frozen and omit run payloads in every phase', () => {
   const m = machine();
   const inspect = () => {
-    const state = m.state(), view = analysisRunStateSnapshot(state);
+    const state = m.state(),
+      view = analysisRunStateSnapshot(state);
     const checkFrozen = (value) => {
       if (!value || typeof value !== 'object') return;
       assert.equal(Object.isFrozen(value), true);
@@ -369,32 +409,53 @@ test('diagnostic snapshots are detached, deeply frozen and omit run payloads in 
     assert.equal(view.execution.tag, state.execution.tag);
     assert.equal(view.execution.runId, analysisOperationId(state.execution));
     assert.doesNotMatch(JSON.stringify(view), /history\/settings\/model|rowKeys|selectionKey|snapshot|fen/i);
-    assert.throws(() => { view.visible = false; }, TypeError);
-    assert.throws(() => { view.modes.push('review'); }, TypeError);
+    assert.throws(() => {
+      view.visible = false;
+    }, TypeError);
+    assert.throws(() => {
+      view.modes.push('review');
+    }, TypeError);
     return view;
   };
   inspect();
-  m.request(true, 250); inspect();
-  m.tick(250); inspect();
+  m.request(true, 250);
+  inspect();
+  m.tick(250);
+  inspect();
   m.prepared();
   const running = inspect();
-  assert.throws(() => { running.execution.owner.runId = -1; }, TypeError);
-  assert.throws(() => { running.execution.intent.force = false; }, TypeError);
-  m.settings(both); inspect();
-  m.settle(); inspect();
-  m.settings(both); inspect();
-  m.send({ type: 'MODE_ENTER', mode: 'critical' }); inspect();
-  m.settings(both); const queued = inspect();
-  assert.throws(() => { queued.wanted.force = true; }, TypeError);
+  assert.throws(() => {
+    running.execution.owner.runId = -1;
+  }, TypeError);
+  assert.throws(() => {
+    running.execution.intent.force = false;
+  }, TypeError);
+  m.settings(both);
+  inspect();
+  m.settle();
+  inspect();
+  m.settings(both);
+  inspect();
+  m.send({ type: 'MODE_ENTER', mode: 'critical' });
+  inspect();
+  m.settings(both);
+  const queued = inspect();
+  assert.throws(() => {
+    queued.wanted.force = true;
+  }, TypeError);
   m.send({ type: 'MODE_EXIT', mode: 'critical', resume: true });
-  m.send({ type: 'STOP', preserveMaintenance: true }); inspect();
-  m.send({ type: 'DISPOSE' }); inspect();
+  m.send({ type: 'STOP', preserveMaintenance: true });
+  inspect();
+  m.send({ type: 'DISPOSE' });
+  inspect();
   assert.equal(running.execution.tag, 'running', 'older snapshots never change');
   assert.deepEqual(queued.modes, ['critical']);
 });
 
 test('transition log is bounded, immutable, detached and contains no event payloads', () => {
-  let state = initialAnalysisRunState(), log = Object.freeze([]), first;
+  let state = initialAnalysisRunState(),
+    log = Object.freeze([]),
+    first;
   for (let nextId = 1; nextId <= 75; nextId++) {
     const event = { type: 'REQUEST', intent: { requestId: nextId, force: true }, delayMs: 250, nextId };
     const next = transitionAnalysis(freeze(state), event);
@@ -415,7 +476,9 @@ test('transition log is bounded, immutable, detached and contains no event paylo
   assert.equal(Object.isFrozen(log[0]), true);
   assert.equal(Object.isFrozen(log[0].effects), true);
   assert.throws(() => log.pop(), TypeError);
-  assert.throws(() => { log[0].from = 'running'; }, TypeError);
+  assert.throws(() => {
+    log[0].from = 'running';
+  }, TypeError);
   assert.throws(() => log[0].effects.push('search'), TypeError);
   assert.doesNotMatch(JSON.stringify(log), /intent|snapshot|fen|selectionKey/i);
   const event = { type: 'MODE_ENTER', mode: 'critical', nextId: 100 };
@@ -426,11 +489,13 @@ test('transition log is bounded, immutable, detached and contains no event paylo
 
 test('smoke hooks keep existing fields, expose frozen diagnostics and tear down only their own mount', () => {
   const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
-  const from = source.indexOf('  const schedulingStateHook = '), to = source.indexOf('  const pvResize = ', from);
+  const from = source.indexOf('  const schedulingStateHook = '),
+    to = source.indexOf('  const pvResize = ', from);
   assert.ok(from >= 0 && to > from);
   const cleanup = [...source.matchAll(/^    if \(smokeGlobal\.__analysis.*$/gm)].map(([line]) => line).join('\n');
   assert.equal(cleanup.split('\n').length, 4);
-  const code = ts.transpile(`
+  const code = ts.transpile(
+    `
     const { analysisIsAnalyzing, analysisOperationId, analysisRunStateSnapshot } = helpers;
     const analysisRunState = helpers.state, analysisTransitionLog = helpers.log;
     const selectedLc0Runtime = () => 'onnx', workerRuntime = 'onnx';
@@ -440,18 +505,46 @@ test('smoke hooks keep existing fields, expose frozen diagnostics and tear down 
     const hook = () => {}, applyHiddenTab = () => {};
     ${source.slice(from, to)}
     return () => { ${cleanup} };
-  `, { target: ts.ScriptTarget.ES2022 });
-  const global = {}, m = machine();
-  m.request(); m.prepared();
-  const mount = () => new Function('globalThis', 'helpers', code)(global, {
-    analysisIsAnalyzing, analysisOperationId, analysisRunStateSnapshot, state: m.state(), log: Object.freeze([]),
-  });
-  const unmountOld = mount(), oldHook = global.__analysisSchedulingState;
+  `,
+    { target: ts.ScriptTarget.ES2022 },
+  );
+  const global = {},
+    m = machine();
+  m.request();
+  m.prepared();
+  const mount = () =>
+    new Function('globalThis', 'helpers', code)(global, {
+      analysisIsAnalyzing,
+      analysisOperationId,
+      analysisRunStateSnapshot,
+      state: m.state(),
+      log: Object.freeze([]),
+    });
+  const unmountOld = mount(),
+    oldHook = global.__analysisSchedulingState;
   const view = oldHook();
-  assert.deepEqual(Object.keys(view).sort(), [
-    'analyzing', 'searchActive', 'reloadActive', 'reloadQueued', 'disposeQueued', 'phase', 'runId', 'revision',
-    'runtime', 'workerRuntime', 'hidden', 'suspended', 'fen', 'workerProgressMessages', 'uiProgressSamples', 'message', 'state',
-  ].sort());
+  assert.deepEqual(
+    Object.keys(view).sort(),
+    [
+      'analyzing',
+      'searchActive',
+      'reloadActive',
+      'reloadQueued',
+      'disposeQueued',
+      'phase',
+      'runId',
+      'revision',
+      'runtime',
+      'workerRuntime',
+      'hidden',
+      'suspended',
+      'fen',
+      'workerProgressMessages',
+      'uiProgressSamples',
+      'message',
+      'state',
+    ].sort(),
+  );
   assert.equal(view.fen, 'current FEN');
   assert.equal(view.state.execution.tag, 'running');
   assert.equal(Object.isFrozen(view), true);
@@ -469,12 +562,22 @@ test('transition log records run identity and revision without retaining PREPARE
   const m = machine();
   m.settings(none, false);
   m.request();
-  const before = m.state(), owner = m.owner();
+  const before = m.state(),
+    owner = m.owner();
   const event = { type: 'PREPARED', owner, revision: before.revision, snapshot };
   const effects = m.send(event);
   let log = appendAnalysisTransitionLog([], before, event, { state: m.state(), effects });
-  assert.deepEqual(log[0], { event: 'PREPARED', mode: null, from: 'preparing', to: 'running', effects: ['search'], runId: owner.runId, revision: before.revision });
-  const running = m.state(), enter = { type: 'MODE_ENTER', mode: 'retry' };
+  assert.deepEqual(log[0], {
+    event: 'PREPARED',
+    mode: null,
+    from: 'preparing',
+    to: 'running',
+    effects: ['search'],
+    runId: owner.runId,
+    revision: before.revision,
+  });
+  const running = m.state(),
+    enter = { type: 'MODE_ENTER', mode: 'retry' };
   const cancelled = m.send(enter);
   log = appendAnalysisTransitionLog(log, running, enter, { state: m.state(), effects: cancelled });
   assert.equal(log.at(-1).runId, owner.runId);
@@ -490,7 +593,10 @@ test('navigation drops only the request, retaining active backend ownership', ()
   assert.equal(m.state().wanted, null);
   m.settle();
   assert.equal(m.state().execution.tag, 'idle');
-  assert.equal(m.effects.some((e) => e.type === 'prepare'), false);
+  assert.equal(
+    m.effects.some((e) => e.type === 'prepare'),
+    false,
+  );
   m.request(true, 250);
   m.send({ type: 'DROP_REQUEST' });
   m.tick(1000);
@@ -505,7 +611,10 @@ test('initial setup continues while hidden and only defers its later requested s
   m.request();
   m.settle(1000);
   assert.equal(m.state().execution.tag, 'idle');
-  assert.equal(m.effects.some((e) => e.type === 'prepare'), false);
+  assert.equal(
+    m.effects.some((e) => e.type === 'prepare'),
+    false,
+  );
   m.send({ type: 'VISIBILITY', visible: true, resumeSearch: true });
   assert.equal(m.state().execution.tag, 'preparing');
 });
@@ -519,5 +628,8 @@ test('cached navigation with auto off drops a hidden search, preserving only mai
   m.send({ type: 'VISIBILITY', visible: true, resumeSearch: false });
   m.settle();
   assert.equal(m.state().execution.tag, 'idle');
-  assert.equal(m.effects.some((e) => e.type === 'search'), false);
+  assert.equal(
+    m.effects.some((e) => e.type === 'search'),
+    false,
+  );
 });

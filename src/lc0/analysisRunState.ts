@@ -34,7 +34,7 @@ export type AnalysisEvent = (
   | { type: 'MODE_EXIT'; mode: AnalysisMode; resume?: boolean }
   | { type: 'DISPOSE' }
 ) & { nextId: number };
-export type AnalysisEventInput = AnalysisEvent extends infer E ? E extends AnalysisEvent ? Omit<E, 'nextId'> : never : never;
+export type AnalysisEventInput = AnalysisEvent extends infer E ? (E extends AnalysisEvent ? Omit<E, 'nextId'> : never) : never;
 export type AnalysisEffect =
   | { type: 'cancel'; operationId: number }
   | { type: 'clearTimer'; ticket: number }
@@ -56,18 +56,31 @@ export function analysisIsAnalyzing(state: AnalysisRunState): boolean {
 
 export function analysisCanPrepare(state: AnalysisRunState, owner: Owner): boolean {
   const execution = state.execution;
-  return execution.tag === 'preparing' && execution.owner.runId === owner.runId && execution.owner.preparationRevision === owner.preparationRevision && state.revision === owner.preparationRevision && state.visible && !state.modes.length && !state.wanted && !state.maintenance.reloadLc0 && !state.maintenance.disposeUnused;
+  return (
+    execution.tag === 'preparing' &&
+    execution.owner.runId === owner.runId &&
+    execution.owner.preparationRevision === owner.preparationRevision &&
+    state.revision === owner.preparationRevision &&
+    state.visible &&
+    !state.modes.length &&
+    !state.wanted &&
+    !state.maintenance.reloadLc0 &&
+    !state.maintenance.disposeUnused
+  );
 }
 
 // Omit run payloads: histories, model URLs and cache keys are not diagnostics.
 export function analysisRunStateSnapshot(state: AnalysisRunState) {
   const execution = state.execution;
   return Object.freeze({
-    revision: state.revision, visible: state.visible, modes: Object.freeze([...state.modes]),
+    revision: state.revision,
+    visible: state.visible,
+    modes: Object.freeze([...state.modes]),
     wanted: state.wanted && Object.freeze({ ...state.wanted }),
     maintenance: Object.freeze({ ...state.maintenance }),
     execution: Object.freeze({
-      tag: execution.tag, runId: analysisOperationId(execution),
+      tag: execution.tag,
+      runId: analysisOperationId(execution),
       ticket: execution.tag === 'scheduled' ? execution.ticket : null,
       owner: 'owner' in execution ? Object.freeze({ ...execution.owner }) : null,
       intent: 'intent' in execution ? Object.freeze({ ...execution.intent }) : null,
@@ -77,23 +90,42 @@ export function analysisRunStateSnapshot(state: AnalysisRunState) {
 }
 
 export type AnalysisTransitionEntry = Readonly<{
-  event: AnalysisEvent['type']; mode: AnalysisMode | null; from: Execution['tag']; to: Execution['tag'];
-  effects: readonly AnalysisEffect['type'][]; runId: number | null; revision: number;
+  event: AnalysisEvent['type'];
+  mode: AnalysisMode | null;
+  from: Execution['tag'];
+  to: Execution['tag'];
+  effects: readonly AnalysisEffect['type'][];
+  runId: number | null;
+  revision: number;
 }>;
-export function appendAnalysisTransitionLog(log: readonly AnalysisTransitionEntry[], previous: AnalysisRunState, event: AnalysisEventInput, next: { state: AnalysisRunState; effects: AnalysisEffect[] }): readonly AnalysisTransitionEntry[] {
-  return Object.freeze([...log.slice(-49), Object.freeze({
-    event: event.type, mode: 'mode' in event ? event.mode : null,
-    from: previous.execution.tag, to: next.state.execution.tag,
-    effects: Object.freeze(next.effects.map((effect) => effect.type)),
-    runId: analysisOperationId(next.state.execution) ?? analysisOperationId(previous.execution), revision: next.state.revision,
-  })]);
+export function appendAnalysisTransitionLog(
+  log: readonly AnalysisTransitionEntry[],
+  previous: AnalysisRunState,
+  event: AnalysisEventInput,
+  next: { state: AnalysisRunState; effects: AnalysisEffect[] },
+): readonly AnalysisTransitionEntry[] {
+  return Object.freeze([
+    ...log.slice(-49),
+    Object.freeze({
+      event: event.type,
+      mode: 'mode' in event ? event.mode : null,
+      from: previous.execution.tag,
+      to: next.state.execution.tag,
+      effects: Object.freeze(next.effects.map((effect) => effect.type)),
+      runId: analysisOperationId(next.state.execution) ?? analysisOperationId(previous.execution),
+      revision: next.state.revision,
+    }),
+  ]);
 }
 
 export function transitionAnalysis(previous: AnalysisRunState, event: AnalysisEvent): { state: AnalysisRunState; effects: AnalysisEffect[] } {
   let state = previous;
   const effects: AnalysisEffect[] = [];
   if (state.execution.tag === 'disposed') return { state, effects };
-  const merge = (intent: Intent): Intent => ({ ...intent, force: intent.force || state.wanted?.force === true || ('intent' in state.execution && state.execution.intent.force) });
+  const merge = (intent: Intent): Intent => ({
+    ...intent,
+    force: intent.force || state.wanted?.force === true || ('intent' in state.execution && state.execution.intent.force),
+  });
   const retire = () => {
     const execution = state.execution;
     if (execution.tag === 'scheduled') effects.push({ type: 'clearTimer', ticket: execution.ticket });
@@ -105,7 +137,12 @@ export function transitionAnalysis(previous: AnalysisRunState, event: AnalysisEv
     if (!state.visible || state.modes.length || state.execution.tag !== 'idle') return;
     if (state.maintenance.reloadLc0 || state.maintenance.disposeUnused) {
       const maintenance = state.maintenance;
-      state = { ...state, execution: { tag: 'maintaining', operationId: event.nextId, maintenance }, maintenance: none, wanted: maintenance.reloadLc0 && state.wanted ? { ...state.wanted, force: true } : state.wanted };
+      state = {
+        ...state,
+        execution: { tag: 'maintaining', operationId: event.nextId, maintenance },
+        maintenance: none,
+        wanted: maintenance.reloadLc0 && state.wanted ? { ...state.wanted, force: true } : state.wanted,
+      };
       effects.push({ type: 'maintain', operationId: event.nextId, maintenance });
     } else if (state.wanted) {
       const intent = state.wanted;
@@ -133,7 +170,10 @@ export function transitionAnalysis(previous: AnalysisRunState, event: AnalysisEv
       advance();
       break;
     case 'SETTINGS_CHANGED': {
-      const maintenance = { reloadLc0: state.maintenance.reloadLc0 || event.maintenance.reloadLc0, disposeUnused: state.maintenance.disposeUnused || event.maintenance.disposeUnused };
+      const maintenance = {
+        reloadLc0: state.maintenance.reloadLc0 || event.maintenance.reloadLc0,
+        disposeUnused: state.maintenance.disposeUnused || event.maintenance.disposeUnused,
+      };
       state = { ...state, revision: event.revision, maintenance, wanted: event.request ? merge(event.intent) : state.wanted };
       if (state.execution.tag === 'scheduled' || state.execution.tag === 'cancelling') {
         retire();
@@ -148,7 +188,11 @@ export function transitionAnalysis(previous: AnalysisRunState, event: AnalysisEv
       break;
     case 'BACKEND_STARTED':
       retire();
-      state = { ...state, execution: { tag: 'maintaining', operationId: event.operationId, maintenance: none }, wanted: event.intent ? merge(event.intent) : state.wanted };
+      state = {
+        ...state,
+        execution: { tag: 'maintaining', operationId: event.operationId, maintenance: none },
+        wanted: event.intent ? merge(event.intent) : state.wanted,
+      };
       break;
     case 'PREPARED': {
       const execution = state.execution;
@@ -160,7 +204,11 @@ export function transitionAnalysis(previous: AnalysisRunState, event: AnalysisEv
     case 'SETTLED':
       if (analysisOperationId(state.execution) !== event.operationId) break;
       // A failed backend must not retry forever, but newer settings still run.
-      state = { ...state, execution: { tag: 'idle' }, wanted: event.failed && !state.maintenance.reloadLc0 && !state.maintenance.disposeUnused ? null : state.wanted };
+      state = {
+        ...state,
+        execution: { tag: 'idle' },
+        wanted: event.failed && !state.maintenance.reloadLc0 && !state.maintenance.disposeUnused ? null : state.wanted,
+      };
       advance();
       break;
     case 'STOP': {
@@ -178,7 +226,14 @@ export function transitionAnalysis(previous: AnalysisRunState, event: AnalysisEv
       if (!event.visible) {
         // Initial backend setup already runs in the background; only reloads pause.
         if (execution.tag === 'maintaining' && !execution.maintenance.reloadLc0 && !execution.maintenance.disposeUnused) break;
-        if (execution.tag === 'maintaining') state = { ...state, maintenance: { reloadLc0: state.maintenance.reloadLc0 || execution.maintenance.reloadLc0, disposeUnused: state.maintenance.disposeUnused || execution.maintenance.disposeUnused } };
+        if (execution.tag === 'maintaining')
+          state = {
+            ...state,
+            maintenance: {
+              reloadLc0: state.maintenance.reloadLc0 || execution.maintenance.reloadLc0,
+              disposeUnused: state.maintenance.disposeUnused || execution.maintenance.disposeUnused,
+            },
+          };
         retire();
       } else advance();
       break;

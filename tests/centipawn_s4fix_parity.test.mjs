@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { boardToFen, parseFen, squareName } from '../src/chess/board.ts';
-import { normalizePositionForStmWhite, normalizedMoveToOriginal } from '../src/chess/boardNormalization.ts';
+import { normalizedMoveToOriginal, normalizePositionForStmWhite } from '../src/chess/boardNormalization.ts';
 import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../src/chess/moveEncodings.ts';
 import { legalMoves, makeMove } from '../src/chess/movegen.ts';
@@ -45,7 +45,7 @@ test('s4fix encoder and legal policy indices equal native inputs at all 51 posit
     const moves = legalMoves(normalized.board);
     const indices = new Map(moves.map((move) => [moveToUci(normalizedMoveToOriginal(move, normalized.flipped)), moveToSquareformerPolicyIndex(move)]));
     assert.deepEqual([...indices.keys()].sort(), [...position.legal_uci].sort(), position.label);
-    position.legal_uci.forEach((uci, i) => assert.equal(indices.get(uci), position.legal_policy_index[i], `${position.label} ${uci}`));
+    for (const [i, uci] of position.legal_uci.entries()) assert.equal(indices.get(uci), position.legal_policy_index[i], `${position.label} ${uci}`);
   }
 });
 
@@ -67,11 +67,20 @@ test('s4fix ORT Web outputs and evaluator T=2 priors match the native fixture', 
   try {
     for (const position of fixture.positions) {
       const { tokens, attack } = inputs(position);
-      const outputs = await session.run({
-        tokens: new ort.Tensor('int64', tokens, [1, 64, 24]),
-        attack_summary: new ort.Tensor('float32', attack, [1, 64, 28]),
-      }, ['policy', 'wdl', 'q', 'wdl_sf18']);
-      check('policy_logits', position.legal_policy_index.map((i) => outputs.policy.data[i]), position.expected.policy_logits, 2e-3, position.label);
+      const outputs = await session.run(
+        {
+          tokens: new ort.Tensor('int64', tokens, [1, 64, 24]),
+          attack_summary: new ort.Tensor('float32', attack, [1, 64, 28]),
+        },
+        ['policy', 'wdl', 'q', 'wdl_sf18'],
+      );
+      check(
+        'policy_logits',
+        position.legal_policy_index.map((i) => outputs.policy.data[i]),
+        position.expected.policy_logits,
+        2e-3,
+        position.label,
+      );
       check('wdl_logits', outputs.wdl.data, position.expected.wdl_logits, 2e-3, position.label);
       check('wdl', softmax(outputs.wdl.data), position.expected.wdl, 2e-4, position.label);
       check('q', outputs.q.data, [position.expected.q], 2e-4, position.label);
@@ -80,14 +89,26 @@ test('s4fix ORT Web outputs and evaluator T=2 priors match the native fixture', 
       const context = { historyFens: position.history_fens };
       const evaluation = await evaluator.evaluate(board, context);
       const actionIds = new Map(legalMoves(board).map((move) => [moveToUci(move), moveToActionId(move)]));
-      check('prior', position.legal_uci.map((uci) => evaluation.policy.get(actionIds.get(uci))), softmax(position.expected.policy_logits.map((x) => x / 2)), 2e-4, position.label);
+      check(
+        'prior',
+        position.legal_uci.map((uci) => evaluation.policy.get(actionIds.get(uci))),
+        softmax(position.expected.policy_logits.map((x) => x / 2)),
+        2e-4,
+        position.label,
+      );
       check('wdl', evaluation.wdl, position.expected.wdl, 2e-4, position.label);
       check('wdl', evaluation.auxiliaryWdls.wdl_sf18, softmax(position.expected.wdl_sf18_logits), 2e-4, position.label);
       if ([0, 6, 12, 50].includes(fixture.positions.indexOf(position))) {
         const plain = await baseline.evaluate(board, context);
         assert.deepEqual(evaluation.wdl, plain.wdl, 'policy temperature must not change WDL');
         assert.deepEqual(evaluation.auxiliaryWdls, plain.auxiliaryWdls, 'policy temperature must not change auxiliary WDL');
-        check('prior', position.legal_uci.map((uci) => plain.policy.get(actionIds.get(uci))), softmax(position.expected.policy_logits), 2e-4, position.label);
+        check(
+          'prior',
+          position.legal_uci.map((uci) => plain.policy.get(actionIds.get(uci))),
+          softmax(position.expected.policy_logits),
+          2e-4,
+          position.label,
+        );
         assert.notDeepEqual(evaluation.policy, plain.policy);
       }
     }
@@ -104,7 +125,10 @@ test('s4fix repetition flag ignores an uncapturable en-passant square on the ear
   let board = parseFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
   const fens = [boardToFen(board)];
   for (const uci of line) {
-    board = makeMove(board, legalMoves(board).find((move) => moveToUci(move) === uci));
+    board = makeMove(
+      board,
+      legalMoves(board).find((move) => moveToUci(move) === uci),
+    );
     fens.push(boardToFen(board));
   }
   const historyFens = fens.slice(0, -1).reverse();

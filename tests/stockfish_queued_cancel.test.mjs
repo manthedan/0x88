@@ -93,11 +93,7 @@ for (const [command, call] of Object.entries(queuedCalls)) {
     assert.equal(owner.outcome, 'resolved');
     assert.equal(owner.value, 'e2e4');
     assert.equal(workers.length, 1, 'one startup serves A');
-    assert.equal(
-      workers[0].messages.filter((m) => m.startsWith('go')).length,
-      1,
-      'the cancelled request never reached the worker',
-    );
+    assert.equal(workers[0].messages.filter((m) => m.startsWith('go')).length, 1, 'the cancelled request never reached the worker');
   });
 }
 
@@ -117,11 +113,7 @@ test('a cancelled queued request does not let the next request overtake the gate
   assert.equal(cancelled.outcome, 'AbortError');
 
   await finishStartup(workers[0]);
-  assert.equal(
-    workers[0].messages.filter((m) => m.startsWith('go')).length,
-    1,
-    'only the owner is searching; the next request still waits its turn',
-  );
+  assert.equal(workers[0].messages.filter((m) => m.startsWith('go')).length, 1, 'only the owner is searching; the next request still waits its turn');
   assert.equal(next.outcome, 'pending');
 
   workers[0].emit('bestmove e2e4');

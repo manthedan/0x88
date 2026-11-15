@@ -130,7 +130,9 @@ test('the thinking indicator only shows when an engine turn outlasts the show de
       renders++;
     },
   };
-  const setThinking = new Function(...Object.keys(dependencies), `${stripTypeScriptTypes(helper)}; return ctxSetEngineThinking;`)(...Object.values(dependencies));
+  const setThinking = new Function(...Object.keys(dependencies), `${stripTypeScriptTypes(helper)}; return ctxSetEngineThinking;`)(
+    ...Object.values(dependencies),
+  );
   const fire = () => {
     const pending = [...timers.values()];
     timers.clear();

@@ -141,8 +141,7 @@ const TVMJS_RUNTIMES = [
     uiLabel: 'Centipawn · TVMJS (old model)',
     status: 'historical-research',
     manifest: 'public/runtimes/centipawn-tvmjs-webgpu/bt4-soap-rem-c19000-final/f32/v2-shape-k16/manifest.json',
-    notes:
-      'Retained TVMJS WebGPU runtime for bt4-soap-rem-c19000-final only; incompatible with s4fix-v-ema and not selected by the served model.',
+    notes: 'Retained TVMJS WebGPU runtime for bt4-soap-rem-c19000-final only; incompatible with s4fix-v-ema and not selected by the served model.',
   },
 ];
 

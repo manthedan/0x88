@@ -4,11 +4,25 @@ import test from 'node:test';
 import ts from 'typescript';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
 import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from '../src/lc0/analysisRunSnapshot.ts';
+import {
+  analysisCanPrepare,
+  analysisIsAnalyzing,
+  analysisOperationId,
+  appendAnalysisTransitionLog,
+  initialAnalysisRunState,
+  transitionAnalysis,
+} from '../src/lc0/analysisRunState.ts';
 import { BT4_NET, Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
-import { isLc0BigNetVariant } from '../src/lc0/engineCatalog.ts';
-import { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab } from '../src/lc0/hiddenTabPause.ts';
-import { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, appendAnalysisTransitionLog, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
 import { CriticalAnalysisRefresh } from '../src/lc0/criticalMoments.ts';
+import { isLc0BigNetVariant } from '../src/lc0/engineCatalog.ts';
+import {
+  cancelHiddenTabWork,
+  classifyHiddenReload,
+  hiddenAnalysisStopEnabled,
+  initialHiddenTabPause,
+  requestHiddenTabWork,
+  transitionHiddenTab,
+} from '../src/lc0/hiddenTabPause.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 
 // A big net picks its served model (the shipped export or, on Apple WebGPU, its
@@ -34,7 +48,10 @@ const backendFunction = slice('async function loadLc0Backend(', 'async function 
 const reloadFunction = slice('async function reloadLc0Backend(', 'async function init(');
 const hiddenFunctions = slice('function hiddenTabActive(', 'function installHiddenTabPause(');
 const criticalHandoff = slice('    pauseAnalysis: () => {', '    updateView: (moment, lines) => {');
-const navigationFunction = slice('let analysisGameTree = tree;', '// ---------------------------------------------------------------------------\n// Human moves');
+const navigationFunction = slice(
+  'let analysisGameTree = tree;',
+  '// ---------------------------------------------------------------------------\n// Human moves',
+);
 const centipawnAvailability = slice('async function refreshCentipawnHybridManifestStatus(', 'function centipawnModel(');
 const centipawnPins = slice('function retireAnalysisRunCentipawnKeys(', 'function centipawnEvaluator(');
 
@@ -81,7 +98,8 @@ class FakeWorker {
       else this.reply(ready);
     } else if (message.type === 'search') {
       this.searches += 1;
-      (this.searchMessages ??= []).push(message);
+      this.searchMessages ??= [];
+      this.searchMessages.push(message);
       FakeWorker.searchLog.push({ model: this.init.modelUrl, multiPv: message.multiPv });
       if (this.outcome.crashOnSearch) setImmediate(() => this.emit('error', { message: 'injected GPU crash' }));
       else
@@ -116,7 +134,14 @@ async function withWorkers(plan, run) {
 const searches = () => FakeWorker.instances.map((worker) => worker.searches);
 
 function element() {
-  return { textContent: '', toggleAttribute(name, force) { if (name === 'disabled') this.disabled = force; }, disabled: false, checked: false };
+  return {
+    textContent: '',
+    toggleAttribute(name, force) {
+      if (name === 'disabled') this.disabled = force;
+    },
+    disabled: false,
+    checked: false,
+  };
 }
 
 function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
@@ -329,7 +354,28 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     'smallLc0Runtime',
     'hiddenHelpers',
     code,
-  )(START_FEN, BT4_NET, T3_NET, searchers, rows, element, { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen }, isLc0BigNetVariant, { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, initialAnalysisRunState, appendAnalysisTransitionLog, CriticalAnalysisRefresh, transitionAnalysis: observeTransition, admissions }, smallLc0Runtime, { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab });
+  )(
+    START_FEN,
+    BT4_NET,
+    T3_NET,
+    searchers,
+    rows,
+    element,
+    { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen },
+    isLc0BigNetVariant,
+    {
+      analysisCanPrepare,
+      analysisIsAnalyzing,
+      analysisOperationId,
+      initialAnalysisRunState,
+      appendAnalysisTransitionLog,
+      CriticalAnalysisRefresh,
+      transitionAnalysis: observeTransition,
+      admissions,
+    },
+    smallLc0Runtime,
+    { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab },
+  );
 }
 
 test('post-capture controls cannot relabel search arguments, cached rows or completed coverage', () =>
@@ -349,13 +395,21 @@ test('post-capture controls cannot relabel search arguments, cached rows or comp
       for (let i = 0; i < 20 && !page.idle(); i++) await new Promise(setImmediate);
       assert.equal(page.idle(), true);
       const messages = FakeWorker.instances[0].searchMessages;
-      assert.deepEqual(messages.map(({ visits, multiPv }) => [visits, multiPv]), [[64, 1], [128, 3]]);
+      assert.deepEqual(
+        messages.map(({ visits, multiPv }) => [visits, multiPv]),
+        [
+          [64, 1],
+          [128, 3],
+        ],
+      );
       assert.deepEqual(messages[0].input.positions.map(boardToFen), [START_FEN]);
       assert.deepEqual([...page.engineLineCache.keys()], [originalKey, nextKey]);
       assert.deepEqual([...page.completeAnalysisKeys], [originalKey, nextKey]);
       assert.equal(page.engineLineCache.get(originalKey)[0].searchedMultiPv, 1);
       assert.equal(page.lineCache.get(START_FEN)[0].searchedMultiPv, 3, 'only the current selection publishes');
-    } finally { t3.dispose(); }
+    } finally {
+      t3.dispose();
+    }
   }));
 
 const t3Row = { family: 'lc0', variant: 't3', strength: 64 };
@@ -601,77 +655,101 @@ async function until(predicate) {
 }
 
 for (const gate of ['own init', 'joined other-options init', 'normalized second init']) {
-  for (const change of ['MultiPV', 'runtime', 'rows', 'strength', 'dial', 'same-FEN history', 'normalization', 'Stop', 'hide', 'dispose/remount', 'replacement']) {
+  for (const change of [
+    'MultiPV',
+    'runtime',
+    'rows',
+    'strength',
+    'dial',
+    'same-FEN history',
+    'normalization',
+    'Stop',
+    'hide',
+    'dispose/remount',
+    'replacement',
+  ]) {
     test(`${change} while held at ${gate}: admission and arguments use one snapshot`, () =>
-      withWorkers({ [T3_ORIGINAL]: [
-        { servedModelUrl: T3_SPLITK, hold: true },
-        { servedModelUrl: T3_ORIGINAL, hold: gate === 'normalized second init' },
-      ] }, async () => {
-        const t3 = new Bt4WorkerSearcher(T3_NET);
-        try {
-          const small = { family: 'lc0', variant: 'small', strength: 64 };
-          const joined = gate === 'own init' ? null : t3.init({ evalCacheEntries: 2048 });
-          const page = analysisPage({ rows: [small, t3Row], searchers: new Map([['t3', t3]]), smallLc0Runtime: 'hybrid-a' });
-          const first = page.analyzeCurrent({ force: true });
-          await until(() => FakeWorker.instances[0]?.release);
-          if (gate === 'normalized second init') {
-            FakeWorker.instances[0].release();
-            await joined;
-            await until(() => FakeWorker.instances[1]?.release);
-          }
-          assert.deepEqual(FakeWorker.searchLog, []);
-          assert.deepEqual(page.smallSearchLog, []);
-          assert.deepEqual(page.admissions, []);
-          const oldId = page.state().execution.owner.runId;
-          let replacement;
-          if (change === 'MultiPV') page.setMultiPv(3);
-          if (change === 'runtime') page.setRuntime('hybrid-b');
-          if (change === 'rows') page.setRows([t3Row]);
-          if (change === 'strength') page.setStrength(128);
-          if (change === 'dial') page.setDial('eco');
-          if (change === 'same-FEN history') replacement = page.navigateHistory([parseFen(START_FEN), parseFen(START_FEN)], ['g1f3', 'g8f6', 'f3g1', 'f6g8']);
-          if (change === 'normalization') page.normalizeRows([small]);
-          if (change === 'Stop') page.stop();
-          if (change === 'hide') page.hide();
-          if (change === 'dispose/remount') { page.leave(); page.remount(); replacement = page.analyzeCurrent(); }
-          if (change === 'replacement') replacement = page.analyzeCurrent();
-          assert.deepEqual(page.admissions, [], 'a settings mutation or replacement cannot search before validation');
-          FakeWorker.instances[gate === 'normalized second init' ? 1 : 0].release();
-          await Promise.all([first, joined, replacement]);
-          await settled(page);
-          if (change === 'Stop' || change === 'hide') {
-            assert.deepEqual(page.admissions, []);
+      withWorkers(
+        {
+          [T3_ORIGINAL]: [
+            { servedModelUrl: T3_SPLITK, hold: true },
+            { servedModelUrl: T3_ORIGINAL, hold: gate === 'normalized second init' },
+          ],
+        },
+        async () => {
+          const t3 = new Bt4WorkerSearcher(T3_NET);
+          try {
+            const small = { family: 'lc0', variant: 'small', strength: 64 };
+            const joined = gate === 'own init' ? null : t3.init({ evalCacheEntries: 2048 });
+            const page = analysisPage({ rows: [small, t3Row], searchers: new Map([['t3', t3]]), smallLc0Runtime: 'hybrid-a' });
+            const first = page.analyzeCurrent({ force: true });
+            await until(() => FakeWorker.instances[0]?.release);
+            if (gate === 'normalized second init') {
+              FakeWorker.instances[0].release();
+              await joined;
+              await until(() => FakeWorker.instances[1]?.release);
+            }
             assert.deepEqual(FakeWorker.searchLog, []);
             assert.deepEqual(page.smallSearchLog, []);
-            if (change === 'Stop') return;
-            assert.equal(page.state().wanted.force, true);
-            page.show();
+            assert.deepEqual(page.admissions, []);
+            const oldId = page.state().execution.owner.runId;
+            let replacement;
+            if (change === 'MultiPV') page.setMultiPv(3);
+            if (change === 'runtime') page.setRuntime('hybrid-b');
+            if (change === 'rows') page.setRows([t3Row]);
+            if (change === 'strength') page.setStrength(128);
+            if (change === 'dial') page.setDial('eco');
+            if (change === 'same-FEN history') replacement = page.navigateHistory([parseFen(START_FEN), parseFen(START_FEN)], ['g1f3', 'g8f6', 'f3g1', 'f6g8']);
+            if (change === 'normalization') page.normalizeRows([small]);
+            if (change === 'Stop') page.stop();
+            if (change === 'hide') page.hide();
+            if (change === 'dispose/remount') {
+              page.leave();
+              page.remount();
+              replacement = page.analyzeCurrent();
+            }
+            if (change === 'replacement') replacement = page.analyzeCurrent();
+            assert.deepEqual(page.admissions, [], 'a settings mutation or replacement cannot search before validation');
+            FakeWorker.instances[gate === 'normalized second init' ? 1 : 0].release();
+            await Promise.all([first, joined, replacement]);
             await settled(page);
+            if (change === 'Stop' || change === 'hide') {
+              assert.deepEqual(page.admissions, []);
+              assert.deepEqual(FakeWorker.searchLog, []);
+              assert.deepEqual(page.smallSearchLog, []);
+              if (change === 'Stop') return;
+              assert.equal(page.state().wanted.force, true);
+              page.show();
+              await settled(page);
+            }
+            assert.equal(page.admissions.length, 1, 'only the validated follow-up searches');
+            const captured = page.admissions[0];
+            assert.deepEqual([...page.engineLineCache.keys()].sort(), [...captured.rowKeys].sort());
+            assert.deepEqual([...page.completeAnalysisKeys], [captured.selectionKey]);
+            assert.equal(captured.multiPv, change === 'MultiPV' ? 3 : 1);
+            assert.equal(captured.runtime, change === 'runtime' ? 'hybrid-b' : 'hybrid-a');
+            assert.equal(captured.broker.dial, change === 'dial' ? 'eco' : 'balanced');
+            assert.equal(captured.positions.length, change === 'same-FEN history' ? 2 : 1);
+            assert.equal(captured.cpuPosition.moves.length, change === 'same-FEN history' ? 4 : 0);
+            assert.ok(captured.rows.every((row) => row.strength === (change === 'strength' ? 128 : 64)));
+            if (change === 'rows') assert.equal(captured.rows.length, 1);
+            if (change === 'normalization') assert.ok(captured.rows.every((row) => row.variant === 'small'));
+            if (change === 'replacement' || change === 'dispose/remount' || change === 'same-FEN history') {
+              assert.equal(page.state().execution.tag, 'idle');
+              assert.notEqual(oldId, page.state().execution.owner?.runId);
+            }
+            for (const worker of FakeWorker.instances)
+              for (const message of worker.searchMessages ?? []) {
+                assert.equal(message.multiPv, captured.multiPv);
+                assert.equal(message.visits, captured.rows.find((row) => row.variant === 't3').strength);
+                assert.deepEqual(message.input.positions.map(boardToFen), captured.positions.map(boardToFen));
+              }
+            assert.ok(page.smallSearchLog.every((runtime) => runtime === captured.runtime));
+          } finally {
+            t3.dispose();
           }
-          assert.equal(page.admissions.length, 1, 'only the validated follow-up searches');
-          const captured = page.admissions[0];
-          assert.deepEqual([...page.engineLineCache.keys()].sort(), [...captured.rowKeys].sort());
-          assert.deepEqual([...page.completeAnalysisKeys], [captured.selectionKey]);
-          assert.equal(captured.multiPv, change === 'MultiPV' ? 3 : 1);
-          assert.equal(captured.runtime, change === 'runtime' ? 'hybrid-b' : 'hybrid-a');
-          assert.equal(captured.broker.dial, change === 'dial' ? 'eco' : 'balanced');
-          assert.equal(captured.positions.length, change === 'same-FEN history' ? 2 : 1);
-          assert.equal(captured.cpuPosition.moves.length, change === 'same-FEN history' ? 4 : 0);
-          assert.ok(captured.rows.every((row) => row.strength === (change === 'strength' ? 128 : 64)));
-          if (change === 'rows') assert.equal(captured.rows.length, 1);
-          if (change === 'normalization') assert.ok(captured.rows.every((row) => row.variant === 'small'));
-          if (change === 'replacement' || change === 'dispose/remount' || change === 'same-FEN history') {
-            assert.equal(page.state().execution.tag, 'idle');
-            assert.notEqual(oldId, page.state().execution.owner?.runId);
-          }
-          for (const worker of FakeWorker.instances) for (const message of worker.searchMessages ?? []) {
-            assert.equal(message.multiPv, captured.multiPv);
-            assert.equal(message.visits, captured.rows.find((row) => row.variant === 't3').strength);
-            assert.deepEqual(message.input.positions.map(boardToFen), captured.positions.map(boardToFen));
-          }
-          assert.ok(page.smallSearchLog.every((runtime) => runtime === captured.runtime));
-        } finally { t3.dispose(); }
-      }));
+        },
+      ));
   }
 }
 
@@ -687,9 +765,19 @@ for (const action of ['Stop', 'hide', 'settings', 'replacement', 'dispose/remoun
     let newer;
     if (action === 'Stop') page.stop();
     if (action === 'hide') page.hide();
-    if (action === 'settings') { page.setRuntime('hybrid-b'); page.setMultiPv(3); }
-    if (action === 'replacement') { page.stop(); newer = page.analyzeCurrent(); }
-    if (action === 'dispose/remount') { page.leave(); page.remount(); newer = page.analyzeCurrent(); }
+    if (action === 'settings') {
+      page.setRuntime('hybrid-b');
+      page.setMultiPv(3);
+    }
+    if (action === 'replacement') {
+      page.stop();
+      newer = page.analyzeCurrent();
+    }
+    if (action === 'dispose/remount') {
+      page.leave();
+      page.remount();
+      newer = page.analyzeCurrent();
+    }
     release();
     await Promise.all([loading, newer]);
     await settled(page);
@@ -723,7 +811,9 @@ test('Stop followed by hide retires cleanup without leaving Analyze disabled', (
       assert.equal(page.el('analyze').disabled, false);
       assert.equal(page.el('lc0RuntimeSelect').disabled, false);
       assert.equal(page.admissions.length, 1, 'the cancelled search was not resurrected');
-    } finally { t3.dispose(); }
+    } finally {
+      t3.dispose();
+    }
   }));
 
 test('cancelling standalone backend setup restores controls and progress without old-finally ownership', async () => {
@@ -797,7 +887,9 @@ for (const mode of ['review', 'retry', 'critical']) {
         assert.equal(page.pinRetentions.length, 1);
         assert.equal(page.admissions.length, 1);
         assert.deepEqual(searches(), [1]);
-      } finally { t3.dispose(); }
+      } finally {
+        t3.dispose();
+      }
     }));
 }
 
@@ -820,29 +912,30 @@ for (const keepSelection of [false, true]) {
   });
 }
 
-for (const kind of ['initial setup', 'runtime reload']) for (const replaceTree of [false, true]) {
-  test(`auto-off navigation drops search but preserves ${kind} (new tree: ${replaceTree})`, async () => {
-    const small = { family: 'lc0', variant: 'small', strength: 64 };
-    const page = analysisPage({ rows: [small], searchers: new Map(), smallLc0Runtime: kind === 'runtime reload' ? 'onnx' : null });
-    const release = page.holdBackend();
-    let loading;
-    if (kind === 'initial setup') loading = page.loadBackend();
-    else page.setRuntime('hybrid-b');
-    const operation = page.state().execution.operationId;
-    page.navigateAutoOff(replaceTree);
-    assert.equal(page.state().execution.operationId, operation, 'navigation does not cancel position-independent setup');
-    assert.equal(page.state().wanted, null);
-    release();
-    await loading;
-    await settled(page);
-    assert.deepEqual(page.backendCompletions, [kind === 'runtime reload' ? 'hybrid-b' : 'onnx']);
-    assert.deepEqual(page.admissions, []);
-    assert.equal(page.el('analyze').disabled, false);
-    await page.analyzeCurrent();
-    assert.equal(page.admissions.length, 1);
-    assert.equal(page.backendCompletions.length, 1, 'the loaded backend is reusable');
-  });
-}
+for (const kind of ['initial setup', 'runtime reload'])
+  for (const replaceTree of [false, true]) {
+    test(`auto-off navigation drops search but preserves ${kind} (new tree: ${replaceTree})`, async () => {
+      const small = { family: 'lc0', variant: 'small', strength: 64 };
+      const page = analysisPage({ rows: [small], searchers: new Map(), smallLc0Runtime: kind === 'runtime reload' ? 'onnx' : null });
+      const release = page.holdBackend();
+      let loading;
+      if (kind === 'initial setup') loading = page.loadBackend();
+      else page.setRuntime('hybrid-b');
+      const operation = page.state().execution.operationId;
+      page.navigateAutoOff(replaceTree);
+      assert.equal(page.state().execution.operationId, operation, 'navigation does not cancel position-independent setup');
+      assert.equal(page.state().wanted, null);
+      release();
+      await loading;
+      await settled(page);
+      assert.deepEqual(page.backendCompletions, [kind === 'runtime reload' ? 'hybrid-b' : 'onnx']);
+      assert.deepEqual(page.admissions, []);
+      assert.equal(page.el('analyze').disabled, false);
+      await page.analyzeCurrent();
+      assert.equal(page.admissions.length, 1);
+      assert.equal(page.backendCompletions.length, 1, 'the loaded backend is reusable');
+    });
+  }
 
 for (const showFirst of [false, true]) {
   test(`hidden queued settings survive critical settlement (show first: ${showFirst})`, async () => {
@@ -882,11 +975,19 @@ test('Centipawn manifest row fallback invalidates held big-net preparation befor
       assert.equal(page.admissions[0].rows[1].variant, 'bt4-auto');
       assert.deepEqual([...page.engineLineCache.keys()].sort(), [...page.admissions[0].rowKeys].sort());
       assert.deepEqual([...page.completeAnalysisKeys], [page.admissions[0].selectionKey]);
-    } finally { t3.dispose(); }
+    } finally {
+      t3.dispose();
+    }
   }));
 
 test('automatic fallback during backend-only setup cannot recreate a navigation-dropped search', async () => {
-  const page = analysisPage({ rows: [{ family: 'lc0', variant: 'small', strength: 64 }, { family: 'centipawn', variant: 'bt4-custom', strength: 64 }], searchers: new Map() });
+  const page = analysisPage({
+    rows: [
+      { family: 'lc0', variant: 'small', strength: 64 },
+      { family: 'centipawn', variant: 'bt4-custom', strength: 64 },
+    ],
+    searchers: new Map(),
+  });
   const release = page.holdBackend();
   const loading = page.loadBackend(false);
   page.navigateAutoOff(true);
@@ -956,7 +1057,9 @@ test('changing engines after Stop does not wait for a cancelled big-net init to 
       await first;
       assert.equal(page.admissions.length, 1, 'old init cannot consume or restart the replacement');
       assert.deepEqual([...page.completeAnalysisKeys], [page.admissions[0].selectionKey]);
-    } finally { t3.dispose(); }
+    } finally {
+      t3.dispose();
+    }
   }));
 
 test('hiding an automatic initial backend load retains its search on show', async () => {

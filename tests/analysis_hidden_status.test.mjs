@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
-import { analysisStatus } from '../src/lc0/analysisStatus.ts';
 import { analysisIsAnalyzing } from '../src/lc0/analysisRunState.ts';
+import { analysisStatus } from '../src/lc0/analysisStatus.ts';
 import { hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork } from '../src/lc0/hiddenTabPause.ts';
 
 const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
@@ -17,14 +17,23 @@ function slice(start, end) {
 function statusPage({ hidden = false, active = false, aborted = false, reload = false } = {}) {
   const nodes = new Map();
   const el = (id) => {
-    if (!nodes.has(id)) nodes.set(id, {
-      disabled: id === 'stop', dataset: {}, textContent: '', title: '',
-      toggleAttribute(name, force) { if (name === 'disabled') this.disabled = force; },
-      closest() { return null; },
-    });
+    if (!nodes.has(id))
+      nodes.set(id, {
+        disabled: id === 'stop',
+        dataset: {},
+        textContent: '',
+        title: '',
+        toggleAttribute(name, force) {
+          if (name === 'disabled') this.disabled = force;
+        },
+        closest() {
+          return null;
+        },
+      });
     return nodes.get(id);
   };
-  const code = ts.transpile(`
+  const code = ts.transpile(
+    `
     let hiddenTab = initialHiddenTabPause(hidden);
     const analysisRunState = { execution: { tag: reload ? 'maintaining' : active && !aborted ? 'running' : 'idle' } };
     const retry = null, lineCache = new Map(), tree = { current: { fen: 'current' } };
@@ -35,10 +44,22 @@ function statusPage({ hidden = false, active = false, aborted = false, reload = 
     ${slice('function deferHiddenTabWork(', 'function applyHiddenTab(')}
     ${slice('function renderAnalysisStatus(', 'function activeEngineNames(')}
     return { deferHiddenTabWork, renderAnalysisStatus, state: () => hiddenTab, el };
-  `, { target: ts.ScriptTarget.ES2022 });
-  return new Function('el', 'initialHiddenTabPause', 'requestHiddenTabWork', 'hiddenAnalysisStopEnabled', 'hidden', 'active', 'aborted', 'reload', 'analysisStatus', 'analysisIsAnalyzing', code)(
-    el, initialHiddenTabPause, requestHiddenTabWork, hiddenAnalysisStopEnabled, hidden, active, aborted, reload, analysisStatus, analysisIsAnalyzing,
+  `,
+    { target: ts.ScriptTarget.ES2022 },
   );
+  return new Function(
+    'el',
+    'initialHiddenTabPause',
+    'requestHiddenTabWork',
+    'hiddenAnalysisStopEnabled',
+    'hidden',
+    'active',
+    'aborted',
+    'reload',
+    'analysisStatus',
+    'analysisIsAnalyzing',
+    code,
+  )(el, initialHiddenTabPause, requestHiddenTabWork, hiddenAnalysisStopEnabled, hidden, active, aborted, reload, analysisStatus, analysisIsAnalyzing);
 }
 
 test('hidden queued analysis is paused while Stop can cancel its resume', () => {

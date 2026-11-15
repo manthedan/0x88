@@ -17,8 +17,8 @@ import {
   clearRuntimeFallbackWarning,
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
-import { chooseMove } from '../search/puct.ts';
 import { centipawnSearchOptions } from '../search/centipawn.ts';
+import { chooseMove } from '../search/puct.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { lc0AnalysisLines, stockfishAnalysisLines } from '../src/lc0/analysisFormat.ts';
+import { initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
 import {
   CriticalAnalysisRefresh,
   createCriticalReport,
@@ -14,7 +15,6 @@ import {
 import { criticalAgreement, criticalPositionLines, criticalReportMarkup } from '../src/lc0/criticalMomentsPresentation.ts';
 import { reviewGame } from '../src/lc0/gameReview.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
-import { initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
 
 const line = (uci = 'e2e4', scoreCp = 20, engine = 'Stockfish Lite') => ({
   engine,
@@ -79,7 +79,8 @@ test('normal uncached navigation can queue its own refresh but cannot inherit a 
 });
 
 test('cancelled critical lanes keep admission until drain and cannot release a newer review handoff', async () => {
-  let state = initialAnalysisRunState(), id = 0;
+  let state = initialAnalysisRunState(),
+    id = 0;
   const send = (event) => {
     const next = transitionAnalysis(state, { ...event, nextId: ++id });
     state = next.state;
@@ -87,14 +88,25 @@ test('cancelled critical lanes keep admission until drain and cannot release a n
   };
   send({ type: 'MODE_ENTER', mode: 'critical' });
   let release, started;
-  const held = new Promise((resolve) => { release = resolve; });
-  const entered = new Promise((resolve) => { started = resolve; });
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise((resolve) => {
+    started = resolve;
+  });
   const controller = new AbortController();
-  const running = run([lane('sf', async () => {
-    started();
-    await held;
-    return { provenance: provenance(), line: line() };
-  })], [moment()], new Map(), controller.signal);
+  const running = run(
+    [
+      lane('sf', async () => {
+        started();
+        await held;
+        return { provenance: provenance(), line: line() };
+      }),
+    ],
+    [moment()],
+    new Map(),
+    controller.signal,
+  );
   await entered;
   controller.abort();
   send({ type: 'SETTINGS_CHANGED', revision: 1, maintenance: { reloadLc0: true, disposeUnused: true }, intent: { requestId: 1, force: true }, request: true });

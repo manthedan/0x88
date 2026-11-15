@@ -1,9 +1,9 @@
 import { type BoardState, boardToFen, type Color, opposite, type PieceRole, parseFen } from '../chess/board.ts';
 import { isStmWhiteRankflip, normalizedMoveToOriginal, normalizePositionForStmWhite, rankFlipSquare } from '../chess/boardNormalization.ts';
+import { repetitionKey, repetitionKeyFromFen, rootRepetitionKeyFromFen } from '../chess/drawRules.ts';
 import { type Move, moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import { isSquareAttacked, legalMoves } from '../chess/movegen.ts';
-import { repetitionKey, repetitionKeyFromFen, rootRepetitionKeyFromFen } from '../chess/drawRules.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import * as ort from './ortRuntime.ts';
@@ -961,7 +961,11 @@ export class SquareFormerEvaluator implements Evaluator {
     this.meta = meta;
     this.settings = settings;
   }
-  static async create(modelPath: string | Uint8Array | ArrayBuffer, meta: SquareFormerMeta, settings: SquareFormerSettings = {}): Promise<SquareFormerEvaluator> {
+  static async create(
+    modelPath: string | Uint8Array | ArrayBuffer,
+    meta: SquareFormerMeta,
+    settings: SquareFormerSettings = {},
+  ): Promise<SquareFormerEvaluator> {
     return new SquareFormerEvaluator(await ort.createOrtSession(modelPath), meta, settings);
   }
   async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {
