@@ -1,0 +1,8 @@
+or {
+  JsAssignmentExpression(right=`$run.catch(() => undefined)`) where { $run <: JsIdentifierExpression() },
+  `const $turn = $previous.catch(() => undefined)` where { $previous <: JsIdentifierExpression() },
+  `$previous.then(() => $gate, () => $gate)` where { $gate <: JsIdentifierExpression() },
+  `const $run = $queue.then($work, $work)`
+} as $queue_code where {
+  register_diagnostic(span=$queue_code, message="Hand-written promise queue. Use ExclusiveQueue from src/lc0/exclusiveQueue.ts: queue.run(task, signal) keeps call order, and a caller cancelled while it waits leaves at once instead of waiting behind the running task (a hand-written tail got this wrong in four engine adapters). Use queue.idle() to wait for everything queued so far.")
+}

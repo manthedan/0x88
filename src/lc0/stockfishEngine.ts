@@ -8,6 +8,7 @@ import {
   uciPositionCommand,
 } from './browserUciEngine.ts';
 import { engineArtifactWorkerScript, resolveEngineArtifactUrl } from './engineArtifacts.ts';
+import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
 
 /**
@@ -232,17 +233,6 @@ function abortError(): Error {
 }
 
 /** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
-function waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
-  const turn = previous.catch(() => undefined);
-  if (!signal) return turn;
-  if (signal.aborted) return Promise.reject(abortError());
-  return new Promise<void>((resolve, reject) => {
-    const onAbort = () => reject(abortError());
-    signal.addEventListener('abort', onAbort, { once: true });
-    turn.then(resolve).finally(() => signal.removeEventListener('abort', onAbort));
-  });
-}
-
 export class StockfishEngine implements BrowserUciEngine {
   readonly name = 'stockfish-lite';
   private worker: Worker | null = null;
@@ -258,7 +248,7 @@ export class StockfishEngine implements BrowserUciEngine {
   private rejectInit: ((error: Error) => void) | null = null;
   private analyzeLines: Map<number, StockfishInfoLine> | null = null;
   private lastInfoLines: StockfishInfoLine[] = [];
-  private queueTail: Promise<void> = Promise.resolve();
+  private readonly queue = new ExclusiveQueue(abortError);
   private disposed = false;
   private options: StockfishOptions;
   private readonly url: string;
@@ -303,27 +293,8 @@ export class StockfishEngine implements BrowserUciEngine {
    * Every `fn` starts with awaitInit(signal), which rejects an aborted signal
    * the same way, so the early rejection only changes when it settles.
    */
-  private async runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    const previous = this.queueTail;
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.queueTail = previous.then(
-      () => gate,
-      () => gate,
-    );
-    try {
-      await waitForTurn(previous, signal);
-    } catch (error) {
-      release();
-      throw error;
-    }
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
+  private runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.queue.run(fn, signal);
   }
 
   private revokeWorkerObjectUrl(): void {

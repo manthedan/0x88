@@ -1,4 +1,5 @@
 import type { Lc0HistoryFill } from './encoder112.ts';
+import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { LC0_DEFAULT_POLICY_TEMPERATURE, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import type {
   Lc0WebEncoderKernelVariant,
@@ -49,7 +50,7 @@ export class Lc0WebHybridEvaluator {
   private readonly createRuntime: (options: Lc0WebHybridRuntimeCreateOptions) => Promise<Lc0WebHybridEvaluatorRuntime>;
   private runtimePromise?: Promise<Lc0WebHybridEvaluatorRuntime>;
   private currentRuntime?: Lc0WebHybridEvaluatorRuntime;
-  private evaluationQueue: Promise<void> = Promise.resolve();
+  private readonly evaluationQueue = new ExclusiveQueue();
   private disposed = false;
   private disposePromise?: Promise<void>;
 
@@ -106,12 +107,7 @@ export class Lc0WebHybridEvaluator {
 
   private enqueueEvaluation<T>(work: () => Promise<T>): Promise<T> {
     if (this.disposed) return Promise.reject(new Error('LC0 WebGPU hybrid evaluator has been disposed'));
-    const run = this.evaluationQueue.then(work, work);
-    this.evaluationQueue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    return this.evaluationQueue.run(work);
   }
 
   async evaluate(input: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
@@ -149,7 +145,7 @@ export class Lc0WebHybridEvaluator {
     if (this.disposePromise) return this.disposePromise;
     this.disposed = true;
     this.disposePromise = (async () => {
-      await this.evaluationQueue;
+      await this.evaluationQueue.idle();
       const runtimePromise = this.runtimePromise;
       this.runtimePromise = undefined;
       this.currentRuntime = undefined;

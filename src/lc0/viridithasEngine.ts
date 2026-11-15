@@ -1,5 +1,6 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type BrowserUciAnalysisOptions, type BrowserUciEngine, type BrowserUciSearchOptions, uciPositionCommand } from './browserUciEngine.ts';
+import { ExclusiveQueue } from './exclusiveQueue.ts';
 import type { RecklessOptions } from './recklessEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 
@@ -59,17 +60,6 @@ function abortError(): Error {
 }
 
 /** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
-function waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
-  const turn = previous.catch(() => undefined);
-  if (!signal) return turn;
-  if (signal.aborted) return Promise.reject(abortError());
-  return new Promise<void>((resolve, reject) => {
-    const onAbort = () => reject(abortError());
-    signal.addEventListener('abort', onAbort, { once: true });
-    turn.then(resolve).finally(() => signal.removeEventListener('abort', onAbort));
-  });
-}
-
 function goCommand(options: RecklessOptions): string {
   if (options.movetimeMs && options.movetimeMs > 0) return `go movetime ${Math.floor(options.movetimeMs)}`;
   return `go depth ${Math.max(1, Math.floor(options.depth ?? 4))}`;
@@ -128,7 +118,7 @@ export class ViridithasEngine implements BrowserUciEngine {
   private persistentHashCommand: string | null = null;
   private persistentThreadsCommand: string | null = null;
   private persistentMultipvCommand: string | null = null;
-  private queueTail: Promise<void> = Promise.resolve();
+  private readonly queue = new ExclusiveQueue(abortError);
   private disposed = false;
   private lastInfoLines: StockfishInfoLine[] = [];
 
@@ -254,29 +244,12 @@ export class ViridithasEngine implements BrowserUciEngine {
    * caller's work. Releasing its gate early is safe: the queue tail still
    * chains through `previous`, so later requests keep their order.
    */
-  private async runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    const previous = this.queueTail;
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.queueTail = previous.then(
-      () => gate,
-      () => gate,
-    );
-    try {
-      await waitForTurn(previous, signal);
-    } catch (error) {
-      release();
-      throw error;
-    }
-    try {
+  private runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.queue.run(async () => {
       // Work queued before dispose() must not recreate (and leak) a worker.
       if (this.disposed) throw abortError();
-      return await fn();
-    } finally {
-      release();
-    }
+      return fn();
+    }, signal);
   }
 
   private runOneShotCommands(commands: string[], signal?: AbortSignal): Promise<RunResult> {

@@ -1,3 +1,4 @@
+import { ExclusiveQueue } from './exclusiveQueue.ts';
 import '../nn/ortConsoleFilter.ts';
 import { collectOrtRuntimeDiagnostics, type OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
 import { loadLc0WebModelPack } from './modelPack.ts';
@@ -274,15 +275,12 @@ async function handle(message: WorkerRequest): Promise<void> {
   }
 }
 
-let operationQueue: Promise<void> = Promise.resolve();
+const operationQueue = new ExclusiveQueue();
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   const message = event.data;
-  const run = operationQueue.then(
-    () => handle(message),
-    () => handle(message),
-  );
-  operationQueue = run.catch(() => undefined);
-  void run.catch((error) => {
-    self.postMessage({ type: 'error', id: message.id, error: error instanceof Error ? error.message : String(error) });
-  });
+  void operationQueue
+    .run(() => handle(message))
+    .catch((error) => {
+      self.postMessage({ type: 'error', id: message.id, error: error instanceof Error ? error.message : String(error) });
+    });
 });

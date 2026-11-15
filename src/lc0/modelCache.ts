@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { Lc0ArtifactChannelManifestSchema, Lc0ArtifactReleaseManifestSchema, Lc0ModelManifestSchema } from './modelManifestSchema.ts';
 
 type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
@@ -1323,7 +1324,7 @@ async function ensureResumableShardQuota(
 
 interface ResumableShardPersistenceDomain {
   activeHashes: Map<string, number>;
-  writeTail: Promise<void>;
+  writes: ExclusiveQueue;
 }
 
 const resumableShardCacheStorageDomains = new Map<string, ResumableShardPersistenceDomain>();
@@ -1334,7 +1335,7 @@ const resumableShardObjectDomains = new WeakMap<object, ResumableShardPersistenc
 function newResumableShardPersistenceDomain(): ResumableShardPersistenceDomain {
   return {
     activeHashes: new Map(),
-    writeTail: Promise.resolve(),
+    writes: new ExclusiveQueue(),
   };
 }
 
@@ -1373,17 +1374,7 @@ function resumableShardPersistenceDomain(cacheName: string, customStore: Lc0Mode
 }
 
 async function serializeResumableShardCacheWrite<T>(domain: ResumableShardPersistenceDomain, operation: () => Promise<T>): Promise<T> {
-  const previous = domain.writeTail;
-  let release!: () => void;
-  domain.writeTail = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    return await operation();
-  } finally {
-    release();
-  }
+  return domain.writes.run(operation);
 }
 
 function retainActiveResumableShardHashes(domain: ResumableShardPersistenceDomain, hashes: ReadonlySet<string>): () => void {

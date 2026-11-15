@@ -1,3 +1,4 @@
+import { ExclusiveQueue } from './exclusiveQueue.ts';
 import '../nn/ortConsoleFilter.ts';
 import {
   collectOrtRuntimeDiagnostics,
@@ -284,7 +285,7 @@ const pendingSearchCancels: number[] = [];
 // This worker owns exactly one ORT session. Queue all model operations so the
 // page can broker repeated eval/search requests here without concurrent
 // session.run() calls against the same static batch-1 WebGPU/WASM session.
-let operationQueue: Promise<void> = Promise.resolve();
+const operationQueue = new ExclusiveQueue();
 
 function nowMs(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now();
@@ -295,9 +296,7 @@ function post(message: WorkerResponse): void {
 }
 
 function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
-  const run = operationQueue.then(work, work);
-  operationQueue = run.catch(() => undefined);
-  return run;
+  return operationQueue.run(work);
 }
 
 async function handleInit(message: InitMessage): Promise<void> {

@@ -16,6 +16,7 @@
       "!engines"
     ]
   },
+  "plugins": ["./lint/no-hand-rolled-queue.grit"],
   "formatter": {
     "enabled": true,
     "indentStyle": "space",

@@ -22,6 +22,7 @@
 // Invokes are serialized: the buffers are shared, so a second run waits for the
 // first one's readback.
 import type * as ort from 'onnxruntime-web/webgpu';
+import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
 
 export type OrtGpuIoTensorType = 'float16' | 'float32';
 
@@ -189,7 +190,7 @@ export class OrtGpuIoBinding {
   readonly outputMode: OrtGpuIoOutputMode;
   private readonly pins: Array<() => boolean>;
   private pinsChecked = false;
-  private tail: Promise<unknown> = Promise.resolve();
+  private readonly invokes = new ExclusiveQueue();
   private disposed = false;
 
   /** `pin: false` is for the lab bisection only (see pinOrtGpuBufferImport). */
@@ -261,9 +262,7 @@ export class OrtGpuIoBinding {
 
   /** One invoke: upload `data`, run, read every output back with one map. Serialized per binding. */
   run(data: ArrayBufferView & { BYTES_PER_ELEMENT: number; byteLength: number }): Promise<OrtGpuIoOutputs> {
-    const next = this.tail.then(() => this.runNow(data));
-    this.tail = next.catch(() => undefined);
-    return next;
+    return this.invokes.run(() => this.runNow(data));
   }
 
   private async runNow(data: ArrayBufferView & { BYTES_PER_ELEMENT: number; byteLength: number }): Promise<OrtGpuIoOutputs> {
@@ -317,7 +316,7 @@ export class OrtGpuIoBinding {
   /** Destroys the buffers once in-flight invokes settle. Release the session first or after; ORT holds no use past run(). */
   async dispose(): Promise<void> {
     if (this.disposed) return;
-    await this.tail;
+    await this.invokes.idle();
     this.disposed = true;
     this.inputBuffer.destroy();
     for (const buffer of this.outputBuffers) buffer.destroy();

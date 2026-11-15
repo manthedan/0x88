@@ -9,6 +9,7 @@ import {
 } from './browserUciEngine.ts';
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
 import { engineArtifactWorkerScript } from './engineArtifacts.ts';
+import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 import { uciHistoryFromLastIrreversibleMove } from './uciGameHistory.ts';
 
@@ -210,7 +211,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
   private options: Options;
   private initialized = false;
   private appliedOptions = new Map<string, string>();
-  private queueTail: Promise<void> = Promise.resolve();
+  private readonly queue = new ExclusiveQueue(() => this.abortError());
   private disposed = false;
   private lastInfoLines: BrowserUciInfoLine[] = [];
   private readonly jsUrl: string;
@@ -247,42 +248,16 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
    * prewarmUnlocked(signal), whose first request rejects an aborted signal the
    * same way, so the early rejection only changes when it settles.
    */
-  private async runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    const previous = this.queueTail;
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.queueTail = previous.then(
-      () => gate,
-      () => gate,
-    );
-    try {
-      await this.waitForTurn(previous, signal);
-    } catch (error) {
-      release();
-      throw error;
-    }
-    try {
-      // Work queued before dispose() must not recreate (and leak) a worker.
-      if (this.disposed) throw this.disposedError();
-      return await fn();
-    } finally {
-      this.trimOutput();
-      release();
-    }
-  }
-
-  /** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
-  private waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
-    const turn = previous.catch(() => undefined);
-    if (!signal) return turn;
-    if (signal.aborted) return Promise.reject(this.abortError());
-    return new Promise<void>((resolve, reject) => {
-      const onAbort = () => reject(this.abortError());
-      signal.addEventListener('abort', onAbort, { once: true });
-      turn.then(resolve).finally(() => signal.removeEventListener('abort', onAbort));
-    });
+  private runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.queue.run(async () => {
+      try {
+        // Work queued before dispose() must not recreate (and leak) a worker.
+        if (this.disposed) throw this.disposedError();
+        return await fn();
+      } finally {
+        this.trimOutput();
+      }
+    }, signal);
   }
 
   /**

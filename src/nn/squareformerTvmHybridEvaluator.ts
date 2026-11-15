@@ -3,6 +3,7 @@ import { isStmWhiteRankflip, normalizedMoveToOriginal, normalizePositionForStmWh
 import { type Move, moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import { legalMoves } from '../chess/movegen.ts';
+import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import {
@@ -227,7 +228,7 @@ async function loadKernels(kernelBase: string, verifier?: ArtifactVerifier): Pro
 }
 
 export class SquareformerTvmHybridEvaluator implements Evaluator {
-  private runTail: Promise<unknown> = Promise.resolve();
+  private readonly queue = new ExclusiveQueue();
   private destroyed = false;
   private failureReason: string | undefined;
   private device: GPUDevice;
@@ -374,9 +375,7 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
   }
 
   private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.runTail.then(fn, fn);
-    this.runTail = run.catch(() => undefined);
-    return run;
+    return this.queue.run(fn);
   }
 
   async evaluateEncoded(tokens: Uint32Array, attackSummary: Float32Array, legalIndices: Uint32Array): Promise<SquareformerTvmHybridRawOutput> {
@@ -461,6 +460,6 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
         /* best effort */
       }
     };
-    void this.runTail.then(release, release);
+    void this.queue.idle().then(release);
   }
 }

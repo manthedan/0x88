@@ -4,6 +4,7 @@ import { repetitionKey, repetitionKeyFromFen, rootRepetitionKeyFromFen } from '.
 import { type Move, moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import { isSquareAttacked, legalMoves } from '../chess/movegen.ts';
+import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import * as ort from './ortRuntime.ts';
@@ -954,7 +955,7 @@ export class SquareFormerEvaluator implements Evaluator {
   // ORT-web does not guard a session against overlapping run() calls or a
   // release() while a run is suspended (WebGPU/asyncify), so runs are queued
   // and destroy() releases the session only after the queue drains.
-  private runTail: Promise<unknown> = Promise.resolve();
+  private readonly queue = new ExclusiveQueue();
   private settings: SquareFormerSettings;
   constructor(session: ort.InferenceSession, meta: SquareFormerMeta, settings: SquareFormerSettings = {}) {
     this.session = session;
@@ -1118,9 +1119,7 @@ export class SquareFormerEvaluator implements Evaluator {
   }
 
   private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.runTail.then(fn, fn);
-    this.runTail = run.catch(() => undefined);
-    return run;
+    return this.queue.run(fn);
   }
 
   destroy(): void {
@@ -1128,6 +1127,6 @@ export class SquareFormerEvaluator implements Evaluator {
     this.destroyed = true;
     this.inputCache.clear();
     const release = () => ort.releaseOrtSession(this.session).catch(() => undefined);
-    void this.runTail.then(release, release);
+    void this.queue.idle().then(release);
   }
 }

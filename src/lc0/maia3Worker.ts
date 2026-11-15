@@ -9,6 +9,7 @@ import {
   setRequestedOrtExecutionProviderForCurrentThread,
   setRequestedOrtWasmThreadsForCurrentThread,
 } from '../nn/ortRuntime.ts';
+import { ExclusiveQueue } from './exclusiveQueue.ts';
 
 type InitMessage = {
   type: 'init';
@@ -44,7 +45,7 @@ type DisposeMessage = {
 type Maia3WorkerMessage = InitMessage | EvaluateMessage | EvaluateConditionsMessage | DisposeMessage;
 
 let session: ort.InferenceSession | null = null;
-let operationTail: Promise<void> = Promise.resolve();
+const operations = new ExclusiveQueue();
 
 function post(message: unknown, transfers: Transferable[] = []): void {
   (globalThis as unknown as { postMessage: (message: unknown, transfers?: Transferable[]) => void }).postMessage(message, transfers);
@@ -62,44 +63,65 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
 (globalThis as unknown as { onmessage: ((event: MessageEvent<Maia3WorkerMessage>) => void) | null }).onmessage = (event) => {
   // ORT runs and session release must not overlap. The live panel coalesces
   // obsolete requests before posting; this also protects other worker callers.
-  const operation = operationTail.then(async () => {
-    const message = event.data;
-    try {
-      if (message.type === 'init') {
-        if (session) await releaseOrtSession(session);
-        if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
-        setRequestedOrtWasmThreadsForCurrentThread(message.wasmThreads ?? null);
-        // Unlike searchWorker this worker never switches provider per message,
-        // so an ep=wasm request is a lifetime property and can pin the runtime
-        // pair. Without this a WebGPU-capable browser running Maia on WASM
-        // downloads the 24 MB asyncify build and stays single-threaded: the
-        // selector deliberately ignores a programmatic provider pin, because
-        // for a per-message worker it would not be safe.
-        if (message.ep === 'wasm' && !ortRuntimeArtifactKindIsLocked()) setOrtRuntimeArtifactKindForCurrentThread('wasm');
-        post({ type: 'progress', id: message.id, stage: 'creating-session' });
-        session = await createOrtSession(message.model);
-        post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames, backend: describeOrtBackendConfig() });
-        return;
-      }
+  void operations
+    .run(async () => {
+      const message = event.data;
+      try {
+        if (message.type === 'init') {
+          if (session) await releaseOrtSession(session);
+          if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+          setRequestedOrtWasmThreadsForCurrentThread(message.wasmThreads ?? null);
+          // Unlike searchWorker this worker never switches provider per message,
+          // so an ep=wasm request is a lifetime property and can pin the runtime
+          // pair. Without this a WebGPU-capable browser running Maia on WASM
+          // downloads the 24 MB asyncify build and stays single-threaded: the
+          // selector deliberately ignores a programmatic provider pin, because
+          // for a per-message worker it would not be safe.
+          if (message.ep === 'wasm' && !ortRuntimeArtifactKindIsLocked()) setOrtRuntimeArtifactKindForCurrentThread('wasm');
+          post({ type: 'progress', id: message.id, stage: 'creating-session' });
+          session = await createOrtSession(message.model);
+          post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames, backend: describeOrtBackendConfig() });
+          return;
+        }
 
-      if (message.type === 'dispose') {
-        if (session) await releaseOrtSession(session);
-        session = null;
-        post({ type: 'disposed', id: message.id });
-        return;
-      }
+        if (message.type === 'dispose') {
+          if (session) await releaseOrtSession(session);
+          session = null;
+          post({ type: 'disposed', id: message.id });
+          return;
+        }
 
-      if (!session) throw new Error('Maia3 worker is not initialized');
+        if (!session) throw new Error('Maia3 worker is not initialized');
 
-      if (message.type === 'evaluateConditions') {
-        const single = new Float32Array(message.tokens);
-        const n = message.eloSelfs.length;
-        const batch = new Float32Array(n * single.length);
-        for (let i = 0; i < n; i += 1) batch.set(single, i * single.length);
+        if (message.type === 'evaluateConditions') {
+          const single = new Float32Array(message.tokens);
+          const n = message.eloSelfs.length;
+          const batch = new Float32Array(n * single.length);
+          for (let i = 0; i < n; i += 1) batch.set(single, i * single.length);
+          const feeds: Record<string, ort.Tensor> = {
+            tokens: new ort.Tensor('float32', batch, [n, 64, 12]),
+            elo_self: new ort.Tensor('float32', Float32Array.from(message.eloSelfs), [n]),
+            elo_oppo: new ort.Tensor('float32', Float32Array.from(message.eloOppos), [n]),
+          };
+          const outputs = await session.run(feeds);
+          const logitsMove = await firstOutput(outputs, 'logits_move', 0);
+          const logitsValue = await firstOutput(outputs, 'logits_value', 1);
+          post(
+            {
+              type: 'result',
+              id: message.id,
+              logitsMove: logitsMove.buffer,
+              logitsValue: logitsValue.buffer,
+            },
+            [logitsMove.buffer, logitsValue.buffer],
+          );
+          return;
+        }
+
         const feeds: Record<string, ort.Tensor> = {
-          tokens: new ort.Tensor('float32', batch, [n, 64, 12]),
-          elo_self: new ort.Tensor('float32', Float32Array.from(message.eloSelfs), [n]),
-          elo_oppo: new ort.Tensor('float32', Float32Array.from(message.eloOppos), [n]),
+          tokens: new ort.Tensor('float32', new Float32Array(message.tokens), [1, 64, 12]),
+          elo_self: new ort.Tensor('float32', new Float32Array([message.eloSelf]), [1]),
+          elo_oppo: new ort.Tensor('float32', new Float32Array([message.eloOppo]), [1]),
         };
         const outputs = await session.run(feeds);
         const logitsMove = await firstOutput(outputs, 'logits_move', 0);
@@ -113,29 +135,9 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           },
           [logitsMove.buffer, logitsValue.buffer],
         );
-        return;
+      } catch (error) {
+        post({ type: 'error', id: message.id, message: error instanceof Error ? error.message : String(error) });
       }
-
-      const feeds: Record<string, ort.Tensor> = {
-        tokens: new ort.Tensor('float32', new Float32Array(message.tokens), [1, 64, 12]),
-        elo_self: new ort.Tensor('float32', new Float32Array([message.eloSelf]), [1]),
-        elo_oppo: new ort.Tensor('float32', new Float32Array([message.eloOppo]), [1]),
-      };
-      const outputs = await session.run(feeds);
-      const logitsMove = await firstOutput(outputs, 'logits_move', 0);
-      const logitsValue = await firstOutput(outputs, 'logits_value', 1);
-      post(
-        {
-          type: 'result',
-          id: message.id,
-          logitsMove: logitsMove.buffer,
-          logitsValue: logitsValue.buffer,
-        },
-        [logitsMove.buffer, logitsValue.buffer],
-      );
-    } catch (error) {
-      post({ type: 'error', id: message.id, message: error instanceof Error ? error.message : String(error) });
-    }
-  });
-  operationTail = operation.catch(() => undefined);
+    })
+    .catch(() => undefined);
 };

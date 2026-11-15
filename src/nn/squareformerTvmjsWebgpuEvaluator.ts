@@ -5,6 +5,7 @@ import { moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { isTrustedExecutableAssetUrl } from '../lc0/assetUrls.ts';
+import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
 import { loadLc0ModelForOrt } from '../lc0/modelCache.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
@@ -204,7 +205,7 @@ function floatArray(bytes: Uint8Array): Float32Array {
 }
 
 export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
-  private runTail: Promise<unknown> = Promise.resolve();
+  private readonly queue = new ExclusiveQueue();
   private failureReason: string | undefined;
   private destroyed = false;
   private readonly runtime: TvmRuntime;
@@ -302,9 +303,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
   }
 
   private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.runTail.then(fn, fn);
-    this.runTail = run.catch(() => undefined);
-    return run;
+    return this.queue.run(fn);
   }
 
   async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {
@@ -429,6 +428,6 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
         /* best effort */
       }
     };
-    void this.runTail.then(dispose, dispose);
+    void this.queue.idle().then(dispose);
   }
 }
