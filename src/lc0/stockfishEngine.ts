@@ -231,6 +231,18 @@ function abortError(): Error {
   return error;
 }
 
+/** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
+function waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+  const turn = previous.catch(() => undefined);
+  if (!signal) return turn;
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    turn.then(resolve).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 export class StockfishEngine implements BrowserUciEngine {
   readonly name = 'stockfish-lite';
   private worker: Worker | null = null;
@@ -283,7 +295,15 @@ export class StockfishEngine implements BrowserUciEngine {
     this.sendOption('Hash', hashCommand(this.options.hashMb ?? DEFAULT_STOCKFISH_HASH_MB));
   }
 
-  private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  /**
+   * Run `fn` after every earlier request. A request cancelled while it waits
+   * for its turn rejects at once instead of waiting for another caller's work
+   * (which may be a cold startup). Releasing its gate early is safe: the queue
+   * tail still chains through `previous`, so later requests keep their order.
+   * Every `fn` starts with awaitInit(signal), which rejects an aborted signal
+   * the same way, so the early rejection only changes when it settles.
+   */
+  private async runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -293,7 +313,12 @@ export class StockfishEngine implements BrowserUciEngine {
       () => gate,
       () => gate,
     );
-    await previous.catch(() => undefined);
+    try {
+      await waitForTurn(previous, signal);
+    } catch (error) {
+      release();
+      throw error;
+    }
     try {
       return await fn();
     } finally {
@@ -475,7 +500,7 @@ export class StockfishEngine implements BrowserUciEngine {
     return this.runExclusive(async () => {
       await this.awaitInit(signal);
       if (signal?.aborted) throw abortError();
-    });
+    }, signal);
   }
 
   /** Reset Stockfish state/hash for a fresh game and wait for `readyok`. */
@@ -486,7 +511,7 @@ export class StockfishEngine implements BrowserUciEngine {
       this.worker.postMessage('ucinewgame');
       await this.waitReady(signal);
       this.lastInfoLines = [];
-    });
+    }, signal);
   }
 
   runtimeStatus(): BrowserUciRuntimeStatus {
@@ -554,7 +579,7 @@ export class StockfishEngine implements BrowserUciEngine {
         this.worker!.postMessage(position);
         this.worker!.postMessage(stockfishGoCommand(this.options));
       });
-    });
+    }, signal);
   }
 
   /** MultiPV analysis of a FEN: returns one info line per PV, sorted by rank. */
@@ -592,7 +617,7 @@ export class StockfishEngine implements BrowserUciEngine {
         this.worker!.postMessage(position);
         this.worker!.postMessage(stockfishGoCommand({ depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs }));
       });
-    });
+    }, opts.signal);
   }
 
   dispose(): void {
