@@ -238,7 +238,16 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     return this.abortError(`${this.config.label} engine disposed`);
   }
 
-  private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  /**
+   * Run `fn` after every earlier request. A request cancelled while it waits
+   * for its turn rejects with AbortError at once instead of waiting for another
+   * caller's work (which may be a cold init with no timeout). Releasing its
+   * gate early is safe: the queue tail still chains through `previous`, so
+   * later requests keep their order. Every `fn` starts with
+   * prewarmUnlocked(signal), whose first request rejects an aborted signal the
+   * same way, so the early rejection only changes when it settles.
+   */
+  private async runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -248,18 +257,32 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
       () => gate,
       () => gate,
     );
-    return previous
-      .catch(() => undefined)
-      .then(async () => {
-        try {
-          // Work queued before dispose() must not recreate (and leak) a worker.
-          if (this.disposed) throw this.disposedError();
-          return await fn();
-        } finally {
-          this.trimOutput();
-          release();
-        }
-      });
+    try {
+      await this.waitForTurn(previous, signal);
+    } catch (error) {
+      release();
+      throw error;
+    }
+    try {
+      // Work queued before dispose() must not recreate (and leak) a worker.
+      if (this.disposed) throw this.disposedError();
+      return await fn();
+    } finally {
+      this.trimOutput();
+      release();
+    }
+  }
+
+  /** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
+  private waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+    const turn = previous.catch(() => undefined);
+    if (!signal) return turn;
+    if (signal.aborted) return Promise.reject(this.abortError());
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = () => reject(this.abortError());
+      signal.addEventListener('abort', onAbort, { once: true });
+      turn.then(resolve).finally(() => signal.removeEventListener('abort', onAbort));
+    });
   }
 
   /**
@@ -471,7 +494,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
   }
 
   async prewarm(signal?: AbortSignal): Promise<void> {
-    return this.runExclusive(() => this.prewarmUnlocked(signal));
+    return this.runExclusive(() => this.prewarmUnlocked(signal), signal);
   }
 
   async newGame(signal?: AbortSignal): Promise<void> {
@@ -482,7 +505,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
       await this.sendCommand('isready', signal);
       await this.waitForLine((line) => line === 'readyok', 'readyok after ucinewgame', readyStart, signal);
       this.lastInfoLines = [];
-    });
+    }, signal);
   }
 
   private async prewarmUnlocked(signal?: AbortSignal): Promise<void> {
@@ -527,7 +550,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
         commandPromise.catch(() => undefined);
         throw error;
       }
-    });
+    }, signal);
   }
 
   async analyze(fen: string, opts: BrowserUciAnalysisOptions = {}): Promise<BrowserUciInfoLine[]> {
@@ -550,7 +573,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
         commandPromise.catch(() => undefined);
         throw error;
       }
-    });
+    }, opts.signal);
   }
 
   private collectInfoLines(startIndex: number): BrowserUciInfoLine[] {
