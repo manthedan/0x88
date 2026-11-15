@@ -110,6 +110,18 @@ function abortError(): Error {
   return error;
 }
 
+/** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
+function waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+  const turn = previous.catch(() => undefined);
+  if (!signal) return turn;
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    turn.then(resolve).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 function createSharedInput(capacity = PERSISTENT_STDIN_CAPACITY_BYTES): SharedInput {
   const buffer = new SharedArrayBuffer(SHARED_STDIN_HEADER_BYTES + capacity);
   const control = new Int32Array(buffer, 0, SHARED_STDIN_HEADER_INTS);
@@ -400,7 +412,13 @@ export class RecklessEngine implements BrowserUciEngine {
     if (!wasBrowserApi) this.browserApiLoadStatus = null;
   }
 
-  private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  /**
+   * Run `fn` after every earlier request. A request cancelled while it waits
+   * for its turn rejects with AbortError at once instead of waiting for another
+   * caller's work. Releasing its gate early is safe: the queue tail still
+   * chains through `previous`, so later requests keep their order.
+   */
+  private async runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -410,7 +428,12 @@ export class RecklessEngine implements BrowserUciEngine {
       () => gate,
       () => gate,
     );
-    await previous.catch(() => undefined);
+    try {
+      await waitForTurn(previous, signal);
+    } catch (error) {
+      release();
+      throw error;
+    }
     try {
       // Work queued before dispose() must not recreate (and leak) a worker.
       if (this.disposed) throw abortError();
@@ -650,7 +673,7 @@ export class RecklessEngine implements BrowserUciEngine {
         this.persistentDisabled = true;
         this.disposeWorker();
       }
-    });
+    }, signal);
   }
 
   /**
@@ -674,7 +697,7 @@ export class RecklessEngine implements BrowserUciEngine {
       const result = await this.runCommandsUntil(['ucinewgame', 'isready'], signal, (line, stream) => stream === 'stdout' && line === 'readyok');
       if (result.exitCode !== 0) throw new Error(`Reckless new game exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = [];
-    });
+    }, signal);
   }
 
   runtimeStatus(): RecklessRuntimeStatus {
@@ -720,7 +743,7 @@ export class RecklessEngine implements BrowserUciEngine {
       if (result.exitCode !== 0) throw new Error(`Reckless exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return parseBestMove(result.stdout.find((line) => line.startsWith('bestmove')) ?? '');
-    });
+    }, signal);
   }
 
   async analyze(fen: string, opts: BrowserUciAnalysisOptions = {}): Promise<StockfishInfoLine[]> {
@@ -746,7 +769,7 @@ export class RecklessEngine implements BrowserUciEngine {
       if (result.exitCode !== 0) throw new Error(`Reckless exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return this.lastInfo();
-    });
+    }, opts.signal);
   }
 
   dispose(): void {

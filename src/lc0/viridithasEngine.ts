@@ -58,6 +58,18 @@ function abortError(): Error {
   return error;
 }
 
+/** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
+function waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+  const turn = previous.catch(() => undefined);
+  if (!signal) return turn;
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    turn.then(resolve).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 function goCommand(options: RecklessOptions): string {
   if (options.movetimeMs && options.movetimeMs > 0) return `go movetime ${Math.floor(options.movetimeMs)}`;
   return `go depth ${Math.max(1, Math.floor(options.depth ?? 4))}`;
@@ -236,7 +248,13 @@ export class ViridithasEngine implements BrowserUciEngine {
     this.persistentMultipvCommand = null;
   }
 
-  private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  /**
+   * Run `fn` after every earlier request. A request cancelled while it waits
+   * for its turn rejects with AbortError at once instead of waiting for another
+   * caller's work. Releasing its gate early is safe: the queue tail still
+   * chains through `previous`, so later requests keep their order.
+   */
+  private async runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const previous = this.queueTail;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -246,7 +264,12 @@ export class ViridithasEngine implements BrowserUciEngine {
       () => gate,
       () => gate,
     );
-    await previous.catch(() => undefined);
+    try {
+      await waitForTurn(previous, signal);
+    } catch (error) {
+      release();
+      throw error;
+    }
     try {
       // Work queued before dispose() must not recreate (and leak) a worker.
       if (this.disposed) throw abortError();
@@ -478,7 +501,7 @@ export class ViridithasEngine implements BrowserUciEngine {
         this.persistentDisabled = true;
         this.disposeWorker();
       }
-    });
+    }, signal);
   }
 
   runtimeStatus(): ViridithasRuntimeStatus {
@@ -509,7 +532,7 @@ export class ViridithasEngine implements BrowserUciEngine {
       const result = await this.runCommandsUntil(commands, signal, (line, stream) => stream === 'stdout' && line === 'readyok');
       if (result.exitCode !== 0) throw new Error(`Viridithas new game exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = [];
-    });
+    }, signal);
   }
 
   async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
@@ -522,7 +545,7 @@ export class ViridithasEngine implements BrowserUciEngine {
       if (result.exitCode !== 0) throw new Error(`Viridithas exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return parseBestMove(result.stdout.find((line) => line.startsWith('bestmove')) ?? '');
-    });
+    }, signal);
   }
 
   async analyze(fen: string, opts: BrowserUciAnalysisOptions = {}): Promise<StockfishInfoLine[]> {
@@ -539,7 +562,7 @@ export class ViridithasEngine implements BrowserUciEngine {
       if (result.exitCode !== 0) throw new Error(`Viridithas exited with ${result.exitCode}: ${result.stderr.join('\n')}`);
       this.lastInfoLines = this.parseInfo(result.stdout);
       return this.lastInfo();
-    });
+    }, opts.signal);
   }
 
   async bestMovesBatch(fens: string[], signal?: AbortSignal, opts: { clearHashBetweenSearches?: boolean } = {}): Promise<ViridithasBatchSearchResult[]> {
@@ -550,7 +573,7 @@ export class ViridithasEngine implements BrowserUciEngine {
       if (searches.length !== fens.length) throw new Error(`Viridithas batch returned ${searches.length} bestmove line(s) for ${fens.length} position(s)`);
       this.lastInfoLines = searches.map((search) => search.info).filter((info): info is StockfishInfoLine => info !== null);
       return searches.map((search) => ({ bestMove: search.bestMove, info: search.info ? { ...search.info, pvUci: [...search.info.pvUci] } : null }));
-    });
+    }, signal);
   }
 
   dispose(): void {
