@@ -12,12 +12,14 @@ import {
   parseSoakQuery,
   recoverSoakReport,
   SOAK_STORAGE_KEY,
+  SOAK_FENS,
+  SoakSkip,
   type SoakReport,
   type SoakResult,
   skipRemainingSoakSteps,
   strongestLoadedNet,
 } from './mobileSoak.ts';
-import { makeSoakEngine, SOAK_FENS, type SoakEngine, SoakSkip } from './mobileSoakEngines.ts';
+import type { SoakEngine } from './mobileSoakEngines.ts';
 
 const iso = () => new Date().toISOString();
 export async function collectSoakEnvironment(): Promise<Record<string, unknown>> {
@@ -110,7 +112,46 @@ export async function sampleSoakMemory(): Promise<MemorySample> {
   }
   return memory;
 }
+/** Survives Svelte route remounts; only a fresh document may forget failed ownership. */
+export class MobileSoakDocument {
+  readonly operations = new ExclusiveQueue();
+  private unsafe = false;
+  private readonly listeners = new Set<() => void>();
+
+  get unsafeDisposal(): boolean {
+    return this.unsafe;
+  }
+
+  blockUnsafeDisposal(): void {
+    if (this.unsafe) return;
+    this.unsafe = true;
+    for (const listener of this.listeners) listener();
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+}
+
+export interface MobileSoakServices {
+  environment(): Promise<Record<string, unknown>>;
+  memory(): Promise<MemorySample>;
+  makeEngine(id: string, signal: AbortSignal): Promise<SoakEngine>;
+  documentScope: MobileSoakDocument;
+}
+const defaultServices: MobileSoakServices = {
+  environment: collectSoakEnvironment,
+  memory: sampleSoakMemory,
+  // Keep production engine imports lazy; controller lifecycle tests inject inert adapters.
+  makeEngine: async (id, signal) => (await import('./mobileSoakEngines.ts')).makeSoakEngine(id, signal),
+  documentScope: new MobileSoakDocument(),
+};
+
 export interface MobileSoakApi {
+  readonly unsafeDisposal: boolean;
   readonly state: SoakReport['state'];
   readonly results: SoakReport;
   start(stepIds?: string[]): Promise<void>;
@@ -123,7 +164,11 @@ declare global {
   }
 }
 
-export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: MobileSoakApi; ready: Promise<void>; destroy(): void } {
+export function mountMobileSoak(
+  onChange: (report: SoakReport) => void,
+  overrides: Partial<MobileSoakServices> = {},
+): { api: MobileSoakApi; ready: Promise<void>; destroy(): void } {
+  const services = { ...defaultServices, ...overrides };
   const query = parseSoakQuery(location.search);
   let saved: SoakReport | null = null;
   let storageEnabled = true;
@@ -134,12 +179,12 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
   }
   let report = saved ? recoverSoakReport(saved, iso()) : emptySoakReport(query, iso());
   if (!storageEnabled) report = addSoakEvent(report, 'storage-unavailable', 'Crash recovery disabled; this run still works in memory.', iso());
-  const operations = new ExclusiveQueue();
   const abort = new AbortController();
   let active = false;
   let mounted = true;
   let departure: SoakReport | null = null;
   const publish = () => {
+    if (!mounted) return; // Retired async work must never write over another controller's breadcrumb.
     if (storageEnabled) {
       try {
         window.localStorage.setItem(SOAK_STORAGE_KEY, JSON.stringify(departure ?? report));
@@ -148,8 +193,9 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
         report = addSoakEvent(report, 'storage-unavailable', String(error), iso());
       }
     }
-    if (mounted && !departure) onChange({ ...report });
+    if (!departure) onChange({ ...report });
   };
+  const unsubscribeSafety = services.documentScope.subscribe(publish);
   const log = (type: string, detail: string) => {
     const at = iso();
     report = addSoakEvent(report, type, detail, at);
@@ -180,27 +226,32 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
     const engines: SoakEngine[] = [];
     let safelyDisposed = true;
     try {
-      result.memory.push(await sampleSoakMemory());
+      result.memory.push(await services.memory());
+      abort.signal.throwIfAborted();
       const ids = id === 'arena' ? ['bt4', 't3', 'sf-full'] : id === 'heat' ? [strongestLoadedNet(report.steps)].filter((v): v is string => v !== null) : [id];
       if (!ids.length) throw new SoakSkip('No successful net step earlier in this run; select at least one net before heat.');
       const loadStarted = performance.now();
       try {
         for (const engineId of ids) {
           abort.signal.throwIfAborted();
-          const engine = makeSoakEngine(engineId, abort.signal);
+          const engine = await services.makeEngine(engineId, abort.signal);
           engines.push(engine); // Own partial loads too, so finally always tears them down.
+          abort.signal.throwIfAborted();
           await engine.load();
+          abort.signal.throwIfAborted();
           result.runtime[engineId] = engine.runtime();
           publish();
         }
       } finally {
         result.loadMs = performance.now() - loadStarted;
       }
-      result.memory.push(await sampleSoakMemory());
+      result.memory.push(await services.memory());
+      abort.signal.throwIfAborted();
       publish();
       if (id === 'heat') await heatSearch(engines[0], result);
       else {
         for (const fen of SOAK_FENS) {
+          abort.signal.throwIfAborted();
           // Arena holds both pooled nets + its independent SF worker resident. Concurrent searches
           // deliberately exceed ordinary turn-taking, but each seat uses its real production adapter.
           const settled = await Promise.allSettled(
@@ -220,7 +271,7 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
       result.status = error instanceof SoakSkip ? 'skipped' : 'failed';
       result.error = error instanceof Error ? error.message : String(error);
     } finally {
-      result.memory.push(await sampleSoakMemory());
+      result.memory.push(await services.memory());
       for (const engine of engines) {
         result.runtime[engine.id] = engine.runtime();
         const loss = engine.deviceLost();
@@ -239,8 +290,12 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
           result.status = 'failed';
           result.error = `${result.error ?? ''} Disposal: ${String(entry.reason)}`.trim();
         }
+      if (!safelyDisposed) {
+        services.documentScope.blockUnsafeDisposal();
+        log('unsafe-disposal', 'Engine release failed. Reload the document before starting more engines.');
+      }
       result.disposeMs = performance.now() - disposeStarted;
-      result.memory.push(await sampleSoakMemory());
+      result.memory.push(await services.memory());
       result.finishedAt = iso();
       report = finishSoakStep(report, result);
       publish();
@@ -267,22 +322,27 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
     result.firstSearchMs = sample.ms;
   }
   async function run(): Promise<void> {
-    if (active || !mounted) return;
+    if (active || !mounted || services.documentScope.unsafeDisposal) return;
     active = true;
     report = { ...report, state: 'running', startedAt: report.startedAt ?? iso(), crashStep: null };
     publish();
     try {
       await ready;
-      if (!report.env) {
-        report = { ...report, env: await collectSoakEnvironment() };
+      if (!mounted) return;
+      if (!report.env && !services.documentScope.unsafeDisposal) {
+        const env = await services.environment();
+        if (!mounted) return;
+        report = { ...report, env };
         publish();
       }
-      await operations.run(async () => {
-        while (report.nextIndex < report.stepIds.length && !abort.signal.aborted) {
-          if (!(await executeStep(report.stepIds[report.nextIndex]))) {
-            report = skipRemainingSoakSteps(report, 'Previous disposal failed; refusing to overlap possibly resident engines. Start over or reload.', iso());
-            break;
-          }
+      // Route remounts wait for retired cleanup too, then recheck the document-wide latch.
+      await services.documentScope.operations.run(async () => {
+        if (!mounted) return;
+        while (report.nextIndex < report.stepIds.length && !abort.signal.aborted && !services.documentScope.unsafeDisposal) {
+          if (!(await executeStep(report.stepIds[report.nextIndex]))) break;
+        }
+        if (services.documentScope.unsafeDisposal) {
+          report = skipRemainingSoakSteps(report, 'Previous disposal failed; refusing to overlap possibly resident engines. Reload the document.', iso());
         }
         if (!abort.signal.aborted) {
           report = { ...report, state: 'done', finishedAt: iso() };
@@ -294,6 +354,9 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
     }
   }
   const api: MobileSoakApi = {
+    get unsafeDisposal() {
+      return services.documentScope.unsafeDisposal;
+    },
     get state() {
       return report.state;
     },
@@ -301,7 +364,7 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
       return report;
     },
     async start(stepIds) {
-      if (active || report.state === 'crashed-awaiting-choice') return;
+      if (!mounted || active || services.documentScope.unsafeDisposal || report.state === 'crashed-awaiting-choice') return;
       const selection = stepIds ? parseSoakQuery(`steps=${encodeURIComponent(stepIds.join(','))}`) : query;
       report = emptySoakReport({ ...selection, heatSeconds: query.heatSeconds }, iso());
       if (!storageEnabled) report = addSoakEvent(report, 'storage-unavailable', 'Crash recovery disabled for this page; results are in memory only.', iso());
@@ -309,12 +372,12 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
       await run();
     },
     async continueAfterCrash() {
-      if (active || report.state !== 'crashed-awaiting-choice') return;
+      if (!mounted || active || services.documentScope.unsafeDisposal || report.state !== 'crashed-awaiting-choice') return;
       report = continueSoakReport(report);
       await run();
     },
     reset() {
-      if (active) return;
+      if (!mounted || active || services.documentScope.unsafeDisposal) return;
       report = { ...emptySoakReport(query, iso()), env: report.env };
       if (!storageEnabled) report = addSoakEvent(report, 'storage-unavailable', 'Crash recovery disabled for this page; results are in memory only.', iso());
       publish();
@@ -322,19 +385,25 @@ export function mountMobileSoak(onChange: (report: SoakReport) => void): { api: 
   };
   window.__mobileSoak = api;
   // Environment is visible without Start, including on a recovered crash. Preserve the original run's env.
-  const ready = collectSoakEnvironment().then((env) => {
+  const ready = services.environment().then((env) => {
+    if (!mounted) return;
     report = { ...report, env: report.env ?? env };
     publish();
   });
   if (query.auto)
     void ready
-      .then(() => (api.state === 'crashed-awaiting-choice' ? api.continueAfterCrash() : api.start()))
+      .then(() => {
+        if (!mounted || services.documentScope.unsafeDisposal) return;
+        return api.state === 'crashed-awaiting-choice' ? api.continueAfterCrash() : api.start();
+      })
       .catch((error) => log('runner-error', String(error)));
   return {
     api,
     ready,
     destroy() {
       mounted = false;
+      storageEnabled = false;
+      unsubscribeSafety();
       abort.abort();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('pagehide', pagehide);

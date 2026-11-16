@@ -1,4 +1,4 @@
-import { START_FEN, parseFen } from '../chess/board.ts';
+import { parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
@@ -13,14 +13,12 @@ import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
 import { createLc0OnnxEvaluatorFromUrl, LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
 import { Maia3BrowserEvaluator } from './maia3.ts';
-import { type SearchSample, rate } from './mobileSoak.ts';
+import { type SearchSample, rate, SoakSkip } from './mobileSoak.ts';
 import type { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { cpuThreadBudget, defaultBrowserEnvironment } from './resourceBroker.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 
-export const SOAK_FENS = [START_FEN, 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1'];
-export class SoakSkip extends Error {}
 export interface SoakSearchOptions {
   durationMs?: number;
   progress?: (count: number) => void;

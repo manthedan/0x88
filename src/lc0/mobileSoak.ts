@@ -1,4 +1,8 @@
+import { START_FEN } from '../chess/board.ts';
 import { ENGINE_FAMILY_DEFINITIONS } from './engineCatalog.ts';
+
+export const SOAK_FENS = [START_FEN, 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1'];
+export class SoakSkip extends Error {}
 
 export type SoakState = 'idle' | 'running' | 'done' | 'crashed-awaiting-choice';
 export type SoakStatus = 'ok' | 'failed' | 'skipped' | 'crashed';

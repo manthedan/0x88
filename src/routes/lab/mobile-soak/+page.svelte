@@ -9,6 +9,7 @@ let api: MobileSoakApi | undefined;
 let notice = '';
 const steps = buildSoakSteps();
 $: running = report?.state === 'running';
+$: unsafeDisposal = !!report && api?.unsafeDisposal === true;
 $: json = report ? JSON.stringify(report, null, 2) : '';
 $: selected = (report?.stepIds ?? []).flatMap((id) => steps.filter((step) => step.id === id));
 const ms = (value: number | null | undefined) => value == null ? '—' : `${Math.round(value)} ms`;
@@ -46,14 +47,17 @@ async function copy() {
     <p class="note">Memory is normally unavailable on Safari (null). Chrome numbers exclude some GPU memory. WASM heaps are private in these production adapters, so heap byteLength is null.</p>
   </section>
   <div class="controls">
-    <button id="mobile-soak-start" data-testid="start" class="primary" disabled={!api || running || report?.state === 'crashed-awaiting-choice'} on:click={start}>Start</button>
-    <button id="mobile-soak-continue" data-testid="continue" disabled={!api || report?.state !== 'crashed-awaiting-choice'} on:click={resume}>Continue after that step</button>
-    <button id="mobile-soak-reset" data-testid="start-over" disabled={!api || running} on:click={() => api?.reset()}>Start over</button>
+    <button id="mobile-soak-start" data-testid="start" class="primary" disabled={!api || running || unsafeDisposal || report?.state === 'crashed-awaiting-choice'} on:click={start}>Start</button>
+    <button id="mobile-soak-continue" data-testid="continue" disabled={!api || unsafeDisposal || report?.state !== 'crashed-awaiting-choice'} on:click={resume}>Continue after that step</button>
+    <button id="mobile-soak-reset" data-testid="start-over" disabled={!api || running || unsafeDisposal} on:click={() => api?.reset()}>Start over</button>
     <button id="mobile-soak-copy" data-testid="copy-results" disabled={!report} on:click={copy}>Copy results</button>
   </div>
   <p id="mobile-soak-status" data-testid="status" role="status" aria-live="polite">
-    {report?.state ?? 'idle'}{report?.inProgress ? ` · ${report.inProgress.id} (loading, searching or disposing)` : ''} · Reloads: {report?.reloadCount ?? 0}
+    {report?.state ?? 'idle'}{report?.inProgress ? ` · ${report.inProgress.id} (loading, searching or disposing)` : ''} · Reloads: {report?.reloadCount ?? 0}{unsafeDisposal ? ' · unsafe disposal — reload required' : ''}
   </p>
+  {#if unsafeDisposal}
+    <p id="mobile-soak-unsafe-disposal" data-testid="unsafe-disposal" role="alert">Engine teardown failed; a session may still be resident. Copy results, then reload this page before starting more engines. Start, Continue, and Start over are blocked, even if you leave and reopen this route.</p>
+  {/if}
   {#if report?.state === 'crashed-awaiting-choice'}
     <p role="alert">The tab was killed during {report.crashStep}. Reload/navigation also leaves this breadcrumb; it is not proof of an OS kill. Continue skips that step and keeps earlier results.</p>
   {/if}
