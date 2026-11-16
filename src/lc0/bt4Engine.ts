@@ -12,6 +12,7 @@ import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscri
 import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
+import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
@@ -306,6 +307,7 @@ export class Bt4WorkerSearcher {
   private activeSearchId: number | null = null;
   private configuredEvalCacheEntries = -1;
   backend = '';
+  deviceLost: OrtDeviceLoss | null = null;
   fallback: OrtRuntimeDiagnostics['fallback'];
   /**
    * URL of the model the worker runs: config.modelUrl, or its split-K rewrite on
@@ -350,11 +352,16 @@ export class Bt4WorkerSearcher {
     if (this.ready && this.configuredEvalCacheEntries !== evalCacheEntries) this.dispose();
     if (this.initPromise) return this.initPromise;
     if (!this.worker) {
+      this.deviceLost = null;
       const worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
       this.worker = worker;
       worker.addEventListener('message', (event: MessageEvent) => {
         if (this.worker !== worker) return;
-        const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
+        const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number; loss?: OrtDeviceLoss };
+        if (message.type === 'deviceLost') {
+          this.deviceLost = message.loss ?? null;
+          return;
+        }
         if (message.type === 'downloadProgress') {
           this.onDownloadProgress?.(message.loadedBytes ?? 0, message.totalBytes);
           return;

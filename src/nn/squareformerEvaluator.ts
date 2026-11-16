@@ -952,6 +952,7 @@ export class SquareFormerEvaluator implements Evaluator {
   private meta: SquareFormerMeta;
   private inputCache = new Map<string, SquareFormerEncodedInput>();
   private destroyed = false;
+  private disposal: Promise<void> | null = null;
   // ORT-web does not guard a session against overlapping run() calls or a
   // release() while a run is suspended (WebGPU/asyncify), so runs are queued
   // and destroy() releases the session only after the queue drains.
@@ -1122,11 +1123,17 @@ export class SquareFormerEvaluator implements Evaluator {
     return this.queue.run(fn);
   }
 
+  /** Awaitable teardown for owners that must not overlap resident sessions. */
+  dispose(): Promise<void> {
+    if (!this.disposal) {
+      this.destroyed = true;
+      this.inputCache.clear();
+      this.disposal = this.queue.idle().then(() => ort.releaseOrtSession(this.session));
+    }
+    return this.disposal;
+  }
+
   destroy(): void {
-    if (this.destroyed) return;
-    this.destroyed = true;
-    this.inputCache.clear();
-    const release = () => ort.releaseOrtSession(this.session).catch(() => undefined);
-    void this.queue.idle().then(release);
+    void this.dispose().catch(() => undefined);
   }
 }

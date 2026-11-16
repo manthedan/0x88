@@ -1,3 +1,4 @@
+import { type OrtDeviceLoss, watchOrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import '../nn/ortConsoleFilter.ts';
 import {
@@ -167,6 +168,7 @@ type WorkerResponse =
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'searchReset'; id: number }
   | { type: 'downloadProgress'; id: number; loadedBytes: number; totalBytes?: number }
+  | { type: 'deviceLost'; id: number; loss: OrtDeviceLoss }
   | { type: 'error'; id: number; error: string };
 
 type WorkerEvaluator = Lc0EvaluationProvider & {
@@ -449,6 +451,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   configuredModelCacheStatus = nextModelCacheStatus;
   configuredOrtWasm = diagnostics.wasm;
   configuredOrtFallback = diagnostics.fallback;
+  watchOrtDeviceLoss((loss) => post({ type: 'deviceLost', id: message.id, loss }));
   await previousEvaluator?.dispose?.();
   post({
     type: 'ready',

@@ -1,3 +1,4 @@
+import { watchOrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import {
   createOrtSession,
@@ -80,6 +81,7 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           if (message.ep === 'wasm' && !ortRuntimeArtifactKindIsLocked()) setOrtRuntimeArtifactKindForCurrentThread('wasm');
           post({ type: 'progress', id: message.id, stage: 'creating-session' });
           session = await createOrtSession(message.model);
+          watchOrtDeviceLoss((loss) => post({ type: 'deviceLost', loss }));
           post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames, backend: describeOrtBackendConfig() });
           return;
         }

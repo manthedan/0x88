@@ -1,3 +1,4 @@
+import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { type BoardState, boardToFen, type Piece, type PieceRole, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
@@ -260,6 +261,7 @@ export class Maia3BrowserEvaluator {
   readonly outputNames: string[];
   /** Resolved ORT backend, e.g. 'auto->webgpu' or 'wasm' (from the worker). */
   readonly backend: string;
+  deviceLost: OrtDeviceLoss | null = null;
   private abortCleanup?: () => void;
   private terminated = false;
   private readonly onFailure?: (error: Error) => void;
@@ -394,7 +396,11 @@ export class Maia3BrowserEvaluator {
   }
 
   private onMessage(event: MessageEvent): void {
-    const data = event.data as { type?: string; id?: number; message?: string };
+    const data = event.data as { type?: string; id?: number; message?: string; loss?: OrtDeviceLoss };
+    if (data.type === 'deviceLost') {
+      this.deviceLost = data.loss ?? null;
+      return;
+    }
     if (typeof data.id !== 'number') return;
     const pending = this.pending.get(data.id);
     if (!pending) return;
