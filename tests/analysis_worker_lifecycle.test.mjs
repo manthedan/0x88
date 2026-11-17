@@ -41,7 +41,7 @@ function controller() {
   const code = ts.transpile(
     `
     let searchWorker = null, workerReady = false, workerBackend = '', workerRuntime = '', workerSeq = 0;
-    let activeWorkerSearchId = null, workerSearchWarm = false, analysisWorkerProgressMessages = 0;
+    let activeWorkerSearchId = null, workerSearchWarm = false, analysisWorkerProgressMessages = 0, lc0ServedModelUrl = '';
     const workerPending = new Map();
     const selectedLc0Runtime = () => 'onnx', lc0InitMessage = () => ({ type: 'init' });
     const publishBrowserRuntimeAudit = () => {}, lc0ResolvedRuntime = () => 'fake', multiPv = () => 1;

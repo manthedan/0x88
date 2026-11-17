@@ -1,9 +1,9 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
-import AnalysisPreview from '$lib/components/AnalysisPreview.svelte';
-import SiteHeader from '$lib/components/SiteHeader.svelte';
-import { footerNav } from '$lib/nav';
+import { type BrowserCapabilityReport, detectBrowserCapabilities } from '#lib/browserCapabilities.ts';
+import AnalysisPreview from '#lib/components/AnalysisPreview.svelte';
+import SiteHeader from '#lib/components/SiteHeader.svelte';
+import { footerNav } from '#lib/nav.ts';
 import { engineFamilyOptions } from '../lc0/engineCatalog.ts';
 
 const title = '0x88 | Browser chess engine workbench';

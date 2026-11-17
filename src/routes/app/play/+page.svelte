@@ -1,10 +1,10 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import BrowserCapabilities from '#lib/components/BrowserCapabilities.svelte';
+import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.svelte';
+import RestoreNotice from '#lib/components/RestoreNotice.svelte';
+import SiteHeader from '#lib/components/SiteHeader.svelte';
 import { afterNavigate } from '$app/navigation';
-import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
-import PhoneLargeNetPreference from '$lib/components/PhoneLargeNetPreference.svelte';
-import RestoreNotice from '$lib/components/RestoreNotice.svelte';
-import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 let mountedUrl: URL | null = null;
 afterNavigate(({ to }) => {

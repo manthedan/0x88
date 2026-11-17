@@ -1,16 +1,15 @@
 <script lang="ts">
-import { page } from '$app/stores';
-import { primaryNav } from '$lib/nav';
-import { type BoardStyle, boardStyle, theme, toggleTheme } from '$lib/stores/theme';
+import { primaryNav } from '#lib/nav.ts';
+import { type BoardStyle, boardStyle, theme, toggleTheme } from '#lib/stores/theme.ts';
+import { page } from '$app/state';
 
-export let pageTitle = '';
 // Landing-only simplification; workspace headers keep their existing controls.
-export let landing = false;
-let mobileOpen = false;
-let mobileNavEl: HTMLElement | null = null;
+let { pageTitle = '', landing = false }: { pageTitle?: string; landing?: boolean } = $props();
+let mobileOpen = $state(false);
+let mobileNavEl = $state<HTMLElement | null>(null);
 
-$: path = $page.url.pathname;
-$: isDark = $theme === 'dark';
+const path = $derived(page.url.pathname);
+const isDark = $derived($theme === 'dark');
 
 function isActive(href: string): boolean {
   if (href === '/') return path === '/';
@@ -33,7 +32,7 @@ function onWindowKeydown(event: KeyboardEvent) {
 }
 </script>
 
-<svelte:window on:click={onWindowClick} on:keydown={onWindowKeydown} />
+<svelte:window onclick={onWindowClick} onkeydown={onWindowKeydown} />
 
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header" class:landing>
@@ -51,7 +50,7 @@ function onWindowKeydown(event: KeyboardEvent) {
       {/each}
     </nav>
     <div class="mobile-nav" class:open={mobileOpen} bind:this={mobileNavEl}>
-      <button class="menu-toggle" type="button" aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'} title="Menu" aria-expanded={mobileOpen} on:click={() => mobileOpen = !mobileOpen}><span aria-hidden="true"></span></button>
+      <button class="menu-toggle" type="button" aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'} title="Menu" aria-expanded={mobileOpen} onclick={() => mobileOpen = !mobileOpen}><span aria-hidden="true"></span></button>
       {#if mobileOpen}
         <nav class="mobile-nav-menu" aria-label="Mobile navigation">
           {#each primaryNav as item (item.href)}
@@ -60,7 +59,7 @@ function onWindowKeydown(event: KeyboardEvent) {
           {#if !landing}
           <div class="mobile-board-field">
             <label for="mobileBoardSelect">Board style</label>
-            <select id="mobileBoardSelect" value={$boardStyle} on:change={onBoardChange}>
+            <select id="mobileBoardSelect" value={$boardStyle} onchange={onBoardChange}>
               <option value="brown">Brown</option>
               <option value="night">Night</option>
               <option value="blue">Blue</option>
@@ -71,9 +70,9 @@ function onWindowKeydown(event: KeyboardEvent) {
         </nav>
       {/if}
     </div>
-    <button class="theme-toggle" type="button" aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'} title={isDark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={isDark} on:click={toggleTheme}>{#if isDark}<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/></svg>{:else}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>{/if}</button>
+    <button class="theme-toggle" type="button" aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'} title={isDark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={isDark} onclick={toggleTheme}>{#if isDark}<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/></svg>{:else}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>{/if}</button>
     {#if !landing}
-    <select class="board-style-select" aria-label="Board style" title="Board style" value={$boardStyle} on:change={onBoardChange}>
+    <select class="board-style-select" aria-label="Board style" title="Board style" value={$boardStyle} onchange={onBoardChange}>
       <option value="brown">Brown</option>
       <option value="night">Night</option>
       <option value="blue">Blue</option>

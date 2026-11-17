@@ -91,7 +91,7 @@ interface GpuAdapterLike {
   requestDevice(options?: { requiredFeatures?: string[] }): Promise<unknown>;
 }
 
-interface NavigatorWithGpu extends Navigator {
+interface NavigatorWithGpu extends Omit<Navigator, 'gpu'> {
   gpu?: { requestAdapter(): Promise<GpuAdapterLike | null> };
 }
 

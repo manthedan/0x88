@@ -113,7 +113,7 @@ async function desiredStamp(args) {
     inputs: {
       packageJsonSha256: await sha256Path('package.json'),
       packageLockSha256: await sha256Path('package-lock.json'),
-      svelteConfigSha256: await sha256Path('svelte.config.js'),
+      kitConfigSha256: await sha256Path('kit.config.js'),
       viteConfigSha256: await sha256Path('vite.config.ts'),
       tsconfigSha256: await sha256Path('tsconfig.json'),
       netlifyTomlSha256: await sha256Path('netlify.toml'),

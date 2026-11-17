@@ -1,8 +1,8 @@
 <script lang="ts">
 import { onMount, tick } from 'svelte';
-import { type BrowserCapabilityReport, detectBrowserCapabilities } from '$lib/browserCapabilities';
-import SiteHeader from '$lib/components/SiteHeader.svelte';
-import { activeDocsTopic, docsSearchShortcut, toggleDocsGroup } from '$lib/docsNavigation';
+import { type BrowserCapabilityReport, detectBrowserCapabilities } from '#lib/browserCapabilities.ts';
+import SiteHeader from '#lib/components/SiteHeader.svelte';
+import { activeDocsTopic, docsSearchShortcut, toggleDocsGroup } from '#lib/docsNavigation.ts';
 
 const title = '0x88 Chess — documentation';
 const description = 'How to use the 0x88 browser chess workspaces, fix WebGPU and download problems, and find each engine’s license and corresponding source.';

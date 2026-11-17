@@ -251,7 +251,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     const bundleFile = manifest.files?.find((entry) => entry.path === bundlePath);
     if (!bundleFile?.sha256) throw new Error(`TVMJS manifest missing bundle integrity metadata: ${bundlePath}`);
     const bundleUrl = new URL(bundlePath, baseUrl);
-    const gpu = (navigator as Navigator & { gpu?: { requestAdapter(options?: unknown): Promise<GpuAdapter | null> } }).gpu;
+    const gpu = (navigator as Omit<Navigator, 'gpu'> & { gpu?: { requestAdapter(options?: unknown): Promise<GpuAdapter | null> } }).gpu;
     if (!gpu) throw new Error('WebGPU is unavailable');
     const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('WebGPU adapter unavailable');

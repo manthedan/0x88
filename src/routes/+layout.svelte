@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import { registerServiceWorker } from '$lib/pwa/register';
-import { boardStyle, syncThemeToDom, theme } from '$lib/stores/theme';
+import { registerServiceWorker } from '#lib/pwa/register.ts';
+import { boardStyle, syncThemeToDom, theme } from '#lib/stores/theme.ts';
 
 onMount(() => {
   registerServiceWorker();
@@ -15,7 +15,7 @@ onMount(() => {
     boardStyle.set(root.dataset.board as 'night' | 'blue' | 'green');
   }
   if (new URLSearchParams(location.search).get('memprobe') === '1') {
-    void import('$lib/memprobe').then((module) => module.mountMemprobe());
+    void import('#lib/memprobe.ts').then((module) => module.mountMemprobe());
   }
   return stop;
 });

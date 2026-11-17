@@ -28,18 +28,17 @@ export function createCspDirectives(env) {
   };
 }
 
+// Shared by the Vite plugin and deployment-policy checks; SvelteKit 3 reads no svelte.config.js.
 export default {
-  kit: {
-    adapter: adapter({
-      pages: outDir,
-      assets: outDir,
-    }),
-    csp: {
-      mode: 'hash',
-      directives: createCspDirectives(loadEnv(process.env.NODE_ENV === 'development' ? 'development' : 'production', process.cwd(), 'VITE_')),
-    },
-    files: {
-      assets: assetsDir,
-    },
+  adapter: adapter({
+    pages: outDir,
+    assets: outDir,
+  }),
+  csp: {
+    mode: 'hash',
+    directives: createCspDirectives(loadEnv(process.env.NODE_ENV === 'development' ? 'development' : 'production', process.cwd(), 'VITE_')),
+  },
+  files: {
+    assets: assetsDir,
   },
 };

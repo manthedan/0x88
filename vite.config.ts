@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
+import kitConfig from './kit.config.js';
 import { patchChessgroundSvg } from './src/lc0/chessgroundArrowPatch.ts';
 
 const crossOriginIsolationHeaders = {
@@ -23,7 +24,7 @@ function chessgroundArrows(): Plugin {
 }
 
 export default defineConfig({
-  plugins: labOnly ? [] : [chessgroundArrows(), sveltekit()],
+  plugins: labOnly ? [] : [chessgroundArrows(), sveltekit(kitConfig)],
   optimizeDeps: labOnly ? { exclude: ['onnxruntime-web'] } : { exclude: ['chessground'] },
   resolve: {
     // ORT is configured to load its staged /ort/ glue and WASM at runtime.

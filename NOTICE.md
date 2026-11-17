@@ -99,7 +99,7 @@ build must surface.
 | [Apache TVM](https://github.com/apache/tvm) (TVMJS WebGPU runtime) | Apache-2.0 |
 | [Svelte / SvelteKit](https://github.com/sveltejs/kit) | MIT |
 | [@bjorn3/browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) | MIT / Apache-2.0 |
-| [TanStack Query / Store](https://github.com/TanStack) | MIT |
+| [Valibot](https://github.com/open-circle/valibot) | MIT |
 
 Full transitive dependency licences are resolvable from `package-lock.json`.
 

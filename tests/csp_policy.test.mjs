@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import svelteConfig, { createCspDirectives } from '../kit.config.js';
 import {
   checkBuiltPage,
   checkCspPolicy,
@@ -17,7 +18,6 @@ import {
 } from '../scripts/check_csp_policy.mjs';
 import { checkDeployCachePolicy } from '../scripts/check_deploy_cache_policy.mjs';
 import { renderHeadersFile } from '../scripts/generate_netlify_headers_file.mjs';
-import svelteConfig, { createCspDirectives } from '../svelte.config.js';
 
 const repoRoot = process.cwd();
 const sha = (text) => createHash('sha256').update(text, 'utf8').digest('base64');
@@ -40,8 +40,8 @@ function builtPage({ theme = 'theme()', boot = 'boot()', metaScriptSrc } = {}) {
   ].join('\n');
 }
 
-test('the shipped header and svelte.config.js policies agree', async () => {
-  assert.deepEqual(await checkCspPolicy(repoRoot), { ok: true, checked: ['netlify.toml', 'svelte.config.js'] });
+test('the shipped header and kit.config.js policies agree', async () => {
+  assert.deepEqual(await checkCspPolicy(repoRoot), { ok: true, checked: ['netlify.toml', 'kit.config.js'] });
 });
 
 const defaultEnv = {
@@ -55,8 +55,8 @@ async function policyFixture(t, mutate, env) {
   const toml = mutate(await readFile(resolve(repoRoot, 'netlify.toml'), 'utf8'));
   await mkdir(join(dir, 'public'));
   await writeFile(join(dir, 'package.json'), '{"type":"module"}');
-  const config = env ? { kit: { csp: { directives: createCspDirectives(env) } } } : svelteConfig;
-  await writeFile(join(dir, 'svelte.config.js'), `export default ${JSON.stringify(config)};`);
+  const config = env ? { csp: { directives: createCspDirectives(env) } } : svelteConfig;
+  await writeFile(join(dir, 'kit.config.js'), `export default ${JSON.stringify(config)};`);
   await writeFile(join(dir, 'netlify.toml'), toml);
   await writeFile(join(dir, 'public/_headers'), renderHeadersFile(toml));
   return dir;
@@ -80,7 +80,7 @@ test('a connect-only custom executable asset host is rejected by both script-src
   await assert.rejects(checkCspPolicy(root, undefined, { ...defaultEnv, VITE_LC0_BROWSER_ASSET_BASE_URL: `${origin}/engines/` }), (error) => {
     for (const [policy, file] of [
       ['header', 'netlify.toml'],
-      ['meta', 'svelte.config.js'],
+      ['meta', 'kit.config.js'],
     ]) {
       assert.ok(
         error.failures.some((failure) => failure.includes(`${policy} script-src blocks ${origin}`) && failure.includes(file)),
@@ -91,10 +91,10 @@ test('a connect-only custom executable asset host is rejected by both script-src
   });
 });
 
-test('svelte.config.js derives meta script-src from the executable asset base origin', () => {
+test('kit.config.js derives meta script-src from the executable asset base origin', () => {
   const result = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', "import config from './svelte.config.js'; console.log(JSON.stringify(config.kit.csp.directives['script-src']));"],
+    ['--input-type=module', '-e', "import config from './kit.config.js'; console.log(JSON.stringify(config.csp.directives['script-src']));"],
     {
       encoding: 'utf8',
       env: { ...process.env, VITE_LC0_BROWSER_ASSET_BASE_URL: 'https://engines.example.com/subpath/' },
@@ -125,7 +125,7 @@ test('default meta CSP directives retain their committed source order and bytes'
   );
 });
 
-test('svelte.config.js reads the executable asset origin from Vite production environment files', async (t) => {
+test('kit.config.js reads the executable asset origin from Vite production environment files', async (t) => {
   const root = await policyFixture(t, (toml) => toml);
   await writeFile(join(root, '.env.production'), 'VITE_LC0_BROWSER_ASSET_BASE_URL=https://engines.example.com/subpath/\n');
   const env = { ...process.env };
@@ -135,7 +135,7 @@ test('svelte.config.js reads the executable asset origin from Vite production en
     [
       '--input-type=module',
       '-e',
-      `import config from ${JSON.stringify(resolve(repoRoot, 'svelte.config.js'))}; console.log(JSON.stringify(config.kit.csp.directives['script-src']));`,
+      `import config from ${JSON.stringify(resolve(repoRoot, 'kit.config.js'))}; console.log(JSON.stringify(config.csp.directives['script-src']));`,
     ],
     {
       cwd: root,
@@ -155,7 +155,7 @@ test('each enforced script-src independently requires the executable asset origi
   const missingMeta = await policyFixture(t, (toml) => allowExecutableOrigin(connected(toml), origin));
   for (const [root, policy, file] of [
     [missingHeader, 'header', 'netlify.toml'],
-    [missingMeta, 'meta', 'svelte.config.js'],
+    [missingMeta, 'meta', 'kit.config.js'],
   ]) {
     await assert.rejects(checkCspPolicy(root, undefined, env), (error) => {
       assert.ok(
@@ -212,7 +212,7 @@ test('a stale built meta script-src is rejected even when the source configurati
   );
   await assert.rejects(checkCspPolicy(root, 'dist', env), (error) => {
     assert.equal(error.failures.length, 1, error.message);
-    assert.match(error.failures[0], /index.html: meta script-src blocks https:\/\/engines.example.com.*svelte.config.js/);
+    assert.match(error.failures[0], /index.html: meta script-src blocks https:\/\/engines.example.com.*kit.config.js/);
     return true;
   });
 });
@@ -362,7 +362,7 @@ test('inlineScriptAllowed follows CSP hash and strict-dynamic semantics', () => 
   assert.equal(inlineScriptAllowed(parseCsp("img-src 'self'"), hash), true);
 });
 
-test('policy drift between svelte.config.js and netlify.toml is rejected', async () => {
+test('policy drift between kit.config.js and netlify.toml is rejected', async () => {
   const header = await shippedHeader();
   const meta = metaDirectivesFromSvelteConfig(svelteConfig);
   assert.deepEqual(checkPolicyConsistency(header, meta), []);
@@ -399,7 +399,7 @@ test('connect-src in the header may be narrower than the meta policy but never w
   ]);
 });
 
-test('svelte.config.js keywords are quoted the way SvelteKit emits them', () => {
-  const meta = metaDirectivesFromSvelteConfig({ kit: { csp: { directives: { 'script-src': ['self', 'unsafe-eval', 'blob:', 'sha256-abc'] } } } });
+test('kit.config.js keywords are quoted the way SvelteKit emits them', () => {
+  const meta = metaDirectivesFromSvelteConfig({ csp: { directives: { 'script-src': ['self', 'unsafe-eval', 'blob:', 'sha256-abc'] } } });
   assert.deepEqual(meta.get('script-src'), ["'self'", "'unsafe-eval'", 'blob:', "'sha256-abc'"]);
 });
