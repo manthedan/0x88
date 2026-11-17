@@ -3,6 +3,7 @@
 #
 #   scripts/perf_matrix/mini.sh up [dist-dir] [laptop-port] [mini-port]   # server + reverse tunnel + sync scripts
 #   scripts/perf_matrix/mini.sh run <name> [run_matrix args...]            # runs ON the mini (~/perf-matrix/out/<name>), under its lock
+#   scripts/perf_matrix/mini.sh run-routes <name> [perf:routes args...]     # route gate, same shared mutex
 #   scripts/perf_matrix/mini.sh fetch <name> [local-dir]                   # copy results back
 #   scripts/perf_matrix/mini.sh down                                       # stop the server + tunnel started by `up`
 #   scripts/perf_matrix/mini.sh status
@@ -81,6 +82,9 @@ up)
   ssh -o BatchMode=yes "$HOST" "mkdir -p ~/$WORKSPACE/scripts/perf_matrix ~/$WORKSPACE/out"
   # Isolate this branch's scripts from agents using ~/perf-matrix; share only its mutex.
   rsync -a --delete "$REPO/scripts/perf_matrix/" "$HOST:$WORKSPACE/scripts/perf_matrix/"
+  ssh -o BatchMode=yes "$HOST" "mkdir -p ~/$WORKSPACE/scripts/perf_routes ~/$WORKSPACE/scripts/lib"
+  rsync -a --delete "$REPO/scripts/perf_routes/" "$HOST:$WORKSPACE/scripts/perf_routes/"
+  rsync -a "$REPO/scripts/lib/perf_canary_stats.mjs" "$HOST:$WORKSPACE/scripts/lib/"
   code=$(ssh -o BatchMode=yes "$HOST" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$MPORT/lab/mobile-soak/")
   echo "server pid $(cat "$STATE/server.pid") (laptop :$LPORT), tunnel pid $(cat "$STATE/tunnel.pid") (mini :$MPORT), page HTTP $code"
   ;;
@@ -94,6 +98,23 @@ run)
     echo \"mini load: \$(sysctl -n vm.loadavg)\" && \
     node scripts/perf_matrix/run_matrix.mjs --driver $DRIVER --lock-dir \$HOME/perf-matrix/safari.lock \
       --base http://127.0.0.1:$MPORT --out out/$NAME $args"
+  ;;
+run-routes)
+  NAME=$1
+  [[ "$NAME" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'invalid route output name'; exit 1; }
+  shift
+  MPORT=$(cat "$STATE/mini-port")
+  alive "$STATE/tunnel.pid" || { echo "tunnel is down: run '$0 up' first"; exit 1; }
+  # Explicit URL flags support two independently transported built previews. Self-comparison
+  # uses the same upstream bytes; the session proxy still supplies fresh origins per arm.
+  defaults=()
+  case " $* " in *' --baseline-url '*) ;; *) defaults+=(--baseline-url "http://127.0.0.1:$MPORT");; esac
+  case " $* " in *' --candidate-url '*) ;; *) defaults+=(--candidate-url "http://127.0.0.1:$MPORT");; esac
+  args=$(printf '%q ' "${defaults[@]}" "$@")
+  ssh -o BatchMode=yes "$HOST" "cd ~/$WORKSPACE && export PATH=/opt/homebrew/bin:\$PATH && \
+    echo \"mini load: \$(sysctl -n vm.loadavg)\" && \
+    node scripts/perf_routes/run.mjs --driver $DRIVER --lock-dir \$HOME/perf-matrix/safari.lock \
+      --out out/$NAME $args"
   ;;
 fetch)
   NAME=$1
@@ -115,5 +136,5 @@ status)
   for p in tunnel server; do alive "$STATE/$p.pid" && echo "$p running ($(cat "$STATE/$p.pid"))" || echo "$p stopped"; done
   ssh -o BatchMode=yes "$HOST" 'cat ~/perf-matrix/safari.lock/owner 2>/dev/null || echo "mini lock free"; sysctl -n vm.loadavg'
   ;;
-*) echo "usage: $0 up|run|fetch|down|status"; exit 2 ;;
+*) echo "usage: $0 up|run|run-routes|fetch|down|status"; exit 2 ;;
 esac

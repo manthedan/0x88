@@ -3,7 +3,7 @@
 // state: a warm run must fetch zero model bytes from the network.
 import { createServer, request as httpRequest } from 'node:http';
 
-export async function startCountingProxy(target) {
+export async function startCountingProxy(target, { htmlScript } = {}) {
   const upstream = new URL(target);
   // Channel-v2 model representations have no extension. Identify their raw hash
   // from app-origin model pins, rather than counting unrelated WASM/glue artifacts.
@@ -32,14 +32,34 @@ export async function startCountingProxy(target) {
     const entry = { at: Date.now(), method: req.method, path: req.url, status: null, bytes: 0 };
     requests.push(entry);
     const up = httpRequest(
-      { host: upstream.hostname, port: upstream.port, method: req.method, path: req.url, headers: { ...req.headers, host: upstream.host } },
+      {
+        host: upstream.hostname,
+        port: upstream.port,
+        method: req.method,
+        path: req.url,
+        headers: { ...req.headers, host: upstream.host, ...(htmlScript ? { 'accept-encoding': 'identity' } : {}) },
+      },
       (upRes) => {
         entry.status = upRes.statusCode;
-        res.writeHead(upRes.statusCode ?? 502, upRes.headers);
         upRes.on('data', (chunk) => {
           entry.bytes += chunk.length;
         });
-        upRes.pipe(res);
+        if (htmlScript && String(upRes.headers['content-type']).includes('text/html') && upRes.statusCode === 200) {
+          // Route probes must run before hydration/worker creation, including on Safari.
+          // Request identity HTML so we never inject into a compressed representation.
+          const chunks = [];
+          upRes.on('data', (chunk) => chunks.push(chunk));
+          upRes.on('end', () => {
+            const body = Buffer.from(Buffer.concat(chunks).toString().replace('<head>', `<head><script>${htmlScript}</script>`));
+            const headers = { ...upRes.headers, 'content-length': body.length };
+            delete headers['content-encoding'];
+            res.writeHead(200, headers);
+            res.end(body);
+          });
+        } else {
+          res.writeHead(upRes.statusCode ?? 502, upRes.headers);
+          upRes.pipe(res);
+        }
       },
     );
     up.on('error', (error) => {
