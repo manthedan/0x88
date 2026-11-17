@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Bt4WorkerSearcher, LQO_NET } from '../src/lc0/bt4Engine.ts';
+import { BIG_NETS, Bt4WorkerSearcher, LQO_NET } from '../src/lc0/bt4Engine.ts';
 import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { startSearchWorker } from '../src/lc0/searchWorkerCore.ts';
@@ -99,9 +99,63 @@ test('big-net worker receives page graph/folding options, keeps device model sel
   assert.equal(workers.length, 2);
   assert.equal(workers[0].terminated, true);
   assert.equal(workers[1].posted[0].ortDiagnostics.graphOptimizationLevel, 'basic');
-  assert.equal(workers[1].posted[0].dequantFold, true, 'default app fold remains enabled');
+  assert.equal(workers[1].posted[0].dequantFold, false, 'the explicit big-net policy is off when no override is present');
   assert.equal(searcher.ortRuntime.graphOptimizationLevel, 'basic');
 });
+
+test('fold resolution preserves Small and honors worker > URL/environment > model config', (t) => {
+  globals(t, { location: { search: '' } });
+  assert.equal(ort.ortDequantFoldEnabled(), true, 'Small/generic default is unchanged');
+  assert.equal(ort.ortDequantFoldEnabled(false), false);
+  const oldEnv = process.env.ORT_DEQUANT_FOLD;
+  t.after(() => {
+    if (oldEnv === undefined) delete process.env.ORT_DEQUANT_FOLD;
+    else process.env.ORT_DEQUANT_FOLD = oldEnv;
+  });
+  process.env.ORT_DEQUANT_FOLD = '1';
+  assert.equal(ort.ortDequantFoldEnabled(false), true, 'environment can force on');
+  location.search = '?ortDequantFold=0';
+  assert.equal(ort.ortDequantFoldEnabled(false), false, 'URL wins over environment');
+  delete process.env.ORT_DEQUANT_FOLD;
+  for (const [raw, expected] of [
+    ['1', true],
+    ['0', false],
+    ['true', true],
+    ['off', false],
+  ]) {
+    location.search = '?ortDequantFold=' + raw;
+    assert.equal(ort.ortDequantFoldEnabled(false), expected);
+    assert.equal(ort.ortDequantFoldEnabled(true), expected);
+  }
+  location.search = '?ortDequantFold=1';
+  ort.setOrtDequantFoldForCurrentThread(false);
+  assert.equal(ort.ortDequantFoldEnabled(true), false);
+  location.search = '?ortDequantFold=0';
+  ort.setOrtDequantFoldForCurrentThread(true);
+  assert.equal(ort.ortDequantFoldEnabled(false), true);
+});
+
+for (const [query, forced] of [
+  ['', undefined],
+  ['?ortDequantFold=1', true],
+  ['?ortDequantFold=0', false],
+]) {
+  test(`production per-net fold policies and forwarded init overrides: ${query || 'default'}`, async (t) => {
+    globals(t, { location: { search: query }, Worker: WorkerStub });
+    for (const config of Object.values(BIG_NETS)) {
+      assert.equal(config.dequantFold, false);
+      const searcher = new Bt4WorkerSearcher(config);
+      await searcher.init();
+      assert.equal(searcher.ortRuntime.dequantFoldEnabled, forced ?? false);
+      searcher.dispose();
+    }
+    const worker = new WorkerStub();
+    const ready = await Maia3BrowserEvaluator.postInit(worker, 'unused-model');
+    assert.equal(worker.posted[0].dequantFold, forced ?? false);
+    assert.equal(ready.ortRuntime.dequantFoldEnabled, forced ?? false);
+    assert.equal(ort.ortDequantFoldEnabled(), forced ?? true, 'Small remains enabled by default');
+  });
+}
 
 test('Maia init forwards page diagnostics and preserves the effective worker settings in its ready payload', async (t) => {
   globals(t, { location: { search: '?ortGraphOpt=layout&ortDequantFold=0' } });
@@ -193,6 +247,11 @@ test('real Maia worker handler applies graph options to ORT session creation wit
     assert.equal(ready.ortRuntime.graphOptimizationLevel, level);
     assert.equal(ready.ortRuntime.dequantFoldEnabled, false);
   }
+  for (const fold of [undefined, true, false]) {
+    const ready = await send({ type: 'init', model: 'unused', ep: 'wasm', dequantFold: fold });
+    assert.equal(ready.type, 'ready');
+    assert.equal(ready.ortRuntime.dequantFoldEnabled, fold ?? false, 'worker field forces either arm; omission uses Maia policy');
+  }
   await send({ type: 'dispose' });
-  assert.deepEqual(levels, ['disabled', 'extended']);
+  assert.deepEqual(levels, ['disabled', 'extended', 'all', 'all', 'all']);
 });

@@ -370,15 +370,18 @@ export function setOrtDequantFoldForCurrentThread(value: boolean | null): void {
 }
 
 /**
- * Weight-only DequantizeLinear nodes are folded into plain initializers at load time unless
- * `?ortDequantFold=0` (or ORT_DEQUANT_FOLD=0) asks for the graph as shipped.
+ * Resolve an explicit model policy (Small/default callers keep folding). A worker pin
+ * wins over the page/environment override, which wins over the model's default.
+ * `?ortDequantFold=1/0` can force either arm for benchmarking on every model.
  */
-export function ortDequantFoldEnabled(): boolean {
+export function ortDequantFoldEnabled(defaultEnabled = true): boolean {
   if (forcedOrtDequantFold !== null) return forcedOrtDequantFold;
   const raw = String(browserParam('ortDequantFold') ?? envValue('ORT_DEQUANT_FOLD') ?? '')
     .trim()
     .toLowerCase();
-  return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
+  if (['0', 'false', 'off', 'no'].includes(raw)) return false;
+  if (['1', 'true', 'on', 'yes'].includes(raw)) return true;
+  return defaultEnabled;
 }
 
 export function lastOrtDequantFoldSummary(): OrtDequantFoldSummary | null {

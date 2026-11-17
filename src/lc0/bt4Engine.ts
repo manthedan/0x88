@@ -28,6 +28,8 @@ export interface BigNetConfig {
   key: 'bt4' | 't3' | 'lqo';
   name: string;
   modelUrl: string;
+  /** App weight-fold policy; explicit URL/worker overrides still win. */
+  dequantFold: boolean;
   /** Validated lab config may probe an unlisted model; production integrity checks still apply. */
   diagnosticModel?: true;
   approxMb: number;
@@ -48,6 +50,7 @@ export interface BigNetConfig {
 export const BT4_NET: BigNetConfig = {
   key: 'bt4',
   name: 'BT4-it332',
+  dequantFold: false,
   modelUrl: resolvePublicAssetUrl('/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx'),
   approxMb: 178,
   recommendedBatchSize: 8,
@@ -61,6 +64,7 @@ export const BT4_NET: BigNetConfig = {
 export const T3_NET: BigNetConfig = {
   key: 't3',
   name: 't3-512 distill',
+  dequantFold: false,
   modelUrl: resolvePublicAssetUrl('/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx'),
   approxMb: 163,
   recommendedBatchSize: 8,
@@ -78,6 +82,7 @@ export const T3_NET: BigNetConfig = {
 export const LQO_NET: BigNetConfig = {
   key: 'lqo',
   name: 'Queen Odds',
+  dequantFold: false,
   modelUrl: resolvePublicAssetUrl('/models/lc0/lqo_v2.f16.qdq8.onnx'),
   approxMb: 96,
   recommendedBatchSize: 8,
@@ -308,8 +313,8 @@ function normalizedEvalCacheEntries(entries: number | undefined): number {
   return Math.max(0, Math.floor(Number(entries ?? 0) || 0));
 }
 
-function bigNetDiagnosticRequest() {
-  return { ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(), dequantFold: ortDequantFoldEnabled() };
+function bigNetDiagnosticRequest(config: BigNetConfig) {
+  return { ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(), dequantFold: ortDequantFoldEnabled(config.dequantFold) };
 }
 
 export class Bt4WorkerSearcher {
@@ -365,14 +370,14 @@ export class Bt4WorkerSearcher {
     return (
       this.ready &&
       this.configuredEvalCacheEntries === normalizedEvalCacheEntries(options.evalCacheEntries) &&
-      this.configuredDiagnosticKey === JSON.stringify(bigNetDiagnosticRequest())
+      this.configuredDiagnosticKey === JSON.stringify(bigNetDiagnosticRequest(this.config))
     );
   }
 
   /** Create + init the worker on first call (fetches the large net, then cached). */
   async init(options: { evalCacheEntries?: number } = {}): Promise<string> {
     const evalCacheEntries = normalizedEvalCacheEntries(options.evalCacheEntries);
-    const diagnostics = bigNetDiagnosticRequest();
+    const diagnostics = bigNetDiagnosticRequest(this.config);
     const diagnosticKey = JSON.stringify(diagnostics);
     if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries && this.configuredDiagnosticKey === diagnosticKey) return this.backend;
     if (this.ready) this.dispose();

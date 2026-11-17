@@ -4,6 +4,7 @@ import { legalMoves } from '../chess/movegen.ts';
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
 
@@ -438,7 +439,7 @@ export class Maia3BrowserEvaluator {
         ep,
         wasmThreads,
         ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
-        dequantFold: ortDequantFoldEnabled(),
+        dequantFold: ortDequantFoldEnabled(MAIA3_ORT_DEFAULTS.dequantFold),
         ...(reloadModel ? { modelUrl: reloadModel.url, metadataTrustedModel: reloadModel.metadataTrusted } : {}),
       };
       if (typeof model === 'string') worker.postMessage(message);

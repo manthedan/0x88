@@ -3,19 +3,20 @@ import { moveToUci } from '../chess/moveCodec.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
 import { type OrtDeviceLoss, watchOrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
-import { describeOrtBackendConfig, collectOrtSessionDiagnostics, requestedOrtGraphOptimizationLevel, ortDequantFoldEnabled } from '../nn/ortRuntime.ts';
+import { collectOrtSessionDiagnostics, describeOrtBackendConfig, ortDequantFoldEnabled, requestedOrtGraphOptimizationLevel } from '../nn/ortRuntime.ts';
 import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { searchRoot } from '../search/puct.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import type { BigNetKey } from './bigNetSessionPool.ts';
-import { BIG_NETS, type Bt4WorkerSearcher, checkBigNetAsset } from './bt4Engine.ts';
 import type { BrowserUciEngine } from './browserUciEngine.ts';
+import { BIG_NETS, type Bt4WorkerSearcher, checkBigNetAsset } from './bt4Engine.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
 import { createLc0OnnxEvaluatorFromUrl, LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
 import { Maia3BrowserEvaluator } from './maia3.ts';
-import { type SearchSample, rate, SoakSkip } from './mobileSoak.ts';
-import { createSoakCpuProbe } from './mobileSoakCpu.ts';
+import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
+import { rate, type SearchSample, SoakSkip } from './mobileSoak.ts';
 import { createSoakBigNetBinding } from './mobileSoakBigNet.ts';
+import { createSoakCpuProbe } from './mobileSoakCpu.ts';
 import type { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { cpuThreadBudget, defaultBrowserEnvironment } from './resourceBroker.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -166,7 +167,10 @@ export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: 
     runtime: () => ({
       ...(id === 'maia3' || id === 'lc0-small' || id === 'centipawn' || bigBinding
         ? {
-            ortRuntime: { graphOptimizationLevel: requestedOrtGraphOptimizationLevel(), dequantFoldEnabled: ortDequantFoldEnabled() },
+            ortRuntime: {
+              graphOptimizationLevel: requestedOrtGraphOptimizationLevel(),
+              dequantFoldEnabled: ortDequantFoldEnabled(bigBinding?.config.dequantFold ?? (id === 'maia3' ? MAIA3_ORT_DEFAULTS.dequantFold : true)),
+            },
             ortRuntimeSource: 'requested until session ready',
           }
         : {}),

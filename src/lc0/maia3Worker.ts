@@ -15,6 +15,7 @@ import {
   setRequestedOrtWasmThreadsForCurrentThread,
 } from '../nn/ortRuntime.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
+import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { type Lc0ModelLoadInfo, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel } from './onnxModelRecovery.ts';
 
@@ -87,7 +88,7 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           if (session) await releaseOrtSession(session);
           if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
           setOrtRuntimeDiagnosticOptionsForCurrentThread(message.ortDiagnostics ?? null);
-          setOrtDequantFoldForCurrentThread(message.dequantFold ?? null);
+          setOrtDequantFoldForCurrentThread(message.dequantFold ?? MAIA3_ORT_DEFAULTS.dequantFold);
           setRequestedOrtWasmThreadsForCurrentThread(message.wasmThreads ?? null);
           // Unlike searchWorker this worker never switches provider per message,
           // so an ep=wasm request is a lifetime property and can pin the runtime
