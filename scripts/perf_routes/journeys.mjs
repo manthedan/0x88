@@ -3,6 +3,7 @@ import { chooseHumanMove, playHumanTurn } from './human.mjs';
 
 const PLAY_TURN = `(${playHumanTurn.toString()})(document.querySelector('#status')?.textContent)`;
 
+export const DOCS_READY = `location.pathname === '/docs/' && document.querySelector('#doc-h1')?.textContent?.trim() === 'Using 0x88' && !!document.querySelector('#pages-analysis')`;
 export const MIDGAME = 'r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 6 6';
 export const routeFor = (name) => (name.startsWith('play') ? 'play' : name.startsWith('arena') ? 'arena' : 'analysis');
 

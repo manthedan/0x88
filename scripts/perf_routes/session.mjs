@@ -5,8 +5,8 @@ import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
-import { jsBytesByRoute, peakFootprint } from './gate.mjs';
-import { MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
+import { jsBytesByRoute, naturalVisibilityValid, peakFootprint } from './gate.mjs';
+import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
@@ -197,6 +197,7 @@ try {
   // Client-side navigation to a non-engine route observes retention without destroying the page process.
   const documentId = await evaluate(`window.__routePerf.documentId`);
   const away = '/docs/';
+  const awayAt = Date.now();
   if (spec.journey.startsWith('play')) {
     // The real leave confirmation is owned by this test flow. Avoid Safari unhandled-prompt deadlocks.
     await evaluate(`(window.confirm = () => true, true)`);
@@ -204,7 +205,7 @@ try {
   await evaluate(
     `(() => { const a=document.querySelector('.site-header nav.primary a[href="${away}"]'); if(!a) throw Error('Docs link missing'); a.click(); return true; })()`,
   );
-  await waitFor(evaluate, `location.pathname === '${away}'`);
+  await waitFor(evaluate, DOCS_READY);
   if ((await evaluate(`window.__routePerf.documentId`)) !== documentId) throw Error('Residual navigation destroyed document');
   phase = 'residual';
   await sleep(20000);
@@ -212,6 +213,10 @@ try {
   const residual = result.samples.filter((s) => s.phase === 'residual' && s.ms >= result.samples.at(-1).ms - 2000);
   result.metrics['memory.residualMb'] = median(residual.map((s) => s.rendererMb + (s.gpuMb ?? 0)));
   result.metrics['workers.residual'] = await evaluate(`window.__routePerf.workers`);
+  result.postNavigationRequests = proxy.requests.filter((request) => request.at >= awayAt).map((request) => ({ ...request }));
+  result.naturalVisibility = await evaluate(`({events:window.__routePerf.visibility,final:document.visibilityState})`);
+  if (!naturalVisibilityValid(result.naturalVisibility.events, result.naturalVisibility.final))
+    throw Error('Page became hidden during natural measurement windows; see naturalVisibility.');
   result.externalAssetUrls = [
     ...new Set([
       ...result.externalRequests,
@@ -228,7 +233,7 @@ try {
   phase = 'ua-after-natural';
   await uaMemory('postResidualGc');
   if (samplingError) throw samplingError;
-  const failed = result.requests.filter((r) => r.method !== 'HEAD' && r.status >= 400);
+  const failed = [...result.requests, ...result.postNavigationRequests].filter((r) => r.method !== 'HEAD' && r.status >= 400);
   // Adding a row speculatively prefetches the next suggested family before the user changes
   // it. Reckless is not selected in any gate journey; its absent optional local assets must
   // not invalidate four successfully searched engines. Keep those failures as evidence.
@@ -238,7 +243,7 @@ try {
 } catch (error) {
   if (evaluate)
     result.diagnostic = await evaluate(
-      `({url:location.href,title:document.title,message:document.querySelector('#message')?.textContent,body:document.body?.textContent?.slice(0,1000),probe:window.__routePerf ?? null,hook:typeof window.__analysisUserMove,board:!!document.querySelector('#ground cg-board'),visibility:document.visibilityState})`,
+      `({url:location.href,title:document.title,message:document.querySelector('#message')?.textContent,body:document.body?.textContent?.slice(0,1000),probe:window.__routePerf ?? null,hook:typeof window.__analysisUserMove,board:!!document.querySelector('#ground cg-board'),visibility:document.visibilityState,scheduling:window.__analysisSchedulingState?.(),lines:[...document.querySelectorAll('#engineSummaries [data-pv-fen]')].map(el=>({fen:el.dataset.pvFen,engine:el.dataset.engine}))})`,
     ).catch((e) => ({ error: String(e) }));
   if (proxy) result.requests = proxy.requests.map((r) => ({ ...r }));
   result.error = String(error.stack ?? error);

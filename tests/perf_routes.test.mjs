@@ -4,9 +4,20 @@ import { createServer } from 'node:http';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { startCountingProxy } from '../scripts/perf_matrix/proxy.mjs';
-import { compareRuns, JOURNEYS, jsBytesByRoute, parseArgs, peakFootprint, plan, previewEnvironment, stats, verdict } from '../scripts/perf_routes/gate.mjs';
+import {
+  compareRuns,
+  JOURNEYS,
+  jsBytesByRoute,
+  naturalVisibilityValid,
+  parseArgs,
+  peakFootprint,
+  plan,
+  previewEnvironment,
+  stats,
+  verdict,
+} from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
-import { arenaGameFailed, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
+import { arenaGameFailed, DOCS_READY, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -173,7 +184,9 @@ test('route probes retain original worker payloads, count teardown once and pars
   assert.equal(window.__routePerf.externalAssets[0], 'https://assets.example/net.onnx');
   cpu.receive({ type: 'searchProgress', id: 3, progress: { fen: 'current', visits: 500, completedVisits: 5, elapsedMs: 1000 } });
   cpu.receive({ type: 'searchResult', id: 3, result: { fen: 'current', visits: 502, stats: { completedVisits: 7 }, elapsedMs: 1000 } });
+  cpu.receive({ type: 'searchResult', id: 4, result: { fen: 'cached', visits: 500, stats: { completedVisits: 0 }, elapsedMs: 1 } });
   assert.deepEqual(Array.from(window.__routePerf.rates['lc0-visits']), [5, 7]);
+  assert.equal(window.__routePerf.analysisProgress.at(-1).fen, 'cached', 'a zero-new-work response proves the FEN request without inflating speed');
   assert.equal(window.__routePerf.analysisProgress[0].fen, 'current');
   assert.equal(window.__routePerf.peakWorkers, 2);
   cpu.receive({ type: 'disposed' });
@@ -271,6 +284,22 @@ test('host-side human moves are deterministic/legal and reject terminal or wrong
   assert.throws(() => chooseHumanMove(['e4']), /White turn/);
   assert.throws(() => chooseHumanMove(['not-san']), /Cannot replay/);
   assert.throws(() => chooseHumanMove(['f3', 'e5', 'g4', 'Qh4#']), /ended before/);
+});
+
+test('hidden intervals invalidate natural measurements even if visibility is restored', () => {
+  assert.equal(naturalVisibilityValid([{ state: 'visible' }, { state: 'hidden' }, { state: 'visible' }], 'visible'), false);
+  assert.equal(naturalVisibilityValid([{ state: 'visible' }], 'hidden'), false);
+  assert.equal(naturalVisibilityValid([{ state: 'visible' }], 'visible'), true);
+  assert.equal(naturalVisibilityValid([], 'visible'), false);
+});
+
+test('residual Docs readiness rejects an error page with a matching pathname', () => {
+  const ready = new Function('document', 'location', `return Boolean(${DOCS_READY});`);
+  const location = { pathname: '/docs/' };
+  assert.equal(ready({ querySelector: () => null }, location), false);
+  assert.equal(ready({ querySelector: (selector) => (selector === '#doc-h1' ? { textContent: 'Using 0x88' } : {}) }, location), true);
+  const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
+  assert.match(source, /result\.requests,\s*\.\.\.result\.postNavigationRequests/);
 });
 
 test('visited routes with cached JS are explicit zero baselines, not missing samples', () => {

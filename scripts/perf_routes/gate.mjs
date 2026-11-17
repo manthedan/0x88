@@ -112,6 +112,9 @@ export function verdict(name, baseline, candidate, expected = 5) {
   return { name, baseline: a, candidate: b, deltaRatio, threshold, status };
 }
 
+export const naturalVisibilityValid = (events, finalState) =>
+  finalState === 'visible' && events.length > 0 && events.every((event) => event.state === 'visible');
+
 export const previewEnvironment = (port, env = process.env) => ({ ...env, PORT: String(port) });
 
 export function jsBytesByRoute(requests, marks) {

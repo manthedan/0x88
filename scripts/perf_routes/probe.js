@@ -11,11 +11,13 @@
     rates: {},
     analysisProgress: [],
     externalAssets: [],
+    visibility: [{ at: performance.now(), state: document.visibilityState }],
     errors: [],
     events: [],
     supportsLongTasks: PerformanceObserver.supportedEntryTypes.includes('longtask'),
   };
   window.__routePerf = p;
+  document.addEventListener?.('visibilitychange', () => p.visibility.push({ at: performance.now(), state: document.visibilityState }));
   performance.setResourceTimingBufferSize(10000);
   if (p.supportsLongTasks)
     new PerformanceObserver((list) => {
@@ -96,11 +98,15 @@
           if (/^bestmove /.test(output)) line();
         }
         const v = m?.progress ?? m?.result;
+        if (v?.fen && v.visits > 0 && location.pathname.includes('/analysis')) {
+          // A reused root may satisfy the request with zero NEW visits. Its FEN-associated
+          // response still proves auto-analysis ran; it must not become a speed sample.
+          p.analysisProgress.push({ fen: v.fen, at: performance.now(), id: m.id });
+        }
         const completed = v?.completedVisits ?? v?.stats?.completedVisits;
         if (completed > 0 && v.elapsedMs > 0) {
           // Total root visits may include an inherited/reused tree; elapsedMs is this search only.
           rate(kind, (completed * 1000) / v.elapsedMs);
-          if (v.fen && location.pathname.includes('/analysis')) p.analysisProgress.push({ fen: v.fen, at: performance.now(), id: m.id });
           line();
         }
         if (
