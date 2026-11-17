@@ -1,3 +1,4 @@
+import { requestedOrtRuntimeDiagnosticOptions, ortDequantFoldEnabled } from '../nn/ortRuntime.ts';
 import { type BoardState, boardToFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
@@ -172,6 +173,8 @@ function createWorker(arm: StrengthArm): WorkerClient {
           type: 'init',
           modelUrl: arm.modelUrl,
           ep: 'webgpu',
+          ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
+          dequantFold: ortDequantFoldEnabled(),
           cacheModel: true,
           evalCacheEntries: 2048,
           physicalBatchMode: arm.physicalBatchMode,

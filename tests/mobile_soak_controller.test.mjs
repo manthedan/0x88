@@ -85,6 +85,126 @@ function browser(t, search = '?steps=sf-lite,t3') {
   };
 }
 
+test('active API, storage and published rows stay running through load, search and disposal', async (t) => {
+  const f = browser(t, '?steps=sf-lite');
+  const load = deferred(),
+    search = deferred(),
+    dispose = deferred();
+  let loading = false,
+    searching = false,
+    disposing = false;
+  const current = f.mount({
+    makeEngine: async (id) =>
+      engine(id, {
+        load() {
+          loading = true;
+          return load.promise;
+        },
+        search(fen) {
+          searching = true;
+          return search.promise.then(() => sample(id, fen));
+        },
+        dispose() {
+          disposing = true;
+          return dispose.promise;
+        },
+      }),
+  });
+  await current.ready;
+  const run = current.api.start();
+  const assertRunning = () => {
+    assert.equal(current.api.state, 'running');
+    assert.equal(current.api.results.inProgress.id, 'sf-lite');
+    assert.equal(current.api.results.steps[0].status, 'running');
+    assert.equal(f.saved().steps[0].status, 'running');
+    assert.equal(current.changes.at(-1).steps[0].status, 'running');
+  };
+  await until(() => loading);
+  assertRunning();
+  load.resolve();
+  await until(() => searching);
+  assertRunning();
+  search.resolve();
+  await until(() => disposing);
+  assertRunning();
+  dispose.resolve();
+  await run;
+  assert.equal(current.api.results.inProgress, null);
+  assert.equal(current.api.results.steps[0].status, 'ok');
+  assert.equal(f.saved().steps[0].status, 'ok');
+});
+
+test('failed teardown is still running until its active marker clears, then becomes failed', async (t) => {
+  const f = browser(t, '?steps=sf-lite');
+  const disposal = deferred(),
+    afterDispose = deferred();
+  let memories = 0,
+    disposing = false;
+  const memory = { at: 'test', jsHeap: null, userAgentBytes: null, wasmHeapBytes: null, error: null };
+  const current = f.mount({
+    memory: async () => (++memories === 4 ? afterDispose.promise : memory),
+    makeEngine: async (id) =>
+      engine(id, {
+        dispose() {
+          disposing = true;
+          return disposal.promise;
+        },
+      }),
+  });
+  await current.ready;
+  const run = current.api.start();
+  await until(() => disposing);
+  disposal.reject(new Error('release failed'));
+  await until(() => memories === 4);
+  assert.equal(current.api.results.steps[0].status, 'running');
+  assert.equal(current.api.results.inProgress.id, 'sf-lite');
+  assert.match(current.api.results.steps[0].error, /release failed/);
+  assert.equal(current.api.unsafeDisposal, true);
+  afterDispose.resolve(memory);
+  await run;
+  assert.equal(current.api.results.steps[0].status, 'failed');
+  assert.equal(current.api.results.inProgress, null);
+});
+
+test('API step selection and crash continuation preserve the saved run model overrides', async (t) => {
+  const f = browser(t, '?steps=lqo,t3&lqoModel=/models/lc0/lqo_v2.f16.onnx&t3Model=/models/lc0/unit-t3.f16.onnx');
+  const search = deferred();
+  const calls = [];
+  let searching = false;
+  const makeEngine = async (id, _signal, modelOverride) => {
+    calls.push([id, modelOverride]);
+    return engine(id, {
+      runtime: () => ({ requestedModelUrl: modelOverride }),
+      search(fen) {
+        searching = true;
+        return search.promise.then(() => sample(id, fen));
+      },
+    });
+  };
+  const old = f.mount({ makeEngine });
+  await old.ready;
+  const pending = old.api.start(['lqo', 't3']);
+  await until(() => searching);
+  assert.equal(f.saved().steps[0].runtime.lqo.requestedModelUrl, '/models/lc0/lqo_v2.f16.onnx');
+  old.destroy();
+  f.location.search = '?steps=t3';
+  const current = f.mount({ makeEngine });
+  await current.ready;
+  assert.equal(current.api.state, 'crashed-awaiting-choice');
+  const continued = current.api.continueAfterCrash();
+  search.resolve();
+  await Promise.all([pending, continued]);
+  assert.deepEqual(calls, [
+    ['lqo', '/models/lc0/lqo_v2.f16.onnx'],
+    ['t3', '/models/lc0/unit-t3.f16.onnx'],
+  ]);
+  assert.deepEqual(
+    current.api.results.steps.map((s) => s.status),
+    ['crashed', 'ok'],
+  );
+  assert.equal(current.api.results.modelOverrides.lqo, '/models/lc0/lqo_v2.f16.onnx');
+});
+
 test('retired initial environment/auto continuation and stale API cannot overwrite a reopened run', async (t) => {
   const f = browser(t, '?auto=1&steps=sf-lite');
   const environment = deferred();

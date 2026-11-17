@@ -2,6 +2,8 @@
 
 Route: `/lab/mobile-soak` (included in the product build; deliberately absent from navigation).
 
+The original measurements below are desktop evidence. A subsequent **owner-reported real iPhone run (Safari 26.6 / iOS 26.6)** passed all CPU engines, Lc0 Small, Maia3, Centipawn and t3 (171MB plain f16, split-K). LQO (`lqo_v2.f16.qdq8.onnx`, reported 96MB int8 QDQ) killed the tab in **2 of 3 trials**, roughly **8–10 seconds** into its step. BT4 (policytune-332 batch8 f16 QDQ, reported 187MB) killed it during load. These phone results were provided by the owner, not independently collected by this agent. The exact memory-kill mechanism remains a hypothesis; neither file size nor a passed desktop run establishes peak mobile memory usage.
+
 ## Running / automation
 
 Open the page and tap **Start**, or use:
@@ -21,6 +23,7 @@ Stable selectors:
 - `#mobile-soak-unsafe-disposal` / `[data-testid="unsafe-disposal"]` when teardown has failed
 - `#mobile-soak-step-<id>` / `[data-testid="step-<id>"]`
 - Button test IDs: `start`, `continue`, `start-over`, `copy-results`; status: `status`.
+- Step rows expose `data-status`; the current step's result status is genuinely `running` in the API, JSON, storage and UI throughout load/search/disposal. Terminal status is assigned only when its in-progress marker is cleared. Reload recovery still replaces any marked step with `crashed`, including old saved reports that pessimistically used `failed`.
 
 Poll the API rather than assuming a fixed load delay. Stockfish and WASM handshakes use their production deadlines; neural initialization/inference can take much longer on a phone. There is no lab timer that abandons a pending load and starts another resident engine. A hung browser/runtime may require a reload; that interruption is captured by the breadcrumb.
 
@@ -63,6 +66,38 @@ One `localStorage` value (`0x88-mobile-soak-v1`) contains the entire report plus
 Destroying a controller immediately disables both persistence and UI publication, removes its document-safety subscription, and prevents pending auto-start continuations or stale API calls from starting/resetting runs. Pending environment probes and asynchronous cleanup may still settle, but cannot overwrite a reopened controller's report or crash marker. A document-scoped `ExclusiveQueue` keeps a reopened controller's allocations behind retired cleanup; if that cleanup fails, the unsafe-disposal latch notifies the mounted UI and prevents its queued run from allocating engines. Mounted pagehide snapshots still remain frozen through cleanup and unfreeze on BFCache pageshow.
 
 A breadcrumb proves interruption, **not** an OS OOM: manual reload/navigation and a killed tab are indistinguishable. All storage reads/writes are caught; denied/quota storage leaves an in-memory runner and a `storage-unavailable` event. No account, upload or external results service is involved.
+
+## iPhone diagnostic controls
+
+Plain-f16 LQO trial (one variant per run, no suffixed step IDs):
+
+```text
+/lab/mobile-soak?auto=1&steps=lqo&lqoModel=/models/lc0/lqo_v2.f16.onnx
+```
+
+Lab-only `lqoModel`, `t3Model` and `bt4Model` accept a path under `/models/lc0/` or an absolute URL on exactly `https://assets.0x88.app`. Other origins/schemes, credentials, fragments, control characters and path escapes fail closed with an error; they never silently load the shipped QDQ net. Relative paths use the existing production asset-base resolver. Manifest/hash verification is unchanged: an uncatalogued or unavailable model fails/skips with its actual reason, with no unverified-loader escape hatch.
+
+Overrides use an isolated instance of the **production `BigNetSessionPool` / `Bt4WorkerSearcher` / search-worker path**, even when the supplied URL spells the shipped URL. They cannot collide with a Play/Arena/Analysis seat or another diagnostic variant. Overrides are saved with the run, preserved by API step selection and crash continuation, and applied to the corresponding Arena/heat net too. Runtime includes `requestedModelUrl`, actual `servedModelUrl`, `modelOverride`, `registeredSplitKUrl` and `splitKApplied`. The production Apple-WebGPU split-K rule remains enabled; an unregistered filename (including plain `lqo_v2.f16.onnx`) explicitly reports that no production rewrite exists. Step-label size estimates still describe the shipped model, not the override.
+
+`ortGraphOpt=disabled|basic|extended|layout|all` chooses ORT `sessionOptions().graphOptimizationLevel`; absent/invalid values retain **all**. Effective `graphOptimizationLevel` is included in ORT runtime diagnostics and the worker's ready payload, visible under each neural step's `runtime.<engine>.ortRuntime`. Big-net and Maia workers receive the option explicitly because worker URLs do not inherit the page query. Other search-worker entrypoints forward the same diagnostic options. Cached big-net initialization is invalidated if graph/folding settings change. Requested model/ORT settings are checkpointed before load; `ortRuntimeSource` distinguishes pending requested settings from completed session diagnostics if the phone dies during load.
+
+**Important independent control:** this repo already performs an app-side JavaScript weight-only `DequantizeLinear` folding pass in `ortRuntime.ts::prepareOrtModelInput`, enabled by default. It materializes plain initializers **before** ORT session creation and can grow the model. Disabling ORT graph optimization alone does not disable that pass. To test QDQ without either optimization layer, use:
+
+```text
+/lab/mobile-soak?auto=1&steps=lqo&ortGraphOpt=disabled&ortDequantFold=0
+```
+
+The existing `ortDequantFold` choice now reaches big-net and Maia workers as well. Its default remains enabled; diagnostics report `dequantFoldEnabled` and the fold summary, including before/after model bytes when available. The owner's theory that ORT constant folding expands QDQ weights is **not established by these changes**. Disabling both layers is an experiment, not a guarantee that ORT/provider initialization retains int8 weights exclusively on GPU or avoids other CPU/GPU copies. Compare with `ortGraphOpt=all` (and explicitly keep `ortDequantFold=0` if isolating only ORT's optimizer). Plain-f16 LQO can also be tried with either optimizer setting by appending the two flags to its override URL above.
+
+### Diagnostic-control regression verification
+
+- `npm run lint`: passed. **217 relevant tests passed**, covering active status through deferred load/search/teardown, crash continuation with saved overrides, URL rejection, isolated shipping/diagnostic pools, production split-K reporting, all five graph levels, cache invalidation when options change, and actual search/Maia worker handlers receiving settings without a page URL.
+- `npm test`: **2,277 passed, 4 existing optional skips, zero failures** (including Svelte typecheck). Product build passed.
+- Built-page agent-browser check on this Mac, isolated static server on available port :60037: during LQO loading, the row's `data-status`, API result, and stored result were all **running**, with requested model/options checkpointed before session creation.
+- Plain LQO override with `ortGraphOpt=disabled&ortDequantFold=0`: **ok**, load **11,535ms**, first search **555ms**; actual served URL was `https://assets.0x88.app/models/lc0/lqo_v2.f16.onnx`, worker diagnostics confirmed graph **disabled**, app fold **false**, no registered split-K rewrite. Maia with the same flags: **ok**, load **1,649ms**, first inference **249ms**, worker-confirmed settings identical.
+- Plain LQO with default settings: **ok**, warm load **1,079ms**, first search **219ms**, worker-confirmed graph **all** and app fold **true**. Its model bytes were **189,397,245** before/after the app pass with zero folded nodes. These mixed cache/optimizer timings are functional checks, not a controlled performance comparison.
+- Reloaded during a subsequent active heat step: recovery preserved `lqo ok`, recorded `heat crashed`, counted one reload and retained the plain-f16 override. No OS kill was induced or inferred by this manual reload test.
+- These new controls have **not been rerun on the physical iPhone by this agent**; the phone findings at the top remain the owner's reported measurements.
 
 ## Desktop verification
 
@@ -158,7 +193,7 @@ Quick agent-browser check against this follow-up product build, served from the 
 
 ## iOS Safari risks / unverified items
 
-- **No physical iPhone or Android run was performed.** Desktop success does not establish mobile safety, total memory bounds, or resistance to Jetsam/tab reloads.
+- Agent verification remains desktop-only; the owner-reported physical iPhone findings are recorded above. No Android run is recorded. Desktop success does not establish mobile safety, total memory bounds, or resistance to Jetsam/tab reloads.
 - Big-net decoding, dequantization, ORT graphs and GPU buffers can multiply the 96–178MB compressed-file sizes. Two pooled big nets plus full Stockfish's network, WASM heaps, pthreads and 64MB hash are intentionally hazardous on a phone.
 - Worker WebGPU, shader-f16, adapter limits and ORT operator support may differ from desktop. Production fallback can be much slower and consume substantial CPU/memory; do not infer support solely from `navigator.gpu`.
 - Safari memory APIs generally provide no warning before a kill. Storage/private-mode/quota denial can also remove crash detection; a discarded browser profile/cleared storage cannot preserve evidence.

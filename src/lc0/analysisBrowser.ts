@@ -9,7 +9,7 @@ import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame } from '../chess/p
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
-import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, requestedOrtRuntimeDiagnosticOptions, ortDequantFoldEnabled } from '../nn/ortRuntime.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
   type BrowserRuntimeAuditDetail,
@@ -858,6 +858,8 @@ function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown>
     modelUrl: MODEL_URL,
     deviceModelSelection: LC0_DEVICE_MODEL_SELECTION,
     ep: requestedEp(),
+    ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
+    dequantFold: ortDequantFoldEnabled(),
     cacheModel: true,
     requestPersistentModelStorage: true,
     evalCacheEntries: 2048,

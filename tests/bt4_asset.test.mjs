@@ -46,6 +46,11 @@ test('production skips known-unhosted big-net asset probes', async () => {
     assert.equal(await checkBigNetAsset(r2Config), 'missing');
     assert.equal(bigNetAssetStatusSync(r2Config), 'missing');
     assert.equal(calls, 0);
+    const diagnostic = { ...r2Config, diagnosticModel: true };
+    assert.equal(await checkBigNetAsset(diagnostic), 'present', 'explicit lab config probes models outside the shipping allowlist');
+    assert.equal(bigNetAssetStatusSync(diagnostic), 'present');
+    assert.equal(bigNetAssetStatusSync(r2Config), 'missing', 'diagnostic probe cannot change shipping selector state');
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);

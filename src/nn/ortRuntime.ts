@@ -168,7 +168,14 @@ export type OrtWebGpuDiagnosticsSnapshot = {
   api: OrtWebGpuApiInstrumentationSummary;
 };
 
-export type OrtRuntimeDiagnostics = {
+export type OrtGraphOptimizationLevel = NonNullable<ort.InferenceSession.SessionOptions['graphOptimizationLevel']>;
+export type OrtSessionDiagnostics = {
+  graphOptimizationLevel: OrtGraphOptimizationLevel;
+  dequantFoldEnabled: boolean;
+  dequantFold?: OrtDequantFoldSummary;
+};
+
+export type OrtRuntimeDiagnostics = OrtSessionDiagnostics & {
   requestedEp: OrtExecutionProviderPreference;
   resolvedExecutionProviders: string[];
   describe: string;
@@ -199,7 +206,6 @@ export type OrtRuntimeDiagnostics = {
   sessionAttempts: OrtSessionAttempt[];
   fallback?: OrtRuntimeFallback;
   webgpuDiagnostics?: OrtWebGpuDiagnosticsSnapshot;
-  dequantFold?: OrtDequantFoldSummary;
 };
 
 export type OrtDequantFoldSummary = {
@@ -294,6 +300,7 @@ let forcedOrtRuntimeArtifactKind: OrtRuntimeArtifactKind | null = null;
 let lockedOrtRuntimeArtifactKind: OrtRuntimeArtifactKind | null = null;
 
 export type OrtRuntimeDiagnosticOptions = {
+  graphOptimizationLevel?: OrtGraphOptimizationLevel;
   /** Request JSEP kernel timestamp callbacks (unavailable on the native WebGPU EP in ORT 1.27). */
   webgpuProfiling?: boolean;
   /** Wrap browser WebGPU APIs before ORT initializes to count submits/maps/copies. */
@@ -808,6 +815,30 @@ function configureOrtWasmArtifact(
   }
 }
 
+/** Worker init pins this option explicitly because its location does not contain the page query. */
+export function requestedOrtGraphOptimizationLevel(): OrtGraphOptimizationLevel {
+  const value = forcedOrtDiagnosticsOptions?.graphOptimizationLevel ?? browserParam('ortGraphOpt');
+  return value === 'disabled' || value === 'basic' || value === 'extended' || value === 'layout' || value === 'all' ? value : 'all';
+}
+
+/** Effective page/thread diagnostics forwarded to dedicated ORT workers. */
+export function requestedOrtRuntimeDiagnosticOptions(): OrtRuntimeDiagnosticOptions {
+  return {
+    graphOptimizationLevel: requestedOrtGraphOptimizationLevel(),
+    preferredOutputLocation: requestedOrtPreferredOutputLocation(),
+    webgpuProfiling: requestedOrtWebGpuProfiling(),
+    webgpuApiInstrumentation: requestedOrtWebGpuApiInstrumentation(),
+  };
+}
+
+export function collectOrtSessionDiagnostics(): OrtSessionDiagnostics {
+  return {
+    graphOptimizationLevel: requestedOrtGraphOptimizationLevel(),
+    dequantFoldEnabled: ortDequantFoldEnabled(),
+    ...(lastOrtDequantFold ? { dequantFold: { ...lastOrtDequantFold } } : {}),
+  };
+}
+
 function requestedOrtPreferredOutputLocation(): OrtRuntimeDiagnosticOptions['preferredOutputLocation'] | undefined {
   if (forcedOrtDiagnosticsOptions?.preferredOutputLocation) return forcedOrtDiagnosticsOptions.preferredOutputLocation;
   const raw = browserParam('ortPreferredOutputLocation') ?? browserParam('preferredOutputLocation');
@@ -1136,7 +1167,11 @@ function configureOrtRuntime() {
 export function sessionOptions(executionProviders = resolvedOrtExecutionProviders()): ort.InferenceSession.SessionOptions {
   configureOrtRuntime();
   const threads = requestedOrtWasmThreads(typeof document !== 'undefined', typeof document === 'undefined' && !!globalThis.process?.versions?.node);
-  const opts: ort.InferenceSession.SessionOptions = { graphOptimizationLevel: 'all', executionProviders, logSeverityLevel: requestedOrtLogSeverityLevel() };
+  const opts: ort.InferenceSession.SessionOptions = {
+    graphOptimizationLevel: requestedOrtGraphOptimizationLevel(),
+    executionProviders,
+    logSeverityLevel: requestedOrtLogSeverityLevel(),
+  };
   const preferredOutputLocation = requestedOrtPreferredOutputLocation();
   if (preferredOutputLocation && executionProviders.includes('webgpu')) opts.preferredOutputLocation = preferredOutputLocation;
   if (threads > 0) {
@@ -1236,6 +1271,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
   const webgpu = ort.env.webgpu as unknown as { powerPreference?: string } | undefined;
   const artifact = requestedOrtWasmArtifact();
   const diag: OrtRuntimeDiagnostics = {
+    ...collectOrtSessionDiagnostics(),
     requestedEp: requestedOrtExecutionProvider(),
     resolvedExecutionProviders: lastOrtExecutionProviders ?? resolvedOrtExecutionProviders(),
     describe: describeOrtBackendConfig(),
@@ -1272,7 +1308,6 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
     sessionAttempts: sessionAttempts.map((x) => ({ ...x, providers: [...x.providers] })),
     ...(lastOrtRuntimeFallback ? { fallback: { ...lastOrtRuntimeFallback } } : {}),
     webgpuDiagnostics: getOrtWebGpuDiagnosticsSnapshot(),
-    ...(lastOrtDequantFold ? { dequantFold: { ...lastOrtDequantFold } } : {}),
   };
   if (options.probeAdapter && webgpuAvailable()) {
     try {

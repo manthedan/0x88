@@ -6,6 +6,7 @@ import {
   type OrtExecutionProviderPreference,
   type OrtRuntimeDiagnosticOptions,
   type OrtRuntimeDiagnostics,
+  type OrtSessionDiagnostics,
   type OrtWasmArtifactSelection,
   setOrtDequantFoldForCurrentThread,
   setOrtRuntimeDiagnosticOptionsForCurrentThread,
@@ -157,6 +158,7 @@ type WorkerResponse =
       modelCache: string;
       ortWasm?: OrtRuntimeDiagnostics['wasm'];
       ortFallback?: OrtRuntimeDiagnostics['fallback'];
+      ortRuntime?: OrtSessionDiagnostics;
       /** ONNX runtime only: the model the session runs (differs from modelUrl when the split-K model was selected). */
       servedModelUrl?: string;
       /** ONNX runtime only: the ORT IO mode in use (a requested GPU mode may have fallen back to 'cpu'). */
@@ -280,6 +282,7 @@ let configuredBackend = '';
 let configuredModelCacheStatus = '';
 let configuredOrtWasm: OrtRuntimeDiagnostics['wasm'] | undefined;
 let configuredOrtFallback: OrtRuntimeDiagnostics['fallback'];
+let configuredOrtRuntime: OrtSessionDiagnostics | undefined;
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
 /** Cancels whose search message is still queued behind the search that is running. */
@@ -326,6 +329,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     requestPersistentModelStorage: message.requestPersistentModelStorage === true,
     minimumFreeBytesAfterModelCache: message.minimumFreeBytesAfterModelCache ?? null,
     ortDiagnostics: message.ortDiagnostics ?? null,
+    dequantFold: message.dequantFold ?? null,
     ortWasmArtifact: message.ortWasmArtifact ?? null,
     ortWasmThreads: message.ortWasmThreads ?? null,
     physicalBatchMode: message.physicalBatchMode === 'logical' ? 'logical' : 'declared',
@@ -339,6 +343,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       modelCache: `${configuredModelCacheStatus} · reused existing worker session`,
       ortWasm: configuredOrtWasm,
       ortFallback: configuredOrtFallback,
+      ortRuntime: configuredOrtRuntime,
       ...(configuredServedModelUrl ? { servedModelUrl: configuredServedModelUrl } : {}),
       ...(configuredOrtIoMode ? { ortIoMode: configuredOrtIoMode } : {}),
     });
@@ -367,6 +372,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     configuredModelUrl = message.wholeModelManifestUrl;
     configuredInitKey = initKey;
     deviceLossMonitor.stop();
+    configuredOrtRuntime = undefined;
     configuredBackend = 'whole-onnx-webgpu';
     configuredModelCacheStatus = `whole-model-webgpu${cacheLabel}`;
     configuredOrtWasm = undefined;
@@ -397,6 +403,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     configuredModelUrl = message.packUrl;
     configuredInitKey = initKey;
     deviceLossMonitor.stop();
+    configuredOrtRuntime = undefined;
     configuredBackend = message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
     configuredModelCacheStatus = `hybrid-pack-lazy${cacheLabel}`;
     configuredOrtWasm = undefined;
@@ -455,6 +462,11 @@ async function handleInit(message: InitMessage): Promise<void> {
   configuredModelCacheStatus = nextModelCacheStatus;
   configuredOrtWasm = diagnostics.wasm;
   configuredOrtFallback = diagnostics.fallback;
+  configuredOrtRuntime = {
+    graphOptimizationLevel: diagnostics.graphOptimizationLevel,
+    dequantFoldEnabled: diagnostics.dequantFoldEnabled,
+    dequantFold: diagnostics.dequantFold,
+  };
   deviceLossMonitor.refresh();
   await previousEvaluator?.dispose?.();
   post({
@@ -464,6 +476,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     modelCache: configuredModelCacheStatus,
     ortWasm: configuredOrtWasm,
     ortFallback: configuredOrtFallback,
+    ortRuntime: configuredOrtRuntime,
     servedModelUrl: configuredServedModelUrl,
     ortIoMode: configuredOrtIoMode,
   });

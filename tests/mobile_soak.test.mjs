@@ -17,6 +17,7 @@ import {
   skipRemainingSoakSteps,
   soakRuntimeSummary,
   strongestLoadedNet,
+  validateSoakModelOverride,
 } from '../src/lc0/mobileSoak.ts';
 import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
 import { env } from '../src/nn/ortRuntime.ts';
@@ -42,11 +43,51 @@ test('query defaults, empty selection, unknown IDs, deduplication and literal au
   assert.deepEqual(parseSoakQuery('?steps=').stepIds, []);
   assert.deepEqual(parseSoakQuery('?steps=t3,sf-lite,t3,nope&auto=1'), {
     auto: true,
+    modelOverrides: {},
     stepIds: ['t3', 'sf-lite'],
     heatSeconds: 120,
     warnings: ['Unknown step: nope'],
   });
   assert.equal(parseSoakQuery('?auto=true').auto, false);
+});
+
+test('lab-only model overrides validate trusted URLs and survive crash recovery', () => {
+  const query = parseSoakQuery('?steps=lqo&t3Model=https%3A%2F%2Fassets.0x88.app%2Fmodels%2Flc0%2Ft3.onnx&lqoModel=%2Fmodels%2Flc0%2Flqo_v2.f16.onnx');
+  assert.deepEqual(query.modelOverrides, { lqo: '/models/lc0/lqo_v2.f16.onnx', t3: 'https://assets.0x88.app/models/lc0/t3.onnx' });
+  const report = beginSoakStep(emptySoakReport(query, at), 'lqo', at);
+  assert.equal(report.steps[0].status, 'running');
+  const restored = recoverSoakReport(decodeSoakReport(JSON.stringify(report)), later);
+  assert.equal(restored.steps[0].status, 'crashed');
+  assert.deepEqual(restored.modelOverrides, query.modelOverrides);
+  assert.equal(validateSoakModelOverride('https://assets.0x88.app/artifacts/sha256/model.onnx'), 'https://assets.0x88.app/artifacts/sha256/model.onnx');
+});
+
+test('invalid model overrides fail closed rather than silently loading the shipped QDQ net', () => {
+  for (const value of [
+    '',
+    '/models/lc0/',
+    '/models/other.onnx',
+    'model.onnx',
+    '//assets.0x88.app/models/lc0/a.onnx',
+    'http://assets.0x88.app/models/lc0/a.onnx',
+    'https://evil.test/models/lc0/a.onnx',
+    'https://assets.0x88.app.evil.test/a',
+    'https://user@assets.0x88.app/a',
+    'https://assets.0x88.app:8443/a',
+    'data:text/plain,x',
+    '/models/lc0/a.onnx#fragment',
+    '/models/lc0/../a.onnx',
+    '/models/lc0/a/../../private',
+    '/models/lc0/%2e%2e/a.onnx',
+    '/models/lc0/%252e%252e/a.onnx',
+    '/models/lc0/%2F..%2F..%2Fprivate',
+    '/models/lc0/a\\\\..\\\\private',
+    ' /models/lc0/a.onnx',
+    '/models/lc0/a.onnx\n',
+  ]) {
+    assert.throws(() => parseSoakQuery(`?lqoModel=${encodeURIComponent(value)}`), /lqoModel:/, value);
+  }
+  assert.equal(decodeSoakReport(JSON.stringify({ ...empty(), modelOverrides: { lqo: 'https://evil.test/a' } })), null);
 });
 
 test('heat seconds are finite, integer and bounded', () => {
@@ -66,6 +107,7 @@ test('begin persists complete marker and nullable telemetry before any allocatio
   const running = beginSoakStep(before, 'sf-lite', at);
   assert.equal(before.inProgress, null);
   assert.equal(running.state, 'running');
+  assert.equal(running.steps[0].status, 'running', 'API and saved report must not pessimistically say failed');
   assert.deepEqual(running.inProgress, { id: 'sf-lite', at });
   assert.equal(running.steps[0].loadMs, null);
   assert.equal(running.steps[0].firstSearchMs, null);

@@ -13,7 +13,14 @@ import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
-import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, requestedOrtExecutionProvider } from '../nn/ortRuntime.ts';
+import {
+  collectOrtRuntimeDiagnostics,
+  type OrtRuntimeDiagnostics,
+  type OrtSessionDiagnostics,
+  ortDequantFoldEnabled,
+  requestedOrtExecutionProvider,
+  requestedOrtRuntimeDiagnosticOptions,
+} from '../nn/ortRuntime.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
@@ -21,6 +28,8 @@ export interface BigNetConfig {
   key: 'bt4' | 't3' | 'lqo';
   name: string;
   modelUrl: string;
+  /** Validated lab config may probe an unlisted model; production integrity checks still apply. */
+  diagnosticModel?: true;
   approxMb: number;
   recommendedBatchSize: number;
   recommendedPipelineDepth: number;
@@ -177,6 +186,10 @@ const DEPLOYED_BIG_NET_URLS = new Set<string>([
   '/models/lc0/lqo_v2.f16.qdq8.onnx',
 ]);
 
+function bigNetProbeKey(config: BigNetConfig): string {
+  return config.diagnosticModel ? `lab:${config.modelUrl}` : config.modelUrl;
+}
+
 function shouldSkipKnownUnhostedBigNetProbe(config: BigNetConfig): boolean {
   const pathname = assetPathname(config.modelUrl);
   return !isLocalDevelopmentOrigin() && pathname.startsWith('/models/lc0/') && !DEPLOYED_BIG_NET_URLS.has(pathname);
@@ -214,7 +227,7 @@ export function bt4SupportedSync(): boolean {
 
 /** Last probed local model asset result without re-probing. */
 export function bigNetAssetStatusSync(config: BigNetConfig = BT4_NET): Bt4AssetStatus {
-  return assetStatuses.get(config.modelUrl) ?? 'unknown';
+  return assetStatuses.get(bigNetProbeKey(config)) ?? 'unknown';
 }
 
 export function bt4AssetStatusSync(): Bt4AssetStatus {
@@ -223,26 +236,27 @@ export function bt4AssetStatusSync(): Bt4AssetStatus {
 
 /** Browser-served big-net ONNX asset availability. Cached after the first probe. */
 export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?: () => void): Promise<Bt4AssetStatus> {
-  const existingStatus = assetStatuses.get(config.modelUrl);
+  const probeKey = bigNetProbeKey(config);
+  const existingStatus = assetStatuses.get(probeKey);
   if (existingStatus === 'present' || existingStatus === 'missing') return existingStatus;
   const urls = [config.modelUrl];
-  const existing = assetProbes.get(config.modelUrl);
+  const existing = assetProbes.get(probeKey);
   if (existing) {
     subscribeAssetProbeChange(urls, onStatus);
     return existing;
   }
-  if (shouldSkipKnownUnhostedBigNetProbe(config)) {
-    assetStatuses.set(config.modelUrl, 'missing');
+  if (!config.diagnosticModel && shouldSkipKnownUnhostedBigNetProbe(config)) {
+    assetStatuses.set(probeKey, 'missing');
     notifyAssetProbeChange(urls, onStatus);
     return 'missing';
   }
   if (!assetProbeRetryAllowed(urls, onStatus)) return 'unknown';
   const probe = probeAssetUrls(urls).then((status) => {
-    assetStatuses.set(config.modelUrl, status);
-    assetProbes.delete(config.modelUrl);
+    assetStatuses.set(probeKey, status);
+    assetProbes.delete(probeKey);
     return status;
   });
-  assetProbes.set(config.modelUrl, probe);
+  assetProbes.set(probeKey, probe);
   return probe;
 }
 
@@ -294,6 +308,10 @@ function normalizedEvalCacheEntries(entries: number | undefined): number {
   return Math.max(0, Math.floor(Number(entries ?? 0) || 0));
 }
 
+function bigNetDiagnosticRequest() {
+  return { ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(), dequantFold: ortDequantFoldEnabled() };
+}
+
 export class Bt4WorkerSearcher {
   readonly config: BigNetConfig;
   private worker: Worker | null = null;
@@ -306,7 +324,9 @@ export class Bt4WorkerSearcher {
   >();
   private activeSearchId: number | null = null;
   private configuredEvalCacheEntries = -1;
+  private configuredDiagnosticKey = '';
   backend = '';
+  ortRuntime: OrtSessionDiagnostics | null = null;
   deviceLost: OrtDeviceLoss | null = null;
   fallback: OrtRuntimeDiagnostics['fallback'];
   /**
@@ -342,14 +362,20 @@ export class Bt4WorkerSearcher {
    * serve a different model (servedModelUrl).
    */
   isInitializedFor(options: { evalCacheEntries?: number } = {}): boolean {
-    return this.ready && this.configuredEvalCacheEntries === normalizedEvalCacheEntries(options.evalCacheEntries);
+    return (
+      this.ready &&
+      this.configuredEvalCacheEntries === normalizedEvalCacheEntries(options.evalCacheEntries) &&
+      this.configuredDiagnosticKey === JSON.stringify(bigNetDiagnosticRequest())
+    );
   }
 
   /** Create + init the worker on first call (fetches the large net, then cached). */
   async init(options: { evalCacheEntries?: number } = {}): Promise<string> {
     const evalCacheEntries = normalizedEvalCacheEntries(options.evalCacheEntries);
-    if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries) return this.backend;
-    if (this.ready && this.configuredEvalCacheEntries !== evalCacheEntries) this.dispose();
+    const diagnostics = bigNetDiagnosticRequest();
+    const diagnosticKey = JSON.stringify(diagnostics);
+    if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries && this.configuredDiagnosticKey === diagnosticKey) return this.backend;
+    if (this.ready) this.dispose();
     if (this.initPromise) return this.initPromise;
     if (!this.worker) {
       this.deviceLost = null;
@@ -396,13 +422,20 @@ export class Bt4WorkerSearcher {
       // Big nets opt into app-owned Cache Storage so immutable model bytes
       // survive route changes even when the browser HTTP cache skips large
       // entries. Quota-limited browsers fall back to URL-loading in the worker.
-      const ready = await this.post<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>({
+      this.ortRuntime = { graphOptimizationLevel: diagnostics.ortDiagnostics.graphOptimizationLevel ?? 'all', dequantFoldEnabled: diagnostics.dequantFold };
+      const ready = await this.post<{
+        backend: string;
+        ortFallback?: OrtRuntimeDiagnostics['fallback'];
+        servedModelUrl?: string;
+        ortRuntime?: OrtSessionDiagnostics;
+      }>({
         type: 'init',
         modelUrl: this.config.modelUrl,
-        // Big-net URLs are fixed (no ?model= override), so the device rule always applies.
+        // Keep the production device rule for both shipped and lab-selected configs.
         deviceModelSelection: true,
         ep,
         cacheModel: true,
+        ...diagnostics,
         evalCacheEntries,
         reportDownloadProgress: this.config.streamDownloadProgress === true,
         requestPersistentModelStorage: true,
@@ -411,6 +444,8 @@ export class Bt4WorkerSearcher {
       if (this.worker !== worker) throw new Error('Lc0 BT4 worker invalidated during initialization');
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
+      this.configuredDiagnosticKey = diagnosticKey;
+      this.ortRuntime = ready.ortRuntime ?? this.ortRuntime;
       this.backend = ready.backend;
       this.fallback = ready.ortFallback;
       this.servedModelUrl = ready.servedModelUrl ?? this.config.modelUrl;
@@ -498,6 +533,8 @@ export class Bt4WorkerSearcher {
     this.ready = false;
     this.initPromise = null;
     this.configuredEvalCacheEntries = -1;
+    this.configuredDiagnosticKey = '';
+    this.ortRuntime = null;
     this.backend = '';
     this.fallback = undefined;
     this.servedModelUrl = '';

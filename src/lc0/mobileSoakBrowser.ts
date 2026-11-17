@@ -16,6 +16,8 @@ import {
   SoakSkip,
   type SoakReport,
   type SoakResult,
+  type SoakStatus,
+  type SoakBigNetKey,
   skipRemainingSoakSteps,
   strongestLoadedNet,
 } from './mobileSoak.ts';
@@ -139,14 +141,14 @@ export class MobileSoakDocument {
 export interface MobileSoakServices {
   environment(): Promise<Record<string, unknown>>;
   memory(): Promise<MemorySample>;
-  makeEngine(id: string, signal: AbortSignal): Promise<SoakEngine>;
+  makeEngine(id: string, signal: AbortSignal, modelOverride?: string): Promise<SoakEngine>;
   documentScope: MobileSoakDocument;
 }
 const defaultServices: MobileSoakServices = {
   environment: collectSoakEnvironment,
   memory: sampleSoakMemory,
   // Keep production engine imports lazy; controller lifecycle tests inject inert adapters.
-  makeEngine: async (id, signal) => (await import('./mobileSoakEngines.ts')).makeSoakEngine(id, signal),
+  makeEngine: async (id, signal, modelOverride) => (await import('./mobileSoakEngines.ts')).makeSoakEngine(id, signal, modelOverride),
   documentScope: new MobileSoakDocument(),
 };
 
@@ -226,6 +228,7 @@ export function mountMobileSoak(
     const result = report.steps.at(-1)!;
     const engines: SoakEngine[] = [];
     let safelyDisposed = true;
+    let outcome: Exclude<SoakStatus, 'running'> = 'failed';
     try {
       result.memory.push({ ...(await services.memory()), phase: 'before-load' });
       abort.signal.throwIfAborted();
@@ -235,10 +238,12 @@ export function mountMobileSoak(
       try {
         for (const engineId of ids) {
           abort.signal.throwIfAborted();
-          const engine = await services.makeEngine(engineId, abort.signal);
+          const engine = await services.makeEngine(engineId, abort.signal, report.modelOverrides?.[engineId as SoakBigNetKey]);
           engines.push(engine); // Own partial loads too, so finally always tears them down.
           ownedEngines.add(engine);
           abort.signal.throwIfAborted();
+          result.runtime[engineId] = engine.runtime(); // Preserve requested model/diagnostics if loading kills the tab.
+          publish();
           await engine.load();
           abort.signal.throwIfAborted();
           const engineRuntime = engine.runtime();
@@ -272,9 +277,9 @@ export function mountMobileSoak(
           if (failure?.status === 'rejected') throw failure.reason;
         }
       }
-      result.status = 'ok';
+      outcome = 'ok';
     } catch (error) {
-      result.status = error instanceof SoakSkip ? 'skipped' : 'failed';
+      outcome = error instanceof SoakSkip ? 'skipped' : 'failed';
       result.error = error instanceof Error ? error.message : String(error);
     } finally {
       result.memory.push({ ...(await services.memory()), phase: 'after-search' });
@@ -291,7 +296,7 @@ export function mountMobileSoak(
         if (loss) result.deviceLost.push(loss);
       }
       if (result.deviceLost.length) {
-        result.status = 'failed';
+        outcome = 'failed';
         result.error = `${result.error ?? ''} WebGPU device lost: ${JSON.stringify(result.deviceLost)}`.trim();
       }
       const disposeStarted = performance.now();
@@ -308,7 +313,7 @@ export function mountMobileSoak(
       for (const entry of disposed)
         if (entry.status === 'rejected') {
           safelyDisposed = false;
-          result.status = 'failed';
+          outcome = 'failed';
           result.error = `${result.error ?? ''} Disposal: ${String(entry.reason)}`.trim();
         }
       if (!safelyDisposed) {
@@ -318,6 +323,7 @@ export function mountMobileSoak(
       result.disposeMs = performance.now() - disposeStarted;
       result.memory.push({ ...(await services.memory()), phase: 'after-dispose' });
       result.finishedAt = iso();
+      result.status = outcome;
       report = finishSoakStep(report, result);
       publish();
     }
@@ -387,7 +393,7 @@ export function mountMobileSoak(
     async start(stepIds) {
       if (!mounted || active || services.documentScope.unsafeDisposal || report.state === 'crashed-awaiting-choice') return;
       const selection = stepIds ? parseSoakQuery(`steps=${encodeURIComponent(stepIds.join(','))}`) : query;
-      report = emptySoakReport({ ...selection, heatSeconds: query.heatSeconds }, iso());
+      report = emptySoakReport({ ...selection, heatSeconds: query.heatSeconds, modelOverrides: query.modelOverrides }, iso());
       if (!storageEnabled) report = addSoakEvent(report, 'storage-unavailable', 'Crash recovery disabled for this page; results are in memory only.', iso());
       log('run-start', report.stepIds.join(','));
       await run();

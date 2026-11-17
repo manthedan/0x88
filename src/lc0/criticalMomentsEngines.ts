@@ -1,3 +1,4 @@
+import { requestedOrtRuntimeDiagnosticOptions, ortDequantFoldEnabled } from '../nn/ortRuntime.ts';
 import { boardToFen, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
@@ -80,6 +81,8 @@ export function createCriticalEngines(
           modelUrl: CRITICAL_LC0_MODEL,
           deviceModelSelection: true,
           ep: 'auto',
+          ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
+          dequantFold: ortDequantFoldEnabled(),
           runtime: 'onnx',
           cacheModel: true,
           evalCacheEntries: 2048,

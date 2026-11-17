@@ -3,11 +3,11 @@ import { moveToUci } from '../chess/moveCodec.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
 import { type OrtDeviceLoss, watchOrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
-import { describeOrtBackendConfig } from '../nn/ortRuntime.ts';
+import { describeOrtBackendConfig, collectOrtSessionDiagnostics, requestedOrtGraphOptimizationLevel, ortDequantFoldEnabled } from '../nn/ortRuntime.ts';
 import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { searchRoot } from '../search/puct.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { acquireBigNetSearcher, type BigNetKey, detachBigNetSearcher } from './bigNetSessionPool.ts';
+import type { BigNetKey } from './bigNetSessionPool.ts';
 import { BIG_NETS, type Bt4WorkerSearcher, checkBigNetAsset } from './bt4Engine.ts';
 import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
@@ -15,6 +15,7 @@ import { createLc0OnnxEvaluatorFromUrl, LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0
 import { Maia3BrowserEvaluator } from './maia3.ts';
 import { type SearchSample, rate, SoakSkip } from './mobileSoak.ts';
 import { createSoakCpuProbe } from './mobileSoakCpu.ts';
+import { createSoakBigNetBinding } from './mobileSoakBigNet.ts';
 import type { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { cpuThreadBudget, defaultBrowserEnvironment } from './resourceBroker.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -35,7 +36,7 @@ export interface SoakEngine {
   dispose(): Promise<void>;
 }
 /** Only adapters around shipped loaders/searchers; no model fetching/session construction here. */
-export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
+export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: string): SoakEngine {
   let cpu: BrowserUciEngine | undefined;
   let cpuProbe: ReturnType<typeof createSoakCpuProbe> | undefined;
   let big: Bt4WorkerSearcher | undefined;
@@ -47,8 +48,9 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
   let lost: OrtDeviceLoss | null = null;
   let unwatch: (() => void) | undefined;
   const bigKey = Object.hasOwn(BIG_NETS, id) ? (id as BigNetKey) : null;
+  const bigBinding = bigKey ? createSoakBigNetBinding(bigKey, modelOverride) : null;
   const retire = () => {
-    if (bigKey && big) detachBigNetSearcher(bigKey, big);
+    if (bigBinding && big) bigBinding.retire(big);
   };
   return {
     id,
@@ -62,13 +64,13 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
         runtime = { flavor, threads };
       } else if (isDefaultBrowserUciFamily(id)) {
         cpu = await createDefaultBrowserUciEngine(id);
-      } else if (bigKey) {
-        if ((await checkBigNetAsset(BIG_NETS[bigKey])) === 'missing')
-          throw new SoakSkip(`Production asset probe: ${BIG_NETS[bigKey].modelUrl} is not hosted here`);
+      } else if (bigBinding) {
+        if ((await checkBigNetAsset(bigBinding.config)) === 'missing')
+          throw new SoakSkip(`Production asset probe: ${bigBinding.config.modelUrl} is not hosted here`);
         signal.throwIfAborted(); // Asset probing may finish after this controller was retired.
-        big = acquireBigNetSearcher(bigKey);
+        big = bigBinding.acquire();
         await big.init();
-        runtime = { backend: big.backend, fallback: big.fallback ?? null, servedModelUrl: big.servedModelUrl };
+        runtime = { backend: big.backend, fallback: big.fallback ?? null, servedModelUrl: big.servedModelUrl, ortRuntime: big.ortRuntime };
       } else if (id === 'lc0-small') {
         const loaded = await createLc0OnnxEvaluatorFromUrl(resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH), {
           deviceSelection: true,
@@ -76,17 +78,34 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
         });
         small = loaded.evaluator;
         lc0 = new Lc0PuctSearcher(small);
-        runtime = { backend: describeOrtBackendConfig(), servedModelUrl: loaded.servedUrl, fallback: loaded.fallbackReason ?? null, ioMode: small.ioMode };
+        runtime = {
+          backend: describeOrtBackendConfig(),
+          servedModelUrl: loaded.servedUrl,
+          fallback: loaded.fallbackReason ?? null,
+          ioMode: small.ioMode,
+          ortRuntime: collectOrtSessionDiagnostics(),
+        };
       } else if (id === 'maia3') {
         maia = await Maia3BrowserEvaluator.create({ signal });
-        runtime = { backend: maia.backend, note: 'Production policy evaluator, not a tree-search engine', modelUrl: maia.modelLoad.url };
+        runtime = {
+          backend: maia.backend,
+          note: 'Production policy evaluator, not a tree-search engine',
+          modelUrl: maia.modelLoad.url,
+          ortRuntime: maia.ortRuntime,
+        };
       } else if (id === 'centipawn') {
         const loaded = await createBrowserSquareformerRuntimeEvaluator(
           { onnx: resolvePublicAssetUrl('/models/s4fix_v_ema.onnx'), meta: resolvePublicAssetUrl('/models/s4fix_v_ema.meta.json'), runtime: 'auto' },
           { runtime: 'auto', fallback: true },
         );
         centi = loaded.evaluator;
-        runtime = { runtime: loaded.resolvedRuntime, backend: describeOrtBackendConfig(), fallback: loaded.fallbackReason ?? null, modelId: loaded.modelId };
+        runtime = {
+          runtime: loaded.resolvedRuntime,
+          backend: describeOrtBackendConfig(),
+          fallback: loaded.fallbackReason ?? null,
+          modelId: loaded.modelId,
+          ortRuntime: collectOrtSessionDiagnostics(),
+        };
       } else throw new SoakSkip(`Unknown production engine: ${id}`);
       if (cpu) {
         cpuProbe = createSoakCpuProbe(id, cpu);
@@ -144,7 +163,18 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
       if (!move || !count) throw new Error('Search returned no move or completed work');
       return { engine: id, fen, ms, count, unit, perSecond: rate(count, ms), move };
     },
-    runtime: () => ({ ...runtime, ...cpuProbe?.runtime() }),
+    runtime: () => ({
+      ...(id === 'maia3' || id === 'lc0-small' || id === 'centipawn' || bigBinding
+        ? {
+            ortRuntime: { graphOptimizationLevel: requestedOrtGraphOptimizationLevel(), dequantFoldEnabled: ortDequantFoldEnabled() },
+            ortRuntimeSource: 'requested until session ready',
+          }
+        : {}),
+      ...runtime,
+      ...cpuProbe?.runtime(),
+      ...bigBinding?.modelRuntime(big),
+      ...(runtime.ortRuntime ? { ortRuntimeSource: 'session diagnostics' } : {}),
+    }),
     deviceLost: () => big?.deviceLost ?? maia?.deviceLost ?? lost,
     retire,
     async dispose() {

@@ -2,7 +2,11 @@ import { createOrtDeviceLossMonitor } from '../nn/ortDeviceLoss.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import {
   createOrtSession,
+  collectOrtSessionDiagnostics,
   describeOrtBackendConfig,
+  type OrtRuntimeDiagnosticOptions,
+  setOrtRuntimeDiagnosticOptionsForCurrentThread,
+  setOrtDequantFoldForCurrentThread,
   type OrtExecutionProviderPreference,
   ortRuntimeArtifactKindIsLocked,
   releaseOrtSession,
@@ -19,6 +23,8 @@ type InitMessage = {
   /** ORT execution-provider preference; default 'auto' (WebGPU first, wasm fallback). */
   ep?: OrtExecutionProviderPreference;
   wasmThreads?: number;
+  ortDiagnostics?: OrtRuntimeDiagnosticOptions;
+  dequantFold?: boolean;
 };
 
 type EvaluateMessage = {
@@ -74,6 +80,8 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           deviceLossMonitor.stop();
           if (session) await releaseOrtSession(session);
           if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
+          setOrtRuntimeDiagnosticOptionsForCurrentThread(message.ortDiagnostics ?? null);
+          setOrtDequantFoldForCurrentThread(message.dequantFold ?? null);
           setRequestedOrtWasmThreadsForCurrentThread(message.wasmThreads ?? null);
           // Unlike searchWorker this worker never switches provider per message,
           // so an ep=wasm request is a lifetime property and can pin the runtime
@@ -85,7 +93,14 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           post({ type: 'progress', id: message.id, stage: 'creating-session' });
           session = await createOrtSession(message.model);
           deviceLossMonitor.refresh();
-          post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames, backend: describeOrtBackendConfig() });
+          post({
+            type: 'ready',
+            id: message.id,
+            inputNames: session.inputNames,
+            outputNames: session.outputNames,
+            backend: describeOrtBackendConfig(),
+            ortRuntime: collectOrtSessionDiagnostics(),
+          });
           return;
         }
 

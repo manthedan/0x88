@@ -1,4 +1,5 @@
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
+import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { type BoardState, boardToFen, type Piece, type PieceRole, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
@@ -261,6 +262,7 @@ export class Maia3BrowserEvaluator {
   readonly outputNames: string[];
   /** Resolved ORT backend, e.g. 'auto->webgpu' or 'wasm' (from the worker). */
   readonly backend: string;
+  readonly ortRuntime: OrtSessionDiagnostics | null;
   deviceLost: OrtDeviceLoss | null = null;
   private abortCleanup?: () => void;
   private terminated = false;
@@ -280,7 +282,7 @@ export class Maia3BrowserEvaluator {
     modelLoad: Lc0ModelLoadResult,
     selfElo: number,
     oppoElo: number,
-    names: { inputNames: string[]; outputNames: string[]; backend: string },
+    names: { inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics },
     onFailure?: (error: Error) => void,
   ) {
     this.worker = worker;
@@ -291,6 +293,7 @@ export class Maia3BrowserEvaluator {
     this.inputNames = names.inputNames;
     this.outputNames = names.outputNames;
     this.backend = names.backend;
+    this.ortRuntime = names.ortRuntime ?? null;
     this.worker.addEventListener('message', this.messageListener);
     this.worker.addEventListener('error', this.errorListener);
     this.worker.addEventListener('messageerror', this.messageErrorListener);
@@ -349,7 +352,7 @@ export class Maia3BrowserEvaluator {
     ep?: Maia3BrowserEvaluatorOptions['ep'],
     signal?: AbortSignal,
     wasmThreads?: number,
-  ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string }> {
+  ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics }> {
     return new Promise((resolve, reject) => {
       const id = 0;
       const cleanup = () => {
@@ -372,11 +375,19 @@ export class Maia3BrowserEvaluator {
         reject(new Error('Maia3 worker initialization message could not be decoded'));
       };
       const onMessage = (event: MessageEvent) => {
-        const data = event.data as { type?: string; id?: number; message?: string; inputNames?: string[]; outputNames?: string[]; backend?: string };
+        const data = event.data as {
+          type?: string;
+          id?: number;
+          message?: string;
+          inputNames?: string[];
+          outputNames?: string[];
+          backend?: string;
+          ortRuntime?: OrtSessionDiagnostics;
+        };
         if (data.type === 'deviceLost' || data.id !== id) return;
         if (data.type === 'ready') {
           cleanup();
-          resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown' });
+          resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown', ortRuntime: data.ortRuntime });
         } else if (data.type === 'error') {
           cleanup();
           reject(new Error(data.message ?? 'Maia3 worker initialization failed'));
@@ -390,8 +401,17 @@ export class Maia3BrowserEvaluator {
         onAbort();
         return;
       }
-      if (typeof model === 'string') worker.postMessage({ type: 'init', id, model, ep, wasmThreads });
-      else worker.postMessage({ type: 'init', id, model, ep, wasmThreads }, [model]);
+      const message = {
+        type: 'init',
+        id,
+        model,
+        ep,
+        wasmThreads,
+        ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
+        dequantFold: ortDequantFoldEnabled(),
+      };
+      if (typeof model === 'string') worker.postMessage(message);
+      else worker.postMessage(message, [model]);
     });
   }
 

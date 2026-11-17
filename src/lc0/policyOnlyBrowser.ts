@@ -8,6 +8,7 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import {
   collectOrtRuntimeDiagnostics,
+  requestedOrtRuntimeDiagnosticOptions,
   describeOrtBackendConfig,
   type OrtExecutionProviderPreference,
   type OrtRuntimeDiagnostics,
@@ -1098,8 +1099,8 @@ function requestedWorkerEp(): OrtExecutionProviderPreference {
 }
 
 function requestedOrtDiagnosticsPayload() {
-  if (!ORT_WEBGPU_PROFILE_REQUESTED && !ORT_WEBGPU_API_TRACE_REQUESTED && !ORT_PREFERRED_OUTPUT_LOCATION) return undefined;
   return {
+    ...requestedOrtRuntimeDiagnosticOptions(),
     webgpuProfiling: ORT_WEBGPU_PROFILE_REQUESTED,
     webgpuApiInstrumentation: ORT_WEBGPU_API_TRACE_REQUESTED,
     ...(ORT_PREFERRED_OUTPUT_LOCATION ? { preferredOutputLocation: ORT_PREFERRED_OUTPUT_LOCATION } : {}),

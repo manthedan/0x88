@@ -5,7 +5,65 @@ export const SOAK_FENS = [START_FEN, 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/P
 export class SoakSkip extends Error {}
 
 export type SoakState = 'idle' | 'running' | 'done' | 'crashed-awaiting-choice';
-export type SoakStatus = 'ok' | 'failed' | 'skipped' | 'crashed';
+export type SoakStatus = 'running' | 'ok' | 'failed' | 'skipped' | 'crashed';
+export type SoakBigNetKey = 'lqo' | 't3' | 'bt4';
+export type SoakModelOverrides = Partial<Record<SoakBigNetKey, string>>;
+
+function modelUrlHasControlCharacters(value: string): boolean {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
+}
+
+/** Lab-only boundary: normalized LC0 paths or the exact trusted HTTPS asset origin. */
+export function validateSoakModelOverride(raw: string): string {
+  const relative = raw.startsWith('/models/lc0/');
+  try {
+    if (!raw || raw.trim() !== raw || raw.includes('\\') || /\s/.test(raw) || modelUrlHasControlCharacters(raw)) throw new Error('invalid characters');
+    if (
+      decodeURIComponent(raw.split(/[?#]/)[0])
+        .split('/')
+        .some((part) => part === '.' || part === '..')
+    )
+      throw new Error('path escape');
+    const url = new URL(raw, 'https://assets.0x88.app');
+    const decodedPath = decodeURIComponent(url.pathname);
+    if (
+      url.origin !== 'https://assets.0x88.app' ||
+      url.username ||
+      url.password ||
+      url.hash ||
+      decodedPath.includes('\\') || decodedPath.includes('%') ||
+      modelUrlHasControlCharacters(decodedPath) ||
+      decodedPath.split('/').some((part) => part === '.' || part === '..')
+    )
+      throw new Error('invalid URL');
+    if (relative) {
+      if (!decodedPath.startsWith('/models/lc0/') || decodedPath === '/models/lc0/') throw new Error('outside LC0 directory');
+      return `${url.pathname}${url.search}`;
+    }
+    if (!/^https:\/\//i.test(raw)) throw new Error('absolute HTTPS URL required');
+    return url.href;
+  } catch {
+    throw new Error('Model override must be a path under /models/lc0/ or an https://assets.0x88.app/ URL (no credentials, fragments or path escapes).');
+  }
+}
+export function parseSoakModelOverrides(params: URLSearchParams): SoakModelOverrides {
+  const overrides: SoakModelOverrides = {};
+  for (const key of ['lqo', 't3', 'bt4'] as const) {
+    const raw = params.get(`${key}Model`);
+    if (raw !== null) {
+      try {
+        overrides[key] = validateSoakModelOverride(raw);
+      } catch (error) {
+        throw new Error(`${key}Model: ${String(error)}`);
+      }
+    }
+  }
+  return overrides;
+}
 export interface SoakStep {
   id: string;
   label: string;
@@ -31,6 +89,7 @@ export function buildSoakSteps(): SoakStep[] {
   ];
 }
 export interface SoakQuery {
+  modelOverrides: SoakModelOverrides;
   auto: boolean;
   stepIds: string[];
   heatSeconds: number;
@@ -42,6 +101,7 @@ export function parseSoakQuery(search: string): SoakQuery {
   const known = new Set(buildSoakSteps().map((step) => step.id));
   const seconds = Number(params.get('heatSeconds') ?? 120);
   return {
+    modelOverrides: parseSoakModelOverrides(params),
     auto: params.get('auto') === '1',
     stepIds: [...new Set(requested.filter((id) => known.has(id)))],
     heatSeconds: Number.isFinite(seconds) ? Math.max(1, Math.min(1800, Math.floor(seconds))) : 120,
@@ -96,6 +156,8 @@ export interface SoakResult {
   disposeMs: number | null;
 }
 export interface SoakReport {
+  /** Absent in older saved reports; resume must use this run's selected variants. */
+  modelOverrides?: SoakModelOverrides;
   version: 1;
   runId: string;
   state: SoakState;
@@ -115,6 +177,7 @@ export const SOAK_STORAGE_KEY = '0x88-mobile-soak-v1';
 export function emptySoakReport(query: SoakQuery, at: string): SoakReport {
   return {
     version: 1,
+    modelOverrides: { ...query.modelOverrides },
     runId: at,
     state: 'idle',
     startedAt: null,
@@ -152,9 +215,10 @@ export function newSoakResult(id: string, at: string): SoakResult {
   };
 }
 export function beginSoakStep(report: SoakReport, id: string, at: string): SoakReport {
-  return { ...report, state: 'running', inProgress: { id, at }, steps: [...report.steps, newSoakResult(id, at)] };
+  return { ...report, state: 'running', inProgress: { id, at }, steps: [...report.steps, { ...newSoakResult(id, at), status: 'running' }] };
 }
 export function finishSoakStep(report: SoakReport, result: SoakResult): SoakReport {
+  if (result.status === 'running') result = { ...result, status: 'failed', error: result.error ?? 'Step finished without a terminal outcome' };
   return {
     ...report,
     inProgress: null,
@@ -254,7 +318,7 @@ export function decodeSoakReport(text: string | null): SoakReport | null {
         (s) =>
           !s ||
           typeof s.id !== 'string' ||
-          !['ok', 'failed', 'skipped', 'crashed'].includes(s.status) ||
+          !['running', 'ok', 'failed', 'skipped', 'crashed'].includes(s.status) ||
           !s.runtime ||
           typeof s.runtime !== 'object' ||
           !Array.isArray(s.searches) ||
@@ -272,6 +336,12 @@ export function decodeSoakReport(text: string | null): SoakReport | null {
     )
       return null;
     if (r.inProgress && (r.inProgress.id !== r.stepIds[r.nextIndex] || typeof r.inProgress.at !== 'string')) return null;
+    if (r.modelOverrides !== undefined) {
+      if (!r.modelOverrides || typeof r.modelOverrides !== 'object' || Array.isArray(r.modelOverrides)) return null;
+      for (const [key, value] of Object.entries(r.modelOverrides)) {
+        if (!['lqo', 't3', 'bt4'].includes(key) || typeof value !== 'string' || validateSoakModelOverride(value) !== value) return null;
+      }
+    }
     return r;
   } catch {
     return null;
@@ -287,7 +357,8 @@ export function strongestLoadedNet(results: SoakResult[]): string | null {
 export function soakRuntimeSummary(value: unknown): string {
   if (!value || typeof value !== 'object') return 'Not loaded';
   const runtime = value as Record<string, unknown>;
-  return `${runtime.backend ?? runtime.runtime ?? runtime.mode ?? 'unknown'}${runtime.threads ? ` · ${runtime.threads} threads` : ''}`;
+  const ortRuntime = runtime.ortRuntime as { graphOptimizationLevel?: string } | null | undefined;
+  return `${runtime.backend ?? runtime.runtime ?? runtime.mode ?? 'unknown'}${runtime.threads ? ` · ${runtime.threads} threads` : ''}${ortRuntime?.graphOptimizationLevel ? ` · graph ${ortRuntime.graphOptimizationLevel}` : ''}`;
 }
 export function makeHeatSlice(elapsedMs: number, durationMs: number, count: number): HeatSlice {
   return { elapsedMs, durationMs, count, perSecond: rate(count, durationMs) ?? 0 };
