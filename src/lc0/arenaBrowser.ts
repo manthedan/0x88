@@ -4967,19 +4967,24 @@ async function runArenaBenchAutorun(): Promise<void> {
   }
 }
 
+function revokeArenaPhoneLargeNets(): void {
+  if (!phoneLargeNetsBlocked()) return;
+  const affected = activeSeatRows().some((row) => phoneSafeEngineVariant(row.family, row.variant) !== row.variant);
+  for (const key of ARENA_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
+  // The setup is locked during a run. Cross-tab revocation must retire leftovers
+  // without discarding an unrelated CPU/Small tournament or its current game.
+  if ((running || startPending) && !affected) return;
+  if (affected) abort?.abort();
+  renderSeatSelectors();
+  persistArenaSeatRows();
+  buildEngines();
+  populateSeats();
+}
+
 function wireEvents() {
   window.addEventListener(
     PHONE_LARGE_NET_CHANGE_EVENT,
-    () => {
-      if (!phoneLargeNetsBlocked()) return;
-      // Setup is fieldset-locked while running; this also handles programmatic revocation.
-      abort?.abort();
-      for (const key of ARENA_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
-      renderSeatSelectors();
-      persistArenaSeatRows();
-      buildEngines();
-      populateSeats();
-    },
+    revokeArenaPhoneLargeNets,
     { signal: mountAbort.signal },
   );
   el('start').addEventListener('click', () => {

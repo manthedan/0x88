@@ -5195,6 +5195,18 @@ function hoverLine(pvUci: string[], engine: string) {
   setShapes(bestShapes());
 }
 
+function revokeAnalysisPhoneLargeNets(): void {
+  if (!phoneLargeNetsBlocked()) return;
+  // Hidden pages and blocking modes may defer maintenance indefinitely. Retire
+  // workers now, including in-flight initialization, before scheduling UI work.
+  for (const key of ANALYSIS_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
+  cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+  cancelAllAnalysisAssetPrefetches();
+  renderEngineList();
+  persistManualEngineRows();
+  deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
+}
+
 function wireEvents() {
   el('retryStart').addEventListener('click', startMistakeRetry);
   el('retryExit').addEventListener('click', () => exitMistakeRetry());
@@ -5631,14 +5643,7 @@ function wireEvents() {
   });
   window.addEventListener(
     PHONE_LARGE_NET_CHANGE_EVENT,
-    () => {
-      if (!phoneLargeNetsBlocked()) return;
-      cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
-      cancelAllAnalysisAssetPrefetches();
-      renderEngineList();
-      persistManualEngineRows();
-      deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
-    },
+    revokeAnalysisPhoneLargeNets,
     { signal: mountAbort.signal },
   );
   el('engineList').addEventListener('change', async (event) => {
