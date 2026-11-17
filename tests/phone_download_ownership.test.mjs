@@ -24,18 +24,22 @@ async function until(predicate) {
   assert.fail('expected an async checkpoint');
 }
 
-for (const replacement of ['cpu-profile', 'manual', 'unmount']) {
+for (const replacement of ['cpu-profile', 'manual', 'add', 'remove', 'lines', 'runtime', 'unmount']) {
   test(`Analysis ${replacement} supersedes a pending large-profile cache probe without another prompt or stale commit`, async () => {
     const probe = Promise.withResolvers();
     const mountAbort = new AbortController();
     const prompts = [];
     const messages = [];
     const nodes = new Map();
+    const listeners = new Map();
     const el = (id) => {
-      if (!nodes.has(id)) nodes.set(id, {});
+      if (!nodes.has(id)) nodes.set(id, { addEventListener: (type, handler) => listeners.set(`${id}:${type}`, handler) });
       return nodes.get(id);
     };
-    const initial = [{ family: 'sf', variant: 'lite', strength: 8 }];
+    const initial = [
+      { family: 'sf', variant: 'lite', strength: 8 },
+      { family: 'sf', variant: 'full', strength: 12 },
+    ];
     const deps = {
       engineRows: initial,
       BIG_NETS,
@@ -68,10 +72,17 @@ for (const replacement of ['cpu-profile', 'manual', 'unmount']) {
       completeAnalysisKeys: new Set(),
       deferAnalysisSettingsRefresh() {},
       prefetchAnalysisAssetsForAddedRow() {},
+      persistManualEngineRows() {},
+      cancelAnalysisAssetPrefetch() {},
+      tree: { current: { fen: 'position' } },
+      nextEngineFamily: () => 'sf',
+      defaultVariant: () => 'full',
+      defaultStrength: () => 12,
     };
     const code =
       extract(source.analysis, 'async function profileRowsForUse(', 'function loadEngineProfiles(') +
-      extract(source.analysis, 'let profileLoadAbort:', 'function saveCurrentEngineProfile(');
+      extract(source.analysis, 'let profileLoadAbort:', 'function saveCurrentEngineProfile(') +
+      extract(source.analysis, "  el('engineList').addEventListener('click'", '  criticalPanel = mountCriticalMomentsPanel(');
     const api = new Function(
       'deps',
       `let { ${Object.keys(deps)} } = deps; ${code}; return {
@@ -83,6 +94,12 @@ for (const replacement of ['cpu-profile', 'manual', 'unmount']) {
     await until(() => prompts.length === 1);
     if (replacement === 'cpu-profile') await api.apply({ name: 'new', rows: [{ family: 'sf', variant: 'full', strength: 12 }], multiPv: 2 });
     else if (replacement === 'manual') api.manual();
+    else if (replacement === 'add') listeners.get('addEngine:click')();
+    else if (replacement === 'remove') listeners.get('engineList:click')({ target: { closest: () => ({ dataset: { i: '0' } }) } });
+    else if (replacement === 'lines') {
+      el('multiPvInput').value = '7';
+      listeners.get('multiPvInput:change')();
+    } else if (replacement === 'runtime') listeners.get('lc0RuntimeSelect:change')();
     else mountAbort.abort();
     assert.equal(prompts[0].signal.aborted, true);
     probe.resolve(true);
@@ -92,7 +109,10 @@ for (const replacement of ['cpu-profile', 'manual', 'unmount']) {
       ['bt4'],
       'the old second row must never prompt',
     );
-    assert.deepEqual(api.rows(), replacement === 'unmount' ? initial : [{ family: 'sf', variant: 'full', strength: 12 }]);
+    assert.deepEqual(api.rows(), ['unmount', 'add', 'lines', 'runtime'].includes(replacement) ? initial : [{ family: 'sf', variant: 'full', strength: 12 }]);
+    if (replacement === 'add') assert.equal(api.rows().length, 3);
+    if (replacement === 'remove') assert.equal(api.rows().length, 1);
+    if (replacement === 'lines') assert.equal(el('multiPvInput').value, '7');
     assert.equal(
       messages.some((message) => message.includes('“old”')),
       false,
@@ -424,6 +444,53 @@ for (const action of ['dismiss', 'confirm']) {
       assert.equal(await api.check(ctx), true);
       assert.deepEqual(prompts, ['lqo']);
     }
+  });
+}
+
+for (const stale of [false, true]) {
+  test(`cancelling a picker warning resumes the initial reverted opponent only for its current game (stale=${stale})`, async () => {
+    const ctx = {
+      pendingPreferredEngineId: 'leela-queen-odds',
+      pendingPreferredEngineTimer: 42,
+      lastEngineId: 'maia3',
+      abort: new AbortController(),
+      consentAbort: new AbortController(),
+      disposed: false,
+      engineThinking: false,
+      preparingEngine: false,
+      gameOver: null,
+    };
+    const node = { value: 'lc0-bt4' };
+    let handler;
+    let preparations = 0;
+    let note = 'Checking your saved engine assets…';
+    const cleared = [];
+    const deps = {
+      ctx,
+      BIG_NETS,
+      trackListener: (_ctx, _node, _event, listener) => {
+        handler = listener;
+      },
+      selectEl: () => node,
+      clearTimeout: (timer) => cleared.push(timer),
+      ctxDraftEngine: () => ({ id: 'lc0-bt4', family: 'lc0', variant: 'bt4' }),
+      requestLargeNetConsent: async () => {
+        if (stale) ctx.abort.abort();
+        return false;
+      },
+      ctxSetEngineNote: (text) => {
+        note = text;
+      },
+      ctxPrepareOrStartEngine: () => preparations++,
+    };
+    const code = extract(source.play, "  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {", "  trackListener(ctx, selectEl('levelSelect')");
+    new Function('deps', `const { ${Object.keys(deps)} } = deps; ${code};`)(deps);
+    await handler();
+    assert.equal(node.value, 'maia3', 'Cancel keeps the prior selector value');
+    assert.equal(ctx.pendingPreferredEngineId, null, 'late saved asset callbacks cannot change opponents');
+    assert.deepEqual(cleared, [42]);
+    assert.equal(preparations, stale ? 0 : 1);
+    if (!stale) assert.equal(note, '', 'checking text cannot strand the unprepared fallback');
   });
 }
 

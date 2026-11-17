@@ -2207,12 +2207,14 @@ function ctxInit(ctx: PlayContext): void {
   trackListener(ctx, selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
   trackListener(ctx, window, PHONE_LARGE_NET_CHANGE_EVENT, () => ctxRevokePhoneLargeNets(ctx));
   trackListener(ctx, selectEl('engineSelect'), 'change', async () => {
+    const wasResolvingSavedEngine = !!ctx.pendingPreferredEngineId;
     ctx.pendingPreferredEngineId = null;
     if (ctx.pendingPreferredEngineTimer) {
       clearTimeout(ctx.pendingPreferredEngineTimer);
       ctx.pendingPreferredEngineTimer = null;
     }
     const previousEngineId = ctx.lastEngineId;
+    const selectionGame = ctx.abort.signal;
     if (ctx.engineThinking) {
       selectEl('engineSelect').value = previousEngineId;
       ctxRender(ctx);
@@ -2221,7 +2223,18 @@ function ctxInit(ctx: PlayContext): void {
     const option = ctxDraftEngine();
     if (option.family === 'lc0' && option.variant !== 'small') {
       selectEl('engineSelect').value = previousEngineId;
-      if (!(await requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], ctx.consentAbort.signal, false))) return;
+      if (!(await requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], ctx.consentAbort.signal, false))) {
+        // Cancelling the initial saved-asset probe also cancelled its eventual
+        // preparation callback. Resume the reverted opponent, not that restore.
+        if (
+          wasResolvingSavedEngine && !ctx.disposed && !selectionGame.aborted && !ctx.engineThinking &&
+          !ctx.preparingEngine && !ctx.gameOver && ctx.lastEngineId === previousEngineId
+        ) {
+          ctxSetEngineNote('');
+          ctxPrepareOrStartEngine(ctx);
+        }
+        return;
+      }
       if (ctx.disposed || ctx.engineThinking || ctx.lastEngineId !== previousEngineId) return;
       if (ctxEngineOptionState(option).disabled) {
         ctxRefreshEngineOptions(ctx);

@@ -5737,6 +5737,7 @@ function wireEvents() {
     if (!button) return;
     const i = Number(button.dataset.i);
     if (Number.isNaN(i) || engineRows.length <= 1) return;
+    profileLoadAbort?.abort();
     const [removedRow] = engineRows.splice(i, 1);
     cancelAnalysisAssetPrefetch(removedRow);
     persistManualEngineRows();
@@ -5745,6 +5746,7 @@ function wireEvents() {
     deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
   });
   const addEngineRow = () => {
+    profileLoadAbort?.abort();
     const family = nextEngineFamily();
     const row = normalizeDeployEngineRow({ family, variant: defaultVariant(family), strength: defaultStrength(family) }, 'analysis', engineRows.length);
     engineRows.push(row);
@@ -5758,9 +5760,11 @@ function wireEvents() {
   el('addEngine').addEventListener('click', addEngineRow);
   el('addEngineInManager').addEventListener('click', addEngineRow);
   el('lc0RuntimeSelect').addEventListener('change', () => {
+    profileLoadAbort?.abort();
     deferAnalysisSettingsRefresh({ reloadLc0: true });
   });
   el('multiPvInput').addEventListener('change', () => {
+    profileLoadAbort?.abort();
     lineCache.delete(tree.current.fen);
     deferAnalysisSettingsRefresh();
   });
