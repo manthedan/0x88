@@ -32,11 +32,15 @@ checks the rule before any asset checks or warmup. The block has no dialog.
 Existing asset/WebGPU checks and the single-net download warning still apply.
 Queen Odds is covered by the policy without adding it to Arena's existing menu.
 
-On constrained devices, `bigNetSessionPool.ts` has one resident slot. Acquiring a
-different net disposes the previous worker **before** constructing its replacement,
-even if the previous session was retained by the three-minute idle TTL. Releasing
-a net disposes it immediately. Reacquiring the same active net still reuses it.
-Desktop retains the existing multi-net pool and idle TTL.
+On constrained devices, Arena requests exclusive residency from
+`bigNetSessionPool.ts`. Acquiring a different net disposes the previous worker
+**before** constructing its replacement, even if the previous session was retained
+by the three-minute idle TTL. Releasing a net disposes it immediately. Reacquiring
+the same active net still reuses it. Shared callers such as Analysis keep ownership
+of their active sessions: without an exclusive request, only retired sessions are
+evicted. This avoids interrupting Analysis's existing parallel initialization.
+Desktop retains the existing multi-net pool and idle TTL, even for exclusive
+requests.
 
 Arena diagnostics and asset checks never acquire searchers. Phone warmup prepares
 only the current game's engines, including when advancing through a safe gauntlet.

@@ -489,7 +489,7 @@ let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown'
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
-  return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
+  return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key, true) };
 }
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';

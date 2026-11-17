@@ -46,12 +46,13 @@ export class BigNetSessionPool<T extends DisposableSearcher> {
     this.constrained = constrained;
   }
 
-  acquire(key: BigNetKey): T {
-    // Phones have one resident slot. Terminate the old worker before even
-    // constructing its replacement, including sessions retained by the TTL.
+  acquire(key: BigNetKey, exclusive = false): T {
+    // Never retain retired nets alongside a new one on phones. Arena also
+    // requests exclusive residency; other callers (Analysis's parallel init)
+    // still own their active sessions and must not be evicted behind their back.
     if (this.constrained()) {
-      for (const other of this.records.keys()) {
-        if (other !== key) this.disposeNow(other);
+      for (const [other, record] of this.records) {
+        if (other !== key && (exclusive || record.timer !== null)) this.disposeNow(other);
       }
     }
     let record = this.records.get(key);
@@ -126,9 +127,9 @@ function installPagehideDisposal(): void {
   });
 }
 
-export function acquireBigNetSearcher(key: BigNetKey): Bt4WorkerSearcher {
+export function acquireBigNetSearcher(key: BigNetKey, exclusive = false): Bt4WorkerSearcher {
   installPagehideDisposal();
-  return defaultPool.acquire(key);
+  return defaultPool.acquire(key, exclusive);
 }
 
 export function releaseBigNetSearcher(key: BigNetKey, idleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS): void {

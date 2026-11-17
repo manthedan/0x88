@@ -36,6 +36,8 @@ proposals. A historical record is not an instruction to restore its old defaults
 - [`engine_resource_broker_design.md`](engine_resource_broker_design.md) — current CPU budgets and resource-class leases; GPU evaluation arbitration deferred. Referenced from `src/lc0/resourceBroker.ts`.
 - [`arena_analysis_roadmap.md`](arena_analysis_roadmap.md) — current capability/backlog map, with historical design appendix; referenced from `src/lc0/charts.ts`, `gameReview.ts`, and `tournament.ts`.
 
+- [`arena_phone_memory_guard.md`](arena_phone_memory_guard.md) — constrained-device detection, Arena large-net pairing limits, and shared-pool residency.
+
 ## Artifact distribution, hosting, and models
 
 - [`engine_artifact_distribution.md`](engine_artifact_distribution.md) — artifact/source distribution policy.

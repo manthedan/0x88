@@ -126,7 +126,7 @@ test('identity-checked detach cannot remove another owner or a different key', (
   bt4.dispose();
 });
 
-test('constrained pool disposes the previous net before creating a different one', () => {
+test('constrained exclusive acquire disposes the previous net before creating a different one', () => {
   const events = [];
   const { scheduler, timers } = fakeScheduler();
   const pool = new BigNetSessionPool(
@@ -140,9 +140,9 @@ test('constrained pool disposes the previous net before creating a different one
     500,
     () => true,
   );
-  pool.acquire('bt4');
-  pool.acquire('t3');
-  pool.acquire('lqo');
+  pool.acquire('bt4', true);
+  pool.acquire('t3', true);
+  pool.acquire('lqo', true);
   assert.deepEqual(events, ['create:bt4', 'dispose:bt4', 'create:t3', 'dispose:t3', 'create:lqo']);
   assert.equal(pool.has('bt4'), false);
   assert.equal(pool.has('t3'), false);
@@ -165,6 +165,40 @@ test('constrained pool reuses its one slot, but release never retains a retired 
   assert.equal(searcher.disposeCalls, 1);
   assert.equal(pool.has('bt4'), false);
   assert.equal(timers.length, 0);
+});
+
+test('constrained shared callers retain active sessions until they retire them (Analysis parallel init)', () => {
+  const pool = new BigNetSessionPool(
+    (config) => new FakeSearcher(config),
+    undefined,
+    undefined,
+    () => true,
+  );
+  const bt4 = pool.acquire('bt4');
+  const t3 = pool.acquire('t3');
+  assert.equal(pool.acquire('bt4'), bt4);
+  assert.equal(pool.acquire('t3'), t3);
+  assert.equal(bt4.disposeCalls, 0);
+  assert.equal(t3.disposeCalls, 0);
+  pool.releaseUnused(['t3']);
+  assert.equal(bt4.disposeCalls, 1);
+  assert.equal(t3.disposeCalls, 0);
+  pool.disposeAllNow();
+});
+
+test('desktop retains active sessions even when Arena requests exclusive residency', () => {
+  const pool = new BigNetSessionPool(
+    (config) => new FakeSearcher(config),
+    undefined,
+    undefined,
+    () => false,
+  );
+  const bt4 = pool.acquire('bt4', true);
+  const t3 = pool.acquire('t3', true);
+  assert.equal(pool.peek('bt4'), bt4);
+  assert.equal(pool.peek('t3'), t3);
+  assert.equal(bt4.disposeCalls, 0);
+  pool.disposeAllNow();
 });
 
 test('constrained acquire also clears an inherited idle-TTL net before replacement', () => {

@@ -96,6 +96,10 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
       () => constrained,
     );
     pool.acquire('lqo'); // An earlier page/game may have retained a different net.
+    const bigNetFor = new Function('BIG_NETS', 'acquireBigNetSearcher', `${extract('function bigNetFor(', '\nlet runtimeIsolation')}\nreturn bigNetFor;`)(
+      BIG_NETS,
+      (key, exclusive) => pool.acquire(key, exclusive),
+    );
     const deps = {
       seatIds: ['sf:lite:8', 'lc0:bt4:100', 'lc0:t3:100'],
       matchAbort: new AbortController(),
@@ -117,7 +121,7 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
         calls.push(ids);
         for (const id of ids) {
           if (!id.startsWith('lc0:')) continue;
-          pool.acquire(id.split(':')[1]);
+          bigNetFor(id.split(':')[1]);
           if (constrained) assert.equal(Object.keys(BIG_NETS).filter((key) => pool.has(key)).length, 1);
         }
       },
