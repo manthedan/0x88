@@ -29,8 +29,10 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
     t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => meta }));
     t.mock.method(SquareformerTvmjsWebgpuEvaluator, 'create', () => assert.fail('old TVMJS graph was loaded'));
     t.mock.method(SquareformerTvmHybridEvaluator, 'create', () => assert.fail('old hybrid graph was loaded'));
-    t.mock.method(SquareFormerEvaluator, 'create', async (_url, _meta, settings) => {
+    let verified = true;
+    t.mock.method(SquareFormerEvaluator, 'create', async (_url, _meta, settings, loadOptions) => {
       assert.deepEqual(settings, { policyTemperature: 2, nativeHistory: true });
+      assert.equal(loadOptions.verifiedCentipawn, verified);
       return evaluator;
     });
     for (const runtime of ['auto', 'ort', 'tvmjs', 'custom-webgpu']) {
@@ -49,5 +51,15 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       if (runtime === 'tvmjs' || runtime === 'custom-webgpu') assert.match(loaded.fallbackReason, /ORT-only/);
       else assert.equal(loaded.fallbackReason, undefined);
     }
+    verified = false;
+    const research = await createBrowserSquareformerRuntimeEvaluator(
+      {
+        modelId: S4FIX_V_EMA_MODEL_ID,
+        onnx: '/models/custom.onnx',
+        meta: '/models/s4fix_v_ema.meta.json',
+      },
+      { runtime: 'ort' },
+    );
+    assert.equal(research.evaluator, evaluator, 'default metadata does not make an explicit research ONNX the pinned artifact');
   });
 }

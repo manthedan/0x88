@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import { resolvePublicAssetUrl } from '../lc0/assetUrls.ts';
+import { isPinnedCentipawnOnnx } from './centipawnModel.ts';
 import type { Evaluator } from './evaluator.ts';
 import { type BrowserRuntimeAuditDetail, publishBrowserRuntimeAudit } from './runtimeAudit.ts';
 import { RuntimeFallbackEvaluator } from './runtimeFallbackEvaluator.ts';
@@ -101,7 +102,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   const modelId = inferRuntimeModelId(spec);
   const requestedRuntime = parseBrowserRuntimeSelector(options.runtime ?? spec.runtime ?? params?.get('runtime'));
   const createOrtEvaluator = () =>
-    SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId), { verifiedCentipawn: modelId === S4FIX_V_EMA_MODEL_ID });
+    SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId), { verifiedCentipawn: isPinnedCentipawnOnnx(spec.onnx) });
   const fallback = options.fallback ?? (params ? runtimeFallbackEnabled(params, true) : true);
   const tvmjsEntry = promotedTvmjsRuntimeForModel(modelId);
   const customEntry = promotedCustomRuntimeForModel(modelId);

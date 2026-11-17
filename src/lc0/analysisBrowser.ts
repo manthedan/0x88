@@ -142,6 +142,7 @@ import {
 } from './analysisRunState.ts';
 import { positionShareUrl } from './analysisShare.ts';
 import { analysisStatus } from './analysisStatus.ts';
+import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import {
   BERSERK_VARIANTS,
@@ -6193,8 +6194,9 @@ function disposeRuntimeResources(): void {
   berserkEngines.disposeAll();
   plentyChessEngines.disposeAll();
   stormphraxEngines.disposeAll();
-  void mainEvaluator?.dispose?.();
+  const retiredMain = mainEvaluator;
   mainEvaluator = null;
+  if (retiredMain) trackEngineRetirement(Promise.resolve(retiredMain.dispose?.()));
   searcher = null;
   lc0ServedModelUrl = '';
 }
@@ -6330,38 +6332,42 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
     try {
       let nextEvaluator: Lc0EvaluationProvider | null = null;
       let nextServedModelUrl = '';
-      if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
-        nextEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
-          manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
-          batch: lc0WholeModelPhysicalBatch(),
-          fetchTensorCache: lc0WholeModelTensorCache(),
-          logger: (line) => console.info('[lc0 whole-model analysis]', line),
-          signal: operationSignal,
-        });
-      } else {
-        const created = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
-          deviceSelection: LC0_DEVICE_MODEL_SELECTION,
-          load: {
-            cache: true,
-            requestPersistentStorage: true,
-            signal: operationSignal,
-            onProgress: (loaded, total) => {
-              if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
+      const fallbackSignal = operationSignal ?? mountAbort.signal;
+      const createFallback = async (): Promise<Lc0EvaluationProvider> => {
+        if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
+          return Lc0WholeOnnxWebgpuEvaluator.create({
+            manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
+            batch: lc0WholeModelPhysicalBatch(),
+            fetchTensorCache: lc0WholeModelTensorCache(),
+            logger: (line) => console.info('[lc0 whole-model analysis]', line),
+            signal: fallbackSignal,
+          });
+        } else {
+          const created = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
+            deviceSelection: LC0_DEVICE_MODEL_SELECTION,
+            load: {
+              cache: true,
+              requestPersistentStorage: true,
+              signal: fallbackSignal,
+              onProgress: (loaded, total) => {
+                if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
+              },
             },
-          },
-        });
-        nextEvaluator = created.evaluator;
-        nextServedModelUrl = created.servedUrl;
-      }
+          });
+          nextServedModelUrl = created.servedUrl;
+          return created.evaluator;
+        }
+      };
+      nextEvaluator = await loadRetirableResource(createFallback, fallbackSignal);
       if (loadCancelled()) {
-        void nextEvaluator?.dispose?.();
+        trackEngineRetirement(Promise.resolve(nextEvaluator.dispose?.()));
         return false;
       }
       nextEvaluator = new CachedLc0Evaluator(nextEvaluator, { maxEntries: 2048 });
       const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
       const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
       if (loadCancelled()) {
-        void nextEvaluator.dispose?.();
+        trackEngineRetirement(Promise.resolve(nextEvaluator.dispose?.()));
         return false;
       }
       mainEvaluator = nextEvaluator;

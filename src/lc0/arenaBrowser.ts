@@ -2984,7 +2984,16 @@ function disposeUnusedUciEngines(): void {
 function reconcileArenaNeuralSessions(): void {
   if (running) return;
   const rows = activeSeatRows();
-  if (!rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant)) && (lc0Cache || loadingLc0)) disposeLc0Resources();
+  if (!rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant)) && (lc0Cache || loadingLc0)) {
+    const canceledLoad = loadingLc0;
+    disposeLc0Resources();
+    if (canceledLoad) {
+      hideDownloadProgress();
+      refreshSeatControls();
+      el('start').toggleAttribute('disabled', startPending);
+      if (!startPending) el('message').textContent = readyMessage();
+    }
+  }
   for (const key of ARENA_BIG_NET_KEYS) {
     if (rows.some((row) => row.family === 'lc0' && row.variant === key)) continue;
     peekBigNetSearcher(key)?.cancel();
@@ -4459,6 +4468,8 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   };
   let enginesReady = false;
   try {
+    await awaitEngineRetirements();
+    if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
     if (isolatedCpuPool()) {
       enginesReady = true;
       el('message').textContent = 'Preparing private CPU workers…';

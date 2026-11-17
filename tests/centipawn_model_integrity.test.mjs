@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { clearLc0ModelCacheEntry, loadLc0ModelForOrt } from '../src/lc0/modelCache.ts';
-import { createCentipawnOrtSession } from '../src/nn/centipawnModel.ts';
+import { createCentipawnOrtSession, isPinnedCentipawnOnnx } from '../src/nn/centipawnModel.ts';
 
 const URL = 'https://centipawn.test/models/s4fix_v_ema.onnx';
 const SHA = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
@@ -71,6 +71,14 @@ async function environment(t, create) {
     counts: () => ({ writes, clears }),
   };
 }
+
+test('the pinned loader follows the ONNX artifact identity, not metadata or a claimed model ID', () => {
+  assert.equal(isPinnedCentipawnOnnx('/models/s4fix_v_ema.onnx?v=1'), true);
+  assert.equal(isPinnedCentipawnOnnx('https://assets.0x88.app/models/s4fix_v_ema.onnx'), true);
+  assert.equal(isPinnedCentipawnOnnx('/models/%734fix_v_ema.onnx'), true);
+  assert.equal(isPinnedCentipawnOnnx('/models/s4fix_v_ema.meta.json'), false);
+  assert.equal(isPinnedCentipawnOnnx('/models/custom.onnx'), false);
+});
 
 test('Centipawn uses manifest-pinned SHA-256 and Cache Storage; second creation and lazy fallback read verified cache', async (t) => {
   const env = await environment(t);

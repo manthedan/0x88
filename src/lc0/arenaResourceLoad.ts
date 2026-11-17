@@ -1,8 +1,8 @@
 import { trackEngineRetirement } from './engineRetirement.ts';
 
 /** Immediate logical cancellation; canceled native creation remains owned until released. */
-export function loadArenaResource<T extends { dispose?: () => unknown }>(create: () => Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) throw new DOMException('Arena load cancelled', 'AbortError');
+export function loadRetirableResource<T extends { dispose?: () => unknown }>(create: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new DOMException('Engine load cancelled', 'AbortError');
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const creating = Promise.resolve().then(() => {
@@ -23,7 +23,7 @@ export function loadArenaResource<T extends { dispose?: () => unknown }>(create:
           () => undefined,
         ),
       );
-      reject(new DOMException('Arena load cancelled', 'AbortError'));
+      reject(new DOMException('Engine load cancelled', 'AbortError'));
     };
     signal.addEventListener('abort', onAbort, { once: true });
     creating.then(
@@ -43,3 +43,5 @@ export function loadArenaResource<T extends { dispose?: () => unknown }>(create:
     if (signal.aborted) onAbort();
   });
 }
+
+export const loadArenaResource = loadRetirableResource;

@@ -10,6 +10,15 @@ function ownModel({ model, ...info }: Lc0ModelLoadResult): OwnedModel {
   return { input: model, info };
 }
 
+/** Metadata/model IDs describe tensor semantics, not the identity of an explicit research ONNX override. */
+export function isPinnedCentipawnOnnx(modelUrl: string): boolean {
+  try {
+    return decodeURIComponent(new URL(modelUrl, 'http://localhost/').pathname).split('/').pop() === 's4fix_v_ema.onnx';
+  } catch {
+    return false;
+  }
+}
+
 /** App-origin pins, verified-only Cache Storage, and one-shot trusted-cache parse repair. */
 export async function createCentipawnOrtSession(modelUrl: string, deps = DEFAULT_DEPS) {
   let owned = ownModel(await deps.load(modelUrl, LOAD_OPTIONS));
