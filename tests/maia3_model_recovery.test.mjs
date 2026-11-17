@@ -85,6 +85,31 @@ test('Maia repairs the exact metadata-trusted cache entry once, in a fresh worke
   assert.equal(evaluator.modelLoad.revalidated, true);
 });
 
+test('Maia can repair metadata-trusted bytes reacquired by the worker after an initially hashed load', async (t) => {
+  const fake = setup(t);
+  const load = fake.deps.load;
+  fake.deps.load = async (...args) => ({ ...(await load(...args)), cacheStatus: 'miss', verification: 'hashed' });
+  t.mock.method(Worker.prototype, 'postMessage', function (message) {
+    if (message.type !== 'init') return;
+    const { model: _model, ...info } = modelLoad();
+    queueMicrotask(() =>
+      this.dispatchEvent(
+        new MessageEvent('message', {
+          data:
+            this.index === 0
+              ? { type: 'error', id: message.id, message: 'INVALID_PROTOBUF', modelLoad: info }
+              : { type: 'ready', id: message.id, backend: 'test', inputNames: [], outputNames: [] },
+        }),
+      ),
+    );
+  });
+  const evaluator = await Maia3BrowserEvaluator.create({ modelUrl: URL }, fake.deps);
+  t.after(() => evaluator.terminate());
+  assert.equal(fake.loads.length, 2);
+  assert.equal(fake.loads[1].options.forceReload, true);
+  assert.deepEqual(fake.evictions, [[ARTIFACT, 'maia3-browser-models-v1']]);
+});
+
 test('Maia propagates a second parse failure without another worker/fetch', async (t) => {
   const fake = setup(t, 'INVALID_PROTOBUF', true);
   await assert.rejects(Maia3BrowserEvaluator.create({ modelUrl: URL }, fake.deps), /INVALID_PROTOBUF/);

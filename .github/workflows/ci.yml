@@ -80,7 +80,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ../models/lc0-bestnets
-          key: lc0-parity-${{ hashFiles('public/models/lc0/manifest.json', 'scripts/stage_lc0_test_assets.mjs') }}
+          key: lc0-parity-${{ hashFiles('public/models/lc0/manifest.json', 'public/models/maia3/manifest.json', 'scripts/stage_lc0_test_assets.mjs') }}
       # Hash-checks the committed LC0 manifest locally. A warm cache makes no
       # network calls. Missing bytes come from the commit-pinned release
       # (public/channels/stable.json → public/releases/*.json), not the live channel.

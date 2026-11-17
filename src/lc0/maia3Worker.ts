@@ -1,25 +1,30 @@
 import { createOrtDeviceLossMonitor } from '../nn/ortDeviceLoss.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import {
-  createOrtSession,
   collectOrtSessionDiagnostics,
+  createOrtSession,
   describeOrtBackendConfig,
-  type OrtRuntimeDiagnosticOptions,
-  setOrtRuntimeDiagnosticOptionsForCurrentThread,
-  setOrtDequantFoldForCurrentThread,
   type OrtExecutionProviderPreference,
+  type OrtRuntimeDiagnosticOptions,
   ortRuntimeArtifactKindIsLocked,
   releaseOrtSession,
+  setOrtDequantFoldForCurrentThread,
   setOrtRuntimeArtifactKindForCurrentThread,
+  setOrtRuntimeDiagnosticOptionsForCurrentThread,
   setRequestedOrtExecutionProviderForCurrentThread,
   setRequestedOrtWasmThreadsForCurrentThread,
 } from '../nn/ortRuntime.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
+import { type Lc0ModelLoadInfo, loadLc0ModelForOrt } from './modelCache.ts';
+import { isMetadataTrustedModel } from './onnxModelRecovery.ts';
 
 type InitMessage = {
   type: 'init';
   id: number;
   model: string | ArrayBuffer;
+  /** Verified reload provenance; never an opaque/unverified model source. */
+  modelUrl?: string;
+  metadataTrustedModel?: boolean;
   /** ORT execution-provider preference; default 'auto' (WebGPU first, wasm fallback). */
   ep?: OrtExecutionProviderPreference;
   wasmThreads?: number;
@@ -75,6 +80,7 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
   void operations
     .run(async () => {
       const message = event.data;
+      let fallbackModelLoad: Lc0ModelLoadInfo | undefined;
       try {
         if (message.type === 'init') {
           deviceLossMonitor.stop();
@@ -91,7 +97,24 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           // for a per-message worker it would not be safe.
           if (message.ep === 'wasm' && !ortRuntimeArtifactKindIsLocked()) setOrtRuntimeArtifactKindForCurrentThread('wasm');
           post({ type: 'progress', id: message.id, stage: 'creating-session' });
-          session = await createOrtSession(message.model);
+          const reloadModel = message.modelUrl
+            ? async () => {
+                const { model, ...info } = await loadLc0ModelForOrt(message.modelUrl!, {
+                  cache: true,
+                  cacheName: 'maia3-browser-models-v1',
+                  manifestUrl: '/models/maia3/manifest.json',
+                  allowUnverified: false,
+                });
+                fallbackModelLoad = info;
+                return model;
+              }
+            : undefined;
+          const creating = createOrtSession(message.model, {
+            reloadModel,
+            rejectModelParseErrors: () => (fallbackModelLoad ? isMetadataTrustedModel(fallbackModelLoad) : message.metadataTrustedModel === true),
+          });
+          message.model = ''; // The worker-owned init event must not pin the unfolded buffer.
+          session = await creating;
           deviceLossMonitor.refresh();
           post({
             type: 'ready',
@@ -157,7 +180,12 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           [logitsMove.buffer, logitsValue.buffer],
         );
       } catch (error) {
-        post({ type: 'error', id: message.id, message: error instanceof Error ? error.message : String(error) });
+        post({
+          type: 'error',
+          id: message.id,
+          message: error instanceof Error ? error.message : String(error),
+          ...(fallbackModelLoad ? { modelLoad: fallbackModelLoad } : {}),
+        });
       }
     })
     .catch(() => undefined);

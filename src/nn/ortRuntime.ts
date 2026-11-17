@@ -3,9 +3,9 @@ import './ortConsoleFilter.ts';
 export * from 'onnxruntime-web/webgpu';
 
 import * as ort from 'onnxruntime-web/webgpu';
+import { isOnnxModelParseError } from '../lc0/onnxModelRecovery.ts';
 import { supportsWasmRelaxedSimdIntegerDot } from '../lc0/wasmFeatures.ts';
 import { foldOnnxDequantizeLinear } from './onnxDequantFold.ts';
-import { isOnnxModelParseError } from '../lc0/onnxModelRecovery.ts';
 
 (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
 
@@ -393,11 +393,11 @@ type OrtModelInput = string | Uint8Array | ArrayBuffer;
 
 type PreparedOrtModelInput = {
   input: OrtModelInput;
-  /** The unfolded model, present only when `input` is a folded rewrite of it. */
-  original?: OrtModelInput;
+  /** Lazy verified reload when available; raw input retained only for callers without reload provenance. */
+  original?: OrtModelSource;
 };
 
-async function prepareOrtModelInput(modelPath: OrtModelInput): Promise<PreparedOrtModelInput> {
+async function prepareOrtModelInput(modelPath: OrtModelInput, reloadModel?: () => Promise<OrtModelInput>): Promise<PreparedOrtModelInput> {
   if (!ortDequantFoldEnabled()) {
     lastOrtDequantFold = { enabled: false, foldedNodes: 0, skippedNodes: 0, removedInitializers: 0, bytesBefore: 0, bytesAfter: 0, elapsedMs: 0 };
     return { input: modelPath };
@@ -428,7 +428,7 @@ async function prepareOrtModelInput(modelPath: OrtModelInput): Promise<PreparedO
       bytesAfter: result.bytesAfter,
       elapsedMs: result.elapsedMs,
     };
-    return result.foldedNodes > 0 ? { input: result.bytes, original: bytes } : { input: bytes };
+    return result.foldedNodes > 0 ? { input: result.bytes, original: reloadModel ?? bytes } : { input: bytes };
   } catch (err) {
     console.warn(`Centipawn: ORT dequantize fold skipped: ${err instanceof Error ? err.message : String(err)}`);
     lastOrtDequantFold = {
@@ -1470,6 +1470,8 @@ export type CreateOrtSessionOptions = {
    * on WASM; the default reuses the primary model's unfolded bytes.
    */
   wasmFallbackModel?: () => Promise<OrtModelInput>;
+  /** Reacquire the same model through its verified loader, only if an unfolded/provider fallback needs it. */
+  reloadModel?: () => Promise<OrtModelInput>;
   /**
    * Extra session options for the WebGPU attempts only (never the WASM
    * fallback), e.g. `enableGraphCapture` for GPU-resident IO (src/nn/ortGpuIo.ts).
@@ -1478,7 +1480,7 @@ export type CreateOrtSessionOptions = {
   /** Request WebGPU alone and never fall back to WASM: the caller handles failure. */
   webgpuOnly?: boolean;
   /** Let the verified loader repair metadata-trusted bytes before any provider/model fallback masks a parse error. */
-  rejectModelParseErrors?: boolean;
+  rejectModelParseErrors?: boolean | (() => boolean);
 };
 
 /**
@@ -1493,7 +1495,7 @@ export type CreateOrtSessionOptions = {
  * model would never be used.
  */
 export function planOrtSessionAttempts(
-  prepared: { input: OrtModelInput; original?: OrtModelInput },
+  prepared: { input: OrtModelInput; original?: OrtModelSource },
   providers: string[],
   wasmFallback: boolean,
   options: CreateOrtSessionOptions = {},
@@ -1511,7 +1513,7 @@ export function planOrtSessionAttempts(
   }
   if (wasmFallback) {
     attempts.push({
-      input: options.wasmFallbackModel ?? prepared.original ?? prepared.input,
+      input: options.wasmFallbackModel ?? prepared.original ?? options.reloadModel ?? prepared.input,
       providers: ['wasm'],
       kind: 'wasm-fallback',
       note: (message) => `fallback after WebGPU failure${options.wasmFallbackModel ? ' (WASM model)' : ''}: ${message}`,
@@ -1520,7 +1522,17 @@ export function planOrtSessionAttempts(
   return attempts;
 }
 
-export async function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSessionOptions = {}): Promise<ort.InferenceSession> {
+export function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSessionOptions = {}): Promise<ort.InferenceSession> {
+  // Async frames retain original argument registers even after reassignment.
+  // Only this synchronous, consumed holder ever receives the raw argument.
+  return createOrtSessionFromSource(() => {
+    const input = modelPath;
+    modelPath = undefined as never;
+    return input;
+  }, options);
+}
+
+async function createOrtSessionFromSource(takeModel: () => OrtModelInput, options: CreateOrtSessionOptions): Promise<ort.InferenceSession> {
   // Must precede resolvedOrtExecutionProviders(): both it and the artifact
   // selector read the probe result, and the locks below freeze that choice.
   await ensureWebGpuAdapterProbed();
@@ -1532,17 +1544,23 @@ export async function createOrtSession(modelPath: OrtModelInput, options: Create
   // the WebGPU->WASM fallback below then reuses the same binary.
   lockRequestedOrtWasmArtifact();
   lockOrtRuntimeArtifactKind(providers);
-  const prepared = await prepareOrtModelInput(modelPath);
+  let prepared: PreparedOrtModelInput | undefined = await prepareOrtModelInput(takeModel(), options.reloadModel);
   const wasmFallback = !options.webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
   const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
+  prepared = undefined;
   let lastMessage: string | null = null;
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i];
     const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     try {
-      const input = typeof attempt.input === 'function' ? await attempt.input() : attempt.input;
+      let source: OrtModelSource | undefined = attempt.input;
+      attempt.input = undefined as never; // Consumed records must not pin an input through later attempts.
+      let input: OrtModelInput | undefined = typeof source === 'function' ? await source() : source;
+      source = undefined;
       const extra = attempt.providers.includes('webgpu') ? options.webgpuSessionOptions : undefined;
-      const session = await ort.InferenceSession.create(input as never, { ...sessionOptions(attempt.providers), ...extra });
+      const creating = ort.InferenceSession.create(input as never, { ...sessionOptions(attempt.providers), ...extra });
+      input = undefined; // ORT owns its ingestion lifetime; do not keep an extra JS root until it returns.
+      const session = await creating;
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
       createdOrtSessions += 1;
       recordSessionAttempt(attempt.providers, true, t1 - t0);
@@ -1555,7 +1573,8 @@ export async function createOrtSession(modelPath: OrtModelInput, options: Create
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
       lastMessage = err instanceof Error ? err.message : String(err);
       recordSessionAttempt(attempt.providers, false, t1 - t0, lastMessage);
-      if (options.rejectModelParseErrors && isOnnxModelParseError(err)) throw err;
+      const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
+      if (rejectParse && isOnnxModelParseError(err)) throw err;
       const next = attempts[i + 1];
       if (!next) throw err;
       if (next.kind !== 'wasm-fallback') {

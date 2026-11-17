@@ -12,6 +12,7 @@ import { parseScriptArgs } from './lib/cli.mjs';
 const DEFAULT_ROOT = '../models/lc0-bestnets';
 const ASSET_ORIGIN = 'https://assets.0x88.app';
 const PINNED_MANIFEST_URL = new URL('../public/models/lc0/manifest.json', import.meta.url);
+const PINNED_MAIA_MANIFEST_URL = new URL('../public/models/maia3/manifest.json', import.meta.url);
 const COMMITTED_CHANNEL_URL = new URL('../public/channels/stable.json', import.meta.url);
 // Required parity fixtures. Integrity comes from the committed model manifest,
 // not from whatever the live stable channel currently points at.
@@ -20,6 +21,13 @@ export const REQUIRED_ASSETS = Object.freeze([
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.onnx',
   // tests/onnx_dequant_fold.test.mjs: the shipped default Play model.
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx',
+  // Byte-identical fold goldens for every shipped/fallback QDQ artifact.
+  '/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.splitk.onnx',
+  '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx',
+  '/models/lc0/lqo_v2.f16.qdq8.onnx',
+  '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx',
+  '/models/maia3/maia3_simplified.qdq8.graph.onnx',
+  '/models/maia3/maia3_simplified.qdq8.onnx',
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch4.f16.onnx',
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.onnx',
   '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json',
@@ -76,21 +84,25 @@ async function fetchJson(url, label) {
 }
 
 function targetPath(root, logicalUrl) {
-  const prefix = '/models/lc0/';
-  if (!logicalUrl.startsWith(prefix)) throw new Error(`Unexpected LC0 logical URL: ${logicalUrl}`);
+  const prefix = ['/models/lc0/', '/models/maia3/'].find((candidate) => logicalUrl.startsWith(candidate));
+  if (!prefix) throw new Error(`Unexpected LC0/Maia logical URL: ${logicalUrl}`);
   const relative = logicalUrl.slice(prefix.length);
   if (relative.includes('.lc0web/')) return join(root, 'lc0web', relative);
   return join(root, 'onnx', relative);
 }
 
 export async function pinnedAssetMetadata(manifestUrl = PINNED_MANIFEST_URL, required = REQUIRED_ASSETS) {
-  const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
+  const manifests = [JSON.parse(await readFile(manifestUrl, 'utf8'))];
+  const isDefault = manifestUrl instanceof URL ? manifestUrl.href === PINNED_MANIFEST_URL.href : resolve(manifestUrl) === fileURLToPath(PINNED_MANIFEST_URL);
+  if (isDefault) manifests.push(JSON.parse(await readFile(PINNED_MAIA_MANIFEST_URL, 'utf8')));
   const pinned = new Map();
-  for (const model of manifest.models ?? []) pinned.set(model.url, { bytes: model.bytes, sha256: model.sha256?.toLowerCase() });
-  for (const pack of manifest.packs ?? []) {
-    pinned.set(pack.url, { bytes: pack.metadataBytes, sha256: pack.metadataSha256?.toLowerCase() });
-    const prefix = pack.url.slice(0, pack.url.lastIndexOf('/') + 1);
-    for (const shard of pack.shards ?? []) pinned.set(`${prefix}${shard.file}`, { bytes: shard.bytes, sha256: shard.sha256?.toLowerCase() });
+  for (const manifest of manifests) {
+    for (const model of manifest.models ?? []) pinned.set(model.url, { bytes: model.bytes, sha256: model.sha256?.toLowerCase() });
+    for (const pack of manifest.packs ?? []) {
+      pinned.set(pack.url, { bytes: pack.metadataBytes, sha256: pack.metadataSha256?.toLowerCase() });
+      const prefix = pack.url.slice(0, pack.url.lastIndexOf('/') + 1);
+      for (const shard of pack.shards ?? []) pinned.set(`${prefix}${shard.file}`, { bytes: shard.bytes, sha256: shard.sha256?.toLowerCase() });
+    }
   }
   for (const logicalUrl of required) {
     const expected = pinned.get(logicalUrl);

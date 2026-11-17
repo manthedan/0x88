@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createLc0OnnxEvaluatorFromUrl, selectLc0OrtModelUrl, LC0_SMALL_BATCH1_QDQ8_PATH } from '../src/lc0/lc0SmallModelSelection.ts';
-import { isOnnxModelParseError } from '../src/lc0/onnxModelRecovery.ts';
+import { createLc0OnnxEvaluatorFromUrl, LC0_SMALL_BATCH1_QDQ8_PATH, selectLc0OrtModelUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
-import * as ort from '../src/nn/ortRuntime.ts';
+import { isOnnxModelParseError } from '../src/lc0/onnxModelRecovery.ts';
 import { ProtoWriter } from '../src/nn/onnxDequantFold.ts';
+import * as ort from '../src/nn/ortRuntime.ts';
 
 const ORIGINAL = LC0_SMALL_BATCH1_QDQ8_PATH;
 const PLACEMENT = { providers: ['webgpu', 'wasm'], adapterVendor: 'apple' };
@@ -236,9 +236,10 @@ for (const secondUsesWasm of [true, false]) {
     assert.deepEqual(evictions, [ARTIFACT]);
     assert.deepEqual(
       loads.map((l) => l.url),
-      [SPLITK, ORIGINAL, ORIGINAL],
+      [SPLITK, ORIGINAL, ORIGINAL, SPLITK, ...(secondUsesWasm ? [ORIGINAL] : [])],
     );
     assert.equal(loads[2].options.forceReload, true);
+    assert.equal(loads.filter((load) => load.options.forceReload).length, 1, 'one network-forced recovery; other reads lazily reacquire cached inputs');
     assert.equal(result.servedUrl, secondUsesWasm ? ORIGINAL : SPLITK);
     assert.equal(result.variant, secondUsesWasm ? 'original' : 'splitk');
     assert.equal(result.modelLoad.url, secondUsesWasm ? ARTIFACT : selected.url);

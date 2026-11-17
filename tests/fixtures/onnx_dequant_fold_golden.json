@@ -1,0 +1,75 @@
+{
+  "reference": "720aaf4a:src/nn/onnxDequantFold.ts (captured before the single-buffer rewrite)",
+  "models": [
+    {
+      "file": "BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx",
+      "inputBytes": 186676343,
+      "inputSha256": "af5319e8aa5a240c26311c3f52f58b3e190734e028b081ac78432e652eb80b7a",
+      "outputBytes": 370637638,
+      "outputSha256": "b6dda28f480ca9632e1eaa26440014cd7bc3177c83acdf4273f9b90e8e1fa206",
+      "foldedNodes": 147,
+      "removedInitializers": 294,
+      "skippedNodes": 0
+    },
+    {
+      "file": "lqo_v2.f16.qdq8.onnx",
+      "inputBytes": 95662716,
+      "inputSha256": "4effd3079add6ab04043f066057f987b54e90e7e54cdf62ac0931b300769fc0e",
+      "outputBytes": 189399671,
+      "outputSha256": "4cacdd89a647ba0cdb99009560f5628369e4188db5e0f7fbc81fe9fe0180b997",
+      "foldedNodes": 144,
+      "removedInitializers": 288,
+      "skippedNodes": 0
+    },
+    {
+      "file": "maia3_simplified.qdq8.graph.onnx",
+      "inputBytes": 27971924,
+      "inputSha256": "3be705330f38fb0309c82e0ea2f95734ee6bd14fd72eabbad694356bba443246",
+      "outputBytes": 45518132,
+      "outputSha256": "daa787d2c605349d41f429edc8843c00a6743b70a39fc891d58e4986a1a2a041",
+      "foldedNodes": 43,
+      "removedInitializers": 86,
+      "skippedNodes": 0
+    },
+    {
+      "file": "maia3_simplified.qdq8.onnx",
+      "inputBytes": 28138813,
+      "inputSha256": "4141faeca4b0aa9f99073d70abb43211264ed2eb04cb96214ba85a86dd455a10",
+      "outputBytes": 45685021,
+      "outputSha256": "b4277225cdcf8e113afbf216532f34c9bab0bc7485fd4c868b90a9d34ec2ebb9",
+      "foldedNodes": 43,
+      "removedInitializers": 86,
+      "skippedNodes": 0
+    },
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx",
+      "inputBytes": 20558031,
+      "inputSha256": "9396c11226de7f29dbad8c60147b1082b8093adc7a0b77819cd0fb33103a095f",
+      "outputBytes": 40492866,
+      "outputSha256": "70da09eddda2030a9a164c9c5e27fb34e178ec6330f8dd6baa96ebd663947a5d",
+      "foldedNodes": 98,
+      "removedInitializers": 196,
+      "skippedNodes": 0
+    },
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.splitk.onnx",
+      "inputBytes": 20580952,
+      "inputSha256": "3a5ccb636ebc596a66021b90a39a3d5b708fbd280048b07ff2d7855d240b37a1",
+      "outputBytes": 40515787,
+      "outputSha256": "87d7963daa33b82159182c3a7127be6497629a9f47bf498ebd64f94b6a1d4177",
+      "foldedNodes": 98,
+      "removedInitializers": 196,
+      "skippedNodes": 0
+    },
+    {
+      "file": "t1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx",
+      "inputBytes": 20558031,
+      "inputSha256": "203237314baa01a05edc41f1a59f3e34c8f86c445bc47156ad8cab0c379d9273",
+      "outputBytes": 40492866,
+      "outputSha256": "bbb903dd9e6c1e1a672453d207c28da1dd98c63fbed9745fdae9ba9385aeb39a",
+      "foldedNodes": 98,
+      "removedInitializers": 196,
+      "skippedNodes": 0
+    }
+  ]
+}

@@ -61,6 +61,9 @@ export interface Lc0ModelLoadResult {
   telemetry: Lc0ModelLoadTelemetry;
 }
 
+/** Persist/report provenance without retaining a full model buffer after preparation. */
+export type Lc0ModelLoadInfo = Omit<Lc0ModelLoadResult, 'model'>;
+
 export interface Lc0ModelVerificationMetadata {
   key: string;
   schemaVersion: number;
@@ -1080,7 +1083,7 @@ export async function clearLc0ModelCache(
   return { cleared, removedEntries };
 }
 
-export function describeLc0ModelLoad(result: Lc0ModelLoadResult): string {
+export function describeLc0ModelLoad(result: Lc0ModelLoadInfo): string {
   const mb = result.bytes === undefined ? '' : ` · ${(result.bytes / 1_000_000).toFixed(1)} MB`;
   const timing = ` · ${result.elapsedMs.toFixed(0)} ms`;
   if (result.cacheStatus === 'disabled') return `disabled${timing}`;

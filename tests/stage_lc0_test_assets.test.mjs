@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { releaseCatalogEntries } from '../scripts/engine_artifact_registry.mjs';
-import { REQUIRED_ASSETS, resolveArtifactDownloadUrl } from '../scripts/stage_lc0_test_assets.mjs';
+import { pinnedAssetMetadata, REQUIRED_ASSETS, resolveArtifactDownloadUrl } from '../scripts/stage_lc0_test_assets.mjs';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const manifest = JSON.parse(readFileSync(new URL('../public/models/lc0/manifest.json', import.meta.url), 'utf8'));
@@ -65,7 +65,7 @@ test('LC0 test asset staging rejects a stable release that differs from committe
   assert.match(result.stderr, /Stable artifact release integrity does not match the committed LC0 manifest/);
 });
 
-test('the committed release catalog matches the committed LC0 manifest for every required fixture', () => {
+test('the committed release catalog matches the committed model manifests for every required fixture', async () => {
   const channel = JSON.parse(readFileSync(new URL('../public/channels/stable.json', import.meta.url), 'utf8'));
   assert.match(channel.releaseManifestUrl, /^\/releases\//);
   const release = JSON.parse(readFileSync(new URL(`../public${channel.releaseManifestUrl}`, import.meta.url), 'utf8'));
@@ -74,13 +74,7 @@ test('the committed release catalog matches the committed LC0 manifest for every
       .filter((entry) => entry.encoding === 'identity')
       .map((entry) => [entry.logicalUrl, entry]),
   );
-  const pinned = new Map();
-  for (const model of manifest.models ?? []) pinned.set(model.url, { bytes: model.bytes, sha256: model.sha256.toLowerCase() });
-  for (const pack of manifest.packs ?? []) {
-    pinned.set(pack.url, { bytes: pack.metadataBytes, sha256: pack.metadataSha256.toLowerCase() });
-    const prefix = pack.url.slice(0, pack.url.lastIndexOf('/') + 1);
-    for (const shard of pack.shards ?? []) pinned.set(`${prefix}${shard.file}`, { bytes: shard.bytes, sha256: shard.sha256.toLowerCase() });
-  }
+  const pinned = await pinnedAssetMetadata();
   for (const logicalUrl of REQUIRED_ASSETS) {
     const entry = entries.get(logicalUrl);
     assert.ok(entry, `commit-pinned release is missing ${logicalUrl}`);
@@ -126,6 +120,23 @@ test('a complete local cache verifies by hash and does not touch the network', a
   assert.equal(corrupt.status, 1);
   assert.match(corrupt.stderr, /missing or corrupt/);
   assert.equal(sha256(await readFile(assetPath)), sha256(Buffer.alloc(body.length, 1)));
+});
+
+test('Maia golden fixtures use the same hash-verified, zero-network parity staging', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'maia-stage-warm-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const body = Buffer.from('pinned-maia-fixture');
+  const logicalUrl = '/models/maia3/tiny.onnx';
+  const manifestPath = join(root, 'manifest.json');
+  await mkdir(join(root, 'onnx'));
+  await writeFile(join(root, 'onnx', 'tiny.onnx'), body);
+  await writeFile(manifestPath, JSON.stringify({ models: [{ url: logicalUrl, bytes: body.length, sha256: sha256(body) }] }));
+  const result = stage(['--root', root, '--manifest', manifestPath, '--required', logicalUrl, '--offline']);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.network, false);
+  assert.equal(report.staged[0].sha256, sha256(body));
+  assert.equal(report.staged[0].path, join(root, 'onnx', 'tiny.onnx'));
 });
 
 test('offline mode fails a missing asset and does not create a file', async (t) => {

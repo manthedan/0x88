@@ -193,7 +193,7 @@ type TensorInfo = {
   dims: number[];
   raw: Uint8Array | null;
   int32Data: Int32Array | null;
-  floatData: Float32Array | null;
+  floatData: number[] | null;
 };
 
 function parseTensor(buf: Uint8Array, f: Field): TensorInfo {
@@ -245,7 +245,7 @@ function parseTensor(buf: Uint8Array, f: Field): TensorInfo {
     }
   }
   if (int32.length) info.int32Data = Int32Array.from(int32);
-  if (floats.length) info.floatData = Float32Array.from(floats);
+  if (floats.length) info.floatData = floats;
   return info;
 }
 
@@ -255,120 +255,189 @@ function elementCount(dims: number[]): number {
   return n;
 }
 
-/** Integer tensor as an int8-range array (int4/uint4 unpacked, low nibble first). */
-function integerValues(t: TensorInfo): ArrayLike<number> | null {
-  const n = elementCount(t.dims);
-  switch (t.dataType) {
-    case ONNX_INT8:
-      if (t.raw) return t.raw.byteLength === n ? new Int8Array(t.raw.buffer, t.raw.byteOffset, n) : null;
-      return t.int32Data && t.int32Data.length === n ? Int8Array.from(t.int32Data) : null;
-    case ONNX_UINT8:
-      if (t.raw) return t.raw.byteLength === n ? t.raw : null;
-      return t.int32Data && t.int32Data.length === n ? Uint8Array.from(t.int32Data) : null;
-    case ONNX_INT4: {
-      if (!t.raw || t.raw.byteLength !== (n + 1) >> 1) return null;
-      const out = new Int8Array(n);
-      for (let i = 0; i < n; i++) {
-        const nib = (t.raw[i >> 1] >> ((i & 1) * 4)) & 0xf;
-        out[i] = nib >= 8 ? nib - 16 : nib;
-      }
-      return out;
-    }
-    case ONNX_UINT4: {
-      if (!t.raw || t.raw.byteLength !== (n + 1) >> 1) return null;
-      const out = new Uint8Array(n);
-      for (let i = 0; i < n; i++) out[i] = (t.raw[i >> 1] >> ((i & 1) * 4)) & 0xf;
-      return out;
-    }
-    default:
-      return null;
-  }
-}
+type TensorReader = { length: number; at(index: number): number };
 
-function floatValues(t: TensorInfo): Float32Array | null {
-  const n = elementCount(t.dims);
-  if (t.dataType === ONNX_FLOAT) {
+/** Views/readers only: even packed int4 weights are never unpacked into a second tensor. */
+function integerReader(t: TensorInfo): TensorReader | null {
+  const length = elementCount(t.dims);
+  if (!Number.isSafeInteger(length) || length < 0) return null;
+  if (t.dataType === ONNX_INT8 || t.dataType === ONNX_UINT8) {
     if (t.raw) {
-      if (t.raw.byteLength !== n * 4) return null;
-      const out = new Float32Array(n);
-      const dv = new DataView(t.raw.buffer, t.raw.byteOffset, t.raw.byteLength);
-      for (let i = 0; i < n; i++) out[i] = dv.getFloat32(i * 4, true);
-      return out;
+      if (t.raw.byteLength !== length) return null;
+      const raw = t.raw;
+      return { length, at: t.dataType === ONNX_INT8 ? (i) => (raw[i] << 24) >> 24 : (i) => raw[i] };
     }
-    return t.floatData && t.floatData.length === n ? t.floatData : null;
+    const data = t.int32Data;
+    if (!data || data.length !== length) return null;
+    return { length, at: t.dataType === ONNX_INT8 ? (i) => (data[i] << 24) >> 24 : (i) => data[i] & 255 };
   }
-  if (t.dataType === ONNX_FLOAT16) {
-    if (!t.raw || t.raw.byteLength !== n * 2) return null;
-    const out = new Float32Array(n);
-    const dv = new DataView(t.raw.buffer, t.raw.byteOffset, t.raw.byteLength);
-    for (let i = 0; i < n; i++) out[i] = f16BitsToF32(dv.getUint16(i * 2, true));
-    return out;
+  if (t.dataType === ONNX_INT4 || t.dataType === ONNX_UINT4) {
+    const raw = t.raw;
+    if (!raw || raw.byteLength !== Math.ceil(length / 2)) return null;
+    const nibble = (i: number) => (raw[i >> 1] >> ((i & 1) * 4)) & 15;
+    return { length, at: t.dataType === ONNX_INT4 ? (i) => (nibble(i) << 28) >> 28 : nibble };
   }
   return null;
 }
 
-function dequantize(x: TensorInfo, scale: TensorInfo, zeroPoint: TensorInfo | null, axisAttr: number, blockSize: number): Float32Array | null {
-  const q = integerValues(x);
-  const s = floatValues(scale);
+function floatReader(t: TensorInfo): TensorReader | null {
+  const length = elementCount(t.dims);
+  if (!Number.isSafeInteger(length) || length < 0) return null;
+  if (t.dataType === ONNX_FLOAT && !t.raw) {
+    const data = t.floatData;
+    return data && data.length === length ? { length, at: (i) => data[i] } : null;
+  }
+  const width = t.dataType === ONNX_FLOAT ? 4 : t.dataType === ONNX_FLOAT16 ? 2 : 0;
+  if (!width || !t.raw || t.raw.byteLength !== length * width) return null;
+  const view = new DataView(t.raw.buffer, t.raw.byteOffset, t.raw.byteLength);
+  const half = view as DataView & { getFloat16?: (offset: number, littleEndian?: boolean) => number };
+  if (width === 2 && typeof half.getFloat16 === 'function') {
+    return {
+      length,
+      at: (i) => {
+        const value = half.getFloat16!(i * 2, true);
+        return Number.isNaN(value) ? NaN : value; // Match f16BitsToF32's canonical NaN.
+      },
+    };
+  }
+  return { length, at: width === 4 ? (i) => view.getFloat32(i * 4, true) : (i) => f16BitsToF32(view.getUint16(i * 2, true)) };
+}
+
+type DequantPlan = { total: number; write(view: DataView, offset: number, dataType: number): void };
+
+/** Validate/plan without materializing any dequantized weights. */
+function planDequantize(x: TensorInfo, scale: TensorInfo, zeroPoint: TensorInfo | null, axisAttr: number, blockSize: number): DequantPlan | null {
+  const q = integerReader(x);
+  const s = floatReader(scale);
   if (!q || !s) return null;
-  let zp: ArrayLike<number> | null = null;
+  let zp: TensorReader | null = null;
   if (zeroPoint) {
     if (zeroPoint.dataType !== x.dataType) return null;
-    zp = integerValues(zeroPoint);
+    zp = integerReader(zeroPoint);
     if (!zp || zp.length !== s.length) return null;
   }
   const dims = x.dims;
   const rank = dims.length;
-  const total = elementCount(dims);
-  const out = new Float32Array(total);
-  const scaleCount = elementCount(scale.dims);
-  if (scaleCount === 1 && blockSize === 0) {
-    const sv = s[0];
-    const zv = zp ? zp[0] : 0;
-    for (let i = 0; i < total; i++) out[i] = (q[i] - zv) * sv;
-    return out;
+  const total = q.length;
+  const scalar = s.length === 1 && blockSize === 0;
+  let outer = 1,
+    inner = 1,
+    axisDim = 0,
+    blocks = 0;
+  if (!scalar) {
+    const axis = axisAttr < 0 ? axisAttr + rank : axisAttr;
+    if (axis < 0 || axis >= rank || blockSize < 0) return null;
+    for (let d = 0; d < axis; d++) outer *= dims[d];
+    axisDim = dims[axis];
+    for (let d = axis + 1; d < rank; d++) inner *= dims[d];
+    if (blockSize === 0) {
+      if (scale.dims.length !== 1 || scale.dims[0] !== axisDim) return null;
+    } else {
+      blocks = Math.ceil(axisDim / blockSize);
+      if (scale.dims.length !== rank) return null;
+      for (let d = 0; d < rank; d++) if (scale.dims[d] !== (d === axis ? blocks : dims[d])) return null;
+    }
   }
-  let axis = axisAttr < 0 ? axisAttr + rank : axisAttr;
-  if (axis < 0 || axis >= rank) return null;
-  let outer = 1;
-  for (let d = 0; d < axis; d++) outer *= dims[d];
-  const axisDim = dims[axis];
-  let inner = 1;
-  for (let d = axis + 1; d < rank; d++) inner *= dims[d];
-  if (blockSize === 0) {
-    if (scale.dims.length !== 1 || scale.dims[0] !== axisDim) return null;
-    let idx = 0;
-    for (let o = 0; o < outer; o++) {
-      for (let j = 0; j < axisDim; j++) {
-        const sv = s[j];
-        const zv = zp ? zp[j] : 0;
-        for (let i = 0; i < inner; i++, idx++) out[idx] = (q[idx] - zv) * sv;
+  return {
+    total,
+    write(view, offset, dataType) {
+      // Keep the old f64 -> f32 -> f16 rounding, not direct f64 -> f16.
+      // Native half IO is exact for finite values; NaNs retain the legacy encoding.
+      const half = view as DataView & { setFloat16?: (offset: number, value: number, littleEndian?: boolean) => void };
+      const storeHalf =
+        typeof half.setFloat16 === 'function'
+          ? (i: number, value: number) => {
+              if (Number.isNaN(value)) view.setUint16(offset + i * 2, f32ToF16Bits(value), true);
+              else half.setFloat16!(offset + i * 2, Math.fround(value), true);
+            }
+          : (i: number, value: number) => view.setUint16(offset + i * 2, f32ToF16Bits(value), true);
+      const store = dataType === ONNX_FLOAT16 ? storeHalf : (i: number, value: number) => view.setFloat32(offset + i * 4, value, true);
+      if (scalar) {
+        const sv = s.at(0),
+          zv = zp ? zp.at(0) : 0;
+        for (let i = 0; i < total; i++) store(i, (q.at(i) - zv) * sv);
+        return;
       }
-    }
-    return out;
-  }
-  const blocks = Math.ceil(axisDim / blockSize);
-  if (scale.dims.length !== rank) return null;
-  for (let d = 0; d < rank; d++) if (scale.dims[d] !== (d === axis ? blocks : dims[d])) return null;
-  let idx = 0;
-  for (let o = 0; o < outer; o++) {
-    for (let j = 0; j < axisDim; j++) {
-      const base = (o * blocks + Math.floor(j / blockSize)) * inner;
-      if (zp) for (let i = 0; i < inner; i++, idx++) out[idx] = (q[idx] - zp[base + i]) * s[base + i];
-      else for (let i = 0; i < inner; i++, idx++) out[idx] = q[idx] * s[base + i];
-    }
-  }
-  return out;
+      let idx = 0;
+      for (let o = 0; o < outer; o++) {
+        for (let j = 0; j < axisDim; j++) {
+          if (blockSize === 0) {
+            const sv = s.at(j),
+              zv = zp ? zp.at(j) : 0;
+            for (let i = 0; i < inner; i++, idx++) store(idx, (q.at(idx) - zv) * sv);
+          } else {
+            const base = (o * blocks + Math.floor(j / blockSize)) * inner;
+            if (zp) for (let i = 0; i < inner; i++, idx++) store(idx, (q.at(idx) - zp.at(base + i)) * s.at(base + i));
+            else for (let i = 0; i < inner; i++, idx++) store(idx, q.at(idx) * s.at(base + i));
+          }
+        }
+      }
+    },
+  };
 }
 
-function encodeFloatTensor(name: string, dataType: number, dims: number[], values: Float32Array): Uint8Array {
-  if (dataType === ONNX_FLOAT16) {
-    const bits = new Uint16Array(values.length);
-    for (let i = 0; i < values.length; i++) bits[i] = f32ToF16Bits(values[i]);
-    return encodeTensorProto(name, ONNX_FLOAT16, dims, new Uint8Array(bits.buffer, bits.byteOffset, bits.byteLength));
+function varintLength(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`protobuf: bad size ${value}`);
+  let length = 1;
+  for (; value >= 128; value = Math.floor(value / 128)) length++;
+  return length;
+}
+
+function bytesFieldLength(field: number, length: number): number {
+  return varintLength(field * 8 + WIRE_LEN) + varintLength(length) + length;
+}
+
+/** Exact-size model output: no tensor, graph or final-model concatenation copies. */
+class ModelWriter {
+  readonly bytes: Uint8Array;
+  readonly view: DataView;
+  position = 0;
+  constructor(length: number) {
+    this.bytes = new Uint8Array(length);
+    this.view = new DataView(this.bytes.buffer, this.bytes.byteOffset, this.bytes.byteLength);
   }
-  const copy = Float32Array.from(values);
-  return encodeTensorProto(name, ONNX_FLOAT, dims, new Uint8Array(copy.buffer, copy.byteOffset, copy.byteLength));
+  varint(value: number): void {
+    while (value >= 128) {
+      this.bytes[this.position++] = (value % 128) | 0x80;
+      value = Math.floor(value / 128);
+    }
+    this.bytes[this.position++] = value;
+  }
+  varintField(field: number, value: number): void {
+    this.varint(field * 8);
+    this.varint(value);
+  }
+  header(field: number, length: number): void {
+    this.varint(field * 8 + WIRE_LEN);
+    this.varint(length);
+  }
+  raw(bytes: Uint8Array): void {
+    this.bytes.set(bytes, this.position);
+    this.position += bytes.byteLength;
+  }
+}
+
+type FoldedTensor = { name: Uint8Array; dataType: number; dims: number[]; plan: DequantPlan; rawBytes: number; byteLength: number };
+function planFoldedTensor(name: string, dataType: number, dims: number[], plan: DequantPlan): FoldedTensor {
+  const encodedName = textEncoder.encode(name);
+  const rawBytes = plan.total * (dataType === ONNX_FLOAT16 ? 2 : 4);
+  const byteLength =
+    dims.reduce((n, dim) => n + 1 + varintLength(dim), 0) +
+    1 +
+    varintLength(dataType) +
+    bytesFieldLength(8, encodedName.length) +
+    bytesFieldLength(9, rawBytes);
+  return { name: encodedName, dataType, dims, plan, rawBytes, byteLength };
+}
+function writeFoldedTensor(writer: ModelWriter, tensor: FoldedTensor): void {
+  writer.header(5, tensor.byteLength);
+  for (const dim of tensor.dims) writer.varintField(1, dim);
+  writer.varintField(2, tensor.dataType);
+  writer.header(8, tensor.name.length);
+  writer.raw(tensor.name);
+  writer.header(9, tensor.rawBytes);
+  tensor.plan.write(writer.view, writer.position, tensor.dataType);
+  writer.position += tensor.rawBytes;
 }
 
 // ---------------------------------------------------------------- nodes
@@ -527,7 +596,7 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   };
 
   const removedNodes = new Set<Field>();
-  const replacement = new Map<Field, Uint8Array>(); // initializer field -> folded tensor bytes (emitted in its place)
+  const folds = new Map<Field, FoldedTensor>(); // metadata/readers only, no replacement tensor buffers
   const droppedInitializers = new Set<Field>();
   let skipped = 0;
   for (const node of dql) {
@@ -558,19 +627,18 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
       skipped += 1;
       continue;
     }
-    const values = dequantize(x, scale, zp, node.axis, node.blockSize);
-    if (!values) {
+    const plan = planDequantize(x, scale, zp, node.axis, node.blockSize);
+    if (!plan) {
       skipped += 1;
       continue;
     }
     const xEntry = initializers.get(node.inputs[0])!;
-    if (replacement.has(xEntry.field)) {
+    if (folds.has(xEntry.field)) {
       skipped += 1;
       continue;
     } // shared quantized input: fold only once
-    const folded = encodeFloatTensor(node.outputs[0], outType, x.dims, values);
     removedNodes.add(node.field);
-    replacement.set(xEntry.field, folded);
+    folds.set(xEntry.field, planFoldedTensor(node.outputs[0], outType, x.dims, plan));
     for (const name of [node.inputs[0], node.inputs[1], zpName]) {
       if (!name) continue;
       const left = (consumers.get(name) ?? 1) - 1;
@@ -580,25 +648,36 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   }
   if (removedNodes.size === 0) return unchanged(skipped);
 
-  const graph = new ProtoWriter();
-  for (const f of graphFields) {
-    if (f.field === 1 && removedNodes.has(f)) continue;
-    if (f.field === 5) {
-      const folded = replacement.get(f);
-      if (folded) {
-        graph.bytesField(5, folded);
+  // Pass 1 counts exactly the same fields/order that pass 2 writes. No numeric
+  // tensor data is produced until the sole, final model buffer is allocated.
+  const graph = (writer?: ModelWriter): number => {
+    let length = 0;
+    for (const f of graphFields) {
+      if (f.field === 1 && removedNodes.has(f)) continue;
+      if (f.field === 5) {
+        const folded = folds.get(f);
+        if (folded) {
+          length += bytesFieldLength(5, folded.byteLength);
+          if (writer) writeFoldedTensor(writer, folded);
+        }
         if (droppedInitializers.has(f)) continue;
-      } else if (droppedInitializers.has(f)) continue;
+      }
+      length += f.end - f.start;
+      writer?.raw(model.subarray(f.start, f.end));
     }
-    graph.raw(model.subarray(f.start, f.end));
-  }
-  const graphBytes = graph.finish();
-  const out = new ProtoWriter();
+    return length;
+  };
+  const graphLength = graph();
+  const modelLength = modelFields.reduce((length, f) => length + (f === graphField ? bytesFieldLength(7, graphLength) : f.end - f.start), 0);
+  const writer = new ModelWriter(modelLength);
   for (const f of modelFields) {
-    if (f === graphField) out.bytesField(7, graphBytes);
-    else out.raw(model.subarray(f.start, f.end));
+    if (f === graphField) {
+      writer.header(7, graphLength);
+      graph(writer);
+    } else writer.raw(model.subarray(f.start, f.end));
   }
-  const bytes = out.finish();
+  if (writer.position !== modelLength) throw new Error('onnx: folded model size mismatch');
+  const bytes = writer.bytes;
   return {
     bytes,
     foldedNodes: removedNodes.size,

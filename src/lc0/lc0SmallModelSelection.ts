@@ -1,5 +1,5 @@
 import { type OrtSessionPlacement, resolveOrtSessionPlacement } from '../nn/ortRuntime.ts';
-import { clearLc0ModelCacheEntry, type Lc0ModelLoadOptions, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
+import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadOptions, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
 
@@ -78,10 +78,23 @@ export function lc0SmallModelRequest(
 }
 
 type ModelBytes = string | Uint8Array | ArrayBuffer;
+type LoadedModel = { info: Lc0ModelLoadInfo; input: ModelBytes | undefined };
+
+function loadedModel(result: Lc0ModelLoadResult, revalidated = false): LoadedModel {
+  const { model, ...info } = result;
+  if (revalidated) info.revalidated = true;
+  return { info, input: model };
+}
+
+function takeModel(load: LoadedModel): ModelBytes | undefined {
+  const input = load.input;
+  load.input = undefined;
+  return input;
+}
 
 export type Lc0OrtEvaluatorFromUrlOptions = {
   load?: Lc0ModelLoadOptions;
-  evaluator?: Omit<Lc0OnnxEvaluatorOptions, 'wasmFallbackModel'>;
+  evaluator?: Omit<Lc0OnnxEvaluatorOptions, 'wasmFallbackModel' | 'reloadModel' | 'rejectModelParseErrors'>;
   /**
    * Apply the device rule above. Product surfaces set it from
    * lc0SmallModelRequest (no ?model= override); explicit overrides and lab
@@ -92,8 +105,8 @@ export type Lc0OrtEvaluatorFromUrlOptions = {
 
 export type Lc0OrtEvaluatorFromUrl = {
   evaluator: Lc0OnnxEvaluator;
-  /** The load of the bytes the session actually runs. */
-  modelLoad: Lc0ModelLoadResult;
+  /** Provenance of the model actually run; no retained model buffer. */
+  modelLoad: Lc0ModelLoadInfo;
   requestedUrl: string;
   /** URL of the model the session runs: the cache identity for its evaluations. */
   servedUrl: string;
@@ -144,11 +157,11 @@ export async function createLc0OnnxEvaluatorFromUrl(
   const loadOptions = options.load ?? {};
   const selectedUrl = options.deviceSelection ? selectLc0OrtModelUrl(requestedUrl, await deps.placement()) : requestedUrl;
   let fallbackReason: string | undefined;
-  let modelLoad: Lc0ModelLoadResult | undefined;
+  let modelLoad: LoadedModel | undefined;
   let servedUrl = requestedUrl;
   if (selectedUrl !== requestedUrl) {
     try {
-      modelLoad = await deps.load(selectedUrl, loadOptions);
+      modelLoad = loadedModel(await deps.load(selectedUrl, loadOptions));
       servedUrl = selectedUrl;
     } catch (error) {
       if (isAbortError(error)) throw error;
@@ -156,56 +169,78 @@ export async function createLc0OnnxEvaluatorFromUrl(
       console.warn(`Lc0: ${fallbackReason}; loading the original model.`);
     }
   }
-  modelLoad ??= await deps.load(requestedUrl, loadOptions);
-  let originalLoad: Lc0ModelLoadResult | undefined;
+  modelLoad ??= loadedModel(await deps.load(requestedUrl, loadOptions));
+  let originalLoad: LoadedModel | undefined;
   let usedOriginal = false;
+  const reloadPrimary = async (): Promise<ModelBytes> => {
+    modelLoad = loadedModel(await deps.load(servedUrl, { ...loadOptions, allowUnverified: false }), modelLoad?.info.revalidated);
+    usedOriginal = false;
+    loadOptions.signal?.throwIfAborted();
+    return takeModel(modelLoad)!;
+  };
   const wasmFallbackModel =
     servedUrl === requestedUrl
       ? undefined
       : async () => {
+          if (originalLoad?.input === undefined) {
+            originalLoad = loadedModel(await deps.load(requestedUrl, loadOptions), originalLoad?.info.revalidated);
+          }
           usedOriginal = true;
-          originalLoad ??= await deps.load(requestedUrl, loadOptions);
-          return originalLoad.model;
+          loadOptions.signal?.throwIfAborted();
+          return takeModel(originalLoad)!;
         };
-  const create = (load: Lc0ModelLoadResult) => {
+  // Defined outside create's activation: these callbacks capture provenance/
+  // empty holders, never its transient model argument.
+  const rejectModelParseErrors = () => isMetadataTrustedModel((usedOriginal ? originalLoad : modelLoad)?.info);
+  const create = async () => {
     loadOptions.signal?.throwIfAborted();
     usedOriginal = false;
-    return deps.createEvaluator(load.model, {
+    let input = takeModel(modelLoad!);
+    input ??= await reloadPrimary();
+    const creating = deps.createEvaluator(input, {
       ...options.evaluator,
       ...(wasmFallbackModel ? { wasmFallbackModel } : {}),
-      rejectModelParseErrors: isMetadataTrustedModel(load),
+      ...(modelLoad?.info.sha256Valid === true ? { reloadModel: reloadPrimary } : {}),
+      rejectModelParseErrors,
     });
+    input = undefined; // Do not pin the unfolded bytes while ORT builds the folded session.
+    return creating;
   };
   let evaluator: Lc0OnnxEvaluator;
   try {
-    evaluator = await create(modelLoad);
+    evaluator = await create();
   } catch (error) {
     loadOptions.signal?.throwIfAborted();
     const failedOnOriginal = usedOriginal;
-    const failed = failedOnOriginal ? originalLoad : modelLoad;
+    const failed = (failedOnOriginal ? originalLoad : modelLoad)?.info;
     if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(failed) || !failed) throw error;
     console.warn(`Lc0: cached model could not be parsed; evicting and verifying one fresh load. ${failed.url}`);
     await (deps.clearCacheEntry ?? clearLc0ModelCacheEntry)(failed.url, loadOptions.cacheName, loadOptions.metadataStore);
     loadOptions.signal?.throwIfAborted();
-    const reloaded = {
-      ...(await deps.load(failedOnOriginal ? requestedUrl : servedUrl, { ...loadOptions, forceReload: true, allowUnverified: false })),
-      revalidated: true,
-    };
-    if (reloaded.verification !== 'hashed' || reloaded.sha256Valid !== true) throw new Error('LC0 model recovery requires freshly SHA-256-verified bytes');
-    if (failedOnOriginal) originalLoad = reloaded;
-    else modelLoad = reloaded;
-    // Deliberately not recursive: a second parse failure propagates without another fetch.
-    evaluator = await create(modelLoad);
+    const reloaded = loadedModel(
+      await deps.load(failedOnOriginal ? requestedUrl : servedUrl, { ...loadOptions, forceReload: true, allowUnverified: false }),
+      true,
+    );
+    if (reloaded.info.verification !== 'hashed' || reloaded.info.sha256Valid !== true)
+      throw new Error('LC0 model recovery requires freshly SHA-256-verified bytes');
+    if (failedOnOriginal) {
+      originalLoad = reloaded;
+      // Keep only provenance until WASM is actually needed. An uncacheable
+      // recovery must retain its verified bytes to avoid another model download.
+      if (reloaded.info.mode === 'cache') reloaded.input = undefined;
+    } else modelLoad = reloaded;
+    // Deliberately not recursive: a second parse failure propagates without another refetch.
+    evaluator = await create();
   }
   if (usedOriginal && originalLoad) {
     // createOrtSession only loads the fallback model when the WebGPU attempts failed
     // and it is about to run WASM; a returned session is therefore the original model.
     fallbackReason = 'WebGPU session failed; WASM runs the original model';
-    return { evaluator, modelLoad: originalLoad, requestedUrl, servedUrl: requestedUrl, variant: 'original', fallbackReason };
+    return { evaluator, modelLoad: originalLoad.info, requestedUrl, servedUrl: requestedUrl, variant: 'original', fallbackReason };
   }
   return {
     evaluator,
-    modelLoad,
+    modelLoad: modelLoad!.info,
     requestedUrl,
     servedUrl,
     variant: servedUrl === requestedUrl ? 'original' : 'splitk',

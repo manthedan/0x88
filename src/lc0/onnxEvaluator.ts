@@ -75,7 +75,9 @@ export interface Lc0OnnxEvaluatorOptions {
   /** Passed to createOrtSession: the model for its WebGPU -> WASM fallback attempt. */
   wasmFallbackModel?: () => Promise<string | Uint8Array | ArrayBuffer>;
   /** Verified loader owns one-shot metadata-cache recovery before provider fallback. */
-  rejectModelParseErrors?: boolean;
+  rejectModelParseErrors?: boolean | (() => boolean);
+  /** Verified lazy reload of the same bytes, so folded-session creation need not pin the original. */
+  reloadModel?: () => Promise<string | Uint8Array | ArrayBuffer>;
   /**
    * How invokes move data (docs/ort_invoke_overhead_2026-11.md). 'cpu' (default):
    * CPU input and output tensors. 'gpu': persistent GPU input/output buffers and
@@ -591,31 +593,42 @@ export function lc0GpuIoSpecs(
   return { input, outputs };
 }
 
+function gpuIoModelEligible(modelPath: string | Uint8Array | ArrayBuffer, mode: string, options: Lc0OnnxEvaluatorOptions): boolean {
+  // No unverified shape-probe download for URL-only callers.
+  if (typeof modelPath === 'string') return false;
+  try {
+    const declared = lc0GpuIoSpecs(readOnnxModelIo(modelPath instanceof Uint8Array ? modelPath : new Uint8Array(modelPath)), { inferOutputBatch: true });
+    if ('reason' in declared) throw new Error(`model not eligible: ${declared.reason}`);
+    return true;
+  } catch (error) {
+    const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
+    if (rejectParse && isOnnxModelParseError(error)) throw error;
+    console.warn(`Lc0: GPU-resident ORT IO (${mode}) unavailable, using CPU IO. ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
 /**
  * A WebGPU session with GPU-resident IO, or null (with a console warning) when
  * the placement is not WebGPU, the model has dynamic shapes, or ORT rejects the
  * session; the caller then builds the ordinary session.
  */
 async function createLc0GpuIoSession(
-  modelPath: string | Uint8Array | ArrayBuffer,
+  takeModel: () => string | Uint8Array | ArrayBuffer,
   mode: 'gpu' | 'gpu-capture',
-  rejectModelParseErrors = false,
+  options: Lc0OnnxEvaluatorOptions,
 ): Promise<{ session: ort.InferenceSession; binding: OrtGpuIoBinding } | null> {
+  let modelPath = takeModel();
   let session: ort.InferenceSession | undefined;
   try {
-    // Reject symbolic declarations before allocating/folding a complete session.
-    // URL-only lab callers have no verified declarations to inspect: use CPU IO
-    // rather than downloading a second, potentially different copy for a probe.
-    if (typeof modelPath === 'string') return null;
-    const declared = lc0GpuIoSpecs(readOnnxModelIo(modelPath instanceof Uint8Array ? modelPath : new Uint8Array(modelPath)), { inferOutputBatch: true });
-    if ('reason' in declared) throw new Error(`model not eligible: ${declared.reason}`);
-    const placement = await ort.resolveOrtSessionPlacement();
-    if (placement.providers[0] !== 'webgpu') return null;
-    session = await ort.createOrtSession(modelPath, {
+    const creating = ort.createOrtSession(modelPath, {
       webgpuOnly: true,
-      rejectModelParseErrors,
+      reloadModel: options.reloadModel,
+      rejectModelParseErrors: options.rejectModelParseErrors,
       webgpuSessionOptions: { preferredOutputLocation: 'gpu-buffer', ...(mode === 'gpu-capture' ? ortGraphCaptureSessionOptions() : {}) },
     });
+    modelPath = undefined as never;
+    session = await creating;
     const specs = lc0GpuIoSpecs(session);
     if ('reason' in specs) throw new Error(`model not eligible: ${specs.reason}`);
     const device = (await (ort.env.webgpu as unknown as { device?: unknown }).device) as ConstructorParameters<typeof OrtGpuIoBinding>[1] | undefined;
@@ -637,7 +650,8 @@ async function createLc0GpuIoSession(
     return { session, binding };
   } catch (error) {
     if (session) await ort.releaseOrtSession(session).catch(() => undefined);
-    if (rejectModelParseErrors && isOnnxModelParseError(error)) throw error;
+    const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
+    if (rejectParse && isOnnxModelParseError(error)) throw error;
     console.warn(`Lc0: GPU-resident ORT IO (${mode}) unavailable, using CPU IO. ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
@@ -664,15 +678,35 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     this.physicalBatchMode = options.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   }
 
-  static async create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0OnnxEvaluator> {
-    if (options.ioMode === 'gpu' || options.ioMode === 'gpu-capture') {
-      const gpu = await createLc0GpuIoSession(modelPath, options.ioMode, options.rejectModelParseErrors);
-      if (gpu) return new Lc0OnnxEvaluator(gpu.session, options, { binding: gpu.binding, mode: options.ioMode });
+  static create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0OnnxEvaluator> {
+    return Lc0OnnxEvaluator.createFromSource(() => {
+      const input = modelPath;
+      modelPath = undefined as never;
+      return input;
+    }, options);
+  }
+
+  private static async createFromSource(takeModel: () => string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions): Promise<Lc0OnnxEvaluator> {
+    let modelPath = takeModel();
+    if ((options.ioMode === 'gpu' || options.ioMode === 'gpu-capture') && gpuIoModelEligible(modelPath, options.ioMode, options)) {
+      const placement = await ort.resolveOrtSessionPlacement();
+      if (placement.providers[0] === 'webgpu') {
+        const creating = createLc0GpuIoSession(() => modelPath, options.ioMode, options);
+        // Raw callers need these bytes for CPU-IO fallback; verified URL loaders
+        // can reacquire them only if the actual GPU attempt fails.
+        if (options.reloadModel) modelPath = undefined as never;
+        const gpu = await creating;
+        if (gpu) return new Lc0OnnxEvaluator(gpu.session, options, { binding: gpu.binding, mode: options.ioMode });
+        if (options.reloadModel) modelPath = await options.reloadModel();
+      }
     }
-    return new Lc0OnnxEvaluator(
-      await ort.createOrtSession(modelPath, { wasmFallbackModel: options.wasmFallbackModel, rejectModelParseErrors: options.rejectModelParseErrors }),
-      options,
-    );
+    const creating = ort.createOrtSession(modelPath, {
+      wasmFallbackModel: options.wasmFallbackModel,
+      reloadModel: options.reloadModel,
+      rejectModelParseErrors: options.rejectModelParseErrors,
+    });
+    modelPath = undefined as never;
+    return new Lc0OnnxEvaluator(await creating, options);
   }
 
   dispose(): Promise<void> {

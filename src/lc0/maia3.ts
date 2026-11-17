@@ -1,10 +1,10 @@
-import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
-import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { type BoardState, boardToFen, type Piece, type PieceRole, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
+import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
+import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { clearLc0ModelCacheEntry, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
+import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
 
 const MAIA3_MODEL_CACHE_NAME = 'maia3-browser-models-v1';
@@ -328,7 +328,14 @@ export class Maia3BrowserEvaluator {
       options.signal?.throwIfAborted();
       const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
       try {
-        const names = await Maia3BrowserEvaluator.postInit(worker, loaded.model, options.ep, options.signal, options.wasmThreads);
+        const names = await Maia3BrowserEvaluator.postInit(
+          worker,
+          loaded.model,
+          options.ep,
+          options.signal,
+          options.wasmThreads,
+          loaded.sha256Valid === true ? { url: loaded.logicalUrl ?? loaded.url, metadataTrusted: isMetadataTrustedModel(loaded) } : undefined,
+        );
         options.signal?.throwIfAborted();
         const evaluator = new Maia3BrowserEvaluator(worker, loaded, selfElo, oppoElo, names, options.onFailure);
         const abort = () => evaluator.terminate();
@@ -344,10 +351,11 @@ export class Maia3BrowserEvaluator {
       return await create(modelLoad);
     } catch (error) {
       options.signal?.throwIfAborted();
-      if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(modelLoad)) throw error;
-      await modelDeps.clear(modelLoad.url, MAIA3_MODEL_CACHE_NAME);
+      const failed = (error as { modelLoad?: Lc0ModelLoadInfo } | null)?.modelLoad ?? modelLoad;
+      if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(failed)) throw error;
+      await modelDeps.clear(failed.url, MAIA3_MODEL_CACHE_NAME);
       options.signal?.throwIfAborted();
-      const reloaded = { ...(await load(modelLoad.logicalUrl ?? modelLoad.url, true)), revalidated: true };
+      const reloaded = { ...(await load(failed.logicalUrl ?? modelLoad.logicalUrl ?? failed.url, true)), revalidated: true };
       if (reloaded.verification !== 'hashed' || reloaded.sha256Valid !== true) throw new Error('Maia3 model recovery requires freshly SHA-256-verified bytes');
       return create(reloaded); // One retry, in a fresh worker; no recursion or artifact fallback.
     }
@@ -372,6 +380,7 @@ export class Maia3BrowserEvaluator {
     ep?: Maia3BrowserEvaluatorOptions['ep'],
     signal?: AbortSignal,
     wasmThreads?: number,
+    reloadModel?: { url: string; metadataTrusted: boolean },
   ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics }> {
     return new Promise((resolve, reject) => {
       const id = 0;
@@ -403,6 +412,7 @@ export class Maia3BrowserEvaluator {
           outputNames?: string[];
           backend?: string;
           ortRuntime?: OrtSessionDiagnostics;
+          modelLoad?: Lc0ModelLoadInfo;
         };
         if (data.type === 'deviceLost' || data.id !== id) return;
         if (data.type === 'ready') {
@@ -410,7 +420,7 @@ export class Maia3BrowserEvaluator {
           resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown', ortRuntime: data.ortRuntime });
         } else if (data.type === 'error') {
           cleanup();
-          reject(new Error(data.message ?? 'Maia3 worker initialization failed'));
+          reject(Object.assign(new Error(data.message ?? 'Maia3 worker initialization failed'), data.modelLoad ? { modelLoad: data.modelLoad } : {}));
         }
       };
       worker.addEventListener('message', onMessage);
@@ -429,6 +439,7 @@ export class Maia3BrowserEvaluator {
         wasmThreads,
         ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
         dequantFold: ortDequantFoldEnabled(),
+        ...(reloadModel ? { modelUrl: reloadModel.url, metadataTrustedModel: reloadModel.metadataTrusted } : {}),
       };
       if (typeof model === 'string') worker.postMessage(message);
       else worker.postMessage(message, [model]);

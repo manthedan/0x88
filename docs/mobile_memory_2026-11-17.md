@@ -128,6 +128,50 @@ This is an integrity/recovery change, **not a normal-load memory optimization**.
 - **Real Safari recovery test:** loaded Small split-K, corrupted a same-length **20,580,952-byte** cached body without changing its verification metadata, then started again. It passed on WebGPU with no variant/provider fallback, made **exactly one** model request with `cache:'reload'`, and repaired the cached SHA-256 to `3a5ccb636ebc596a66021b90a39a3d5b708fbd280048b07ff2d7855d240b37a1`.
 - Validation: lint; **253 relevant tests** including all model-cache/model-pack/resumable/engine-integrity cases, recovery, Maia and IO lifecycle tests; Svelte typecheck; **`npm test`: 2323 passed, 4 existing asset-dependent skips, zero failures**; product build. No streaming/incremental hash path was added.
 
+## Step 3: one-output-buffer folding and model lifetimes
+
+After step 3 (same protocol; Safari pairing contention was waited out without terminating the other session):
+
+| Model | Cold peak / end MB | Warm peak / end MB | Load cold / warm ms | Midgame visits/s cold / warm |
+|---|---:|---:|---:|---:|
+| lqo | 2351 / 2194 | 4569 / 4477 | 9593 / 7289 | 83.1 / 18.2 |
+| t3 | 3011 / 2949 | 5549 / 5402 | 16960 / 3103 | 59.1 / 58.5 |
+| bt4 | 3733 / 3667 | 6667 / 6280 | 15254 / 6218 | 22.9 / 21.4 |
+
+The isolated cold LQO total peak fell **3007 → 2351 MB** versus step 2 (baseline 3627 MB), but remains above the phone's reported 2048 MB limit. BT4 total peak barely changed; native malloc still dominates. Short-run throughput and load times remain noisy. Observed fold times were LQO **544/928 → 686/1002 ms**, BT4 **2037/2392 → 2202/2580 ms** (cold/warm, step 2 → step 3): memory savings are not presented as a startup-speed optimization.
+
+### What changed
+
+- The fold first validates/plans and computes **exact TensorProto, GraphProto and ModelProto sizes**, then allocates one final model buffer. It reads quantized weights/scales through views/readers and writes f16/f32 values directly at their final offsets. There is no dequantized Float32Array, unpacked int4 tensor, encoded-weight replacement buffer Map, graph intermediate, or final concatenation copy.
+- The Map now contains only small plans/readers into the original. Legacy packed `int32_data` and `float_data` encodings remain supported. All unknown fields, initializer ordering, shared-input retention, nested-subgraph consumers, output dtype and skip behavior are preserved.
+- Native half IO is used when available, with the manual fallback tested too. The old **f64 → f32 → f16** rounding is preserved (`Math.fround` before native half stores); NaN handling follows the old converter.
+- The common verified loader returns **provenance without `.model`**, consumes owned byte holders before awaiting creation, and supplies verified lazy reload callbacks for unfolded/provider/IO fallback. Successful loads neither reread nor redownload a model merely to save a fallback copy. Shared/coalesced results are **not mutated or detached**.
+- Simply assigning `modelPath=undefined` inside an async function was insufficient: a Node heap snapshot showed the original still held by the async generator's **`parameters_and_registers`** in both evaluator and ORT creation. Synchronous consuming entry wrappers now pass only a source function to private async frames. The regression test forces GC in an isolated child and proves the unfolded ArrayBuffer is collectible **while native creation is still pending**.
+- Maia forwards verified reload provenance with its transferred input, clears the worker-owned init message's buffer reference, and reacquires through the same pinned loader only on fallback. Worker-side metadata-cache parse failures are surfaced to the parent for the bounded repair even if the original main-thread load was hashed.
+- Low-level byte/opaque-URL callers **without a verified reload source** retain the original only to preserve their existing unfolded fallback contract; an uncacheable repaired WASM-original input is similarly retained only until needed. No new unverified fallback fetch is substituted. Physical reclamation still depends on the browser.
+
+### Copy budget after the rewrite
+
+| Ours, excluding metadata/runtime | LQO bytes | BT4 bytes | Lifetime |
+|---|---:|---:|---|
+| Old input + encoded replacements + graph + final model | 662708512 | 1297024440 | Necessarily coexist at old final serialization |
+| New input + sole final model | 285062387 | 557313981 | While streaming the fold into the final output |
+| Eliminated simultaneous serialization buffers | **377646125** | **739710459** | No longer allocated |
+| Folded input handed to ORT | 189399671 | 370637638 | ORT's ingestion lifetime; rederivable original no longer rooted by our async frames |
+
+At the cold total peak, LQO Gigacage was **182 MB**, versus 1180 MB at baseline. This is consistent with the final 189.4 MB model being the remaining large JS input, not proof that every browser/native copy has disappeared. BT4's cold peak still included 2749 MB WebKit malloc; its warm peak 5412 MB. The baseline linear-memory measurement cannot account for these totals by itself.
+
+### Byte identity and regression evidence
+
+[Committed goldens](../tests/fixtures/onnx_dequant_fold_golden.json) were generated using the unchanged `720aaf4a` fold **before this rewrite**. All **seven** complete folded protobufs match, including LQO, BT4, three Small variants and both Maia QDQ variants. Input lengths/hashes are pinned independently by committed manifests and the immutable release catalog.
+
+- LQO folded SHA-256: `4cacdd89a647ba0cdb99009560f5628369e4188db5e0f7fbc81fe9fe0180b997`.
+- BT4 folded SHA-256: `b6dda28f480ca9632e1eaa26440014cd7bc3177c83acdf4273f9b90e8e1fa206`.
+- Allocation regression traps Float32Array construction and counts exactly **one** large Uint8Array output allocation. Numeric tests cover signed/unsigned int8/int4, scalar/per-axis/blocked scales, zero points, f16/f32 scale/output combinations, signed NaNs, native/manual half IO and shared quantized inputs.
+- The existing real-ORT shipped Small folded-vs-in-graph inference/move/prior parity test **ran and passed**, not skipped. Full-buffer identity also preserves the already-tested old folded models for the large nets.
+- CI fixture staging now includes all seven goldens, keeps hash-verified local staging zero-network, and includes Maia's committed manifest in the CI cache key. No model binaries are committed and this is not a new production streaming/hash path. An offline check of the seven local fixtures passed with `network:false`.
+- Validation: required lint; 208 relevant tests plus 46 post-format lifecycle/recovery/IO checks; Svelte typecheck; **`npm test`: 2340 passed, 4 unrelated existing skips** (three Python-transformer fixtures and the LC0 C++ encoder source); product build. All changed TS/JS/JSON files pass targeted Biome check. The optional repository-wide `check:biome` also reports pre-existing import/format findings in unrelated soak/telemetry files; no broad cleanup is folded into this memory change.
+
 ## Remaining work / costs
 
-Steps 3–4 and final no-fold controls will be recorded in subsequent commits. At this stage the requested sub-1 GB LQO / sub-2 GB BT4 peaks are **not achieved**. The significant native/WebKit cost and reload retention remain unexplained by JS copy counts alone. Do not promise an iPhone fix, disable folding by default, weaken integrity, or embark on OPFS/streaming hash work based on these observations.
+Step 4 and final no-fold controls will be recorded next. The requested sub-1 GB LQO / sub-2 GB BT4 peaks are **not achieved**. Expanded f16 models still enter ORT, and significant native/WebKit cost and reload retention remain. Do not promise an iPhone fix, disable folding by default, weaken integrity, or embark on OPFS/streaming hash work based on these observations.

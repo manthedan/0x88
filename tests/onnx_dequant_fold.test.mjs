@@ -13,6 +13,8 @@ import {
   ONNX_FLOAT16,
   ONNX_INT4,
   ONNX_INT8,
+  ONNX_UINT4,
+  ONNX_UINT8,
   ProtoWriter,
   parseProtoFields,
 } from '../src/nn/onnxDequantFold.ts';
@@ -367,6 +369,131 @@ test('a DequantizeLinear fed by an overridable graph input is not folded', () =>
   assert.equal(folded.foldedNodes, 0);
   assert.equal(folded.skippedNodes, 1);
   assert.equal(folded.bytes, bytes, 'model bytes returned unchanged');
+});
+
+function foldedRaw(bytes, name = 'W') {
+  const graph = parseProtoFields(bytes).find((f) => f.field === 7);
+  for (const field of parseProtoFields(bytes, graph.valueStart, graph.valueEnd).filter((f) => f.field === 5)) {
+    const fields = parseProtoFields(bytes, field.valueStart, field.valueEnd);
+    const named = fields.find((f) => f.field === 8);
+    if (new TextDecoder().decode(bytes.subarray(named.valueStart, named.valueEnd)) === name) {
+      const raw = fields.find((f) => f.field === 9);
+      return bytes.subarray(raw.valueStart, raw.valueEnd);
+    }
+  }
+  assert.fail(`missing ${name}`);
+}
+
+test('raw int4 folding allocates just the exact final buffer and never constructs a Float32Array intermediate', () => {
+  const count = 100001;
+  const bytes = model({
+    nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'])],
+    initializers: [
+      encodeTensorProto('Wq', ONNX_INT4, [count], new Uint8Array(Math.ceil(count / 2)).fill(0x7f)),
+      encodeTensorProto('Ws', ONNX_FLOAT16, [], f16Bytes([0.125])),
+    ],
+    inputs: [],
+    outputs: [valueInfo('W', ONNX_FLOAT16, [count])],
+  });
+  const NativeBytes = globalThis.Uint8Array,
+    NativeFloats = globalThis.Float32Array;
+  const allocations = [];
+  let folded;
+  globalThis.Uint8Array = class extends NativeBytes {
+    constructor(...args) {
+      super(...args);
+      if (typeof args[0] === 'number' && args[0] >= 4096) allocations.push(args[0]);
+    }
+  };
+  globalThis.Float32Array = class extends NativeFloats {
+    constructor() {
+      throw new Error('forbidden Float32Array intermediate');
+    }
+  };
+  try {
+    folded = foldOnnxDequantizeLinear(bytes);
+  } finally {
+    globalThis.Uint8Array = NativeBytes;
+    globalThis.Float32Array = NativeFloats;
+  }
+  assert.equal(folded.foldedNodes, 1);
+  assert.deepEqual(allocations, [folded.bytes.byteLength]);
+  assert.equal(foldedRaw(folded.bytes).byteLength, count * 2);
+});
+
+test('all integer dtypes/layouts/output dtypes match the old f32-intermediate rounding, including the half-reader fallback', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(DataView.prototype, 'getFloat16');
+  const encoder = Object.getOwnPropertyDescriptor(DataView.prototype, 'setFloat16');
+  for (const fallback of [false, true]) {
+    if (fallback && descriptor) Object.defineProperty(DataView.prototype, 'getFloat16', { ...descriptor, value: undefined });
+    if (fallback && encoder) Object.defineProperty(DataView.prototype, 'setFloat16', { ...encoder, value: undefined });
+    try {
+      for (const dtype of [ONNX_INT8, ONNX_UINT8, ONNX_INT4, ONNX_UINT4])
+        for (const scaleType of [ONNX_FLOAT, ONNX_FLOAT16])
+          for (const outputType of [ONNX_FLOAT, ONNX_FLOAT16])
+            for (const layout of ['scalar', 'axis', 'blocked']) {
+              const signed = dtype === ONNX_INT8 || dtype === ONNX_INT4,
+                packed = dtype === ONNX_INT4 || dtype === ONNX_UINT4;
+              const q = Array.from({ length: 9 }, (_, i) => (packed ? ((i * 3) % 16) - (signed ? 8 : 0) : ((i * 33) % 256) - (signed ? 128 : 0)));
+              const scaleDims = layout === 'scalar' ? [] : layout === 'axis' ? [3] : [2, 3];
+              const count = layout === 'scalar' ? 1 : layout === 'axis' ? 3 : 6;
+              const scales = [0.123456789, 1e-39, 1 + 2 ** -23, 65504.1, -0, Infinity].slice(0, count);
+              const stored = scaleType === ONNX_FLOAT16 ? scales.map((v) => f16BitsToF32(f32ToF16Bits(v))) : Array.from(Float32Array.from(scales));
+              const zero = Array.from({ length: count }, (_, i) => (i % 3) + (signed ? -1 : 1));
+              const attrs = [attrInt('output_dtype', outputType), attrSignedInt('axis', layout === 'blocked' ? 0 : -1)];
+              if (layout === 'blocked') attrs.push(attrInt('block_size', 2));
+              const input = model({
+                nodes: [node('DequantizeLinear', ['Wq', 'Ws', 'Zp'], ['W'], attrs)],
+                initializers: [
+                  encodeTensorProto('Wq', dtype, [3, 3], packed ? int4Bytes(q) : int8Bytes(q)),
+                  encodeTensorProto('Ws', scaleType, scaleDims, scaleType === ONNX_FLOAT16 ? f16Bytes(scales) : f32Bytes(scales)),
+                  encodeTensorProto('Zp', dtype, scaleDims, packed ? int4Bytes(zero) : int8Bytes(zero)),
+                ],
+                inputs: [],
+                outputs: [valueInfo('W', outputType, [3, 3])],
+              });
+              const values = Float32Array.from(q, (v, i) => {
+                const s = layout === 'scalar' ? 0 : layout === 'axis' ? i % 3 : Math.floor(Math.floor(i / 3) / 2) * 3 + (i % 3);
+                return (v - zero[s]) * stored[s];
+              });
+              const expected =
+                outputType === ONNX_FLOAT16 ? new Uint8Array(Uint16Array.from(values, f32ToF16Bits).buffer) : new Uint8Array(Float32Array.from(values).buffer);
+              const folded = foldOnnxDequantizeLinear(input);
+              assert.equal(folded.foldedNodes, 1);
+              assert.deepEqual(foldedRaw(folded.bytes), expected, `${dtype}/${scaleType}/${outputType}/${layout}/fallback=${fallback}`);
+            }
+    } finally {
+      if (descriptor) Object.defineProperty(DataView.prototype, 'getFloat16', descriptor);
+      if (encoder) Object.defineProperty(DataView.prototype, 'setFloat16', encoder);
+    }
+  }
+});
+
+test('native/fallback half readers canonicalize signed NaNs exactly as the old converter', () => {
+  const scales = new Uint8Array(Uint16Array.of(0xfc01, 0x7c01).buffer);
+  const bytes = model({
+    nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W'], [attrInt('axis', 1), attrInt('output_dtype', ONNX_FLOAT)])],
+    initializers: [encodeTensorProto('Wq', ONNX_INT8, [1, 2], int8Bytes([1, -1])), encodeTensorProto('Ws', ONNX_FLOAT16, [2], scales)],
+    inputs: [],
+    outputs: [valueInfo('W', ONNX_FLOAT, [1, 2])],
+  });
+  const values = Float32Array.from([1 * f16BitsToF32(0xfc01), -1 * f16BitsToF32(0x7c01)]);
+  assert.deepEqual(foldedRaw(foldOnnxDequantizeLinear(bytes).bytes), new Uint8Array(Float32Array.from(values).buffer));
+});
+
+test('shared quantized inputs preserve the old folded-before-original ordering and skipped-node policy', () => {
+  const q = encodeTensorProto('Wq', ONNX_INT8, [2], int8Bytes([1, -2]));
+  const scale = encodeTensorProto('Ws', ONNX_FLOAT16, [], f16Bytes([0.5]));
+  const second = node('DequantizeLinear', ['Wq', 'Ws'], ['Other']);
+  const outputs = [valueInfo('W', ONNX_FLOAT16, [2]), valueInfo('Other', ONNX_FLOAT16, [2])];
+  const folded = foldOnnxDequantizeLinear(
+    model({ nodes: [node('DequantizeLinear', ['Wq', 'Ws'], ['W']), second], initializers: [q, scale], inputs: [], outputs }),
+  );
+  const expected = model({ nodes: [second], initializers: [encodeTensorProto('W', ONNX_FLOAT16, [2], f16Bytes([0.5, -1])), q, scale], inputs: [], outputs });
+  assert.equal(folded.foldedNodes, 1);
+  assert.equal(folded.skippedNodes, 1);
+  assert.equal(folded.removedInitializers, 0);
+  assert.deepEqual(folded.bytes, expected);
 });
 
 const QDQ8 = process.env.LC0_QDQ8_MODEL ?? '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';

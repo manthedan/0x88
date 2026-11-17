@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { lc0GpuIoSpecs, Lc0OnnxEvaluator, defaultLc0OrtIoMode } from '../src/lc0/onnxEvaluator.ts';
+import { defaultLc0OrtIoMode, Lc0OnnxEvaluator, lc0GpuIoSpecs } from '../src/lc0/onnxEvaluator.ts';
 import { readOnnxModelIo } from '../src/lc0/onnxModelIo.ts';
-import { ProtoWriter, encodeTensorProto, ONNX_FLOAT16 } from '../src/nn/onnxDequantFold.ts';
+import { encodeTensorProto, ONNX_FLOAT16, ProtoWriter } from '../src/nn/onnxDequantFold.ts';
 import * as ort from '../src/nn/ortRuntime.ts';
 
 function value(name, shape, type = ONNX_FLOAT16) {
