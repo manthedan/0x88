@@ -355,6 +355,7 @@ export class Bt4WorkerSearcher {
   >();
   private activeSearchId: number | null = null;
   private closing: Promise<void> | null = null;
+  private lifecycleGeneration = 0;
   private configuredEvalCacheEntries = -1;
   private configuredDiagnosticKey = '';
   backend = '';
@@ -408,7 +409,18 @@ export class Bt4WorkerSearcher {
     const diagnosticKey = JSON.stringify(diagnostics);
     if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries && this.configuredDiagnosticKey === diagnosticKey) return this.backend;
     if (this.ready) this.dispose();
-    if (this.closing) await this.closing;
+    const generation = this.lifecycleGeneration;
+    const closing = this.closing;
+    if (closing) {
+      try {
+        await closing;
+      } finally {
+        // Report this attempt's cleanup failure, but allow a later explicit retry.
+        if (this.closing === closing) this.closing = null;
+      }
+    }
+    // Pool/page teardown during the wait must not resurrect an unowned worker.
+    if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
     if (this.initPromise) return this.initPromise;
     if (!this.worker) {
       this.deviceLost = null;
@@ -578,6 +590,7 @@ export class Bt4WorkerSearcher {
 
   /** Retire synchronously; release the detached worker's session/device before termination. */
   dispose(): Promise<void> {
+    this.lifecycleGeneration++;
     const worker = this.worker;
     this.invalidate(worker, new Error('Lc0 BT4 worker disposed'), false);
     if (worker) {
