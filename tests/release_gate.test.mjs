@@ -24,7 +24,7 @@ function harness({ dirty = '', lintStatus = 0, ciRuns = [green], smokeRuns = [{ 
         return ok(dirty);
       }
       if (bin === 'npm' || bin === '/custom/npm') {
-        assert.deepEqual(args, ['run', 'check:biome']);
+        assert.deepEqual(args, ['run', 'check:biome:tracked']);
         return { status: lintStatus, stdout: '', stderr: lintStatus ? 'Biome formatting error' : '' };
       }
       assert.equal(bin, 'gh');

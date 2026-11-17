@@ -21,7 +21,7 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   const netlify = join(root, 'fake-netlify.sh');
   await fakeBin(
     npm,
-    'printf "%s\\n" "$*" >> "$NPM_LOG"\nif [ "$*" = "run check:biome" ]; then exit 0; fi\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.jspi.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.jspi.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.wasm"\nexit 0',
+    'printf "%s\\n" "$*" >> "$NPM_LOG"\nif [ "$*" = "run check:biome:tracked" ]; then exit 0; fi\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.jspi.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.jspi.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.wasm"\nexit 0',
   );
   await fakeBin(netlify, 'printf "%s\\n" "$*" >> "$NETLIFY_LOG"\nexit 0');
   await fakeBin(
@@ -81,7 +81,7 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   assert.equal(secondSummary.built, false);
   assert.equal(secondSummary.deployed, true);
   assert.ok(secondSummary.timings.some((entry) => entry.name === 'netlify deploy'));
-  assert.deepEqual((await readFile(npmLog, 'utf8')).trim().split('\n'), ['run build:netlify:r2', 'run check:biome']);
+  assert.deepEqual((await readFile(npmLog, 'utf8')).trim().split('\n'), ['run build:netlify:r2', 'run check:biome:tracked']);
   const deployLog = await readFile(netlifyLog, 'utf8');
   assert.match(deployLog, /deploy --no-build --dir .* --prod --message test deploy/);
   assert.equal(secondSummary.releaseGate.ci, 'success');

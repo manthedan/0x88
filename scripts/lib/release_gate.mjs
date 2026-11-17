@@ -74,11 +74,11 @@ export async function checkReleaseGate(
   command(
     exec,
     args.npmBin || 'npm',
-    ['run', 'check:biome'],
-    'Fix the reported Biome errors with npx biome check --write <failing-files>, then rerun npm run check:biome.',
+    ['run', 'check:biome:tracked'],
+    'Fix the reported Biome errors with npx biome check --write <failing-files>, then rerun npm run check:biome:tracked (untracked files are not linted).',
     120_000,
   );
-  log('[release-gate] Tracked tree clean; npm run check:biome passed.');
+  log('[release-gate] Tracked tree clean; tracked files pass Biome.');
 
   let ci = 'skipped';
   if (!args.prod) log('[release-gate] WARNING: draft deploy (no --prod); skipping GitHub ci check.');

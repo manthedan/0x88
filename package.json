@@ -185,7 +185,8 @@
     "deploy:generate-headers": "node scripts/generate_netlify_headers_file.mjs",
     "format": "biome format --write .",
     "lint": "biome lint .",
-    "check:biome": "biome check ."
+    "check:biome": "biome check .",
+    "check:biome:tracked": "git ls-files -z | xargs -0 biome check --no-errors-on-unmatched --files-ignore-unknown=true"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",
