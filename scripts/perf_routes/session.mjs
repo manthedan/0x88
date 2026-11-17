@@ -213,6 +213,10 @@ try {
   const residual = result.samples.filter((s) => s.phase === 'residual' && s.ms >= result.samples.at(-1).ms - 2000);
   result.metrics['memory.residualMb'] = median(residual.map((s) => s.rendererMb + (s.gpuMb ?? 0)));
   result.metrics['workers.residual'] = await evaluate(`window.__routePerf.workers`);
+  // Errors during client-side teardown matter even if a failed disposal terminates
+  // the worker and leaves a superficially healthy zero-worker residual count.
+  result.finalWorkerErrors = await evaluate(`[...window.__routePerf.errors]`);
+  if (result.finalWorkerErrors.length) throw Error(`Worker errors through residual teardown: ${result.finalWorkerErrors.join('; ')}`);
   result.postNavigationRequests = proxy.requests.filter((request) => request.at >= awayAt).map((request) => ({ ...request }));
   result.naturalVisibility = await evaluate(`({events:window.__routePerf.visibility,final:document.visibilityState})`);
   if (!naturalVisibilityValid(result.naturalVisibility.events, result.naturalVisibility.final))

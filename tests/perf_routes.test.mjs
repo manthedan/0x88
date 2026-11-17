@@ -194,6 +194,13 @@ test('route probes retain original worker payloads, count teardown once and pars
   sf.terminate();
   assert.equal(window.__routePerf.workers, 0);
   assert.equal(cpu.terminated, true);
+  const initialErrors = [...window.__routePerf.errors];
+  cpu.receive({ type: 'error', error: 'dispose failed' });
+  assert.equal(initialErrors.length, 0);
+  assert.equal(window.__routePerf.errors.at(-1), 'dispose failed');
+  const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
+  assert.ok(source.indexOf('result.finalWorkerErrors =') > source.indexOf("result.metrics['workers.residual'] ="));
+  assert.match(source, /if \(result\.finalWorkerErrors\.length\) throw/);
 });
 
 test('probe disconnects and drops Play observer/host on navigation and detects external fetches', async () => {
