@@ -15,11 +15,11 @@
 <p id="phoneLargeNetFallback" class="phone-large-net-preference" role="status" hidden>{PHONE_LARGE_NET_REASON}</p>
 {#if constrained}
   <p class="phone-large-net-preference" role="status">
-    Large nets on this device: {enabled ? 'on' : 'off'}
+    BT4 and t3 on this device: {enabled ? 'on' : 'off'}
     {#if enabled}
       · <button type="button" onclick={() => phoneLargeNetPreference.setEnabled(false)}>turn off</button>
     {:else}
-      <span> — may crash this tab. Choose a large net to review the warning.</span>
+      <span> — may crash this tab. Choose BT4 or t3 to review the warning.</span>
     {/if}
   </p>
 {/if}

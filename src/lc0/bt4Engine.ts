@@ -26,7 +26,7 @@ import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { lc0SplitKUrl } from './lc0SmallModelSelection.ts';
-import { phoneLargeNetsBlocked, PHONE_LARGE_NET_SUFFIX } from './phoneLargeNetPolicy.ts';
+import { phoneBigNetBlocked, PHONE_LARGE_NET_SUFFIX } from './phoneLargeNetPolicy.ts';
 
 export interface BigNetConfig {
   key: 'bt4' | 't3' | 'lqo';
@@ -297,7 +297,7 @@ export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStat
  */
 export function bigNetOptionState(config: BigNetConfig): { disabled: boolean; suffix: string } {
   // Keep the option actionable so choosing it can open consent, not load a net.
-  if (phoneLargeNetsBlocked()) return { disabled: false, suffix: PHONE_LARGE_NET_SUFFIX };
+  if (phoneBigNetBlocked(config.key)) return { disabled: false, suffix: PHONE_LARGE_NET_SUFFIX };
   const asset = bigNetAssetStatusSync(config);
   if (asset === 'unknown') return { disabled: true, suffix: ' (checking net)' };
   if (asset === 'missing') return { disabled: true, suffix: ' (net not hosted here)' };
@@ -354,7 +354,7 @@ export class Bt4WorkerSearcher {
     { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: Bt4SearchProgress) => void }
   >();
   private activeSearchId: number | null = null;
-  private closing: Promise<void> = Promise.resolve();
+  private closing: Promise<void> | null = null;
   private configuredEvalCacheEntries = -1;
   private configuredDiagnosticKey = '';
   backend = '';
@@ -408,6 +408,7 @@ export class Bt4WorkerSearcher {
     const diagnosticKey = JSON.stringify(diagnostics);
     if (this.ready && this.configuredEvalCacheEntries === evalCacheEntries && this.configuredDiagnosticKey === diagnosticKey) return this.backend;
     if (this.ready) this.dispose();
+    if (this.closing) await this.closing;
     if (this.initPromise) return this.initPromise;
     if (!this.worker) {
       this.deviceLost = null;
@@ -584,6 +585,6 @@ export class Bt4WorkerSearcher {
       // Pool/page owners historically have a synchronous disposal contract.
       void this.closing.catch(() => undefined);
     }
-    return this.closing;
+    return this.closing ?? Promise.resolve();
   }
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
+import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
 
 class FakeSearcher {
   constructor(config) {
@@ -220,6 +221,88 @@ test('constrained acquire also clears an inherited idle-TTL net before replaceme
   pool.acquire('t3');
   assert.equal(timers[0].cleared, true);
   assert.equal(pool.has('bt4'), false);
+});
+
+for (const ack of [true, false]) {
+  test(`phone exclusive replacement awaits graceful disposal (${ack ? 'ack' : 'bounded timeout'})`, async () => {
+    const events = [];
+    class Worker extends EventTarget {
+      postMessage(message) {
+        events.push(message.type);
+      }
+      terminate() {
+        events.push('terminate');
+      }
+    }
+    const worker = new Worker();
+    const pool = new BigNetSessionPool(
+      (config) => {
+        events.push(`create:${config.key}`);
+        return { dispose: () => disposeOrtWorker(worker, 25) };
+      },
+      undefined,
+      undefined,
+      () => true,
+    );
+    const first = pool.acquire('bt4');
+    const next = pool.acquireAsync('t3', true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pool.has('bt4'), false, 'detach remains synchronous at retirement');
+    assert.equal(pool.has('t3'), false, 'replacement is not constructed while the old worker drains');
+    assert.deepEqual(events, ['create:bt4', 'cancel', 'dispose']);
+    if (ack) worker.dispatchEvent(new MessageEvent('message', { data: { id: -1, type: 'disposed' } }));
+    const replacement = await next;
+    assert.deepEqual(events, ['create:bt4', 'cancel', 'dispose', 'terminate', 'create:t3']);
+    assert.notEqual(replacement, first);
+    assert.equal(pool.detach('bt4', first), false);
+    assert.equal(pool.peek('t3'), replacement);
+  });
+}
+
+test('async phone acquire waits for an already released net and preserves active Analysis rows', async () => {
+  const retirement = Promise.withResolvers();
+  const pool = new BigNetSessionPool(
+    (config) => ({ config, dispose: () => retirement.promise }),
+    undefined,
+    undefined,
+    () => true,
+  );
+  const bt4 = pool.acquire('bt4');
+  const t3 = await pool.acquireAsync('t3');
+  assert.equal(pool.peek('bt4'), bt4, 'shared acquisition does not evict an active row');
+  pool.release('bt4', 0);
+  let acquired = false;
+  const next = pool.acquireAsync('lqo').then((value) => {
+    acquired = true;
+    return value;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(acquired, false);
+  retirement.resolve();
+  await next;
+  assert.equal(pool.peek('t3'), t3);
+});
+
+test('failed or cancelled graceful retirement does not construct a replacement', async () => {
+  for (const cancel of [false, true]) {
+    const retirement = Promise.withResolvers();
+    const pool = new BigNetSessionPool(
+      () => ({ dispose: () => retirement.promise }),
+      undefined,
+      undefined,
+      () => true,
+    );
+    pool.acquire('bt4');
+    const abort = new AbortController();
+    const next = pool.acquireAsync('t3', true, abort.signal);
+    await new Promise((resolve) => setImmediate(resolve));
+    if (cancel) {
+      abort.abort();
+      retirement.resolve();
+    } else retirement.reject(new Error('release failed'));
+    await assert.rejects(next, cancel ? { name: 'AbortError' } : /release failed/);
+    assert.equal(pool.has('t3'), false);
+  }
 });
 
 test('default scheduler calls the timer globals unbound (browsers reject a foreign receiver)', () => {

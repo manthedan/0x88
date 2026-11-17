@@ -2,19 +2,20 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
+import { arenaBigNetPairingBlocked } from '../src/lc0/arenaMemoryGuard.ts';
+import { acquireBigNetSearcher, acquireBigNetSearcherAsync, disposeAllBigNetSearchersNow, hasBigNetSearcher } from '../src/lc0/bigNetSessionPool.ts';
+import { BIG_NETS, bigNetOptionState, phoneBlockedBigNetModelUrl } from '../src/lc0/bt4Engine.ts';
 import { requestLargeNetConsent } from '../src/lc0/largeNetConsent.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
-import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
-import { BIG_NETS, bigNetOptionState, phoneBlockedBigNetModelUrl } from '../src/lc0/bt4Engine.ts';
-import { acquireBigNetSearcher, hasBigNetSearcher } from '../src/lc0/bigNetSessionPool.ts';
-import { arenaBigNetPairingBlocked } from '../src/lc0/arenaMemoryGuard.ts';
 import {
-  PHONE_LARGE_NET_STORAGE_KEY,
   createPhoneLargeNetPreference,
+  PHONE_LARGE_NET_STORAGE_KEY,
+  phoneBigNetBlocked,
   phoneLargeNetPreference,
   phoneLargeNetsBlocked,
   phoneSafeEngineVariant,
 } from '../src/lc0/phoneLargeNetPolicy.ts';
+import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
 
 for (const surface of ['analysis', 'play', 'arena', 'review']) {
   for (const constrained of [false, true]) {
@@ -23,7 +24,7 @@ for (const surface of ['analysis', 'play', 'arena', 'review']) {
         const blocked = constrained && !optedIn;
         assert.equal(phoneLargeNetsBlocked(constrained, optedIn), blocked);
         for (const key of Object.keys(BIG_NETS)) {
-          assert.equal(phoneSafeEngineVariant('lc0', key, constrained, optedIn), blocked ? 'small' : key);
+          assert.equal(phoneSafeEngineVariant('lc0', key, constrained, optedIn), blocked && key !== 'lqo' ? 'small' : key);
           assert.equal(phoneSafeEngineVariant('sf', key, constrained, optedIn), key);
         }
         assert.equal(phoneSafeEngineVariant('lc0', 'small', constrained, optedIn), 'small');
@@ -86,22 +87,30 @@ test('failed revocation writes cannot re-enable a stored opt-in during this sess
   assert.equal(preference.enabled(), false);
 });
 
-test('phone options remain visible/actionable for consent, but pool acquisition is denied', () => {
+test('phone BT4/t3 options allow consent but deny acquisition; Queen Odds is exempt', async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'location');
   Object.defineProperty(globalThis, 'location', { configurable: true, value: new URL('https://example.test/?memoryClass=phone') });
   phoneLargeNetPreference.setEnabled(false);
   try {
     for (const [key, config] of Object.entries(BIG_NETS)) {
-      assert.deepEqual(bigNetOptionState(config), { disabled: false, suffix: ' (Large net — off on phones)' });
+      if (key === 'lqo') {
+        assert.doesNotMatch(bigNetOptionState(config).suffix, /off on phones/);
+        assert.equal(acquireBigNetSearcher(key).config, config);
+        assert.equal((await acquireBigNetSearcherAsync(key)).config, config);
+      } else {
+        assert.deepEqual(bigNetOptionState(config), { disabled: false, suffix: ' (Large net — off on phones)' });
+        assert.throws(() => acquireBigNetSearcher(key), /BT4 and t3 are off on phones/);
+        await assert.rejects(acquireBigNetSearcherAsync(key), /BT4 and t3 are off on phones/);
+        assert.equal(hasBigNetSearcher(key), false);
+      }
       assert.equal(phoneBlockedBigNetModelUrl(config.modelUrl), true);
       const splitK = lc0SplitKUrl(config.modelUrl);
       if (splitK) {
         assert.equal(phoneBlockedBigNetModelUrl(splitK), true, 'shipped split-K variants cannot bypass the picker');
         assert.equal(phoneBlockedBigNetModelUrl(`${splitK}?cache=1`), true);
       }
-      assert.throws(() => acquireBigNetSearcher(key), /Large nets are off on phones/);
-      assert.equal(hasBigNetSearcher(key), false);
     }
+    disposeAllBigNetSearchersNow();
     phoneLargeNetPreference.setEnabled(true);
     assert.equal(phoneLargeNetsBlocked(), false);
     assert.equal(phoneBlockedBigNetModelUrl(BIG_NETS.bt4.modelUrl), true, 'known large models must use the picker, not the Small override lane');
@@ -170,9 +179,14 @@ test('modal cancellation restores focus; Tab stays trapped; opt-in happens only 
   try {
     let pending = requestLargeNetConsent(BIG_NETS.bt4);
     let dialog = body.children.at(-1);
-    const [cancel, use] = dialog.children[2].children;
+    const [cancel, use] = dialog.children.at(-1).children;
     assert.equal(dialog.attributes['aria-modal'], 'true');
-    assert.match(dialog.children[1].textContent, /178 MB/);
+    assert.equal(dialog.children[0].textContent, 'Use a large net on this phone?');
+    assert.equal(
+      dialog.children[1].textContent,
+      'BT4 and t3 can crash this tab on phones and are very slow without WebGPU. Downloads ~178 MB, cached after first load.',
+    );
+    assert.equal(dialog.children[2].textContent, 'You can turn this off below the engine picker.');
     assert.equal(document.activeElement, cancel);
     const tab = () => {
       const event = new Event('keydown', { cancelable: true });
@@ -189,18 +203,29 @@ test('modal cancellation restores focus; Tab stays trapped; opt-in happens only 
     assert.equal(phoneLargeNetPreference.enabled(), false);
     pending = requestLargeNetConsent(BIG_NETS.t3);
     dialog = body.children.at(-1);
-    dialog.children[2].children[1].dispatchEvent(new Event('click'));
+    assert.match(dialog.children[1].textContent, /163 MB/);
+    dialog.children.at(-1).children[1].dispatchEvent(new Event('click'));
     assert.equal(await pending, true);
     assert.equal(phoneLargeNetPreference.enabled(), true);
     assert.equal(document.activeElement, previous);
     // Once opted in, no second dialog is necessary on another surface/net.
-    assert.equal(await requestLargeNetConsent(BIG_NETS.lqo), true);
+    assert.equal(await requestLargeNetConsent(BIG_NETS.bt4), true);
     phoneLargeNetPreference.setEnabled(false);
     const abort = new AbortController();
-    pending = requestLargeNetConsent(BIG_NETS.lqo, abort.signal);
+    pending = requestLargeNetConsent(BIG_NETS.t3, abort.signal);
     abort.abort();
     assert.equal(await pending, false);
     assert.equal(phoneLargeNetPreference.enabled(), false);
+    const count = body.children.length;
+    assert.equal(await requestLargeNetConsent(BIG_NETS.lqo, undefined, false), true);
+    assert.equal(body.children.length, count, 'Play Queen Odds never shows the phone opt-in');
+    pending = requestLargeNetConsent(BIG_NETS.lqo);
+    dialog = body.children.at(-1);
+    assert.equal(dialog.children[0].textContent, 'Use Lc0 Queen Odds?');
+    assert.match(dialog.children[1].textContent, /96MB download/);
+    dialog.children.at(-1).children[1].dispatchEvent(new Event('click'));
+    assert.equal(await pending, true);
+    assert.equal(phoneLargeNetPreference.enabled(), false, 'ordinary Queen Odds warning never grants BT4/t3 consent');
   } finally {
     phoneLargeNetPreference.setEnabled(false);
     if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
@@ -221,7 +246,7 @@ test('saved and explicitly selected profiles fall back without prompting or acqu
       clampStrengthForRow: (row) => row.strength,
       isLc0BigNetVariant: (variant) => Object.hasOwn(BIG_NETS, variant),
       BIG_NETS,
-      phoneLargeNetsBlocked: () => true,
+      phoneBigNetBlocked: (key) => phoneBigNetBlocked(key, true, false),
       bigNetSelectableSync: () => {
         assert.fail('blocked restore must not check assets');
       },
@@ -230,15 +255,16 @@ test('saved and explicitly selected profiles fall back without prompting or acqu
       },
     };
     const restore = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${profileFunction}; return profileRowsForUse;`)(deps);
-    const rows = Object.keys(BIG_NETS).map((variant) => ({ family: 'lc0', variant, strength: 400 }));
+    const keys = ['bt4', 't3'];
+    const rows = keys.map((variant) => ({ family: 'lc0', variant, strength: 400 }));
     const restored = await restore(rows, allowPrompt);
     assert.deepEqual(
       restored.map((row) => row.variant),
-      ['small', 'small', 'small'],
+      ['small', 'small'],
     );
     assert.deepEqual(
       rows.map((row) => row.variant),
-      Object.keys(BIG_NETS),
+      keys,
       'saved setup is not rewritten',
     );
   }
@@ -264,6 +290,9 @@ test('restored Play game keeps its position but replaces a blocked large opponen
         { id: 'lc0-small', family: 'lc0', variant: 'small', group: 'engine' },
       ],
       readWorkspace: () => saved,
+      BIG_NETS,
+      bigNetAssetStatusSync: () => 'present',
+      isV0DeployProfile: () => false,
       ctxRefreshEngineOptions() {},
       phoneSafeEngineVariant: (family, variant) => phoneSafeEngineVariant(family, variant, true, false),
       showPhoneLargeNetFallback: () => {
@@ -280,11 +309,11 @@ test('restored Play game keeps its position but replaces a blocked large opponen
     const init = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${prefix}; return ctxInit;`)(deps);
     const ctx = {};
     init(ctx);
-    assert.equal(ctx.activeEngine, 'lc0-small');
+    assert.equal(ctx.activeEngine, key === 'lqo' ? 'lqo' : 'lc0-small');
     assert.equal(ctx.pendingPreferredEngineId, null);
     assert.equal(ctx.board, saved.board);
     assert.deepEqual(ctx.moves, saved.moves);
-    assert.equal(warned, true);
+    assert.equal(warned, key !== 'lqo');
     assert.equal(saved.preferences.engineId, key, 'stored game is not mutated by decoding');
   }
 });
@@ -300,7 +329,7 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
   };
   const scenarios = [...Object.entries(options).map(([engineId, option]) => [engineId, option, false]), ['maia3', options.maia3, true]];
   for (const [engineId, option, cancellingRestore] of scenarios) {
-    const activeLarge = Object.hasOwn(BIG_NETS, option.variant);
+    const activeLarge = phoneBigNetBlocked(option.variant, true, false);
     const active = { engineId, color: 'white', level: 3, maiaElo: 1700 };
     const opponent = cancellingRestore
       ? committedPlayOpponent(active)
@@ -324,6 +353,7 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
     const clearedTimers = [];
     const deps = {
       phoneLargeNetsBlocked: () => true,
+      ENGINE_OPTIONS: Object.entries(options).map(([id, option]) => ({ id, ...option })),
       phoneSafeEngineVariant: (family, variant) => phoneSafeEngineVariant(family, variant, true, false),
       ctxSelectedEngine: (ctx) => options[ctx.opponent.active.engineId],
       ctxDraftEngine: () => options[(ctx.opponent.pending ?? ctx.opponent.active).engineId],

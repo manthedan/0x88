@@ -67,6 +67,7 @@ for (const workflow of ['Arena', 'Analysis']) {
                 hide,
                 { evalCacheEntries: 0 },
               )(['t3'], () => controller.signal.aborted);
+        await new Promise(setImmediate);
         const init = commands.find((message) => message.type === 'init');
         assert.ok(init, 'the real pooled searcher is waiting for model initialization');
         if (cancelled) controller.abort();

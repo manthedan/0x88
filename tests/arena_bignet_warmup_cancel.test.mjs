@@ -56,6 +56,7 @@ for (const phase of ['before init', 'during init', 'during search', 'no cancella
     const controller = new AbortController();
     if (phase === 'before init') controller.abort();
     const pending = warmup(controller.signal);
+    await new Promise(setImmediate);
     if (phase === 'during init') controller.abort();
     const init = messages.find((message) => message.type === 'init');
     if (init) workers[0].reply({ id: init.id, backend: 'mock-webgpu' });

@@ -79,12 +79,13 @@ import {
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
-import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
+import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import {
   PHONE_LARGE_NET_CHANGE_EVENT,
   PHONE_LARGE_NET_REASON,
   PHONE_LARGE_NET_SUFFIX,
+  phoneBigNetBlocked,
   phoneLargeNetsBlocked,
   phoneSafeEngineVariant,
 } from './phoneLargeNetPolicy.ts';
@@ -496,9 +497,9 @@ const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant
 const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
-function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
+async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
-  return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key, true) };
+  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, true, signal) };
 }
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
@@ -1721,7 +1722,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
             refreshSeatControls();
           }),
         );
-      if (phoneLargeNetsBlocked()) return { ...option, label: `${option.label}${PHONE_LARGE_NET_SUFFIX}`, disabled: false };
+      if (phoneBigNetBlocked(config.key)) return { ...option, label: `${option.label}${PHONE_LARGE_NET_SUFFIX}`, disabled: false };
       const suffix =
         !bt4SupportedSync() && !isMemoryConstrainedDevice()
           ? ' (WebGPU unavailable)'
@@ -3010,7 +3011,7 @@ function buildEngines() {
   const lc0BigNetMove =
     (engineId: string, row: EngineRow): ArenaEngine['move'] =>
     async (positions, signal) => {
-      const { config, searcher } = bigNetFor(row.variant);
+      const { config, searcher } = await bigNetFor(row.variant, signal);
       // A stopped move gives up its progress display at once; its late download
       // callbacks and finally must not touch the next operation's display.
       const onAbort = () => {
@@ -3182,7 +3183,7 @@ function buildEngines() {
     renderCacheInfo();
   };
   const lc0BigNetWarmup = (variant: string) => async (signal: AbortSignal) => {
-    const { config, searcher } = bigNetFor(variant);
+    const { config, searcher } = await bigNetFor(variant, signal);
     // Same ownership as a move: Stop hides this warmup's display immediately.
     const onAbort = () => hideDownloadProgress();
     signal.addEventListener('abort', onAbort, { once: true });

@@ -152,9 +152,9 @@ import {
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
-import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
+import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
-import { PHONE_LARGE_NET_CHANGE_EVENT, PHONE_LARGE_NET_REASON, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
+import { PHONE_LARGE_NET_CHANGE_EVENT, PHONE_LARGE_NET_REASON, phoneBigNetBlocked, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
 import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
@@ -592,9 +592,9 @@ function syncBrokerParticipants(rows: EngineRow[]): void {
 }
 type AnalysisBigNetKey = Extract<BigNetKey, 'bt4' | 't3'>;
 const ANALYSIS_BIG_NET_KEYS: readonly AnalysisBigNetKey[] = ['bt4', 't3'];
-function bigNetFor(variant: string): { config: BigNetConfig; searcher: Bt4WorkerSearcher } {
+async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
-  return { config: BIG_NETS[key], searcher: acquireBigNetSearcher(key) };
+  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, false, signal) };
 }
 let ground: Ground | null = null;
 let pvGround: Ground | null = null;
@@ -1377,7 +1377,7 @@ async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): Pr
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
       // Read metadata only: declining a saved setup must not acquire a runtime/session.
       const config = BIG_NETS[next.variant];
-      const allowed = !phoneLargeNetsBlocked() && bigNetSelectableSync(config) && allowBt4Prompt && (await requestLargeNetConsent(config, mountAbort.signal));
+      const allowed = !phoneBigNetBlocked(config.key) && bigNetSelectableSync(config) && allowBt4Prompt && (await requestLargeNetConsent(config, mountAbort.signal));
       if (!allowed) next.variant = 'small';
     }
     result.push(next);
@@ -1881,7 +1881,7 @@ async function workerBigNetLines(
   servedModelUrl: string,
   signal?: AbortSignal,
 ): Promise<AnalysisLine[]> {
-  const { config, searcher } = bigNetFor(variant);
+  const { config, searcher } = await bigNetFor(variant, signal);
   const label = `Lc0 ${config.name}`;
   // The run's keys name servedModelUrl; never search on another session under them.
   if (!searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION) || searcher.servedModelUrl !== servedModelUrl) {
@@ -1941,7 +1941,7 @@ async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boo
   const errors = new Map<AnalysisBigNetKey, Error>();
   await Promise.all(
     keys.map(async (key) => {
-      const { config, searcher } = bigNetFor(key);
+      const { config, searcher } = await bigNetFor(key);
       const label = `Lc0 ${config.name}`;
       // A cancelled run no longer owns the shared model progress slot:
       // cancelAnalysisOperation already cleared it, and the next run or mount
@@ -1989,7 +1989,7 @@ async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<
   if (isStaleMount(mountSignal)) return;
   const previousRows = JSON.stringify(engineRows);
   for (const row of engineRows) {
-    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(BIG_NETS[row.variant])) row.variant = 'small';
   }
   if (JSON.stringify(engineRows) !== previousRows) invalidateAnalysisSettings();
   renderEngineList();

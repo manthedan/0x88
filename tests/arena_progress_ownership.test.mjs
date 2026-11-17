@@ -60,6 +60,7 @@ for (const operation of ['warmup', 'move']) {
         operation === 'warmup'
           ? factory('lqo')(controller.signal)
           : factory('seat-1', { variant: 'lqo', strength: 1 })([parseFen(START_FEN)], controller.signal);
+      await new Promise(setImmediate);
       const worker = workers[0];
       assert.ok(worker, 'operation is awaiting shared model initialization');
       if (cancelled) {

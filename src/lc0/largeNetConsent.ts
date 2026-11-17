@@ -1,6 +1,6 @@
 import { type BigNetConfig, bigNetLoadWarning } from './bt4Engine.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
-import { PHONE_LARGE_NET_REASON, phoneLargeNetPreference, phoneLargeNetsBlocked } from './phoneLargeNetPolicy.ts';
+import { PHONE_LARGE_NET_REASON, phoneBigNetBlocked, phoneLargeNetPreference } from './phoneLargeNetPolicy.ts';
 
 export function showPhoneLargeNetFallback(modelOverride = false): void {
   const notice = document.getElementById('phoneLargeNetFallback');
@@ -16,7 +16,9 @@ export function showPhoneLargeNetFallback(modelOverride = false): void {
 export async function requestLargeNetConsent(config: BigNetConfig, signal?: AbortSignal, desktopWarning = true): Promise<boolean> {
   const phone = isMemoryConstrainedDevice();
   if (signal?.aborted) return false;
-  if (phone ? !phoneLargeNetsBlocked() : !desktopWarning) return true;
+  const phoneConsent = phoneBigNetBlocked(config.key);
+  // Queen Odds keeps the ordinary download warning, never the device opt-in.
+  if (phone && config.key !== 'lqo' ? !phoneConsent : !desktopWarning) return true;
   const previousFocus = document.activeElement as HTMLElement | null;
   const previousFocusId = previousFocus?.id;
   const previousFocusLabel = previousFocus?.getAttribute('aria-label');
@@ -27,11 +29,11 @@ export async function requestLargeNetConsent(config: BigNetConfig, signal?: Abor
   dialog.setAttribute('aria-describedby', 'largeNetConsentDescription');
   const title = document.createElement('h2');
   title.id = 'largeNetConsentTitle';
-  title.textContent = phone ? 'Use large nets on this phone?' : `Use Lc0 ${config.name}?`;
+  title.textContent = phoneConsent ? 'Use a large net on this phone?' : `Use Lc0 ${config.name}?`;
   const description = document.createElement('p');
   description.id = 'largeNetConsentDescription';
-  description.textContent = phone
-    ? `Large nets may crash this tab on phones, even when loading just one or switching nets. Without WebGPU they are very slow (around 1–4 visits per second). Lc0 ${config.name} downloads ~${config.approxMb} MB, cached after first load. “Use anyway” enables all large nets on this device. You can turn them off near the engine picker. Arena still allows only one large net at a time.`
+  description.textContent = phoneConsent
+    ? `BT4 and t3 can crash this tab on phones and are very slow without WebGPU. Downloads ~${config.approxMb} MB, cached after first load.`
     : bigNetLoadWarning(config);
   const actions = document.createElement('div');
   actions.className = 'large-net-consent-actions';
@@ -43,7 +45,13 @@ export async function requestLargeNetConsent(config: BigNetConfig, signal?: Abor
   use.textContent = 'Use anyway';
   use.className = 'primary';
   actions.append(cancel, use);
-  dialog.append(title, description, actions);
+  dialog.append(title, description);
+  if (phoneConsent) {
+    const note = document.createElement('small');
+    note.textContent = 'You can turn this off below the engine picker.';
+    dialog.append(note);
+  }
+  dialog.append(actions);
   document.body.append(dialog);
   return new Promise<boolean>((resolve) => {
     let accepted = false;
@@ -75,7 +83,7 @@ export async function requestLargeNetConsent(config: BigNetConfig, signal?: Abor
               ? Array.from(document.querySelectorAll<HTMLElement>('[aria-label]')).find((node) => node.getAttribute('aria-label') === previousFocusLabel)
               : null;
         returnFocus?.focus({ preventScroll: true });
-        if (accepted && !signal?.aborted && phone) {
+        if (accepted && !signal?.aborted && phoneConsent) {
           const notice = document.getElementById('phoneLargeNetFallback');
           if (notice) notice.hidden = true;
           phoneLargeNetPreference.setEnabled(true);

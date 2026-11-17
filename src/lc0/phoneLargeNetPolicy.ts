@@ -1,7 +1,7 @@
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 
 export const PHONE_LARGE_NET_STORAGE_KEY = '0x88-phone-large-nets-v1';
-export const PHONE_LARGE_NET_REASON = 'Large nets are off on phones because they may crash this tab. Using the default small engine instead.';
+export const PHONE_LARGE_NET_REASON = 'BT4 and t3 are off on phones because they may crash this tab. Using the default small engine instead.';
 export const PHONE_LARGE_NET_SUFFIX = ' (Large net — off on phones)';
 type PreferenceStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -47,6 +47,11 @@ export function phoneLargeNetsBlocked(constrained = isMemoryConstrainedDevice(),
   return constrained && !optedIn;
 }
 
+/** Queen Odds runs alone in Play and is exempt from the phone opt-in. */
+export function phoneBigNetBlocked(key: string, constrained = isMemoryConstrainedDevice(), optedIn = phoneLargeNetPreference.enabled()): boolean {
+  return (key === 'bt4' || key === 't3') && phoneLargeNetsBlocked(constrained, optedIn);
+}
+
 /** Shared by saved, URL and restored engine rows; never grants consent implicitly. */
 export function phoneSafeEngineVariant(
   family: string,
@@ -54,5 +59,5 @@ export function phoneSafeEngineVariant(
   constrained = isMemoryConstrainedDevice(),
   optedIn = phoneLargeNetPreference.enabled(),
 ): string {
-  return family === 'lc0' && ['bt4', 't3', 'lqo'].includes(variant) && phoneLargeNetsBlocked(constrained, optedIn) ? 'small' : variant;
+  return family === 'lc0' && phoneBigNetBlocked(variant, constrained, optedIn) ? 'small' : variant;
 }

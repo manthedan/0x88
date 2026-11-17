@@ -24,7 +24,7 @@ for (const lifecycle of ['current', 'cancelled', 'disposed']) {
       const deps = {
         ctxSelectedEngine: () => ({ family: 'lc0', variant: 'lqo' }),
         ctxStrengthFor: () => 1,
-        acquireBigNetSearcher: () => searcher,
+        acquireBigNetSearcherAsync: async () => searcher,
         ctxSetEngineNote: (...args) => writes.push(['note', ...args]),
         ctxShowDownloadProgress: (...args) => writes.push(['show', ...args]),
         ctxHideDownloadProgress: () => writes.push(['hide']),

@@ -22,7 +22,7 @@ import { chooseMove } from '../search/puct.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { acquireBigNetSearcher, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
+import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { PHONE_LARGE_NET_CHANGE_EVENT, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
@@ -721,8 +721,8 @@ function disposeCachedCpuEngine(id: string): void {
   void pending.then((engine) => engine.dispose?.()).catch(() => undefined);
 }
 
-function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): boolean {
-  const searcher = acquireBigNetSearcher('lqo');
+async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): Promise<boolean> {
+  const searcher = await acquireBigNetSearcherAsync('lqo', false, signal);
   if (searcher.loaded) return false;
   const label = `Lc0 ${searcher.config.name}`;
   ctxShowDownloadProgress(label, undefined, undefined, 'Loading in background');
@@ -756,12 +756,12 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     if (ctx.humanColor === 'w') {
       const bookMove = lqoBlackBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
-        const preloading = ctxPreloadLqoAfterBookMove(ctx, signal);
+        const preloading = await ctxPreloadLqoAfterBookMove(ctx, signal);
         ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
     } else if (ctx.moves.length === 0) {
-      const searcher = acquireBigNetSearcher('lqo');
+      const searcher = await acquireBigNetSearcherAsync('lqo', false, signal);
       let progressShown = false;
       if (!searcher.loaded) {
         ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
@@ -787,7 +787,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     } else {
       const bookMove = lqoWhiteBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
-        const preloading = ctxPreloadLqoAfterBookMove(ctx, signal);
+        const preloading = await ctxPreloadLqoAfterBookMove(ctx, signal);
         ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
@@ -864,7 +864,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'lc0') {
-    const searcher = acquireBigNetSearcher(option.variant as BigNetKey);
+    const searcher = await acquireBigNetSearcherAsync(option.variant as BigNetKey, false, signal);
     if (!searcher.loaded && !signal.aborted && !ctxIsDisposed(ctx)) {
       ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
       ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
@@ -952,7 +952,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
       if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
       searcher.resetTree();
     } else if (option.family === 'lc0') {
-      const searcher = acquireBigNetSearcher(option.variant as BigNetKey);
+      const searcher = await acquireBigNetSearcherAsync(option.variant as BigNetKey, false, signal);
       const lqoOptions = option.variant === 'lqo' ? ctxLqoSearchOptions(ctx) : null;
       await searcher.search(
         { positions: ctx.positions },
@@ -1921,9 +1921,10 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
   if (!phoneLargeNetsBlocked()) return;
   // A saved-engine asset probe must not restore a large opponent after revocation.
-  const cancellingRestore = !!ctx.pendingPreferredEngineId;
-  ctx.pendingPreferredEngineId = null;
-  if (ctx.pendingPreferredEngineTimer) {
+  const pending = ENGINE_OPTIONS.find((option) => option.id === ctx.pendingPreferredEngineId);
+  const cancellingRestore = !!pending && phoneSafeEngineVariant(pending.family, pending.variant) !== pending.variant;
+  if (cancellingRestore) ctx.pendingPreferredEngineId = null;
+  if (cancellingRestore && ctx.pendingPreferredEngineTimer) {
     clearTimeout(ctx.pendingPreferredEngineTimer);
     ctx.pendingPreferredEngineTimer = null;
   }
