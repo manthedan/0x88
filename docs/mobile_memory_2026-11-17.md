@@ -1,4 +1,4 @@
-# Mobile memory, phases 1–3 — 2026-11-17
+# Mobile memory, phases 1–4 — 2026-11-17
 
 **Current policy is [Phase 3](#phase-3-lqo-batch-one-capture-and-maia3-folding-restored): LQO capture at batch 1; Maia3/Small folding on; big-net folding off.** Phase 2's Maia fold-off policy is historical. Mini measurements and review are complete; laptop Safari measurement remains externally blocked.
 
@@ -381,3 +381,116 @@ Build + overlay as before. Full captured gate: `/lab/kernel-hillclimb/ort-profil
 Final validation: lint, 98 relevant capture/controller/protocol/kernel tests and 12 runner regressions; full suite **2368 passed, 4 existing skips**; typecheck zero errors/warnings; product build; real full-corpus WebGPU gate. Branch Codex autoreview used the requested `--mode branch --base main --engine codex --model gpt-6.1-sol --thinking xhigh` with repository-relative-path guidance. One finding was verified: Chrome's pre-sampling cache/worker/start setup could throw before the renderer-refresh timer's cleanup scope. `a909855b` extends the `finally` scope and tests the real setup-failure path, preventing a stranded mutex. It does not affect successful counters or product sessions. The next whole-branch review (`phase3/autoreview-2.log/json`) exited **0, clean: no accepted/actionable findings**; no redundant review followed.
 
 The laptop comparisons and laptop 90 s burst confirmation are **not complete**, and no iPhone safety or Safari-26 burst-removal claim is made from the mini alone.
+
+## Phase 4: engine-switch carryover, soak fidelity and iPhone lab parameters
+
+### New owner evidence and scope
+
+Owner's **iOS 26.6.2**, draft of `a55ab795` (copied evidence, not a new device test): every individual net survives a fresh-tab 90 s search, including LQO (6.5 s load, capture, 32–37 visits/s), BT4 (11 s, 35–45 visits/s), t3 (9.4 s, 108–130 visits/s) and Maia3. Arena (BT4 + t3 + SF full) dies about 20 s into every fresh-tab attempt. `lc0-small,lqo` dies during LQO load; `t3,maia3` passes once and dies once during Maia load; `bt4,lqo` passes. Full-suite failures follow earlier engines. Reported kill reason: **`WebContent exceeded mem limit: ActiveHard 2048 MB`**.
+
+This phase tests same-document engine sequences, **not** same-tab reloads masquerading as fresh loads. Product folding/capture/model policies from Phase 3 stay unchanged. No Arena behavior, model bytes, hashes, cache-integrity rules, ORT build or JSC flags change. The iPhone/port 4444 and the user's main checkout were not touched; there was no deployment, push or publication.
+
+### Task 1 — fidelity: complete, with a correction to the premise
+
+`makeSoakSmall()` now uses the actual **Analysis `searchWorker.ts` / `searchWorkerCore.ts` path**: device model selection, ordinary capture-capable IO default, verified model cache, persistent-storage request and 2048-entry evaluation cache. The soak still requests its two fixed eight-visit searches, not Analysis's interactive search budget. New result runtime fields record `previousSoakIoMode:'cpu'`, requested capture and the **effective** worker-ready `ioMode`. On the mini, all ten final Small/LQO worker readies use capture; Small selects the shipped Apple split-K model.
+
+| Adapter / surface | Before | After |
+|---|---|---|
+| Soak Small | Page-thread evaluator, `deviceSelection:true` but default **CPU IO** | Analysis search worker, **gpu-capture** on the measured WebGPU device |
+| Analysis Small | Device-selected search worker, capture default | Same inference path; bounded graceful retirement added |
+| Play Small | **Page-thread** `ctxEnsureLc0Small()` evaluator | **Unchanged** |
+| Soak Maia3 | `Maia3BrowserEvaluator.create()` / `maia3Worker.ts` | Same product worker/evaluator |
+
+**The brief's Play assertion does not match this checkout:** Play currently uses a page-thread Small evaluator too. It was not converted to a worker as an incidental product change. The fidelity target here is Analysis's shipped worker path, not a claim that all product Small callers already share it.
+
+Maia's soak was already faithful: one ordinary `session.run()` on three CPU tensor feeds per evaluation, **node-by-node ORT execution, no graph capture**. Play's b1 policy evaluation, Analysis's condition batches and the rating grid share that worker, with different batch workloads. The soak's b1 policy evaluations are not tree search. Maia folding stays **on**. There is no new Maia capture/session cache or altered numerical path.
+
+### Task 2 — bounded graceful disposal: complete
+
+`disposeOrtWorker()` sends out-of-band cancellation followed by terminal `dispose` (reserved request ID −1), waits for the matching ack or **1500 ms** timeout, then terminates the captured worker. It is idempotent per worker, removes listeners/timers, ignores unrelated replies, terminates on transport failure and preserves release/transport errors for awaitable owners. Timeout falls back to termination, not an unbounded wait.
+
+- Big-net `dispose()` detaches state and rejects pending requests **synchronously**, as before; its returned promise lets the soak await actual ack/termination before starting the next step. Late replies/acks cannot invalidate a replacement instance. Existing synchronous pool owners remain supported.
+- Analysis Small detaches immediately on ordinary retirement, then uses the same bounded handshake. Broken worker transports still hard-terminate: they cannot be trusted to acknowledge cleanup.
+- Search-worker disposal seals new model-operation admission, cancels active search out of band, then releases behind its existing **ExclusiveQueue**, resets/drops the search tree/evaluator and stops intentional device-loss notifications. Evaluator disposal releases the ORT session and IO bindings. Only then does terminal worker cleanup destroy/drop its captured `env.webgpu.device`; it never destroys a shared page-thread device.
+- **Maia already had a queued `dispose`/`session.release()` protocol** before this phase; it was unbounded and did not explicitly destroy/drop the device. Its owner `terminate()`/abort path was abrupt. Both now have bounded retirement. Normal dispose preserves already admitted inference replies while draining; explicit cancellation still rejects in-flight/future owner requests immediately. Fatal runtime errors retain their existing failure notification/hard-stop semantics.
+
+There are **50/50 matching final-build disposal acknowledgements** in the measurement cohort, all before termination: **15 [7–196] ms**, median [min–max]. No measured timeout or release/transport failure occurred. Unit tests cover those unobserved failure paths, idempotence, stale/foreign acknowledgements, termination failure, replacement survival, immediate abort, preserved admitted Maia inference, and actual Search/Maia queue-drain → release → device-destroy → ack ordering. This is a lifecycle change, not a model/search algorithm change; existing scheduler/state-machine tests and full suite pass.
+
+**Ack is not proof of immediate physical reclamation**, cancellation of JSC compilation or a smaller WebContent lifetime high-water mark. Timeout cannot force WebKit's native teardown to finish.
+
+### Task 3 — lab gap and ballast: complete
+
+Both controls are lab-only, default **0**, and persist in the report so crash continuation uses the saved run's settings, not a changed URL:
+
+- `labGapSeconds=N`, integer **0–1800**: abortable idle wait **after awaited disposal and before the next step**, including before Arena if it follows another step. No initial/final artificial gap. Events record gap start/end. The document queue still protects remounts; navigation aborts the gap without admitting the next engine.
+- `labBallastMb=N`, integer **0–4096 MiB**: before the first remaining step, allocate/touch every word of PRNG-filled ArrayBuffers in **32 MiB chunks**, with an exact partial final chunk. Keep them for the entire run, including gaps, and release at run end. Record requested `labBallastMb`, actual `labBallastAllocatedBytes`, and allocation/release events. Invalid/nonfinite/fractional/out-of-range inputs fail closed. Allocation failure does not start engines or strand the runner in `running`.
+
+Examples: `/lab/mobile-soak/?auto=1&steps=t3,maia3&labGapSeconds=20` and `/lab/mobile-soak/?steps=lc0-small,lqo&labBallastMb=256`. For headroom bisection, use a fresh tab/process per candidate and retain the requested ballast/kill breadcrumb; ballast is not a production memory budget or automatic limit. The tests verify a 33 MiB allocation is 32+1 MiB, non-repeating PRNG contents across chunks, and ballast present during both steps and the intervening awaited gap. **No physical-iPhone ballast/headroom search was performed.**
+
+### Task 4 — final mini measurements: complete
+
+**Host:** M4 Mac mini, 16 GiB, macOS/Safari **27.0.1**, default JSC settings, secure context and COOP/COEP isolation verified for every load. Existing mini safaridriver **PID 36158 / port 4446** was neither started nor stopped. All GPU measurements run through `scripts/perf_matrix/mini.sh` and `run_matrix.mjs`, isolated workspace `~/perf-mobile-soak-phase4`, shared mutex `~/perf-matrix/safari.lock`. No laptop Safari measurement was attempted; no laptop timing benchmark ran outside benchlock (none was needed).
+
+**Builds:** actual `a55ab795` product build versus frozen implementation **`6e0a1dc7`**, built with `BUILD_SCOPE=product npm run build:client`. Baseline is preserved in `.local-dev-artifacts/mobile-memory-phase4/baseline-dist`; final in this worktree's `dist-client`. Independent own servers/tunnels use laptop 61985/61986 → mini 18785/18786. All models/runtime assets stay on the laptop and pass through the runner's counting proxy. URLs, pinned bytes, automatic Apple Small/t3 split-K selection, graph `all`, Small/Maia fold-on and big-net fold-off are unchanged. The later `086c831d` fix affects only helper-PID ownership, not the served build or counters.
+
+**Protocol:** 9 cells × **5 cold sessions = 45 valid loads**, interleaved round-robin by sequence/build/repeat; 45 distinct, clean-baseline WebContent PIDs, new session/origin/cache per sequence. Within a sequence the steps deliberately share that one document/process. All cold wire/cache, secure/isolation, normal-JSC and terminal-step assertions passed. Ballast is **0** in these comparisons. Use two fixed eight-visit searches per net / two b1 Maia evaluations, not 90 s sustained search. These smoke rates are **not a speed benchmark**.
+
+**Peak definitions:** MB in these tables means **MiB (2²⁰ bytes)**. Sequence lifetime peak is the kernel `ri_lifetime_max_phys_footprint`, including a fixed **10 s post-done settle**. Per-step windows use resettable kernel interval maxima, accumulated without gaps through step disposal; an inter-step idle gap belongs to its preceding step, and the final step includes the settle. These are whole-WebContent peaks **during** a step, including predecessor carryover, not a model's private allocation or cumulative lifetime counter copied into each row. Labels follow nominal 250 ms page polling / 100 ms counter reads and can straddle a boundary; they are not exact allocation timestamps. No maxima are added together. The settle window is an observation, not a guaranteed plateau.
+
+#### Sequence lifetime peaks
+
+Median [min–max], n=5 per before/after cell:
+
+| Sequence | Before MiB | After MiB | Verdict |
+|---|---:|---:|---|
+| `lc0-small,lqo` | **776 [774–820]** | **507 [499–512]** | Clear reduction for the bundled fidelity + teardown change |
+| `t3,maia3` | 932 [921–935] | 944 [934–976] | No demonstrated lifetime saving |
+| `bt4,lqo` | 1048 [1047–1053] | 1067 [1046–1138] | No demonstrated lifetime saving |
+| `arena` | **2867 [2699–2873]** | **2835 [2413–2877]** | Remains much too large to promise phone safety |
+| `t3,maia3`, **after + 20 s gap** | — | **937 [928–939]** | First step still dominates sequence peak |
+
+#### Step-lifetime window peaks
+
+Same units/repeats; predecessor residue is deliberately included:
+
+| Sequence / step | Before MiB | After MiB |
+|---|---:|---:|
+| Small → LQO / **Small** | 369 [354–386] | 361 [352–365] |
+| Small → LQO / **LQO** | 776 [774–820] | 507 [499–512] |
+| t3 → Maia / **t3** | 932 [921–935] | 944 [934–976] |
+| t3 → Maia / **Maia** | 739 [731–764] | 750 [743–780] |
+| BT4 → LQO / **BT4** | 1048 [1047–1053] | 1067 [1046–1138] |
+| BT4 → LQO / **LQO** | 683 [654–1045] | 683 [662–835] |
+| Arena / **whole step** | 2867 [2699–2873] | 2835 [2413–2877] |
+| t3 → Maia, **after + 20 s gap / t3** | — | 937 [928–939] |
+| t3 → Maia, **after + 20 s gap / Maia** | — | **328 [290–331]** |
+
+With the gap, the first observed Maia-step footprint falls from **750 [729–780] to 44 [43–46] MiB**; its step peak falls from 750 to 328 MiB. This establishes **late reclamation on this mini within the 20 s idle window**, not “never reclaimed.” It does not identify native/JIT/driver allocations, prove the same iPhone behavior, or reduce t3's already-recorded sequence lifetime peak.
+
+Small → LQO's 10 s end-window footprint falls from **291 [289–322] to 59 [54–61] MiB**. Small's own peak barely changes, while LQO's inherited peak drops. This comparison bundles worker isolation, IO fidelity and teardown; it **does not isolate which one caused how many bytes**, nor establish removal of Safari-26 OMG bursts on an iPhone.
+
+#### Arena: load order and resident sessions
+
+| Observed Arena interval | Before MiB | After MiB |
+|---|---:|---:|
+| BT4 loading | 1037 [1034–1043] | 1041 [1040–1069] |
+| t3 loading, **BT4 remains resident** | 1862 [1852–2042] | 2002 [1861–2022] |
+| After t3 ready: **both nets + SF preparation/search/teardown** | 2867 [2699–2873] | 2835 [2413–2877] |
+
+**No concurrent BT4/t3 initialization was observed in any of the ten Arena runs:** t3's init follows BT4's ready. The soak loads adapters sequentially (BT4, t3, SF full), but **retains both big-net sessions simultaneously**, then searches its three seats concurrently. It has **two**, not one or three, live big-net worker sessions; final readies confirm capture/b8 for both. Their terminal acks occur only at whole-step teardown. The highest interval is after both big nets are ready, while SF is being prepared/resident and the seats search; this polling instrumentation does not claim a byte-exact SF-only subpeak. SF uses the automatic threaded flavor with six threads on this host.
+
+Source inspection agrees on the important product invariant: Arena's `warmUpSelectedEngines()` awaits each warmup in a `for` loop; `lc0BigNetWarmup()` initializes/searches its pool-owned net and retains it for later games. Thus ordinary Arena also does **not** parallel-load these two nets, and can have **two resident big-net sessions** (one pool instance per key). Product warmups additionally do their one-visit search/configured evaluation cache, and normal games take turns; the soak's simultaneous searches are deliberate stress, **not an exact tournament replay**. No Arena product code was changed. Its observed 10 s settled footprints are still **1593 [1509–1599] before / 1625 [1218–1698] after MiB**; release acknowledgements alone do not eliminate the tail.
+
+**Task-4 verdict:** all requested final mini sequence cells and the after-build 20 s gap control have n=5, with **no invalid/excluded measured loads**. This does **not fix Arena's demonstrated owner iPhone failure**, establish a narrow regression/equivalence bound for t3/BT4, or substitute Safari 27 desktop for iOS/Safari 26. No new laptop or iPhone measurement is claimed.
+
+### Evidence, verification and closeout
+
+Raw final evidence: `.local-dev-artifacts/mobile-memory-phase4/final-mini/{runs.jsonl,summary.json,sessions/}`, `evidence.json`, `cells.json`, `mini-final.log`, and baseline/final build logs. `summary.json` includes per-step/per-stage medians and ranges; session JSON retains interval/lifetime counters, sample time series, all effective ready settings and worker init/ready/dispose/ack/terminate events. The aggregation check additionally asserted all 45 PIDs are distinct and all 50 final-build releases acknowledged before termination; `evidence.json` retains its grouped peaks and ack-latency statistics. Reproduce with `PERF_MINI_WORKSPACE=perf-mobile-soak-phase4`, per-server `PERF_MINI_STATE`, `mini.sh up`, then `mini.sh run final-sequences --cells cells.json`; `mini.sh fetch` and local `run_matrix.mjs --report` regenerate the aggregates.
+
+A complete earlier **45-load pilot** is retained separately under `mini/` / remote `out/sequences`, with its frozen build in `pilot-after-dist`. It is **not pooled into these final tables**: subsequent disposal/error/admission hardening was followed by a complete, predeclared rerun against `6e0a1dc7`, not selective high/low reruns. After the final remote runner had saved all 45 loads and printed its summary, its local shell wrapper hit a parser error because the running script had been edited for the PID-ownership review fix. The completed remote results/mutex cleanup were unaffected; a fresh `mini.sh fetch` and local aggregation succeeded. The current script passes `bash -n` and executable ownership regressions.
+
+Validation: product build; Svelte typecheck **zero errors/warnings**; repository lint; full suite via **`LC0_MEMORY_MODEL_DIR=<worktree>/…/models npm test -- --test-concurrency=2`: 2395 passed, 4 existing optional skips**, no omitted test files. All seven byte-identical folding goldens and real Small inference parity ran. An earlier unrestricted full suite was also green before the helper-only review fix (2387 passed); a later busy-host attempt hit an unrelated audit-test 2 s descendant-start deadline, and one shell attempt exceeded its caller timeout. Lowering runner concurrency made the complete suite green without weakening or changing that test. No unrelated processes were stopped to free CPU.
+
+Required Codex command: `~/.pi/agent/skills/autoreview/scripts/autoreview --mode branch --base main --engine codex --model gpt-6.1-sol --thinking xhigh`. The first review found one accepted issue in the inherited mini wrapper: persisted PID files were checked only with `kill -0`, allowing PID reuse to target a foreign helper. `086c831d` now persists/verifies **start time + exact command**, refuses unverified live records before reuse/stop, and adds eight executable tests with mocked signals (no real process is killed by the tests). Final review outcome is recorded after the required same-engine rerun.
+
+**Task-5 verdict: complete — Phase 4 records all tables, protocol/provenance, corrected premises, implementation/test verdicts and limits. Overall: Small-switch carryover improves on the mini; graceful teardown is bounded and verified; delayed reclaim is measurable; Arena remains unresolved on the iPhone.**
