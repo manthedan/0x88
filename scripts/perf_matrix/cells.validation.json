@@ -1,0 +1,12 @@
+{
+  "repeats": 3,
+  "settleMs": 10000,
+  "cells": [
+    { "browser": "safari", "net": "lqo", "cache": ["cold", "warm"], "params": {}, "repeats": 5 },
+    { "browser": "safari", "net": "lqo", "cache": ["cold", "warm"], "params": { "ortDequantFold": "0" } },
+    { "browser": "safari", "net": "t3", "cache": ["cold", "warm"], "params": {} },
+    { "browser": "chrome", "net": "lqo", "cache": ["cold", "warm"], "params": {} },
+    { "browser": "chrome", "net": "lqo", "cache": ["cold", "warm"], "params": { "ortDequantFold": "0" } },
+    { "browser": "chrome", "net": "t3", "cache": ["cold", "warm"], "params": {} }
+  ]
+}
