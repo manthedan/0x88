@@ -3,8 +3,30 @@
 // state: a warm run must fetch zero model bytes from the network.
 import { createServer, request as httpRequest } from 'node:http';
 
-export function startCountingProxy(target) {
+export async function startCountingProxy(target) {
   const upstream = new URL(target);
+  // Channel-v2 model representations have no extension. Identify their raw hash
+  // from app-origin model pins, rather than counting unrelated WASM/glue artifacts.
+  const modelHashes = new Set();
+  await Promise.all(
+    ['lc0', 'maia3'].map(async (family) => {
+      try {
+        const response = await fetch(new URL(`/models/${family}/manifest.json`, upstream), { signal: AbortSignal.timeout(5000) });
+        if (!response.ok) return;
+        const manifest = await response.json();
+        for (const entry of manifest.models ?? []) if (/^[a-f0-9]{64}$/i.test(entry.sha256 ?? '')) modelHashes.add(entry.sha256.toLowerCase());
+      } catch {
+        /* Legacy extension paths remain countable when a manifest is unavailable. */
+      }
+    }),
+  );
+  const isModel = (requestPath) => {
+    const pathname = new URL(requestPath, 'http://proxy.local').pathname;
+    if (pathname.endsWith('/manifest.json')) return false;
+    if (/\.(onnx|bin|params|lc0web|br)$|\/models\//.test(pathname)) return true;
+    const artifact = /^\/artifacts\/sha256\/([a-f0-9]{64})\/(?:identity|br\/[a-f0-9]{64})$/i.exec(pathname);
+    return artifact !== null && modelHashes.has(artifact[1].toLowerCase());
+  };
   const requests = [];
   const server = createServer((req, res) => {
     const entry = { at: Date.now(), method: req.method, path: req.url, status: null, bytes: 0 };
@@ -34,8 +56,7 @@ export function startCountingProxy(target) {
         url: `http://127.0.0.1:${port}`,
         requests,
         /** Requests for model-like assets (.onnx and friends) since `since` (epoch ms). */
-        modelRequests: (since) =>
-          requests.filter((r) => r.at >= since && /\.(onnx|bin|params|lc0web|br)(\?|$)|\/models\//.test(r.path ?? '') && !/manifest\.json/.test(r.path ?? '')),
+        modelRequests: (since) => requests.filter((r) => r.at >= since && isModel(r.path ?? '')),
         close: () =>
           new Promise((r) => {
             server.close(() => r());

@@ -1,10 +1,50 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import test from 'node:test';
 import { digestReport, phaseOf, soakUrl, summarize, WORKER_READY_SCRIPT } from '../scripts/perf_matrix/common.mjs';
+import { startCountingProxy } from '../scripts/perf_matrix/proxy.mjs';
 
 const runner = readFileSync(new URL('../scripts/perf_matrix/run_matrix.mjs', import.meta.url), 'utf8');
 const validity = new Function(`${runner.slice(runner.indexOf('function validity(r)'), runner.indexOf('function aggregate(dir)'))}; return validity;`)();
+
+test('proxy counts extensionless v2 identity/Brotli model bytes but not runtime artifacts', async (t) => {
+  const modelHash = 'a'.repeat(64),
+    representationHash = 'b'.repeat(64),
+    runtimeHash = 'c'.repeat(64);
+  const upstream = createServer((req, res) => {
+    if (req.url.endsWith('/manifest.json')) {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ models: [{ sha256: modelHash }] }));
+    } else res.end(Buffer.alloc(req.url.includes('/br/') ? 60 : 100));
+  });
+  await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const proxy = await startCountingProxy(`http://127.0.0.1:${upstream.address().port}`);
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => {
+      upstream.close(resolve);
+      upstream.closeAllConnections();
+    });
+  });
+  const paths = [
+    `/artifacts/sha256/${modelHash}/identity`,
+    `/artifacts/sha256/${modelHash}/br/${representationHash}`,
+    `/artifacts/sha256/${runtimeHash}/identity`,
+    '/models/lc0/net.onnx',
+    '/models/lc0/manifest.json',
+  ];
+  for (const path of paths) await (await fetch(proxy.url + path)).arrayBuffer();
+  const model = proxy.modelRequests(0);
+  assert.deepEqual(
+    model.map((r) => r.path),
+    [paths[0], paths[1], paths[3]],
+  );
+  assert.equal(
+    model.reduce((sum, r) => sum + r.bytes, 0),
+    260,
+  );
+});
 
 test('matrix keeps load/search and teardown boundaries distinct', () => {
   const progress = (phases) => ({ state: 'running', steps: [{ phases }] });
