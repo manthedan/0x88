@@ -4860,6 +4860,7 @@ const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
 let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
 let maia3PanelPending: Promise<Maia3BrowserEvaluator> | null = null;
+let maia3PanelAbort: AbortController | null = null;
 let maia3PanelLoadGeneration = 0;
 let maia3PanelTask: LatestOnlyTask<string> | null = null;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -4873,6 +4874,8 @@ function maia3PanelStatus(text: string): void {
 
 function unloadMaia3Panel(message: string): void {
   maia3PanelLoadGeneration += 1;
+  maia3PanelAbort?.abort();
+  maia3PanelAbort = null;
   maia3PanelTask?.dispose();
   maia3PanelTask = null;
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
@@ -4904,6 +4907,8 @@ async function enableMaia3Panel(): Promise<void> {
   if (maia3PanelEvaluator || maia3PanelLoading) return;
   const mountSignal = mountAbort.signal;
   const generation = ++maia3PanelLoadGeneration;
+  const loadAbort = new AbortController();
+  maia3PanelAbort = loadAbort;
   maia3PanelLoading = true;
   (el('maia3Enable') as HTMLButtonElement).disabled = true;
   try {
@@ -4912,6 +4917,10 @@ async function enableMaia3Panel(): Promise<void> {
     await awaitEngineRetirements();
     if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
     maia3PanelPending = Maia3BrowserEvaluator.create({
+      signal: loadAbort.signal,
+      onInitCleanup: (cleanup) => {
+        trackEngineRetirement(cleanup);
+      },
       onFailure: (error) => {
         if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
         maia3PanelTask?.dispose();
@@ -6193,6 +6202,8 @@ function disposePageResources(): void {
   analysisReloadAbort?.abort();
   analysisReloadAbort = null;
   disposeRuntimeResources();
+  maia3PanelAbort?.abort();
+  maia3PanelAbort = null;
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   if (maia3PanelPending)
     trackEngineRetirement(
@@ -6268,7 +6279,16 @@ async function loadLc0Backend(
 }
 
 async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
-  await awaitEngineRetirements();
+  try {
+    await awaitEngineRetirements();
+  } catch (error) {
+    if (!loadCancelled()) {
+      el('analyze').toggleAttribute('disabled', false);
+      selectEl('lc0RuntimeSelect').disabled = false;
+      el('message').textContent = `Previous engine could not be retired. Reload this page before loading another model: ${(error as Error).message}`;
+    }
+    return false; // A failed termination is not permission to create a main-thread fallback.
+  }
   if (loadCancelled()) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);

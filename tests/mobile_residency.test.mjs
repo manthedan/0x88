@@ -14,15 +14,15 @@ function compile(code, deps = {}) {
   return new Function(...Object.keys(deps), `return (${stripTypeScriptTypes(`function run(){${code}\n}`)})();`)(...Object.values(deps));
 }
 const play = source('playBrowser');
-function playOwner() {
+function playOwner(options = {}) {
   const loads = [],
     releases = [],
     gates = [];
   const ctx = { enginePreparationGeneration: 0, opponent: { active: { maiaElo: 1500 } } };
   const api = compile(
     `
-    let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null};
-    let maia3Promise=null,maia3Status=null,maia3Generation=0;
+    let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null,abort:new AbortController()};
+    let maia3Promise=null,maia3Status=null,maia3Generation=0,maia3Owner=null;
     ${extract(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureCentipawn(')}
     ${extract(play, 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
     return {retire:retireUnusedPlayNeuralEngines,small:()=>ctxEnsureLc0Small(ctx),maia:()=>ctxEnsureMaia3(ctx),peek:()=>lc0Searcher};
@@ -35,8 +35,9 @@ function playOwner() {
       ctxAsyncUiIsCurrent: () => false,
       MODEL_URL: '/small.onnx',
       LC0_DEVICE_MODEL_SELECTION: true,
-      createLc0OnnxEvaluatorFromUrl: async () => {
+      createLc0OnnxEvaluatorFromUrl: async (_url, loadOptions) => {
         loads.push('small');
+        if (options.createSmall) return options.createSmall(loadOptions);
         return {
           evaluator: {
             dispose: () => {
@@ -58,8 +59,9 @@ function playOwner() {
         resetTree() {}
       },
       Maia3BrowserEvaluator: {
-        create: async () => {
+        create: async (createOptions) => {
           loads.push('maia');
+          if (options.createMaia) return options.createMaia(createOptions);
           return {
             modelLoad: { bytes: 1 },
             dispose: () => {
@@ -99,6 +101,57 @@ for (const old of ['maia', 'small']) {
   });
 }
 
+test('switching away from a stalled Small download aborts it rather than blocking the replacement', async () => {
+  let aborted = false;
+  const api = playOwner({
+    createSmall: ({ load }) =>
+      new Promise((_resolve, reject) => {
+        load.signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            reject(load.signal.reason);
+          },
+          { once: true },
+        );
+      }),
+  });
+  const loading = assert.rejects(api.small(), { name: 'AbortError' });
+  await api.retire({ family: 'sf' });
+  await loading;
+  assert.equal(aborted, true);
+});
+
+test('switching away from a stalled Maia initialization aborts promptly but still awaits its published worker cleanup', async () => {
+  const cleanup = Promise.withResolvers();
+  let aborted = false;
+  const api = playOwner({
+    createMaia: ({ signal, onInitCleanup }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            onInitCleanup(cleanup.promise);
+            reject(signal.reason);
+          },
+          { once: true },
+        );
+      }),
+  });
+  const loading = assert.rejects(api.maia(), { name: 'AbortError' });
+  let settled = false;
+  const retiring = api.retire({ family: 'sf' }).then(() => {
+    settled = true;
+  });
+  await loading;
+  await new Promise(setImmediate);
+  assert.equal(aborted, true);
+  assert.equal(settled, false, 'the aborted init still owns a retiring worker');
+  cleanup.resolve();
+  await retiring;
+});
+
 test('Play unmount calls the same awaitable retirement for both neural owners', async () => {
   const api = playOwner();
   await api.small();
@@ -123,8 +176,8 @@ test('a Small initialization finishing after retirement cannot repopulate the pa
     released = [];
   const api = compile(
     `
-    let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null};
-    let maia3Promise=null,maia3Status=null,maia3Generation=0;
+    let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null,abort:new AbortController()};
+    let maia3Promise=null,maia3Status=null,maia3Generation=0,maia3Owner=null;
     ${extract(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureCentipawn(')}
     return {load:()=>ctxEnsureLc0Small(ctx),retire:retireUnusedPlayNeuralEngines,peek:()=>lc0Searcher};
   `,
@@ -206,7 +259,7 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
   const api = compile(
     `
     let maia3PanelLoadGeneration=1,maia3PanelTask={dispose(){}},maia3PanelTimer=null;
-    let maia3PanelPending=pending,maia3PanelEvaluator=null,maia3PanelLoading=true,explorerMaia={};
+    let maia3PanelPending=pending,maia3PanelEvaluator=null,maia3PanelLoading=true,explorerMaia={},maia3PanelAbort=null;
     ${extract(source('analysisBrowser'), 'function unloadMaia3Panel(', 'async function enableMaia3Panel(')}
     unloadMaia3Panel('Unloaded');
     return ()=>({maia3PanelEvaluator,maia3PanelLoading,maia3PanelLoadGeneration,explorerMaia});
@@ -245,6 +298,72 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
   const perform = extract(source('analysisBrowser'), 'async function performAnalysis(owner:', 'let analysisGameTree = tree;');
   assert.match(perform, /isMemoryConstrainedDevice\(\).*rows.some/s);
   assert.ok(perform.indexOf('unloadMaia3Panel(') < perform.indexOf('initBigNetsForRun(uninitializedBigNets'));
+});
+
+test('Analysis cancels a pending Maia panel load, awaits terminal cleanup, and re-enable reloads it', async () => {
+  const text = source('analysisBrowser'),
+    cleanup = Promise.withResolvers(),
+    elements = new Map();
+  let creates = 0;
+  const api = compile(
+    `
+    let maia3PanelLoadGeneration=0,maia3PanelTask=null,maia3PanelTimer=null,maia3PanelPending=null;
+    let maia3PanelEvaluator=null,maia3PanelLoading=false,maia3PanelAbort=null,explorerMaia=null;
+    ${extract(text, 'function unloadMaia3Panel(', 'function scheduleMaia3Panel(')}
+    return {enable:enableMaia3Panel,unload:unloadMaia3Panel};
+  `,
+    {
+      trackEngineRetirement,
+      awaitEngineRetirements,
+      mountAbort: new AbortController(),
+      isStaleMount: () => false,
+      el: (id) => {
+        if (!elements.has(id)) elements.set(id, {});
+        return elements.get(id);
+      },
+      maia3PanelStatus: () => {},
+      showModelProgress: () => {},
+      hideModelProgress: () => {},
+      renderExplorerComparison: () => {},
+      scheduleMaia3Panel: () => {},
+      LatestOnlyTask: class {
+        dispose() {}
+      },
+      Maia3BrowserEvaluator: {
+        create: ({ signal, onInitCleanup }) => {
+          creates++;
+          if (creates > 1) return Promise.resolve({ dispose: async () => {} });
+          return new Promise((_resolve, reject) =>
+            signal.addEventListener(
+              'abort',
+              () => {
+                onInitCleanup(cleanup.promise);
+                reject(signal.reason);
+              },
+              { once: true },
+            ),
+          );
+        },
+      },
+    },
+  );
+  const enabling = api.enable();
+  await new Promise(setImmediate);
+  api.unload('Unloaded');
+  await enabling;
+  let retired = false;
+  const waiting = awaitEngineRetirements().then(() => {
+    retired = true;
+  });
+  await new Promise(setImmediate);
+  assert.equal(retired, false);
+  cleanup.resolve();
+  await waiting;
+  await api.enable();
+  assert.equal(creates, 2);
+  assert.equal(elements.get('maia3Enable').hidden, true);
+  api.unload('Done');
+  await awaitEngineRetirements();
 });
 
 test('Arena immediately detaches big nets and waits for ack before the next warmup', async () => {

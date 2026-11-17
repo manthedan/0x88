@@ -146,8 +146,9 @@ const LQO_BLACK_SEARCH_CONTEMPT_LIMIT = 32;
 const BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3', 'lqo'];
 let lc0Searcher: Lc0PuctSearcher | null = null;
 let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
-let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null } = { evaluator: null };
+let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null; abort: AbortController } = { evaluator: null, abort: new AbortController() };
 let maia3Generation = 0;
+let maia3Owner: { abort: AbortController; cleanup: Promise<void> | null } | null = null;
 let centipawnEvaluator: CachedEvaluator | null = null;
 let centipawnLoadPromise: Promise<Evaluator> | null = null;
 let centipawnEvaluatorGeneration = 0;
@@ -563,22 +564,28 @@ function ctxHideDownloadProgress(): void {
 function retireUnusedPlayNeuralEngines(option?: PlayEngineOption): Promise<void> {
   if (option?.family !== 'maia3' && maia3Promise) {
     const pending = maia3Promise;
+    const owner = maia3Owner;
+    maia3Owner = null;
     maia3Promise = null;
     maia3Status = null;
     maia3Generation += 1;
+    owner?.abort.abort();
     trackEngineRetirement(
       pending.then(
         (evaluator) => evaluator.dispose(),
-        () => undefined,
+        async () => {
+          await owner?.cleanup;
+        },
       ),
     );
   }
   if (!(option?.family === 'lc0' && option.variant === 'small') && lc0LoadPromise) {
     const pending = lc0LoadPromise;
     const owner = lc0SmallOwner;
-    lc0SmallOwner = { evaluator: null };
+    lc0SmallOwner = { evaluator: null, abort: new AbortController() };
     lc0LoadPromise = null;
     lc0Searcher = null;
+    owner.abort.abort();
     trackEngineRetirement(
       pending.then(
         async (searcher) => {
@@ -608,6 +615,7 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
         load: {
           cache: true,
           requestPersistentStorage: true,
+          signal: owner.abort.signal,
           onProgress: (loaded, total) => {
             if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Lc0 small net', loaded, total);
           },
@@ -680,18 +688,26 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
 async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
   if (maia3Promise) {
     const cached = maia3Promise;
+    const owner = maia3Owner;
     const evaluator = await cached;
+    if (owner?.abort.signal.aborted) throw new DOMException('Maia3 owner retired', 'AbortError');
     if (!evaluator.failure) return evaluator;
     if (maia3Promise === cached) maia3Promise = null;
     return ctxEnsureMaia3(ctx);
   }
   const uiGeneration = ctx.enginePreparationGeneration;
-  const generation = maia3Generation;
+  const generation = ++maia3Generation;
+  const owner = { abort: new AbortController(), cleanup: null as Promise<void> | null };
+  maia3Owner = owner;
   maia3Promise = (async () => {
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Maia3 human model…');
     const evaluator = await Maia3BrowserEvaluator.create({
       selfElo: ctx.opponent.active.maiaElo,
       oppoElo: ctx.opponent.active.maiaElo,
+      signal: owner.abort.signal,
+      onInitCleanup: (cleanup) => {
+        owner.cleanup = cleanup;
+      },
       onProgress: (loaded, total) => {
         if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Maia3', loaded, total);
       },
