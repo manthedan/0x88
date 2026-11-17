@@ -1,4 +1,5 @@
 import { BIG_NETS, type BigNetConfig, Bt4WorkerSearcher } from './bt4Engine.ts';
+import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 
 export type BigNetKey = BigNetConfig['key'];
 
@@ -31,14 +32,28 @@ export class BigNetSessionPool<T extends DisposableSearcher> {
   private readonly factory: (config: BigNetConfig) => T;
   private readonly scheduler: TimerScheduler;
   private readonly defaultIdleTtlMs: number;
+  private readonly constrained: () => boolean;
 
-  constructor(factory: (config: BigNetConfig) => T, scheduler: TimerScheduler = defaultScheduler, defaultIdleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS) {
+  constructor(
+    factory: (config: BigNetConfig) => T,
+    scheduler: TimerScheduler = defaultScheduler,
+    defaultIdleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS,
+    constrained = isMemoryConstrainedDevice,
+  ) {
     this.factory = factory;
     this.scheduler = scheduler;
     this.defaultIdleTtlMs = defaultIdleTtlMs;
+    this.constrained = constrained;
   }
 
   acquire(key: BigNetKey): T {
+    // Phones have one resident slot. Terminate the old worker before even
+    // constructing its replacement, including sessions retained by the TTL.
+    if (this.constrained()) {
+      for (const other of this.records.keys()) {
+        if (other !== key) this.disposeNow(other);
+      }
+    }
     let record = this.records.get(key);
     if (!record) {
       record = { searcher: this.factory(BIG_NETS[key]), timer: null };
@@ -55,7 +70,7 @@ export class BigNetSessionPool<T extends DisposableSearcher> {
     const record = this.records.get(key);
     if (!record) return;
     if (record.timer) this.scheduler.clearTimeout(record.timer);
-    if (idleTtlMs <= 0) {
+    if (this.constrained() || idleTtlMs <= 0) {
       this.disposeNow(key);
       return;
     }

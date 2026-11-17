@@ -158,6 +158,7 @@ onMount(() => {
       <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors" data-fixed="false"></div>
       <button id="addSeat" class="add-seat" type="button" title="Add another engine seat">+ Add engine</button>
       <p class="matchup-note" id="matchupNote">Equal time per move · colors alternate.</p>
+      <p id="arenaMemoryNote" class="field-hint" role="status" hidden></p>
     </details>
     <details class="section-block" open>
       <summary>Time control &amp; openings</summary>

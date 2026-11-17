@@ -59,6 +59,7 @@ import {
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
+import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeatBlocked } from './arenaMemoryGuard.ts';
 import { arenaMoveDelay, guardArenaUnload } from './arenaNavigation.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { loadArenaResource } from './arenaResourceLoad.ts';
@@ -109,6 +110,7 @@ import {
 } from './bt4Engine.ts';
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
+import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import {
@@ -1816,6 +1818,20 @@ function activeSeatRows(): EngineRow[] {
   return arenaTournamentMode() === 'match' ? seatRows.slice(0, 2) : [...seatRows];
 }
 
+let startDisabled = true;
+function setArenaStartDisabled(disabled: boolean): void {
+  startDisabled = disabled;
+  refreshArenaMemoryGuard();
+}
+
+function refreshArenaMemoryGuard(): void {
+  const blocked = arenaBigNetPairingBlocked(arenaTournamentMode(), seatRows);
+  const note = el('arenaMemoryNote');
+  note.hidden = !blocked && !seatRows.some((_, index) => arenaBigNetSeatBlocked(arenaTournamentMode(), seatRows, index));
+  note.textContent = ARENA_BIG_NET_MEMORY_REASON;
+  el('start').toggleAttribute('disabled', startDisabled || blocked);
+}
+
 function runtimeAuditIdentityForRow(row: EngineRow): string | null {
   if (row.family === 'centipawn') {
     const model = centipawnModel();
@@ -1877,11 +1893,12 @@ function renderSeatSelectors(): void {
       .map((row, index) => {
         const meta = strengthMeta(row.family);
         const famSel = families.map(({ value, label }) => `<option value="${value}"${row.family === value ? ' selected' : ''}>${label}</option>`).join('');
+        const memoryBlocked = row.family === 'lc0' && arenaBigNetSeatBlocked(arenaTournamentMode(), seatRows, index);
         const varSel = variantOptions(row.family)
-          .map(
-            (option) =>
-              `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${htmlEscape(option.label)}</option>`,
-          )
+          .map((option) => {
+            const blocked = memoryBlocked && isLc0BigNetVariant(option.value);
+            return `<option value="${option.value}"${row.variant === option.value ? ' selected' : ''}${option.disabled || blocked ? ' disabled' : ''}>${htmlEscape(option.label)}${blocked ? ' (one large net at a time)' : ''}</option>`;
+          })
           .join('');
         const label = `Engine ${index + 1}`;
         const inactive = matchMode && index >= 2 ? ' seat-inactive' : '';
@@ -1899,6 +1916,7 @@ function renderSeatSelectors(): void {
       })
       .join('');
   el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
+  refreshArenaMemoryGuard();
   reconcileActiveRuntimeFallbackWarning();
   if (!running) renderSideLabels();
   renderSetupSummary();
@@ -2159,8 +2177,9 @@ function engineRuntimeDiagnosticsText(): string {
       return `${name}: ${budgetText(row)} · ${lc0RuntimeLabel()}${hybrid ? ` · ${hybrid}` : ''} · batch ${lc0BatchSize()} · pipeline depth ${lc0BatchPipelineDepth()} · ${cacheMetricsText(lc0Cache?.metrics())}`;
     }
     if (row?.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-      const { config, searcher } = bigNetFor(row.variant);
-      return `${name}: ${budgetText(row)} · ${searcher.loaded ? `loaded ${searcher.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ${config.name} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · eval cache ${arenaCacheEntries()} · ~${config.approxMb}MB net · ${searcher.servedModelUrl || config.modelUrl}`;
+      const config = BIG_NETS[row.variant];
+      const searcher = peekBigNetSearcher(config.key);
+      return `${name}: ${budgetText(row)} · ${searcher?.loaded ? `loaded ${searcher.backend || 'WebGPU'}` : 'lazy WebGPU worker'} · ${config.name} · batch ${config.recommendedBatchSize} · pipeline depth ${config.recommendedPipelineDepth} · eval cache ${arenaCacheEntries()} · ~${config.approxMb}MB net · ${searcher?.servedModelUrl || config.modelUrl}`;
     }
     if (row?.family === 'centipawn')
       return `${name}: ${budgetText(row)} · SquareFormer ${centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`;
@@ -2257,8 +2276,8 @@ function uciTelemetrySummary(t: UciEngineTelemetry): string {
   return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · last ${formatMs(t.lastElapsedMs)} · total nodes ${formatCount(t.totalNodes)} · ${last}${t.lastMultiPv && t.lastMultiPv > 1 ? ` · MultiPV ${t.lastMultiPv}` : ''}`;
 }
 
-function bt4TelemetrySummary(t: Bt4Telemetry, searcher: Bt4WorkerSearcher): string {
-  return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · visits ${t.completedVisits} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · last ${formatMs(t.lastElapsedMs)} · ${searcher.loaded ? `backend ${searcher.backend || 'WebGPU'}` : 'worker not loaded'}`;
+function bt4TelemetrySummary(t: Bt4Telemetry, searcher: Bt4WorkerSearcher | null): string {
+  return `${t.engineName}: searches ${t.searches} · avg ${averageMs(t.totalElapsedMs, t.searches)} · visits ${t.completedVisits} · evals ${t.evalCalls} · cache hits ${t.cacheHits} · last ${formatMs(t.lastElapsedMs)} · ${searcher?.loaded ? `backend ${searcher.backend || 'WebGPU'}` : 'worker not loaded'}`;
 }
 
 function engineSearchDiagnosticsText(ids = diagnosticEngineIds()): string {
@@ -2272,10 +2291,11 @@ function engineSearchDiagnosticsText(ids = diagnosticEngineIds()): string {
     }
     if (row?.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
       const t = bt4Telemetry.get(id);
-      const { config, searcher } = bigNetFor(row.variant);
+      const config = BIG_NETS[row.variant];
+      const searcher = peekBigNetSearcher(config.key);
       return t?.searches
         ? bt4TelemetrySummary(t, searcher)
-        : `${name}: ${config.name} search waiting${searcher.loaded ? ` · backend ${searcher.backend || 'WebGPU'}` : ''}`;
+        : `${name}: ${config.name} search waiting${searcher?.loaded ? ` · backend ${searcher.backend || 'WebGPU'}` : ''}`;
     }
     if (row?.family === 'centipawn') return engineOutputs.has(id) ? `${name}: Centipawn search output ready` : `${name}: Centipawn search waiting`;
     const uci = uciTelemetry.get(id);
@@ -2856,7 +2876,7 @@ async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<
   bt4AvailabilityResolved = true;
   if (isStaleMount(mountSignal)) return;
   for (const row of activeSeatRows()) {
-    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(bigNetFor(row.variant).config)) row.variant = 'small';
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(BIG_NETS[row.variant])) row.variant = 'small';
   }
   buildEngines();
   renderSeatSelectors();
@@ -3176,7 +3196,7 @@ function buildEngines() {
     const hashMb = cpuEngineHashMbForSurface('arena');
     return {
       phase: 'Loading and configuring the local WebAssembly engine',
-      detail: `Stockfish runs entirely in this browser. On first use, this loads its engine files, starts ${threadText}, allocates a ${hashMb} MB search cache, and completes its UCI readiness check. The match clock has not started; game 1 begins automatically.`,
+      detail: `Stockfish runs entirely in this browser. On first use, this loads its engine files, starts ${threadText}, allocates a ${hashMb} MB search cache, and completes its UCI readiness check. The game clock starts after preparation; play begins automatically.`,
     };
   };
   const stockfishWarmup = (kind: 'lite' | 'full') => async (signal: AbortSignal) => {
@@ -3493,7 +3513,7 @@ function showEngineWarmupStatus(engine: ArenaEngine, index: number, total: numbe
   el('engineWarmupTitle').textContent = `Preparing ${engine.name} · engine ${index} of ${total}`;
   const fallback: ArenaWarmupStatus = {
     phase: 'Loading the engine and checking that it is ready',
-    detail: 'The arena performs a tiny untimed readiness check before game 1 so startup work is not charged to the first move. The match begins automatically.',
+    detail: 'A short check prepares each engine before play. Game time starts after preparation.',
   };
   const copy = engine.warmupStatus ?? fallback;
   el('engineWarmupPhase').textContent = copy.phase;
@@ -3518,7 +3538,7 @@ async function warmUpSelectedEngines(ids: string[], signal: AbortSignal, minimum
     pending.push(engine);
   }
   if (!pending.length) return;
-  el('message').textContent = 'Preparing engines before game 1…';
+  el('message').textContent = 'Preparing engines…';
   const visibleSince = performance.now();
   try {
     for (let index = 0; index < pending.length; index++) {
@@ -3796,7 +3816,7 @@ async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.si
 
 function clearStartPending(): void {
   startPending = false;
-  if (!running) el('start').toggleAttribute('disabled', false);
+  if (!running) setArenaStartDisabled(false);
   syncArenaPhase();
 }
 
@@ -4103,7 +4123,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   if (running || startPending) return;
   const mountSignal = mountAbort.signal;
   startPending = true;
-  el('start').toggleAttribute('disabled', true);
+  setArenaStartDisabled(true);
   syncArenaPhase();
   await checkpointWrites;
   if (isStaleMount(mountSignal)) return;
@@ -4124,6 +4144,12 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   );
   for (const id of ARENA_CONTROL_IDS) (el(id) as HTMLInputElement).value = effectiveControls[id];
   syncSeatRowsFromDom();
+  // Also guard URL, saved and programmatic setups before asset checks or warmup.
+  if (arenaBigNetPairingBlocked(arenaTournamentMode(), seatRows)) {
+    el('message').textContent = ARENA_BIG_NET_MEMORY_REASON;
+    clearStartPending();
+    return;
+  }
   const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
   if (isStaleMount(mountSignal)) return;
   if (!selectedAssetsAvailable) {
@@ -4178,7 +4204,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   for (const row of bigNetRows) {
     if (!isLc0BigNetVariant(row.variant) || checkedBigNetVariants.has(row.variant)) continue;
     checkedBigNetVariants.add(row.variant);
-    const { config } = bigNetFor(row.variant);
+    const config = BIG_NETS[row.variant];
     const status = await checkBigNetAsset(config, whileArenaMounted(renderSeatSelectors));
     if (isStaleMount(mountSignal)) return;
     if (status !== 'present') {
@@ -4271,7 +4297,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   exitReview();
   renderEngineOutputs();
   renderSearchTelemetryInfo();
-  el('start').toggleAttribute('disabled', true);
+  setArenaStartDisabled(true);
   el('stop').toggleAttribute('disabled', false);
   const score: MatchScore = { a: 0, b: 0, aWins: 0, bWins: 0, draws: 0, games: 0 };
   if (resume) {
@@ -4372,8 +4398,13 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         if (!lc0Cache) throw new Error('The saved Lc0 network could not be loaded.');
       }
       resetLc0SearchTrees(seatIds);
-      await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
-      enginesReady = true;
+      // A safe gauntlet can have several large nets in the field. On phones,
+      // prepare only this game's seats, never the entire retained roster.
+      const constrained = isMemoryConstrainedDevice();
+      if (!constrained) {
+        await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
+        enginesReady = true;
+      }
       if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
       for (const i of pendingIndices) {
         if (matchAbort.signal.aborted) break;
@@ -4382,6 +4413,10 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         const black = byPid.get(blackId)!;
         const whiteEngine = white.engine!;
         const blackEngine = black.engine!;
+        if (constrained) {
+          await warmUpSelectedEngines([whiteEngine.id, blackEngine.id], matchAbort.signal, enginesReady ? 0 : minimumWarmupVisibleMs);
+          enginesReady = true;
+        }
         // Reset trees per game (fresh game tree); within a game the shared tree is
         // reused across both sides' plies — i.e. self-play when both seats match.
         resetLc0SearchTrees(seatIds);
@@ -4435,7 +4470,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       thinkingEngineIds.clear();
     }
     if (ownsMatchState && !isStaleMount(mountSignal)) {
-      el('start').toggleAttribute('disabled', false);
+      setArenaStartDisabled(false);
       el('stop').toggleAttribute('disabled', true);
       refreshOpeningPreview();
       refreshStockfishControls();
@@ -4561,13 +4596,13 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
   if (!selectedSeatsNeedLc0Evaluator()) {
     lc0LoadAbort = null;
     loadingLc0 = false;
-    el('start').toggleAttribute('disabled', false);
+    setArenaStartDisabled(false);
     refreshSeatControls();
     el('message').textContent = readyMessage();
     return;
   }
   loadingLc0 = true;
-  el('start').toggleAttribute('disabled', true);
+  setArenaStartDisabled(true);
   refreshSeatControls();
   const hybrid = lc0HybridConfigLabel(runtime);
   el('message').textContent = 'Loading the Lc0 network…';
@@ -4609,13 +4644,13 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
     lc0Searchers.clear();
     renderCacheInfo();
     hideDownloadProgress();
-    el('start').toggleAttribute('disabled', false);
+    setArenaStartDisabled(false);
     el('message').textContent = readyMessage();
   } catch (error) {
     if (isStaleMount(mountSignal) || signal.aborted) return;
     hideDownloadProgress();
     if (!selectedSeatsNeedLc0Evaluator()) {
-      el('start').toggleAttribute('disabled', false);
+      setArenaStartDisabled(false);
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed, but current non-LC0 matchup is ready: ${(error as Error).message}`;
     } else {
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
@@ -4930,7 +4965,7 @@ function wireEvents() {
         el('message').textContent = 'Saved tournament discarded. Set up a new run.';
         refreshOpeningPreview();
         refreshSeatControls();
-        el('start').toggleAttribute('disabled', false);
+        setArenaStartDisabled(false);
       } catch (error) {
         checkpointProblem = `Could not discard: ${error instanceof Error ? error.message : String(error)}`;
         renderCheckpointStatus();
@@ -5040,6 +5075,12 @@ function wireEvents() {
       row.variant = defaultVariant(row.family);
       row.strength = strengthMeta(row.family).def;
     } else if (target.classList.contains('seat-var')) {
+      if (row.family === 'lc0' && isLc0BigNetVariant(target.value) && arenaBigNetSeatBlocked(arenaTournamentMode(), seatRows, seat)) {
+        target.value = row.variant;
+        el('message').textContent = ARENA_BIG_NET_MEMORY_REASON;
+        refreshArenaMemoryGuard();
+        return;
+      }
       if (
         row.family === 'lc0' &&
         isLc0BigNetVariant(target.value) &&
@@ -5064,7 +5105,7 @@ function wireEvents() {
     buildEngines();
     populateSeats();
     if (selectedSeatsNeedLc0Evaluator() && !lc0Cache && !loadingLc0) void loadLc0Evaluator();
-    else if (!loadingLc0) el('start').toggleAttribute('disabled', false);
+    else if (!loadingLc0) setArenaStartDisabled(false);
   });
   el('arenaSeatList').addEventListener('input', (event) => {
     if (running) return;
@@ -5270,7 +5311,7 @@ async function init(mountSignal: AbortSignal) {
         setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
         enterReview(trail, trail.entries.length - 1);
       }
-      el('start').toggleAttribute('disabled', false);
+      setArenaStartDisabled(false);
       syncArenaPhase();
     }
   } catch (error) {
@@ -5307,6 +5348,7 @@ function resetArenaPageState(): void {
   loadingLc0 = false;
   running = false;
   startPending = false;
+  startDisabled = true;
   gameChartSamples = [];
   games.length = 0;
   gameResultChips.length = 0;

@@ -126,6 +126,68 @@ test('identity-checked detach cannot remove another owner or a different key', (
   bt4.dispose();
 });
 
+test('constrained pool disposes the previous net before creating a different one', () => {
+  const events = [];
+  const { scheduler, timers } = fakeScheduler();
+  const pool = new BigNetSessionPool(
+    (config) => {
+      events.push(`create:${config.key}`);
+      const searcher = new FakeSearcher(config);
+      searcher.dispose = () => events.push(`dispose:${config.key}`);
+      return searcher;
+    },
+    scheduler,
+    500,
+    () => true,
+  );
+  pool.acquire('bt4');
+  pool.acquire('t3');
+  pool.acquire('lqo');
+  assert.deepEqual(events, ['create:bt4', 'dispose:bt4', 'create:t3', 'dispose:t3', 'create:lqo']);
+  assert.equal(pool.has('bt4'), false);
+  assert.equal(pool.has('t3'), false);
+  assert.equal(timers.length, 0);
+});
+
+test('constrained pool reuses its one slot, but release never retains a retired net', () => {
+  const { scheduler, timers } = fakeScheduler();
+  const pool = new BigNetSessionPool(
+    (config) => new FakeSearcher(config),
+    scheduler,
+    500,
+    () => true,
+  );
+  const searcher = pool.acquire('bt4');
+  assert.equal(pool.acquire('bt4'), searcher);
+  pool.releaseUnused(['bt4']);
+  assert.equal(searcher.disposeCalls, 0);
+  pool.release('bt4', 180000);
+  assert.equal(searcher.disposeCalls, 1);
+  assert.equal(pool.has('bt4'), false);
+  assert.equal(timers.length, 0);
+});
+
+test('constrained acquire also clears an inherited idle-TTL net before replacement', () => {
+  let constrained = false;
+  const { scheduler, timers } = fakeScheduler();
+  let first;
+  const pool = new BigNetSessionPool(
+    (config) => {
+      if (config.key === 't3') assert.equal(first.disposeCalls, 1, 'old worker must be terminated before replacement');
+      return new FakeSearcher(config);
+    },
+    scheduler,
+    180000,
+    () => constrained,
+  );
+  first = pool.acquire('bt4');
+  pool.release('bt4');
+  constrained = true;
+  pool.acquire('t3');
+  assert.equal(timers[0].cleared, true);
+  assert.equal(pool.has('bt4'), false);
+});
+
 test('default scheduler calls the timer globals unbound (browsers reject a foreign receiver)', () => {
   const realSet = globalThis.setTimeout;
   const realClear = globalThis.clearTimeout;
