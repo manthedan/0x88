@@ -58,6 +58,7 @@ test('Arena start entry blocks restored/URL/programmatic pairings before acquiri
         startPending: false,
         abort: null,
         mountAbort: new AbortController(),
+        abortArenaPickerConsent() {},
         setArenaStartDisabled() {},
         syncArenaPhase() {},
         checkpointWrites: Promise.resolve(),
@@ -104,10 +105,11 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
       () => constrained,
     );
     pool.acquire('lqo'); // An earlier page/game may have retained a different net.
-    const bigNetFor = new Function('BIG_NETS', 'acquireBigNetSearcherAsync', `${extract('async function bigNetFor(', '\nlet runtimeIsolation')}\nreturn bigNetFor;`)(
-      BIG_NETS,
-      (key, exclusive) => pool.acquireAsync(key, exclusive),
-    );
+    const bigNetFor = new Function(
+      'BIG_NETS',
+      'acquireBigNetSearcherAsync',
+      `${extract('async function bigNetFor(', '\nlet runtimeIsolation')}\nreturn bigNetFor;`,
+    )(BIG_NETS, (key, exclusive) => pool.acquireAsync(key, exclusive));
     const deps = {
       seatIds: ['sf:lite:8', 'lc0:bt4:100', 'lc0:t3:100'],
       matchAbort: new AbortController(),

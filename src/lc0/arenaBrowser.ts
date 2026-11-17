@@ -499,6 +499,11 @@ let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown'
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 // A picker acceptance approves its next startup, not every future uncached run.
 const arenaDownloadApprovals = new Set<BigNetKey>();
+let arenaPickerConsentAbort: AbortController | null = null;
+function abortArenaPickerConsent(): void {
+  arenaPickerConsentAbort?.abort();
+  arenaPickerConsentAbort = null;
+}
 async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
   return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, true, signal) };
@@ -4149,6 +4154,7 @@ function queueCheckpointSave(saved: ArenaCheckpoint, mountSignal: AbortSignal): 
 
 async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null, matchAbort = new AbortController()): Promise<void> {
   if (running || startPending) return;
+  abortArenaPickerConsent();
   const mountSignal = mountAbort.signal;
   // The same controller owns startup AND play, so revocation/teardown can cancel
   // the first asset/checkpoint await, not only a match that is already live.
@@ -4582,6 +4588,7 @@ function disposeLc0Resources(): void {
 }
 
 function disposeRuntimeResources(): void {
+  abortArenaPickerConsent();
   arenaDownloadApprovals.clear();
   abort?.abort();
   abort = null;
@@ -4992,6 +4999,7 @@ async function runArenaBenchAutorun(): Promise<void> {
 
 function revokeArenaPhoneLargeNets(): void {
   if (!phoneLargeNetsBlocked()) return;
+  abortArenaPickerConsent();
   arenaDownloadApprovals.clear();
   const affected = activeSeatRows().some((row) => phoneSafeEngineVariant(row.family, row.variant) !== row.variant);
   for (const key of ARENA_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
@@ -5141,7 +5149,8 @@ function wireEvents() {
   };
   document.addEventListener('keydown', arenaKeydownHandler);
   el('arenaSeatList').addEventListener('change', async (event) => {
-    if (running) return;
+    if (running || startPending) return;
+    abortArenaPickerConsent();
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     const seat = Number(target.dataset.seat);
     if (!Number.isInteger(seat) || !seatRows[seat]) return;
@@ -5161,9 +5170,11 @@ function wireEvents() {
         const selectedVariant = target.value;
         const config = BIG_NETS[selectedVariant];
         target.value = row.variant;
-        const signal = mountAbort.signal;
+        const request = new AbortController();
+        arenaPickerConsentAbort = request;
+        const signal = AbortSignal.any([mountAbort.signal, request.signal]);
         if (!(await requestLargeNetConsent(config, signal))) return;
-        if (signal.aborted || seatRows[seat] !== row || running || startPending) return;
+        if (signal.aborted || arenaPickerConsentAbort !== request || seatRows[seat] !== row || running || startPending) return;
         if (!bigNetSelectableSync(config)) {
           el('message').textContent = bigNetUnavailableText(config);
           renderSeatSelectors();
@@ -5193,10 +5204,11 @@ function wireEvents() {
     else if (!loadingLc0) setArenaStartDisabled(false);
   });
   el('arenaSeatList').addEventListener('input', (event) => {
-    if (running) return;
+    if (running || startPending) return;
     const target = event.target as HTMLInputElement;
     const seat = Number(target.dataset.seat);
     if (Number.isInteger(seat) && seatRows[seat] && target.classList.contains('seat-strength')) {
+      abortArenaPickerConsent();
       seatRows[seat].strength = Number(target.value);
       clampStrength(seatRows[seat]);
       persistArenaSeatRows();
@@ -5208,11 +5220,12 @@ function wireEvents() {
     }
   });
   el('arenaSeatList').addEventListener('click', (event) => {
-    if (running) return;
+    if (running || startPending) return;
     const target = event.target as HTMLElement;
     if (!target.classList.contains('seat-remove')) return;
     const index = Number(target.dataset.seat);
     if (!Number.isInteger(index) || seatRows.length <= 2) return;
+    abortArenaPickerConsent();
     syncSeatRowsFromDom();
     seatRows.splice(index, 1);
     persistArenaSeatRows();
@@ -5221,7 +5234,8 @@ function wireEvents() {
     populateSeats();
   });
   el('addSeat').addEventListener('click', () => {
-    if (running || seatRows.length >= 8) return;
+    if (running || startPending || seatRows.length >= 8) return;
+    abortArenaPickerConsent();
     syncSeatRowsFromDom();
     seatRows.push({ family: 'sf', variant: 'lite', strength: 8 });
     persistArenaSeatRows();
@@ -5229,7 +5243,8 @@ function wireEvents() {
     populateSeats();
   });
   el('tournamentModeSelect').addEventListener('change', () => {
-    if (running) return;
+    if (running || startPending) return;
+    abortArenaPickerConsent();
     if (isReadyMessage(el('message').textContent)) el('message').textContent = readyMessage();
     syncSeatRowsFromDom();
     buildEngines();

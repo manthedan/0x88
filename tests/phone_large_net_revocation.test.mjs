@@ -65,6 +65,7 @@ for (const state of ['running', 'starting', 'idle']) {
         phoneSafeEngineVariant: (family, variant) => phoneSafeEngineVariant(family, variant, true, false),
         ARENA_BIG_NET_KEYS: ['bt4', 't3'],
         arenaDownloadApprovals: new Set(),
+        abortArenaPickerConsent() {},
         disposeBigNetSearcherNow: (key) => pool.disposeNow(key),
         running: state === 'running',
         startPending: state === 'starting',

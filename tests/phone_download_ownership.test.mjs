@@ -15,6 +15,7 @@ function extract(text, first, last, tail = '') {
   assert.ok(start >= 0 && end > start, `production boundaries: ${first}`);
   return stripTypeScriptTypes(text.slice(start, end) + tail);
 }
+const playPickerAbort = extract(source.play, 'function ctxCancelPickerConsent(', 'function ctxCancelEngineTurn(');
 const tick = () => new Promise(setImmediate);
 async function until(predicate) {
   for (let i = 0; i < 100; i++) {
@@ -176,6 +177,7 @@ for (const phase of [
       startPending: false,
       abort: null,
       mountAbort: new AbortController(),
+      abortArenaPickerConsent() {},
       setArenaStartDisabled() {},
       syncArenaPhase() {},
       checkpointWrites: phase === 'checkpoint-writes' ? gate.promise : Promise.resolve(),
@@ -439,6 +441,7 @@ for (const action of ['dismiss', 'confirm']) {
       ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),
     };
     const code =
+      playPickerAbort +
       extract(source.play, 'function ctxSetOpponent(', 'function ctxRestoreOpponentControls(') +
       extract(source.play, 'function ctxMaybeQueueRestart(', 'function ctxTuneOpponent(') +
       extract(source.play, "  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {", "  trackListener(ctx, selectEl('levelSelect')") +
@@ -509,7 +512,9 @@ for (const [accepted, stale] of [
       },
       ctxPrepareOrStartEngine: () => preparations++,
     };
-    const code = extract(source.play, "  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {", "  trackListener(ctx, selectEl('levelSelect')");
+    const code =
+      playPickerAbort +
+      extract(source.play, "  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {", "  trackListener(ctx, selectEl('levelSelect')");
     new Function('deps', `const { ${Object.keys(deps)} } = deps; ${code};`)(deps);
     await handler();
     assert.equal(node.value, 'maia3', 'Cancel keeps the prior selector value');

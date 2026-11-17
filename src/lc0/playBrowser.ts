@@ -185,6 +185,7 @@ interface PlayContext {
   pendingInput: PendingInput | null;
   restoredGame: boolean;
   consentAbort: AbortController;
+  pickerConsent: { controller: AbortController; resumeFallback: boolean } | null;
   restoredDownloadEngineId: string | null;
   restoredDownloadConsent: Promise<boolean> | null;
   abort: AbortController;
@@ -250,6 +251,7 @@ function createPlayContext(): PlayContext {
     pendingInput: null,
     restoredGame: false,
     consentAbort: new AbortController(),
+    pickerConsent: null,
     restoredDownloadEngineId: null,
     restoredDownloadConsent: null,
     abort: new AbortController(),
@@ -919,6 +921,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
 }
 async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   if (ctx.disposed || ctx.board.turn !== ctx.humanColor || ctx.restoredDownloadConsent) return;
+  if (ctx.pickerConsent) ctxCancelPickerConsent(ctx);
   const resumingGame = ctx.moves.length > 0;
   const option = ctxSelectedEngine(ctx);
   const preferences = ctx.opponent.active;
@@ -1019,7 +1022,13 @@ function ctxSetEngineThinking(ctx: PlayContext, thinking: boolean): void {
   }, THINKING_SHOW_DELAY_MS);
 }
 
+function ctxCancelPickerConsent(ctx: PlayContext): void {
+  ctx.pickerConsent?.controller.abort();
+  ctx.pickerConsent = null;
+}
+
 function ctxCancelEngineTurn(ctx: PlayContext): void {
+  ctxCancelPickerConsent(ctx);
   ctx.abort.abort();
   ctx.abort = new AbortController();
   ctx.restoredDownloadConsent = null;
@@ -1067,6 +1076,7 @@ function ctxPhase(ctx: PlayContext): PlayPhase {
 
 async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   if (ctx.gameOver || ctx.board.turn === ctx.humanColor || ctx.restoredDownloadConsent) return;
+  if (ctx.pickerConsent) ctxCancelPickerConsent(ctx);
   const signal = ctx.abort.signal;
   if (ctx.restoredDownloadEngineId && !(await ctxCheckRestoredDownloadConsent(ctx))) return;
   if (signal.aborted || ctx.disposed) return;
@@ -1949,6 +1959,7 @@ async function ctxCheckRestoredDownloadConsent(ctx: PlayContext): Promise<boolea
 
 /** Imported setup must not make an opponent move before the player presses Play. */
 function ctxPrepareOrStartEngine(ctx: PlayContext): void {
+  ctxCancelPickerConsent(ctx);
   if (ctx.practicePosition && !ctx.started) return;
   if (ctx.board.turn !== ctx.humanColor) void ctxEngineTurn(ctx);
   else if (!ctx.engineReady) void ctxVerifySelectedEngineReady(ctx);
@@ -1971,6 +1982,7 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 
 function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
   if (!phoneLargeNetsBlocked()) return;
+  if (ctx.pickerConsent) ctxCancelPickerConsent(ctx);
   // A saved-engine asset probe must not restore a large opponent after revocation.
   const pending = ENGINE_OPTIONS.find((option) => option.id === ctx.pendingPreferredEngineId);
   const cancellingRestore = !!pending && phoneSafeEngineVariant(pending.family, pending.variant) !== pending.variant;
@@ -2207,7 +2219,12 @@ function ctxInit(ctx: PlayContext): void {
   trackListener(ctx, selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
   trackListener(ctx, window, PHONE_LARGE_NET_CHANGE_EVENT, () => ctxRevokePhoneLargeNets(ctx));
   trackListener(ctx, selectEl('engineSelect'), 'change', async () => {
-    const wasResolvingSavedEngine = !!ctx.pendingPreferredEngineId;
+    // Transfer abandoned saved-probe preparation to a superseding picker owner.
+    const resumeFallback = !!ctx.pendingPreferredEngineId || !!ctx.pickerConsent?.resumeFallback;
+    ctxCancelPickerConsent(ctx);
+    const request = { controller: new AbortController(), resumeFallback };
+    ctx.pickerConsent = request;
+    const signal = AbortSignal.any([ctx.consentAbort.signal, ctx.abort.signal, request.controller.signal]);
     ctx.pendingPreferredEngineId = null;
     if (ctx.pendingPreferredEngineTimer) {
       clearTimeout(ctx.pendingPreferredEngineTimer);
@@ -2218,9 +2235,11 @@ function ctxInit(ctx: PlayContext): void {
     const resumeRevertedOpponent = () => {
       // Discarding the initial asset probe also removed its preparation callback.
       if (
-        wasResolvingSavedEngine &&
+        request.resumeFallback &&
         !ctx.disposed &&
         !selectionGame.aborted &&
+        !signal.aborted &&
+        ctx.pickerConsent === request &&
         !ctx.engineThinking &&
         !ctx.preparingEngine &&
         !ctx.gameOver &&
@@ -2238,11 +2257,11 @@ function ctxInit(ctx: PlayContext): void {
     const option = ctxDraftEngine();
     if (option.family === 'lc0' && option.variant !== 'small') {
       selectEl('engineSelect').value = previousEngineId;
-      if (!(await requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], ctx.consentAbort.signal, false))) {
+      if (!(await requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], signal, false))) {
         resumeRevertedOpponent();
         return;
       }
-      if (ctx.disposed || selectionGame.aborted || ctx.engineThinking || ctx.lastEngineId !== previousEngineId) return;
+      if (ctx.disposed || signal.aborted || ctx.pickerConsent !== request || ctx.engineThinking || ctx.lastEngineId !== previousEngineId) return;
       if (ctxEngineOptionState(option).disabled) {
         ctxRefreshEngineOptions(ctx);
         resumeRevertedOpponent();
