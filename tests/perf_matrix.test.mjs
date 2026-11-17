@@ -67,6 +67,57 @@ test('worker observation records effective IO/fold settings without changing the
   assert.equal(Object.hasOwn(window.__perfWorkerReady[0], 'model'), false);
 });
 
+test('Chrome preserves completed cold evidence and records a later warm harness failure', async () => {
+  const source = readFileSync(new URL('../scripts/perf_matrix/chrome_session.mjs', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('const runs = [];'), source.indexOf('async function measure('));
+  const cold = { pid: 123, targetId: 'owned', report: { status: 'ok' } };
+  let written,
+    closed = 0;
+  const execute = new Function(
+    'spec',
+    'measure',
+    'cdp',
+    'processes',
+    'sleep',
+    'ab',
+    'proxy',
+    'writeFileSync',
+    'outPath',
+    'log',
+    `return (async () => {${body}})();`,
+  );
+  await execute(
+    { net: 'maia3', plan: ['cold', 'warm-fresh'], cdpUrl: 'ws://owned' },
+    async (kind) => {
+      if (kind === 'cold') return cold;
+      throw Error('injected warm navigation failure');
+    },
+    {
+      send: async () => {},
+      ws: {
+        close() {
+          closed++;
+        },
+      },
+    },
+    async () => [],
+    async () => {},
+    () => {},
+    { close: async () => {} },
+    (_path, text) => {
+      written = JSON.parse(text);
+    },
+    'owned.json',
+    () => {},
+  );
+  assert.equal(written.length, 2);
+  assert.deepEqual(written[0], cold);
+  assert.equal(written[1].cache, 'warm-fresh');
+  assert.equal(written[1].report.status, 'harness-error');
+  assert.match(written[1].report.error, /injected warm/);
+  assert.equal(closed, 1);
+});
+
 test('zero-wait Safari creation returns a pairing conflict after one attempt so the outer runner can yield benchlock', async () => {
   const source = readFileSync(new URL('../scripts/perf_matrix/safari_session.mjs', import.meta.url), 'utf8');
   const body = source.slice(source.indexOf('async function createSession()'), source.indexOf('const proxy ='));

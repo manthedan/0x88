@@ -94,6 +94,16 @@ try {
     runs.push(run);
     previous = { targetId: run.targetId, pid: run.pid };
   }
+} catch (error) {
+  log(`session error: ${error.message}`);
+  runs.push({
+    browser: 'chrome',
+    net: spec.net,
+    params: spec.params ?? {},
+    cache: spec.plan[runs.length] ?? 'unknown',
+    sessionIndex: runs.length,
+    report: { status: 'harness-error', error: String(error.message).slice(0, 300) },
+  });
 } finally {
   try {
     if (!spec.cdpUrl) ab('close');
