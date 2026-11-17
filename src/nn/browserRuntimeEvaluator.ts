@@ -49,8 +49,8 @@ export type BrowserRuntimeEvaluatorResult = {
   fallbackReason?: string;
 };
 
-async function loadJson(url: string): Promise<unknown> {
-  const res = await fetch(url);
+async function loadJson(url: string, signal?: AbortSignal): Promise<unknown> {
+  const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`${url}: ${res.status} ${res.statusText}`);
   return await res.json();
 }
@@ -94,15 +94,19 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     kernelBase?: string | null;
     fixtureRoot?: string | null;
     fallback?: boolean;
+    signal?: AbortSignal;
     audit?: Partial<BrowserRuntimeAuditDetail>;
   } = {},
 ): Promise<BrowserRuntimeEvaluatorResult> {
   const params = options.params;
-  const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta));
+  const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta, options.signal));
   const modelId = inferRuntimeModelId(spec);
   const requestedRuntime = parseBrowserRuntimeSelector(options.runtime ?? spec.runtime ?? params?.get('runtime'));
   const createOrtEvaluator = () =>
-    SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId), { verifiedCentipawn: isPinnedCentipawnOnnx(spec.onnx) });
+    SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId), {
+      verifiedCentipawn: isPinnedCentipawnOnnx(spec.onnx),
+      signal: options.signal,
+    });
   const fallback = options.fallback ?? (params ? runtimeFallbackEnabled(params, true) : true);
   const tvmjsEntry = promotedTvmjsRuntimeForModel(modelId);
   const customEntry = promotedCustomRuntimeForModel(modelId);

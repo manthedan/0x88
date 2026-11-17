@@ -92,6 +92,8 @@ export interface Lc0ModelLoadOptions {
   forceReload?: boolean;
   /** Lab/dev only: allow models without hash verification. Unverified bytes are never persisted. */
   allowUnverified?: boolean;
+  /** Product models may require an app-manifest digest before consulting external channel metadata. */
+  requireManifestEntry?: boolean;
   cacheName?: string;
   manifestUrl?: string;
   /** Already-validated entry from another model family's manifest (e.g. TVMJS). */
@@ -398,7 +400,7 @@ async function fetchModelManifest(manifestUrl: string): Promise<Lc0ModelManifest
 async function fetchManifestEntry(modelUrl: string, manifestUrl: string): Promise<Lc0ModelManifestEntry | undefined> {
   const manifest = await fetchModelManifest(manifestUrl);
   const absolute = absoluteUrl(modelUrl);
-  const file = new URL(absolute).pathname.split('/').pop();
+  const file = decodeURIComponent(new URL(absolute).pathname).split('/').pop();
   return manifest?.models?.find((entry) => {
     const entryUrl = absoluteUrl(entry.url);
     return entry.url === modelUrl || entryUrl === absolute || entry.file === file;
@@ -769,6 +771,7 @@ function modelLoadFlightKey(modelUrl: string, options: Lc0ModelLoadOptions): str
     options.manifestEntry ?? null,
     options.channelUrl ?? configuredChannelUrl() ?? null,
     options.allowUnverified ?? false,
+    options.requireManifestEntry ?? false,
     options.forceReload ?? false,
     options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS,
     options.requestPersistentStorage ?? false,
@@ -834,6 +837,9 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   const manifest = options.manifestEntry
     ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl, elapsedMs: 0 }
     : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  if (options.requireManifestEntry && !/^[a-f0-9]{64}$/i.test(manifest.entry?.sha256 ?? '')) {
+    throw new Error(`App-origin model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
+  }
   const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
   const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
   if (!options.allowUnverified && !/^[a-f0-9]{64}$/i.test(expectation.expectedSha256 ?? '')) {

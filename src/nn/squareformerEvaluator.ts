@@ -968,10 +968,12 @@ export class SquareFormerEvaluator implements Evaluator {
     modelPath: string | Uint8Array | ArrayBuffer,
     meta: SquareFormerMeta,
     settings: SquareFormerSettings = {},
-    options: { verifiedCentipawn?: boolean } = {},
+    options: { verifiedCentipawn?: boolean; signal?: AbortSignal } = {},
   ): Promise<SquareFormerEvaluator> {
     const session =
-      options.verifiedCentipawn && typeof modelPath === 'string' ? await createCentipawnOrtSession(modelPath) : await ort.createOrtSession(modelPath);
+      options.verifiedCentipawn && typeof modelPath === 'string'
+        ? await createCentipawnOrtSession(modelPath, undefined, options.signal)
+        : await ort.createOrtSession(modelPath);
     return new SquareFormerEvaluator(session, meta, settings);
   }
   async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {

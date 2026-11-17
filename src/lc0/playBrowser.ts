@@ -21,6 +21,7 @@ import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { chooseMove } from '../search/puct.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
+import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
@@ -154,6 +155,7 @@ let maia3Owner: { abort: AbortController; cleanup: Promise<void> | null } | null
 let centipawnEvaluator: CachedEvaluator | null = null;
 let centipawnLoadPromise: Promise<Evaluator> | null = null;
 let centipawnEvaluatorGeneration = 0;
+let centipawnLoadAbort: AbortController | null = null;
 const playRuntimeFallbackAudits = new Map<string, BrowserRuntimeAuditDetail>();
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 const pendingCpuNewGames = new PendingCpuNewGames();
@@ -563,7 +565,25 @@ function ctxHideDownloadProgress(): void {
   hideLoadingProgress(container);
 }
 
+async function disposePlayCentipawn(evaluator: Evaluator): Promise<void> {
+  if (evaluator instanceof CachedEvaluator) evaluator.clear();
+  const owned = (evaluator instanceof CachedEvaluator ? evaluator.inner : evaluator) as Evaluator & {
+    dispose?: () => void | Promise<void>;
+    destroy?: () => void | Promise<void>;
+  };
+  await (owned.dispose ? owned.dispose() : owned.destroy?.());
+}
+
 function retireUnusedPlayNeuralEngines(option?: PlayEngineOption): Promise<void> {
+  if (option?.family !== 'centipawn' && centipawnLoadPromise) {
+    const pending = centipawnLoadPromise;
+    centipawnEvaluatorGeneration += 1;
+    centipawnEvaluator = null;
+    centipawnLoadPromise = null;
+    centipawnLoadAbort?.abort();
+    centipawnLoadAbort = null;
+    trackEngineRetirement(pending.then(disposePlayCentipawn, () => undefined));
+  }
   if (option?.family !== 'maia3' && maia3Promise) {
     const pending = maia3Promise;
     const owner = maia3Owner;
@@ -647,24 +667,30 @@ function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
     const evaluatorGeneration = centipawnEvaluatorGeneration;
     const uiGeneration = ctx.enginePreparationGeneration;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Centipawn…');
-    centipawnLoadPromise = createBrowserSquareformerRuntimeEvaluator(
-      {
-        id: 's4fix-v-ema',
-        modelId: 's4fix-v-ema',
-        label: 'Centipawn',
-        onnx: CENTIPAWN_MODEL_URL,
-        meta: CENTIPAWN_META_URL,
-        runtime: 'ort',
-      },
-      {
-        runtime: 'ort',
-        fallback: true,
-        audit: { surface: 'play' },
-      },
-    )
-      .then((loaded) => {
+    const loadAbort = new AbortController();
+    centipawnLoadAbort = loadAbort;
+    centipawnLoadPromise = loadRetirableResource(async () => {
+      const loaded = await createBrowserSquareformerRuntimeEvaluator(
+        {
+          id: 's4fix-v-ema',
+          modelId: 's4fix-v-ema',
+          label: 'Centipawn',
+          onnx: CENTIPAWN_MODEL_URL,
+          meta: CENTIPAWN_META_URL,
+          runtime: 'ort',
+        },
+        {
+          runtime: 'ort',
+          fallback: true,
+          audit: { surface: 'play' },
+          signal: loadAbort.signal,
+        },
+      );
+      return { ...loaded, dispose: () => disposePlayCentipawn(loaded.evaluator) };
+    }, loadAbort.signal)
+      .then(async (loaded) => {
         if (ctxIsDisposed(ctx) || evaluatorGeneration !== centipawnEvaluatorGeneration) {
-          (loaded.evaluator as Evaluator & { destroy?: () => void }).destroy?.();
+          await trackEngineRetirement(loaded.dispose());
           const error = new Error('Centipawn load discarded after Play teardown');
           error.name = 'AbortError';
           throw error;
@@ -2474,12 +2500,6 @@ export function mountPlayBrowser(): () => void {
       ctxCancelEngineTurn(ctx);
       ctx.abort.abort();
       void retireUnusedPlayNeuralEngines().catch(() => undefined);
-      centipawnEvaluatorGeneration += 1;
-      centipawnEvaluator?.clear();
-      const destroyCentipawn = (centipawnEvaluator?.inner as (Evaluator & { destroy?: () => void }) | undefined)?.destroy;
-      if (typeof destroyCentipawn === 'function') destroyCentipawn.call(centipawnEvaluator?.inner);
-      centipawnEvaluator = null;
-      centipawnLoadPromise = null;
       playRuntimeFallbackAudits.clear();
       // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
       // engines it must not remain cached after this Play route is gone.

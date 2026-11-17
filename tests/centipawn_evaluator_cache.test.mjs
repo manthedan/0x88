@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCentipawnEvaluatorCache } from '../src/lc0/centipawnEvaluatorCache.ts';
+import { awaitEngineRetirements } from '../src/lc0/engineRetirement.ts';
 
 const deferred = () => {
   let resolve, reject;
@@ -23,13 +24,14 @@ test('an old rejection never deletes a newer in-flight load for the same key', a
   let index = 0;
   const cache = createCentipawnEvaluatorCache(() => loads[index++].promise);
   const old = cache.get('same', request, () => true);
-  const rejected = assert.rejects(old, /old aborted/);
-  await Promise.resolve();
+  const rejected = assert.rejects(old, { name: 'AbortError' });
+  await new Promise(setImmediate);
   cache.retain(new Set());
   const current = cache.get('same', request, () => true);
-  await Promise.resolve();
+  await new Promise(setImmediate);
   loads[0].reject(Error('old aborted'));
   await rejected;
+  await awaitEngineRetirements();
   assert.equal(
     cache.get('same', request, () => true),
     current,
@@ -49,14 +51,15 @@ test('a late successful old load is destroyed and cannot overwrite the current e
   const cache = createCentipawnEvaluatorCache(() => loads[index++].promise);
   const old = cache.get('same', request, () => true);
   const rejected = assert.rejects(old, { name: 'AbortError' });
-  await Promise.resolve();
+  await new Promise(setImmediate);
   cache.clear();
   const current = cache.get('same', request, () => true);
-  await Promise.resolve();
+  await new Promise(setImmediate);
   loads[1].resolve({ evaluator: inner[1] });
   await current;
   loads[0].resolve({ evaluator: inner[0] });
   await rejected;
+  await awaitEngineRetirements();
   assert.equal(
     cache.get('same', request, () => true),
     current,
@@ -72,6 +75,49 @@ test('a late successful old load is destroyed and cannot overwrite the current e
     [1, 1],
   );
 });
+
+for (const pending of [false, true])
+  test(`shared Centipawn cache tracks loaded and late native releases (${pending})`, async () => {
+    const native = deferred(),
+      release = deferred();
+    let calls = 0,
+      signal;
+    const inner = {
+      dispose: () => {
+        calls++;
+        return release.promise;
+      },
+      destroy: () => assert.fail('must await dispose, not void destroy'),
+    };
+    const cache = createCentipawnEvaluatorCache(async (_spec, options) => {
+      signal = options.signal;
+      return native.promise;
+    });
+    const loading = cache.get('owned', request, () => true),
+      canceled = pending ? assert.rejects(loading, { name: 'AbortError' }) : null;
+    await new Promise(setImmediate);
+    if (!pending) {
+      native.resolve({ evaluator: inner });
+      await loading;
+    }
+    cache.clear();
+    assert.equal(cache.has('owned'), false);
+    assert.equal(signal.aborted, true);
+    let retired = false;
+    const waiting = awaitEngineRetirements().then(() => {
+      retired = true;
+    });
+    if (pending) {
+      await canceled;
+      native.resolve({ evaluator: inner });
+    }
+    await new Promise(setImmediate);
+    assert.equal(calls, 1);
+    assert.equal(retired, false);
+    release.resolve();
+    await waiting;
+    assert.equal(retired, true);
+  });
 
 test('retention preserves active entries and Analysis run snapshots; inactive resolutions are destroyed', async () => {
   const inner = evaluator();

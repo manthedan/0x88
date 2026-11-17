@@ -5,7 +5,7 @@ import { createCentipawnOrtSession, isPinnedCentipawnOnnx } from '../src/nn/cent
 
 const URL = 'https://centipawn.test/models/s4fix_v_ema.onnx';
 const SHA = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
-async function environment(t, create) {
+async function environment(t, create, { manifestAvailable = true, channelUrl = null } = {}) {
   const body = new Map(),
     metadata = new Map(),
     requests = [],
@@ -35,8 +35,17 @@ async function environment(t, create) {
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = input.url ?? input;
     requests.push({ url, cache: init?.cache ?? input.cache });
-    if (url === '/models/centipawn.manifest.json') return Response.json({ models: [{ file: 's4fix_v_ema.onnx', url: URL, bytes: 3, sha256: SHA }] });
-    if (String(url).split('?')[0] === URL) return new Response(wire);
+    if (url === '/models/centipawn.manifest.json')
+      return manifestAvailable
+        ? Response.json({ models: [{ file: 's4fix_v_ema.onnx', url: URL, bytes: 3, sha256: SHA }] })
+        : new Response(null, { status: 503 });
+    if (url === channelUrl) return Response.json({ schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: '/releases/test.json' });
+    if (url === 'https://untrusted-assets.test/releases/test.json')
+      return Response.json({
+        schema: 'lc0_browser.artifact_release_manifest.v1',
+        artifacts: [{ file: 's4fix_v_ema.onnx', logicalUrl: '/models/s4fix_v_ema.onnx', artifactUrl: URL, bytes: 3, sha256: SHA }],
+      });
+    if (decodeURIComponent(String(url)).split('?')[0] === URL) return new Response(wire);
     return new Response(null, { status: 404 });
   });
   const cacheName = `centipawn-test-${t.name}`;
@@ -44,8 +53,9 @@ async function environment(t, create) {
     load: async (url, options) => {
       assert.equal(options.manifestUrl, '/models/centipawn.manifest.json');
       assert.equal(options.allowUnverified, false);
+      assert.equal(options.requireManifestEntry, true);
       assert.equal(options.cache, true);
-      const result = await loadLc0ModelForOrt(url, { ...options, cacheName, metadataStore: store, channelUrl: null });
+      const result = await loadLc0ModelForOrt(url, { ...options, cacheName, metadataStore: store, channelUrl });
       loads.push(result);
       return result;
     },
@@ -94,6 +104,29 @@ test('Centipawn uses manifest-pinned SHA-256 and Cache Storage; second creation 
   await env.sessions[0].options.reloadModel();
   assert.equal(env.requests.filter((r) => r.url === URL).length, 1);
   assert.equal(env.sessions[0].options.rejectModelParseErrors(), true, 'fallback parse recovery follows the reloaded provenance');
+});
+
+test('Centipawn cannot replace an unavailable app pin with an asset-host-supplied digest', async (t) => {
+  const channelUrl = 'https://untrusted-assets.test/channels/test.json';
+  const env = await environment(t, undefined, { manifestAvailable: false, channelUrl });
+  const channelOnly = await loadLc0ModelForOrt(URL, { cache: false, manifestUrl: '/models/centipawn.manifest.json', channelUrl });
+  assert.equal(channelOnly.sha256Valid, true, 'fixture really offers otherwise valid channel-supplied bytes and digest');
+  env.requests.length = 0;
+  await assert.rejects(createCentipawnOrtSession(URL, env.deps), /App-origin model integrity metadata is unavailable/);
+  assert.deepEqual(
+    env.requests.map((r) => r.url),
+    ['/models/centipawn.manifest.json'],
+  );
+  assert.equal(env.sessions.length, 0);
+  assert.equal(env.counts().writes, 0);
+});
+
+test('percent-encoded Centipawn filenames use the app pin while preserving the requested fetch URL', async (t) => {
+  const env = await environment(t),
+    requested = URL.replace('/s4fix', '/%734fix');
+  await createCentipawnOrtSession(requested, env.deps);
+  assert.equal(env.loads[0].sha256Valid, true);
+  assert.ok(env.requests.some((r) => r.url === requested));
 });
 
 test('Centipawn query overrides find the same app pin and preserve the requested verified fetch URL', async (t) => {

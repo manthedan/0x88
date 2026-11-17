@@ -23,6 +23,7 @@ function playOwner(options = {}) {
     `
     let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null,abort:new AbortController()};
     let maia3Promise=null,maia3Status=null,maia3Generation=0,maia3Owner=null;
+    let centipawnLoadPromise=null,centipawnEvaluator=null,centipawnEvaluatorGeneration=0,centipawnLoadAbort=null;
     ${extract(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureCentipawn(')}
     ${extract(play, 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
     return {retire:retireUnusedPlayNeuralEngines,small:()=>ctxEnsureLc0Small(ctx),maia:()=>ctxEnsureMaia3(ctx),peek:()=>lc0Searcher};
@@ -178,6 +179,7 @@ test('a Small initialization finishing after retirement cannot repopulate the pa
     `
     let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null,abort:new AbortController()};
     let maia3Promise=null,maia3Status=null,maia3Generation=0,maia3Owner=null;
+    let centipawnLoadPromise=null,centipawnEvaluator=null,centipawnEvaluatorGeneration=0,centipawnLoadAbort=null;
     ${extract(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureCentipawn(')}
     return {load:()=>ctxEnsureLc0Small(ctx),retire:retireUnusedPlayNeuralEngines,peek:()=>lc0Searcher};
   `,
@@ -255,7 +257,8 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
   const pending = Promise.withResolvers(),
     release = Promise.withResolvers(),
     elements = new Map();
-  let disposals = 0;
+  let disposals = 0,
+    progressHidden = false;
   const api = compile(
     `
     let maia3PanelLoadGeneration=1,maia3PanelTask={dispose(){}},maia3PanelTimer=null;
@@ -268,6 +271,9 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
       pending: pending.promise,
       trackEngineRetirement,
       renderExplorerComparison: () => {},
+      hideModelProgress: () => {
+        progressHidden = true;
+      },
       maia3PanelStatus: () => {},
       el: (id) => {
         if (!elements.has(id)) elements.set(id, {});
@@ -290,6 +296,7 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
   assert.equal(disposals, 1);
   release.resolve();
   await waiting;
+  assert.equal(progressHidden, true, 'canceled Maia download progress is removed by its retiring owner');
   assert.equal(api().maia3PanelLoading, false);
   assert.equal(api().explorerMaia, null);
   assert.equal(elements.get('maia3Enable').hidden, false);

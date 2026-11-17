@@ -2,7 +2,7 @@ import { clearLc0ModelCacheEntry, type Lc0ModelLoadResult, loadLc0ModelForOrt } 
 import { isMetadataTrustedModel, isOnnxModelParseError } from '../lc0/onnxModelRecovery.ts';
 import { createOrtSession } from './ortRuntime.ts';
 
-const LOAD_OPTIONS = { cache: true, allowUnverified: false, manifestUrl: '/models/centipawn.manifest.json' } as const;
+const LOAD_OPTIONS = { cache: true, allowUnverified: false, requireManifestEntry: true, manifestUrl: '/models/centipawn.manifest.json' } as const;
 const DEFAULT_DEPS = { load: loadLc0ModelForOrt, create: createOrtSession, clear: clearLc0ModelCacheEntry };
 
 type OwnedModel = { input?: Lc0ModelLoadResult['model']; info: Omit<Lc0ModelLoadResult, 'model'> };
@@ -20,10 +20,11 @@ export function isPinnedCentipawnOnnx(modelUrl: string): boolean {
 }
 
 /** App-origin pins, verified-only Cache Storage, and one-shot trusted-cache parse repair. */
-export async function createCentipawnOrtSession(modelUrl: string, deps = DEFAULT_DEPS) {
-  let owned = ownModel(await deps.load(modelUrl, LOAD_OPTIONS));
+export async function createCentipawnOrtSession(modelUrl: string, deps = DEFAULT_DEPS, signal?: AbortSignal) {
+  const loadOptions = signal ? { ...LOAD_OPTIONS, signal } : LOAD_OPTIONS;
+  let owned = ownModel(await deps.load(modelUrl, loadOptions));
   const reloadModel = async () => {
-    owned = ownModel(await deps.load(modelUrl, LOAD_OPTIONS));
+    owned = ownModel(await deps.load(modelUrl, loadOptions));
     const input = owned.input!;
     owned.input = undefined;
     return input;
@@ -40,7 +41,7 @@ export async function createCentipawnOrtSession(modelUrl: string, deps = DEFAULT
   } catch (error) {
     if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(owned.info)) throw error;
     await deps.clear(owned.info.url);
-    owned = ownModel(await deps.load(modelUrl, { ...LOAD_OPTIONS, forceReload: true }));
+    owned = ownModel(await deps.load(modelUrl, { ...loadOptions, forceReload: true }));
     if (owned.info.verification !== 'hashed' || owned.info.sha256Valid !== true) throw new Error('Centipawn recovery requires freshly SHA-256-verified bytes');
     return create();
   }

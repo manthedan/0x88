@@ -218,7 +218,7 @@ test('whole-model evaluator retains destinations if draining readbacks fails', a
   await assert.rejects(evaluator.evaluateBatchSequence([FENS, FENS]), /device lost/);
   await assert.rejects(evaluator.evaluateBatchSequence([FENS, ['invalid FEN']]), /device lost/);
   assert.equal(state.disposedBeforeReadback, 0);
-  evaluator.dispose();
+  await assert.rejects(evaluator.dispose(), /readbacks could not be drained/);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(state.runtimeDisposed, 0, 'pending WASM destinations must outlive the runtime too');
   for (const copy of state.pendingCopies.splice(0)) copy();
@@ -267,15 +267,21 @@ test('whole-model evaluator defers runtime and device release until in-flight wo
   });
   const evaluation = evaluator.evaluateBatch(FENS);
   await started;
-  evaluator.dispose();
-  evaluator.dispose();
+  const retirement = evaluator.dispose();
+  assert.equal(evaluator.dispose(), retirement, 'retirement is idempotent and awaitable');
+  let retired = false;
+  retirement.then(() => {
+    retired = true;
+  });
   await assert.rejects(evaluator.evaluate(FENS[0]), /disposed/);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(state.runtimeDisposed, 0);
   assert.equal(state.deviceDestroyed, 0);
+  assert.equal(retired, false);
   releaseSync();
   assertDecoded(await evaluation, 4);
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await retirement;
+  assert.equal(retired, true);
   assert.equal(state.runtimeDisposed, 1);
   assert.equal(state.deviceDestroyed, 1);
   assert.equal(state.scopes.length, 0, 'root scope released');

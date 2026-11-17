@@ -4471,7 +4471,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       unloadMaia3Panel('Maia3 unloaded to make room for Lc0. Enable Maia3 after analysis finishes to reload.');
     }
     if (hasEngineRetirements()) await awaitEngineRetirements();
-    if (controller.signal.aborted || mountAbort.signal.aborted) return;
+    if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
     const uninitializedBigNets = bigNetsAwaitingInit(rows);
     let bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
     if (uninitializedBigNets.length) {
@@ -4910,6 +4910,7 @@ function unloadMaia3Panel(message: string): void {
   enable.hidden = false;
   enable.disabled = maia3PanelBlockedByRun !== null;
   maia3PanelStatus(message);
+  hideModelProgress();
 }
 
 async function enableMaia3Panel(): Promise<void> {

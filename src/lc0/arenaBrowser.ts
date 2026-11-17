@@ -4469,7 +4469,8 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   let enginesReady = false;
   try {
     await awaitEngineRetirements();
-    if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
+    if (isStaleMount(mountSignal)) return;
+    matchAbort.signal.throwIfAborted();
     if (isolatedCpuPool()) {
       enginesReady = true;
       el('message').textContent = 'Preparing private CPU workers…';
@@ -4487,7 +4488,8 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
         enginesReady = true;
       }
-      if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
+      if (isStaleMount(mountSignal)) return;
+      matchAbort.signal.throwIfAborted();
       for (const i of pendingIndices) {
         if (matchAbort.signal.aborted) break;
         const { whiteId, blackId, opening } = schedule[i];
