@@ -2,6 +2,7 @@
 import { onMount } from 'svelte';
 import { afterNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
+import PhoneLargeNetPreference from '$lib/components/PhoneLargeNetPreference.svelte';
 import RestoreNotice from '$lib/components/RestoreNotice.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 
@@ -90,6 +91,7 @@ onMount(() => {
       <h2 class="pane-heading">Opponent</h2>
       <div class="field"><label for="engineSelect" class="visually-hidden">Opponent</label>
         <select id="engineSelect"></select></div>
+      <PhoneLargeNetPreference />
       <p id="opponentBlurb" class="opponent-blurb"></p>
       <div id="maia3Controls" hidden>
         <div class="rating-head">

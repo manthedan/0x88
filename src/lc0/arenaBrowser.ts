@@ -80,6 +80,14 @@ import {
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
 import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
+import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import {
+  PHONE_LARGE_NET_CHANGE_EVENT,
+  PHONE_LARGE_NET_REASON,
+  PHONE_LARGE_NET_SUFFIX,
+  phoneLargeNetsBlocked,
+  phoneSafeEngineVariant,
+} from './phoneLargeNetPolicy.ts';
 import { boardCheck } from './boardUx.ts';
 import { el, htmlEscape, inputEl, maybeEl, selectEl } from './browserDom.ts';
 import {
@@ -99,11 +107,11 @@ import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
+  phoneBlockedBigNetModelUrl,
   type BigNetConfig,
   type Bt4SearchResult,
   type Bt4WorkerSearcher,
   bigNetAssetStatusSync,
-  bigNetLoadWarning,
   bt4SupportedSync,
   checkBigNetAsset,
   probeBt4Support,
@@ -329,9 +337,10 @@ interface EngineOutputSnapshot {
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+const blockedModelOverride = phoneBlockedBigNetModelUrl(params.get('model'));
 const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
   DEFAULT_MODEL_URL,
-  isV0DeployProfile() ? null : params.get('model'),
+  isV0DeployProfile() || blockedModelOverride ? null : params.get('model'),
   resolvePublicAssetUrl,
 );
 /** Model the ONNX evaluator runs: MODEL_URL or, on Apple WebGPU, its split-K rewrite. */
@@ -1686,11 +1695,11 @@ function defaultVariant(family: EngineFamily): string {
 }
 
 function bigNetSelectableSync(config: BigNetConfig): boolean {
-  return bt4SupportedSync() && bigNetAssetStatusSync(config) === 'present';
+  return (isMemoryConstrainedDevice() || bt4SupportedSync()) && bigNetAssetStatusSync(config) === 'present';
 }
 
 function bigNetUnavailableText(config: BigNetConfig): string {
-  if (!bt4SupportedSync()) return `Lc0 ${config.name} needs WebGPU support.`;
+  if (!isMemoryConstrainedDevice() && !bt4SupportedSync()) return `Lc0 ${config.name} needs WebGPU support.`;
   if (bigNetAssetStatusSync(config) === 'missing')
     return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
   if (bigNetAssetStatusSync(config) === 'unknown') return `Lc0 ${config.name} model asset is still being checked.`;
@@ -1700,11 +1709,11 @@ function bigNetUnavailableText(config: BigNetConfig): string {
 function variantOptions(family: EngineFamily): { value: string; label: string; disabled?: boolean }[] {
   if (isV0DeployProfile() && !['lc0', 'centipawn', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax'].includes(family)) return [];
   if (family === 'lc0')
-    return lc0VariantOptions(bt4SupportedSync()).map((option) => {
+    return lc0VariantOptions(isMemoryConstrainedDevice() || bt4SupportedSync()).map((option) => {
       if (!isLc0BigNetVariant(option.value)) return option;
       const config = BIG_NETS[option.value];
       const asset = bigNetAssetStatusSync(config);
-      if (bt4SupportedSync() && asset === 'unknown')
+      if ((isMemoryConstrainedDevice() || bt4SupportedSync()) && asset === 'unknown')
         void checkBigNetAsset(
           config,
           whileArenaMounted(() => {
@@ -1712,7 +1721,15 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
             refreshSeatControls();
           }),
         );
-      const suffix = !bt4SupportedSync() ? ' (WebGPU unavailable)' : asset === 'missing' ? ' (asset missing)' : asset === 'unknown' ? ' (checking asset)' : '';
+      if (phoneLargeNetsBlocked()) return { ...option, label: `${option.label}${PHONE_LARGE_NET_SUFFIX}`, disabled: false };
+      const suffix =
+        !bt4SupportedSync() && !isMemoryConstrainedDevice()
+          ? ' (WebGPU unavailable)'
+          : asset === 'missing'
+            ? ' (asset missing)'
+            : asset === 'unknown'
+              ? ' (checking asset)'
+              : '';
       return { ...option, label: `${option.label}${suffix}`, disabled: option.disabled || asset !== 'present' };
     });
   if (family === 'centipawn')
@@ -1877,6 +1894,9 @@ function seatEngineId(index: number): string {
 
 function renderSeatSelectors(): void {
   for (const row of seatRows) {
+    const safeVariant = phoneSafeEngineVariant(row.family, row.variant);
+    if (safeVariant !== row.variant) showPhoneLargeNetFallback();
+    row.variant = safeVariant;
     const options = variantOptions(row.family);
     const selected = options.find((option) => option.value === row.variant);
     const pendingBigNet = !bt4AvailabilityResolved && row.family === 'lc0' && isLc0BigNetVariant(row.variant);
@@ -2951,6 +2971,11 @@ function disposeUnusedUciEngines(): void {
 }
 
 function buildEngines() {
+  for (const row of seatRows) {
+    const safeVariant = phoneSafeEngineVariant(row.family, row.variant);
+    if (safeVariant !== row.variant) showPhoneLargeNetFallback();
+    row.variant = safeVariant;
+  }
   for (const row of activeSeatRows()) clampStrength(row);
   const activeIds = new Set(activeSeatRows().map(engineIdForRow));
   pruneUnusedLc0Searchers(activeIds);
@@ -4150,6 +4175,13 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     clearStartPending();
     return;
   }
+  if (seatRows.some((row) => phoneSafeEngineVariant(row.family, row.variant) !== row.variant)) {
+    renderSeatSelectors();
+    showPhoneLargeNetFallback();
+    el('message').textContent = PHONE_LARGE_NET_REASON;
+    clearStartPending();
+    return;
+  }
   const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
   if (isStaleMount(mountSignal)) return;
   if (!selectedAssetsAvailable) {
@@ -4193,7 +4225,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   }
   const byPid = new Map(participants.map((participant) => [participant.pid, participant]));
   const bigNetRows = activeSeatRows().filter((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant));
-  const bigNetRuntimeSupported = !bigNetRows.length || (await probeBt4Support());
+  const bigNetRuntimeSupported = !bigNetRows.length || (await probeBt4Support()) || isMemoryConstrainedDevice();
   if (isStaleMount(mountSignal)) return;
   if (!bigNetRuntimeSupported) {
     el('message').textContent = 'Lc0 big nets need WebGPU, which is unavailable in this browser.';
@@ -4935,6 +4967,20 @@ async function runArenaBenchAutorun(): Promise<void> {
 }
 
 function wireEvents() {
+  window.addEventListener(
+    PHONE_LARGE_NET_CHANGE_EVENT,
+    () => {
+      if (!phoneLargeNetsBlocked()) return;
+      // Setup is fieldset-locked while running; this also handles programmatic revocation.
+      abort?.abort();
+      for (const key of ARENA_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
+      renderSeatSelectors();
+      persistArenaSeatRows();
+      buildEngines();
+      populateSeats();
+    },
+    { signal: mountAbort.signal },
+  );
   el('start').addEventListener('click', () => {
     void startMatch();
   });
@@ -5064,7 +5110,7 @@ function wireEvents() {
     } else if (event.key === 'Escape') exitReview();
   };
   document.addEventListener('keydown', arenaKeydownHandler);
-  el('arenaSeatList').addEventListener('change', (event) => {
+  el('arenaSeatList').addEventListener('change', async (event) => {
     if (running) return;
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     const seat = Number(target.dataset.seat);
@@ -5081,13 +5127,20 @@ function wireEvents() {
         refreshArenaMemoryGuard();
         return;
       }
-      if (
-        row.family === 'lc0' &&
-        isLc0BigNetVariant(target.value) &&
-        !window.confirm(`${bigNetLoadWarning(BIG_NETS[target.value])}\n\nUse Lc0 ${BIG_NETS[target.value].name}?`)
-      ) {
+      if (row.family === 'lc0' && isLc0BigNetVariant(target.value)) {
+        const selectedVariant = target.value;
+        const config = BIG_NETS[selectedVariant];
         target.value = row.variant;
-        return;
+        const signal = mountAbort.signal;
+        if (!(await requestLargeNetConsent(config, signal))) return;
+        if (signal.aborted || seatRows[seat] !== row || running) return;
+        if (!bigNetSelectableSync(config)) {
+          el('message').textContent = bigNetUnavailableText(config);
+          renderSeatSelectors();
+          el('arenaSeatList').querySelector<HTMLElement>(`.seat-var[data-seat="${seat}"]`)?.focus();
+          return;
+        }
+        target.value = selectedVariant;
       }
       row.variant = target.value;
     } else if (target.classList.contains('seat-strength')) {
@@ -5104,6 +5157,7 @@ function wireEvents() {
     }
     buildEngines();
     populateSeats();
+    if (target.classList.contains('seat-var')) el('arenaSeatList').querySelector<HTMLElement>(`.seat-var[data-seat="${seat}"]`)?.focus();
     if (selectedSeatsNeedLc0Evaluator() && !lc0Cache && !loadingLc0) void loadLc0Evaluator();
     else if (!loadingLc0) setArenaStartDisabled(false);
   });
@@ -5260,6 +5314,7 @@ async function init(mountSignal: AbortSignal) {
   selectEl('berserkVariantSelect').value = REQUESTED_BERSERK_VARIANT.key;
   selectEl('plentychessVariantSelect').value = REQUESTED_PLENTYCHESS_VARIANT.key;
   selectEl('stormphraxVariantSelect').value = REQUESTED_STORMPHRAX_VARIANT.key;
+  if (blockedModelOverride) showPhoneLargeNetFallback(true);
   restoreArenaSeatRows();
   applyArenaQueryParams();
   applyLc0Preset(inferredLc0Preset());

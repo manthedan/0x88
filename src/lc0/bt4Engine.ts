@@ -24,6 +24,8 @@ import {
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
+import { phoneLargeNetsBlocked, PHONE_LARGE_NET_SUFFIX } from './phoneLargeNetPolicy.ts';
 
 export interface BigNetConfig {
   key: 'bt4' | 't3' | 'lqo';
@@ -97,6 +99,13 @@ export const LQO_NET: BigNetConfig = {
 };
 
 export const BIG_NETS: Record<BigNetConfig['key'], BigNetConfig> = { bt4: BT4_NET, t3: T3_NET, lqo: LQO_NET };
+
+/** On phones, known large models must use the big-net picker, never the Small lane.
+ * Revoking consent must not leave a large model disguised as Small by ?model=.
+ */
+export function phoneBlockedBigNetModelUrl(url: string | null): boolean {
+  return !!url && isMemoryConstrainedDevice() && Object.values(BIG_NETS).some((config) => assetPathname(url) === assetPathname(config.modelUrl));
+}
 
 export const BT4_MODEL_NAME = BT4_NET.name;
 export const BT4_MODEL_URL = BT4_NET.modelUrl;
@@ -280,6 +289,8 @@ export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStat
  * analysis ended up hiding big nets entirely without WebGPU).
  */
 export function bigNetOptionState(config: BigNetConfig): { disabled: boolean; suffix: string } {
+  // Keep the option actionable so choosing it can open consent, not load a net.
+  if (phoneLargeNetsBlocked()) return { disabled: false, suffix: PHONE_LARGE_NET_SUFFIX };
   const asset = bigNetAssetStatusSync(config);
   if (asset === 'unknown') return { disabled: true, suffix: ' (checking net)' };
   if (asset === 'missing') return { disabled: true, suffix: ' (net not hosted here)' };

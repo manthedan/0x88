@@ -343,7 +343,12 @@ test('an explicit ?model= override, even naming the default file, loads exactly 
   // The product pages take the opt-in from the request, not from URL equality.
   for (const file of ['analysisBrowser', 'playBrowser', 'arenaBrowser']) {
     const source = readFileSync(new URL(`../src/lc0/${file}.ts`, import.meta.url), 'utf8');
-    assert.match(source, /lc0SmallModelRequest\(\s*DEFAULT_MODEL_URL,\s*isV0DeployProfile\(\) \? null : params\.get\('model'\)/, file);
+    // Known large-net overrides additionally require phone consent; ordinary overrides are unchanged.
+    assert.match(
+      source,
+      /lc0SmallModelRequest\(\s*DEFAULT_MODEL_URL,\s*isV0DeployProfile\(\)(?: \|\| blockedModelOverride)? \? null : params\.get\('model'\)/,
+      file,
+    );
     assert.doesNotMatch(source, /(deviceSelection|deviceModelSelection): MODEL_URL === DEFAULT_MODEL_URL/, file);
     assert.match(source, /(deviceSelection|deviceModelSelection): LC0_DEVICE_MODEL_SELECTION/, file);
   }

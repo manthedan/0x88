@@ -153,6 +153,8 @@ import {
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
 import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
+import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { PHONE_LARGE_NET_CHANGE_EVENT, PHONE_LARGE_NET_REASON, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
 import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
@@ -169,10 +171,10 @@ import type { BrowserUciAnalysisOptions, BrowserUciEngine } from './browserUciEn
 import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
+  phoneBlockedBigNetModelUrl,
   type BigNetConfig,
   type Bt4WorkerSearcher,
   bigNetAssetStatusSync,
-  bigNetLoadWarning,
   bigNetOptionState,
   bt4SupportedSync,
   checkBigNetAsset,
@@ -295,9 +297,10 @@ type Ground = ReturnType<typeof Chessground>;
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+const blockedModelOverride = phoneBlockedBigNetModelUrl(params.get('model'));
 const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
   DEFAULT_MODEL_URL,
-  isV0DeployProfile() ? null : params.get('model'),
+  isV0DeployProfile() || blockedModelOverride ? null : params.get('model'),
   resolvePublicAssetUrl,
 );
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
@@ -1367,18 +1370,19 @@ function bigNetUnavailableText(config: BigNetConfig): string {
   if (bigNetAssetStatusSync(config) === 'unknown') return `Lc0 ${config.name} model asset is still being checked.`;
   return '';
 }
-function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): EngineRow[] {
-  return rows.map((row, index) => {
+async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): Promise<EngineRow[]> {
+  const result: EngineRow[] = [];
+  for (const [index, row] of rows.entries()) {
     const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
       // Read metadata only: declining a saved setup must not acquire a runtime/session.
-      const config = BIG_NETS[next.variant === 't3' ? 't3' : 'bt4'];
-      const allowed =
-        bigNetSelectableSync(config) && allowBt4Prompt && window.confirm(`${bigNetLoadWarning(config)}\n\nLoad the saved Lc0 ${config.name} profile row?`);
+      const config = BIG_NETS[next.variant];
+      const allowed = !phoneLargeNetsBlocked() && bigNetSelectableSync(config) && allowBt4Prompt && (await requestLargeNetConsent(config, mountAbort.signal));
       if (!allowed) next.variant = 'small';
     }
-    return next;
-  });
+    result.push(next);
+  }
+  return result;
 }
 function loadEngineProfiles(): EngineAnalysisProfile[] {
   try {
@@ -1432,18 +1436,22 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
     ? profileSummary(profile, builtIn?.note)
     : 'Manual engine setup. Choose a saved setup or save the current engines.';
 }
-function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): void {
+async function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): Promise<void> {
   const runtime = engineSetupRuntime(profile.lc0Runtime, params.has('dev'));
   const runtimeChanged = selectedLc0Runtime() !== runtime;
   cancelAllAnalysisAssetPrefetches();
-  engineRows = profileRowsForUse(profile.rows, true);
+  const signal = mountAbort.signal;
+  const rows = await profileRowsForUse(profile.rows, true);
+  if (signal.aborted) return;
+  engineRows = rows;
+  if (phoneLargeNetsBlocked() && profileHasBt4(profile.rows)) showPhoneLargeNetFallback();
   inputEl('multiPvInput').value = String(profile.multiPv);
   selectEl('lc0RuntimeSelect').value = runtime;
   if (options.persistLast !== false) storageSet(LAST_ENGINE_PROFILE_STORAGE_KEY, profile.name);
   renderEngineList();
   renderEngineProfiles(options.selected ?? profile.name);
   el('engineProfileSummary').textContent = profileSummary(currentEngineProfile(profile.name), options.note);
-  engineProfileMessage(`Loaded engine setup “${profile.name}”.`);
+  engineProfileMessage(`Loaded engine setup “${profile.name}”.${phoneLargeNetsBlocked() && profileHasBt4(profile.rows) ? ` ${PHONE_LARGE_NET_REASON}` : ''}`);
   lineCache.clear();
   completeAnalysisKeys.clear();
   deferAnalysisSettingsRefresh({ reloadLc0: runtimeChanged, disposeUnusedEngines: true });
@@ -1609,7 +1617,9 @@ function loadManualEngineRows(): EngineRow[] | undefined {
       const raw = value as Record<string, unknown>;
       const family = canonicalEngineFamily(String(raw.family ?? ''));
       if (!family) return [];
-      const persistedVariant = persistedVariantOrDefault(family, raw.variant);
+      const safeVariant = phoneSafeEngineVariant(family, String(raw.variant ?? ''));
+      if (safeVariant !== String(raw.variant ?? '')) showPhoneLargeNetFallback();
+      const persistedVariant = persistedVariantOrDefault(family, safeVariant);
       const variant = family === 'lc0' && isLc0BigNetVariant(persistedVariant) ? 'small' : persistedVariant;
       return [normalizeDeployEngineRow({ family, variant, strength: Number(raw.strength) }, 'analysis', index)];
     });
@@ -1802,6 +1812,9 @@ function renderEngineList(): void {
   const previousRows = JSON.stringify(engineRows);
   engineRows = engineRows.map((row, index) => {
     Object.assign(row, normalizeDeployEngineRow(row, 'analysis', index));
+    const safeVariant = phoneSafeEngineVariant(row.family, row.variant);
+    if (safeVariant !== row.variant) showPhoneLargeNetFallback();
+    row.variant = safeVariant;
     const options = variantOptions(row.family);
     const selected = options.find((option) => option.value === row.variant);
     if (!selected || (selected.disabled && !/\(checking\b/.test(selected.label))) {
@@ -5616,7 +5629,19 @@ function wireEvents() {
     // the suspended search has to disable it here; that finally will not run again.
     document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
   });
-  el('engineList').addEventListener('change', (event) => {
+  window.addEventListener(
+    PHONE_LARGE_NET_CHANGE_EVENT,
+    () => {
+      if (!phoneLargeNetsBlocked()) return;
+      cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+      cancelAllAnalysisAssetPrefetches();
+      renderEngineList();
+      persistManualEngineRows();
+      deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
+    },
+    { signal: mountAbort.signal },
+  );
+  el('engineList').addEventListener('change', async (event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     const i = Number(target.dataset.i);
     if (Number.isNaN(i) || !engineRows[i]) return;
@@ -5629,17 +5654,20 @@ function wireEvents() {
       renderEngineList();
     } else if (target.classList.contains('row-var')) {
       if (engineRows[i].family === 'lc0' && isLc0BigNetVariant(target.value)) {
-        // One-time gate before the large lazy load.
-        const { config } = bigNetFor(target.value);
+        // Consent and cancellation must not acquire a worker or start a download.
+        const selectedVariant = target.value;
+        const config = BIG_NETS[selectedVariant];
+        target.value = engineRows[i].variant;
+        const signal = mountAbort.signal;
+        if (!(await requestLargeNetConsent(config, signal))) return;
+        if (signal.aborted || engineRows[i] !== previousRow) return;
         if (!bigNetSelectableSync(config)) {
           el('message').textContent = bigNetUnavailableText(config);
-          target.value = engineRows[i].variant;
+          renderEngineList();
+          el('engineList').querySelector<HTMLElement>(`.row-var[data-i="${i}"]`)?.focus();
           return;
         }
-        if (!window.confirm(`${bigNetLoadWarning(config)}\n\nUse Lc0 ${config.name}?`)) {
-          target.value = engineRows[i].variant;
-          return;
-        }
+        target.value = selectedVariant;
       }
       engineRows[i].variant = target.value;
     } else if (target.classList.contains('row-strength')) {
@@ -5647,6 +5675,10 @@ function wireEvents() {
       engineRows[i].strength = Math.max(meta.min, Math.min(meta.max, Math.floor(Number(target.value) || meta.def)));
     }
     engineRows[i] = normalizeDeployEngineRow(engineRows[i], 'analysis', i);
+    if (target.classList.contains('row-var')) {
+      renderEngineList();
+      el('engineList').querySelector<HTMLElement>(`.row-var[data-i="${i}"]`)?.focus();
+    }
     renderEngineSetupSummary();
     cancelAnalysisAssetPrefetch(previousRow);
     reconcileActiveRuntimeFallbackWarning();
@@ -6288,6 +6320,7 @@ async function init(mountSignal: AbortSignal) {
     }
   };
   window.addEventListener('pagehide', analysisPagehideHandler);
+  if (blockedModelOverride) showPhoneLargeNetFallback(true);
   engineProfiles = loadEngineProfiles();
   installExperimentalLc0RuntimeOption();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
@@ -6295,8 +6328,12 @@ async function init(mountSignal: AbortSignal) {
   // Do not silently restore saved BT4 rows on page load: selecting that profile
   // later goes through the explicit support check and large-download prompt.
   const lastProfile = storedLastProfile && !profileHasBt4(storedLastProfile.rows) ? storedLastProfile : undefined;
+  if (phoneLargeNetsBlocked() && storedLastProfile && profileHasBt4(storedLastProfile.rows)) {
+    engineRows = await profileRowsForUse(storedLastProfile.rows, false);
+    showPhoneLargeNetFallback();
+  }
   if (lastProfile) {
-    engineRows = profileRowsForUse(lastProfile.rows, false);
+    engineRows = await profileRowsForUse(lastProfile.rows, false);
     inputEl('multiPvInput').value = String(lastProfile.multiPv);
     selectEl('lc0RuntimeSelect').value = engineSetupRuntime(lastProfile.lc0Runtime, params.has('dev'));
   } else {

@@ -1,4 +1,5 @@
 import { BIG_NETS, type BigNetConfig, Bt4WorkerSearcher } from './bt4Engine.ts';
+import { phoneLargeNetsBlocked, PHONE_LARGE_NET_REASON } from './phoneLargeNetPolicy.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 
 export type BigNetKey = BigNetConfig['key'];
@@ -128,6 +129,7 @@ function installPagehideDisposal(): void {
 }
 
 export function acquireBigNetSearcher(key: BigNetKey, exclusive = false): Bt4WorkerSearcher {
+  if (phoneLargeNetsBlocked()) throw new Error(PHONE_LARGE_NET_REASON);
   installPagehideDisposal();
   return defaultPool.acquire(key, exclusive);
 }

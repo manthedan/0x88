@@ -2,6 +2,7 @@
 import { onMount } from 'svelte';
 import { beforeNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
+import PhoneLargeNetPreference from '$lib/components/PhoneLargeNetPreference.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 let mountedUrl: URL | null = null;
@@ -156,6 +157,7 @@ onMount(() => {
       <div class="field mode-field"><label for="tournamentModeSelect">Mode</label>
         <select id="tournamentModeSelect"><option value="match">Match (two engines)</option><option value="round-robin">Round robin</option><option value="gauntlet">Gauntlet (Engine 1 vs field)</option></select></div>
       <div id="arenaSeatList" class="engine-list" aria-label="Arena engine selectors" data-fixed="false"></div>
+      <PhoneLargeNetPreference />
       <button id="addSeat" class="add-seat" type="button" title="Add another engine seat">+ Add engine</button>
       <p class="matchup-note" id="matchupNote">Equal time per move · colors alternate.</p>
       <p id="arenaMemoryNote" class="field-hint" role="status" hidden></p>

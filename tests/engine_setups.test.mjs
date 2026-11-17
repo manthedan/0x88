@@ -58,7 +58,7 @@ test('large-net setup confirmation reads metadata without allocating an engine s
   const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
   const guard = source.slice(source.indexOf('function profileRowsForUse('), source.indexOf('function loadEngineProfiles('));
   assert.match(guard, /const config = BIG_NETS\[/);
-  assert.match(guard, /bigNetSelectableSync\(config\) && allowBt4Prompt && window.confirm/);
+  assert.match(guard, /!phoneLargeNetsBlocked\(\) && bigNetSelectableSync\(config\) && allowBt4Prompt && \(?await requestLargeNetConsent/);
   assert.match(guard, /if \(!allowed\) next.variant = 'small'/);
   assert.doesNotMatch(guard, /bigNetFor\(|acquireBigNetSearcher\(/);
 });

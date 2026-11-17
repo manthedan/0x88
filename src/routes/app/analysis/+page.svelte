@@ -2,6 +2,7 @@
 import { onMount } from 'svelte';
 import { afterNavigate } from '$app/navigation';
 import BrowserCapabilities from '$lib/components/BrowserCapabilities.svelte';
+import PhoneLargeNetPreference from '$lib/components/PhoneLargeNetPreference.svelte';
 import RestoreNotice from '$lib/components/RestoreNotice.svelte';
 import SiteHeader from '$lib/components/SiteHeader.svelte';
 
@@ -327,6 +328,7 @@ onMount(() => {
       <div id="engineList" class="engine-list">
         <div class="engine-list-loading">Preparing engine controls…</div>
       </div>
+      <PhoneLargeNetPreference />
       <div class="row add-engine-row">
         <button id="addEngineInManager" type="button">+ Add engine</button>
       </div>

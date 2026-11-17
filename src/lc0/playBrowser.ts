@@ -23,10 +23,13 @@ import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from 
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcher, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
+import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { PHONE_LARGE_NET_CHANGE_EVENT, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { buttonEl, el, htmlEscape, maybeEl, selectEl } from './browserDom.ts';
 import {
   BIG_NETS,
+  phoneBlockedBigNetModelUrl,
   type Bt4SearchOptions,
   bigNetAssetStatusSync,
   bigNetMemoryCaution,
@@ -74,9 +77,10 @@ import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './wo
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+const blockedModelOverride = phoneBlockedBigNetModelUrl(params.get('model'));
 const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
   DEFAULT_MODEL_URL,
-  isV0DeployProfile() ? null : params.get('model'),
+  isV0DeployProfile() || blockedModelOverride ? null : params.get('model'),
   resolvePublicAssetUrl,
 );
 const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/s4fix_v_ema.onnx');
@@ -180,6 +184,7 @@ interface PlayContext {
   autosave: ReturnType<typeof createWorkspaceAutosave> | null;
   pendingInput: PendingInput | null;
   restoredGame: boolean;
+  consentAbort: AbortController;
   abort: AbortController;
   disposed: boolean;
   ground: ReturnType<typeof Chessground> | null;
@@ -242,6 +247,7 @@ function createPlayContext(): PlayContext {
     autosave: null,
     pendingInput: null,
     restoredGame: false,
+    consentAbort: new AbortController(),
     abort: new AbortController(),
     disposed: false,
     ground: null,
@@ -1913,6 +1919,7 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 }
 
 function ctxInit(ctx: PlayContext): void {
+  if (blockedModelOverride) showPhoneLargeNetFallback(true);
   // Only a decoded storage position handoff replaces a saved game. URL options never contain a Play game.
   const handedOff = ctxApplyPlayHandoffForMount(ctx);
   const validEngineIds = new Set(ENGINE_OPTIONS.map((option) => option.id));
@@ -1920,7 +1927,12 @@ function ctxInit(ctx: PlayContext): void {
   ctx.restoredGame = !!saved;
   if (saved) ctx.practicePosition = saved.practicePosition;
   ctxRefreshEngineOptions(ctx);
-  const preferences = saved?.preferences ?? loadPlayPreferences(playPreferenceStorage(), validEngineIds);
+  let preferences = saved?.preferences ?? loadPlayPreferences(playPreferenceStorage(), validEngineIds);
+  const requestedOption = ENGINE_OPTIONS.find((option) => option.id === preferences.engineId);
+  if (requestedOption && phoneSafeEngineVariant(requestedOption.family, requestedOption.variant) !== requestedOption.variant) {
+    preferences = { ...preferences, engineId: 'lc0-small' };
+    showPhoneLargeNetFallback();
+  }
   const preferredOption = ENGINE_OPTIONS.find((option) => option.id === preferences.engineId && (!ctx.practicePosition || option.group !== 'odds'));
   const preferredBigNetStatus =
     preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' ? bigNetAssetStatusSync(BIG_NETS[preferredOption.variant as BigNetKey]) : null;
@@ -2108,7 +2120,25 @@ function ctxInit(ctx: PlayContext): void {
   trackListener(ctx, el('confirmRestart'), 'click', () => ctxConfirmRestart(ctx));
   trackListener(ctx, el('dismissRestart'), 'click', () => ctxDismissRestart(ctx));
   trackListener(ctx, selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
-  trackListener(ctx, selectEl('engineSelect'), 'change', () => {
+  trackListener(ctx, window, PHONE_LARGE_NET_CHANGE_EVENT, () => {
+    if (!phoneLargeNetsBlocked()) return;
+    const active = ctxSelectedEngine(ctx);
+    const draft = ctxDraftEngine();
+    if ([active, draft].some((option) => phoneSafeEngineVariant(option.family, option.variant) !== option.variant)) {
+      ctxCancelEngineTurn(ctx);
+      releaseUnusedBigNetSearchers([], 0);
+      const preferences = { ...ctx.opponent.active, engineId: 'lc0-small' };
+      ctxSetOpponent(ctx, committedPlayOpponent(preferences));
+      ctxRestoreOpponentControls(ctx);
+      ctx.engineReady = false;
+      showPhoneLargeNetFallback();
+      ctxPersistPlayPreferences(ctx);
+      ctxRender(ctx);
+      if (!ctx.gameOver) ctxPrepareOrStartEngine(ctx);
+    }
+    ctxRefreshEngineOptions(ctx);
+  });
+  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {
     ctx.pendingPreferredEngineId = null;
     if (ctx.pendingPreferredEngineTimer) {
       clearTimeout(ctx.pendingPreferredEngineTimer);
@@ -2121,6 +2151,17 @@ function ctxInit(ctx: PlayContext): void {
       return;
     }
     const option = ctxDraftEngine();
+    if (option.family === 'lc0' && option.variant !== 'small') {
+      selectEl('engineSelect').value = previousEngineId;
+      if (!(await requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], ctx.consentAbort.signal, false))) return;
+      if (ctx.disposed || ctx.engineThinking || ctx.lastEngineId !== previousEngineId) return;
+      if (ctxEngineOptionState(option).disabled) {
+        ctxRefreshEngineOptions(ctx);
+        return;
+      }
+      ctxRefreshEngineOptions(ctx);
+      selectEl('engineSelect').value = option.id;
+    }
     if (option.family === 'maia3' && previousEngineId.startsWith('maia-')) {
       const carried = Number(ctx.lastEngineId.slice('maia-'.length));
       if (Number.isFinite(carried)) {
@@ -2254,6 +2295,7 @@ export function mountPlayBrowser(): () => void {
     ctx.autosave?.flush();
     ctx.autosave = null;
     ctx.disposed = true;
+    ctx.consentAbort.abort();
     ctxCancelEngineTurn(ctx);
     ctx.abort.abort();
     releaseUnusedBigNetSearchers([], 0);

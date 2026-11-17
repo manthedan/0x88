@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeatBlocked } from '../src/lc0/arenaMemoryGuard.ts';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
+import { PHONE_LARGE_NET_REASON, phoneSafeEngineVariant } from '../src/lc0/phoneLargeNetPolicy.ts';
 
 const big = (variant) => ({ family: 'lc0', variant, strength: 100 });
 const cpu = { family: 'sf', variant: 'lite', strength: 8 };
@@ -50,39 +51,45 @@ test('Arena start entry blocks restored/URL/programmatic pairings before acquiri
     return nodes.get(id);
   };
   for (const mode of ['match', 'round-robin', 'gauntlet']) {
-    let cleared = false;
-    const deps = {
-      running: false,
-      startPending: false,
-      mountAbort: new AbortController(),
-      setArenaStartDisabled() {},
-      syncArenaPhase() {},
-      checkpointWrites: Promise.resolve(),
-      isStaleMount: () => false,
-      checkpointUnreadable: false,
-      checkpointCompatibility: async () => 'test',
-      normalizeArenaControls: () => ({}),
-      ARENA_CONTROL_IDS: [],
-      el,
-      syncSeatRowsFromDom() {},
-      arenaBigNetPairingBlocked: (mode, seats) => arenaBigNetPairingBlocked(mode, seats, true),
-      arenaTournamentMode: () => mode,
-      seatRows: [big('bt4'), big('t3')],
-      ARENA_BIG_NET_MEMORY_REASON,
-      clearStartPending() {
-        cleared = true;
-      },
-      ensureSelectedRecklessAssetsAvailable() {
-        assert.fail('blocked setup reached asset checks');
-      },
-    };
-    const start = new Function(
-      'deps',
-      `let { ${Object.keys(deps).join(', ')} } = deps;\n${extract('async function startMatchUnchecked(', '\nasync function startMatch(')}\nreturn startMatchUnchecked;`,
-    )(deps);
-    await start();
-    assert.equal(cleared, true);
-    assert.equal(el('message').textContent, ARENA_BIG_NET_MEMORY_REASON);
+    for (const pairBlocked of [true, false]) {
+      let cleared = false;
+      const deps = {
+        running: false,
+        startPending: false,
+        mountAbort: new AbortController(),
+        setArenaStartDisabled() {},
+        syncArenaPhase() {},
+        checkpointWrites: Promise.resolve(),
+        isStaleMount: () => false,
+        checkpointUnreadable: false,
+        checkpointCompatibility: async () => 'test',
+        normalizeArenaControls: () => ({}),
+        ARENA_CONTROL_IDS: [],
+        el,
+        syncSeatRowsFromDom() {},
+        arenaBigNetPairingBlocked: (mode, seats) => arenaBigNetPairingBlocked(mode, seats, true),
+        arenaTournamentMode: () => mode,
+        seatRows: [big('bt4'), pairBlocked ? big('t3') : cpu],
+        ARENA_BIG_NET_MEMORY_REASON,
+        PHONE_LARGE_NET_REASON,
+        phoneSafeEngineVariant: (family, variant) => phoneSafeEngineVariant(family, variant, true, false),
+        renderSeatSelectors() {},
+        showPhoneLargeNetFallback() {},
+        clearStartPending() {
+          cleared = true;
+        },
+        ensureSelectedRecklessAssetsAvailable() {
+          assert.fail('blocked setup reached asset checks');
+        },
+      };
+      const start = new Function(
+        'deps',
+        `let { ${Object.keys(deps).join(', ')} } = deps;\n${extract('async function startMatchUnchecked(', '\nasync function startMatch(')}\nreturn startMatchUnchecked;`,
+      )(deps);
+      await start();
+      assert.equal(cleared, true);
+      assert.equal(el('message').textContent, pairBlocked ? ARENA_BIG_NET_MEMORY_REASON : PHONE_LARGE_NET_REASON);
+    }
   }
 });
 
