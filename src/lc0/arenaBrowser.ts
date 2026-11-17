@@ -4709,6 +4709,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
       ].filter((part): part is string => !!part),
     });
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
+    void renderRuntimeBadge();
     lc0Searchers.clear();
     renderCacheInfo();
     hideDownloadProgress();

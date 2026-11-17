@@ -286,6 +286,8 @@ test('Arena mount never eagerly loads Small; Start and fixed-suite autoruns stil
     init = extract(text, 'async function init(mountSignal:', 'function resetArenaPageState(');
   assert.doesNotMatch(init, /await loadLc0Evaluator/);
   assert.match(init, /renderRuntimeBadge\(\)/);
+  const lazyLoad = extract(text, 'async function loadLc0Evaluator(', 'async function reloadLc0Evaluator(');
+  assert.match(lazyLoad, /lc0Cache = new CachedLc0Evaluator[\s\S]*renderRuntimeBadge\(\)/, 'badge refresh follows lazy native session creation');
   assert.match(init, /runFixedSuiteBenchAutorun\(\)/);
   assert.match(init, /runArenaBenchAutorun\(\)/);
   assert.match(extract(text, 'async function startMatchUnchecked(', 'async function startMatch('), /await loadLc0Evaluator\(mountSignal, matchAbort.signal\)/);
