@@ -1,5 +1,7 @@
 # Mobile memory, phases 1–3 — 2026-11-17
 
+**Current policy is [Phase 3](#phase-3-lqo-batch-one-capture-and-maia3-folding-restored): LQO capture at batch 1; Maia3/Small folding on; big-net folding off.** Phase 2's Maia fold-off policy is historical. Mini measurements and review are complete; laptop Safari measurement remains externally blocked.
+
 **Phase 1 below is historical. Its sampled peaks and same-tab “warm” rows are superseded by [Phase 2](#phase-2-fresh-process-measurements-and-per-net-policy).** Same-tab reloads inherited the previous process's allocations; the variable post-disposal tail also captured WebAssembly JIT growth. Those rows must not be used as load-peak or speed comparisons. The phase-1 blanket CPU-IO policy was a real fixed-net regression, not random noise; Phase 2 removes it. Phase 2 also supersedes the old all-model fold-on policy.
 
 Companion to [mobile soak](mobile_soak_2026-11-16.md). Worktree/branch: `mobile-soak` / `lab/mobile-soak`; baseline `720aaf4a`. Desktop measurements below are **not iPhone validation**. The Carbon analysis is a source of hypotheses, not allocation evidence.
@@ -362,7 +364,7 @@ All four valid; final runs report actual capture/b1. Final 10 s slices stay abou
 
 ### Laptop Safari 26: externally blocked
 
-The coordinator is queued under benchlock for LQO cold+warm n≥5, Maia3 cold n≥5, and the same two 90 s LQO searches per build. **No phase-3 laptop cell has completed:** the existing port-4445 driver refuses session creation because Safari is paired with another WebDriver session. Pairing failures yield benchlock and back off outside it; no foreign session or driver is terminated. Owner/perf-harness measurements motivate the change but are not relabeled as this phase's baseline/final matrix. This required machine remains an explicit verification gap.
+The coordinator was configured under benchlock for LQO cold+warm n≥5, Maia3 cold n≥5, and the same two 90 s LQO searches per build. **No phase-3 laptop cell completed:** the existing port-4445 driver refused every session creation because Safari was paired with another WebDriver session. Pairing failures yielded benchlock and backed off outside it. Blocking waits continued from roughly **12:06 to 14:56 UTC**, including a final two-hour blocking shell wait. The idle, recorded owned coordinator (Node PID 10722) was then stopped only after verifying its command and that it had no child; it had created **zero Safari sessions**. Own mini server/tunnel PIDs 9073/9074/9164/9165 were stopped after verifying their commands; mini driver **36158 remained running**. No foreign session, driver or WebKit process was terminated. Owner/perf-harness measurements motivate the change but are not relabeled as this phase's baseline/final matrix. This required machine remains an explicit verification gap; saved specs/builds can be resumed after its owner frees Safari.
 
 ### Maia3 capture feasibility (inspection only)
 
