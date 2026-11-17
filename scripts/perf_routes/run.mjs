@@ -202,6 +202,7 @@ function report(dir) {
     `Completed attempts: ${runs.length}/${plan(options).length}. Regressed metrics: ${flagged}/${metrics.length} (${fmt(metrics.length ? (flagged / metrics.length) * 100 : 0)}%).`,
     `Gate: **${summary.some((s) => s.status === 'regressed') ? 'REGRESSED' : summary.some((s) => s.status !== 'clean') ? 'INCOMPLETE / NOISY' : 'CLEAN'}**. A subset is not a full merge gate.`,
     'Memory MB = MiB. Peak total = simultaneous sampled renderer+owned Chrome GPU; independent kernel renderer/GPU peaks are separate. Settled/residual = median final 2s of fixed 20s windows; no forced GC or plateau claim.',
+    'UA postResidualGc memory is sampled only after every natural footprint/worker/task/speed observation is frozen; the API-triggered GC cannot affect the natural retention numbers.',
     'Input = queued real user-move hook to two animation frames, not hardware-to-screen. Speed = median observed per-search visits/s or UCI NPS; Maia3 = worker round-trip evaluations/s. Safari GPU excluded (shared process).',
     '',
     '| Browser/journey | Metric | n B/C | Baseline median [min–max]; MAD | Candidate | Delta | Threshold | Verdict |',

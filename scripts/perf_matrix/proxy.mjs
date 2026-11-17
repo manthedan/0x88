@@ -2,9 +2,12 @@
 // its own origin (fresh storage partition), and every request is logged so a run can prove its cache
 // state: a warm run must fetch zero model bytes from the network.
 import { createServer, request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 
 export async function startCountingProxy(target, { htmlScript } = {}) {
   const upstream = new URL(target);
+  if (!['http:', 'https:'].includes(upstream.protocol)) throw Error('Proxy upstream must use HTTP or HTTPS');
+  const request = upstream.protocol === 'https:' ? httpsRequest : httpRequest;
   // Channel-v2 model representations have no extension. Identify their raw hash
   // from app-origin model pins, rather than counting unrelated WASM/glue artifacts.
   const modelHashes = new Set();
@@ -31,8 +34,9 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
   const server = createServer((req, res) => {
     const entry = { at: Date.now(), method: req.method, path: req.url, status: null, bytes: 0 };
     requests.push(entry);
-    const up = httpRequest(
+    const up = request(
       {
+        protocol: upstream.protocol,
         host: upstream.hostname,
         port: upstream.port,
         method: req.method,
@@ -53,6 +57,7 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
             const body = Buffer.from(Buffer.concat(chunks).toString().replace('<head>', `<head><script>${htmlScript}</script>`));
             const headers = { ...upRes.headers, 'content-length': body.length };
             delete headers['content-encoding'];
+            delete headers['transfer-encoding']; // Buffered response is now length-delimited, never both.
             res.writeHead(200, headers);
             res.end(body);
           });

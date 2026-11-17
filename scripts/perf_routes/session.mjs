@@ -5,6 +5,7 @@ import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
+import { peakFootprint } from './gate.mjs';
 import { MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
@@ -160,7 +161,6 @@ try {
     phase = value;
     if (value.startsWith('route:')) result.routeMarks.push({ route: value.slice(6), at: Date.now() });
   });
-  await uaMemory('settled');
   result.probe = await evaluate(`JSON.parse(JSON.stringify(window.__routePerf))`);
   result.workerReady = await evaluate(`window.__perfWorkerReady`);
   result.transitions = await evaluate(`window.__analysisTransitionLog?.() ?? []`);
@@ -190,7 +190,7 @@ try {
   result.metrics['memory.rendererPeakMb'] = Math.max(result.navigationPeakMb ?? 0, ...active.map((s) => s.rendererIntervalMb));
   if (gpuPids.length) result.metrics['memory.gpuPeakMb'] = Math.max(...active.map((s) => s.gpuIntervalMb ?? 0));
   // Total is the simultaneous sampled sum, NOT the sum of independent high-water marks.
-  result.metrics['memory.peakMb'] = Math.max(result.navigationPeakMb ?? 0, ...active.map((s) => s.rendererMb + (s.gpuMb ?? 0)));
+  result.metrics['memory.peakMb'] = peakFootprint(spec.browser, active, result.navigationPeakMb ?? 0);
   const settled = active.filter((s) => s.ms >= active.at(-1).ms - 2000);
   result.metrics['memory.settledMb'] = median(settled.map((s) => s.rendererMb + (s.gpuMb ?? 0)));
   // Client-side navigation to a non-engine route observes retention without destroying the page process.
@@ -211,7 +211,10 @@ try {
   const residual = result.samples.filter((s) => s.phase === 'residual' && s.ms >= result.samples.at(-1).ms - 2000);
   result.metrics['memory.residualMb'] = median(residual.map((s) => s.rendererMb + (s.gpuMb ?? 0)));
   result.metrics['workers.residual'] = await evaluate(`window.__routePerf.workers`);
-  await uaMemory('residual');
+  // UA measurement triggers GC (eager with our Chrome flag). Never request it until
+  // ALL natural footprint, worker, speed, input and long-task observations are frozen.
+  phase = 'ua-after-natural';
+  await uaMemory('postResidualGc');
   if (samplingError) throw samplingError;
   const failed = result.requests.filter((r) => r.method !== 'HEAD' && r.status >= 400);
   // Adding a row speculatively prefetches the next suggested family before the user changes

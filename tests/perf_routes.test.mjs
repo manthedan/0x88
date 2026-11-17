@@ -4,8 +4,9 @@ import { createServer } from 'node:http';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { startCountingProxy } from '../scripts/perf_matrix/proxy.mjs';
-import { compareRuns, JOURNEYS, parseArgs, plan, stats, verdict } from '../scripts/perf_routes/gate.mjs';
+import { compareRuns, JOURNEYS, parseArgs, peakFootprint, plan, stats, verdict } from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
+import { arenaGameFailed, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -108,7 +109,8 @@ test('proxy prepends early route probes only to identity HTML, preserving script
     res.setHeader('content-type', req.url === '/page' ? 'text/html' : 'text/javascript');
     if (req.url === '/page') {
       assert.equal(req.headers['accept-encoding'], 'identity');
-      res.end('<html><head><script>app()</script></head></html>');
+      res.write('<html><head>'); // Deliberately chunked upstream HTML.
+      res.end('<script>app()</script></head></html>');
     } else res.end('hello');
   });
   await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
@@ -120,7 +122,9 @@ test('proxy prepends early route probes only to identity HTML, preserving script
       upstream.closeAllConnections();
     });
   });
-  assert.match(await (await fetch(proxy.url + '/page')).text(), /<head><script>probe\(\)<\/script><script>app/);
+  const htmlResponse = await fetch(proxy.url + '/page');
+  assert.equal(htmlResponse.headers.has('transfer-encoding'), false);
+  assert.match(await htmlResponse.text(), /<head><script>probe\(\)<\/script><script>app/);
   assert.equal(await (await fetch(proxy.url + '/app.js')).text(), 'hello');
   assert.equal(proxy.requests.find((r) => r.path === '/app.js').bytes, 5);
 });
@@ -184,6 +188,48 @@ test('host-side human moves are deterministic/legal and reject terminal or wrong
   assert.throws(() => chooseHumanMove(['e4']), /White turn/);
   assert.throws(() => chooseHumanMove(['not-san']), /Cannot replay/);
   assert.throws(() => chooseHumanMove(['f3', 'e5', 'g4', 'Qh4#']), /ended before/);
+});
+
+test('Safari peaks use kernel intervals; Chrome totals never sum independent process maxima', () => {
+  const samples = [
+    { rendererMb: 10, gpuMb: 20, rendererIntervalMb: 80 },
+    { rendererMb: 20, gpuMb: 5, rendererIntervalMb: 25 },
+  ];
+  assert.equal(peakFootprint('safari', samples, 70), 80);
+  assert.equal(peakFootprint('safari', samples, 90), 90);
+  assert.equal(peakFootprint('chrome', samples), 30);
+  assert.throws(() => peakFootprint('chrome', []), /No footprint/);
+});
+
+test('Analysis requires post-move FEN-associated worker progress plus every rendered engine PV', async () => {
+  const window = { __routePerf: { analysisProgress: [{ fen: 'old', at: 20 }] } };
+  let rowCount = 2;
+  const document = {
+    querySelectorAll: (selector) =>
+      selector.includes('engineSummaries')
+        ? ['Lc0', 'SF'].slice(0, rowCount).map((engine) => ({ dataset: { pvFen: 'new', engine }, querySelector: () => true }))
+        : [1, 2],
+  };
+  const evaluate = async (expression) => new Function('window', 'document', `return (${expression});`)(window, document);
+  await assert.rejects(requireAnalysisForMove(evaluate, { fen: 'new', started: 10 }, 1), /Timed out/);
+  window.__routePerf.analysisProgress = [{ fen: 'new', at: 9 }];
+  await assert.rejects(requireAnalysisForMove(evaluate, { fen: 'new', started: 10 }, 1), /Timed out/);
+  window.__routePerf.analysisProgress = [{ fen: 'new', at: 20 }];
+  assert.equal(await requireAnalysisForMove(evaluate, { fen: 'new', started: 10 }, 1), true);
+  rowCount = 1;
+  await assert.rejects(requireAnalysisForMove(evaluate, { fen: 'new', started: 10 }, 1), /Timed out/);
+});
+
+test('Arena rejects illegal/missing moves even when a finished-game chip exists', () => {
+  for (const reason of ['illegal e2e5', 'resigned', 'cancelled', 'forfeit', 'failed', 'timeout']) assert.equal(arenaGameFailed(`1-0 (${reason})`), true);
+  for (const reason of ['checkmate', 'stalemate', 'threefold repetition', 'ply limit']) assert.equal(arenaGameFailed(`1/2-1/2 (${reason})`), false);
+});
+
+test('UA collection runs only after natural footprint and worker observations are frozen', () => {
+  const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
+  assert.equal((source.match(/await uaMemory\(/g) ?? []).length, 1);
+  assert.ok(source.indexOf('await uaMemory(') > source.indexOf("result.metrics['workers.residual'] ="));
+  assert.ok(source.indexOf('await uaMemory(') > source.indexOf("result.metrics['memory.residualMb'] ="));
 });
 
 test('missing throughput for one selected engine cannot yield a clean comparison', () => {

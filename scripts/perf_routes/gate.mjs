@@ -112,6 +112,13 @@ export function verdict(name, baseline, candidate, expected = 5) {
   return { name, baseline: a, candidate: b, deltaRatio, threshold, status };
 }
 
+export function peakFootprint(browser, samples, navigationPeak = 0) {
+  if (!samples.length) throw Error('No footprint samples');
+  return browser === 'safari'
+    ? Math.max(navigationPeak, ...samples.map((s) => s.rendererIntervalMb))
+    : Math.max(...samples.map((s) => s.rendererMb + (s.gpuMb ?? 0)));
+}
+
 export const REQUIRED = [
   'memory.peakMb',
   'memory.settledMb',

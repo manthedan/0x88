@@ -9,6 +9,7 @@
     boardInteractiveMs: null,
     longTasks: [],
     rates: {},
+    analysisProgress: [],
     errors: [],
     events: [],
     supportsLongTasks: PerformanceObserver.supportedEntryTypes.includes('longtask'),
@@ -74,6 +75,7 @@
         const v = m?.progress ?? m?.result;
         if (v?.visits > 0 && v.elapsedMs > 0) {
           rate(kind, (v.visits * 1000) / v.elapsedMs);
+          if (v.fen && location.pathname.includes('/analysis')) p.analysisProgress.push({ fen: v.fen, at: performance.now(), id: m.id });
           line();
         }
         if (

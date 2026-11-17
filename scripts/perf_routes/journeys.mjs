@@ -101,7 +101,32 @@ export async function userMove(evaluate, analysis, index = 0, preferredMove = ''
     evaluate,
     analysis ? `window.__analysisSchedulingState().fen !== ${JSON.stringify(before)}` : `document.querySelectorAll('#moveList .san').length > ${before}`,
   );
-  return { ...result, latencyMs: await evaluate(`window.__routeMove.ms`) };
+  return {
+    ...result,
+    latencyMs: await evaluate(`window.__routeMove.ms`),
+    started: await evaluate(`window.__routeMove.start`),
+    ...(analysis ? { fen: await evaluate(`window.__analysisSchedulingState().fen`) } : {}),
+  };
+}
+
+export function arenaGameFailed(log) {
+  return /forfeit|failed|error|timeout|\billegal\b|\bresigned\b|\bcancelled\b/i.test(log);
+}
+
+export async function requireAnalysisForMove(evaluate, move, timeout = 120000) {
+  // Cumulative counters can include late progress from the position just cancelled.
+  // Require a response for this exact post-move FEN and visible PVs for every selected row.
+  return waitFor(
+    evaluate,
+    `(() => {
+    const fen=${JSON.stringify(move.fen)};
+    const worker=window.__routePerf.analysisProgress.some(p => p.fen===fen && p.at>=${move.started});
+    const rows=[...document.querySelectorAll('#engineSummaries [data-pv-fen]')].filter(el=>el.dataset.pvFen===fen && el.querySelector('.pv-move'));
+    const count=document.querySelectorAll('#engineList .engine-row').length;
+    return worker && new Set(rows.map(el=>el.dataset.engine)).size>=count;
+  })()`,
+    timeout,
+  );
 }
 
 export async function headerNavigate(evaluate, route) {
@@ -122,7 +147,9 @@ export async function runJourney(evaluate, name, mark = () => {}) {
     mark('analysis');
     if (!start.analyzing) await click(evaluate, '#analyze');
     await waitFor(evaluate, `window.__analysisSchedulingState().analyzing`);
-    evidence.moves.push(await userMove(evaluate, true));
+    const firstMove = await userMove(evaluate, true);
+    evidence.moves.push(firstMove);
+    await requireAnalysisForMove(evaluate, firstMove);
     await sleep(60000);
     const end = await evaluate(`window.__analysisSchedulingState()`);
     if (end.workerProgressMessages <= start.workerProgressMessages || end.uiProgressSamples <= start.uiProgressSamples)
@@ -130,9 +157,9 @@ export async function runJourney(evaluate, name, mark = () => {}) {
     evidence.scheduling = { start, end };
     if (name === 'analysis-four') {
       for (let i = 0; i < 10; i++) {
-        const count = await evaluate(`window.__analysisSchedulingState().workerProgressMessages`);
-        evidence.moves.push(await userMove(evaluate, true, i));
-        await waitFor(evaluate, `window.__analysisSchedulingState().workerProgressMessages > ${count}`);
+        const move = await userMove(evaluate, true, i);
+        evidence.moves.push(move);
+        await requireAnalysisForMove(evaluate, move);
       }
     }
   } else if (name.startsWith('play')) {
@@ -176,7 +203,7 @@ export async function runJourney(evaluate, name, mark = () => {}) {
     );
     evidence.result = await evaluate(`document.querySelector('#gameChips').textContent`);
     evidence.log = await evaluate(`document.querySelector('#log').textContent`);
-    if (/forfeit|failed|error|timeout/i.test(evidence.log)) throw Error(`Arena did not complete a valid game: ${evidence.log}`);
+    if (arenaGameFailed(evidence.log)) throw Error(`Arena did not complete a valid game: ${evidence.log}`);
     if (/failed|error/i.test(await evaluate(`document.querySelector('#message').textContent`))) throw Error('Arena game failed');
   } else {
     await analysisSetup(evaluate);
