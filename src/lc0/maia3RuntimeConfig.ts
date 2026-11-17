@@ -1,2 +1,2 @@
-/** Shared page/worker policy; Maia's low eval count does not justify expanding its weights. */
-export const MAIA3_ORT_DEFAULTS = { dequantFold: false } as const;
+/** Shared page/worker policy: folding avoids Maia's measured Safari 26 compiler/lifetime regression. */
+export const MAIA3_ORT_DEFAULTS = { dequantFold: true } as const;

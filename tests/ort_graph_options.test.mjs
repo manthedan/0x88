@@ -152,8 +152,8 @@ for (const [query, forced] of [
     }
     const worker = new WorkerStub();
     const ready = await Maia3BrowserEvaluator.postInit(worker, 'unused-model');
-    assert.equal(worker.posted[0].dequantFold, forced ?? false);
-    assert.equal(ready.ortRuntime.dequantFoldEnabled, forced ?? false);
+    assert.equal(worker.posted[0].dequantFold, forced ?? true, 'Maia is folded again on every device');
+    assert.equal(ready.ortRuntime.dequantFoldEnabled, forced ?? true);
     assert.equal(ort.ortDequantFoldEnabled(), forced ?? true, 'Small remains enabled by default');
   });
 }
@@ -254,7 +254,7 @@ test('real Maia worker handler applies graph options to ORT session creation wit
   for (const fold of [undefined, true, false]) {
     const ready = await send({ type: 'init', model: 'unused', ep: 'wasm', dequantFold: fold });
     assert.equal(ready.type, 'ready');
-    assert.equal(ready.ortRuntime.dequantFoldEnabled, fold ?? false, 'worker field forces either arm; omission uses Maia policy');
+    assert.equal(ready.ortRuntime.dequantFoldEnabled, fold ?? true, 'worker field forces either arm; omission uses Maia policy');
   }
   await send({ type: 'dispose' });
   assert.deepEqual(levels, ['disabled', 'extended', 'all', 'all', 'all']);
