@@ -118,6 +118,14 @@ test('Chrome preserves completed cold evidence and records a later warm harness 
   assert.equal(closed, 1);
 });
 
+test('Chrome done footprint reads the actual renderer mark, not the Safari mark schema', () => {
+  const source = readFileSync(new URL('../scripts/perf_matrix/chrome_session.mjs', import.meta.url), 'utf8');
+  const assignment = source.match(/record\.doneMb = [^;]+;/)[0];
+  const read = new Function('record', 'marks', `${assignment} return record.doneMb;`);
+  assert.equal(read({}, { settle: { rendererTopMb: 321 } }), 321);
+  assert.equal(read({}, {}), null);
+});
+
 test('zero-wait Safari creation returns a pairing conflict after one attempt so the outer runner can yield benchlock', async () => {
   const source = readFileSync(new URL('../scripts/perf_matrix/safari_session.mjs', import.meta.url), 'utf8');
   const body = source.slice(source.indexOf('async function createSession()'), source.indexOf('const proxy ='));

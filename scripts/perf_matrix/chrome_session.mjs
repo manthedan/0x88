@@ -233,7 +233,7 @@ async function measure(kind, index) {
   record.peakThroughSearchSumMb = round(record.peakThroughSearchMb + (record.gpuPeakThroughSearchMb ?? 0));
   const med = (xs) => (xs.length ? [...xs].sort((a, b) => a - b)[xs.length >> 1] : null);
   record.searchMedianMb = med(samples.filter((s) => s[1] === 'r').map((s) => s[2]));
-  record.doneMb = marks.settle?.mb ?? null;
+  record.doneMb = marks.settle?.rendererTopMb ?? null;
   const tailFrom = samples.length ? samples.at(-1)[0] - 2000 : 0;
   record.settledMb = med(samples.filter((s) => s[1] === 't' && s[0] >= tailFrom).map((s) => s[2]));
   record.samples = samples;
