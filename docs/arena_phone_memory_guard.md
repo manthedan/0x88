@@ -25,7 +25,9 @@ on dismissal. The dialog follows Analysis's existing native-dialog pattern.
 localStorage. Access and writes are guarded; a session override keeps opt-in
 and revocation working when storage fails. Revoking Play consent replaces a large
 live opponent with Small, but only dismisses a blocked restart draft when the live
-opponent is unaffected; unresolved saved-large-engine probes are also cancelled.
+opponent is unaffected; unresolved saved-BT4/t3 probes are also cancelled. Every
+revocation retires retained BT4/t3 sessions, including leftovers from an earlier
+game, while exempt Queen Odds work and saved preferences remain intact.
 A line beside each picker shows
 “BT4 and t3 on this device: on · turn off”. Turning off cancels gated large-net work,
 releases its sessions, and falls back to a small engine. Arena's setup fieldset
@@ -40,6 +42,13 @@ Known large-net `?model=` overrides (including shipped split-K variants) on phon
 always fall back to Small, with an
 explanation to use the real large-net picker instead. This prevents a large net
 from being disguised as Small and remaining resident after consent is revoked.
+The mobile-soak lab explicitly requests the same consent before any engines or
+ballast for a run containing BT4, t3 or Arena, including `auto=1` and crash
+continuation. Declining skips the remaining steps without loading a model;
+leaving aborts the dialog. Desktop and Queen Odds-only diagnostics need no
+phone prompt. The lab exposes the shared preference control, locked during runs;
+its deliberate two-net Arena stress step is not a product tournament pairing.
+
 Critical-moments review offers only Lc0 Small (plus Stockfish and Maia), so it has
 no large-net option to gate; Analysis review uses its consent-checked engine rows.
 

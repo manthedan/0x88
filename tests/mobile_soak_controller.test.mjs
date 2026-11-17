@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import ts from 'typescript';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
-import { SOAK_STORAGE_KEY } from '../src/lc0/mobileSoak.ts';
+import { beginSoakStep, emptySoakReport, parseSoakQuery, SOAK_STORAGE_KEY } from '../src/lc0/mobileSoak.ts';
 import { MobileSoakDocument, mountMobileSoak } from '../src/lc0/mobileSoakBrowser.ts';
 
 // Execute the real adapter without importing unrelated TVM-only TypeScript parameter properties.
@@ -109,6 +109,73 @@ function browser(t, search = '?steps=sf-lite,t3') {
     },
   };
 }
+
+for (const mode of ['manual', 'auto', 'continue']) {
+  for (const accepted of [false, true]) {
+    test(`${mode} diagnostics await explicit phone consent before engines or ballast (accepted=${accepted})`, async (t) => {
+      const search = `?steps=sf-lite,t3&labBallastMb=1${mode === 'auto' ? '&auto=1' : ''}`;
+      const f = browser(t, search);
+      if (mode === 'continue') {
+        const at = '2026-11-16T00:00:00.000Z';
+        const interrupted = beginSoakStep(emptySoakReport(parseSoakQuery(search), at), 'sf-lite', at);
+        window.localStorage.setItem(SOAK_STORAGE_KEY, JSON.stringify(interrupted));
+      }
+      const permission = deferred();
+      const requests = [];
+      const loaded = [];
+      const controller = f.mount({
+        requestConsent: async (ids, signal) => {
+          requests.push([...ids]);
+          assert.equal(signal.aborted, false);
+          return permission.promise;
+        },
+        makeEngine: async (id) => {
+          loaded.push(id);
+          return engine(id);
+        },
+      });
+      await controller.ready;
+      const running = mode === 'auto' ? null : mode === 'continue' ? controller.api.continueAfterCrash() : controller.api.start();
+      await until(() => requests.length === 1);
+      assert.deepEqual(requests[0], mode === 'continue' ? ['t3'] : ['sf-lite', 't3']);
+      assert.deepEqual(loaded, []);
+      assert.equal(
+        controller.api.results.events.some((event) => event.type === 'ballast-start'),
+        false,
+      );
+      permission.resolve(accepted);
+      if (running) await running;
+      else await until(() => controller.api.state === 'done');
+      assert.deepEqual(loaded, accepted ? requests[0] : []);
+      assert.equal(controller.api.state, 'done');
+      if (!accepted) assert.ok(controller.api.results.steps.some((step) => step.status === 'skipped' && /consent declined/.test(step.error)));
+    });
+  }
+}
+
+test('leaving during the lab consent dialog cannot start engines after acceptance', async (t) => {
+  const f = browser(t, '?steps=t3');
+  const permission = deferred();
+  let requested = false;
+  let loaded = 0;
+  const controller = f.mount({
+    requestConsent: async () => {
+      requested = true;
+      return permission.promise;
+    },
+    makeEngine: async (id) => {
+      loaded++;
+      return engine(id);
+    },
+  });
+  await controller.ready;
+  const running = controller.api.start();
+  await until(() => requested);
+  controller.destroy();
+  permission.resolve(true);
+  await running;
+  assert.equal(loaded, 0);
+});
 
 for (const failCleanup of [false, true]) {
   test(`aborted Maia init keeps remount behind owned cleanup and propagates teardown failure (${failCleanup})`, async (t) => {

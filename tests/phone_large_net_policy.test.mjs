@@ -3,10 +3,18 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { arenaBigNetPairingBlocked } from '../src/lc0/arenaMemoryGuard.ts';
-import { acquireBigNetSearcher, acquireBigNetSearcherAsync, disposeAllBigNetSearchersNow, hasBigNetSearcher } from '../src/lc0/bigNetSessionPool.ts';
+import {
+  acquireBigNetSearcher,
+  acquireBigNetSearcherAsync,
+  BigNetSessionPool,
+  disposeAllBigNetSearchersNow,
+  hasBigNetSearcher,
+} from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS, bigNetOptionState, phoneBlockedBigNetModelUrl } from '../src/lc0/bt4Engine.ts';
 import { requestLargeNetConsent } from '../src/lc0/largeNetConsent.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
+import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
+import { requestSoakLargeNetConsent } from '../src/lc0/mobileSoakBrowser.ts';
 import {
   createPhoneLargeNetPreference,
   PHONE_LARGE_NET_STORAGE_KEY,
@@ -226,6 +234,27 @@ test('modal cancellation restores focus; Tab stays trapped; opt-in happens only 
     dialog.children.at(-1).children[1].dispatchEvent(new Event('click'));
     assert.equal(await pending, true);
     assert.equal(phoneLargeNetPreference.enabled(), false, 'ordinary Queen Odds warning never grants BT4/t3 consent');
+    const binding = createSoakBigNetBinding('bt4');
+    assert.throws(() => binding.acquire(), /BT4 and t3 are off on phones/);
+    const dialogs = body.children.length;
+    assert.equal(await requestSoakLargeNetConsent(['lqo', 'heat'], new AbortController().signal), true);
+    assert.equal(body.children.length, dialogs, 'Queen Odds-only diagnostics need no phone opt-in');
+    pending = requestSoakLargeNetConsent(['arena'], new AbortController().signal);
+    await new Promise(setImmediate);
+    dialog = body.children.at(-1);
+    assert.equal(dialog.children[0].textContent, 'Use a large net on this phone?');
+    dialog.children.at(-1).children[0].dispatchEvent(new Event('click'));
+    assert.equal(await pending, false);
+    assert.throws(() => binding.acquire(), /BT4 and t3 are off on phones/);
+    pending = requestSoakLargeNetConsent(['t3'], new AbortController().signal);
+    await new Promise(setImmediate);
+    dialog = body.children.at(-1);
+    assert.match(dialog.children[1].textContent, /163 MB/);
+    dialog.children.at(-1).children[1].dispatchEvent(new Event('click'));
+    assert.equal(await pending, true);
+    const searcher = binding.acquire();
+    assert.equal(binding.retire(searcher), true);
+    await searcher.dispose();
   } finally {
     phoneLargeNetPreference.setEnabled(false);
     if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
@@ -351,6 +380,15 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
     let prepared = 0;
     let dismissed = 0;
     const clearedTimers = [];
+    const pool = new BigNetSessionPool(() => ({
+      disposeCalls: 0,
+      dispose() {
+        this.disposeCalls++;
+      },
+    }));
+    const bt4 = pool.acquire('bt4');
+    const t3 = pool.acquire('t3');
+    const queen = pool.acquire('lqo');
     const deps = {
       phoneLargeNetsBlocked: () => true,
       ENGINE_OPTIONS: Object.entries(options).map(([id, option]) => ({ id, ...option })),
@@ -364,7 +402,7 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
       ctxSetEngineNote: (text) => {
         note = text;
       },
-      releaseUnusedBigNetSearchers() {},
+      releaseUnusedBigNetSearchers: (keys, ttl) => pool.releaseUnused(keys, ttl),
       ctxSetOpponent: (ctx, next) => {
         ctx.opponent = next;
       },
@@ -399,6 +437,10 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
     assert.equal(ctx.pendingPreferredEngineId, null);
     assert.equal(ctx.pendingPreferredEngineTimer, null);
     assert.deepEqual(clearedTimers, cancellingRestore ? [42] : []);
+    assert.equal(bt4.disposeCalls, 1, 'even an unaffected opponent retires previously retained BT4');
+    assert.equal(t3.disposeCalls, 1, 'even an unaffected opponent retires previously retained t3');
+    assert.equal(queen.disposeCalls, 0, 'Queen Odds work is never cancelled by gated-net revocation');
+    pool.disposeAllNow();
   }
 });
 

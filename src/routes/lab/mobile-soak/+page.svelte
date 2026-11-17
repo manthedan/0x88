@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import PhoneLargeNetPreference from '../../../lib/components/PhoneLargeNetPreference.svelte';
 import { writeClipboard } from '../../../lc0/clipboard.ts';
 import { buildSoakSteps, type SoakReport, soakRuntimeSummary } from '../../../lc0/mobileSoak.ts';
 import type { MobileSoakApi } from '../../../lc0/mobileSoakBrowser.ts';
@@ -63,6 +64,9 @@ async function copy() {
     <pre id="mobile-soak-env" data-testid="environment">{report?.env ? JSON.stringify(report.env, null, 2) : 'Collecting environment…'}</pre>
     <p class="note">Memory is normally unavailable on Safari (null). Chrome numbers exclude some GPU memory. WASM heaps are private in these production adapters, so heap byteLength is null.</p>
   </section>
+  <fieldset class="phone-policy" disabled={running} aria-label="Phone large-net preference">
+    <PhoneLargeNetPreference />
+  </fieldset>
   <div class="controls">
     <button id="mobile-soak-start" data-testid="start" class="primary" disabled={!api || running || unsafeDisposal || report?.state === 'crashed-awaiting-choice'} on:click={start}>Start</button>
     <button id="mobile-soak-continue" data-testid="continue" disabled={!api || unsafeDisposal || report?.state !== 'crashed-awaiting-choice'} on:click={resume}>Continue after that step</button>
@@ -118,6 +122,7 @@ async function copy() {
 h1 { font-size: 28px; } h2 { font-size: 20px; }
 p { line-height: 1.5; }
 section { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); padding: 12px; }
+.phone-policy { border: 0; padding: 0; margin: 0; min-width: 0; }
 .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 button { min-height: 44px; padding: 8px 12px; cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: default; }

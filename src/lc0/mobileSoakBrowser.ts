@@ -1,3 +1,4 @@
+import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import {
   addSoakEvent,
@@ -139,11 +140,21 @@ export class MobileSoakDocument {
   }
 }
 
+/** Diagnostic runs still need explicit device consent, including documented autorun URLs. */
+export async function requestSoakLargeNetConsent(stepIds: readonly string[], signal: AbortSignal): Promise<boolean> {
+  const key = stepIds.includes('bt4') || stepIds.includes('arena') ? 'bt4' : stepIds.includes('t3') ? 't3' : null;
+  if (!key || !isMemoryConstrainedDevice()) return !signal.aborted;
+  const { BIG_NETS } = await import('./bt4Engine.ts');
+  const { requestLargeNetConsent } = await import('./largeNetConsent.ts');
+  return requestLargeNetConsent(BIG_NETS[key], signal, false);
+}
+
 export interface MobileSoakServices {
   environment(): Promise<Record<string, unknown>>;
   memory(): Promise<MemorySample>;
   makeEngine(id: string, signal: AbortSignal, modelOverride?: string): Promise<SoakEngine>;
   documentScope: MobileSoakDocument;
+  requestConsent(stepIds: readonly string[], signal: AbortSignal): Promise<boolean>;
   wait(ms: number, signal: AbortSignal): Promise<void>;
 }
 const defaultServices: MobileSoakServices = {
@@ -152,6 +163,7 @@ const defaultServices: MobileSoakServices = {
   // Keep production engine imports lazy; controller lifecycle tests inject inert adapters.
   makeEngine: async (id, signal, modelOverride) => (await import('./mobileSoakEngines.ts')).makeSoakEngine(id, signal, modelOverride),
   documentScope: new MobileSoakDocument(),
+  requestConsent: requestSoakLargeNetConsent,
   wait: (ms, signal) =>
     new Promise((resolve) => {
       const done = () => {
@@ -380,16 +392,26 @@ export function mountMobileSoak(
       await services.documentScope.operations.run(async () => {
         if (!mounted) return;
         try {
-          log('ballast-start', `${report.labBallastMb ?? 0} MiB requested; held through all steps/gaps`);
-          ballast = allocateSoakBallast(report.labBallastMb ?? 0);
-          report.labBallastAllocatedBytes = ballast.reduce((bytes, buffer) => bytes + buffer.byteLength, 0);
-          publish();
-          while (report.nextIndex < report.stepIds.length && !abort.signal.aborted && !services.documentScope.unsafeDisposal) {
-            if (!(await executeStep(report.stepIds[report.nextIndex]))) break;
-            if (report.nextIndex < report.stepIds.length && (report.labGapSeconds ?? 0) > 0 && !abort.signal.aborted) {
-              log('gap-start', `${report.labGapSeconds}s after ${report.steps.at(-1)?.id}`);
-              await services.wait(report.labGapSeconds! * 1000, abort.signal);
-              log('gap-end', `${ballast.length} ballast chunks still held`);
+          const remaining = report.stepIds.slice(report.nextIndex);
+          const heatNet = remaining.includes('heat') ? strongestLoadedNet(report.steps) : null;
+          if (heatNet) remaining.push(heatNet);
+          const consent = await services.requestConsent(remaining, abort.signal);
+          if (!mounted || abort.signal.aborted) return;
+          if (!consent) {
+            report = skipRemainingSoakSteps(report, 'Phone large-net consent declined; no engines started.', iso());
+            log('consent-declined', 'Start a new run to review the warning again.');
+          } else {
+            log('ballast-start', `${report.labBallastMb ?? 0} MiB requested; held through all steps/gaps`);
+            ballast = allocateSoakBallast(report.labBallastMb ?? 0);
+            report.labBallastAllocatedBytes = ballast.reduce((bytes, buffer) => bytes + buffer.byteLength, 0);
+            publish();
+            while (report.nextIndex < report.stepIds.length && !abort.signal.aborted && !services.documentScope.unsafeDisposal) {
+              if (!(await executeStep(report.stepIds[report.nextIndex]))) break;
+              if (report.nextIndex < report.stepIds.length && (report.labGapSeconds ?? 0) > 0 && !abort.signal.aborted) {
+                log('gap-start', `${report.labGapSeconds}s after ${report.steps.at(-1)?.id}`);
+                await services.wait(report.labGapSeconds! * 1000, abort.signal);
+                log('gap-end', `${ballast.length} ballast chunks still held`);
+              }
             }
           }
         } catch (error) {

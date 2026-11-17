@@ -1930,10 +1930,12 @@ function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
   }
   const active = ctxSelectedEngine(ctx);
   const draft = ctxDraftEngine();
+  // An earlier game's gated net may still be retained behind an unaffected opponent.
+  // Queen Odds is exempt and may own live work, so never evict it on revocation.
+  releaseUnusedBigNetSearchers(['lqo'], 0);
   if (cancellingRestore || phoneSafeEngineVariant(active.family, active.variant) !== active.variant) {
     ctxCancelEngineTurn(ctx);
     ctxSetEngineNote('');
-    releaseUnusedBigNetSearchers([], 0);
     const preferences = { ...ctx.opponent.active, engineId: 'lc0-small' };
     ctxSetOpponent(ctx, committedPlayOpponent(preferences));
     ctxRestoreOpponentControls(ctx);
