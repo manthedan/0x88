@@ -30,6 +30,8 @@ export interface BigNetConfig {
   modelUrl: string;
   /** App weight-fold policy; explicit URL/worker overrides still win. */
   dequantFold: boolean;
+  /** GPU-capture-only shape policy, not a model rewrite; omitted on CPU/WASM fallback. */
+  freeDimensionOverrides?: Readonly<Record<string, number>>;
   /** Validated lab config may probe an unlisted model; production integrity checks still apply. */
   diagnosticModel?: true;
   approxMb: number;
@@ -83,6 +85,7 @@ export const LQO_NET: BigNetConfig = {
   key: 'lqo',
   name: 'Queen Odds',
   dequantFold: false,
+  freeDimensionOverrides: { batch: 1 },
   modelUrl: resolvePublicAssetUrl('/models/lc0/lqo_v2.f16.qdq8.onnx'),
   approxMb: 96,
   recommendedBatchSize: 8,
@@ -314,7 +317,11 @@ function normalizedEvalCacheEntries(entries: number | undefined): number {
 }
 
 function bigNetDiagnosticRequest(config: BigNetConfig) {
-  return { ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(), dequantFold: ortDequantFoldEnabled(config.dequantFold) };
+  return {
+    ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
+    dequantFold: ortDequantFoldEnabled(config.dequantFold),
+    ortFreeDimensionOverrides: config.freeDimensionOverrides,
+  };
 }
 
 export class Bt4WorkerSearcher {

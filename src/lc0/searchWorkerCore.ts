@@ -1,4 +1,4 @@
-import { type OrtDeviceLoss, createOrtDeviceLossMonitor } from '../nn/ortDeviceLoss.ts';
+import { createOrtDeviceLossMonitor, type OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import '../nn/ortConsoleFilter.ts';
 import {
@@ -68,6 +68,8 @@ type InitMessage = {
   physicalBatchMode?: 'declared' | 'logical';
   /** ORT IO mode for the ONNX runtime (Lc0OnnxEvaluatorOptions.ioMode); omitted = defaultLc0OrtIoMode(deviceModelSelection). */
   ortIoMode?: Lc0OrtIoMode;
+  /** GPU-only shape policy; no model bytes or cache identity change. */
+  ortFreeDimensionOverrides?: Readonly<Record<string, number>>;
   ortWasmArtifact?: OrtWasmArtifactSelection;
   ortWasmThreads?: number;
   /** Stream model download progress back as 'downloadProgress' messages. */
@@ -334,6 +336,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     ortWasmThreads: message.ortWasmThreads ?? null,
     physicalBatchMode: message.physicalBatchMode === 'logical' ? 'logical' : 'declared',
     ortIoMode: message.ortIoMode ?? null,
+    ortFreeDimensionOverrides: message.ortFreeDimensionOverrides ?? null,
   });
   if (evaluator && configuredInitKey === initKey) {
     post({
@@ -420,7 +423,11 @@ async function handleInit(message: InitMessage): Promise<void> {
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   const created = await createLc0OnnxEvaluatorFromUrl(message.modelUrl, {
     deviceSelection: message.deviceModelSelection === true,
-    evaluator: { physicalBatchMode, ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true) },
+    evaluator: {
+      physicalBatchMode,
+      ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true),
+      freeDimensionOverrides: message.ortFreeDimensionOverrides,
+    },
     load: {
       cache: message.cacheModel,
       allowUnverified: message.allowUnverifiedModel,
@@ -464,6 +471,8 @@ async function handleInit(message: InitMessage): Promise<void> {
   configuredOrtFallback = diagnostics.fallback;
   configuredOrtRuntime = {
     graphOptimizationLevel: diagnostics.graphOptimizationLevel,
+    ioMode: baseEvaluator.ioMode,
+    fixedBatchSize: baseEvaluator.fixedBatchSize,
     dequantFoldEnabled: diagnostics.dequantFoldEnabled,
     dequantFold: diagnostics.dequantFold,
   };

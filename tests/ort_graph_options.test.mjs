@@ -88,6 +88,7 @@ test('big-net worker receives page graph/folding options, keeps device model sel
   assert.equal(first.ortDiagnostics.preferredOutputLocation, 'gpu-buffer');
   assert.equal(first.dequantFold, false, 'app-side folding is independent and must also reach the worker');
   assert.equal(first.deviceModelSelection, true, 'model overrides keep production split-K rules');
+  assert.deepEqual(first.ortFreeDimensionOverrides, { batch: 1 }, 'LQO retains its product shape policy and unchanged model URL');
   assert.equal(first.ortIoMode, undefined, 'device-selected big nets inherit captured IO, with dynamic-shape preflight falling back before creation');
   assert.equal(first.allowUnverifiedModel, undefined, 'diagnostic config must not weaken model integrity');
   assert.equal(first.modelUrl, '/models/lc0/lqo_v2.f16.onnx');
@@ -190,7 +191,7 @@ test('search worker applies forwarded levels without the page URL, reports them,
     return { evaluate: async () => ({}), async dispose() {} };
   });
   startSearchWorker();
-  const init = (level, fold) =>
+  const init = (level, fold, freeDims) =>
     new Promise((resolve) => {
       pending.set(++seq, resolve);
       handler({
@@ -203,6 +204,7 @@ test('search worker applies forwarded levels without the page URL, reports them,
           allowUnverifiedModel: true,
           ortDiagnostics: { graphOptimizationLevel: level },
           dequantFold: fold,
+          ortFreeDimensionOverrides: freeDims,
         },
       });
     });
@@ -217,6 +219,8 @@ test('search worker applies forwarded levels without the page URL, reports them,
   assert.equal(levels.length, 3, 'identical config reuses the session');
   await init('basic', true);
   assert.equal(levels.length, 4, 'changing the independent app-fold flag also re-inits');
+  await init('basic', true, { batch: 1 });
+  assert.equal(levels.length, 5, 'the capture dimension policy is part of session reuse identity');
 });
 
 test('real Maia worker handler applies graph options to ORT session creation without a page query', async (t) => {

@@ -5,7 +5,7 @@ import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
 import { OrtGpuIoBinding, type OrtGpuIoOutputs, type OrtGpuIoTensorSpec, ortGraphCaptureSessionOptions } from '../nn/ortGpuIo.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
-import { type OnnxModelIo, readOnnxModelIo } from './onnxModelIo.ts';
+import { applyOnnxFreeDimensionOverrides, type OnnxModelIo, readOnnxModelIo } from './onnxModelIo.ts';
 import { isOnnxModelParseError } from './onnxModelRecovery.ts';
 import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
@@ -86,6 +86,8 @@ export interface Lc0OnnxEvaluatorOptions {
    * (WASM placement, dynamic batch, session failure) falls back to 'cpu'.
    */
   ioMode?: Lc0OrtIoMode;
+  /** Pin named dimensions only for GPU IO/capture. CPU/WASM fallback retains the shipped dynamic graph. */
+  freeDimensionOverrides?: Readonly<Record<string, number>>;
 }
 
 export type Lc0OrtIoMode = 'cpu' | 'gpu' | 'gpu-capture';
@@ -94,8 +96,9 @@ export type Lc0OrtIoMode = 'cpu' | 'gpu' | 'gpu-capture';
  * The IO mode a search-worker init gets when it names none. The device-selected
  * path (Small and big nets) requests graph-captured GPU IO: fewer CPU-side
  * WebGPU calls per invoke, same outputs (docs/ort_invoke_overhead_2026-11.md).
- * Fixed-shape WebGPU models use it; protobuf preflight rejects dynamic shapes
- * (e.g. LQO) before session creation and uses CPU IO without a probe session.
+ * Fixed-shape WebGPU models use it; explicit per-net dimension overrides can
+ * make a dynamic model eligible (LQO pins batch=1). Unresolved dynamic shapes
+ * use CPU IO without a probe session.
  * Without device selection the default is CPU IO. Explicit ioMode wins.
  */
 export function defaultLc0OrtIoMode(deviceModelSelection: boolean): Lc0OrtIoMode {
@@ -594,18 +597,23 @@ export function lc0GpuIoSpecs(
   return { input, outputs };
 }
 
-function gpuIoModelEligible(modelPath: string | Uint8Array | ArrayBuffer, mode: string, options: Lc0OnnxEvaluatorOptions): boolean {
+type Lc0FixedGpuIo = { input: OrtGpuIoTensorSpec; outputs: OrtGpuIoTensorSpec[] };
+
+function gpuIoModelSpecs(modelPath: string | Uint8Array | ArrayBuffer, mode: string, options: Lc0OnnxEvaluatorOptions): Lc0FixedGpuIo | null {
   // No unverified shape-probe download for URL-only callers.
-  if (typeof modelPath === 'string') return false;
+  if (typeof modelPath === 'string') return null;
   try {
-    const declared = lc0GpuIoSpecs(readOnnxModelIo(modelPath instanceof Uint8Array ? modelPath : new Uint8Array(modelPath)), { inferOutputBatch: true });
+    const declared = lc0GpuIoSpecs(
+      applyOnnxFreeDimensionOverrides(readOnnxModelIo(modelPath instanceof Uint8Array ? modelPath : new Uint8Array(modelPath)), options.freeDimensionOverrides),
+      { inferOutputBatch: true },
+    );
     if ('reason' in declared) throw new Error(`model not eligible: ${declared.reason}`);
-    return true;
+    return declared;
   } catch (error) {
     const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
     if (rejectParse && isOnnxModelParseError(error)) throw error;
     console.warn(`Lc0: GPU-resident ORT IO (${mode}) unavailable, using CPU IO. ${error instanceof Error ? error.message : String(error)}`);
-    return false;
+    return null;
   }
 }
 
@@ -618,6 +626,7 @@ async function createLc0GpuIoSession(
   takeModel: () => string | Uint8Array | ArrayBuffer,
   mode: 'gpu' | 'gpu-capture',
   options: Lc0OnnxEvaluatorOptions,
+  declared: Lc0FixedGpuIo,
 ): Promise<{ session: ort.InferenceSession; binding: OrtGpuIoBinding } | null> {
   let modelPath = takeModel();
   let session: ort.InferenceSession | undefined;
@@ -626,12 +635,30 @@ async function createLc0GpuIoSession(
       webgpuOnly: true,
       reloadModel: options.reloadModel,
       rejectModelParseErrors: options.rejectModelParseErrors,
-      webgpuSessionOptions: { preferredOutputLocation: 'gpu-buffer', ...(mode === 'gpu-capture' ? ortGraphCaptureSessionOptions() : {}) },
+      webgpuSessionOptions: {
+        preferredOutputLocation: 'gpu-buffer',
+        ...(mode === 'gpu-capture' ? ortGraphCaptureSessionOptions() : {}),
+        ...(options.freeDimensionOverrides ? { freeDimensionOverrides: { ...options.freeDimensionOverrides } } : {}),
+      },
     });
     modelPath = undefined as never;
     session = await creating;
-    const specs = lc0GpuIoSpecs(session);
+    const specs = lc0GpuIoSpecs(applyOnnxFreeDimensionOverrides(session, options.freeDimensionOverrides));
     if ('reason' in specs) throw new Error(`model not eligible: ${specs.reason}`);
+    const same = (a: OrtGpuIoTensorSpec | undefined, b: OrtGpuIoTensorSpec) =>
+      a?.name === b.name && a.type === b.type && a.dims.length === b.dims.length && a.dims.every((dim, i) => dim === b.dims[i]);
+    if (
+      !same(specs.input, declared.input) ||
+      declared.outputs.some(
+        (output) =>
+          !same(
+            specs.outputs.find((actual) => actual.name === output.name),
+            output,
+          ),
+      )
+    ) {
+      throw new Error('GPU IO metadata differs from the declared/overridden shape');
+    }
     const device = (await (ort.env.webgpu as unknown as { device?: unknown }).device) as ConstructorParameters<typeof OrtGpuIoBinding>[1] | undefined;
     if (!device) throw new Error('ORT exposed no WebGPU device');
     // Captured sessions keep ORT's own output buffers bound across replays; preallocated
@@ -689,10 +716,11 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
 
   private static async createFromSource(takeModel: () => string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions): Promise<Lc0OnnxEvaluator> {
     let modelPath = takeModel();
-    if ((options.ioMode === 'gpu' || options.ioMode === 'gpu-capture') && gpuIoModelEligible(modelPath, options.ioMode, options)) {
+    const declared = options.ioMode === 'gpu' || options.ioMode === 'gpu-capture' ? gpuIoModelSpecs(modelPath, options.ioMode, options) : null;
+    if ((options.ioMode === 'gpu' || options.ioMode === 'gpu-capture') && declared) {
       const placement = await ort.resolveOrtSessionPlacement();
       if (placement.providers[0] === 'webgpu') {
-        const creating = createLc0GpuIoSession(() => modelPath, options.ioMode, options);
+        const creating = createLc0GpuIoSession(() => modelPath, options.ioMode, options, declared);
         // Raw callers need these bytes for CPU-IO fallback; verified URL loaders
         // can reacquire them only if the actual GPU attempt fails.
         if (options.reloadModel) modelPath = undefined as never;
@@ -723,6 +751,12 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       })();
     }
     return this.closePromise;
+  }
+
+  /** Effective fixed physical IO batch; capture bindings may resolve symbolic ORT metadata. */
+  get fixedBatchSize(): number | undefined {
+    const first = this.gpuIo?.input.dims[0] ?? sessionDeclaredFirstDim(this.session);
+    return typeof first === 'number' && first > 0 ? first : undefined;
   }
 
   private assertNotDisposed(): void {
@@ -877,7 +911,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
 
   private async evaluateBatchNow(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     if (!inputs.length) return [];
-    const declared = sessionDeclaredFirstDim(this.session);
+    const declared = this.gpuIo?.input.dims[0] ?? sessionDeclaredFirstDim(this.session);
     const out: Lc0Evaluation[] = [];
     let offset = 0;
     while (offset < inputs.length) {

@@ -8,6 +8,21 @@ export type OnnxModelIo = {
   outputMetadata: readonly OnnxIoValue[];
 };
 
+/** Resolve only named symbolic dimensions; never change bytes, numeric dimensions or ORT objects. */
+export function applyOnnxFreeDimensionOverrides(io: OnnxModelIo, overrides?: Readonly<Record<string, number>>): OnnxModelIo {
+  if (!overrides) return io;
+  for (const [name, value] of Object.entries(overrides)) {
+    if (!name || !Number.isSafeInteger(value) || value <= 0) throw new Error(`Invalid ONNX free dimension ${name}: ${value}`);
+  }
+  const resolve = (values: readonly OnnxIoValue[]) =>
+    values.map((value) => ({
+      ...value,
+      shape: value.shape?.map((dim) => (typeof dim === 'string' && Object.hasOwn(overrides, dim) ? overrides[dim] : dim)),
+    }));
+  // InferenceSession's IO properties are prototype getters, not own enumerable fields.
+  return { inputNames: io.inputNames, outputNames: io.outputNames, inputMetadata: resolve(io.inputMetadata), outputMetadata: resolve(io.outputMetadata) };
+}
+
 type Field = ReturnType<typeof parseProtoFields>[number];
 const decoder = new TextDecoder();
 

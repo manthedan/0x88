@@ -171,6 +171,9 @@ export type OrtWebGpuDiagnosticsSnapshot = {
 
 export type OrtGraphOptimizationLevel = NonNullable<ort.InferenceSession.SessionOptions['graphOptimizationLevel']>;
 export type OrtSessionDiagnostics = {
+  /** LC0 worker's effective IO, when available (not merely the requested mode). */
+  ioMode?: 'cpu' | 'gpu' | 'gpu-capture';
+  fixedBatchSize?: number;
   graphOptimizationLevel: OrtGraphOptimizationLevel;
   dequantFoldEnabled: boolean;
   dequantFold?: OrtDequantFoldSummary;

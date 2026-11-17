@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultLc0OrtIoMode, Lc0OnnxEvaluator, lc0GpuIoSpecs } from '../src/lc0/onnxEvaluator.ts';
-import { readOnnxModelIo } from '../src/lc0/onnxModelIo.ts';
+import { applyOnnxFreeDimensionOverrides, readOnnxModelIo } from '../src/lc0/onnxModelIo.ts';
 import { encodeTensorProto, ONNX_FLOAT16, ProtoWriter } from '../src/nn/onnxDequantFold.ts';
 import { OrtGpuIoBinding } from '../src/nn/ortGpuIo.ts';
 import * as ort from '../src/nn/ortRuntime.ts';
@@ -20,14 +20,14 @@ function value(name, shape, type = ONNX_FLOAT16) {
   }
   return new ProtoWriter().stringField(1, name).bytesField(2, new ProtoWriter().bytesField(1, tensor.finish()).finish()).finish();
 }
-function model({ input = [1, 112, 8, 8], policy = [1, 1858], outputType = ONNX_FLOAT16, omitWdl = false, initializerInput = false } = {}) {
+function model({ input = [1, 112, 8, 8], policy = [1, 1858], outputType = ONNX_FLOAT16, omitWdl = false, initializerInput = false, wdl = [1, 3] } = {}) {
   const graph = new ProtoWriter().bytesField(11, value('/input/planes', input));
   if (initializerInput) {
     graph.bytesField(5, encodeTensorProto('weights', ONNX_FLOAT16, [1], new Uint8Array(2)));
     graph.bytesField(11, value('weights', [1]));
   }
   graph.bytesField(12, value('/output/policy', policy, outputType));
-  if (!omitWdl) graph.bytesField(12, value('/output/wdl', [1, 3]));
+  if (!omitWdl) graph.bytesField(12, value('/output/wdl', wdl));
   return new ProtoWriter().varintField(1, 9).bytesField(7, graph.finish()).finish();
 }
 
@@ -135,6 +135,97 @@ for (const [net, input, expected] of [
     assert.equal(calls.length, 1, 'LQO must not build then reject a probe; fixed nets must not fall back');
     assert.equal(calls[0].enableGraphCapture, expected === 'gpu-capture' ? true : undefined);
     assert.equal(warmup.mock.callCount(), expected === 'gpu-capture' ? 1 : 0);
+    await evaluator.dispose();
+  });
+}
+
+test('free-dimension resolution uses prototype IO getters, preserves original metadata and validates sizes', () => {
+  const io = readOnnxModelIo(model({ input: ['batch', 112, 8, 8], policy: ['batch', 1858] }));
+  const source = Object.create({
+    get inputNames() {
+      return io.inputNames;
+    },
+    get outputNames() {
+      return io.outputNames;
+    },
+    get inputMetadata() {
+      return io.inputMetadata;
+    },
+    get outputMetadata() {
+      return io.outputMetadata;
+    },
+  });
+  const resolved = applyOnnxFreeDimensionOverrides(source, { batch: 1 });
+  assert.equal(resolved.inputMetadata[0].shape[0], 1);
+  assert.equal(resolved.outputMetadata[0].shape[0], 1);
+  assert.equal(io.inputMetadata[0].shape[0], 'batch');
+  assert.deepEqual(resolved.inputNames, ['/input/planes']);
+  for (const bad of [0, -1, NaN, Infinity, 1.5]) assert.throws(() => applyOnnxFreeDimensionOverrides(source, { batch: bad }), /Invalid ONNX free dimension/);
+  assert.match(lc0GpuIoSpecs(applyOnnxFreeDimensionOverrides(io, { other: 1 })).reason, /dynamic shape/);
+});
+
+for (const failCapture of [false, true, 'metadata-mismatch']) {
+  test(`LQO batch-1 policy: ${failCapture ? 'capture rejection keeps unpinned CPU fallback' : 'one captured session and serial physical b1 for a logical b8 request'}`, async (t) => {
+    const bytes = model({ input: ['batch', 112, 8, 8], policy: ['batch', 1858], wdl: ['batch', 3] });
+    const io = readOnnxModelIo(bytes);
+    const before = bytes.slice();
+    ort.setRequestedOrtExecutionProviderForCurrentThread('webgpu');
+    ort.setOrtDequantFoldForCurrentThread(false);
+    const device = Object.getOwnPropertyDescriptor(ort.env.webgpu, 'device');
+    Object.defineProperty(ort.env.webgpu, 'device', { configurable: true, value: { createBuffer: () => ({ destroy() {} }) } });
+    t.after(() => {
+      ort.setRequestedOrtExecutionProviderForCurrentThread(null);
+      ort.setOrtDequantFoldForCurrentThread(null);
+      if (device) Object.defineProperty(ort.env.webgpu, 'device', device);
+      else delete ort.env.webgpu.device;
+    });
+    t.mock.method(console, 'warn', () => {});
+    t.mock.method(ort.Tensor, 'fromGpuBuffer', () => ({ dispose() {} }));
+    const runs = [],
+      creates = [];
+    t.mock.method(OrtGpuIoBinding.prototype, 'run', async (input) => {
+      runs.push(input.byteLength);
+      return { '/output/policy': new Uint16Array(1858), '/output/wdl': new Uint16Array(3) };
+    });
+    class Session {
+      constructor(metadata = io) {
+        this.metadata = metadata;
+      }
+      get inputNames() {
+        return this.metadata.inputNames;
+      }
+      get outputNames() {
+        return io.outputNames;
+      }
+      get inputMetadata() {
+        return this.metadata.inputMetadata;
+      }
+      get outputMetadata() {
+        return this.metadata.outputMetadata;
+      }
+      async release() {}
+    }
+    t.mock.method(ort.InferenceSession, 'create', async (input, options) => {
+      creates.push({ input, options });
+      if (failCapture === true && options.enableGraphCapture) throw Error('injected capture failure');
+      return new Session(failCapture === 'metadata-mismatch' && options.enableGraphCapture ? applyOnnxFreeDimensionOverrides(io, { batch: 8 }) : io);
+    });
+    const evaluator = await Lc0OnnxEvaluator.create(bytes, { ioMode: 'gpu-capture', freeDimensionOverrides: { batch: 1 } });
+    assert.deepEqual(creates[0].options.freeDimensionOverrides, { batch: 1 });
+    assert.equal(creates[0].input, bytes);
+    assert.equal(evaluator.ioMode, failCapture ? 'cpu' : 'gpu-capture');
+    assert.equal(creates.length, failCapture ? 2 : 1);
+    if (failCapture) {
+      assert.equal(creates[1].options.freeDimensionOverrides, undefined);
+      assert.equal(creates[1].options.enableGraphCapture, undefined);
+      assert.equal(evaluator.fixedBatchSize, undefined, 'no pinned shape survives a CPU fallback');
+    } else {
+      assert.equal(evaluator.fixedBatchSize, 1);
+      const fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      assert.equal((await evaluator.evaluateBatch(Array(8).fill(fen))).length, 8);
+      assert.deepEqual(runs, Array(9).fill(1 * 112 * 8 * 8 * 2), 'one capture warmup and eight physical batch-1 runs');
+    }
+    assert.deepEqual(bytes, before, 'the shipped model bytes and cache entry are unchanged');
     await evaluator.dispose();
   });
 }
