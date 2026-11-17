@@ -153,7 +153,8 @@ test('route probes retain original worker payloads, count teardown once and pars
     performance: { now: () => 100, setResourceTimingBufferSize() {} },
     PerformanceObserver: { supportedEntryTypes: [] },
     document: {},
-    location: { pathname: '/app/analysis/' },
+    location: { pathname: '/app/analysis/', href: 'http://probe/app/analysis/', origin: 'http://probe' },
+    URL,
     setTimeout() {},
     setInterval() {},
   });
@@ -168,12 +169,94 @@ test('route probes retain original worker payloads, count teardown once and pars
   cpu.receive({ type: 'line', line: 'info depth 3 nps 900' });
   assert.equal(window.__routePerf.rates['stockfish-nps'][0], 1200);
   assert.equal(window.__routePerf.rates['berserk-nps'][0], 900);
+  cpu.postMessage({ type: 'init', id: 2, modelUrl: 'https://assets.example/net.onnx' });
+  assert.equal(window.__routePerf.externalAssets[0], 'https://assets.example/net.onnx');
+  cpu.receive({ type: 'searchProgress', id: 3, progress: { fen: 'current', visits: 500, completedVisits: 5, elapsedMs: 1000 } });
+  cpu.receive({ type: 'searchResult', id: 3, result: { fen: 'current', visits: 502, stats: { completedVisits: 7 }, elapsedMs: 1000 } });
+  assert.deepEqual(Array.from(window.__routePerf.rates['lc0-visits']), [5, 7]);
+  assert.equal(window.__routePerf.analysisProgress[0].fen, 'current');
   assert.equal(window.__routePerf.peakWorkers, 2);
   cpu.receive({ type: 'disposed' });
   cpu.terminate();
   sf.terminate();
   assert.equal(window.__routePerf.workers, 0);
   assert.equal(cpu.terminated, true);
+});
+
+test('probe disconnects and drops Play observer/host on navigation and detects external fetches', async () => {
+  let poll,
+    disconnected = 0,
+    observed = 0;
+  const location = { pathname: '/app/play/', href: 'http://probe/app/play/', origin: 'http://probe' };
+  const host = { querySelector: () => ({ textContent: 'Lc0 search: 10 v/s' }) };
+  const document = { querySelector: () => host, querySelectorAll: () => [] };
+  const window = { Worker: class {}, fetch: async () => ({ url: 'https://assets.example/glue.js' }) };
+  runInNewContext(readFileSync(new URL('../scripts/perf_routes/probe.js', import.meta.url), 'utf8'), {
+    window,
+    location,
+    document,
+    URL,
+    performance: { now: () => 100, setResourceTimingBufferSize() {} },
+    PerformanceObserver: { supportedEntryTypes: [] },
+    MutationObserver: class {
+      observe() {
+        observed++;
+      }
+      disconnect() {
+        disconnected++;
+      }
+    },
+    setTimeout() {},
+    setInterval(callback) {
+      poll = callback;
+    },
+  });
+  poll();
+  assert.equal(observed, 1);
+  location.pathname = '/docs/';
+  poll();
+  assert.equal(disconnected, 1);
+  location.pathname = '/app/play/';
+  poll();
+  assert.equal(observed, 2, 'returning Play gets a fresh observer, not the detached host');
+  await window.fetch('https://assets.example/glue.js');
+  assert.equal(window.__routePerf.externalAssets[0], 'https://assets.example/glue.js');
+});
+
+test('Arena main-thread speed subtracts reused visits instead of trusting the displayed root-total rate', () => {
+  let poll,
+    fen = 'first',
+    visits = '100',
+    diagnostic = 'Small: searches 1 · last 100ms · reused visits 80';
+  const card = {
+    dataset: { engineId: 'lc0:small' },
+    querySelector: () => ({ dataset: { fen } }),
+    querySelectorAll: () => [{ querySelector: (s) => ({ textContent: s === 'dt' ? 'Visits' : visits }) }],
+  };
+  const document = { querySelector: () => ({ textContent: diagnostic }), querySelectorAll: () => [card] };
+  const window = { Worker: class {} };
+  runInNewContext(readFileSync(new URL('../scripts/perf_routes/probe.js', import.meta.url), 'utf8'), {
+    window,
+    document,
+    URL,
+    location: { pathname: '/app/arena/', href: 'http://probe/app/arena/', origin: 'http://probe' },
+    performance: { now: () => 100, setResourceTimingBufferSize() {} },
+    PerformanceObserver: { supportedEntryTypes: [] },
+    setTimeout() {},
+    setInterval(callback) {
+      poll = callback;
+    },
+  });
+  poll();
+  fen = 'second';
+  visits = '50';
+  diagnostic = 'Small: searches 2 · last 100ms · reused visits 90';
+  poll();
+  assert.deepEqual(Array.from(window.__routePerf.rates['lc0-visits']), [200, 400]);
+  fen = 'missed';
+  diagnostic = 'Small: searches 4 · last 100ms · reused visits 100';
+  poll();
+  assert.equal(window.__routePerf.rates['lc0-visits'].length, 2, 'do not attribute multiple skipped searches to one card');
 });
 
 test('host-side human moves are deterministic/legal and reject terminal or wrong-turn games', () => {

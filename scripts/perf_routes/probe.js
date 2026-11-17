@@ -10,6 +10,7 @@
     longTasks: [],
     rates: {},
     analysisProgress: [],
+    externalAssets: [],
     errors: [],
     events: [],
     supportsLongTasks: PerformanceObserver.supportedEntryTypes.includes('longtask'),
@@ -28,10 +29,30 @@
     p.rates[kind] ??= [];
     p.rates[kind].push(n);
   };
+  const observeAsset = (raw) => {
+    if (typeof raw !== 'string') return;
+    try {
+      const url = new URL(raw, location.href);
+      if (/^https?:$/.test(url.protocol) && url.origin !== location.origin && !p.externalAssets.includes(url.href)) p.externalAssets.push(url.href);
+    } catch {}
+  };
+  // Asset-hosted builds can bypass the counting proxy, including extensionless glue.
+  // Refuse incomplete byte accounting rather than calling unobserved bytes a saving.
+  if (window.fetch) {
+    const fetch = window.fetch.bind(window);
+    window.fetch = (...args) => {
+      observeAsset(typeof args[0] === 'string' ? args[0] : args[0]?.url);
+      return fetch(...args).then((response) => {
+        observeAsset(response.url);
+        return response;
+      });
+    };
+  }
   const NativeWorker = window.Worker;
   window.Worker = class extends NativeWorker {
     constructor(...args) {
       super(...args);
+      observeAsset(String(args[0]));
       p.workers++;
       p.peakWorkers = Math.max(p.workers, p.peakWorkers);
       let alive = true,
@@ -52,6 +73,7 @@
       this.postMessage = (...messages) => {
         const m = messages[0];
         if (m?.type === 'init') {
+          for (const url of [m.modelUrl, m.model, m.jsUrl, m.wasmUrl, m.dataUrl]) observeAsset(url);
           const path = String(m.modelUrl ?? m.jsUrl ?? m.model ?? args[0]);
           kind = /maia/i.test(path) ? 'maia3-evals' : /berserk/i.test(path) ? 'berserk-nps' : /plenty/i.test(path) ? 'plentychess-nps' : 'lc0-visits';
         }
@@ -60,6 +82,7 @@
       };
       this.addEventListener('message', ({ data: m }) => {
         if (m?.type === 'disposed') retire();
+        if (m?.type === 'ready') observeAsset(m.servedModelUrl);
         const output = typeof m === 'string' ? m : m?.type === 'line' ? m.line : null;
         if (typeof output === 'string') {
           if (/id name .*stockfish/i.test(output)) kind = 'stockfish-nps';
@@ -73,8 +96,10 @@
           if (/^bestmove /.test(output)) line();
         }
         const v = m?.progress ?? m?.result;
-        if (v?.visits > 0 && v.elapsedMs > 0) {
-          rate(kind, (v.visits * 1000) / v.elapsedMs);
+        const completed = v?.completedVisits ?? v?.stats?.completedVisits;
+        if (completed > 0 && v.elapsedMs > 0) {
+          // Total root visits may include an inherited/reused tree; elapsedMs is this search only.
+          rate(kind, (completed * 1000) / v.elapsedMs);
           if (v.fen && location.pathname.includes('/analysis')) p.analysisProgress.push({ fen: v.fen, at: performance.now(), id: m.id });
           line();
         }
@@ -94,8 +119,10 @@
     }
   };
   // Arena Small runs its real search on the main thread, not in a search worker.
-  // Read each completed engine card once per FEN; the displayed Visits/s is rounded.
-  const seen = new Map();
+  // Card Visits/s includes inherited root visits. Derive new work from displayed
+  // total visits minus the telemetry's per-search reused-visits delta, and its last time.
+  const seen = new Map(),
+    arenaCounters = new Map();
   let progressHost, progressObserver, lastProgress;
   setInterval(() => {
     if (location.pathname.includes('/play')) {
@@ -115,8 +142,17 @@
         });
         progressObserver.observe(host, { subtree: true, childList: true, characterData: true });
       }
+    } else {
+      progressObserver?.disconnect();
+      progressObserver = null;
+      progressHost = null;
+      lastProgress = null;
     }
-    if (!location.pathname.includes('/arena')) return;
+    if (!location.pathname.includes('/arena')) {
+      seen.clear();
+      arenaCounters.clear();
+      return;
+    }
     for (const card of document.querySelectorAll('.eng-card')) {
       const pv = card.querySelector('.eng-line');
       if (!pv) continue;
@@ -125,10 +161,19 @@
         fen = pv.dataset.fen;
       if (seen.get(key) === fen) continue;
       for (const stat of card.querySelectorAll('.eng-stats > div')) {
-        if (stat.querySelector('dt')?.textContent !== 'Visits/s') continue;
+        if (stat.querySelector('dt')?.textContent !== 'Visits') continue;
         const text = stat.querySelector('dd')?.textContent?.replaceAll(',', '').trim() ?? '';
-        const match = /^([\d.]+)\s*([kKmM]?)/.exec(text);
-        if (match) rate('lc0-visits', Number(match[1]) * (/m/i.test(match[2]) ? 1e6 : /k/i.test(match[2]) ? 1e3 : 1));
+        const visits = /^([\d.]+)\s*([kKmM]?)/.exec(text);
+        const diagnostic = document.querySelector('#searchTelemetryInfo')?.textContent ?? '';
+        const telemetry = /searches (\d+)[\s\S]*?last ([\d.]+)(ms|s)[\s\S]*?reused visits (\d+)/.exec(diagnostic);
+        if (!visits || !telemetry) continue;
+        const searches = Number(telemetry[1]),
+          reused = Number(telemetry[4]);
+        const previous = arenaCounters.get(key) ?? { searches: 0, reused: 0 };
+        const total = Number(visits[1]) * (/m/i.test(visits[2]) ? 1e6 : /k/i.test(visits[2]) ? 1e3 : 1);
+        const ms = Number(telemetry[2]) * (telemetry[3] === 's' ? 1000 : 1);
+        if (searches === previous.searches + 1 && ms > 0) rate('lc0-visits', ((total - (reused - previous.reused)) * 1000) / ms);
+        arenaCounters.set(key, { searches, reused });
       }
       seen.set(key, fen);
     }

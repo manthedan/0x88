@@ -19,6 +19,7 @@ const result = {
   metrics: {},
   samples: [],
   limitations: [],
+  externalRequests: [],
 };
 let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling;
 const wc = 'com.apple.WebKit.WebContent';
@@ -104,6 +105,10 @@ try {
     close = () => browser.close();
     cdp = await browser.newBrowserCDPSession();
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    context.on('request', (request) => {
+      const url = new URL(request.url());
+      if (/^https?:$/.test(url.protocol) && url.origin !== proxy.url) result.externalRequests.push(url.href);
+    });
     page = await context.newPage();
     page.on('dialog', (dialog) => dialog.accept()); // only local journey leave confirmations
     page.setDefaultTimeout(120000);
@@ -207,6 +212,17 @@ try {
   const residual = result.samples.filter((s) => s.phase === 'residual' && s.ms >= result.samples.at(-1).ms - 2000);
   result.metrics['memory.residualMb'] = median(residual.map((s) => s.rendererMb + (s.gpuMb ?? 0)));
   result.metrics['workers.residual'] = await evaluate(`window.__routePerf.workers`);
+  result.externalAssetUrls = [
+    ...new Set([
+      ...result.externalRequests,
+      ...(await evaluate(`window.__routePerf.externalAssets`)),
+      ...(await evaluate(
+        `performance.getEntriesByType('resource').map(r=>r.name).filter(raw=>{const u=new URL(raw,location.href);return /^https?:$/.test(u.protocol)&&u.origin!==location.origin;})`,
+      )),
+    ]),
+  ];
+  if (result.externalAssetUrls.length)
+    throw Error('Unobserved cross-origin assets bypass the JS counting proxy; stage same-origin assets before comparing (see externalAssetUrls).');
   // UA measurement triggers GC (eager with our Chrome flag). Never request it until
   // ALL natural footprint, worker, speed, input and long-task observations are frozen.
   phase = 'ua-after-natural';
