@@ -497,6 +497,8 @@ const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant
 const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
+// A picker acceptance approves its next startup, not every future uncached run.
+const arenaDownloadApprovals = new Set<BigNetKey>();
 async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
   return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, true, signal) };
@@ -4251,6 +4253,15 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       clearStartPending();
       return;
     }
+    // URL/restored rosters and resumed checkpoints never imply download approval.
+    if (isMemoryConstrainedDevice() && !arenaDownloadApprovals.delete(row.variant)) {
+      const approved = await requestLargeNetConsent(config, matchAbort.signal);
+      if (startupCancelled()) return;
+      if (!approved) {
+        clearStartPending();
+        return;
+      }
+    }
   }
   const engineA = participants[0].engine!;
   const engineB = participants[1].engine!;
@@ -4286,9 +4297,11 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   // Establish the slot before any games run. A stale tab must not overwrite it.
   try {
     await saveArenaCheckpoint(runCheckpoint, checkpointToken);
+    if (abort !== matchAbort || isStaleMount(mountSignal)) return;
     checkpointToken = { runId: runCheckpoint.runId, revision: runCheckpoint.revision };
     checkpointProblem = '';
   } catch (error) {
+    if (abort !== matchAbort || isStaleMount(mountSignal)) return;
     if (error instanceof ArenaCheckpointConflictError) throw error;
     checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Keep this tab open and export PGN before leaving.`;
   }
@@ -4569,6 +4582,7 @@ function disposeLc0Resources(): void {
 }
 
 function disposeRuntimeResources(): void {
+  arenaDownloadApprovals.clear();
   abort?.abort();
   abort = null;
   arenaSearchProgress.clear();
@@ -4978,6 +4992,7 @@ async function runArenaBenchAutorun(): Promise<void> {
 
 function revokeArenaPhoneLargeNets(): void {
   if (!phoneLargeNetsBlocked()) return;
+  arenaDownloadApprovals.clear();
   const affected = activeSeatRows().some((row) => phoneSafeEngineVariant(row.family, row.variant) !== row.variant);
   for (const key of ARENA_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
   // The setup is locked during a run. Cross-tab revocation must retire leftovers
@@ -5148,7 +5163,7 @@ function wireEvents() {
         target.value = row.variant;
         const signal = mountAbort.signal;
         if (!(await requestLargeNetConsent(config, signal))) return;
-        if (signal.aborted || seatRows[seat] !== row || running) return;
+        if (signal.aborted || seatRows[seat] !== row || running || startPending) return;
         if (!bigNetSelectableSync(config)) {
           el('message').textContent = bigNetUnavailableText(config);
           renderSeatSelectors();
@@ -5156,6 +5171,7 @@ function wireEvents() {
           return;
         }
         target.value = selectedVariant;
+        if (isMemoryConstrainedDevice()) arenaDownloadApprovals.add(config.key);
       }
       row.variant = target.value;
     } else if (target.classList.contains('seat-strength')) {

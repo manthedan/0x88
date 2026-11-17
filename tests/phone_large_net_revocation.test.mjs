@@ -63,6 +63,7 @@ for (const state of ['running', 'starting', 'idle']) {
         activeSeatRows: () => [row, { family: 'sf', variant: 'lite' }],
         phoneSafeEngineVariant: (family, variant) => phoneSafeEngineVariant(family, variant, true, false),
         ARENA_BIG_NET_KEYS: ['bt4', 't3'],
+        arenaDownloadApprovals: new Set(),
         disposeBigNetSearcherNow: (key) => pool.disposeNow(key),
         running: state === 'running',
         startPending: state === 'starting',

@@ -1070,6 +1070,10 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   const signal = ctx.abort.signal;
   if (ctx.restoredDownloadEngineId && !(await ctxCheckRestoredDownloadConsent(ctx))) return;
   if (signal.aborted || ctx.disposed) return;
+  // Engine-first games skip readiness preparation, so retire the previous net
+  // here too. Async pool acquisition awaits its bounded cleanup before loading.
+  const option = ctxSelectedEngine(ctx);
+  releaseUnusedBigNetSearchers(option.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
   ctxSetEngineThinking(ctx, true);
   ctx.lastProgressAnnouncement = -1;
   el('progressAnnouncement').textContent = '';

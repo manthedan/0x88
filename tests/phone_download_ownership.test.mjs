@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
+import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
 
 const source = Object.fromEntries(
@@ -98,19 +99,32 @@ for (const replacement of ['cpu-profile', 'manual', 'unmount']) {
   });
 }
 
-for (const phase of ['checkpoint-writes', 'compatibility', 'assets', 'gpu', 'model', 'save']) {
+for (const phase of [
+  'checkpoint-writes',
+  'compatibility',
+  'assets',
+  'gpu',
+  'model',
+  'download',
+  'download-cancel',
+  'download-superseded',
+  'save',
+  'save-with-approval',
+  'save-superseded',
+]) {
   test(`Arena consent revocation cancels startup while awaiting ${phase}`, async () => {
     const gate = Promise.withResolvers();
     let paused = phase === 'checkpoint-writes';
     let revoked = false;
     let admitted = 0;
+    let prompts = 0;
     const nodes = new Map();
     const el = (id) => {
       if (!nodes.has(id)) nodes.set(id, { textContent: '', value: '' });
       return nodes.get(id);
     };
     const wait = (at, result) => {
-      if (phase !== at) return Promise.resolve(result);
+      if (phase !== at && !(['save-with-approval', 'save-superseded'].includes(phase) && at === 'save')) return Promise.resolve(result);
       paused = true;
       return gate.promise.then(() => result);
     };
@@ -139,6 +153,18 @@ for (const phase of ['checkpoint-writes', 'compatibility', 'assets', 'gpu', 'mod
       phoneSafeEngineVariant: (family, variant) => (revoked && family === 'lc0' && variant === 'bt4' ? 'small' : variant),
       phoneLargeNetsBlocked: () => revoked,
       ARENA_BIG_NET_KEYS: ['bt4', 't3'],
+      arenaDownloadApprovals: new Set(phase === 'save-with-approval' ? ['bt4'] : []),
+      requestLargeNetConsent: (config, signal) => {
+        prompts++;
+        assert.equal(config, BIG_NETS.bt4);
+        assert.equal(signal.aborted, false);
+        assert.notEqual(phase, 'save-with-approval', 'picker acceptance must not cause a second startup dialog');
+        if (phase === 'download-cancel' || phase === 'download-superseded') {
+          paused = true;
+          return gate.promise.then(() => false);
+        }
+        return wait('download', true);
+      },
       disposeBigNetSearcherNow() {},
       renderSeatSelectors() {},
       persistArenaSeatRows() {},
@@ -184,19 +210,38 @@ for (const phase of ['checkpoint-writes', 'compatibility', 'assets', 'gpu', 'mod
       'deps',
       `let { ${Object.keys(deps)} } = deps; ${code}; return {
       start: startMatch, revoke: revokeArenaPhoneLargeNets,
-      state: () => ({running,startPending,abort,checkpoint})
+      state: () => ({running,startPending,abort,checkpoint}), token: () => checkpointToken,
+      replace() {
+        abort = new AbortController(); startPending = true;
+        checkpoint = {runId:'replacement'}; checkpointToken = {runId:'replacement',revision:99};
+        return abort;
+      }
     };`,
     )(deps);
     const starting = api.start();
     await until(() => paused);
     const controller = api.state().abort;
     assert.ok(controller, 'startup owns a cancellation controller before the first await');
-    revoked = true;
-    api.revoke();
-    assert.equal(controller.signal.aborted, true);
+    let replacement = null;
+    if (phase.endsWith('-superseded')) {
+      controller.abort();
+      replacement = api.replace();
+    } else if (phase === 'download-cancel') {
+      assert.equal(prompts, 1);
+      assert.equal(controller.signal.aborted, false);
+    } else {
+      if (phase === 'save') assert.equal(prompts, 1, 'restored/URL startup asks before checkpoint creation or warmup');
+      if (phase === 'save-with-approval') assert.equal(prompts, 0);
+      revoked = true;
+      api.revoke();
+      assert.equal(controller.signal.aborted, true);
+    }
     gate.resolve();
     await starting;
-    assert.deepEqual(api.state(), { running: false, startPending: false, abort: null, checkpoint: null });
+    if (replacement) {
+      assert.deepEqual(api.state(), { running: false, startPending: true, abort: replacement, checkpoint: { runId: 'replacement' } });
+      assert.deepEqual(api.token(), { runId: 'replacement', revision: 99 });
+    } else assert.deepEqual(api.state(), { running: false, startPending: false, abort: null, checkpoint: null });
     assert.equal(admitted, 0);
     assert.doesNotMatch(el('message').textContent, /failed/);
   });
@@ -204,7 +249,7 @@ for (const phase of ['checkpoint-writes', 'compatibility', 'assets', 'gpu', 'mod
 
 const restoreGuard = extract(source.play, 'async function ctxCheckRestoredDownloadConsent(', '/** Imported setup must not make');
 const readinessEntry = extract(source.play, 'async function ctxVerifySelectedEngineReady(', '  releaseUnusedBigNetSearchers(', 'admit();\n}');
-const moveEntry = extract(source.play, 'async function ctxEngineTurn(', '  ctxSetEngineThinking(ctx, true);', 'admit();\n}');
+const moveEntry = extract(source.play, 'async function ctxEngineTurn(', '  ctxSetEngineThinking(ctx, true);', 'await admit();\n}');
 for (const key of Object.keys(BIG_NETS)) {
   for (const mode of ['readiness', 'engine-first']) {
     for (const accepted of [false, true]) {
@@ -236,6 +281,7 @@ for (const key of Object.keys(BIG_NETS)) {
             return permission.promise;
           },
           ctxSetEngineNote() {},
+          releaseUnusedBigNetSearchers() {},
           buttonEl: () => retry,
           ctxRender() {},
           ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),
@@ -261,6 +307,48 @@ for (const key of Object.keys(BIG_NETS)) {
     }
   }
 }
+
+test('engine-first Play retires the previous large net and awaits its cleanup before acquiring the next', async () => {
+  const retirement = Promise.withResolvers();
+  const events = [];
+  const pool = new BigNetSessionPool(
+    (config) => {
+      events.push(`create:${config.key}`);
+      return {
+        dispose() {
+          events.push(`dispose:${config.key}`);
+          return retirement.promise;
+        },
+      };
+    },
+    undefined,
+    undefined,
+    () => true,
+  );
+  pool.acquire('bt4');
+  const deps = {
+    ctxSelectedEngine: () => ({ id: 'lc0-t3', family: 'lc0', variant: 't3' }),
+    releaseUnusedBigNetSearchers: (keys, ttl) => pool.releaseUnused(keys, ttl),
+    admit: () => pool.acquireAsync('t3'),
+  };
+  const entry = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${moveEntry}; return ctxEngineTurn;`)(deps);
+  const pending = entry({
+    abort: new AbortController(),
+    board: { turn: 'b' },
+    humanColor: 'w',
+    disposed: false,
+    gameOver: null,
+    restoredDownloadConsent: null,
+  });
+  await tick();
+  assert.deepEqual(events, ['create:bt4', 'dispose:bt4']);
+  assert.equal(pool.has('bt4'), false);
+  assert.equal(pool.has('t3'), false, 'replacement construction is still behind graceful retirement');
+  retirement.resolve();
+  await pending;
+  assert.deepEqual(events, ['create:bt4', 'dispose:bt4', 'create:t3']);
+  pool.disposeAllNow();
+});
 
 test('cancelled Play restore cannot admit an engine or overwrite a replacement consent owner', async () => {
   const permission = Promise.withResolvers();
