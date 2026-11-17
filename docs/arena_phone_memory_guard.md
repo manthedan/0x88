@@ -18,7 +18,10 @@ on dismissal. The dialog follows Analysis's existing native-dialog pattern.
 
 `phoneLargeNetPolicy.ts` remembers consent under `0x88-phone-large-nets-v1` in
 localStorage. Access and writes are guarded; a session override keeps opt-in
-and revocation working when storage fails. A line beside each picker shows
+and revocation working when storage fails. Revoking Play consent replaces a large
+live opponent with Small, but only dismisses a blocked restart draft when the live
+opponent is unaffected; unresolved saved-large-engine probes are also cancelled.
+A line beside each picker shows
 “Large nets on this device: on · turn off”. Turning off cancels large-net work,
 releases its sessions, and falls back to a small engine. Arena's setup fieldset
 locks this control during a run, like its other engine settings.
@@ -28,7 +31,8 @@ resume never grant consent. Without opt-in they fall back to Lc0 Small and show
 a persistent explanation by the picker. Checkpoint resume refuses to mix results
 if that fallback changes the saved engine. The session-pool acquisition boundary
 also rejects large nets without consent, protecting missed/programmatic paths.
-Known large-net `?model=` overrides on phones always fall back to Small, with an
+Known large-net `?model=` overrides (including shipped split-K variants) on phones
+always fall back to Small, with an
 explanation to use the real large-net picker instead. This prevents a large net
 from being disguised as Small and remaining resident after consent is revoked.
 Critical-moments review offers only Lc0 Small (plus Stockfish and Maia), so it has

@@ -1918,6 +1918,34 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
   ctxDisarmResign(ctx);
 }
 
+function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
+  if (!phoneLargeNetsBlocked()) return;
+  // A saved-engine asset probe must not restore a large opponent after revocation.
+  ctx.pendingPreferredEngineId = null;
+  if (ctx.pendingPreferredEngineTimer) {
+    clearTimeout(ctx.pendingPreferredEngineTimer);
+    ctx.pendingPreferredEngineTimer = null;
+  }
+  const active = ctxSelectedEngine(ctx);
+  const draft = ctxDraftEngine();
+  if (phoneSafeEngineVariant(active.family, active.variant) !== active.variant) {
+    ctxCancelEngineTurn(ctx);
+    releaseUnusedBigNetSearchers([], 0);
+    const preferences = { ...ctx.opponent.active, engineId: 'lc0-small' };
+    ctxSetOpponent(ctx, committedPlayOpponent(preferences));
+    ctxRestoreOpponentControls(ctx);
+    ctx.engineReady = false;
+    showPhoneLargeNetFallback();
+    ctxPersistPlayPreferences(ctx);
+    ctxRender(ctx);
+    if (!ctx.gameOver) ctxPrepareOrStartEngine(ctx);
+  } else if (phoneSafeEngineVariant(draft.family, draft.variant) !== draft.variant) {
+    // Controls are only a restart proposal; the unaffected live opponent owns its game.
+    ctxDismissRestart(ctx);
+  }
+  ctxRefreshEngineOptions(ctx);
+}
+
 function ctxInit(ctx: PlayContext): void {
   if (blockedModelOverride) showPhoneLargeNetFallback(true);
   // Only a decoded storage position handoff replaces a saved game. URL options never contain a Play game.
@@ -2120,24 +2148,7 @@ function ctxInit(ctx: PlayContext): void {
   trackListener(ctx, el('confirmRestart'), 'click', () => ctxConfirmRestart(ctx));
   trackListener(ctx, el('dismissRestart'), 'click', () => ctxDismissRestart(ctx));
   trackListener(ctx, selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
-  trackListener(ctx, window, PHONE_LARGE_NET_CHANGE_EVENT, () => {
-    if (!phoneLargeNetsBlocked()) return;
-    const active = ctxSelectedEngine(ctx);
-    const draft = ctxDraftEngine();
-    if ([active, draft].some((option) => phoneSafeEngineVariant(option.family, option.variant) !== option.variant)) {
-      ctxCancelEngineTurn(ctx);
-      releaseUnusedBigNetSearchers([], 0);
-      const preferences = { ...ctx.opponent.active, engineId: 'lc0-small' };
-      ctxSetOpponent(ctx, committedPlayOpponent(preferences));
-      ctxRestoreOpponentControls(ctx);
-      ctx.engineReady = false;
-      showPhoneLargeNetFallback();
-      ctxPersistPlayPreferences(ctx);
-      ctxRender(ctx);
-      if (!ctx.gameOver) ctxPrepareOrStartEngine(ctx);
-    }
-    ctxRefreshEngineOptions(ctx);
-  });
+  trackListener(ctx, window, PHONE_LARGE_NET_CHANGE_EVENT, () => ctxRevokePhoneLargeNets(ctx));
   trackListener(ctx, selectEl('engineSelect'), 'change', async () => {
     ctx.pendingPreferredEngineId = null;
     if (ctx.pendingPreferredEngineTimer) {

@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { requestLargeNetConsent } from '../src/lc0/largeNetConsent.ts';
+import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
+import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
 import { BIG_NETS, bigNetOptionState, phoneBlockedBigNetModelUrl } from '../src/lc0/bt4Engine.ts';
 import { acquireBigNetSearcher, hasBigNetSearcher } from '../src/lc0/bigNetSessionPool.ts';
 import { arenaBigNetPairingBlocked } from '../src/lc0/arenaMemoryGuard.ts';
@@ -92,6 +94,11 @@ test('phone options remain visible/actionable for consent, but pool acquisition 
     for (const [key, config] of Object.entries(BIG_NETS)) {
       assert.deepEqual(bigNetOptionState(config), { disabled: false, suffix: ' (Large net — off on phones)' });
       assert.equal(phoneBlockedBigNetModelUrl(config.modelUrl), true);
+      const splitK = lc0SplitKUrl(config.modelUrl);
+      if (splitK) {
+        assert.equal(phoneBlockedBigNetModelUrl(splitK), true, 'shipped split-K variants cannot bypass the picker');
+        assert.equal(phoneBlockedBigNetModelUrl(`${splitK}?cache=1`), true);
+      }
       assert.throws(() => acquireBigNetSearcher(key), /Large nets are off on phones/);
       assert.equal(hasBigNetSearcher(key), false);
     }
@@ -279,6 +286,71 @@ test('restored Play game keeps its position but replaces a blocked large opponen
     assert.deepEqual(ctx.moves, saved.moves);
     assert.equal(warned, true);
     assert.equal(saved.preferences.engineId, key, 'stored game is not mutated by decoding');
+  }
+});
+
+test('Play revocation distinguishes live opponents, pending restart drafts, and unresolved saved preferences', () => {
+  const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
+  const start = source.indexOf('function ctxRevokePhoneLargeNets(');
+  const fn = stripTypeScriptTypes(source.slice(start, source.indexOf('function ctxInit(', start)));
+  const options = {
+    maia3: { family: 'maia3', variant: 'maia3' },
+    'sf-lite': { family: 'sf', variant: 'lite' },
+    ...Object.fromEntries(Object.keys(BIG_NETS).map((key) => [key, { family: 'lc0', variant: key }])),
+  };
+  for (const [engineId, option] of Object.entries(options)) {
+    const activeLarge = Object.hasOwn(BIG_NETS, option.variant);
+    const active = { engineId, color: 'white', level: 3, maiaElo: 1700 };
+    const opponent = transitionPlayOpponent(committedPlayOpponent(active), {
+      type: 'edit',
+      preferences: { ...active, engineId: activeLarge ? 'sf-lite' : 'bt4', color: 'black' },
+      gameInProgress: true,
+    });
+    const ctx = { opponent, pendingPreferredEngineId: 't3', pendingPreferredEngineTimer: 42, board: 'saved-game' };
+    let cancelled = 0;
+    let prepared = 0;
+    let dismissed = 0;
+    const clearedTimers = [];
+    const deps = {
+      phoneLargeNetsBlocked: () => true,
+      phoneSafeEngineVariant: (family, variant) => phoneSafeEngineVariant(family, variant, true, false),
+      ctxSelectedEngine: (ctx) => options[ctx.opponent.active.engineId],
+      ctxDraftEngine: () => options[(ctx.opponent.pending ?? ctx.opponent.active).engineId],
+      clearTimeout: (timer) => clearedTimers.push(timer),
+      ctxCancelEngineTurn: () => {
+        cancelled++;
+      },
+      releaseUnusedBigNetSearchers() {},
+      ctxSetOpponent: (ctx, next) => {
+        ctx.opponent = next;
+      },
+      committedPlayOpponent,
+      ctxRestoreOpponentControls() {},
+      showPhoneLargeNetFallback() {},
+      ctxPersistPlayPreferences() {},
+      ctxRender() {},
+      ctxRefreshEngineOptions() {},
+      ctxPrepareOrStartEngine: () => {
+        prepared++;
+      },
+      ctxDismissRestart: (ctx) => {
+        dismissed++;
+        ctx.opponent = transitionPlayOpponent(ctx.opponent, { type: 'dismiss' });
+      },
+    };
+    const revoke = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${fn}; return ctxRevokePhoneLargeNets;`)(deps);
+    revoke(ctx);
+    assert.equal(ctx.opponent.active.engineId, activeLarge ? 'lc0-small' : engineId);
+    assert.equal(ctx.opponent.active.color, active.color);
+    assert.equal(ctx.opponent.active.level, active.level);
+    assert.equal(ctx.opponent.pending, null);
+    assert.equal(cancelled, activeLarge ? 1 : 0, 'unaffected live work is not cancelled');
+    assert.equal(prepared, activeLarge ? 1 : 0);
+    assert.equal(dismissed, activeLarge ? 0 : 1);
+    assert.equal(ctx.board, 'saved-game');
+    assert.equal(ctx.pendingPreferredEngineId, null);
+    assert.equal(ctx.pendingPreferredEngineTimer, null);
+    assert.deepEqual(clearedTimers, [42]);
   }
 });
 

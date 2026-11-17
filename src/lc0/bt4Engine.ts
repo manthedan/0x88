@@ -25,6 +25,7 @@ import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from '
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
+import { lc0SplitKUrl } from './lc0SmallModelSelection.ts';
 import { phoneLargeNetsBlocked, PHONE_LARGE_NET_SUFFIX } from './phoneLargeNetPolicy.ts';
 
 export interface BigNetConfig {
@@ -104,7 +105,13 @@ export const BIG_NETS: Record<BigNetConfig['key'], BigNetConfig> = { bt4: BT4_NE
  * Revoking consent must not leave a large model disguised as Small by ?model=.
  */
 export function phoneBlockedBigNetModelUrl(url: string | null): boolean {
-  return !!url && isMemoryConstrainedDevice() && Object.values(BIG_NETS).some((config) => assetPathname(url) === assetPathname(config.modelUrl));
+  return (
+    !!url &&
+    isMemoryConstrainedDevice() &&
+    Object.values(BIG_NETS).some((config) =>
+      [config.modelUrl, lc0SplitKUrl(config.modelUrl)].some((knownUrl) => knownUrl && assetPathname(url) === assetPathname(knownUrl)),
+    )
+  );
 }
 
 export const BT4_MODEL_NAME = BT4_NET.name;
