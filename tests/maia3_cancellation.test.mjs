@@ -7,6 +7,7 @@ class WorkerStub extends EventTarget {
   terminated = false;
   postMessage(message) {
     this.lastMessage = message;
+    if (message.type === 'dispose') queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', { data: { type: 'disposed', id: message.id } })));
   }
   terminate() {
     this.terminated = true;

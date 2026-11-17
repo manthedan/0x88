@@ -1,4 +1,5 @@
 import { createOrtDeviceLossMonitor, type OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
+import { releaseOrtWorkerResources } from '../nn/ortWorkerDispose.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import '../nn/ortConsoleFilter.ts';
 import {
@@ -129,7 +130,8 @@ type CancelMessage = {
   target?: number;
 };
 
-type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | CancelMessage;
+type DisposeMessage = { type: 'dispose'; id: number };
+type WorkerRequest = InitMessage | SearchMessage | ResetSearchMessage | EvaluateMessage | EvaluateBatchMessage | CancelMessage | DisposeMessage;
 
 type WebGpuBufferAllocationTelemetry = {
   installed: boolean;
@@ -171,6 +173,7 @@ type WorkerResponse =
   | { type: 'searchProgress'; id: number; progress: SearchWorkerProgress }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'searchReset'; id: number }
+  | { type: 'disposed'; id: number }
   | { type: 'downloadProgress'; id: number; loadedBytes: number; totalBytes?: number }
   | { type: 'deviceLost'; id?: never; loss: OrtDeviceLoss }
   | { type: 'error'; id: number; error: string };
@@ -293,6 +296,7 @@ const pendingSearchCancels: number[] = [];
 // page can broker repeated eval/search requests here without concurrent
 // session.run() calls against the same static batch-1 WebGPU/WASM session.
 const operationQueue = new ExclusiveQueue();
+let retiring = false;
 
 function nowMs(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now();
@@ -602,6 +606,7 @@ function handleCancel(message: CancelMessage): void {
 
 export function startSearchWorker(options: { createHybridEvaluator?: HybridEvaluatorFactory } = {}): void {
   hybridEvaluatorFactory = options.createHybridEvaluator;
+  retiring = false;
   self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
     const message = event.data;
     // Cancellation is synchronous and must not be wrapped in the error reporter,
@@ -610,9 +615,28 @@ export function startSearchWorker(options: { createHybridEvaluator?: HybridEvalu
       handleCancel(message);
       return;
     }
+    // Seal admission immediately, but release only behind already admitted model work.
+    if (retiring) return;
+    if (message.type === 'dispose') {
+      retiring = true;
+      handleCancel({ type: 'cancel', id: message.id });
+    }
     void enqueueModelOperation(async () => {
       try {
-        if (message.type === 'init') await handleInit(message);
+        if (message.type === 'dispose') {
+          deviceLossMonitor.stop();
+          const previous = evaluator;
+          evaluator = null;
+          searcher?.resetTree();
+          searcher = null;
+          configuredModelUrl = null;
+          configuredInitKey = null;
+          pendingSearchCancels.length = 0;
+          await releaseOrtWorkerResources(async () => {
+            await previous?.dispose?.();
+          });
+          post({ type: 'disposed', id: message.id });
+        } else if (message.type === 'init') await handleInit(message);
         else if (message.type === 'evaluate') {
           if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
           await handleEvaluate(message);

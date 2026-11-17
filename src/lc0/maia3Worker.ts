@@ -14,6 +14,7 @@ import {
   setRequestedOrtExecutionProviderForCurrentThread,
   setRequestedOrtWasmThreadsForCurrentThread,
 } from '../nn/ortRuntime.ts';
+import { releaseOrtWorkerResources } from '../nn/ortWorkerDispose.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { type Lc0ModelLoadInfo, loadLc0ModelForOrt } from './modelCache.ts';
@@ -59,6 +60,7 @@ type Maia3WorkerMessage = InitMessage | EvaluateMessage | EvaluateConditionsMess
 
 let session: ort.InferenceSession | null = null;
 const operations = new ExclusiveQueue();
+let retiring = false;
 
 function post(message: unknown, transfers: Transferable[] = []): void {
   (globalThis as unknown as { postMessage: (message: unknown, transfers?: Transferable[]) => void }).postMessage(message, transfers);
@@ -76,6 +78,8 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
 }
 
 (globalThis as unknown as { onmessage: ((event: MessageEvent<Maia3WorkerMessage>) => void) | null }).onmessage = (event) => {
+  if ((event.data as { type: string }).type === 'cancel' || retiring) return;
+  if (event.data.type === 'dispose') retiring = true;
   // ORT runs and session release must not overlap. The live panel coalesces
   // obsolete requests before posting; this also protects other worker callers.
   void operations
@@ -130,8 +134,11 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
 
         if (message.type === 'dispose') {
           deviceLossMonitor.stop();
-          if (session) await releaseOrtSession(session);
+          const previous = session;
           session = null;
+          await releaseOrtWorkerResources(async () => {
+            if (previous) await releaseOrtSession(previous);
+          });
           post({ type: 'disposed', id: message.id });
           return;
         }

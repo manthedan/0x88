@@ -78,6 +78,12 @@ class FakeWorker {
   addEventListener(type, listener) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
+  removeEventListener(type, listener) {
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter((fn) => fn !== listener),
+    );
+  }
   emit(type, data) {
     for (const listener of this.listeners.get(type) ?? []) listener(data);
   }
@@ -86,6 +92,7 @@ class FakeWorker {
     this.emit('message', { data });
   }
   postMessage(message) {
+    if (message.type === 'dispose') queueMicrotask(() => this.emit('message', { data: { type: 'disposed', id: message.id } }));
     if (message.type === 'init') {
       this.init = message;
       const outcome = FakeWorker.plan.get(message.modelUrl)?.shift() ?? {};

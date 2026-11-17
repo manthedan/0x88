@@ -55,6 +55,58 @@ test('matrix keeps load/search and teardown boundaries distinct', () => {
   assert.equal(phaseOf({ state: 'done' }, true), 'settle');
 });
 
+test('sequence digest cannot hide a failed first step and preserves the lab settings', () => {
+  const report = {
+    labGapSeconds: 20,
+    labBallastMb: 32,
+    labBallastAllocatedBytes: 33554432,
+    steps: [
+      { id: 't3', status: 'failed', error: 'load failed', runtime: {} },
+      { id: 'maia3', status: 'ok', runtime: {} },
+    ],
+  };
+  const digest = digestReport(report);
+  assert.equal(digest.status, 'failed');
+  assert.equal(digest.error, 'load failed');
+  assert.equal(digest.steps.length, 2);
+  assert.equal(digest.labGapSeconds, 20);
+  assert.equal(digest.labBallastAllocatedBytes, 33554432);
+});
+
+test('matrix aggregates interval peaks per sequence step/stage, not cumulative process lifetime', () => {
+  const rows = [0, 1].map((index) => ({
+    browser: 'safari',
+    net: 't3,maia3',
+    cache: 'cold',
+    report: { status: 'ok' },
+    peakMb: 900 + index * 100,
+    stepPeaksMb: { t3: 900 + index * 100, maia3: 300 + index * 100 },
+    stagePeaksMb: { 'arena/loading:bt4': 200 + index * 100 },
+  }));
+  const written = new Map();
+  new Function(
+    'readFileSync',
+    'writeFileSync',
+    'join',
+    'summarize',
+    'validity',
+    'console',
+    `${runner.slice(runner.indexOf('function aggregate(dir)'))}; aggregate('out');`,
+  )(
+    () => rows.map((row) => JSON.stringify(row)).join('\n'),
+    (path, content) => written.set(path, content),
+    (...parts) => parts.join('/'),
+    summarize,
+    validity,
+    { log() {} },
+  );
+  const [summary] = JSON.parse(written.get('out/summary.json'));
+  assert.equal(summary.n, 2);
+  assert.equal(summary.lifetimePeakMb.median, 950);
+  assert.equal(summary.stepPeaksMb.maia3.median, 350);
+  assert.equal(summary.stagePeaksMb['arena/loading:bt4'].median, 250);
+});
+
 test('matrix rejects reused/dirty processes, non-warm wire traffic and failed loads', () => {
   const valid = {
     browser: 'safari',
@@ -145,6 +197,9 @@ test('matrix stats retain the whole spread and ignore unavailable values', () =>
 test('worker observation records effective IO/fold settings without changing the init payload', () => {
   const window = {};
   class NativeWorker {
+    terminate() {
+      this.terminated = true;
+    }
     addEventListener(_type, fn) {
       this.receive = fn;
     }

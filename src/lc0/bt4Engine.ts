@@ -22,6 +22,7 @@ import {
   requestedOrtRuntimeDiagnosticOptions,
 } from '../nn/ortRuntime.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
+import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 export interface BigNetConfig {
@@ -335,6 +336,7 @@ export class Bt4WorkerSearcher {
     { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: Bt4SearchProgress) => void }
   >();
   private activeSearchId: number | null = null;
+  private closing: Promise<void> = Promise.resolve();
   private configuredEvalCacheEntries = -1;
   private configuredDiagnosticKey = '';
   backend = '';
@@ -538,9 +540,9 @@ export class Bt4WorkerSearcher {
     if (this.activeSearchId !== null) this.cancelSearch(this.activeSearchId);
   }
 
-  private invalidate(worker: Worker | null, error: Error): void {
+  private invalidate(worker: Worker | null, error: Error, terminate = true): void {
     if (this.worker !== worker) return;
-    worker?.terminate();
+    if (terminate) worker?.terminate();
     this.worker = null;
     this.ready = false;
     this.initPromise = null;
@@ -555,8 +557,15 @@ export class Bt4WorkerSearcher {
     this.activeSearchId = null;
   }
 
-  /** Terminate the worker and free the resident BT4 net. */
-  dispose(): void {
-    this.invalidate(this.worker, new Error('Lc0 BT4 worker disposed'));
+  /** Retire synchronously; release the detached worker's session/device before termination. */
+  dispose(): Promise<void> {
+    const worker = this.worker;
+    this.invalidate(worker, new Error('Lc0 BT4 worker disposed'), false);
+    if (worker) {
+      this.closing = disposeOrtWorker(worker);
+      // Pool/page owners historically have a synchronous disposal contract.
+      void this.closing.catch(() => undefined);
+    }
+    return this.closing;
   }
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
 
 // Exercise the actual controller functions with only browser/transport effects
 // stubbed. Importing the page would mount its DOM and load model assets.
@@ -20,10 +21,17 @@ function controller() {
       listeners.push(listener);
       this.listeners.set(type, listeners);
     }
+    removeEventListener(type, listener) {
+      this.listeners.set(
+        type,
+        (this.listeners.get(type) ?? []).filter((fn) => fn !== listener),
+      );
+    }
     emit(type, data) {
       for (const listener of this.listeners.get(type) ?? []) listener(data);
     }
     postMessage(message) {
+      if (message.type === 'dispose') queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'disposed' } }));
       if (message.type === 'init') queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'ready', backend: 'fake' } }));
     }
     terminate() {
@@ -44,7 +52,7 @@ function controller() {
   `,
     { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
   );
-  return { ...new Function('Worker', code)(Worker), workers };
+  return { ...new Function('Worker', 'disposeOrtWorker', code)(Worker, disposeOrtWorker), workers };
 }
 
 for (const type of ['error', 'messageerror']) {

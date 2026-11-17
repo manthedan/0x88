@@ -1,6 +1,7 @@
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import {
   addSoakEvent,
+  allocateSoakBallast,
   beginSoakStep,
   continueSoakReport,
   decodeSoakReport,
@@ -143,6 +144,7 @@ export interface MobileSoakServices {
   memory(): Promise<MemorySample>;
   makeEngine(id: string, signal: AbortSignal, modelOverride?: string): Promise<SoakEngine>;
   documentScope: MobileSoakDocument;
+  wait(ms: number, signal: AbortSignal): Promise<void>;
 }
 const defaultServices: MobileSoakServices = {
   environment: collectSoakEnvironment,
@@ -150,6 +152,17 @@ const defaultServices: MobileSoakServices = {
   // Keep production engine imports lazy; controller lifecycle tests inject inert adapters.
   makeEngine: async (id, signal, modelOverride) => (await import('./mobileSoakEngines.ts')).makeSoakEngine(id, signal, modelOverride),
   documentScope: new MobileSoakDocument(),
+  wait: (ms, signal) =>
+    new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      signal.addEventListener('abort', done, { once: true });
+      if (signal.aborted) done();
+    }),
 };
 
 export interface MobileSoakApi {
@@ -186,6 +199,7 @@ export function mountMobileSoak(
   let active = false;
   let mounted = true;
   let departure: SoakReport | null = null;
+  let ballast: ArrayBuffer[] = [];
   const publish = () => {
     if (!mounted) return; // Retired async work must never write over another controller's breadcrumb.
     if (storageEnabled) {
@@ -365,8 +379,25 @@ export function mountMobileSoak(
       // Route remounts wait for retired cleanup too, then recheck the document-wide latch.
       await services.documentScope.operations.run(async () => {
         if (!mounted) return;
-        while (report.nextIndex < report.stepIds.length && !abort.signal.aborted && !services.documentScope.unsafeDisposal) {
-          if (!(await executeStep(report.stepIds[report.nextIndex]))) break;
+        try {
+          log('ballast-start', `${report.labBallastMb ?? 0} MiB requested; held through all steps/gaps`);
+          ballast = allocateSoakBallast(report.labBallastMb ?? 0);
+          report.labBallastAllocatedBytes = ballast.reduce((bytes, buffer) => bytes + buffer.byteLength, 0);
+          publish();
+          while (report.nextIndex < report.stepIds.length && !abort.signal.aborted && !services.documentScope.unsafeDisposal) {
+            if (!(await executeStep(report.stepIds[report.nextIndex]))) break;
+            if (report.nextIndex < report.stepIds.length && (report.labGapSeconds ?? 0) > 0 && !abort.signal.aborted) {
+              log('gap-start', `${report.labGapSeconds}s after ${report.steps.at(-1)?.id}`);
+              await services.wait(report.labGapSeconds! * 1000, abort.signal);
+              log('gap-end', `${ballast.length} ballast chunks still held`);
+            }
+          }
+        } catch (error) {
+          report = skipRemainingSoakSteps(report, `Lab run setup failed: ${String(error)}`, iso());
+          log('run-error', String(error));
+        } finally {
+          log('ballast-release', `${ballast.length} chunks released`);
+          ballast = [];
         }
         if (services.documentScope.unsafeDisposal) {
           report = skipRemainingSoakSteps(report, 'Previous disposal failed; refusing to overlap possibly resident engines. Reload the document.', iso());
@@ -393,7 +424,16 @@ export function mountMobileSoak(
     async start(stepIds) {
       if (!mounted || active || services.documentScope.unsafeDisposal || report.state === 'crashed-awaiting-choice') return;
       const selection = stepIds ? parseSoakQuery(`steps=${encodeURIComponent(stepIds.join(','))}`) : query;
-      report = emptySoakReport({ ...selection, heatSeconds: query.heatSeconds, modelOverrides: query.modelOverrides }, iso());
+      report = emptySoakReport(
+        {
+          ...selection,
+          heatSeconds: query.heatSeconds,
+          modelOverrides: query.modelOverrides,
+          labGapSeconds: query.labGapSeconds,
+          labBallastMb: query.labBallastMb,
+        },
+        iso(),
+      );
       if (!storageEnabled) report = addSoakEvent(report, 'storage-unavailable', 'Crash recovery disabled for this page; results are in memory only.', iso());
       log('run-start', report.stepIds.join(','));
       await run();

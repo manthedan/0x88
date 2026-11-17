@@ -122,12 +122,33 @@ export function soakUrl(base, net, params = {}, auto = false) {
 /** Observe effective worker settings without changing init payloads or model loading. */
 export const WORKER_READY_SCRIPT = `
 window.__perfWorkerReady = [];
+window.__perfWorkerEvents = [];
+window.__perfWorkerStage = 'page';
+let workerSequence = 0;
 const NativeWorker = Worker;
 window.Worker = class extends NativeWorker {
   constructor(...args) {
     super(...args);
+    const workerId = ++workerSequence;
+    let modelUrl;
+    const event = (type) => window.__perfWorkerEvents.push({at: Date.now(), workerId, type, modelUrl});
+    const nativePost = this.postMessage.bind(this);
+    this.postMessage = (...messages) => {
+      if (messages[0]?.type === 'init') {
+        modelUrl = messages[0].modelUrl ?? (typeof messages[0].model === 'string' ? messages[0].model : 'transferred-model');
+        window.__perfWorkerStage = 'loading:' + modelUrl;
+        event('init');
+      }
+      if (messages[0]?.type === 'dispose') event('dispose-request');
+      return nativePost(...messages);
+    };
+    const nativeTerminate = this.terminate.bind(this);
+    this.terminate = () => { event('terminate'); return nativeTerminate(); };
     this.addEventListener('message', e => {
+      if (e.data?.type === 'disposed') event('disposed');
       if (e.data?.type === 'ready') {
+        event('ready');
+        window.__perfWorkerStage = 'resident:' + modelUrl;
         const {backend, ortIoMode, modelCache, ortRuntime, servedModelUrl} = e.data;
         window.__perfWorkerReady.push({backend, ortIoMode, modelCache, ortRuntime, servedModelUrl});
       }
@@ -139,7 +160,7 @@ window.Worker = class extends NativeWorker {
 export const PROGRESS_SCRIPT = `
 const s = window.__mobileSoak; if (!s) return null;
 const r = s.results;
-return { state: r.state, inProgress: r.inProgress && r.inProgress.id,
+return { state: r.state, inProgress: r.inProgress && r.inProgress.id, workerStage: window.__perfWorkerStage,
   steps: (r.steps || []).map((x) => ({ id: x.id, status: x.status, phases: (x.memory || []).map((m) => m.phase), searches: (x.searches || []).length })) };`;
 
 /** Phase from progress: baseline -> load -> search -> dispose -> settle. */
@@ -161,8 +182,24 @@ export function digestReport(report) {
   const rt = JSON.stringify(step.runtime ?? {});
   const mid = step.searches?.find((s) => s.fen && !s.fen.startsWith('rnbqkbnr/pppppppp')) ?? step.searches?.[1];
   return {
-    status: step.status,
-    error: step.error,
+    status: report.steps.every((s) => s.status === 'ok') ? 'ok' : report.steps.find((s) => s.status !== 'ok')?.status,
+    error: report.steps.find((s) => s.error)?.error ?? step.error,
+    ...(report.steps.length > 1
+      ? {
+          steps: report.steps.map((s) => ({
+            id: s.id,
+            status: s.status,
+            error: s.error,
+            startedAt: s.startedAt,
+            finishedAt: s.finishedAt,
+            runtime: s.runtime,
+            disposeMs: round(s.disposeMs),
+          })),
+        }
+      : {}),
+    labGapSeconds: report.labGapSeconds,
+    labBallastMb: report.labBallastMb,
+    labBallastAllocatedBytes: report.labBallastAllocatedBytes,
     loadMs: round(step.loadMs),
     prepareMs: round(step.prepareMs),
     loadDeferred: step.loadDeferred,

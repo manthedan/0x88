@@ -101,6 +101,7 @@ import {
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
+import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import {
   analysisAgreementHeadline,
   analysisArrowCandidates,
@@ -900,8 +901,12 @@ function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => 
 function resetSearchWorker(reason: string | Error): void {
   activeWorkerSearchId = null;
   workerSearchWarm = false;
-  searchWorker?.terminate();
+  const retired = searchWorker;
   searchWorker = null;
+  if (retired) {
+    if (reason instanceof Error) retired.terminate(); // A broken transport cannot acknowledge release.
+    else void disposeOrtWorker(retired).catch(() => undefined);
+  }
   workerReady = false;
   workerBackend = '';
   workerRuntime = '';

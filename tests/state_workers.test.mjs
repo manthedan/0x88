@@ -7,6 +7,7 @@ import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 class FakeWorker {
   static instances = [];
   static autoReady = true;
+  static autoDispose = true;
   listeners = new Map();
   messages = [];
   terminated = false;
@@ -26,6 +27,7 @@ class FakeWorker {
   }
   postMessage(message) {
     this.messages.push(message);
+    if (message.type === 'dispose' && FakeWorker.autoDispose) queueMicrotask(() => this.emit('message', { data: { type: 'disposed', id: message.id } }));
     if (message.type === 'init' && FakeWorker.autoReady) queueMicrotask(() => this.ready(message.id));
   }
   ready(id = this.messages.find((message) => message.type === 'init').id) {
@@ -150,10 +152,12 @@ test('B02: cancellation keeps a healthy worker; cache-size changes recreate it',
 test('B03: a crash during graceful dispose settles it instead of waiting forever', async () => {
   const worker = new FakeWorker();
   const evaluator = maia(worker);
+  FakeWorker.autoDispose = false;
   const disposed = assert.rejects(evaluator.dispose(), /dispose crash/);
   worker.emit('error', { message: 'dispose crash' });
+  FakeWorker.autoDispose = true;
   await disposed;
-  await evaluator.dispose();
+  await assert.rejects(evaluator.dispose(), /dispose crash/);
 });
 
 test('B03: protocol request errors remain nonfatal', async () => {

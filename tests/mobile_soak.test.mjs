@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   addSoakEvent,
+  allocateSoakBallast,
   beginSoakStep,
   buildSoakSteps,
   continueSoakReport,
@@ -19,13 +20,33 @@ import {
   strongestLoadedNet,
   validateSoakModelOverride,
 } from '../src/lc0/mobileSoak.ts';
-import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
-import { env } from '../src/nn/ortRuntime.ts';
 import { watchOrtDeviceLoss } from '../src/nn/ortDeviceLoss.ts';
+import { env } from '../src/nn/ortRuntime.ts';
+import { SquareFormerEvaluator } from '../src/nn/squareformerEvaluator.ts';
 
 const at = '2026-11-16T12:00:00.000Z';
 const later = '2026-11-16T12:01:00.000Z';
 const empty = () => emptySoakReport(parseSoakQuery('?steps=sf-lite,t3,heat'), at);
+
+test('lab gap/ballast validation, persistence and incompressible 32 MiB chunks', () => {
+  const query = parseSoakQuery('?steps=t3,maia3&labGapSeconds=20&labBallastMb=33');
+  const report = emptySoakReport(query, at);
+  assert.equal(decodeSoakReport(JSON.stringify(report)).labGapSeconds, 20);
+  assert.equal(report.labBallastMb, 33);
+  for (const key of ['labGapSeconds', 'labBallastMb']) {
+    for (const value of ['-1', '1.5', 'Infinity', 'NaN', '99999']) assert.throws(() => parseSoakQuery(`?${key}=${value}`), /integer/);
+  }
+  const buffers = allocateSoakBallast(33);
+  assert.deepEqual(
+    buffers.map((b) => b.byteLength),
+    [32 * 1048576, 1048576],
+  );
+  const words = new Uint32Array(buffers[0]);
+  assert.equal(new Set(words.subarray(0, 4096)).size, 4096);
+  assert.notEqual(words[0], new Uint32Array(buffers[1])[0], 'PRNG does not restart per chunk');
+  assert.deepEqual(allocateSoakBallast(0), []);
+  assert.equal(decodeSoakReport(JSON.stringify({ ...report, labBallastMb: -1 })), null);
+});
 
 test('catalog has stable unique step IDs in increasing-pressure order', () => {
   const steps = buildSoakSteps();
@@ -43,6 +64,8 @@ test('query defaults, empty selection, unknown IDs, deduplication and literal au
   assert.deepEqual(parseSoakQuery('?steps=').stepIds, []);
   assert.deepEqual(parseSoakQuery('?steps=t3,sf-lite,t3,nope&auto=1'), {
     auto: true,
+    labGapSeconds: 0,
+    labBallastMb: 0,
     modelOverrides: {},
     stepIds: ['t3', 'sf-lite'],
     heatSeconds: 120,

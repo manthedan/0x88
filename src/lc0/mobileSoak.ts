@@ -92,6 +92,8 @@ export function buildSoakSteps(): SoakStep[] {
 export interface SoakQuery {
   /** Lab-only: one timed search in the selected net step, without a second load. */
   labSearchSeconds?: number;
+  labGapSeconds?: number;
+  labBallastMb?: number;
   modelOverrides: SoakModelOverrides;
   auto: boolean;
   stepIds: string[];
@@ -106,6 +108,8 @@ export function parseSoakQuery(search: string): SoakQuery {
   const searchSeconds = Number(params.get('labSearchSeconds'));
   return {
     ...(Number.isFinite(searchSeconds) && searchSeconds > 0 ? { labSearchSeconds: Math.max(1, Math.min(1800, Math.floor(searchSeconds))) } : {}),
+    labGapSeconds: parseSoakLabNumber(params, 'labGapSeconds', 1800),
+    labBallastMb: parseSoakLabNumber(params, 'labBallastMb', 4096),
     modelOverrides: parseSoakModelOverrides(params),
     auto: params.get('auto') === '1',
     stepIds: [...new Set(requested.filter((id) => known.has(id)))],
@@ -113,6 +117,33 @@ export function parseSoakQuery(search: string): SoakQuery {
     warnings: requested.filter((id) => !known.has(id)).map((id) => `Unknown step: ${id}`),
   };
 }
+function parseSoakLabNumber(params: URLSearchParams, key: string, max: number): number {
+  const value = Number(params.get(key) ?? 0);
+  if (!Number.isFinite(value) || value < 0 || value > max || !Number.isInteger(value)) throw new Error(`${key} must be an integer from 0 to ${max}`);
+  return value;
+}
+
+/** Touch every word with deterministic xorshift32 data: no zero-page/compression shortcut.
+ * The caller owns these buffers for the whole run. MB is MiB, including a partial final chunk.
+ */
+export function allocateSoakBallast(mb: number): ArrayBuffer[] {
+  const buffers: ArrayBuffer[] = [];
+  let state = 0x6d2b79f5;
+  for (let remaining = mb * 1024 * 1024; remaining > 0; ) {
+    const buffer = new ArrayBuffer(Math.min(32 * 1024 * 1024, remaining));
+    const words = new Uint32Array(buffer);
+    for (let i = 0; i < words.length; i++) {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      words[i] = state >>> 0;
+    }
+    buffers.push(buffer);
+    remaining -= buffer.byteLength;
+  }
+  return buffers;
+}
+
 export interface MemorySample {
   phase?: 'before-load' | 'after-prepare' | 'resident-after-load' | 'after-search' | 'after-dispose';
   at: string;
@@ -163,6 +194,9 @@ export interface SoakResult {
 export interface SoakReport {
   /** Absent in older saved reports; resume must use this run's selected variants. */
   modelOverrides?: SoakModelOverrides;
+  labGapSeconds?: number;
+  labBallastMb?: number;
+  labBallastAllocatedBytes?: number;
   version: 1;
   runId: string;
   state: SoakState;
@@ -183,6 +217,9 @@ export function emptySoakReport(query: SoakQuery, at: string): SoakReport {
   return {
     version: 1,
     modelOverrides: { ...query.modelOverrides },
+    labGapSeconds: query.labGapSeconds ?? 0,
+    labBallastMb: query.labBallastMb ?? 0,
+    labBallastAllocatedBytes: 0,
     runId: at,
     state: 'idle',
     startedAt: null,
@@ -341,6 +378,14 @@ export function decodeSoakReport(text: string | null): SoakReport | null {
     )
       return null;
     if (r.inProgress && (r.inProgress.id !== r.stepIds[r.nextIndex] || typeof r.inProgress.at !== 'string')) return null;
+    for (const [key, max] of [
+      ['labGapSeconds', 1800],
+      ['labBallastMb', 4096],
+      ['labBallastAllocatedBytes', 4096 * 1024 * 1024],
+    ] as const) {
+      const value = r[key];
+      if (value !== undefined && (!Number.isInteger(value) || value < 0 || value > max)) return null;
+    }
     if (r.modelOverrides !== undefined) {
       if (!r.modelOverrides || typeof r.modelOverrides !== 'object' || Array.isArray(r.modelOverrides)) return null;
       for (const [key, value] of Object.entries(r.modelOverrides)) {

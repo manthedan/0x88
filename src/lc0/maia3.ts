@@ -4,6 +4,7 @@ import { legalMoves } from '../chess/movegen.ts';
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
+import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
@@ -344,7 +345,9 @@ export class Maia3BrowserEvaluator {
         evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
         return evaluator;
       } catch (error) {
-        worker.terminate();
+        const closing = disposeOrtWorker(worker);
+        if (options.signal?.aborted) void closing.catch(() => undefined);
+        else await closing;
         throw error;
       }
     };
@@ -393,7 +396,7 @@ export class Maia3BrowserEvaluator {
       };
       const onAbort = () => {
         cleanup();
-        worker.terminate();
+        void disposeOrtWorker(worker).catch(() => undefined);
         reject(new DOMException('Maia3 cancelled', 'AbortError'));
       };
       const onError = (event: ErrorEvent) => {
@@ -463,6 +466,7 @@ export class Maia3BrowserEvaluator {
 
   private post<T>(message: Record<string, unknown>, transfers: Transferable[] = []): Promise<T> {
     if (this.terminalError) return Promise.reject(this.terminalError);
+    if (this.disposing) return Promise.reject(new DOMException('Maia3 disposed', 'AbortError'));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
@@ -538,7 +542,10 @@ export class Maia3BrowserEvaluator {
     });
   }
 
-  private stop(error: Error): void {
+  private closing: Promise<void> = Promise.resolve();
+  private disposing = false;
+
+  private stop(error: Error, crashed = false, alreadyTerminated = false): void {
     if (this.terminated) return;
     this.terminated = true;
     this.terminalError = error;
@@ -546,30 +553,43 @@ export class Maia3BrowserEvaluator {
     this.worker.removeEventListener('message', this.messageListener);
     this.worker.removeEventListener('error', this.errorListener);
     this.worker.removeEventListener('messageerror', this.messageErrorListener);
-    this.worker.terminate();
+    if (!alreadyTerminated && !this.disposing) {
+      if (crashed) this.worker.terminate();
+      else {
+        this.closing = disposeOrtWorker(this.worker);
+        void this.closing.catch(() => undefined);
+      }
+    }
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
   }
 
   private fail(error: Error): void {
     if (this.terminated) return;
-    this.stop(error);
+    this.stop(error, true);
     this.onFailure?.(error);
   }
 
-  /** Hard stop for an owner that is cancelling a bounded job, not a graceful session release. */
+  /** Cancel the owner immediately; release the detached worker with a bounded grace period. */
   terminate(): void {
     this.stop(new DOMException('Maia3 cancelled', 'AbortError'));
   }
 
-  async dispose(): Promise<void> {
-    if (this.terminated) return;
-    this.abortCleanup?.();
-    try {
-      await this.post({ type: 'dispose' });
-    } finally {
-      this.terminate();
+  dispose(): Promise<void> {
+    if (!this.terminated && !this.disposing) {
+      this.disposing = true;
+      // Keep already admitted inference replies alive while the worker drains its queue.
+      // Explicit terminate()/abort still rejects them immediately, independently of the ack.
+      this.closing = disposeOrtWorker(this.worker).then(
+        () => this.stop(new DOMException('Maia3 disposed', 'AbortError'), false, true),
+        (error: Error) => {
+          this.stop(error, false, true);
+          throw error;
+        },
+      );
+      void this.closing.catch(() => undefined);
     }
+    return this.closing;
   }
 }
 

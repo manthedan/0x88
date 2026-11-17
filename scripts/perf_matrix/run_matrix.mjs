@@ -229,6 +229,12 @@ function aggregate(dir) {
     searchMedianMb: metric(c, (r) => r.searchMedianMb),
     // Teardown: Safari keeps compiling ORT wasm (OMG tier) after the worker is terminated; see doc.
     lifetimePeakMb: metric(c, (r) => r.peakMb),
+    stepPeaksMb: Object.fromEntries(
+      [...new Set(c.runs.flatMap((r) => Object.keys(r.stepPeaksMb ?? {})))].map((step) => [step, metric(c, (r) => r.stepPeaksMb?.[step])]),
+    ),
+    stagePeaksMb: Object.fromEntries(
+      [...new Set(c.runs.flatMap((r) => Object.keys(r.stagePeaksMb ?? {})))].map((stage) => [stage, metric(c, (r) => r.stagePeaksMb?.[stage])]),
+    ),
     settledMb: metric(c, (r) => r.settledMb),
     gpuProcessLoadPeakMb: metric(c, (r) => r.gpuPeakThroughSearchMb ?? r.gpuProcessMaxDeltaMb),
     uaResidentMb: metric(c, (r) => (typeof r.uaMemoryMb?.['resident-after-load'] === 'number' ? r.uaMemoryMb['resident-after-load'] : NaN)),

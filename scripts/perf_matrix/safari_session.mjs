@@ -175,6 +175,10 @@ async function measure(kind, index) {
   let crashed = false;
   const samples = [];
   const phasePeaks = {};
+  const stepPeaks = {};
+  const stagePeaks = {};
+  let stepId = spec.net.split(',')[0];
+  let stage = 'page';
   const marks = {};
   const pending = [];
   const gpuMax = new Map();
@@ -191,7 +195,7 @@ async function measure(kind, index) {
   }, 250);
   try {
     while (Date.now() - t0 < timeoutMs) {
-      const fp = readFootprint([pid], { threads: true }).get(pid);
+      const fp = readFootprint([pid], { reset: true, threads: true }).get(pid);
       const t = Date.now() - t0;
       if (!fp) {
         crashed = true;
@@ -199,10 +203,21 @@ async function measure(kind, index) {
         break;
       }
       for (const [gp, v] of readFootprint(gpuPids)) gpuMax.set(gp, Math.max(gpuMax.get(gp) ?? 0, v.cur - (gpuBase.get(gp)?.cur ?? v.cur)));
+      // Every kernel interval contributes to all three views; resetting at one boundary
+      // must not lose a peak from a different view. Boundary labels lag the page by <= one poll.
+      phasePeaks[phase] = Math.max(phasePeaks[phase] ?? 0, round(fp.interval));
+      stepPeaks[stepId] = Math.max(stepPeaks[stepId] ?? 0, round(fp.interval));
+      const stageKey = `${stepId}/${stage}`;
+      stagePeaks[stageKey] = Math.max(stagePeaks[stageKey] ?? 0, round(fp.interval));
+      const nextStep = progress?.inProgress ?? progress?.steps?.at(-1)?.id ?? stepId;
+      if (nextStep !== stepId) {
+        marks[`step:${nextStep}`] = { t, mb: round(fp.cur) };
+        stepId = nextStep;
+      }
+      stage = progress?.workerStage ?? stage;
       const next = progress?.state === 'poll-error' ? phase : phaseOf(progress, true);
-      if (next !== phase && ['load', 'search', 'dispose', 'settle'].indexOf(next) > ['load', 'search', 'dispose', 'settle'].indexOf(phase)) {
-        const read = readFootprint([pid], { reset: true }).get(pid);
-        phasePeaks[phase] = round(read.interval);
+      if (next !== phase && next !== 'baseline') {
+        const read = fp;
         marks[next] = { t, mb: round(read.cur) };
         log(`${kind} ${phase} -> ${next} at ${t} ms; ${phase} peak ${round(read.interval)} MB, now ${round(read.cur)} MB`);
         if (next === 'search') pending.push(footprintCategories(pid).then((c) => (record.cats.loaded = c)));
@@ -229,13 +244,19 @@ async function measure(kind, index) {
   }
   const end = readFootprint([pid], { reset: true }).get(pid);
   if (end) {
-    phasePeaks[phase] = round(end.interval);
+    phasePeaks[phase] = Math.max(phasePeaks[phase] ?? 0, round(end.interval));
+    stepPeaks[stepId] = Math.max(stepPeaks[stepId] ?? 0, round(end.interval));
+    const stageKey = `${stepId}/${stage}`;
+    stagePeaks[stageKey] = Math.max(stagePeaks[stageKey] ?? 0, round(end.interval));
     record.cats.settled = await footprintCategories(pid);
   }
   await Promise.all(pending);
   record.crashed = crashed;
   record.timedOut = !crashed && !settleAt;
   record.phasePeaksMb = phasePeaks;
+  record.stepPeaksMb = stepPeaks;
+  record.stagePeaksMb = stagePeaks;
+  record.workerEvents = await exec('return window.__perfWorkerEvents || [];').catch(() => []);
   record.marks = marks;
   record.peakMb = round(end?.life ?? Math.max(...samples.map((s) => s[2])));
   record.sampledPeakMb = Math.max(...samples.map((s) => s[2]));

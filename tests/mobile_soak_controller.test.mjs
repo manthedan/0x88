@@ -85,6 +85,60 @@ function browser(t, search = '?steps=sf-lite,t3') {
   };
 }
 
+test('lab gap follows awaited teardown, holds ballast, and custom Start preserves params', async (t) => {
+  const f = browser(t, '?steps=t3,maia3&labGapSeconds=20&labBallastMb=1');
+  const release = deferred();
+  const gap = deferred();
+  const calls = [];
+  const c = f.mount({
+    makeEngine: async (id) =>
+      engine(id, {
+        load: async () => {
+          calls.push(`load:${id}`);
+          assert.equal(c.api.results.labBallastAllocatedBytes, 1048576);
+        },
+        dispose: async () => {
+          calls.push(`dispose:${id}`);
+          if (id === 't3') await release.promise;
+        },
+      }),
+    wait: async (ms) => {
+      calls.push(`gap:${ms}`);
+      await gap.promise;
+    },
+  });
+  await c.ready;
+  const run = c.api.start(['t3', 'maia3']);
+  await until(() => calls.includes('dispose:t3'));
+  assert.deepEqual(calls, ['load:t3', 'dispose:t3']);
+  release.resolve();
+  await until(() => calls.includes('gap:20000'));
+  assert.equal(c.api.results.steps.length, 1);
+  gap.resolve();
+  await run;
+  assert.deepEqual(calls, ['load:t3', 'dispose:t3', 'gap:20000', 'load:maia3', 'dispose:maia3']);
+  assert.equal(c.api.results.labBallastMb, 1);
+  assert.equal(c.api.results.events.filter((e) => e.type === 'gap-start').length, 1);
+  assert.equal(c.api.state, 'done');
+});
+
+test('destroy aborts a lab gap without admitting the next engine', async (t) => {
+  const f = browser(t, '?steps=t3,maia3&labGapSeconds=20');
+  const calls = [];
+  const c = f.mount({
+    makeEngine: async (id) => {
+      calls.push(id);
+      return engine(id);
+    },
+  });
+  await c.ready;
+  const run = c.api.start();
+  await until(() => c.api.results.events.some((e) => e.type === 'gap-start'));
+  c.destroy();
+  await run;
+  assert.deepEqual(calls, ['t3']);
+});
+
 test('labSearchSeconds runs one timed production-adapter search after one load in the measured step', async (t) => {
   const f = browser(t, '?steps=lqo&labSearchSeconds=90');
   let loads = 0,

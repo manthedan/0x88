@@ -11,15 +11,13 @@ import type { BigNetKey } from './bigNetSessionPool.ts';
 import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { BIG_NETS, type Bt4WorkerSearcher, checkBigNetAsset } from './bt4Engine.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
-import { createLc0OnnxEvaluatorFromUrl, LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
 import { Maia3BrowserEvaluator } from './maia3.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { rate, type SearchSample, SoakSkip } from './mobileSoak.ts';
 import { createSoakBigNetBinding } from './mobileSoakBigNet.ts';
 import { createSoakCpuProbe } from './mobileSoakCpu.ts';
-import type { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import { makeSoakSmall } from './mobileSoakSmall.ts';
 import { cpuThreadBudget, defaultBrowserEnvironment } from './resourceBroker.ts';
-import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 
 export interface SoakSearchOptions {
@@ -38,11 +36,10 @@ export interface SoakEngine {
 }
 /** Only adapters around shipped loaders/searchers; no model fetching/session construction here. */
 export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: string): SoakEngine {
+  if (id === 'lc0-small') return makeSoakSmall(signal);
   let cpu: BrowserUciEngine | undefined;
   let cpuProbe: ReturnType<typeof createSoakCpuProbe> | undefined;
   let big: Bt4WorkerSearcher | undefined;
-  let small: Lc0OnnxEvaluator | undefined;
-  let lc0: Lc0PuctSearcher | undefined;
   let maia: Maia3BrowserEvaluator | undefined;
   let centi: (Evaluator & { dispose?: () => Promise<void>; destroy?: () => void }) | undefined;
   let runtime: Record<string, unknown> = {};
@@ -72,20 +69,6 @@ export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: 
         big = bigBinding.acquire();
         await big.init();
         runtime = { backend: big.backend, fallback: big.fallback ?? null, servedModelUrl: big.servedModelUrl, ortRuntime: big.ortRuntime };
-      } else if (id === 'lc0-small') {
-        const loaded = await createLc0OnnxEvaluatorFromUrl(resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH), {
-          deviceSelection: true,
-          load: { cache: true, signal },
-        });
-        small = loaded.evaluator;
-        lc0 = new Lc0PuctSearcher(small);
-        runtime = {
-          backend: describeOrtBackendConfig(),
-          servedModelUrl: loaded.servedUrl,
-          fallback: loaded.fallbackReason ?? null,
-          ioMode: small.ioMode,
-          ortRuntime: collectOrtSessionDiagnostics(),
-        };
       } else if (id === 'maia3') {
         maia = await Maia3BrowserEvaluator.create({ signal });
         runtime = {
@@ -112,7 +95,7 @@ export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: 
         cpuProbe = createSoakCpuProbe(id, cpu);
         await cpuProbe.prewarm(signal);
       }
-      if (small || centi)
+      if (centi)
         unwatch = watchOrtDeviceLoss((loss) => {
           lost = loss;
         });
@@ -135,10 +118,6 @@ export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: 
       if (big) {
         const result = await big.search(fen, { ...searchOptions, onProgress: (p) => options.progress?.(p.completedVisits) });
         if (result.cancelled) throw new Error('Search cancelled');
-        count = result.visits;
-        move = result.move ?? null;
-      } else if (lc0) {
-        const result = await lc0.search(fen, { ...searchOptions, onProgress: (p) => options.progress?.(p.completedVisits) });
         count = result.visits;
         move = result.move ?? null;
       } else if (maia) {
@@ -184,10 +163,8 @@ export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: 
     async dispose() {
       retire();
       unwatch?.();
-      lc0?.resetTree();
       cpu?.dispose(); // These adapters synchronously terminate their workers.
-      big?.dispose(); // Dispose only our detached instance, never a destination's record under the same key.
-      await small?.dispose();
+      await big?.dispose(); // Await only our detached instance, never a destination's record under the same key.
       await maia?.dispose();
       if (centi?.dispose) await centi.dispose();
       else centi?.destroy?.();

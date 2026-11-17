@@ -63,6 +63,7 @@ async function copy() {
   {/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   <p class="note">Lab model overrides: <code>lqoModel</code>, <code>t3Model</code>, <code>bt4Model</code> accept LC0 model paths or trusted asset URLs. Step sizes describe shipped models, not overrides. <code>ortGraphOpt=disabled</code> disables ORT graph optimization; add <code>ortDequantFold=0</code> to disable the app's separate weight-folding pass.</p>
+  <p class="note">Lab headroom controls: <code>labGapSeconds=N</code> (0–1800) waits after teardown between steps; <code>labBallastMb=N</code> (0–4096 MiB) holds PRNG-filled 32 MiB chunks for the run. Both default to zero and are recorded in JSON; they do not change product engines.</p>
   <p class="note">Heat: {report?.heatSeconds ?? 120}s. Configure with <code>?steps=sf-lite,lc0-small,t3,heat&amp;heatSeconds=120&amp;auto=1</code>. Defaults include all engines. Start over resets to the URL selection.</p>
   <table>
     <caption>Selected steps · load includes download/cache read and initialization · searches: two fixed positions</caption>
