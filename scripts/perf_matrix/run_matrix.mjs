@@ -95,12 +95,34 @@ for (const [i, s] of plan.entries()) {
   const resultPath = join(out, 'sessions', `${sessionId}.json`);
   writeFileSync(
     specPath,
-    JSON.stringify({ base: s.base, build: s.build, net: s.net, params: s.params, plan: s.plan, settleMs, ...(fileSpec.sessionDefaults ?? {}) }, null, 1),
+    JSON.stringify(
+      {
+        base: s.base,
+        build: s.build,
+        net: s.net,
+        params: s.params,
+        plan: s.plan,
+        settleMs,
+        ...(fileSpec.sessionDefaults ?? {}),
+        ...(s.browser === 'safari' && benchlock ? { sessionWaitMs: 0 } : {}),
+      },
+      null,
+      1,
+    ),
   );
   const script = join(here, s.browser === 'safari' ? 'safari_session.mjs' : 'chrome_session.mjs');
   const cmd = benchlock ? [benchlock, process.execPath, script, specPath, resultPath] : [process.execPath, script, specPath, resultPath];
   console.log(`[${i + 1}/${plan.length}] ${sessionId}`);
-  const res = spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+  let res;
+  do {
+    res = spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+    if (s.browser === 'safari' && benchlock && res.status === 75) {
+      // No session was created. Do not monopolize the mutex while another owner
+      // may need it to finish its existing session; retry outside the lock.
+      console.log('Shared Safari busy; benchlock released, retrying in 30 s.');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);
+    }
+  } while (s.browser === 'safari' && benchlock && res.status === 75);
   if (res.status !== 0 || !existsSync(resultPath)) {
     appendFileSync(
       runsFile,

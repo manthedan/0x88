@@ -67,6 +67,28 @@ test('worker observation records effective IO/fold settings without changing the
   assert.equal(Object.hasOwn(window.__perfWorkerReady[0], 'model'), false);
 });
 
+test('zero-wait Safari creation returns a pairing conflict after one attempt so the outer runner can yield benchlock', async () => {
+  const source = readFileSync(new URL('../scripts/perf_matrix/safari_session.mjs', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function createSession()'), source.indexOf('const proxy ='));
+  let calls = 0;
+  const run = new Function('spec', 'wd', 'sleep', 'log', `${body}; return createSession();`);
+  await assert.rejects(
+    run(
+      { sessionWaitMs: 0 },
+      async () => {
+        calls++;
+        throw Error('already paired with another WebDriver session');
+      },
+      () => {
+        throw Error('must not sleep inside the lock');
+      },
+      () => {},
+    ),
+    /already paired/,
+  );
+  assert.equal(calls, 1);
+});
+
 test('external owned-Chrome disconnect rejects pending CDP calls instead of stranding the benchmark lock', async () => {
   const text = readFileSync(new URL('../scripts/perf_matrix/chrome_session.mjs', import.meta.url), 'utf8');
   const Cdp = new Function('WebSocket', `${text.slice(text.indexOf('class Cdp'), text.indexOf('const proxy ='))}; return Cdp;`)(

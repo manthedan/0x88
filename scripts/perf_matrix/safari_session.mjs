@@ -46,7 +46,7 @@ async function createSession() {
       return (await wd('POST', '/session', { capabilities: { alwaysMatch: { browserName: 'safari' } } })).sessionId;
     } catch (error) {
       // Never delete someone else's session: wait it out.
-      if (Date.now() > deadline) throw error;
+      if (Date.now() >= deadline) throw error;
       log(`session create failed (attempt ${attempt}), retrying in 10 s: ${String(error.message).slice(0, 160)}`);
       await sleep(10_000);
     }
@@ -54,7 +54,14 @@ async function createSession() {
 }
 
 const proxy = await startCountingProxy(spec.base);
-const sid = await createSession();
+const sid = await createSession().catch(async (error) => {
+  await proxy.close();
+  if (spec.sessionWaitMs === 0 && String(error.message).includes('already paired with another WebDriver session')) {
+    console.error('Safari paired elsewhere; yielding benchlock before retry.');
+    process.exit(75);
+  }
+  throw error;
+});
 log(`webdriver session ${sid}`); // printed so a killed run's session can still be deleted by hand
 // Explicit page-load timeout; navigation errors surface instead of hanging.
 await wd('POST', `/session/${sid}/timeouts`, { pageLoad: 90_000, script: 60_000 }).catch(() => {});
