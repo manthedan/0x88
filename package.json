@@ -186,7 +186,7 @@
     "format": "biome format --write .",
     "lint": "biome lint .",
     "check:biome": "biome check .",
-    "check:biome:tracked": "git ls-files -z | xargs -0 biome check --no-errors-on-unmatched --files-ignore-unknown=true"
+    "check:biome:tracked": "git ls-files -z | xargs -0 biome check --no-errors-on-unmatched --files-ignore-unknown=true --"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",
