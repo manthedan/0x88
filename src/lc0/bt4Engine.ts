@@ -433,8 +433,6 @@ export class Bt4WorkerSearcher {
         modelUrl: this.config.modelUrl,
         // Keep the production device rule for both shipped and lab-selected configs.
         deviceModelSelection: true,
-        // Device selection (t3 split-K) must not opt big nets into Small's GPU capture.
-        ortIoMode: 'cpu',
         ep,
         cacheModel: true,
         ...diagnostics,

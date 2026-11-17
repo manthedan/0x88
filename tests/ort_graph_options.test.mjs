@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import * as ort from '../src/nn/ortRuntime.ts';
 import { Bt4WorkerSearcher, LQO_NET } from '../src/lc0/bt4Engine.ts';
 import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { startSearchWorker } from '../src/lc0/searchWorkerCore.ts';
+import * as ort from '../src/nn/ortRuntime.ts';
 
 function globals(t, values) {
   const descriptors = new Map(Object.keys(values).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -88,7 +88,7 @@ test('big-net worker receives page graph/folding options, keeps device model sel
   assert.equal(first.ortDiagnostics.preferredOutputLocation, 'gpu-buffer');
   assert.equal(first.dequantFold, false, 'app-side folding is independent and must also reach the worker');
   assert.equal(first.deviceModelSelection, true, 'model overrides keep production split-K rules');
-  assert.equal(first.ortIoMode, 'cpu', 'big-net device selection must not inherit Small GPU capture');
+  assert.equal(first.ortIoMode, undefined, 'device-selected big nets inherit captured IO, with dynamic-shape preflight falling back before creation');
   assert.equal(first.allowUnverifiedModel, undefined, 'diagnostic config must not weaken model integrity');
   assert.equal(first.modelUrl, '/models/lc0/lqo_v2.f16.onnx');
   assert.equal(searcher.ortRuntime.graphOptimizationLevel, 'disabled');

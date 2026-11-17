@@ -92,10 +92,11 @@ export type Lc0OrtIoMode = 'cpu' | 'gpu' | 'gpu-capture';
 
 /**
  * The IO mode a search-worker init gets when it names none. The device-selected
- * Lc0 Small default (product pages without ?model=) runs graph-captured GPU IO:
- * fewer CPU-side WebGPU calls per invoke, same outputs
- * (docs/ort_invoke_overhead_2026-11.md). Explicit model URLs, lab tools and the
- * big nets keep CPU IO.
+ * path (Small and big nets) requests graph-captured GPU IO: fewer CPU-side
+ * WebGPU calls per invoke, same outputs (docs/ort_invoke_overhead_2026-11.md).
+ * Fixed-shape WebGPU models use it; protobuf preflight rejects dynamic shapes
+ * (e.g. LQO) before session creation and uses CPU IO without a probe session.
+ * Without device selection the default is CPU IO. Explicit ioMode wins.
  */
 export function defaultLc0OrtIoMode(deviceModelSelection: boolean): Lc0OrtIoMode {
   return deviceModelSelection ? 'gpu-capture' : 'cpu';

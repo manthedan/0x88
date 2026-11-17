@@ -3,6 +3,7 @@ import test from 'node:test';
 import { defaultLc0OrtIoMode, Lc0OnnxEvaluator, lc0GpuIoSpecs } from '../src/lc0/onnxEvaluator.ts';
 import { readOnnxModelIo } from '../src/lc0/onnxModelIo.ts';
 import { encodeTensorProto, ONNX_FLOAT16, ProtoWriter } from '../src/nn/onnxDequantFold.ts';
+import { OrtGpuIoBinding } from '../src/nn/ortGpuIo.ts';
 import * as ort from '../src/nn/ortRuntime.ts';
 
 function value(name, shape, type = ONNX_FLOAT16) {
@@ -103,6 +104,40 @@ test('Small retains its gpu-capture default and fixed-shape models still attempt
   assert.equal(calls[1].enableGraphCapture, undefined);
   await evaluator.dispose();
 });
+
+for (const [net, input, expected] of [
+  ['LQO', ['batch', 112, 8, 8], 'cpu'],
+  ['t3', [8, 112, 8, 8], 'gpu-capture'],
+  ['BT4', [8, 112, 8, 8], 'gpu-capture'],
+]) {
+  test(`${net} uses the device-selected IO default with exactly one native session`, async (t) => {
+    const bytes = model({ input, policy: [8, 1858] });
+    ort.setRequestedOrtExecutionProviderForCurrentThread('webgpu');
+    ort.setOrtDequantFoldForCurrentThread(false);
+    const deviceDescriptor = Object.getOwnPropertyDescriptor(ort.env.webgpu, 'device');
+    Object.defineProperty(ort.env.webgpu, 'device', { configurable: true, value: { createBuffer: () => ({ destroy() {} }) } });
+    t.after(() => {
+      ort.setRequestedOrtExecutionProviderForCurrentThread(null);
+      ort.setOrtDequantFoldForCurrentThread(null);
+      if (deviceDescriptor) Object.defineProperty(ort.env.webgpu, 'device', deviceDescriptor);
+      else delete ort.env.webgpu.device;
+    });
+    t.mock.method(console, 'warn', () => {});
+    t.mock.method(ort.Tensor, 'fromGpuBuffer', () => ({ dispose() {} }));
+    const warmup = t.mock.method(OrtGpuIoBinding.prototype, 'run', async () => ({}));
+    const calls = [];
+    t.mock.method(ort.InferenceSession, 'create', async (_input, options) => {
+      calls.push(options);
+      return { ...readOnnxModelIo(bytes), async release() {} };
+    });
+    const evaluator = await Lc0OnnxEvaluator.create(bytes, { ioMode: defaultLc0OrtIoMode(true) });
+    assert.equal(evaluator.ioMode, expected);
+    assert.equal(calls.length, 1, 'LQO must not build then reject a probe; fixed nets must not fall back');
+    assert.equal(calls[0].enableGraphCapture, expected === 'gpu-capture' ? true : undefined);
+    assert.equal(warmup.mock.callCount(), expected === 'gpu-capture' ? 1 : 0);
+    await evaluator.dispose();
+  });
+}
 
 test('metadata-owned GPU parse recovery is not swallowed by the CPU-IO fallback', async (t) => {
   ort.setRequestedOrtExecutionProviderForCurrentThread('webgpu');
