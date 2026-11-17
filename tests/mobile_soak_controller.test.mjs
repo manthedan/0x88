@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MobileSoakDocument, mountMobileSoak } from '../src/lc0/mobileSoakBrowser.ts';
 import { SOAK_STORAGE_KEY } from '../src/lc0/mobileSoak.ts';
+import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const deferred = () => Promise.withResolvers();
@@ -205,6 +206,82 @@ test('retired step cleanup cannot overwrite recovery; remount waits for the old 
     current.api.results.steps.map((step) => step.status),
     ['crashed', 'ok'],
   );
+});
+
+test('navigation retires a pooled big net synchronously before production reacquires the key', async (t) => {
+  const f = browser(t, '?steps=bt4');
+  const pendingSearch = deferred();
+  let searching = false;
+  const pool = new BigNetSessionPool((config) => ({
+    key: config.key,
+    disposals: 0,
+    dispose() {
+      this.disposals++;
+    },
+  }));
+  let acquired;
+  const retired = f.mount({
+    makeEngine: async (id) => {
+      acquired = pool.acquire('bt4');
+      const owned = acquired;
+      const retire = () => {
+        pool.detach('bt4', owned);
+      };
+      return engine(id, {
+        search(fen) {
+          searching = true;
+          return pendingSearch.promise.then(() => sample(id, fen));
+        },
+        retire,
+        async dispose() {
+          retire();
+          owned.dispose();
+        },
+      });
+    },
+  });
+  await retired.ready;
+  const run = retired.api.start();
+  await until(() => searching);
+  assert.equal(pool.peek('bt4'), acquired);
+  retired.destroy();
+  assert.equal(pool.has('bt4'), false, 'record must be detached before destroy returns, not in async finally');
+  const destination = pool.acquire('bt4'); // Play/Arena/Analysis do not wait on the soak queue.
+  assert.notEqual(destination, acquired, 'destination must not inherit the retiring searcher');
+  pendingSearch.resolve();
+  await run;
+  assert.equal(acquired.disposals, 1);
+  assert.equal(destination.disposals, 0);
+  assert.equal(pool.peek('bt4'), destination, 'late cleanup must not remove the replacement');
+  pool.disposeAllNow();
+});
+
+test('deferred CPU setup records preparation, init+search and memory phase without fabricated load or throughput', async (t) => {
+  const f = browser(t, '?steps=viridithas');
+  const current = f.mount({
+    makeEngine: async (id) =>
+      engine(id, {
+        runtime: () => ({ backend: 'one-shot', loadDeferred: true, firstInitSearchMs: 2500 }),
+        async search(fen) {
+          return { ...sample(id, fen), ms: 2500, initializationIncluded: true, perSecond: null, engineReportedNps: 1000 };
+        },
+      }),
+  });
+  await current.ready;
+  await current.api.start();
+  const result = current.api.results.steps[0];
+  assert.equal(result.status, 'ok');
+  assert.equal(result.loadDeferred, true);
+  assert.equal(result.loadMs, null);
+  assert.equal(typeof result.prepareMs, 'number');
+  assert.equal(result.firstInitSearchMs, 2500);
+  assert.equal(result.firstSearchMs, 2500);
+  assert.equal(result.searches[0].perSecond, null);
+  assert.deepEqual(
+    result.memory.map((memory) => memory.phase),
+    ['before-load', 'after-prepare', 'after-search', 'after-dispose'],
+  );
+  assert.equal(f.saved().steps[0].loadMs, null);
 });
 
 test('mounted pagehide snapshot still preserves the breadcrumb through cleanup and BFCache restore', async (t) => {

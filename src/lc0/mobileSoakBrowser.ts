@@ -180,6 +180,7 @@ export function mountMobileSoak(
   let report = saved ? recoverSoakReport(saved, iso()) : emptySoakReport(query, iso());
   if (!storageEnabled) report = addSoakEvent(report, 'storage-unavailable', 'Crash recovery disabled; this run still works in memory.', iso());
   const abort = new AbortController();
+  const ownedEngines = new Set<SoakEngine>();
   let active = false;
   let mounted = true;
   let departure: SoakReport | null = null;
@@ -226,7 +227,7 @@ export function mountMobileSoak(
     const engines: SoakEngine[] = [];
     let safelyDisposed = true;
     try {
-      result.memory.push(await services.memory());
+      result.memory.push({ ...(await services.memory()), phase: 'before-load' });
       abort.signal.throwIfAborted();
       const ids = id === 'arena' ? ['bt4', 't3', 'sf-full'] : id === 'heat' ? [strongestLoadedNet(report.steps)].filter((v): v is string => v !== null) : [id];
       if (!ids.length) throw new SoakSkip('No successful net step earlier in this run; select at least one net before heat.');
@@ -236,16 +237,20 @@ export function mountMobileSoak(
           abort.signal.throwIfAborted();
           const engine = await services.makeEngine(engineId, abort.signal);
           engines.push(engine); // Own partial loads too, so finally always tears them down.
+          ownedEngines.add(engine);
           abort.signal.throwIfAborted();
           await engine.load();
           abort.signal.throwIfAborted();
-          result.runtime[engineId] = engine.runtime();
+          const engineRuntime = engine.runtime();
+          result.runtime[engineId] = engineRuntime;
+          result.loadDeferred ||= engineRuntime.loadDeferred === true;
           publish();
         }
       } finally {
-        result.loadMs = performance.now() - loadStarted;
+        result.prepareMs = performance.now() - loadStarted;
+        result.loadMs = result.loadDeferred ? null : result.prepareMs;
       }
-      result.memory.push(await services.memory());
+      result.memory.push({ ...(await services.memory()), phase: result.loadDeferred ? 'after-prepare' : 'resident-after-load' });
       abort.signal.throwIfAborted();
       publish();
       if (id === 'heat') await heatSearch(engines[0], result);
@@ -259,6 +264,7 @@ export function mountMobileSoak(
               const sample = await engine.search(fen);
               result.searches.push(sample);
               result.firstSearchMs ??= sample.ms;
+              if (sample.initializationIncluded) result.firstInitSearchMs ??= sample.ms;
               publish();
             }),
           );
@@ -271,9 +277,16 @@ export function mountMobileSoak(
       result.status = error instanceof SoakSkip ? 'skipped' : 'failed';
       result.error = error instanceof Error ? error.message : String(error);
     } finally {
-      result.memory.push(await services.memory());
+      result.memory.push({ ...(await services.memory()), phase: 'after-search' });
       for (const engine of engines) {
-        result.runtime[engine.id] = engine.runtime();
+        const engineRuntime = engine.runtime();
+        result.runtime[engine.id] = engineRuntime;
+        if (engineRuntime.loadDeferred === true) {
+          result.loadDeferred = true;
+          result.loadMs = null;
+        }
+        const firstInitSearch = engineRuntime.firstInitSearchMs;
+        if (typeof firstInitSearch === 'number') result.firstInitSearchMs ??= firstInitSearch;
         const loss = engine.deviceLost();
         if (loss) result.deviceLost.push(loss);
       }
@@ -283,7 +296,15 @@ export function mountMobileSoak(
       }
       const disposeStarted = performance.now();
       // Await every teardown even if another fails. Never leave a rejected seat running.
-      const disposed = await Promise.allSettled(engines.map((engine) => engine.dispose()));
+      const disposed = await Promise.allSettled(
+        engines.map(async (engine) => {
+          try {
+            await engine.dispose();
+          } finally {
+            ownedEngines.delete(engine);
+          }
+        }),
+      );
       for (const entry of disposed)
         if (entry.status === 'rejected') {
           safelyDisposed = false;
@@ -295,7 +316,7 @@ export function mountMobileSoak(
         log('unsafe-disposal', 'Engine release failed. Reload the document before starting more engines.');
       }
       result.disposeMs = performance.now() - disposeStarted;
-      result.memory.push(await services.memory());
+      result.memory.push({ ...(await services.memory()), phase: 'after-dispose' });
       result.finishedAt = iso();
       report = finishSoakStep(report, result);
       publish();
@@ -404,6 +425,15 @@ export function mountMobileSoak(
       mounted = false;
       storageEnabled = false;
       unsubscribeSafety();
+      // Production destinations share the big-net pool, not our soak-only queue.
+      // Remove our exact records synchronously, before their onMount can reacquire them.
+      for (const engine of ownedEngines) {
+        try {
+          engine.retire?.();
+        } catch {
+          services.documentScope.blockUnsafeDisposal();
+        }
+      }
       abort.abort();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('pagehide', pagehide);

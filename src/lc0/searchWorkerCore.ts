@@ -1,4 +1,4 @@
-import { type OrtDeviceLoss, watchOrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
+import { type OrtDeviceLoss, createOrtDeviceLossMonitor } from '../nn/ortDeviceLoss.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import '../nn/ortConsoleFilter.ts';
 import {
@@ -168,7 +168,7 @@ type WorkerResponse =
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'searchReset'; id: number }
   | { type: 'downloadProgress'; id: number; loadedBytes: number; totalBytes?: number }
-  | { type: 'deviceLost'; id: number; loss: OrtDeviceLoss }
+  | { type: 'deviceLost'; id?: never; loss: OrtDeviceLoss }
   | { type: 'error'; id: number; error: string };
 
 type WorkerEvaluator = Lc0EvaluationProvider & {
@@ -297,6 +297,8 @@ function post(message: WorkerResponse): void {
   self.postMessage(message);
 }
 
+const deviceLossMonitor = createOrtDeviceLossMonitor((loss) => post({ type: 'deviceLost', loss }));
+
 function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
   return operationQueue.run(work);
 }
@@ -364,6 +366,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     searcher = new Lc0PuctSearcher(nextEvaluator);
     configuredModelUrl = message.wholeModelManifestUrl;
     configuredInitKey = initKey;
+    deviceLossMonitor.stop();
     configuredBackend = 'whole-onnx-webgpu';
     configuredModelCacheStatus = `whole-model-webgpu${cacheLabel}`;
     configuredOrtWasm = undefined;
@@ -393,6 +396,7 @@ async function handleInit(message: InitMessage): Promise<void> {
     searcher = new Lc0PuctSearcher(nextEvaluator);
     configuredModelUrl = message.packUrl;
     configuredInitKey = initKey;
+    deviceLossMonitor.stop();
     configuredBackend = message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
     configuredModelCacheStatus = `hybrid-pack-lazy${cacheLabel}`;
     configuredOrtWasm = undefined;
@@ -451,7 +455,7 @@ async function handleInit(message: InitMessage): Promise<void> {
   configuredModelCacheStatus = nextModelCacheStatus;
   configuredOrtWasm = diagnostics.wasm;
   configuredOrtFallback = diagnostics.fallback;
-  watchOrtDeviceLoss((loss) => post({ type: 'deviceLost', id: message.id, loss }));
+  deviceLossMonitor.refresh();
   await previousEvaluator?.dispose?.();
   post({
     type: 'ready',

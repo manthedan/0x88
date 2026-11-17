@@ -74,8 +74,13 @@ async function copy() {
           <td>{report?.inProgress?.id === step.id ? 'running' : result?.status ?? 'pending'}</td>
           <td>
             {#if result}
-              <div>Load {ms(result.loadMs)}</div><div>First {ms(result.firstSearchMs)}</div>
-              {#each result.searches as sample}<div>{sample.engine}: {sample.perSecond?.toFixed(1) ?? '—'} {sample.unit}/s</div>{/each}
+              {#if result.loadDeferred}<div>Load deferred · prepare {ms(result.prepareMs)}</div>{:else}<div>Load {ms(result.loadMs)}</div>{/if}
+              <div>First {ms(result.firstSearchMs)}</div>
+              {#if result.firstInitSearchMs != null}<div>First init + search {ms(result.firstInitSearchMs)} (not init-only)</div>{/if}
+              {#each result.searches as sample}
+                {#if sample.initializationIncluded}<div>{sample.engine}: init + search {ms(sample.ms)}; wall throughput unavailable</div>{:else}<div>{sample.engine}: {sample.perSecond?.toFixed(1) ?? '—'} {sample.unit}/s</div>{/if}
+                {#if sample.initializationIncluded && sample.engineReportedNps != null}<div>Engine-reported: {sample.engineReportedNps.toFixed(1)} nodes/s</div>{/if}
+              {/each}
               {#each Object.entries(result.runtime) as [id, runtime]}<div class="runtime">{id}: {soakRuntimeSummary(runtime)}</div>{/each}
               {#if result.slices.length}<div>{result.slices.length} heat slices (see JSON)</div>{/if}
               {#if result.error}<div class="error">{result.error}</div>{/if}

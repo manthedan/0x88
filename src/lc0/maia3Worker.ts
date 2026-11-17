@@ -1,4 +1,4 @@
-import { watchOrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
+import { createOrtDeviceLossMonitor } from '../nn/ortDeviceLoss.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import {
   createOrtSession,
@@ -52,6 +52,8 @@ function post(message: unknown, transfers: Transferable[] = []): void {
   (globalThis as unknown as { postMessage: (message: unknown, transfers?: Transferable[]) => void }).postMessage(message, transfers);
 }
 
+const deviceLossMonitor = createOrtDeviceLossMonitor((loss) => post({ type: 'deviceLost', loss }));
+
 async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run']>>, preferred: string, fallbackIndex: number): Promise<Float32Array> {
   const byName = outputs[preferred];
   const tensor = byName ?? Object.values(outputs)[fallbackIndex];
@@ -69,6 +71,7 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
       const message = event.data;
       try {
         if (message.type === 'init') {
+          deviceLossMonitor.stop();
           if (session) await releaseOrtSession(session);
           if (message.ep) setRequestedOrtExecutionProviderForCurrentThread(message.ep);
           setRequestedOrtWasmThreadsForCurrentThread(message.wasmThreads ?? null);
@@ -81,12 +84,13 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           if (message.ep === 'wasm' && !ortRuntimeArtifactKindIsLocked()) setOrtRuntimeArtifactKindForCurrentThread('wasm');
           post({ type: 'progress', id: message.id, stage: 'creating-session' });
           session = await createOrtSession(message.model);
-          watchOrtDeviceLoss((loss) => post({ type: 'deviceLost', loss }));
+          deviceLossMonitor.refresh();
           post({ type: 'ready', id: message.id, inputNames: session.inputNames, outputNames: session.outputNames, backend: describeOrtBackendConfig() });
           return;
         }
 
         if (message.type === 'dispose') {
+          deviceLossMonitor.stop();
           if (session) await releaseOrtSession(session);
           session = null;
           post({ type: 'disposed', id: message.id });

@@ -7,13 +7,14 @@ import { describeOrtBackendConfig } from '../nn/ortRuntime.ts';
 import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { searchRoot } from '../search/puct.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { acquireBigNetSearcher, type BigNetKey, disposeBigNetSearcherNow } from './bigNetSessionPool.ts';
+import { acquireBigNetSearcher, type BigNetKey, detachBigNetSearcher } from './bigNetSessionPool.ts';
 import { BIG_NETS, type Bt4WorkerSearcher, checkBigNetAsset } from './bt4Engine.ts';
 import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
 import { createLc0OnnxEvaluatorFromUrl, LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
 import { Maia3BrowserEvaluator } from './maia3.ts';
 import { type SearchSample, rate, SoakSkip } from './mobileSoak.ts';
+import { createSoakCpuProbe } from './mobileSoakCpu.ts';
 import type { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { cpuThreadBudget, defaultBrowserEnvironment } from './resourceBroker.ts';
 import { Lc0PuctSearcher } from './search.ts';
@@ -29,11 +30,14 @@ export interface SoakEngine {
   search(fen: string, options?: SoakSearchOptions): Promise<SearchSample>;
   runtime(): Record<string, unknown>;
   deviceLost(): OrtDeviceLoss | null;
+  /** Synchronous handoff boundary before a destination route can acquire pooled resources. */
+  retire?(): void;
   dispose(): Promise<void>;
 }
 /** Only adapters around shipped loaders/searchers; no model fetching/session construction here. */
 export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
   let cpu: BrowserUciEngine | undefined;
+  let cpuProbe: ReturnType<typeof createSoakCpuProbe> | undefined;
   let big: Bt4WorkerSearcher | undefined;
   let small: Lc0OnnxEvaluator | undefined;
   let lc0: Lc0PuctSearcher | undefined;
@@ -43,6 +47,9 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
   let lost: OrtDeviceLoss | null = null;
   let unwatch: (() => void) | undefined;
   const bigKey = Object.hasOwn(BIG_NETS, id) ? (id as BigNetKey) : null;
+  const retire = () => {
+    if (bigKey && big) detachBigNetSearcher(bigKey, big);
+  };
   return {
     id,
     async load() {
@@ -58,6 +65,7 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
       } else if (bigKey) {
         if ((await checkBigNetAsset(BIG_NETS[bigKey])) === 'missing')
           throw new SoakSkip(`Production asset probe: ${BIG_NETS[bigKey].modelUrl} is not hosted here`);
+        signal.throwIfAborted(); // Asset probing may finish after this controller was retired.
         big = acquireBigNetSearcher(bigKey);
         await big.init();
         runtime = { backend: big.backend, fallback: big.fallback ?? null, servedModelUrl: big.servedModelUrl };
@@ -81,8 +89,8 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
         runtime = { runtime: loaded.resolvedRuntime, backend: describeOrtBackendConfig(), fallback: loaded.fallbackReason ?? null, modelId: loaded.modelId };
       } else throw new SoakSkip(`Unknown production engine: ${id}`);
       if (cpu) {
-        await cpu.prewarm(signal);
-        runtime = { ...runtime, ...cpu.runtimeStatus(), backend: cpu.runtimeLabel() };
+        cpuProbe = createSoakCpuProbe(id, cpu);
+        await cpuProbe.prewarm(signal);
       }
       if (small || centi)
         unwatch = watchOrtDeviceLoss((loss) => {
@@ -90,6 +98,7 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
         });
     },
     async search(fen, options = {}) {
+      if (cpuProbe) return cpuProbe.search(fen, signal, options.durationMs);
       const started = performance.now();
       let count: number | null = null;
       let move: string | null = null;
@@ -103,12 +112,7 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
         yieldEveryMs: 8,
         progressEveryMs: 1000,
       };
-      if (cpu) {
-        cpu.setOptions({ depth: undefined, movetimeMs: options.durationMs ?? 1000 });
-        move = await cpu.search(fen, signal);
-        count = cpu.lastInfo()[0]?.nodes ?? null;
-        unit = 'nodes';
-      } else if (big) {
+      if (big) {
         const result = await big.search(fen, { ...searchOptions, onProgress: (p) => options.progress?.(p.completedVisits) });
         if (result.cancelled) throw new Error('Search cancelled');
         count = result.visits;
@@ -140,13 +144,15 @@ export function makeSoakEngine(id: string, signal: AbortSignal): SoakEngine {
       if (!move || !count) throw new Error('Search returned no move or completed work');
       return { engine: id, fen, ms, count, unit, perSecond: rate(count, ms), move };
     },
-    runtime: () => runtime,
+    runtime: () => ({ ...runtime, ...cpuProbe?.runtime() }),
     deviceLost: () => big?.deviceLost ?? maia?.deviceLost ?? lost,
+    retire,
     async dispose() {
+      retire();
       unwatch?.();
       lc0?.resetTree();
       cpu?.dispose(); // These adapters synchronously terminate their workers.
-      if (bigKey && big) disposeBigNetSearcherNow(bigKey); // Same pool as Arena, immediate worker termination.
+      big?.dispose(); // Dispose only our detached instance, never a destination's record under the same key.
       await small?.dispose();
       await maia?.dispose();
       if (centi?.dispose) await centi.dispose();

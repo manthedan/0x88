@@ -125,8 +125,8 @@ function createWorker(arm: StrengthArm): WorkerClient {
     worker = new Worker(new URL('./batchingStrengthWorker.ts', import.meta.url), { type: 'module', name: `batching-${arm.name}` });
     worker.addEventListener('message', (event: MessageEvent) => {
       const message = event.data as { id?: number; type?: string; error?: string };
-      if (message.type === 'downloadProgress' || message.type === 'searchProgress') return;
-      if (message.id === undefined) return;
+      if (message.type === 'deviceLost' || message.type === 'downloadProgress' || message.type === 'searchProgress') return;
+      if (typeof message.id !== 'number') return;
       const waiter = pending.get(message.id);
       if (!waiter) return;
       pending.delete(message.id);

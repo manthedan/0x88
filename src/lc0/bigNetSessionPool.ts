@@ -69,6 +69,15 @@ export class BigNetSessionPool<T extends DisposableSearcher> {
     }
   }
 
+  /** Transfer an exact record out of the pool without destroying its in-flight worker. */
+  detach(key: BigNetKey, expected: T): boolean {
+    const record = this.records.get(key);
+    if (!record || record.searcher !== expected) return false;
+    if (record.timer) this.scheduler.clearTimeout(record.timer);
+    this.records.delete(key);
+    return true;
+  }
+
   disposeNow(key: BigNetKey): void {
     const record = this.records.get(key);
     if (!record) return;
@@ -113,6 +122,10 @@ export function releaseBigNetSearcher(key: BigNetKey, idleTtlMs = BIG_NET_SESSIO
 
 export function releaseUnusedBigNetSearchers(activeKeys: Iterable<BigNetKey>, idleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS): void {
   defaultPool.releaseUnused(activeKeys, idleTtlMs);
+}
+
+export function detachBigNetSearcher(key: BigNetKey, expected: Bt4WorkerSearcher): boolean {
+  return defaultPool.detach(key, expected);
 }
 
 export function disposeBigNetSearcherNow(key: BigNetKey): void {

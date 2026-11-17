@@ -59,6 +59,7 @@ export function createCriticalEngines(
       worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module', name: 'critical-moments-lc0' });
       worker.addEventListener('message', (event) => {
         const data = event.data;
+        if (data.type === 'deviceLost' || typeof data.id !== 'number') return;
         const request = pending.get(data.id);
         if (!request) return;
         if (data.type === 'downloadProgress') request.progress(`Downloading ${(data.loadedBytes / 1e6).toFixed(1)} MB`);

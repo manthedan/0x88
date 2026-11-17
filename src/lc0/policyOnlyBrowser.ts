@@ -784,6 +784,7 @@ type WorkerReadyResponse = {
 };
 type WorkerResponse =
   | WorkerReadyResponse
+  | { type: 'deviceLost'; id?: never }
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
   | { type: 'packLoadResult'; id: number; result: PackLoadResult }
@@ -1369,6 +1370,7 @@ function postLabWorkerRequest<T>(message: Record<string, unknown>, onId?: (id: n
     searchLabWorker = new Worker(new URL('./searchLabWorker.ts', import.meta.url), { type: 'module' });
     searchLabWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
       const response = event.data;
+      if (response.type === 'deviceLost' || typeof response.id !== 'number') return;
       const pending = labWorkerPending.get(response.id);
       if (!pending) return;
       labWorkerPending.delete(response.id);
@@ -1419,6 +1421,7 @@ function ensureSearchWorkerInstance(): void {
     : new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
   searchWorker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
     const message = event.data;
+    if (message.type === 'deviceLost' || typeof message.id !== 'number') return;
     const pending = workerPending.get(message.id);
     if (!pending) return;
     workerPending.delete(message.id);

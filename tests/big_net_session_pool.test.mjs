@@ -95,6 +95,37 @@ test('BigNetSessionPool releaseUnused schedules only inactive retained nets', ()
   assert.equal(t3.disposeCalls, 1);
 });
 
+test('detaching the owned instance cancels its TTL and a destination acquires a fresh worker', () => {
+  const { scheduler, timers } = fakeScheduler();
+  const pool = new BigNetSessionPool((config) => new FakeSearcher(config), scheduler, 500);
+  const retired = pool.acquire('bt4');
+  pool.release('bt4');
+  assert.equal(pool.detach('bt4', retired), true);
+  assert.equal(timers[0].cleared, true);
+  assert.equal(retired.disposeCalls, 0, 'old owner still drains its in-flight work');
+  const destination = pool.acquire('bt4');
+  assert.notEqual(destination, retired);
+  assert.equal(pool.detach('bt4', retired), false, 'late cleanup cannot detach a replacement');
+  retired.dispose();
+  assert.equal(destination.disposeCalls, 0);
+  assert.equal(pool.peek('bt4'), destination);
+  pool.disposeAllNow();
+});
+
+test('identity-checked detach cannot remove another owner or a different key', () => {
+  const pool = new BigNetSessionPool((config) => new FakeSearcher(config));
+  const bt4 = pool.acquire('bt4');
+  const t3 = pool.acquire('t3');
+  assert.equal(pool.detach('t3', bt4), false);
+  assert.equal(pool.peek('t3'), t3);
+  assert.equal(pool.detach('bt4', bt4), true);
+  assert.equal(pool.detach('bt4', bt4), false);
+  pool.disposeAllNow();
+  assert.equal(bt4.disposeCalls, 0);
+  assert.equal(t3.disposeCalls, 1);
+  bt4.dispose();
+});
+
 test('default scheduler calls the timer globals unbound (browsers reject a foreign receiver)', () => {
   const realSet = globalThis.setTimeout;
   const realClear = globalThis.clearTimeout;

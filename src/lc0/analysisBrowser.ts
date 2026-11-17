@@ -919,7 +919,8 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
   const worker = searchWorker;
   worker.addEventListener('message', (event: MessageEvent) => {
     if (searchWorker !== worker) return;
-    const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
+    const message = event.data as { id?: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
+    if (message.type === 'deviceLost' || typeof message.id !== 'number') return;
     if (message.type === 'downloadProgress') {
       showModelProgress('Lc0 small net', message.loadedBytes ?? 0, message.totalBytes, 'Downloading');
       return;

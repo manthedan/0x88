@@ -26,7 +26,7 @@ Poll the API rather than assuming a fixed load delay. Stockfish and WASM handsha
 
 ## Steps and production paths
 
-Ordinary steps load once, search **startpos** and **Kiwipete** (`r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1`), then dispose. CPU searches request 1,000ms; tree-search nets request eight visits per position. These are smoke/stress workloads, not engine-strength benchmarks. Load time includes download/cache access plus initialization, but excludes the environment and memory probes.
+Ordinary steps prepare/prewarm, search **startpos** and **Kiwipete** (`r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1`), then dispose. CPU searches request 1,000ms; tree-search nets request eight visits per position. These are smoke/stress workloads, not engine-strength benchmarks. For runtimes that actually prewarm, load time includes download/cache access plus initialization, but excludes environment/memory probes. Deferred CPU setup instead has `loadDeferred: true`, `loadMs: null`, and a measured `prepareMs`; its first init-plus-search is recorded separately, as detailed below.
 
 | ID | Work and production module |
 | --- | --- |
@@ -54,9 +54,9 @@ Missing assets detected by the production big-net probe are skipped with their U
 
 The report collects UA, isolation, SAB, hardware concurrency, nullable device memory/storage estimate, high-performance WebGPU adapter info, features (including shader-f16), and buffer/storage/workgroup limits. Adapter field selection follows `lab/webgpu-lc0-diag`; no extra diagnostic GPU device is created. New runs refresh environment data; resumed results retain their original environment.
 
-Memory samples are ordered: before load, resident after load, after searches, after disposal. Chrome JS heap fields are copied when exposed. UA-specific memory sampling is attempted only when available and isolated, with a two-second diagnostic timeout. After a timeout it is disabled for the remainder of that page lifetime, avoiding a growing pile of GC requests. GPU memory is not covered reliably. Worker WASM heaps are private in these shipped adapters; `wasmHeapBytes` is explicitly null. Safari can legitimately have null for every memory field.
+Memory samples now carry phases: `before-load`, `resident-after-load` (or `after-prepare` for deferred CPU setup), `after-search`, `after-dispose`. A no-op prewarm sample is never labeled resident. Chrome JS heap fields are copied when exposed. UA-specific memory sampling is attempted only when available and isolated, with a two-second diagnostic timeout. After a timeout it is disabled for the remainder of that page lifetime, avoiding a growing pile of GC requests. GPU memory is not covered reliably. Worker WASM heaps are private in these shipped adapters; `wasmHeapBytes` is explicitly null. Safari can legitimately have null for every memory field.
 
-Actual ORT `env.webgpu.device.lost` is observed (not the diagnostic adapter). Big-net and Maia workers forward reason/message; main-thread Small/Centipawn use the same observer. Loss marks a completed step failed. No real device loss was observed on this Mac; the notification payload/unsubscribe behavior is unit-tested with a controlled device.
+Actual ORT `env.webgpu.device.lost` is observed (not the diagnostic adapter). Big-net and Maia workers forward reason/message as unsolicited notifications **without request IDs**; main-thread Small/Centipawn use the same observer. Each ORT device gets one lost-promise listener with removable subscriptions, and each worker owns a single refreshable monitor rather than registering a new callback on every re-init. Loss marks a completed step failed. No real device loss was observed on this Mac; the notification payload/unsubscribe behavior is unit-tested with a controlled device.
 
 One `localStorage` value (`0x88-mobile-soak-v1`) contains the entire report plus the in-progress marker, written **before** each step allocates/loads. Partial search/heat results are checkpointed. On recovery the marked step becomes `crashed`, previous results remain, reload count increments once, and Continue advances beyond it. Pagehide/visibility events are retained in a bounded 100-event log. A detached pagehide snapshot prevents worker rejection/cleanup during unload from clearing the stored marker, including when Safari has no asynchronous memory probe to delay cleanup. BFCache restoration unfreezes the live runner. A reload during environment collection or exactly between steps has no engine marker: it restores idle/done rather than stranding a non-existent runner or attributing an engine crash.
 
@@ -89,7 +89,7 @@ Representative successful runs from feature commit `7bf59a73` (mixed initial/war
 
 Neural backend strings came from production adapters: principally `auto->webgpu`; Maia, Centipawn and LQO reported `auto->webgpu,wasm` (the configured provider list, not proof that every operator executed on GPU). CPU runtime metadata includes actual worker/variant URLs and thread counts.
 
-On the final build, an `auto=1` run at 375px ran Lite, Small, t3, and a **120.032-second sustained t3 search** successfully. Warm load times: 99 / 587 / 1,203 / 448ms. The sustained search averaged about **170 visits/s**. Slice rates were **160.3, 153.3, 160.2, 162.5, 169.9, 179.4, 176.9, 167.9, 175.6, 180.0, 181.1**, then **182.9** for the final 7.17s partial slice; full slices lasted 10.18–10.34s. No desktop thermal decline was established. Sampled main-thread JS heap reached approximately 107.5MB after Small load, then approximately 8.5MB after search; these are emphatically not total tab/GPU/worker residency. UA-specific memory hit its diagnostic timeout; WASM heap fields were null.
+On the original feature-verification build, an `auto=1` run at 375px ran Lite, Small, t3, and a **120.032-second sustained t3 search** successfully. Warm load times: 99 / 587 / 1,203 / 448ms. The sustained search averaged about **170 visits/s**. Slice rates were **160.3, 153.3, 160.2, 162.5, 169.9, 179.4, 176.9, 167.9, 175.6, 180.0, 181.1**, then **182.9** for the final 7.17s partial slice; full slices lasted 10.18–10.34s. No desktop thermal decline was established. Sampled main-thread JS heap reached approximately 107.5MB after Small load, then approximately 8.5MB after search; these are emphatically not total tab/GPU/worker residency. UA-specific memory hit its diagnostic timeout; WASM heap fields were null.
 
 Additional checks:
 
@@ -100,16 +100,61 @@ Additional checks:
 - Forced `ortEp=wasm`: Small loaded the original (non-split-K) model in **2,019ms**, first search **411ms**, approximately **19.5 / 18.7 visits/s**, backend `wasm`.
 - Copy results button reported “Results copied”; rendered JSON parsed and matched live API state.
 - Ownership-review follow-up: rebuilt the product and served with COOP/COEP on an available port (:51769). Normal Stockfish Lite still completed (481ms load, 1,003ms first search). Then injected a rejecting `Worker.terminate()` during a second Lite run: Lite failed, t3 was skipped, `window.__mobileSoak.unsafeDisposal` became true, Start/Continue/Start over were disabled and API calls could not erase the failed report; Copy results remained enabled. Same-document Svelte navigation to another lab route and back retained the latch/alert. A full reload cleared the latch and re-enabled Start while preserving the original failure evidence. The test-only Worker override was restored; no actual release failure was claimed.
-- Relevant lifecycle + unit tests after review fixes: **55 passed**. `tests/mobile_soak.test.mjs` contains 17 tests covering query/selection, recovery transitions, departure snapshot isolation, safe teardown failure handling, malformed storage, strongest-net selection, slices, awaited Centipawn teardown and device-loss payloads. `tests/mobile_soak_controller.test.mjs` adds six executable controller regression tests with deferred environment/search/disposal promises: initial auto-start and per-run probes after retirement, late cleanup versus reopened breadcrumbs, shared-queue ownership, unchanged pagehide/BFCache semantics, failed teardown blocking API/reset/remount until a fresh document, and late retired disposal failure refreshing/blocking the current controller. Production engine imports are lazy and controller services are injectable so these tests run the real controller without loading engines or GPU code.
+- First ownership-review regression run (`a777b4ee`): **55 passed**. `tests/mobile_soak.test.mjs` contains 17 tests covering query/selection, recovery transitions, departure snapshot isolation, safe teardown failure handling, malformed storage, strongest-net selection, slices, awaited Centipawn teardown and device-loss payloads. `tests/mobile_soak_controller.test.mjs` adds six executable controller regression tests with deferred environment/search/disposal promises: initial auto-start and per-run probes after retirement, late cleanup versus reopened breadcrumbs, shared-queue ownership, unchanged pagehide/BFCache semantics, failed teardown blocking API/reset/remount until a fresh document, and late retired disposal failure refreshing/blocking the current controller. Production engine imports are lazy and controller services are injectable so these tests run the real controller without loading engines or GPU code.
 - `npm run lint`, `npm test` (including Svelte typecheck), and product build passed. Four existing optional tests skip in the full suite; no failures.
 
 ## Minimal production changes
 
 1. `nn/squareformerEvaluator.ts`: add idempotent, awaitable `dispose()` that drains the existing `ExclusiveQueue` and awaits ORT session release. Existing `destroy(): void` retains its fire-and-forget/nonthrowing behavior by delegating to it. No engine/search refactor.
-2. `nn/ortDeviceLoss.ts`: small observer for ORT's actual device, with unsubscribe, no allocation.
-3. `lc0/searchWorkerCore.ts` + `bt4Engine.ts`, and `lc0/maia3Worker.ts` + `maia3.ts`: forward/store device-loss notifications without changing load/backend selection or worker ownership.
+2. `nn/ortDeviceLoss.ts`: observer for ORT's actual device, with unsubscribe, one promise subscription per device, and a refreshable single-owner monitor; no extra device allocation.
+3. `lc0/searchWorkerCore.ts` + `bt4Engine.ts`, and `lc0/maia3Worker.ts` + `maia3.ts`: forward/store device-loss notifications with no request ID; request handlers explicitly separate them from replies. Other search-worker consumers have equivalent guards (audit below). Load/backend selection is unchanged.
+4. `lc0/bigNetSessionPool.ts`: minimal `detach(key, expectedInstance)` identity check (and default-pool wrapper), canceling any idle timer without destroying the worker. Existing production acquire/release/dispose behavior is unchanged.
 
-The lab-specific pure logic, browser orchestration and adapters are respectively `lc0/mobileSoak.ts`, `mobileSoakBrowser.ts`, and `mobileSoakEngines.ts`. The Svelte route contains presentation and button wiring only.
+The lab-specific pure logic, browser orchestration and adapters are respectively `lc0/mobileSoak.ts`, `mobileSoakBrowser.ts`, and `mobileSoakEngines.ts`; `mobileSoakCpu.ts` measures existing CPU adapters without implementing a loader. The Svelte route contains presentation and button wiring only.
+
+## Second review: worker protocol, pooled handoff, deferred CPU loading
+
+### Worker notification audit
+
+A repo-wide grep of worker entrypoints, constructors and message handlers found these consumers of `searchWorker.ts` / its `hybridSearchWorker.ts` and `batchingStrengthWorker.ts` wrappers, and `maia3Worker.ts`. Every request handler now explicitly returns on `deviceLost` (Bt4/Maia inference store its diagnostics instead), before looking up or settling requests. Numeric request IDs are required for replies. No emitted device-loss notification has an `id` property, so even a notification delivered before `ready` cannot impersonate the pending init response.
+
+| Consumer / handler | Audit / regression coverage |
+| --- | --- |
+| `analysisBrowser.ts::initWorker` | Ignores telemetry, including a forged current init ID; real handler body tested. |
+| `criticalMomentsEngines.ts::initLc0` | Same guard before its pending map; real handler body tested. |
+| `policyOnlyBrowser.ts::ensureSearchWorkerInstance` | Covers normal + hybrid worker; real handler body tested. Its separate `postLabWorkerRequest` handler is guarded too, even though `searchLabWorker.ts` does not emit this notification. |
+| `batchingStrengthBrowser.ts::createWorker` | Covers the batching wrapper of the same core; real handler body tested. |
+| `bt4Engine.ts::Bt4WorkerSearcher.init` | Stores loss without settling init; controlled Worker test sends notifications before `ready`. Play/Arena/Analysis/soak big nets all use this adapter. |
+| `maia3.ts::postInit` and `onMessage` | Init ignores it; inference records it without resolving a pending request. Both handlers tested. All Maia page/report consumers go through this adapter. |
+
+`searchWorker.ts`, `hybridSearchWorker.ts` and `batchingStrengthWorker.ts` all enter `startSearchWorker`; there are no other direct clients in src/scripts/lab/public. Maia has only the adapter-owned constructor. The monitor is constructed once outside each worker's init handler, refreshed only for a different device, and unsubscribed on retirement/session disposal or runtime switch. A WeakMap shares a single lost-promise callback per actual device even across session replacements. Tests perform 100 refreshes, switch devices, unsubscribe retired owners, and confirm no callback accumulation. A real-core regression holds old-session disposal pending, triggers loss while replacement init is awaiting it, verifies the notification has no ID and init remains unsettled, then releases disposal and receives the genuine `ready` reply.
+
+### Big-net ownership on same-document navigation
+
+The soak now synchronously retires every owned adapter during controller destroy, **before** a destination's mount can acquire from the shared pool. For a big net, retirement detaches only the exact acquired instance from its key and clears its idle timer; it does not abandon ongoing work. Async cleanup later disposes the captured instance directly, never `disposeNow(key)`. Therefore a Play/Arena/Analysis destination gets a fresh pool record and cannot have that replacement terminated by late soak cleanup. An asset probe that returns after abort cannot acquire a new pooled instance. No new lease system or pool redesign was introduced.
+
+Pool tests cover matching/mismatching identities, cleared idle timers and replacement survival. A controller regression keeps a big-net search pending, destroys the soak, immediately acquires the same key as a production destination would, then lets old cleanup finish: only the old instance is disposed, and the replacement remains in the pool.
+
+### CPU preparation versus initialization/search
+
+All CPU prewarm implementations were checked: Stockfish completes UCI readiness; Berserk/PlentyChess/Stormphrax inherit the Emscripten readiness handshake; Reckless browser-API mode initializes its worker; **WASI Reckless and Viridithas may return without loading WASM** when SAB/persistent mode is unavailable, forced off, or disabled after fallback. Each one-shot request can instantiate a fresh WASI runtime, not merely the first request.
+
+The lab measurement adapter uses the production runtime status after prewarm, not engine names or elapsed-time guesses. Known resident modes are `worker`, `emscripten-worker`, `persistent`, `browser-api`; idle/one-shot/unknown modes are not resident. Deferred steps report:
+
+- `loadDeferred: true`, `loadMs: null`, measured `prepareMs`, `residentAfterPrepare: false` in runtime metadata;
+- `firstInitSearchMs`: measured end-to-end first search that included startup, **not an init-only time**; `initializationMs` remains null because production one-shot adapters do not expose separate fetch/instantiate/UCI timing;
+- each affected search has `initializationIncluded: true` and `perSecond: null`, rather than publishing startup-inclusive wall time as pure throughput; `engineReportedNps`, when present, is kept separately and labeled as engine-reported;
+- memory immediately after preparation is tagged `after-prepare`, not `resident-after-load`.
+
+The UI labels deferred setup and init-plus-search explicitly. Runtime status is refreshed after searches; a persistent-to-one-shot fallback also suppresses that search's wall-throughput even if prewarm initially succeeded. Tests exercise real Viridithas/Reckless no-SAB prewarm (no worker created), both one-shot searches, all resident modes, mid-search fallback, and persisted report/memory shaping. Existing CPU engine implementations and constructor/asset selection paths were not changed.
+
+Second-review validation: `npm run lint` passed; **57 relevant regression tests passed** across worker protocol/consumer, pool, controller, CPU measurement, existing Analysis/critical/Maia lifecycle, and pure soak tests. `npm test` (including Svelte typecheck) passed **2,256 tests, 4 optional skips, zero failures**; `BUILD_SCOPE=product npm run build:client` passed.
+
+Quick agent-browser check against this follow-up product build, served from the worktree with COOP/COEP on an available port (:56831):
+
+- Stockfish Lite: **ok**, load/prepare **482ms**, first search **1,001ms**, approximately **831k / 844k nodes/s**.
+- t3: **ok**, WebGPU Apple split-K, load/prepare **8,644ms**, first search **128ms**, approximately **63 / 77 visits/s**; no device loss or unsafe disposal.
+- Then temporarily disabled the page's SAB availability (restored afterward; this is a desktop mode-selection test, not physical Safari). Both real production WASI adapters completed in one-shot mode: Viridithas prepare **110ms**, first init-plus-search **4,787ms**, second **1,603ms**; Reckless prepare **111ms**, first init-plus-search **2,929ms**, second **1,034ms**. Both reported `loadMs: null`, `loadDeferred: true`, `initializationMs: null`, `residentAfterPrepare: false`, `after-prepare` memory phase, and null wall `perSecond` on both positions. UCI NPS remained separately labeled (Viridithas ~327k / 320k, Reckless ~607k / 590k). Inspected the rendered deferred-load/init-plus-search labels as well as API/JSON metadata.
 
 ## iOS Safari risks / unverified items
 

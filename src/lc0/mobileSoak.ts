@@ -49,6 +49,7 @@ export function parseSoakQuery(search: string): SoakQuery {
   };
 }
 export interface MemorySample {
+  phase?: 'before-load' | 'after-prepare' | 'resident-after-load' | 'after-search' | 'after-dispose';
   at: string;
   jsHeap: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number } | null;
   userAgentBytes: number | null;
@@ -56,6 +57,9 @@ export interface MemorySample {
   error: string | null;
 }
 export interface SearchSample {
+  /** Deferred/one-shot startup cannot be separated from this elapsed search time. */
+  initializationIncluded?: boolean;
+  engineReportedNps?: number | null;
   engine: string;
   fen: string;
   ms: number;
@@ -78,6 +82,11 @@ export interface SoakResult {
   startedAt: string;
   finishedAt: string | null;
   loadMs: number | null;
+  /** Adapter/asset preparation and prewarm; not a model-load time when deferred. */
+  prepareMs: number | null;
+  loadDeferred: boolean;
+  /** First end-to-end search including startup, never an init-only duration. */
+  firstInitSearchMs: number | null;
   firstSearchMs: number | null;
   runtime: Record<string, unknown>;
   deviceLost: { reason: string; message: string }[];
@@ -130,6 +139,9 @@ export function newSoakResult(id: string, at: string): SoakResult {
     startedAt: at,
     finishedAt: null,
     loadMs: null,
+    prepareMs: null,
+    loadDeferred: false,
+    firstInitSearchMs: null,
     firstSearchMs: null,
     runtime: {},
     deviceLost: [],
@@ -246,7 +258,13 @@ export function decodeSoakReport(text: string | null): SoakReport | null {
           !s.runtime ||
           typeof s.runtime !== 'object' ||
           !Array.isArray(s.searches) ||
-          s.searches.some((sample) => !sample || typeof sample.engine !== 'string' || (sample.perSecond !== null && !Number.isFinite(sample.perSecond))) ||
+          s.searches.some(
+            (sample) =>
+              !sample ||
+              typeof sample.engine !== 'string' ||
+              (sample.perSecond !== null && !Number.isFinite(sample.perSecond)) ||
+              (sample.engineReportedNps != null && !Number.isFinite(sample.engineReportedNps)),
+          ) ||
           !Array.isArray(s.memory) ||
           !Array.isArray(s.slices) ||
           !Array.isArray(s.deviceLost),

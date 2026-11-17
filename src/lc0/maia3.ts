@@ -373,7 +373,7 @@ export class Maia3BrowserEvaluator {
       };
       const onMessage = (event: MessageEvent) => {
         const data = event.data as { type?: string; id?: number; message?: string; inputNames?: string[]; outputNames?: string[]; backend?: string };
-        if (data.id !== id) return;
+        if (data.type === 'deviceLost' || data.id !== id) return;
         if (data.type === 'ready') {
           cleanup();
           resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown' });

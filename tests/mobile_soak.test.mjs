@@ -171,6 +171,7 @@ test('corrupt, obsolete and structurally incomplete breadcrumbs are rejected', (
     JSON.stringify({ ...empty(), steps: [{}] }),
     JSON.stringify({ ...empty(), steps: [{ ...newSoakResult('sf-lite', at), searches: [null] }] }),
     JSON.stringify({ ...empty(), steps: [{ ...newSoakResult('sf-lite', at), searches: [{ engine: 'sf-lite', perSecond: 'bad' }] }] }),
+    JSON.stringify({ ...empty(), steps: [{ ...newSoakResult('sf-lite', at), searches: [{ engine: 'sf-lite', perSecond: null, engineReportedNps: 'bad' }] }] }),
     JSON.stringify({ ...empty(), inProgress: { id: 't3', at } }),
   ])
     assert.equal(decodeSoakReport(value), null);

@@ -2,6 +2,84 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { startSearchWorker } from '../src/lc0/searchWorkerCore.ts';
+import { env } from '../src/nn/ortRuntime.ts';
+
+test('worker loss during replacement init has no request ID and cannot settle init before ready; re-init does not duplicate watchers', async (t) => {
+  const descriptors = new Map(['self', 'navigator', 'fetch'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const deviceDescriptor = Object.getOwnPropertyDescriptor(env.webgpu, 'device');
+  const loss = Promise.withResolvers();
+  const disposing = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const then = loss.promise.then.bind(loss.promise);
+  const subscription = t.mock.method(loss.promise, 'then', (...args) => then(...args));
+  Object.defineProperty(env.webgpu, 'device', { configurable: true, writable: true, value: { lost: loss.promise } });
+  const pending = new Map();
+  const messages = [];
+  let handleMessage;
+  Object.defineProperty(globalThis, 'self', {
+    configurable: true,
+    value: {
+      addEventListener(_type, listener) {
+        handleMessage = listener;
+      },
+      postMessage(message) {
+        messages.push(message);
+        pending.get(message.id)?.(message);
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: 'test' } });
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async () => new Response(null, { status: 404 }) });
+  let created = 0;
+  t.mock.method(Lc0OnnxEvaluator, 'create', async () => {
+    const index = created++;
+    return {
+      evaluate: async () => ({}),
+      dispose: async () => {
+        if (index === 0) {
+          disposing.resolve();
+          await release.promise;
+        }
+      },
+    };
+  });
+  let id = 0;
+  const init = (name) =>
+    new Promise((resolve) => {
+      pending.set(++id, resolve);
+      handleMessage({ data: { type: 'init', id, modelUrl: `https://test.invalid/${name}.onnx`, ep: 'wasm', cacheModel: false, allowUnverifiedModel: true } });
+    });
+  try {
+    startSearchWorker();
+    assert.equal((await init('old')).type, 'ready');
+    const replacing = init('new');
+    let settled = false;
+    void replacing.then(() => {
+      settled = true;
+    });
+    await disposing.promise;
+    loss.resolve({ reason: 'unknown', message: 'reset while init is pending' });
+    await new Promise((resolve) => setImmediate(resolve));
+    const notifications = messages.filter((message) => message.type === 'deviceLost');
+    assert.equal(notifications.length, 1);
+    assert.equal(Object.hasOwn(notifications[0], 'id'), false);
+    assert.equal(settled, false, 'loss notification must not masquerade as an init reply');
+    release.resolve();
+    assert.equal((await replacing).type, 'ready');
+    assert.equal((await init('third')).type, 'ready');
+    assert.equal((await init('fourth')).type, 'ready');
+    assert.equal(subscription.mock.callCount(), 1, 'same ORT device has one lost-promise listener across re-inits');
+    assert.equal(messages.filter((message) => message.type === 'deviceLost').length, 1);
+  } finally {
+    release.resolve();
+    if (deviceDescriptor) Object.defineProperty(env.webgpu, 'device', deviceDescriptor);
+    else delete env.webgpu.device;
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
 
 test('worker disposes a replacement after diagnostics fail and keeps its working evaluator', async (t) => {
   const descriptors = new Map(['self', 'navigator', 'fetch'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));

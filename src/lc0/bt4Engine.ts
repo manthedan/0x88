@@ -357,7 +357,7 @@ export class Bt4WorkerSearcher {
       this.worker = worker;
       worker.addEventListener('message', (event: MessageEvent) => {
         if (this.worker !== worker) return;
-        const message = event.data as { id: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number; loss?: OrtDeviceLoss };
+        const message = event.data as { id?: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number; loss?: OrtDeviceLoss };
         if (message.type === 'deviceLost') {
           this.deviceLost = message.loss ?? null;
           return;
@@ -366,6 +366,7 @@ export class Bt4WorkerSearcher {
           this.onDownloadProgress?.(message.loadedBytes ?? 0, message.totalBytes);
           return;
         }
+        if (typeof message.id !== 'number') return;
         const pending = this.pending.get(message.id);
         if (!pending) return;
         if (message.type === 'searchProgress') {
