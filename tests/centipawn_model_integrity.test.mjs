@@ -36,7 +36,7 @@ async function environment(t, create) {
     const url = input.url ?? input;
     requests.push({ url, cache: init?.cache ?? input.cache });
     if (url === '/models/centipawn.manifest.json') return Response.json({ models: [{ file: 's4fix_v_ema.onnx', url: URL, bytes: 3, sha256: SHA }] });
-    if (url === URL) return new Response(wire);
+    if (String(url).split('?')[0] === URL) return new Response(wire);
     return new Response(null, { status: 404 });
   });
   const cacheName = `centipawn-test-${t.name}`;
@@ -86,6 +86,24 @@ test('Centipawn uses manifest-pinned SHA-256 and Cache Storage; second creation 
   await env.sessions[0].options.reloadModel();
   assert.equal(env.requests.filter((r) => r.url === URL).length, 1);
   assert.equal(env.sessions[0].options.rejectModelParseErrors(), true, 'fallback parse recovery follows the reloaded provenance');
+});
+
+test('Centipawn query overrides find the same app pin and preserve the requested verified fetch URL', async (t) => {
+  const env = await environment(t),
+    requested = `${URL}?v=1`;
+  await createCentipawnOrtSession(requested, env.deps);
+  assert.equal(env.loads[0].sha256Valid, true);
+  assert.equal(env.loads[0].verification, 'hashed');
+  assert.equal(env.requests.filter((request) => request.url === requested).length, 1);
+  assert.equal(env.sessions.length, 1);
+});
+
+test('a queried Centipawn override still rejects a wrong hash before session creation', async (t) => {
+  const env = await environment(t);
+  env.setWire('bad');
+  await assert.rejects(createCentipawnOrtSession(`${URL}?v=2`, env.deps), /sha256 mismatch/i);
+  assert.equal(env.sessions.length, 0);
+  assert.equal(env.counts().writes, 0);
 });
 
 test('Centipawn hash mismatch rejects before session creation or persistent cache writes', async (t) => {

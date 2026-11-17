@@ -398,9 +398,10 @@ async function fetchModelManifest(manifestUrl: string): Promise<Lc0ModelManifest
 async function fetchManifestEntry(modelUrl: string, manifestUrl: string): Promise<Lc0ModelManifestEntry | undefined> {
   const manifest = await fetchModelManifest(manifestUrl);
   const absolute = absoluteUrl(modelUrl);
+  const file = new URL(absolute).pathname.split('/').pop();
   return manifest?.models?.find((entry) => {
     const entryUrl = absoluteUrl(entry.url);
-    return entry.url === modelUrl || entryUrl === absolute || entry.file === modelUrl.split('/').pop();
+    return entry.url === modelUrl || entryUrl === absolute || entry.file === file;
   });
 }
 

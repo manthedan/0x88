@@ -247,6 +247,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     };
     const isStaleMount = (signal) => signal.aborted || signal !== mountAbort.signal;
     const isMemoryConstrainedDevice = () => false, deviceMemoryClass = () => 'desktop';
+    let maia3PanelBlockedByRun = null;
     const shouldAutoAnalyzePosition = () => true, mainlineNodes = () => [];
     const awaitEngineRetirements = async () => {}, hasEngineRetirements = () => false;
     const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {};

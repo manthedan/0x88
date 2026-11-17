@@ -259,7 +259,7 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
   const api = compile(
     `
     let maia3PanelLoadGeneration=1,maia3PanelTask={dispose(){}},maia3PanelTimer=null;
-    let maia3PanelPending=pending,maia3PanelEvaluator=null,maia3PanelLoading=true,explorerMaia={},maia3PanelAbort=null;
+    let maia3PanelPending=pending,maia3PanelEvaluator=null,maia3PanelLoading=true,explorerMaia={},maia3PanelAbort=null,maia3PanelBlockedByRun=null;
     ${extract(source('analysisBrowser'), 'function unloadMaia3Panel(', 'async function enableMaia3Panel(')}
     unloadMaia3Panel('Unloaded');
     return ()=>({maia3PanelEvaluator,maia3PanelLoading,maia3PanelLoadGeneration,explorerMaia});
@@ -308,7 +308,7 @@ test('Analysis cancels a pending Maia panel load, awaits terminal cleanup, and r
   const api = compile(
     `
     let maia3PanelLoadGeneration=0,maia3PanelTask=null,maia3PanelTimer=null,maia3PanelPending=null;
-    let maia3PanelEvaluator=null,maia3PanelLoading=false,maia3PanelAbort=null,explorerMaia=null;
+    let maia3PanelEvaluator=null,maia3PanelLoading=false,maia3PanelAbort=null,explorerMaia=null,maia3PanelBlockedByRun=null;
     ${extract(text, 'function unloadMaia3Panel(', 'function scheduleMaia3Panel(')}
     return {enable:enableMaia3Panel,unload:unloadMaia3Panel};
   `,

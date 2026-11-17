@@ -4466,7 +4466,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     // during init ends this run in favour of the queued one (below). A run with
     // no uninitialized big net does not yield.
     if (isMemoryConstrainedDevice() && rows.some((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant))) {
-      unloadMaia3Panel('Maia3 unloaded to make room for Lc0. Enable Maia3 to reload.');
+      maia3PanelBlockedByRun = controller;
+      unloadMaia3Panel('Maia3 unloaded to make room for Lc0. Enable Maia3 after analysis finishes to reload.');
     }
     if (hasEngineRetirements()) await awaitEngineRetirements();
     if (controller.signal.aborted || mountAbort.signal.aborted) return;
@@ -4788,6 +4789,10 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
     analysisOperations.delete(runId);
+    if (maia3PanelBlockedByRun === controller) {
+      maia3PanelBlockedByRun = null;
+      maybeEl('maia3Enable')?.toggleAttribute('disabled', false);
+    }
     const owns = analysisOperationId(analysisRunState.execution) === runId;
     const effects = applyAnalysisEvent({ type: 'SETTLED', operationId: runId });
     if (owns && !mountAbort.signal.aborted) {
@@ -4863,6 +4868,7 @@ let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
 let maia3PanelPending: Promise<Maia3BrowserEvaluator> | null = null;
 let maia3PanelAbort: AbortController | null = null;
+let maia3PanelBlockedByRun: AbortController | null = null;
 let maia3PanelLoadGeneration = 0;
 let maia3PanelTask: LatestOnlyTask<string> | null = null;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -4901,11 +4907,12 @@ function unloadMaia3Panel(message: string): void {
   el('maia3Caption').hidden = true;
   const enable = el('maia3Enable') as HTMLButtonElement;
   enable.hidden = false;
-  enable.disabled = false;
+  enable.disabled = maia3PanelBlockedByRun !== null;
   maia3PanelStatus(message);
 }
 
 async function enableMaia3Panel(): Promise<void> {
+  if (maia3PanelBlockedByRun) return;
   if (maia3PanelEvaluator || maia3PanelLoading) return;
   const mountSignal = mountAbort.signal;
   const generation = ++maia3PanelLoadGeneration;
@@ -6400,6 +6407,9 @@ async function reloadLc0Backend(
   criticalPanel?.invalidate();
   disposeRuntimeResources();
   if (operationSignal?.aborted) return false;
+  // Settings invalidate the old backend, not permission to allocate an unused
+  // one. A later admitted Small run requests the backend through NEEDS_BACKEND.
+  if (!automaticAnalysisAllowed() || !activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) return true;
   reconcileActiveRuntimeFallbackWarning();
   renderRecklessRuntimeInfo();
   const loaded = await loadLc0Backend(
@@ -6499,6 +6509,7 @@ let lastAnalysisMountHref: string | null = null;
 
 function resetAnalysisPageState(): void {
   analysisHasExplicitInput = false;
+  maia3PanelBlockedByRun = null;
   tree = new GameTree(START_FEN);
   workspaceHeaders = {};
   workspaceResult = '*';

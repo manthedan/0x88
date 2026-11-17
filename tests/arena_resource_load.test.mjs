@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loadArenaResource } from '../src/lc0/arenaResourceLoad.ts';
+import { awaitEngineRetirements, hasEngineRetirements } from '../src/lc0/engineRetirement.ts';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -36,6 +37,36 @@ test('Stop rejects immediately and disposes an evaluator that finishes loading l
   });
   await tick();
   assert.equal(disposed, 1);
+});
+
+test('a canceled native creation and its asynchronous release block the next model until both settle', async () => {
+  const creation = Promise.withResolvers(),
+    release = Promise.withResolvers(),
+    controller = new AbortController();
+  const loading = loadArenaResource(() => creation.promise, controller.signal);
+  await tick();
+  controller.abort();
+  await assert.rejects(loading, { name: 'AbortError' });
+  assert.equal(hasEngineRetirements(), true, 'cancellation publishes cleanup synchronously');
+  let admitted = false,
+    disposed = false;
+  const waiting = awaitEngineRetirements().then(() => {
+    admitted = true;
+  });
+  await tick();
+  assert.equal(admitted, false);
+  creation.resolve({
+    dispose: () => {
+      disposed = true;
+      return release.promise;
+    },
+  });
+  await tick();
+  assert.equal(disposed, true);
+  assert.equal(admitted, false);
+  release.resolve();
+  await waiting;
+  assert.equal(admitted, true);
 });
 
 test('pre-aborted or immediately stopped initialization never starts a loader', async () => {

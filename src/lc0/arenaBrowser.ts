@@ -145,7 +145,7 @@ import {
   stormphraxCacheKey,
   viridithasCacheKey,
 } from './engineProvision.ts';
-import { awaitEngineRetirements } from './engineRetirement.ts';
+import { awaitEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
@@ -2981,12 +2981,24 @@ function disposeUnusedUciEngines(): void {
   stormphraxEngines.retain(rows.filter((row) => row.family === 'stormphrax').map((row) => stormphraxVariantForKey(row.variant)));
 }
 
+function reconcileArenaNeuralSessions(): void {
+  if (running) return;
+  const rows = activeSeatRows();
+  if (!rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant)) && (lc0Cache || loadingLc0)) disposeLc0Resources();
+  for (const key of ARENA_BIG_NET_KEYS) {
+    if (rows.some((row) => row.family === 'lc0' && row.variant === key)) continue;
+    peekBigNetSearcher(key)?.cancel();
+    releaseBigNetSearcher(key, 0);
+  }
+}
+
 function buildEngines() {
   for (const row of seatRows) {
     const safeVariant = phoneSafeEngineVariant(row.family, row.variant);
     if (safeVariant !== row.variant) showPhoneLargeNetFallback();
     row.variant = safeVariant;
   }
+  reconcileArenaNeuralSessions();
   for (const row of activeSeatRows()) clampStrength(row);
   const activeIds = new Set(activeSeatRows().map(engineIdForRow));
   pruneUnusedLc0Searchers(activeIds);
@@ -4576,8 +4588,9 @@ function disposeLc0Resources(): void {
   lc0LoadAbort?.abort();
   lc0LoadAbort = null;
   loadingLc0 = false;
-  void lc0Cache?.dispose();
+  const retired = lc0Cache;
   lc0Cache = null;
+  if (retired) trackEngineRetirement(Promise.resolve(retired.dispose()));
   arenaLc0ServedModelUrl = '';
   lc0Searchers.clear();
   lastLc0SearchResults.clear();
@@ -5196,11 +5209,6 @@ function wireEvents() {
     normalizeSeatRowForDeploy(seat);
     reconcileActiveRuntimeFallbackWarning();
     persistArenaSeatRows();
-    for (const key of ARENA_BIG_NET_KEYS) {
-      if (activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) continue;
-      peekBigNetSearcher(key)?.cancel();
-      releaseBigNetSearcher(key, 0);
-    }
     buildEngines();
     populateSeats();
     if (target.classList.contains('seat-var')) el('arenaSeatList').querySelector<HTMLElement>(`.seat-var[data-seat="${seat}"]`)?.focus();
