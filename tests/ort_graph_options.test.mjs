@@ -88,6 +88,7 @@ test('big-net worker receives page graph/folding options, keeps device model sel
   assert.equal(first.ortDiagnostics.preferredOutputLocation, 'gpu-buffer');
   assert.equal(first.dequantFold, false, 'app-side folding is independent and must also reach the worker');
   assert.equal(first.deviceModelSelection, true, 'model overrides keep production split-K rules');
+  assert.equal(first.ortIoMode, 'cpu', 'big-net device selection must not inherit Small GPU capture');
   assert.equal(first.allowUnverifiedModel, undefined, 'diagnostic config must not weaken model integrity');
   assert.equal(first.modelUrl, '/models/lc0/lqo_v2.f16.onnx');
   assert.equal(searcher.ortRuntime.graphOptimizationLevel, 'disabled');

@@ -5,6 +5,7 @@ import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
 import { OrtGpuIoBinding, type OrtGpuIoOutputs, type OrtGpuIoTensorSpec, ortGraphCaptureSessionOptions } from '../nn/ortGpuIo.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
+import { type OnnxModelIo, readOnnxModelIo } from './onnxModelIo.ts';
 import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
 
@@ -554,7 +555,8 @@ function fixedDims(shape: readonly unknown[] | undefined): number[] | null {
  * Exported for tests.
  */
 export function lc0GpuIoSpecs(
-  session: Pick<ort.InferenceSession, 'inputNames' | 'outputNames' | 'inputMetadata' | 'outputMetadata'>,
+  session: OnnxModelIo,
+  { inferOutputBatch = false }: { inferOutputBatch?: boolean } = {},
 ): { input: OrtGpuIoTensorSpec; outputs: OrtGpuIoTensorSpec[] } | { reason: string } {
   const spec = (meta: unknown, name: string): OrtGpuIoTensorSpec | string => {
     const m = meta as { isTensor?: boolean; type?: string; shape?: readonly unknown[] } | undefined;
@@ -572,10 +574,13 @@ export function lc0GpuIoSpecs(
   if (typeof input === 'string') return { reason: input };
   const outputs: OrtGpuIoTensorSpec[] = [];
   for (const name of session.outputNames) {
-    const out = spec(
-      session.outputMetadata.find((m) => m.name === name),
-      name,
-    );
+    const meta = session.outputMetadata.find((m) => m.name === name);
+    // Small declares policy as ['batch', 1858] even with fixed batch-1 input;
+    // ORT infers that head's batch. Permit that known LC0 convention only in
+    // preflight; the post-create check still requires actual numeric shapes.
+    const inferBatch = inferOutputBatch && meta?.shape?.[0] === 'batch' &&
+      [LC0_ONNX_OUTPUT_POLICY, LC0_ONNX_OUTPUT_WDL, LC0_ONNX_OUTPUT_MLH].includes(name);
+    const out = spec(inferBatch ? { ...meta, shape: [input.dims[0], ...meta!.shape!.slice(1)] } : meta, name);
     if (typeof out === 'string') return { reason: out };
     outputs.push(out);
   }
@@ -595,6 +600,12 @@ async function createLc0GpuIoSession(
 ): Promise<{ session: ort.InferenceSession; binding: OrtGpuIoBinding } | null> {
   let session: ort.InferenceSession | undefined;
   try {
+    // Reject symbolic declarations before allocating/folding a complete session.
+    // URL-only lab callers have no verified declarations to inspect: use CPU IO
+    // rather than downloading a second, potentially different copy for a probe.
+    if (typeof modelPath === 'string') return null;
+    const declared = lc0GpuIoSpecs(readOnnxModelIo(modelPath instanceof Uint8Array ? modelPath : new Uint8Array(modelPath)), { inferOutputBatch: true });
+    if ('reason' in declared) throw new Error(`model not eligible: ${declared.reason}`);
     const placement = await ort.resolveOrtSessionPlacement();
     if (placement.providers[0] !== 'webgpu') return null;
     session = await ort.createOrtSession(modelPath, {

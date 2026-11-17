@@ -1,0 +1,113 @@
+# Mobile memory, phase 1 — 2026-11-17
+
+Companion to [mobile soak](mobile_soak_2026-11-16.md). Worktree/branch: `mobile-soak` / `lab/mobile-soak`; baseline `720aaf4a`. Desktop measurements below are **not iPhone validation**. The Carbon analysis is a source of hypotheses, not allocation evidence.
+
+## Scope and invariants
+
+Four separately tested changes: (1) big-net CPU IO and pre-session shape eligibility, (2) channel integrity and one-shot warm-cache parse recovery, (3) byte-identical single-output-buffer dequantization and shorter input lifetimes, (4) Analysis big-net retirement. Folding stays enabled by default. No OPFS, incremental hashing, model-format change, ORT patch, deployment, or cache-policy redesign.
+
+Keep pinned SHA-256/length verification, verified-only cache writes, the existing metadata-trusted warm-cache policy, resumable/shard verification, and cache version/LRU limits. Do not trade these for memory. The existing metadata fast path attests previously verified storage; it is not a new hash of every warm read. Parse-failure recovery is defense in depth, not a claim that protobuf parsing authenticates tensor weights.
+
+## Owner evidence (copied, not newly measured)
+
+Physical iPhone Safari 26.6: LQO dies at WebContent `ActiveHard 2048 MB`; footprint 0.34 s before death was 1639 MB. BT4/Arena also die; t3, Maia3, Centipawn and Small survive.
+
+Earlier desktop LQO default trace, MB:
+
+| t (ms) | Total | JS VM Gigacage | WebKit malloc | Graphics |
+|---:|---:|---:|---:|---:|
+| 3083 | 186 | 120 | 26 | 31 |
+| 4816 | 341 | 183 | 117 | 31 |
+| 5941 | 830 | 751 | 38 | 31 |
+| 7764 | 1443 | 376 | 1004 | 32 |
+| 9732 | 2294 | 948 | 1085 | 229 |
+| 13424 | 2738 | 1304 | 1164 | 236 |
+
+Newer owner desktop LQO peaks, MB:
+
+| Configuration | Total | Gigacage | WebKit malloc |
+|---|---:|---:|---:|
+| Default | 3130 | 1356 | 1518 |
+| `ortDequantFold=0` | 1629 | 93 | 1331 |
+| `ortDequantFold=0&ortGraphOpt=disabled` | 1520 | — | — |
+| Plain `lqo_v2.f16.onnx` | 2423 | — | 1986 |
+
+Owner's WASM-only LQO peak: 1349 MB, including 1025 MB WebKit malloc. This rules out attributing *all* that category to GPU upload; it does not identify every native allocation.
+
+## Measurement method
+
+- Safari **26.4** on this Mac; Apple WebGPU, COOP/COEP, `crossOriginIsolated=true`. Runtime reports asyncify, one WASM thread; SharedArrayBuffer is available.
+- Own static server: `scripts/serve_isolated_static.mjs dist-client`, initially port 61981. Existing `127.0.0.1:4445` safaridriver was used, not started/stopped.
+- Owner's unmodified `mac-footprint.mjs` samples new WebContent processes. Its 300 ms sleep is **not** the effective sampling interval: synchronous `footprint` calls take additional time. Peaks can miss shorter spikes.
+- URL: `/lab/mobile-soak/?auto=1&steps=<lqo|t3|bt4>&assetBase=https%3A%2F%2Fassets.0x88.app`. Shipped URLs, automatic Apple t3 split-K, default graph `all` and app folding enabled unless stated otherwise.
+- A measurement-only WebDriver preload navigates with `auto=0`, observes small worker-ready messages, then calls the same `__mobileSoak.start()` used by auto-run. No alternate model loader. Tracing runs additionally instrument the real worker; their footprints are **excluded** from the comparison tables.
+- **Cold:** clear Cache Storage before starting. **Warm:** hard-navigate and rerun inside the **same automation session**, asserting the worker reports `hit … sha256 trusted`. Separate Safari automation sessions did not preserve Cache Storage; initial purported warm runs were misses and were discarded.
+- Warm rows deliberately include the real same-WebContent reload/allocator-retention cost. They are not fresh-process cache-hit estimates. Neither `disposeMs` nor `worker.terminate()` guarantees immediate OS footprint reclamation. A warm increase alone does not prove two live pool records.
+- Each table cell is **sampled peak / end-window footprint**, MB as converted by the supplied script. “End” is the median of the final three samples, about eight seconds after the first `done` poll. This is the requested settled observation, **not a guaranteed steady-state plateau or forced-GC result**. Some native totals were still growing. One cold/warm pair per model per stage; do not overinterpret small differences.
+- Raw samples, ready messages, reports, trace events and measurement helpers are retained locally under ignored `.local-dev-artifacts/mobile-memory/`; `base-final-*` is the valid baseline and `step1-*` the first change.
+
+## Verified load path and copy accounting
+
+`Bt4WorkerSearcher.init()` posts a **URL and settings**, not model bytes, to `searchWorkerCore`. `createLc0OnnxEvaluatorFromUrl()` chooses the device variant, then `modelCache` downloads/verifies/caches **inside that worker**. There is no main-to-worker full-model structured clone to replace with a transfer. The ordinary big-net path is monolithic, not `modelPack`/resumable assembly.
+
+Cold LQO instrumentation counted **one model SHA-256 call, 95,662,716 bytes**. On this input, the pinned manifest length preallocates the download target, so capacity-doubling is not the observed load path. Verification and `cache.put` are awaited before folding. This does not establish that cache/hash copies are free, nor audit every resumable path.
+
+Page-relative instrumented baseline timeline (ms):
+
+| From–to | Event | Evidence |
+|---|---|---|
+| 7701–7801 | Whole-model SHA-256, 95,662,716 bytes | Wrapped real `crypto.subtle.digest`; one call |
+| 7805–8149 | `new Response(bytes)` / Cache Storage put | Wrapped real Response/Cache APIs; native buffer lifetime beyond API completion not observable |
+| 8245–9225 | Fold #1, 95,662,716 → 189,399,671 bytes | Temporary hooks around existing fold |
+| 9225–10690 | ORT create #1 | Temporary hooks around real `InferenceSession.create` |
+| 9515–9654 | WASM linear memory grows 199,098,368 → 413,073,408 bytes | Real exported Memory and `Memory.grow` observations |
+| 10699 | GPU IO rejected: `/input/planes: dynamic shape` | Existing warning |
+| 10699–11936 | Fold #2, same sizes | Same hooks |
+| 11939–12841 | ORT create #2 | Same hooks |
+
+The large later peak is not contemporaneous with the digest call in this trace. Crucially, the observed **413 MB linear-memory high-water is not the entire 1–2 GB “WebKit malloc” category**. Carbon's categorical attribution of that bucket to a ~1 GB WASM heap / 4–5× protobuf multiplier is not demonstrated here. Native JIT, driver allocations, staging, allocator retention and ORT internals need separate attribution.
+
+Copy table (sizes are exact bytes where given; aliases are not counted twice):
+
+| Copy / allocation | Realm / owner | LQO / BT4 size | Alive from–to | Evidence / certainty |
+|---|---|---|---|---|
+| Download target / warm `arrayBuffer()` result | Search worker JS, `modelCache` | 95,662,716 / 186,676,343 | Download/cache read through evaluator preparation; formerly retained across ORT creation by `modelLoad.model` and `prepared.original` aliases | Source-proven single shared input buffer; aliases are not extra copies |
+| WebCrypto native input, Response/cache native body | WebKit internals | API input 95,662,716 / 186,676,343; exact native residency unknown | Digest / Response construction and Cache put/read; release time unknown | API calls measured; exact native copy count/lifetime **not** inferred from the category total |
+| Per-tensor f32 dequantized values | Worker JS, old `dequantize()` | Largest 6,291,456 / 100,663,296 | One tensor's conversion; may remain uncollected afterwards | Source plus shipped-model tensor sizes |
+| Per-tensor f16 encoding scratch | Worker JS, old `encodeFloat()` | Largest 3,145,728 / 50,331,648 | Tensor encoding; may remain uncollected | Source plus shipped-model tensor sizes |
+| Encoded replacement initializer Map | Worker JS, old fold | Aggregate 188,246,499 / 369,072,867 | Accumulates during folding; live through graph serialization | Exact sum of replacement TensorProto lengths |
+| Serialized graph intermediate | Worker JS, old `graph.finish()` | 189,399,626 / 370,637,592 | Graph finish through final model finish | Exact GraphProto payload size |
+| Final folded model | Worker JS → ORT | 189,399,671 / 370,637,638 | Final model finish through ORT byte ingestion | Exact output; 144 / 147 nodes folded |
+| ORT input `_malloc` / `HEAPU8.set` | ORT WASM linear memory | Folded model length | Native model load until native session creation finishes | Installed ORT-web loader source; allocation is inside the measured heap, not additive to it |
+| Parsed graph / CPU initializers / temporaries / allocator slack | ORT internals | Not individually measured | Native session initialization and session lifetime | Hypotheses; cannot split them using `footprint` alone |
+| Resident GPU weights / staging / pipelines | WebGPU / WebKit | Category total is observable, individual buffers not fully attributed | Upload through session/device teardown and native reclamation | Baseline cold peak graphics about 220 / 411 MB; not a byte-exact weight-only measurement |
+
+Before rewriting, **input + replacement Map + graph + final model alone** necessarily coexist at final serialization: **662,708,512 bytes LQO / 1,297,024,440 bytes BT4**, excluding per-tensor garbage, runtime and ORT. This is source/size accounting, not an assertion that each byte is simultaneously physically resident. LQO then repeats the fold/session sequence; t3's plain-f16 split-K model is a no-fold identity return.
+
+## Baseline and step 1: session creation / IO
+
+Baseline:
+
+| Model | Cold peak / end MB | Warm peak / end MB | Load cold / warm ms | Midgame visits/s cold / warm |
+|---|---:|---:|---:|---:|
+| lqo | 3627 / 3576 | 5255 / 4781 | 9332 / 6248 | 67.5 / 65.8 |
+| t3 | 1747 / 1744 | 3545 / 3436 | 12972 / 4163 | 70.2 / 49.2 |
+| bt4 | 2800 / 2800 | 5862 / 3225 | 19050 / 6562 | 18.8 / 22.7 |
+
+After step 1:
+
+| Model | Cold peak / end MB | Warm peak / end MB | Load cold / warm ms | Midgame visits/s cold / warm |
+|---|---:|---:|---:|---:|
+| lqo | 2903 / 2820 | 5164 / 5162 | 8299 / 3563 | 74.3 / 71.4 |
+| t3 | 2871 / 2807 | 5554 / 5510 | 11424 / 3202 | 65.1 / 64.7 |
+| bt4 | 3754 / 3630 | 6487 / 6139 | 14814 / 6357 | 23.0 / 21.4 |
+
+- Big-net init explicitly sends `ortIoMode:'cpu'`, independently of `deviceModelSelection:true`; worker-ready messages confirm CPU IO. Small's `defaultLc0OrtIoMode(true) === 'gpu-capture'` is unchanged. A real Safari production search-worker probe selected Small split-K, reported `gpu-capture`, and completed eight visits.
+- New protobuf-only IO reader inspects declared tensor types and input/output shapes before any GPU-IO session attempt. Symbolic/missing/nonpositive input dimensions, unresolved output dimensions, nonfloat outputs and missing heads reject without a probe session. Small's policy declaration is `['batch',1858]` despite a fixed batch-1 input: preflight permits that known head-batch convention for ORT to infer, while post-create validation still demands numeric dimensions. Initializers listed as old-format graph inputs are excluded. Raw payloads are only viewed, not copied. URL-only lab inputs conservatively use CPU IO rather than fetching an unverified shape-probe copy. Post-create metadata validation remains defense in depth.
+- LQO's duplicate initialization is removed. Its Gigacage at the cold total-footprint peak fell from **1180 to 274 MB** in these runs. **Total footprint did not improve consistently across models:** native malloc/end-window retention was larger on t3/BT4. These data do not establish the consultant's predicted total-memory saving.
+- Quick speed check uses the second fixed eight-visit position, after initial inference. t3 cold −7%, warm +32%; BT4 cold +22%, warm −6%: no consistent regression, but this small sample cannot prove a <2% bound. CPU IO moves the old captured zero-input warm-up cost into first search; do not compare first-search speed without accounting for load/warm-up time.
+- Validation: lint, 80 relevant tests, Svelte typecheck (zero errors/warnings), product build. Baseline output SHA-256 goldens were captured **before** changing the folding algorithm for all seven shipped/fallback QDQ artifacts (Small variants, LQO, BT4, Maia variants), after verifying their pinned input hashes.
+
+## Remaining work / costs
+
+Steps 2–4 and final no-fold controls will be recorded in subsequent commits. At this stage the requested sub-1 GB LQO / sub-2 GB BT4 peaks are **not achieved**. The significant native/WebKit cost and reload retention remain unexplained by JS copy counts alone. Do not promise an iPhone fix, disable folding by default, weaken integrity, or embark on OPFS/streaming hash work based on these observations.

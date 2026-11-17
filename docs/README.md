@@ -133,6 +133,7 @@ proposals. A historical record is not an instruction to restore its old defaults
 - [`arena_simul_gate_2026-11.md`](arena_simul_gate_2026-11.md) — Arena simul feasibility gate: bounded experiment only.
 - [`lowend_memory_harness_2026-10.md`](lowend_memory_harness_2026-10.md) — memory harness rerun on a desktop baseline (not a phone).
 - [`mobile_soak_2026-11-16.md`](mobile_soak_2026-11-16.md) — phone stress-test lab, production loader coverage, crash recovery and controller ownership guards; desktop evidence only.
+- [`mobile_memory_2026-11-17.md`](mobile_memory_2026-11-17.md) — phase-1 model-load memory accounting, Safari cold/warm measurements, integrity, folding and Analysis lifetime fixes.
 
 ## Upstream contributions
 
