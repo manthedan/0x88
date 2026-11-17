@@ -1,8 +1,33 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import ts from 'typescript';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
+import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { SOAK_STORAGE_KEY } from '../src/lc0/mobileSoak.ts';
 import { MobileSoakDocument, mountMobileSoak } from '../src/lc0/mobileSoakBrowser.ts';
+
+// Execute the real adapter without importing unrelated TVM-only TypeScript parameter properties.
+const engineSource = readFileSync(new URL('../src/lc0/mobileSoakEngines.ts', import.meta.url), 'utf8');
+const makeSoakEngine = new Function(
+  'Maia3BrowserEvaluator',
+  'BIG_NETS',
+  'isDefaultBrowserUciFamily',
+  'ortDequantFoldEnabled',
+  'requestedOrtGraphOptimizationLevel',
+  'MAIA3_ORT_DEFAULTS',
+  ts.transpile(engineSource.slice(engineSource.indexOf('export function makeSoakEngine')).replace('export function', 'function'), {
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+  }) + '; return makeSoakEngine;',
+)(
+  Maia3BrowserEvaluator,
+  {},
+  () => false,
+  () => true,
+  () => 'all',
+  { dequantFold: true },
+);
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const deferred = () => Promise.withResolvers();
@@ -83,6 +108,55 @@ function browser(t, search = '?steps=sf-lite,t3') {
       fakeDocument.dispatchEvent(new Event('visibilitychange'));
     },
   };
+}
+
+for (const failCleanup of [false, true]) {
+  test(`aborted Maia init keeps remount behind owned cleanup and propagates teardown failure (${failCleanup})`, async (t) => {
+    const f = browser(t, '?steps=maia3,t3');
+    const cleanup = deferred();
+    let initializing = false;
+    let newLoads = 0;
+    t.mock.method(
+      Maia3BrowserEvaluator,
+      'create',
+      ({ signal, onInitCleanup }) =>
+        new Promise((_, reject) => {
+          initializing = true;
+          signal.addEventListener(
+            'abort',
+            () => {
+              onInitCleanup(cleanup.promise);
+              reject(new DOMException('Maia init cancelled', 'AbortError'));
+            },
+            { once: true },
+          );
+        }),
+    );
+    const makeEngine = async (id, signal) =>
+      id === 'maia3'
+        ? makeSoakEngine(id, signal)
+        : engine(id, {
+            load: async () => {
+              newLoads++;
+            },
+          });
+    const old = f.mount({ makeEngine });
+    await old.ready;
+    const oldRun = old.api.start();
+    await until(() => initializing);
+    old.destroy();
+    const current = f.mount({ makeEngine });
+    await current.ready;
+    assert.equal(current.api.state, 'crashed-awaiting-choice');
+    const resumed = current.api.continueAfterCrash();
+    await tick();
+    assert.equal(newLoads, 0, 'logical init cancellation must not release the document queue');
+    if (failCleanup) cleanup.reject(new Error('retired Maia release failed'));
+    else cleanup.resolve();
+    await Promise.all([oldRun, resumed]);
+    assert.equal(current.api.unsafeDisposal, failCleanup);
+    assert.equal(newLoads, failCleanup ? 0 : 1);
+  });
 }
 
 test('lab gap follows awaited teardown, holds ballast, and custom Start preserves params', async (t) => {

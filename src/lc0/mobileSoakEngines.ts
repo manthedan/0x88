@@ -41,6 +41,7 @@ export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: 
   let cpuProbe: ReturnType<typeof createSoakCpuProbe> | undefined;
   let big: Bt4WorkerSearcher | undefined;
   let maia: Maia3BrowserEvaluator | undefined;
+  const maiaInitCleanup: Promise<void>[] = [];
   let centi: (Evaluator & { dispose?: () => Promise<void>; destroy?: () => void }) | undefined;
   let runtime: Record<string, unknown> = {};
   let lost: OrtDeviceLoss | null = null;
@@ -70,7 +71,7 @@ export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: 
         await big.init();
         runtime = { backend: big.backend, fallback: big.fallback ?? null, servedModelUrl: big.servedModelUrl, ortRuntime: big.ortRuntime };
       } else if (id === 'maia3') {
-        maia = await Maia3BrowserEvaluator.create({ signal });
+        maia = await Maia3BrowserEvaluator.create({ signal, onInitCleanup: (cleanup) => maiaInitCleanup.push(cleanup) });
         runtime = {
           backend: maia.backend,
           note: 'Production policy evaluator, not a tree-search engine',
@@ -165,7 +166,11 @@ export function makeSoakEngine(id: string, signal: AbortSignal, modelOverride?: 
       unwatch?.();
       cpu?.dispose(); // These adapters synchronously terminate their workers.
       await big?.dispose(); // Await only our detached instance, never a destination's record under the same key.
-      await maia?.dispose();
+      // create() must reject abort promptly, but this adapter still owns its retired worker.
+      // Do not let a route remount leave the document queue until that cleanup settles.
+      const maiaDisposals = await Promise.allSettled([...maiaInitCleanup, ...(maia ? [maia.dispose()] : [])]);
+      const failed = maiaDisposals.find((entry) => entry.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
       if (centi?.dispose) await centi.dispose();
       else centi?.destroy?.();
     },

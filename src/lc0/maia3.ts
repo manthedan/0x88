@@ -244,6 +244,8 @@ export interface Maia3BrowserEvaluatorOptions {
   allowUnverifiedModel?: boolean;
   /** Abort model loading and terminate this evaluator's worker, including pending inference. */
   signal?: AbortSignal;
+  /** An owner can await retired initialization even when abort rejects create() immediately. */
+  onInitCleanup?: (cleanup: Promise<void>) => void;
   /** Optional owner-supplied CPU reservation; ordinary Human/Play defaults are unchanged. */
   wasmThreads?: number;
   /** Fatal transport failure, including when no inference is in flight. */
@@ -346,6 +348,7 @@ export class Maia3BrowserEvaluator {
         return evaluator;
       } catch (error) {
         const closing = disposeOrtWorker(worker);
+        options.onInitCleanup?.(closing);
         if (options.signal?.aborted) void closing.catch(() => undefined);
         else await closing;
         throw error;

@@ -67,6 +67,36 @@ function setup(t, error = 'INVALID_PROTOBUF', freshFailure = false) {
   return { deps, workers, loads, evictions };
 }
 
+test('Maia abort rejects init promptly but publishes its bounded retirement promise to the owner', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fake = setup(t);
+  t.mock.method(Worker.prototype, 'postMessage', () => {}); // No ready or release ack.
+  const abort = new AbortController();
+  let retirement;
+  const creating = Maia3BrowserEvaluator.create(
+    {
+      modelUrl: URL,
+      signal: abort.signal,
+      onInitCleanup: (cleanup) => {
+        retirement = cleanup;
+      },
+    },
+    fake.deps,
+  );
+  for (let i = 0; i < 10 && !fake.workers.length; i++) await Promise.resolve();
+  assert.equal(fake.workers.length, 1);
+  const rejected = assert.rejects(creating, { name: 'AbortError' });
+  abort.abort();
+  await rejected;
+  assert.ok(retirement instanceof Promise);
+  assert.equal(fake.workers[0].terminated, false);
+  t.mock.timers.tick(1499);
+  assert.equal(fake.workers[0].terminated, false);
+  t.mock.timers.tick(1);
+  await retirement;
+  assert.equal(fake.workers[0].terminated, true);
+});
+
 test('Maia repairs the exact metadata-trusted cache entry once, in a fresh worker', async (t) => {
   const fake = setup(t);
   const evaluator = await Maia3BrowserEvaluator.create({ modelUrl: URL }, fake.deps);
