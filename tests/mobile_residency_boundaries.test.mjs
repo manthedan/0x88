@@ -5,6 +5,7 @@ import test from 'node:test';
 import { analysisCanPrepare } from '../src/lc0/analysisRunState.ts';
 import { loadRetirableResource } from '../src/lc0/arenaResourceLoad.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../src/lc0/engineRetirement.ts';
+import { Lc0WholeOnnxWebgpuEvaluator } from '../src/lc0/wholeOnnxWebgpuEvaluator.ts';
 
 const source = (name) => readFileSync(new URL(`../src/lc0/${name}.ts`, import.meta.url), 'utf8');
 function extract(text, first, last) {
@@ -205,6 +206,88 @@ for (const pendingNative of [false, true])
     release.resolve();
     await retirement;
     assert.equal(retired, true);
+  });
+
+test('Arena forwards cancellation into whole-model initialization before any fetch', async () => {
+  const create = compile(
+    `${extract(source('arenaBrowser'), 'async function createSelectedLc0Evaluator(', 'async function loadLc0Evaluator(')}return createSelectedLc0Evaluator;`,
+    {
+      selectedLc0Runtime: () => 'whole',
+      LC0_WHOLE_MODEL_WEBGPU_RUNTIME: 'whole',
+      LC0_WHOLE_MODEL_MANIFEST_URL: '/runtimes/lc0-tvmjs-webgpu/t1/f16/v1/manifest.json',
+      lc0WholeModelPhysicalBatch: () => 4,
+      lc0WholeModelTensorCache: () => true,
+      Lc0WholeOnnxWebgpuEvaluator,
+    },
+  );
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(create(controller.signal), { name: 'AbortError' });
+});
+
+for (const reason of ['navigation', 'seat cancellation', 'diagnostics failure'])
+  test(`Arena retains native ownership through asynchronous cache handoff: ${reason}`, async () => {
+    const diagnostics = Promise.withResolvers(),
+      started = Promise.withResolvers(),
+      release = Promise.withResolvers(),
+      mount = new AbortController();
+    let calls = 0;
+    const evaluator = {
+      dispose: () => {
+        calls++;
+        return release.promise;
+      },
+    };
+    const api = compile(
+      `
+    let lc0LoadAbort=null,loadingLc0=false,lc0Cache=null;
+    ${extract(source('arenaBrowser'), 'async function loadLc0Evaluator(', 'async function reloadLc0Evaluator(')}
+    return {load:()=>loadLc0Evaluator(),cancel:()=>lc0LoadAbort.abort(),peek:()=>lc0Cache};
+  `,
+      {
+        mountAbort: mount,
+        isStaleMount: (s) => s.aborted,
+        selectedLc0Runtime: () => 'onnx',
+        selectedSeatsNeedLc0Evaluator: () => true,
+        el: () => ({ toggleAttribute() {} }),
+        refreshSeatControls: () => {},
+        readyMessage: () => 'Ready',
+        lc0HybridConfigLabel: () => 'onnx',
+        lc0RuntimeLabel: () => 'onnx',
+        showDownloadProgress: () => {},
+        hideDownloadProgress: () => {},
+        awaitEngineRetirements,
+        trackEngineRetirement,
+        loadArenaResource: loadRetirableResource,
+        createSelectedLc0Evaluator: async () => evaluator,
+        collectOrtRuntimeDiagnostics: () => {
+          started.resolve();
+          return diagnostics.promise;
+        },
+      },
+    );
+    const loading = api.load();
+    await started.promise;
+    if (reason === 'navigation') mount.abort();
+    else if (reason === 'seat cancellation') api.cancel();
+    else {
+      diagnostics.reject(new Error('diagnostics failed'));
+      await loading;
+    }
+    let retired = false;
+    const waiting = awaitEngineRetirements().then(() => {
+      retired = true;
+    });
+    await new Promise(setImmediate);
+    assert.equal(calls, 1);
+    assert.equal(retired, false);
+    assert.equal(api.peek(), null);
+    release.resolve();
+    await waiting;
+    if (reason !== 'diagnostics failure') diagnostics.resolve({});
+    await loading;
+    assert.equal(calls, 1, 'native disposal is idempotent across cancellation and the resumed handoff');
+    assert.equal(api.peek(), null);
   });
 
 test("Stop during retirement reaches Arena's stopped-state handler rather than leaving a live match", async () => {

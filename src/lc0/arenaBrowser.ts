@@ -4661,6 +4661,7 @@ async function createSelectedLc0Evaluator(signal: AbortSignal): Promise<Lc0OnnxE
   if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
     return Lc0WholeOnnxWebgpuEvaluator.create({
       manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
+      signal,
       batch: lc0WholeModelPhysicalBatch(),
       fetchTensorCache: lc0WholeModelTensorCache(),
       logger: (line) => console.info('[lc0 whole-model arena]', line),
@@ -4701,13 +4702,27 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
   const hybrid = lc0HybridConfigLabel(runtime);
   el('message').textContent = 'Loading the Lc0 network…';
   showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
+  let pendingDisposal: (() => Promise<void>) | undefined;
+  const retireUninstalled = () => {
+    if (pendingDisposal) trackEngineRetirement(pendingDisposal());
+  };
+  signal.addEventListener('abort', retireUninstalled, { once: true });
   try {
     await awaitEngineRetirements();
     signal.throwIfAborted();
-    const evaluator = await loadArenaResource(() => createSelectedLc0Evaluator(signal), signal);
+    const owned = await loadArenaResource(async () => {
+      const evaluator = await createSelectedLc0Evaluator(signal);
+      let closing: Promise<void> | undefined;
+      const dispose = () => (closing ??= Promise.resolve().then(() => evaluator.dispose?.()));
+      pendingDisposal = dispose;
+      if (signal.aborted) retireUninstalled();
+      return { evaluator, dispose };
+    }, signal);
+    const evaluator = owned.evaluator;
     const ortDiagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics({ probeAdapter: false }) : undefined;
     if (isStaleMount(mountSignal) || signal.aborted) {
-      void evaluator.dispose?.();
+      await trackEngineRetirement(owned.dispose());
+      pendingDisposal = undefined;
       return;
     }
     publishBrowserRuntimeAudit({
@@ -4736,7 +4751,9 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
             : 'hybrid runtime is pack-lazy until first evaluation succeeds',
       ].filter((part): part is string => !!part),
     });
+    signal.throwIfAborted();
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
+    pendingDisposal = undefined; // The cache now owns retirement; the load lease is fully handed off.
     void renderRuntimeBadge();
     lc0Searchers.clear();
     renderCacheInfo();
@@ -4744,6 +4761,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
     setArenaStartDisabled(false);
     el('message').textContent = readyMessage();
   } catch (error) {
+    retireUninstalled();
     if (isStaleMount(mountSignal) || signal.aborted) return;
     hideDownloadProgress();
     if (!selectedSeatsNeedLc0Evaluator()) {
@@ -4753,6 +4771,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
     }
   } finally {
+    signal.removeEventListener('abort', retireUninstalled);
     if (!isStaleMount(mountSignal) && lc0LoadAbort === loadAbort) {
       lc0LoadAbort = null;
       loadingLc0 = false;

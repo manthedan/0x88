@@ -51,6 +51,20 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       if (runtime === 'tvmjs' || runtime === 'custom-webgpu') assert.match(loaded.fallbackReason, /ORT-only/);
       else assert.equal(loaded.fallbackReason, undefined);
     }
+    const aliased = await createBrowserSquareformerRuntimeEvaluator(
+      {
+        modelId: BT4_SOAP_REM_C19000_FINAL_MODEL_ID,
+        onnx: '/models/%734fix_v_ema.onnx?v=1',
+        meta: '/models/custom.meta.json',
+      },
+      { runtime: 'ort' },
+    );
+    assert.equal(aliased.modelId, S4FIX_V_EMA_MODEL_ID, 'the normalized artifact identity takes precedence over unrelated metadata or stale model IDs');
+    assert.equal(
+      (readFileSync(new URL('../src/nn/browserRuntimeEvaluator.ts', import.meta.url), 'utf8').match(/SquareFormerEvaluator\.create\s*\(/g) ?? []).length,
+      1,
+      'all direct and fallback ORT routes must share the verified factory',
+    );
     verified = false;
     const research = await createBrowserSquareformerRuntimeEvaluator(
       {

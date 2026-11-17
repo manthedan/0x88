@@ -100,7 +100,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
 ): Promise<BrowserRuntimeEvaluatorResult> {
   const params = options.params;
   const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta, options.signal));
-  const modelId = inferRuntimeModelId(spec);
+  const modelId = isPinnedCentipawnOnnx(spec.onnx) ? S4FIX_V_EMA_MODEL_ID : inferRuntimeModelId(spec);
   const requestedRuntime = parseBrowserRuntimeSelector(options.runtime ?? spec.runtime ?? params?.get('runtime'));
   const createOrtEvaluator = () =>
     SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId), {
@@ -157,7 +157,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
         ? 'centipawn-tvmjs-webgpu-f32-v3-subgroups'
         : entry?.runtimeConfigId;
       const selectedAudit = { ...auditBase, manifestUrl: selectedManifestUrl, runtimeConfigId };
-      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), selectedAudit) : primary;
+      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, selectedAudit) : primary;
       const result = {
         evaluator,
         meta,
@@ -173,7 +173,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
       if (!fallback) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn('TVMJS WebGPU runtime unavailable; falling back to ORT SquareFormer.', { label: spec.label ?? spec.id, modelId, fallbackReason });
-      const evaluator = await SquareFormerEvaluator.create(spec.onnx, meta);
+      const evaluator = await createOrtEvaluator();
       const result = {
         evaluator,
         meta,
@@ -192,9 +192,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   if (customRequested) {
     try {
       const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot);
-      const evaluator = fallback
-        ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), auditBase, 'custom-webgpu-fallback-ort')
-        : primary;
+      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, auditBase, 'custom-webgpu-fallback-ort') : primary;
       const result = {
         evaluator,
         meta,
@@ -210,7 +208,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
       if (!fallback) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn('Custom WebGPU runtime unavailable; falling back to ORT SquareFormer.', { label: spec.label ?? spec.id, modelId, fallbackReason });
-      const evaluator = await SquareFormerEvaluator.create(spec.onnx, meta);
+      const evaluator = await createOrtEvaluator();
       const result = {
         evaluator,
         meta,
@@ -226,7 +224,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     }
   }
 
-  const evaluator = await SquareFormerEvaluator.create(spec.onnx, meta);
+  const evaluator = await createOrtEvaluator();
   const result = {
     evaluator,
     meta,
