@@ -210,7 +210,7 @@ for (const failCapture of [false, true, 'metadata-mismatch']) {
       if (failCapture === true && options.enableGraphCapture) throw Error('injected capture failure');
       return new Session(failCapture === 'metadata-mismatch' && options.enableGraphCapture ? applyOnnxFreeDimensionOverrides(io, { batch: 8 }) : io);
     });
-    const evaluator = await Lc0OnnxEvaluator.create(bytes, { ioMode: 'gpu-capture', freeDimensionOverrides: { batch: 1 } });
+    const evaluator = await Lc0OnnxEvaluator.create(bytes, { ioMode: 'gpu-capture', freeDimensionOverrides: { batch: 1 }, physicalBatchMode: 'logical' });
     assert.deepEqual(creates[0].options.freeDimensionOverrides, { batch: 1 });
     assert.equal(creates[0].input, bytes);
     assert.equal(evaluator.ioMode, failCapture ? 'cpu' : 'gpu-capture');

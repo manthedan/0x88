@@ -20,7 +20,8 @@
 // Output: <out>/runs.jsonl (one line per measured load, appended as sessions finish; reruns resume),
 // <out>/summary.json and <out>/summary.md.
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensurePidfp, summarize } from './common.mjs';
@@ -52,6 +53,9 @@ if (!cells.length) throw new Error('no cells: pass --cells <file> or --cell brow
 const repeats = Number(opt('repeats', fileSpec.repeats ?? 5));
 const settleMs = Number(opt('settle-ms', fileSpec.settleMs ?? 10_000));
 const benchlock = opt('benchlock', process.env.PERF_BENCHLOCK);
+const lockDir = opt('lock-dir', process.env.PERF_LOCK_DIR);
+const driver = opt('driver', process.env.PERF_SAFARI_DRIVER);
+if (benchlock && lockDir) throw new Error('pass --benchlock or --lock-dir, not both');
 if (benchlock && !existsSync(benchlock)) throw new Error(`benchlock not found: ${benchlock}`);
 mkdirSync(join(out, 'sessions'), { recursive: true });
 ensurePidfp();
@@ -103,8 +107,9 @@ for (const [i, s] of plan.entries()) {
         params: s.params,
         plan: s.plan,
         settleMs,
+        ...(driver ? { driver } : {}),
         ...(fileSpec.sessionDefaults ?? {}),
-        ...(s.browser === 'safari' && benchlock ? { sessionWaitMs: 0 } : {}),
+        ...(s.browser === 'safari' && (benchlock || lockDir) ? { sessionWaitMs: 0 } : {}),
       },
       null,
       1,
@@ -115,14 +120,19 @@ for (const [i, s] of plan.entries()) {
   console.log(`[${i + 1}/${plan.length}] ${sessionId}`);
   let res;
   do {
-    res = spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
-    if (s.browser === 'safari' && benchlock && res.status === 75) {
+    const locked = s.browser === 'safari' && lockDir ? acquireLock(lockDir) : false;
+    try {
+      res = spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+    } finally {
+      if (locked) releaseLock(lockDir);
+    }
+    if (s.browser === 'safari' && (benchlock || lockDir) && res.status === 75) {
       // No session was created. Do not monopolize the mutex while another owner
       // may need it to finish its existing session; retry outside the lock.
       console.log('Shared Safari busy; benchlock released, retrying in 30 s.');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);
     }
-  } while (s.browser === 'safari' && benchlock && res.status === 75);
+  } while (s.browser === 'safari' && (benchlock || lockDir) && res.status === 75);
   if (res.status !== 0 || !existsSync(resultPath)) {
     appendFileSync(
       runsFile,
@@ -137,6 +147,42 @@ for (const [i, s] of plan.entries()) {
 }
 aggregate(out);
 
+/** Shared mini mutex (upstream protocol): never take over a live/unknown owner's lock. */
+function acquireLock(dir) {
+  for (;;) {
+    try {
+      mkdirSync(dir);
+      writeFileSync(join(dir, 'owner'), `${hostname()} ${process.pid} ${new Date().toISOString()}\n`);
+      return true;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    let owner = '';
+    try {
+      owner = readFileSync(join(dir, 'owner'), 'utf8').trim();
+    } catch {}
+    const [host, pid] = owner.split(' ');
+    let gone = false;
+    if (host === hostname() && Number(pid) > 0) {
+      try {
+        process.kill(Number(pid), 0);
+      } catch (error) {
+        gone = error.code === 'ESRCH';
+      }
+    }
+    // Do not recursively remove a foreign lock: two stale-lock takers could
+    // otherwise erase a newly acquired live lock between checking and unlinking.
+    console.log(`mini lock ${gone ? 'has a stale owner (needs owner cleanup)' : 'held by'} ${owner || '(unknown owner)'}; waiting`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+  }
+}
+function releaseLock(dir) {
+  try {
+    const [host, pid] = readFileSync(join(dir, 'owner'), 'utf8').split(' ');
+    if (host === hostname() && Number(pid) === process.pid) rmSync(dir, { recursive: true, force: true });
+  } catch {}
+}
+
 /** Validity rules for a measured load (see protocol doc). */
 function validity(r) {
   const problems = [];
@@ -147,6 +193,7 @@ function validity(r) {
   if (r.timedOut) problems.push('timed out');
   if (r.cacheVerified === false) problems.push(r.cache === 'cold' ? 'cold run fetched no model bytes' : 'warm run fetched model bytes');
   if (r.pidReused) problems.push('page process reused from previous load');
+  if (r.context && (r.context.secure !== true || r.context.crossOriginIsolated !== true)) problems.push('page not secure and cross-origin isolated');
   if (r.lifeMaxAtBaselineMb > (r.baselineMb ?? 0) + 100) problems.push(`process already peaked at ${r.lifeMaxAtBaselineMb} MB before start`);
   if (r.browser === 'safari' && r.cache === 'warm-fresh' && r.previousPageProcessExited === false) problems.push('previous page process still alive');
   return problems;

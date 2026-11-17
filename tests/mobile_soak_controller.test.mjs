@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MobileSoakDocument, mountMobileSoak } from '../src/lc0/mobileSoakBrowser.ts';
-import { SOAK_STORAGE_KEY } from '../src/lc0/mobileSoak.ts';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
+import { SOAK_STORAGE_KEY } from '../src/lc0/mobileSoak.ts';
+import { MobileSoakDocument, mountMobileSoak } from '../src/lc0/mobileSoakBrowser.ts';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const deferred = () => Promise.withResolvers();
@@ -84,6 +84,35 @@ function browser(t, search = '?steps=sf-lite,t3') {
     },
   };
 }
+
+test('labSearchSeconds runs one timed production-adapter search after one load in the measured step', async (t) => {
+  const f = browser(t, '?steps=lqo&labSearchSeconds=90');
+  let loads = 0,
+    searches = 0,
+    disposals = 0;
+  const current = f.mount({
+    makeEngine: async (id) =>
+      engine(id, {
+        async load() {
+          loads++;
+        },
+        async search(fen, options) {
+          searches++;
+          assert.equal(options.durationMs, 90000);
+          options.progress(8);
+          return sample(id, fen);
+        },
+        async dispose() {
+          disposals++;
+        },
+      }),
+  });
+  await current.ready;
+  await current.api.start();
+  assert.deepEqual([loads, searches, disposals], [1, 1, 1]);
+  assert.equal(current.api.results.steps[0].searches.length, 1);
+  assert.equal(current.api.results.steps[0].status, 'ok');
+});
 
 test('active API, storage and published rows stay running through load, search and disposal', async (t) => {
   const f = browser(t, '?steps=sf-lite');

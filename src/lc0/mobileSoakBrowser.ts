@@ -11,13 +11,13 @@ import {
   makeHeatSlice,
   parseSoakQuery,
   recoverSoakReport,
-  SOAK_STORAGE_KEY,
   SOAK_FENS,
-  SoakSkip,
+  SOAK_STORAGE_KEY,
+  type SoakBigNetKey,
   type SoakReport,
   type SoakResult,
+  SoakSkip,
   type SoakStatus,
-  type SoakBigNetKey,
   skipRemainingSoakSteps,
   strongestLoadedNet,
 } from './mobileSoak.ts';
@@ -258,7 +258,7 @@ export function mountMobileSoak(
       result.memory.push({ ...(await services.memory()), phase: result.loadDeferred ? 'after-prepare' : 'resident-after-load' });
       abort.signal.throwIfAborted();
       publish();
-      if (id === 'heat') await heatSearch(engines[0], result);
+      if (id === 'heat' || (query.labSearchSeconds && id !== 'arena')) await heatSearch(engines[0], result, query.labSearchSeconds ?? report.heatSeconds);
       else {
         for (const fen of SOAK_FENS) {
           abort.signal.throwIfAborted();
@@ -329,7 +329,7 @@ export function mountMobileSoak(
     }
     return safelyDisposed;
   }
-  async function heatSearch(engine: SoakEngine, result: SoakResult): Promise<void> {
+  async function heatSearch(engine: SoakEngine, result: SoakResult, seconds = report.heatSeconds): Promise<void> {
     const started = performance.now();
     let lastAt = started;
     let lastCount = 0;
@@ -343,7 +343,7 @@ export function mountMobileSoak(
       lastCount = count;
       publish();
     };
-    const sample = await engine.search(SOAK_FENS[1], { durationMs: report.heatSeconds * 1000, progress: slice });
+    const sample = await engine.search(SOAK_FENS[1], { durationMs: seconds * 1000, progress: slice });
     slice(sample.count ?? lastCount, true);
     result.searches.push(sample);
     result.firstSearchMs = sample.ms;

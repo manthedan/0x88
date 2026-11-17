@@ -138,6 +138,7 @@ async function measure(kind, index) {
   candidates.sort((a, b) => b[1].cur - a[1].cur);
   const pid = candidates[0]?.[0];
   record.pid = pid;
+  record.context = await exec('return { secure: isSecureContext, crossOriginIsolated, ua: navigator.userAgent };').catch(() => null);
   record.pidReused = pid === previousPagePid;
   record.candidatePids = candidates.map(([p, v]) => [p, round(v.cur)]);
   if (!pid) throw new Error('could not identify page WebContent process');

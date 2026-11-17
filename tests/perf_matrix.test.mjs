@@ -69,6 +69,8 @@ test('matrix rejects reused/dirty processes, non-warm wire traffic and failed lo
   assert.deepEqual(validity(valid), []);
   for (const change of [
     { pidReused: true },
+    { context: { secure: false, crossOriginIsolated: true } },
+    { context: { secure: true, crossOriginIsolated: false } },
     { previousPageProcessExited: false },
     { lifeMaxAtBaselineMb: 200 },
     { cacheVerified: false },
@@ -78,6 +80,60 @@ test('matrix rejects reused/dirty processes, non-warm wire traffic and failed lo
     { report: { status: 'failed' } },
   ])
     assert.ok(validity({ ...valid, ...change }).length);
+});
+
+test('mini mutex releases only its own owner and never deletes a stale foreign directory', () => {
+  const body = runner.slice(runner.indexOf('function acquireLock(dir)'), runner.indexOf('/** Validity rules'));
+  let owner = '',
+    exists = false,
+    removals = 0;
+  const make = new Function(
+    'mkdirSync',
+    'writeFileSync',
+    'readFileSync',
+    'rmSync',
+    'join',
+    'hostname',
+    'process',
+    'Atomics',
+    `${body}; return {acquireLock,releaseLock};`,
+  );
+  const api = make(
+    () => {
+      if (exists) throw Object.assign(Error('exists'), { code: 'EEXIST' });
+      exists = true;
+    },
+    (_path, text) => {
+      owner = text;
+    },
+    () => owner,
+    () => {
+      removals++;
+      exists = false;
+    },
+    (...parts) => parts.join('/'),
+    () => 'mini',
+    {
+      pid: 123,
+      kill() {
+        throw Object.assign(Error('gone'), { code: 'ESRCH' });
+      },
+    },
+    {
+      wait() {
+        throw Error('waiting safely');
+      },
+    },
+  );
+  assert.equal(api.acquireLock('/owned'), true);
+  api.releaseLock('/owned');
+  assert.equal(removals, 1);
+  exists = true;
+  owner = 'mini 999 old';
+  api.releaseLock('/owned');
+  assert.equal(removals, 1);
+  assert.throws(() => api.acquireLock('/owned'), /waiting safely/);
+  assert.equal(removals, 1, 'stale-lock takers must not race to erase a new live owner');
 });
 
 test('matrix stats retain the whole spread and ignore unavailable values', () => {

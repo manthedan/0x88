@@ -440,6 +440,10 @@ runMain(async () => {
   const warmup = intParam('warmup', 5, 0, 1000);
   const iters = intParam('iters', 30, 3, 10000);
   const profileInvokes = intParam('profileInvokes', 5, 0, 200);
+  if (params.has('lc0Io')) {
+    const { profileLc0Io } = await import('./lc0-io-profile.mjs');
+    return profileLc0Io({ params, preset, model, batch, warmup, iters });
+  }
   const profiler = installGpuProfiler();
   ort.setRequestedOrtExecutionProviderForCurrentThread(params.get('ep') === 'wasm' ? 'wasm' : 'webgpu');
   const t0 = performance.now();

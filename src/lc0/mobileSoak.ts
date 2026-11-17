@@ -35,7 +35,8 @@ export function validateSoakModelOverride(raw: string): string {
       url.username ||
       url.password ||
       url.hash ||
-      decodedPath.includes('\\') || decodedPath.includes('%') ||
+      decodedPath.includes('\\') ||
+      decodedPath.includes('%') ||
       modelUrlHasControlCharacters(decodedPath) ||
       decodedPath.split('/').some((part) => part === '.' || part === '..')
     )
@@ -89,6 +90,8 @@ export function buildSoakSteps(): SoakStep[] {
   ];
 }
 export interface SoakQuery {
+  /** Lab-only: one timed search in the selected net step, without a second load. */
+  labSearchSeconds?: number;
   modelOverrides: SoakModelOverrides;
   auto: boolean;
   stepIds: string[];
@@ -100,7 +103,9 @@ export function parseSoakQuery(search: string): SoakQuery {
   const requested = params.has('steps') ? (params.get('steps') ?? '').split(',').filter(Boolean) : buildSoakSteps().map((step) => step.id);
   const known = new Set(buildSoakSteps().map((step) => step.id));
   const seconds = Number(params.get('heatSeconds') ?? 120);
+  const searchSeconds = Number(params.get('labSearchSeconds'));
   return {
+    ...(Number.isFinite(searchSeconds) && searchSeconds > 0 ? { labSearchSeconds: Math.max(1, Math.min(1800, Math.floor(searchSeconds))) } : {}),
     modelOverrides: parseSoakModelOverrides(params),
     auto: params.get('auto') === '1',
     stepIds: [...new Set(requested.filter((id) => known.has(id)))],
