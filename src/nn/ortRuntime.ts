@@ -5,6 +5,7 @@ export * from 'onnxruntime-web/webgpu';
 import * as ort from 'onnxruntime-web/webgpu';
 import { supportsWasmRelaxedSimdIntegerDot } from '../lc0/wasmFeatures.ts';
 import { foldOnnxDequantizeLinear } from './onnxDequantFold.ts';
+import { isOnnxModelParseError } from '../lc0/onnxModelRecovery.ts';
 
 (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
 
@@ -1476,6 +1477,8 @@ export type CreateOrtSessionOptions = {
   webgpuSessionOptions?: Partial<ort.InferenceSession.SessionOptions>;
   /** Request WebGPU alone and never fall back to WASM: the caller handles failure. */
   webgpuOnly?: boolean;
+  /** Let the verified loader repair metadata-trusted bytes before any provider/model fallback masks a parse error. */
+  rejectModelParseErrors?: boolean;
 };
 
 /**
@@ -1552,6 +1555,7 @@ export async function createOrtSession(modelPath: OrtModelInput, options: Create
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
       lastMessage = err instanceof Error ? err.message : String(err);
       recordSessionAttempt(attempt.providers, false, t1 - t0, lastMessage);
+      if (options.rejectModelParseErrors && isOnnxModelParseError(err)) throw err;
       const next = attempts[i + 1];
       if (!next) throw err;
       if (next.kind !== 'wasm-fallback') {

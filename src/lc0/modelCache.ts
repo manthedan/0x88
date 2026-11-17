@@ -85,6 +85,8 @@ export interface Lc0ModelVerificationMetadataStore {
 
 export interface Lc0ModelLoadOptions {
   cache?: boolean;
+  /** Recovery only: bypass Cache Storage reads and stale HTTP bodies; verified bytes may repopulate the cache. */
+  forceReload?: boolean;
   /** Lab/dev only: allow models without hash verification. Unverified bytes are never persisted. */
   allowUnverified?: boolean;
   cacheName?: string;
@@ -493,9 +495,24 @@ async function resolveArtifactUrl(
 ): Promise<ResolvedModelArtifact> {
   const artifactUrl = manifestArtifactUrl(manifest.entry, manifest.manifestUrl);
   if (artifactUrl) return { url: artifactUrl, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
-  return (
-    (await resolveChannelArtifactUrl(modelUrl, channelUrl)) ?? { url: modelUrl, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 }
-  );
+  const channelArtifact = await resolveChannelArtifactUrl(modelUrl, channelUrl);
+  if (!channelArtifact) return { url: modelUrl, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
+  // The asset host cannot replace pins supplied by the app-origin manifest.
+  // Check outside resolveChannelArtifactUrl's unavailable-channel fallback catch:
+  // contradictory metadata must fail closed, not silently choose another URL.
+  const pinned = manifest.entry;
+  if (
+    (pinned?.sha256 !== undefined &&
+      channelArtifact.expectedSha256 !== undefined &&
+      pinned.sha256.toLowerCase() !== channelArtifact.expectedSha256.toLowerCase()) ||
+    (pinned?.bytes !== undefined && channelArtifact.expectedBytes !== undefined && pinned.bytes !== channelArtifact.expectedBytes)
+  )
+    throw new Error(`LC0 channel artifact integrity mismatch for ${modelUrl}: release metadata disagrees with the model manifest`);
+  return {
+    ...channelArtifact,
+    expectedBytes: pinned?.bytes ?? channelArtifact.expectedBytes,
+    expectedSha256: pinned?.sha256 ?? channelArtifact.expectedSha256,
+  };
 }
 
 export interface Lc0ModelBytesExpectation {
@@ -700,6 +717,7 @@ function modelLoadFlightKey(modelUrl: string, options: Lc0ModelLoadOptions): str
     options.manifestEntry ?? null,
     options.channelUrl ?? configuredChannelUrl() ?? null,
     options.allowUnverified ?? false,
+    options.forceReload ?? false,
     options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS,
     options.requestPersistentStorage ?? false,
     options.minimumFreeBytesAfterCache ?? DEFAULT_CACHE_FREE_BYTES_RESERVE,
@@ -782,14 +800,14 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   const store = options.metadataStore ?? browserMetadataStore();
   const key = metadataKey(cacheName, resolved.url);
   const cacheKey = new Request(resolved.url);
-  const fetchRequest = new Request(resolved.url, { cache: 'force-cache', signal: options.signal });
+  const fetchRequest = new Request(resolved.url, { cache: options.forceReload ? 'reload' : 'force-cache', signal: options.signal });
   let cache: Cache;
   let cached: Response | undefined;
   const storagePersistent = await requestPersistentStorage(options.requestPersistentStorage);
   options.signal?.throwIfAborted();
   try {
     cache = await caches.open(cacheName);
-    cached = await cache.match(cacheKey);
+    cached = options.forceReload ? undefined : await cache.match(cacheKey);
   } catch {
     return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs);
   }
@@ -922,7 +940,12 @@ async function fetchUncachedVerifiedModel(
       telemetry: telemetry(started, 'url', { manifestMs }),
     };
   }
-  const download = await fetchModelBytes(new Request(resolved.url, { signal: options.signal }), resolved.url, resolved.expectedBytes, options.onProgress);
+  const download = await fetchModelBytes(
+    new Request(resolved.url, { signal: options.signal, ...(options.forceReload ? { cache: 'reload' } : {}) }),
+    resolved.url,
+    resolved.expectedBytes,
+    options.onProgress,
+  );
   options.signal?.throwIfAborted();
   const check = await verifyLc0ModelBytes(download.bytes, resolved, options.allowUnverified);
   // ResolvedModelArtifact uses expectedBytes/expectedSha256, just like the verifier.

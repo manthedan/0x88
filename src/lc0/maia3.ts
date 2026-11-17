@@ -4,7 +4,10 @@ import { type BoardState, boardToFen, type Piece, type PieceRole, parseFen } fro
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
+import { clearLc0ModelCacheEntry, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
+import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
+
+const MAIA3_MODEL_CACHE_NAME = 'maia3-browser-models-v1';
 
 /**
  * Default browser model: the weight-only int8 QDQ variant after the
@@ -299,15 +302,19 @@ export class Maia3BrowserEvaluator {
     this.worker.addEventListener('messageerror', this.messageErrorListener);
   }
 
-  static async create(options: Maia3BrowserEvaluatorOptions = {}): Promise<Maia3BrowserEvaluator> {
+  static async create(
+    options: Maia3BrowserEvaluatorOptions = {},
+    modelDeps = { load: loadLc0ModelForOrt, clear: clearLc0ModelCacheEntry },
+  ): Promise<Maia3BrowserEvaluator> {
     const selfElo = clampElo(options.selfElo ?? MAIA3_DEFAULT_ELO);
     const oppoElo = clampElo(options.oppoElo ?? selfElo);
-    const load = (url: string) =>
-      loadLc0ModelForOrt(url, {
+    const load = (url: string, forceReload = false) =>
+      modelDeps.load(url, {
         cache: true,
-        allowUnverified: options.allowUnverifiedModel,
+        forceReload,
+        allowUnverified: forceReload ? false : options.allowUnverifiedModel,
         manifestUrl: MAIA3_MODEL_MANIFEST_URL,
-        cacheName: 'maia3-browser-models-v1',
+        cacheName: MAIA3_MODEL_CACHE_NAME,
         onProgress: options.onProgress,
         signal: options.signal,
       });
@@ -317,19 +324,32 @@ export class Maia3BrowserEvaluator {
     } else {
       modelLoad = await Maia3BrowserEvaluator.loadWithFallback(load, options.signal);
     }
-    options.signal?.throwIfAborted();
-    const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
-    try {
-      const names = await Maia3BrowserEvaluator.postInit(worker, modelLoad.model, options.ep, options.signal, options.wasmThreads);
+    const create = async (loaded: Lc0ModelLoadResult) => {
       options.signal?.throwIfAborted();
-      const evaluator = new Maia3BrowserEvaluator(worker, modelLoad, selfElo, oppoElo, names, options.onFailure);
-      const abort = () => evaluator.terminate();
-      options.signal?.addEventListener('abort', abort, { once: true });
-      evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
-      return evaluator;
+      const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
+      try {
+        const names = await Maia3BrowserEvaluator.postInit(worker, loaded.model, options.ep, options.signal, options.wasmThreads);
+        options.signal?.throwIfAborted();
+        const evaluator = new Maia3BrowserEvaluator(worker, loaded, selfElo, oppoElo, names, options.onFailure);
+        const abort = () => evaluator.terminate();
+        options.signal?.addEventListener('abort', abort, { once: true });
+        evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
+        return evaluator;
+      } catch (error) {
+        worker.terminate();
+        throw error;
+      }
+    };
+    try {
+      return await create(modelLoad);
     } catch (error) {
-      worker.terminate();
-      throw error;
+      options.signal?.throwIfAborted();
+      if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(modelLoad)) throw error;
+      await modelDeps.clear(modelLoad.url, MAIA3_MODEL_CACHE_NAME);
+      options.signal?.throwIfAborted();
+      const reloaded = { ...(await load(modelLoad.logicalUrl ?? modelLoad.url, true)), revalidated: true };
+      if (reloaded.verification !== 'hashed' || reloaded.sha256Valid !== true) throw new Error('Maia3 model recovery requires freshly SHA-256-verified bytes');
+      return create(reloaded); // One retry, in a fresh worker; no recursion or artifact fallback.
     }
   }
 

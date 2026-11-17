@@ -1,6 +1,7 @@
 import { type OrtSessionPlacement, resolveOrtSessionPlacement } from '../nn/ortRuntime.ts';
-import { type Lc0ModelLoadOptions, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
+import { clearLc0ModelCacheEntry, type Lc0ModelLoadOptions, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
+import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
 
 /** The shipped Lc0 Small model: batch-1 f16 export with weight-only int8 QDQ. */
 export const LC0_SMALL_BATCH1_QDQ8_FILE = 't1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
@@ -106,6 +107,7 @@ export type Lc0OrtEvaluatorDeps = {
   placement: () => Promise<Pick<OrtSessionPlacement, 'providers' | 'adapterVendor'>>;
   load: (url: string, options: Lc0ModelLoadOptions) => Promise<Lc0ModelLoadResult>;
   createEvaluator: (model: ModelBytes, options: Lc0OnnxEvaluatorOptions) => Promise<Lc0OnnxEvaluator>;
+  clearCacheEntry?: typeof clearLc0ModelCacheEntry;
 };
 
 const DEFAULT_DEPS: Lc0OrtEvaluatorDeps = {
@@ -156,15 +158,46 @@ export async function createLc0OnnxEvaluatorFromUrl(
   }
   modelLoad ??= await deps.load(requestedUrl, loadOptions);
   let originalLoad: Lc0ModelLoadResult | undefined;
+  let usedOriginal = false;
   const wasmFallbackModel =
     servedUrl === requestedUrl
       ? undefined
       : async () => {
-          originalLoad = await deps.load(requestedUrl, loadOptions);
+          usedOriginal = true;
+          originalLoad ??= await deps.load(requestedUrl, loadOptions);
           return originalLoad.model;
         };
-  const evaluator = await deps.createEvaluator(modelLoad.model, { ...options.evaluator, ...(wasmFallbackModel ? { wasmFallbackModel } : {}) });
-  if (originalLoad) {
+  const create = (load: Lc0ModelLoadResult) => {
+    loadOptions.signal?.throwIfAborted();
+    usedOriginal = false;
+    return deps.createEvaluator(load.model, {
+      ...options.evaluator,
+      ...(wasmFallbackModel ? { wasmFallbackModel } : {}),
+      rejectModelParseErrors: isMetadataTrustedModel(load),
+    });
+  };
+  let evaluator: Lc0OnnxEvaluator;
+  try {
+    evaluator = await create(modelLoad);
+  } catch (error) {
+    loadOptions.signal?.throwIfAborted();
+    const failedOnOriginal = usedOriginal;
+    const failed = failedOnOriginal ? originalLoad : modelLoad;
+    if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(failed) || !failed) throw error;
+    console.warn(`Lc0: cached model could not be parsed; evicting and verifying one fresh load. ${failed.url}`);
+    await (deps.clearCacheEntry ?? clearLc0ModelCacheEntry)(failed.url, loadOptions.cacheName, loadOptions.metadataStore);
+    loadOptions.signal?.throwIfAborted();
+    const reloaded = {
+      ...(await deps.load(failedOnOriginal ? requestedUrl : servedUrl, { ...loadOptions, forceReload: true, allowUnverified: false })),
+      revalidated: true,
+    };
+    if (reloaded.verification !== 'hashed' || reloaded.sha256Valid !== true) throw new Error('LC0 model recovery requires freshly SHA-256-verified bytes');
+    if (failedOnOriginal) originalLoad = reloaded;
+    else modelLoad = reloaded;
+    // Deliberately not recursive: a second parse failure propagates without another fetch.
+    evaluator = await create(modelLoad);
+  }
+  if (usedOriginal && originalLoad) {
     // createOrtSession only loads the fallback model when the WebGPU attempts failed
     // and it is about to run WASM; a returned session is therefore the original model.
     fallbackReason = 'WebGPU session failed; WASM runs the original model';

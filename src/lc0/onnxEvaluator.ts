@@ -6,6 +6,7 @@ import { OrtGpuIoBinding, type OrtGpuIoOutputs, type OrtGpuIoTensorSpec, ortGrap
 import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
 import { type OnnxModelIo, readOnnxModelIo } from './onnxModelIo.ts';
+import { isOnnxModelParseError } from './onnxModelRecovery.ts';
 import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
 
@@ -73,6 +74,8 @@ export interface Lc0OnnxEvaluatorOptions {
   physicalBatchMode?: OrtPhysicalBatchMode;
   /** Passed to createOrtSession: the model for its WebGPU -> WASM fallback attempt. */
   wasmFallbackModel?: () => Promise<string | Uint8Array | ArrayBuffer>;
+  /** Verified loader owns one-shot metadata-cache recovery before provider fallback. */
+  rejectModelParseErrors?: boolean;
   /**
    * How invokes move data (docs/ort_invoke_overhead_2026-11.md). 'cpu' (default):
    * CPU input and output tensors. 'gpu': persistent GPU input/output buffers and
@@ -578,8 +581,7 @@ export function lc0GpuIoSpecs(
     // Small declares policy as ['batch', 1858] even with fixed batch-1 input;
     // ORT infers that head's batch. Permit that known LC0 convention only in
     // preflight; the post-create check still requires actual numeric shapes.
-    const inferBatch = inferOutputBatch && meta?.shape?.[0] === 'batch' &&
-      [LC0_ONNX_OUTPUT_POLICY, LC0_ONNX_OUTPUT_WDL, LC0_ONNX_OUTPUT_MLH].includes(name);
+    const inferBatch = inferOutputBatch && meta?.shape?.[0] === 'batch' && [LC0_ONNX_OUTPUT_POLICY, LC0_ONNX_OUTPUT_WDL, LC0_ONNX_OUTPUT_MLH].includes(name);
     const out = spec(inferBatch ? { ...meta, shape: [input.dims[0], ...meta!.shape!.slice(1)] } : meta, name);
     if (typeof out === 'string') return { reason: out };
     outputs.push(out);
@@ -597,6 +599,7 @@ export function lc0GpuIoSpecs(
 async function createLc0GpuIoSession(
   modelPath: string | Uint8Array | ArrayBuffer,
   mode: 'gpu' | 'gpu-capture',
+  rejectModelParseErrors = false,
 ): Promise<{ session: ort.InferenceSession; binding: OrtGpuIoBinding } | null> {
   let session: ort.InferenceSession | undefined;
   try {
@@ -610,6 +613,7 @@ async function createLc0GpuIoSession(
     if (placement.providers[0] !== 'webgpu') return null;
     session = await ort.createOrtSession(modelPath, {
       webgpuOnly: true,
+      rejectModelParseErrors,
       webgpuSessionOptions: { preferredOutputLocation: 'gpu-buffer', ...(mode === 'gpu-capture' ? ortGraphCaptureSessionOptions() : {}) },
     });
     const specs = lc0GpuIoSpecs(session);
@@ -633,6 +637,7 @@ async function createLc0GpuIoSession(
     return { session, binding };
   } catch (error) {
     if (session) await ort.releaseOrtSession(session).catch(() => undefined);
+    if (rejectModelParseErrors && isOnnxModelParseError(error)) throw error;
     console.warn(`Lc0: GPU-resident ORT IO (${mode}) unavailable, using CPU IO. ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
@@ -661,10 +666,13 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
 
   static async create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0OnnxEvaluator> {
     if (options.ioMode === 'gpu' || options.ioMode === 'gpu-capture') {
-      const gpu = await createLc0GpuIoSession(modelPath, options.ioMode);
+      const gpu = await createLc0GpuIoSession(modelPath, options.ioMode, options.rejectModelParseErrors);
       if (gpu) return new Lc0OnnxEvaluator(gpu.session, options, { binding: gpu.binding, mode: options.ioMode });
     }
-    return new Lc0OnnxEvaluator(await ort.createOrtSession(modelPath, { wasmFallbackModel: options.wasmFallbackModel }), options);
+    return new Lc0OnnxEvaluator(
+      await ort.createOrtSession(modelPath, { wasmFallbackModel: options.wasmFallbackModel, rejectModelParseErrors: options.rejectModelParseErrors }),
+      options,
+    );
   }
 
   dispose(): Promise<void> {

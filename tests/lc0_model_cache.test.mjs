@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { clearLc0ModelCache, clearLc0ModelCacheEntry, loadLc0ModelForOrt, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
+import { createLc0OnnxEvaluatorFromUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 
 // Known SHA-256 test vector: the empty input hashes to this digest.
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
@@ -277,8 +278,8 @@ test('loadLc0ModelForOrt resolves v2 channels to immutable Brotli bodies with de
     },
     {
       serveBytes: () => bytesOf('abc'),
-      manifestSha256: EMPTY_SHA256,
-      manifestBytes: 0,
+      manifestSha256: ABC_SHA256,
+      manifestBytes: 3,
       artifactUrls: [MODEL_V2_BR_URL],
       channelManifest: { schema: 'lc0-webgpu.artifact-channel.v2', releaseUrl: '/releases/test-release.json' },
       releaseManifest: {
@@ -324,13 +325,14 @@ test('loadLc0ModelForOrt does not resolve ambiguous name-only v2 basenames', asy
   );
 });
 
-test('loadLc0ModelForOrt validates channel artifacts against release metadata', async () => {
+test('loadLc0ModelForOrt rejects channel metadata that contradicts the app manifest', async () => {
   await withMockedEnv(
-    async () => {
-      const result = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
-      assert.equal(result.sha256Valid, true);
-      assert.equal(result.sha256, ABC_SHA256);
-      assert.equal(result.expectedSha256, ABC_SHA256);
+    async (fetchLog) => {
+      await assert.rejects(
+        loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL }),
+        /channel artifact integrity mismatch.*model manifest/,
+      );
+      assert.equal(fetchLog.model, 0, 'neither the artifact nor a fallback body is fetched');
     },
     {
       serveBytes: () => bytesOf('abc'),
@@ -345,6 +347,189 @@ test('loadLc0ModelForOrt validates channel artifacts against release metadata', 
         },
       ],
     },
+  );
+});
+
+for (const version of [1, 2]) {
+  for (const conflict of ['sha256', 'bytes']) {
+    for (const cache of [false, true]) {
+      test(`v${version} channel ${conflict} conflict fails closed before body/cache access (cache=${cache})`, async () => {
+        const bytes = conflict === 'bytes' ? 4 : 3;
+        const sha256 = conflict === 'sha256' ? EMPTY_SHA256 : ABC_SHA256;
+        await withMockedEnv(
+          async (fetchLog) => {
+            await assert.rejects(
+              loadLc0ModelForOrt(MODEL_URL, { cache, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL }),
+              /channel artifact integrity mismatch/,
+            );
+            assert.equal(fetchLog.model, 0);
+            assert.equal(caches.named.size, 0, 'mismatching metadata cannot consult or poison the cache');
+          },
+          {
+            serveBytes: () => {
+              throw new Error('must not fetch a conflicting body');
+            },
+            manifestSha256: ABC_SHA256,
+            manifestBytes: 3,
+            channelArtifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: MODEL_ARTIFACT_URL, bytes, sha256 }],
+            ...(version === 2
+              ? {
+                  channelManifest: { releaseUrl: '/releases/test-release.json' },
+                  releaseManifest: {
+                    artifacts: [
+                      {
+                        logicalUrl: '/models/lc0/test.onnx',
+                        raw: { bytes, sha256 },
+                        representations: [{ encoding: 'br', url: MODEL_V2_BR_URL, bytes: 2, sha256: 'b'.repeat(64) }],
+                      },
+                    ],
+                  },
+                }
+              : {}),
+          },
+        );
+      });
+    }
+  }
+}
+
+test('missing legacy channel pins inherit app pins, and matching hash case is normalized for comparison', async () => {
+  for (const pins of [{}, { sha256: ABC_SHA256.toUpperCase(), bytes: 3 }]) {
+    await withMockedEnv(
+      async () => {
+        const loaded = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
+        assert.equal(loaded.expectedSha256, ABC_SHA256);
+        assert.equal(loaded.expectedBytes, 3);
+        assert.equal(loaded.sha256Valid, true);
+        assert.equal(loaded.url, MODEL_ARTIFACT_URL);
+      },
+      {
+        serveBytes: () => bytesOf('abc'),
+        manifestSha256: ABC_SHA256,
+        manifestBytes: 3,
+        channelArtifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: MODEL_ARTIFACT_URL, ...pins }],
+      },
+    );
+  }
+});
+
+test('a corrupt channel body cannot pass inherited app pins or enter the cache', async () => {
+  await withMockedEnv(
+    async () => {
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL }), /sha256 mismatch/);
+      assert.equal((await caches.open('lc0-browser-models-v1')).store.size, 0);
+    },
+    {
+      serveBytes: () => bytesOf('bad'),
+      manifestSha256: ABC_SHA256,
+      manifestBytes: 3,
+      channelArtifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: MODEL_ARTIFACT_URL }],
+    },
+  );
+});
+
+test('metadata-trusted parse corruption evicts only that entry, refetches with reload once, and preserves a zero-network warm hit', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  await withMockedEnv(
+    async (fetchLog) => {
+      const metadataStore = new MemoryMetadataStore();
+      const options = { cache: true, manifestUrl: MANIFEST_URL, metadataStore };
+      await loadLc0ModelForOrt(MODEL_URL, options);
+      const cache = await caches.open('lc0-browser-models-v1');
+      const unrelated = 'http://localhost/models/lc0/other.onnx';
+      await cache.put(unrelated, new Response(bytesOf('keep')));
+      await cache.put(MODEL_URL, new Response(bytesOf('bad'))); // Same length; metadata still attests the old verified body.
+      const creations = [];
+      const result = await createLc0OnnxEvaluatorFromUrl(
+        MODEL_URL,
+        { load: options },
+        {
+          placement: async () => ({ providers: ['wasm'] }),
+          load: loadLc0ModelForOrt,
+          createEvaluator: async (model) => {
+            const text = new TextDecoder().decode(model);
+            creations.push(text);
+            if (text === 'bad') throw new Error('ERROR_CODE: 7, ERROR_MESSAGE: Protobuf parsing failed');
+            return { async dispose() {} };
+          },
+        },
+      );
+      assert.deepEqual(creations, ['bad', 'abc']);
+      assert.equal(result.modelLoad.revalidated, true);
+      assert.equal(result.modelLoad.verification, 'hashed');
+      assert.equal(result.modelLoad.sha256Valid, true);
+      assert.equal(fetchLog.model, 2);
+      assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache', 'reload']);
+      assert.equal(await (await cache.match(unrelated)).text(), 'keep', 'other cached models survive');
+      const warm = await loadLc0ModelForOrt(MODEL_URL, options);
+      assert.equal(warm.verification, 'metadata');
+      assert.equal(fetchLog.model, 2, 'repaired warm load performs zero model downloads');
+      assert.equal(metadataStore.entries.size, 1);
+    },
+    { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 },
+  );
+});
+
+test('a corrupt recovery download fails SHA-256 before a second create and is not cached', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  let downloads = 0,
+    creates = 0;
+  await withMockedEnv(
+    async (fetchLog) => {
+      const metadataStore = new MemoryMetadataStore();
+      const load = { cache: true, manifestUrl: MANIFEST_URL, metadataStore };
+      await loadLc0ModelForOrt(MODEL_URL, load);
+      const cache = await caches.open('lc0-browser-models-v1');
+      await cache.put(MODEL_URL, new Response(bytesOf('bad')));
+      await assert.rejects(
+        createLc0OnnxEvaluatorFromUrl(
+          MODEL_URL,
+          { load },
+          {
+            placement: async () => ({ providers: ['wasm'] }),
+            load: loadLc0ModelForOrt,
+            createEvaluator: async () => {
+              creates++;
+              throw new Error('INVALID_PROTOBUF');
+            },
+          },
+        ),
+        /sha256 mismatch/,
+      );
+      assert.equal(creates, 1);
+      assert.equal(fetchLog.model, 2);
+      assert.equal(cache.store.size, 0, 'neither poisoned old bytes nor corrupt fresh bytes remain cached');
+      assert.equal(metadataStore.entries.size, 0);
+    },
+    { serveBytes: () => bytesOf(++downloads === 1 ? 'abc' : 'bad'), manifestSha256: ABC_SHA256, manifestBytes: 3 },
+  );
+});
+
+test('forced recovery still uses HTTP reload and hashes when Cache Storage is unavailable', async () => {
+  await withMockedEnv(
+    async (fetchLog) => {
+      delete globalThis.caches;
+      const fresh = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, forceReload: true });
+      assert.equal(fresh.verification, 'hashed');
+      assert.equal(fresh.sha256Valid, true);
+      assert.deepEqual(fetchLog.modelRequestCaches, ['reload']);
+    },
+    { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 },
+  );
+});
+
+test('forceReload bypasses both the Cache Storage body and a coalesced ordinary flight', async () => {
+  await withMockedEnv(
+    async (fetchLog) => {
+      const options = { cache: true, manifestUrl: MANIFEST_URL };
+      await loadLc0ModelForOrt(MODEL_URL, options);
+      const [warm, fresh] = await Promise.all([loadLc0ModelForOrt(MODEL_URL, options), loadLc0ModelForOrt(MODEL_URL, { ...options, forceReload: true })]);
+      assert.equal(warm.cacheStatus, 'hit');
+      assert.equal(fresh.cacheStatus, 'miss');
+      assert.equal(fresh.verification, 'hashed');
+      assert.deepEqual(fetchLog.modelRequestCaches, ['force-cache', 'reload']);
+    },
+    { serveBytes: () => bytesOf('abc'), manifestSha256: ABC_SHA256, manifestBytes: 3 },
   );
 });
 

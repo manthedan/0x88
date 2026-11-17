@@ -24,7 +24,8 @@ import { isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface } from './engineProvision.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { FenInputFixtureListSchema, HistoryInputFixtureListSchema } from './inputFixtureSchema.ts';
-import { clearLc0ModelCache, describeLc0ModelLoad, loadLc0ModelForOrt } from './modelCache.ts';
+import { clearLc0ModelCache, describeLc0ModelLoad } from './modelCache.ts';
+import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
 import { type Lc0Evaluation, type Lc0EvaluatorInput, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { workerFallbackReplayAbort } from './ortWorkerFallback.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
@@ -4758,14 +4759,14 @@ async function init(mountSignal: AbortSignal) {
       if (isStaleMount(mountSignal)) return;
       renderWorkerGpuStatus(searchWorkerBackend);
     } else {
-      const modelLoad = await loadLc0ModelForOrt(MODEL_URL, { cache: CACHE_MODEL, requestPersistentStorage: CACHE_MODEL, allowUnverified: true });
-      if (isStaleMount(mountSignal)) return;
-      mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
-      const evaluator = await Lc0OnnxEvaluator.create(modelLoad.model);
+      const { evaluator, modelLoad } = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
+        load: { cache: CACHE_MODEL, requestPersistentStorage: CACHE_MODEL, allowUnverified: true, signal: mountSignal },
+      });
       if (isStaleMount(mountSignal)) {
         void evaluator.dispose();
         return;
       }
+      mainModelCacheStatus = describeLc0ModelLoad(modelLoad);
       const nextPlayer = new Lc0PolicyOnlyPlayer(evaluator);
       const nextSearcher = new Lc0PuctSearcher(evaluator);
       const diagnostics = await collectOrtRuntimeDiagnostics();

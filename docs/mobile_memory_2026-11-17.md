@@ -108,6 +108,26 @@ After step 1:
 - Quick speed check uses the second fixed eight-visit position, after initial inference. t3 cold −7%, warm +32%; BT4 cold +22%, warm −6%: no consistent regression, but this small sample cannot prove a <2% bound. CPU IO moves the old captured zero-input warm-up cost into first search; do not compare first-search speed without accounting for load/warm-up time.
 - Validation: lint, 80 relevant tests, Svelte typecheck (zero errors/warnings), product build. Baseline output SHA-256 goldens were captured **before** changing the folding algorithm for all seven shipped/fallback QDQ artifacts (Small variants, LQO, BT4, Maia variants), after verifying their pinned input hashes.
 
+## Step 2: integrity and warm-cache recovery
+
+After step 2 (compare directly with step 1 above):
+
+| Model | Cold peak / end MB | Warm peak / end MB | Load cold / warm ms | Midgame visits/s cold / warm |
+|---|---:|---:|---:|---:|
+| lqo | 3007 / 2998 | 4735 / 4668 | 6077 / 2892 | 100.7 / 99.9 |
+| t3 | 2838 / 2808 | 5420 / 5281 | 9508 / 2982 | 30.9 / 60.7 |
+| bt4 | 3839 / 3750 | 6999 / 6827 | 14170 / 6652 | 23.1 / 21.8 |
+
+This is an integrity/recovery change, **not a normal-load memory optimization**. Native totals remain large, and the very short speed samples vary considerably. All six runs passed; warm ready messages confirmed metadata-trusted Cache Storage hits.
+
+- Channel v1 and v2 **decoded** SHA-256/bytes must agree with every pin supplied by the app-origin model manifest. Conflicting metadata throws before cache/body access; it is outside the unavailable-channel catch and cannot silently select another body. Missing legacy channel fields inherit app pins; hexadecimal hash case is compared case-insensitively. Brotli representation hashes are not confused with decoded-model hashes.
+- Existing unavailable/ambiguous-channel fallback remains, still verifying the chosen body against the app pins. No new origin fallback, cache version, eviction limit, resumable protocol, or weaker validation mode was introduced.
+- A metadata-trusted parse/protobuf failure evicts **only the resolved artifact and its metadata**, reloads with HTTP `cache:'reload'`, freshly hashes the result, and retries **once**. `forceReload` bypasses Cache Storage reads and cannot coalesce with an ordinary read. Corrupt fresh downloads are rejected before a second session attempt/cache write.
+- The loader requests parse errors be surfaced before ORT's unfolded/provider fallback (or GPU-IO's CPU fallback) can mask a poisoned selected model by successfully running another artifact. Device loss, OOM, unsupported operators and aborts do not evict good models. Existing split-K-to-original WASM selection remains correct, including recovery of the original rather than the selected cache identity when appropriate.
+- Recovery covers the common Lc0 loader (big nets, Small and the standalone policy page) and Maia's transferred-model initialization. Maia retries in a fresh worker; cancellation and the original model-family cache namespace are preserved. TVM/model-pack and resumable integrity behavior is unchanged.
+- **Real Safari recovery test:** loaded Small split-K, corrupted a same-length **20,580,952-byte** cached body without changing its verification metadata, then started again. It passed on WebGPU with no variant/provider fallback, made **exactly one** model request with `cache:'reload'`, and repaired the cached SHA-256 to `3a5ccb636ebc596a66021b90a39a3d5b708fbd280048b07ff2d7855d240b37a1`.
+- Validation: lint; **253 relevant tests** including all model-cache/model-pack/resumable/engine-integrity cases, recovery, Maia and IO lifecycle tests; Svelte typecheck; **`npm test`: 2323 passed, 4 existing asset-dependent skips, zero failures**; product build. No streaming/incremental hash path was added.
+
 ## Remaining work / costs
 
-Steps 2–4 and final no-fold controls will be recorded in subsequent commits. At this stage the requested sub-1 GB LQO / sub-2 GB BT4 peaks are **not achieved**. The significant native/WebKit cost and reload retention remain unexplained by JS copy counts alone. Do not promise an iPhone fix, disable folding by default, weaken integrity, or embark on OPFS/streaming hash work based on these observations.
+Steps 3–4 and final no-fold controls will be recorded in subsequent commits. At this stage the requested sub-1 GB LQO / sub-2 GB BT4 peaks are **not achieved**. The significant native/WebKit cost and reload retention remain unexplained by JS copy counts alone. Do not promise an iPhone fix, disable folding by default, weaken integrity, or embark on OPFS/streaming hash work based on these observations.

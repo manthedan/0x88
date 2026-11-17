@@ -104,6 +104,22 @@ test('Small retains its gpu-capture default and fixed-shape models still attempt
   await evaluator.dispose();
 });
 
+test('metadata-owned GPU parse recovery is not swallowed by the CPU-IO fallback', async (t) => {
+  ort.setRequestedOrtExecutionProviderForCurrentThread('webgpu');
+  ort.setOrtDequantFoldForCurrentThread(false);
+  t.after(() => {
+    ort.setRequestedOrtExecutionProviderForCurrentThread(null);
+    ort.setOrtDequantFoldForCurrentThread(null);
+  });
+  let calls = 0;
+  t.mock.method(ort.InferenceSession, 'create', async () => {
+    calls++;
+    throw new Error('INVALID_PROTOBUF');
+  });
+  await assert.rejects(Lc0OnnxEvaluator.create(model(), { ioMode: 'gpu-capture', rejectModelParseErrors: true }), /INVALID_PROTOBUF/);
+  assert.equal(calls, 1, 'surface to the cache owner before trying another session');
+});
+
 test('URL-only GPU requests use one CPU-IO creation without a shape-probe download', async (t) => {
   ort.setRequestedOrtExecutionProviderForCurrentThread('webgpu');
   ort.setOrtDequantFoldForCurrentThread(false);
