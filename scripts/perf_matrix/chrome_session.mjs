@@ -146,114 +146,117 @@ async function measure(kind, index) {
       for (const p of await processes()) if (p.type === 'renderer') renderers.add(p.id);
     } catch {}
   }, 1000);
-  const cache = await evaluate(
-    `(async () => { const out = {}; for (const k of await caches.keys()) out[k] = (await (await caches.open(k)).keys()).length; try { localStorage.removeItem('0x88-mobile-soak-v1'); } catch {} return out; })()`,
-    true,
-  );
-  record.modelCacheEntriesBefore = Object.entries(cache ?? {})
-    .filter(([k]) => !k.startsWith('0x88-app'))
-    .reduce((a, [, n]) => a + n, 0);
-  await sleep(1000);
-  const allPids = () => [...renderers, ...(gpuPid ? [gpuPid] : [])];
-  const base = readFootprint(allPids(), { reset: true });
-  record.pageReadyMs = Date.now() - navStarted;
-  record.gpuBaselineMb = gpuPid ? round(base.get(gpuPid).cur) : null;
-  const perPidPeaks = new Map(); // pid -> {phase: interval peak}
-  const recordPeaks = (read, ph) => {
-    for (const [p, v] of read) if (p !== gpuPid) (perPidPeaks.get(p) ?? perPidPeaks.set(p, {}).get(p))[ph] = round(v.interval);
-  };
-
-  await evaluate(`(() => {${WORKER_READY_SCRIPT}})()`);
-  const t0 = Date.now();
-  await evaluate('void window.__mobileSoak.start(); true');
-  let phase = 'load';
-  let progress = null;
-  let polling = false;
-  let settleAt = null;
-  let crashed = false;
-  const samples = [];
-  const phasePeaks = {};
-  const gpuPhasePeaks = {};
-  const marks = {};
-  const timer = setInterval(async () => {
-    if (polling) return;
-    polling = true;
-    try {
-      progress = await evaluate(`(() => {${PROGRESS_SCRIPT}})()`);
-    } catch (error) {
-      progress = { state: 'poll-error', error: String(error.message).slice(0, 120) };
-    } finally {
-      polling = false;
-    }
-  }, 250);
   try {
-    while (Date.now() - t0 < timeoutMs) {
-      const fp = readFootprint(allPids());
-      const t = Date.now() - t0;
-      const rendererTop = Math.max(0, ...[...fp].filter(([p]) => p !== gpuPid).map(([, v]) => v.cur));
-      const next = progress?.state === 'poll-error' ? phase : phaseOf(progress, true);
-      const order = ['load', 'search', 'dispose', 'settle'];
-      if (next !== phase && order.indexOf(next) > order.indexOf(phase)) {
-        const read = readFootprint(allPids(), { reset: true });
-        recordPeaks(read, phase);
-        if (gpuPid) gpuPhasePeaks[phase] = round(read.get(gpuPid)?.interval);
-        marks[next] = { t, rendererTopMb: round(rendererTop), gpuMb: gpuPid ? round(read.get(gpuPid)?.cur) : null };
-        log(`${kind} ${phase} -> ${next} at ${t} ms; gpu ${phase} peak ${gpuPhasePeaks[phase]} MB`);
-        if (next === 'settle') settleAt = Date.now();
-        phase = next;
+    const cache = await evaluate(
+      `(async () => { const out = {}; for (const k of await caches.keys()) out[k] = (await (await caches.open(k)).keys()).length; try { localStorage.removeItem('0x88-mobile-soak-v1'); } catch {} return out; })()`,
+      true,
+    );
+    record.modelCacheEntriesBefore = Object.entries(cache ?? {})
+      .filter(([k]) => !k.startsWith('0x88-app'))
+      .reduce((a, [, n]) => a + n, 0);
+    await sleep(1000);
+    const allPids = () => [...renderers, ...(gpuPid ? [gpuPid] : [])];
+    const base = readFootprint(allPids(), { reset: true });
+    record.pageReadyMs = Date.now() - navStarted;
+    record.gpuBaselineMb = gpuPid ? round(base.get(gpuPid).cur) : null;
+    const perPidPeaks = new Map(); // pid -> {phase: interval peak}
+    const recordPeaks = (read, ph) => {
+      for (const [p, v] of read) if (p !== gpuPid) (perPidPeaks.get(p) ?? perPidPeaks.set(p, {}).get(p))[ph] = round(v.interval);
+    };
+
+    await evaluate(`(() => {${WORKER_READY_SCRIPT}})()`);
+    const t0 = Date.now();
+    await evaluate('void window.__mobileSoak.start(); true');
+    let phase = 'load';
+    let progress = null;
+    let polling = false;
+    let settleAt = null;
+    let crashed = false;
+    const samples = [];
+    const phasePeaks = {};
+    const gpuPhasePeaks = {};
+    const marks = {};
+    const timer = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        progress = await evaluate(`(() => {${PROGRESS_SCRIPT}})()`);
+      } catch (error) {
+        progress = { state: 'poll-error', error: String(error.message).slice(0, 120) };
+      } finally {
+        polling = false;
       }
-      samples.push([t, CODE[phase], round(rendererTop), gpuPid ? round(fp.get(gpuPid)?.cur) : null]);
-      if (settleAt && Date.now() - settleAt >= settleMs) break;
-      await sleep(sampleMs);
+    }, 250);
+    try {
+      while (Date.now() - t0 < timeoutMs) {
+        const fp = readFootprint(allPids());
+        const t = Date.now() - t0;
+        const rendererTop = Math.max(0, ...[...fp].filter(([p]) => p !== gpuPid).map(([, v]) => v.cur));
+        const next = progress?.state === 'poll-error' ? phase : phaseOf(progress, true);
+        const order = ['load', 'search', 'dispose', 'settle'];
+        if (next !== phase && order.indexOf(next) > order.indexOf(phase)) {
+          const read = readFootprint(allPids(), { reset: true });
+          recordPeaks(read, phase);
+          if (gpuPid) gpuPhasePeaks[phase] = round(read.get(gpuPid)?.interval);
+          marks[next] = { t, rendererTopMb: round(rendererTop), gpuMb: gpuPid ? round(read.get(gpuPid)?.cur) : null };
+          log(`${kind} ${phase} -> ${next} at ${t} ms; gpu ${phase} peak ${gpuPhasePeaks[phase]} MB`);
+          if (next === 'settle') settleAt = Date.now();
+          phase = next;
+        }
+        samples.push([t, CODE[phase], round(rendererTop), gpuPid ? round(fp.get(gpuPid)?.cur) : null]);
+        if (settleAt && Date.now() - settleAt >= settleMs) break;
+        await sleep(sampleMs);
+      }
+    } finally {
+      clearInterval(timer);
     }
+    const end = readFootprint(allPids(), { reset: true });
+    recordPeaks(end, phase);
+    if (gpuPid) gpuPhasePeaks[phase] = round(end.get(gpuPid)?.interval);
+    const pagePeak = (p) => Math.max(0, ...Object.values(perPidPeaks.get(p) ?? {}).filter(Number.isFinite));
+    const pid = [...perPidPeaks.keys()].sort((a, b) => pagePeak(b) - pagePeak(a))[0];
+    record.pid = pid;
+    record.pidReused = pid === previous?.pid;
+    record.pidWasNew = record.newRenderers.includes(pid);
+    Object.assign(phasePeaks, perPidPeaks.get(pid) ?? {});
+    record.baselineMb = round(base.get(pid)?.cur);
+    record.lifeMaxAtBaselineMb = round(base.get(pid)?.life);
+    record.crashed = crashed;
+    record.timedOut = !crashed && !settleAt;
+    record.phasePeaksMb = phasePeaks;
+    record.gpuPhasePeaksMb = gpuPhasePeaks;
+    record.marks = marks;
+    record.peakMb = round(end.get(pid)?.life);
+    record.peakThroughSearchMb = round(Math.max(phasePeaks.load ?? 0, phasePeaks.search ?? 0));
+    record.gpuPeakThroughSearchMb = gpuPid ? round(Math.max(gpuPhasePeaks.load ?? 0, gpuPhasePeaks.search ?? 0)) : null;
+    // Renderer + GPU, each at its own peak: an upper bound on the simultaneous total.
+    record.peakThroughSearchSumMb = round(record.peakThroughSearchMb + (record.gpuPeakThroughSearchMb ?? 0));
+    const med = (xs) => (xs.length ? [...xs].sort((a, b) => a - b)[xs.length >> 1] : null);
+    record.searchMedianMb = med(samples.filter((s) => s[1] === 'r').map((s) => s[2]));
+    record.doneMb = marks.settle?.rendererTopMb ?? null;
+    const tailFrom = samples.length ? samples.at(-1)[0] - 2000 : 0;
+    record.settledMb = med(samples.filter((s) => s[1] === 't' && s[0] >= tailFrom).map((s) => s[2]));
+    record.samples = samples;
+    try {
+      const report = JSON.parse(await evaluate('JSON.stringify(window.__mobileSoak.results)'));
+      record.report = digestReport(report);
+      record.workerReady = await evaluate('window.__perfWorkerReady');
+      const step = report.steps.at(-1);
+      record.uaMemoryMb = Object.fromEntries(
+        (step?.memory ?? []).map((m) => [m.phase, m.userAgentBytes == null ? (m.error ?? null) : round(m.userAgentBytes / 1048576)]),
+      );
+    } catch (error) {
+      record.report = { status: crashed ? 'crashed' : 'report-error', error: String(error.message).slice(0, 200) };
+    }
+    const fetched = proxy.modelRequests(navStarted);
+    record.modelRequests = fetched.map((r) => ({ path: r.path, status: r.status, mb: round(r.bytes / 1048576, 1) }));
+    record.modelBytesFetchedMb = round(fetched.reduce((a, r) => a + r.bytes, 0) / 1048576, 1);
+    record.cacheVerified = kind === 'cold' ? record.modelBytesFetchedMb > 1 : record.modelBytesFetchedMb < 1;
+    log(
+      `${kind}: renderer peakThroughSearch ${record.peakThroughSearchMb} MB, gpu ${record.gpuPeakThroughSearchMb} MB, lifetime ${record.peakMb}, UA ${JSON.stringify(record.uaMemoryMb)}, fetched ${record.modelBytesFetchedMb} MB, status ${record.report.status}`,
+    );
+    return record;
   } finally {
-    clearInterval(timer);
     clearInterval(refresh);
   }
-  const end = readFootprint(allPids(), { reset: true });
-  recordPeaks(end, phase);
-  if (gpuPid) gpuPhasePeaks[phase] = round(end.get(gpuPid)?.interval);
-  const pagePeak = (p) => Math.max(0, ...Object.values(perPidPeaks.get(p) ?? {}).filter(Number.isFinite));
-  const pid = [...perPidPeaks.keys()].sort((a, b) => pagePeak(b) - pagePeak(a))[0];
-  record.pid = pid;
-  record.pidReused = pid === previous?.pid;
-  record.pidWasNew = record.newRenderers.includes(pid);
-  Object.assign(phasePeaks, perPidPeaks.get(pid) ?? {});
-  record.baselineMb = round(base.get(pid)?.cur);
-  record.lifeMaxAtBaselineMb = round(base.get(pid)?.life);
-  record.crashed = crashed;
-  record.timedOut = !crashed && !settleAt;
-  record.phasePeaksMb = phasePeaks;
-  record.gpuPhasePeaksMb = gpuPhasePeaks;
-  record.marks = marks;
-  record.peakMb = round(end.get(pid)?.life);
-  record.peakThroughSearchMb = round(Math.max(phasePeaks.load ?? 0, phasePeaks.search ?? 0));
-  record.gpuPeakThroughSearchMb = gpuPid ? round(Math.max(gpuPhasePeaks.load ?? 0, gpuPhasePeaks.search ?? 0)) : null;
-  // Renderer + GPU, each at its own peak: an upper bound on the simultaneous total.
-  record.peakThroughSearchSumMb = round(record.peakThroughSearchMb + (record.gpuPeakThroughSearchMb ?? 0));
-  const med = (xs) => (xs.length ? [...xs].sort((a, b) => a - b)[xs.length >> 1] : null);
-  record.searchMedianMb = med(samples.filter((s) => s[1] === 'r').map((s) => s[2]));
-  record.doneMb = marks.settle?.rendererTopMb ?? null;
-  const tailFrom = samples.length ? samples.at(-1)[0] - 2000 : 0;
-  record.settledMb = med(samples.filter((s) => s[1] === 't' && s[0] >= tailFrom).map((s) => s[2]));
-  record.samples = samples;
-  try {
-    const report = JSON.parse(await evaluate('JSON.stringify(window.__mobileSoak.results)'));
-    record.report = digestReport(report);
-    record.workerReady = await evaluate('window.__perfWorkerReady');
-    const step = report.steps.at(-1);
-    record.uaMemoryMb = Object.fromEntries(
-      (step?.memory ?? []).map((m) => [m.phase, m.userAgentBytes == null ? (m.error ?? null) : round(m.userAgentBytes / 1048576)]),
-    );
-  } catch (error) {
-    record.report = { status: crashed ? 'crashed' : 'report-error', error: String(error.message).slice(0, 200) };
-  }
-  const fetched = proxy.modelRequests(navStarted);
-  record.modelRequests = fetched.map((r) => ({ path: r.path, status: r.status, mb: round(r.bytes / 1048576, 1) }));
-  record.modelBytesFetchedMb = round(fetched.reduce((a, r) => a + r.bytes, 0) / 1048576, 1);
-  record.cacheVerified = kind === 'cold' ? record.modelBytesFetchedMb > 1 : record.modelBytesFetchedMb < 1;
-  log(
-    `${kind}: renderer peakThroughSearch ${record.peakThroughSearchMb} MB, gpu ${record.gpuPeakThroughSearchMb} MB, lifetime ${record.peakMb}, UA ${JSON.stringify(record.uaMemoryMb)}, fetched ${record.modelBytesFetchedMb} MB, status ${record.report.status}`,
-  );
-  return record;
 }

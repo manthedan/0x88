@@ -163,6 +163,44 @@ test('worker observation records effective IO/fold settings without changing the
   assert.equal(Object.hasOwn(window.__perfWorkerReady[0], 'model'), false);
 });
 
+test('Chrome clears renderer refresh when the cache/setup probe throws before sampling starts', async () => {
+  const source = readFileSync(new URL('../scripts/perf_matrix/chrome_session.mjs', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function measure('));
+  const timers = [],
+    cleared = [];
+  const cdp = {
+    async send(method, params) {
+      if (method === 'Target.createTarget') return { targetId: 'owned' };
+      if (method === 'Target.attachToTarget') return { sessionId: 'owned' };
+      if (method === 'Runtime.evaluate') {
+        if (params.expression.includes('caches.keys')) throw Error('injected cache setup failure');
+        return { result: { value: true } };
+      }
+      return {};
+    },
+  };
+  const run = new Function('spec', 'processes', 'cdp', 'soakUrl', 'proxy', 'sleep', 'setInterval', 'clearInterval', `${body}; return measure('cold', 0);`);
+  await assert.rejects(
+    run(
+      { net: 'lqo' },
+      async () => [{ type: 'renderer', id: 123 }],
+      cdp,
+      () => 'http://owned/lab/mobile-soak',
+      { url: 'http://owned' },
+      async () => {},
+      () => {
+        const timer = {};
+        timers.push(timer);
+        return timer;
+      },
+      (timer) => cleared.push(timer),
+    ),
+    /injected cache setup failure/,
+  );
+  assert.equal(timers.length, 1, 'only the pre-sampling refresh timer was started');
+  assert.deepEqual(cleared, timers);
+});
+
 test('Chrome preserves completed cold evidence and records a later warm harness failure', async () => {
   const source = readFileSync(new URL('../scripts/perf_matrix/chrome_session.mjs', import.meta.url), 'utf8');
   const body = source.slice(source.indexOf('const runs = [];'), source.indexOf('async function measure('));
