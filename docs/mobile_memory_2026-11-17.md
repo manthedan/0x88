@@ -1,8 +1,10 @@
-# Mobile memory, phase 1 — 2026-11-17
+# Mobile memory, phases 1–2 — 2026-11-17
+
+**Phase 1 below is historical. Its sampled peaks and same-tab “warm” rows are superseded by [Phase 2](#phase-2-fresh-process-measurements-and-per-net-policy).** Same-tab reloads inherited the previous process's allocations; the variable post-disposal tail also captured WebAssembly JIT growth. Those rows must not be used as load-peak or speed comparisons. The phase-1 blanket CPU-IO policy was a real fixed-net regression, not random noise; Phase 2 removes it. Phase 2 also supersedes the old all-model fold-on policy.
 
 Companion to [mobile soak](mobile_soak_2026-11-16.md). Worktree/branch: `mobile-soak` / `lab/mobile-soak`; baseline `720aaf4a`. Desktop measurements below are **not iPhone validation**. The Carbon analysis is a source of hypotheses, not allocation evidence.
 
-## Scope and invariants
+## Phase 1 scope and invariants (historical)
 
 Four separately tested changes: (1) big-net CPU IO and pre-session shape eligibility, (2) channel integrity and one-shot warm-cache parse recovery, (3) byte-identical single-output-buffer dequantization and shorter input lifetimes, (4) Analysis big-net retirement. Folding stays enabled by default. No OPFS, incremental hashing, model-format change, ORT patch, deployment, or cache-policy redesign.
 
@@ -212,3 +214,88 @@ BT4's cold no-fold peak is lower here, but it still exceeds 2 GB and its tiny-se
 - Full-model goldens and the existing Small numerical/move/prior parity test are green. Small's real production Safari worker had already selected split-K, reported **gpu-capture** and completed eight visits in step 1; the final build retains that default and the preflight checks, but no new post-step-3 Safari Small worker probe was completed.
 
 **Phase-1 code and four staged desktop measurement sets are complete.** No OPFS work, incremental/streaming hash redesign, model-format change, ORT patch, global fold disable, integrity weakening, deployment or navigation link was introduced. More native-memory evidence and a real-phone retest are needed before promising an iPhone fix.
+
+## Phase 2: fresh-process measurements and per-net policy
+
+### Corrections and implementation
+
+- `4661d8e8` removes the blanket CPU-IO pin. Device-selected models request GPU capture; **t3 and BT4 use it**, while protobuf preflight rejects dynamic LQO **before** any probe session. Tests exercise one native creation for all three and check actual captured vs CPU IO. Small's captured default is unchanged. The independent perf-harness A/B showed the earlier CPU pin added ~1.1 GB to t3's lifetime peak, rather than its load peak; phase-1's “no consistent regression” interpretation was wrong.
+- `41723dd8` adds explicit config: **fold off for LQO, BT4, t3 and Maia3, on for Small**, on every device. No size/RAM heuristic. Worker pin > URL/environment override > model default; `?ortDequantFold=1/0` forces either arm. Main/worker and cache-reuse identity tests cover both directions. Graph optimization remains `all` and is independent.
+- All phase-1 integrity, one-shot parse repair, verified lazy reload, byte-identical folding, and immediate unused Analysis retirement remain. No LQO free-dimension override/capture, worker reuse, or production session/device-release-before-terminate was added.
+
+### Method and provenance
+
+New protocol: `lab/perf-harness`, `docs/perf_measurement_protocol_2026-11-17.md`, read-only sibling worktree. Its runner and `pidfp.c` were copied into this branch as `scripts/perf_matrix/`; **every Phase-2 memory figure below comes from it**. Local adaptations observe worker ready messages without changing init payloads, accept a fresh native-tool-owned Chrome CDP endpoint, serialize Chrome under benchlock too, record/reject Safari launchctl JSC overrides, and bound CDP waits. Pre-session Safari pairing conflicts yield the mutex and retry outside it; no foreign session is deleted.
+
+Host: Apple M4 MacBook Air, 24 GiB, macOS 26.4.1; Safari 26.4 / Asyncify and Chrome 157.0.8103.50 / production JSPI. COOP/COEP isolated. **No physical-iPhone validation.** Normal Safari JSC settings were checked inside the lease. All GPU/search/speed groups used the supplied machine-wide `scratchpad/benchlock`.
+
+Baseline is **actual `720aaf4a` source**, archived and product-built under this worktree's ignored `baseline-src`, not the CPU-pinned phase-1 build. Final engine source is `41723dd8` (later changes are measurement tooling/docs). Both use the same installed ORT 1.27.0 and the same manifest-pinned local model bytes; the archived build's generated model links point at those identical staged bytes. Independent isolated static servers use ports 61982/61981. No other checkout or its build was modified.
+
+Each cold session has a fresh proxy origin/profile and empty model cache. Each warm load uses a **new window/tab and page process**, verifies the previous Safari PID exited, and fetches **zero model bytes** through the proxy. t3's actual served model is the Apple split-K artifact in both builds. Ready messages confirm **CPU IO for LQO, gpu-capture for t3/BT4**, `all` graph optimization, and the correct effective fold flag for every valid load.
+
+Kernel `proc_pid_rusage` high-water counters eliminate sampling gaps. “Load” includes navigation through the two smoke searches; **lifetime includes disposal + a fixed 10 s settle**, and is not a load metric or guaranteed final plateau. MB here means **MiB (2²⁰ B)**. Tables show median [min–max], baseline → final. Repeats are round-robin across builds/models, not selectively rerun outliers. Cold n≈10 would be needed to resolve a 150 MB difference; these ≥5-session comparisons establish the large LQO/BT4 changes, not a narrow t3 equivalence bound.
+
+Raw local evidence: `.local-dev-artifacts/mobile-memory-phase2/{safari,chrome}/`, `speed-r{0,1,2}.json`, `speed.json`, `parity-{lqo,bt4}.json`. `runs.jsonl` and per-session JSON retain validity inputs, exact counters, phases, wire bytes, worker settings and JSC compiler-thread CPU. The runner's `--report` regenerates summaries.
+
+### Safari load and lifetime peaks
+
+**One cell remains short while Safari is paired elsewhere:** baseline Maia3 warm has n=4; all others have n≥5. A balanced extra cohort is queued, not a selective outlier rerun. No claim is made that this missing repeat has completed.
+
+| Net | Cache | n baseline/final | Load peak MB, baseline → final | Lifetime peak MB, baseline → final |
+|---|---|---:|---:|---:|
+| lqo | cold | 5/6 | 3092 [2534–3194] → 1344 [1282–1386] | 3788 [3594–4082] → 2549 [2200–2759] |
+| lqo | warm | 5/6 | 2955 [2795–3104] → 1331 [1261–1373] | 3567 [3450–3843] → 2536 [2257–2580] |
+| t3 | cold | 6/6 | 1723 [1626–1787] → 1735 [1672–1789] | 1757 [1731–1787] → 1752 [1736–1789] |
+| t3 | warm | 6/6 | 1763 [1695–1788] → 1738 [1691–1818] | 1780 [1754–1788] → 1775 [1749–1818] |
+| bt4 | cold | 5/5 | 3808 [3641–3897] → 1733 [1692–1820] | 3933 [3857–4031] → 1841 [1802–1878] |
+| bt4 | warm | 5/5 | 3434 [3239–3712] → 1759 [1697–1826] | 3622 [3389–3720] → 1759 [1697–1826] |
+| maia3 | cold | 5/5 | 1018 [968–1063] → 933 [917–976] | 1052 [1041–1123] → 2138 [1842–2220] |
+| maia3 | warm | 4/5 | 997 [956–1034] → 938 [888–941] | 1028 [989–1065] → 2148 [1947–2243] |
+
+**Important adverse result:** Maia3's new load peak is lower, but its lifetime peak is ~1.1 GB higher. The process remains busy with WASM compiler-thread work after disposal (median tail compiler CPU ~12.8 s baseline vs ~22.3 s final over the 10 s wall window). This is consistent with the Asyncify/JSC tier-up problem, **not attribution to a particular function or proof of CPU operator placement**. The explicit owner-selected no-fold default is retained; this Safari tradeoff needs follow-up. LQO also still grows after disposal. Native/JIT retention is not explained away as a live pool record.
+
+Invalid/excluded: baseline LQO r0 aborted its WebDriver operation (no valid cold/warm pair); baseline Maia3 r3 warm navigation returned HTTP 408. The eight r5 sessions never launched because the extra-cohort command had a benchlock path typo (all retained as `session-failed`; the runner now validates the path). Later pre-session pairing conflicts produced no measured load, and are retained in the session-failure rows/logs. No successful high/low sample was discarded. Chrome had **no invalid measured loads**. The original 40-pair plan and each balanced extension remain recorded locally.
+
+### Chrome renderer and GPU-process load peaks
+
+n=3 per cell; a fresh native-tool-owned Chrome instance per cold/warm pair. GPU is the **instance's own GPU-process interval peak**, not a delta, not all system GPU memory, and not synchronized with the renderer maximum. Never add the two maxima and call that a measured simultaneous total. Renderer lifetime peaks equal its load peaks in these runs.
+
+| Net | Cache | Renderer MB, baseline → final | GPU process MB, baseline → final |
+|---|---|---:|---:|
+| lqo | cold | 1224 [1222–1229] → 498 [482–498] | 392 [390–409] → 351 [339–364] |
+| lqo | warm | 1210 [1208–1228] → 422 [416–431] | 377 [372–416] → 344 [332–354] |
+| t3 | cold | 945 [944–952] → 925 [914–932] | 438 [433–444] → 439 [432–473] |
+| t3 | warm | 804 [794–927] → 811 [797–815] | 442 [439–469] → 470 [444–470] |
+| bt4 | cold | 1809 [1789–1829] → 907 [851–921] | 629 [623–645] → 523 [519–531] |
+| bt4 | warm | 1767 [1762–1771] → 824 [782–838] | 654 [634–674] → 538 [535–550] |
+| maia3 | cold | 454 [454–461] → 323 [321–325] | 266 [251–267] → 255 [254–267] |
+| maia3 | warm | 400 [394–410] → 268 [257–271] | 237 [235–240] → 224 [223–233] |
+
+UA resident samples agree with the direction: LQO ~400 → 214 MB, BT4 ~919 → 472 MB, Maia3 ~115 → 80 MB; t3 ~521 MB unchanged. UA bytes cover page/worker JS and WASM, **not GPU/native allocations or transient peaks**. `ForceEagerMeasureMemory` was enabled only for these Chrome memory runs. The page's after-dispose UA timeout is retained, not interpreted as zero.
+
+### Parity and dedicated speed benchmark
+
+Both final WebGPU no-fold candidates pass the **unchanged** `ort-profile.html?parity=wasm` ten-FEN shipping gates: LQO raw policy/WDL/MLH max abs **1.296875 / 0.008545 / 0.125**, legal-prior max **0.039005**, 8/10 best moves with only the two existing allowlisted mirror-pair flips; BT4 **0.293701 / 0.002930 / 0.96875**, legal-prior max **0.013007**, 10/10 best moves. No threshold or exception was widened. Backend is strictly `webgpu->webgpu`, not a silently accepted WASM candidate.
+
+Maia3 relies on `spike/maia3-nofold`'s `docs/maia3_nofold_2026-11-17.md` plus existing tests as requested: its off/on WebGPU outputs were bit-identical across 1083 rows, both passed the existing browser release corpus, and **both failed the expanded WASM-reference corpus**. The latter was not waived or represented as a pass.
+
+Speed is **not** the soak page's eight-visit throughput. Same dedicated `ort-profile.html`, forced WebGPU, synchronized CPU readback, 5 warmups + 15 invocations, 3 fresh document runs per build/net, under benchlock. Interleave baseline/final, reverse arm order in round 2. Explicit fold=1 baseline / fold=0 final because the raw-session bench does not select product per-net config. Presets use b8 for LQO/t3/BT4 and b1 for Maia3. The t3 timing preset is the original f16 graph, whereas soak selects Apple split-K; this does not isolate the transport/capture change. These are invocation times, not visits/s or playing strength.
+
+| Net / batch | Baseline ms, median [run-median range] | Final ms | Final/baseline |
+|---|---:|---:|---:|
+| lqo / 8 | 68.09 [66.11–72.13] | 77.82 [77.75–122.47] | 1.143× |
+| t3 / 8 | 40.14 [39.56–40.58] | 40.79 [38.17–41.83] | 1.016× |
+| bt4 / 8 | 158.00 [148.60–164.57] | 166.14 [154.81–173.99] | 1.052× |
+| maia3 / 1 | 10.19 [10.13–12.05] | 11.38 [10.58–11.93] | 1.117× |
+
+Retain the 122.47 ms LQO outlier. This is a shared fanless host; benchlock excludes cooperating benchmarks, not all CPU work or thermal drift. The measured slowdown is a real tradeoff accepted by the owner, not an equal-speed claim. The Maia3 spike's paired experiment is stronger evidence for its marginal cost than this unpaired n=3 comparison.
+
+### Reproduction, verification and remaining work
+
+Build each source with `BUILD_SCOPE=product npm run build:client`; serve it with `scripts/serve_isolated_static.mjs`. Pass a cells JSON containing both per-cell `base` URLs and `build` labels to `scripts/perf_matrix/run_matrix.mjs --cells <file> --out <dir> --benchlock <scratchpad/benchlock>`. Use local pinned model files so the counting proxy sees every model byte; a direct CDN `assetBase` would bypass that evidence. For native-tool Chrome, open a fresh instance with `ForceEagerMeasureMemory`, obtain `get cdp-url`, and set `sessionDefaults.cdpUrl` for that one pair. The runner closes only that leased instance. No direct agent-browser CLI was used by this phase's caller.
+
+Parity: `/lab/kernel-hillclimb/ort-profile.html?preset=<lqo|bt4>&parity=wasm&ortDequantFold=0&warmup=5&iters=15&profileInvokes=0`. Timing uses the same page without `parity=wasm`, and the explicit fold arm. Overlay with `node scripts/kernel_hillclimb/build_lab.mjs` after the product build.
+
+Validation: lint, targeted IO/policy/lifetime/worker tests, seven whole-model folding goldens and Small numerical parity, typecheck (zero errors/warnings), product build; final full suite **2357 passed, 4 existing skips** before the final mutex-queue regression (its seven focused runner tests also pass). Codex branch closeout is still pending.
+
+Remaining: finish the missing baseline Maia3 warm repeat; investigate Maia3 and LQO's post-disposal Safari compiler/lifetime growth; physical-iPhone Jetsam validation; potentially larger cold cohorts if a 150 MB effect matters. LQO's final desktop load peak remains above 1 GB. BT4's observed desktop load/lifetime peaks are below 2 GB, **not a guarantee of phone safety**. No LQO dimension/capture override, worker reuse, release-before-terminate change, new model format, ORT patch, OPFS, hash redesign, cache-integrity weakening, deployment or push was introduced.
