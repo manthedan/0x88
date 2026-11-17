@@ -168,6 +168,7 @@ test('runtime fallback destroys ORT when creation completes after destruction', 
   const pending = pendingEvaluation();
   let resolveFallback;
   let fallbackDestroyed = false;
+  const factoryStarted = Promise.withResolvers();
   const fallbackCreated = new Promise((resolve) => {
     resolveFallback = resolve;
   });
@@ -176,12 +177,15 @@ test('runtime fallback destroys ORT when creation completes after destruction', 
       evaluate: () => pending.promise,
       destroy() {},
     },
-    () => fallbackCreated,
+    () => {
+      factoryStarted.resolve();
+      return fallbackCreated;
+    },
     { source: 'test' },
   );
   const evaluation = evaluator.evaluate(parseFen(START_FEN));
   pending.reject(new Error('device lost'));
-  await Promise.resolve();
+  await factoryStarted.promise;
   evaluator.destroy();
   resolveFallback({
     evaluate: async () => ({ policy: new Map(), wdl: [0, 1, 0] }),
@@ -192,6 +196,71 @@ test('runtime fallback destroys ORT when creation completes after destruction', 
   await assert.rejects(evaluation, (error) => error?.name === 'AbortError');
   assert.equal(fallbackDestroyed, true);
 });
+
+for (const pending of [false, true])
+  test(`runtime fallback retirement waits for primary and pending/active native owners (${pending})`, async () => {
+    const primaryRelease = Promise.withResolvers(),
+      primaryStarted = Promise.withResolvers(),
+      native = Promise.withResolvers(),
+      factoryStarted = Promise.withResolvers(),
+      fallbackRelease = Promise.withResolvers();
+    let creates = 0,
+      primaryCalls = 0,
+      fallbackCalls = 0;
+    const value = { policy: new Map(), wdl: [0, 1, 0] };
+    const evaluator = new RuntimeFallbackEvaluator(
+      {
+        evaluate: async () => {
+          throw new Error('device lost');
+        },
+        dispose: () => {
+          primaryCalls++;
+          primaryStarted.resolve();
+          return primaryRelease.promise;
+        },
+      },
+      async () => {
+        creates++;
+        factoryStarted.resolve();
+        return native.promise;
+      },
+      { source: 'test' },
+    );
+    const running = evaluator.evaluate(parseFen(START_FEN));
+    await primaryStarted.promise;
+    assert.equal(creates, 0, 'ORT fallback must wait for compiled GPU retirement');
+    primaryRelease.resolve();
+    await factoryStarted.promise;
+    const fallback = {
+      evaluate: async () => value,
+      dispose: () => {
+        fallbackCalls++;
+        return fallbackRelease.promise;
+      },
+      destroy: () => assert.fail('must prefer awaitable disposal'),
+    };
+    if (!pending) {
+      native.resolve(fallback);
+      await running;
+    }
+    const canceled = pending ? assert.rejects(running, { name: 'AbortError' }) : null;
+    const close = evaluator.dispose();
+    assert.equal(evaluator.dispose(), close);
+    let retired = false;
+    close.then(() => {
+      retired = true;
+    });
+    if (pending) native.resolve(fallback);
+    await new Promise(setImmediate);
+    assert.equal(fallbackCalls, 1);
+    assert.equal(retired, false);
+    fallbackRelease.resolve();
+    await close;
+    if (canceled) await canceled;
+    assert.equal(primaryCalls, 1);
+    assert.equal(fallbackCalls, 1);
+    assert.equal(retired, true);
+  });
 
 test('runtime fallback retries ORT creation after a failed attempt instead of caching the rejection', async () => {
   let primaryEvaluations = 0;

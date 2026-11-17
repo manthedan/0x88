@@ -208,6 +208,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
   private readonly queue = new ExclusiveQueue();
   private failureReason: string | undefined;
   private destroyed = false;
+  private closePromise?: Promise<void>;
   private readonly runtime: TvmRuntime;
   private readonly device: GpuDevice;
   private readonly vmModule: { getFunction(name: string): TvmPackedFunction };
@@ -408,26 +409,34 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     });
   }
 
-  destroy(): void {
-    if (this.destroyed) return;
+  dispose(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.destroyed = true;
-    const dispose = () => {
+    const dispose = async () => {
       try {
         this.runtime.endScope();
       } catch {
         /* already unwound */
       }
+      const errors: unknown[] = [];
       try {
-        this.runtime.dispose();
-      } catch {
-        /* best effort */
+        await this.runtime.dispose();
+      } catch (error) {
+        errors.push(error);
       }
       try {
         this.device.destroy();
-      } catch {
-        /* best effort */
+      } catch (error) {
+        errors.push(error);
       }
+      if (errors.length) throw new AggregateError(errors, 'TVMJS runtime retirement failed');
     };
-    void this.queue.idle().then(dispose);
+    this.closePromise = this.queue.idle().then(dispose);
+    void this.closePromise.catch(() => undefined);
+    return this.closePromise;
+  }
+
+  destroy(): void {
+    void this.dispose();
   }
 }

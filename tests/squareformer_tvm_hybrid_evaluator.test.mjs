@@ -120,14 +120,15 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
     const queued = evaluator.evaluateEncoded(...encoded());
     while (!state.pending.length) await tick();
     evaluator.destroy();
-    evaluator.destroy();
+    const retirement = evaluator.dispose();
+    assert.equal(evaluator.dispose(), retirement, 'legacy destroy and awaitable dispose share one native release');
     await tick();
     assert.equal(destroyed.size, 0);
     assert.equal(state.deviceDestroys, 0);
     await settleNext();
     assert.equal((await running).wdlLogits.length, 3);
     await assert.rejects(queued, /Custom WebGPU evaluator is destroyed/);
-    await tick();
+    await retirement;
     assert.deepEqual([...destroyed].sort(), ['layer0', 'layer1', 'legal', 'policy', 'stem', 'value']);
     assert.equal(state.deviceDestroys, 1);
     assert.equal(state.destroyedWhileActive, 0);

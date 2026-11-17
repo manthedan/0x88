@@ -103,7 +103,7 @@ test('Centipawn TVMJS evaluator pads and chunks fixed batch 16 requests', async 
     assert.deepEqual(result.wdl, [1 / 3, 1 / 3, 1 / 3]);
   }
   evaluator.destroy();
-  await Promise.resolve();
+  await evaluator.dispose();
   assert.equal(state.destroyed, true);
   assert.equal(state.deviceDestroyed, true);
 });
@@ -190,11 +190,12 @@ test('Centipawn TVMJS evaluator defers disposal until an in-flight batch finishe
   );
   const evaluation = evaluator.evaluate(parseFen(START_FEN));
   await started;
-  evaluator.destroy();
+  const retirement = evaluator.dispose();
+  assert.equal(evaluator.dispose(), retirement, 'native retirement is idempotent and awaitable');
   assert.equal(state.destroyed, false);
   releaseSync();
   await evaluation;
-  await Promise.resolve();
+  await retirement;
   assert.equal(state.destroyed, true);
   assert.equal(state.deviceDestroyed, true);
 });

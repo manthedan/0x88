@@ -284,8 +284,8 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       options.signal?.throwIfAborted();
       const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model, options.signal));
       const runtime = await timed('runtimeInstantiateMs', () => api.instantiate(wasmBytes, api.createPolyfillWASI(), options.logger));
-      options.signal?.throwIfAborted();
       ownedRuntime = runtime;
+      options.signal?.throwIfAborted();
       timedSync('runtimeInitWebGpuMs', () => runtime.initWebGPU(device));
       runtime.beginScope();
       try {

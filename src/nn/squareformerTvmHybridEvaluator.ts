@@ -230,6 +230,7 @@ async function loadKernels(kernelBase: string, verifier?: ArtifactVerifier): Pro
 export class SquareformerTvmHybridEvaluator implements Evaluator {
   private readonly queue = new ExclusiveQueue();
   private destroyed = false;
+  private closePromise?: Promise<void>;
   private failureReason: string | undefined;
   private device: GPUDevice;
   private meta: SquareFormerMeta;
@@ -443,23 +444,31 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
   }
 
   /** Frees the GPU buffers and the owned device once in-flight evaluations have settled. */
-  destroy(): void {
-    if (this.destroyed) return;
+  dispose(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.destroyed = true;
-    const release = () => {
+    const release = async () => {
+      const errors: unknown[] = [];
       for (const block of [this.stem, ...this.layers, this.policy, this.value, this.legal]) {
         try {
-          block.destroy();
-        } catch {
-          /* best effort */
+          await block.destroy();
+        } catch (error) {
+          errors.push(error);
         }
       }
       try {
         this.device.destroy();
-      } catch {
-        /* best effort */
+      } catch (error) {
+        errors.push(error);
       }
+      if (errors.length) throw new AggregateError(errors, 'Custom WebGPU runtime retirement failed');
     };
-    void this.queue.idle().then(release);
+    this.closePromise = this.queue.idle().then(release);
+    void this.closePromise.catch(() => undefined);
+    return this.closePromise;
+  }
+
+  destroy(): void {
+    void this.dispose();
   }
 }

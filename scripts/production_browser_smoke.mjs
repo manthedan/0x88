@@ -140,7 +140,13 @@ export function failedRequestEntries(payload) {
   });
 }
 
+export async function assertClientDocument(session, surface) {
+  if ((await evaluate(session, 'window.__productionSmokeDocument')) !== session.documentToken)
+    throw new Error(`${surface} performed a full navigation instead of client-side navigation`);
+}
+
 async function inspectBrowser(session, surface) {
+  await assertClientDocument(session, surface);
   const errors = [...actionableErrorEntries(session.pageErrors), ...actionableErrorEntries(session.consoleErrors)];
   if (errors.length) throw new Error(`${surface} emitted actionable browser errors: ${JSON.stringify(errors)}`);
   return { surface, errors: [] };
@@ -169,8 +175,7 @@ async function navigateSurface(session, path, fullNavigation = false) {
     (value) => value === url.pathname.replace(/\/$/, ''),
     30_000,
   );
-  if ((await evaluate(session, 'window.__productionSmokeDocument')) !== session.documentToken)
-    throw new Error(`${url.pathname} performed a full navigation instead of client-side navigation`);
+  await assertClientDocument(session, url.pathname);
   return String(url);
 }
 
@@ -334,6 +339,7 @@ async function waitForWorkerRetirement(session, previous, requireDrop = false) {
     if (!previous.some((worker) => current.includes(worker))) break;
     await delay(100);
   } while (Date.now() < deadline);
+  await assertClientDocument(session, 'Worker retirement');
   return workerRetirementReport(previous, current, requireDrop);
 }
 
@@ -344,6 +350,7 @@ async function waitForAnalysisWorkers(session) {
     (state) => state?.workerRuntime && state.workerRuntime === state.runtime && state.phase === 'idle',
     session.args.timeoutMs,
   );
+  await assertClientDocument(session, 'Analysis workers ready');
   return session.page.workers();
 }
 

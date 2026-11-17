@@ -2,10 +2,10 @@ import type { BoardState } from '../chess/board.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { type BrowserRuntimeAuditDetail, publishBrowserRuntimeAudit } from './runtimeAudit.ts';
 
-function destroyEvaluator(evaluator: Evaluator | undefined): void {
+async function disposeEvaluator(evaluator: Evaluator | undefined): Promise<void> {
   if (!evaluator) return;
-  const destroy = (evaluator as Evaluator & { destroy?: () => void }).destroy;
-  if (typeof destroy === 'function') destroy.call(evaluator);
+  const owner = evaluator as Evaluator & { dispose?: () => void | Promise<void>; destroy?: () => void | Promise<void> };
+  await (owner.dispose ? owner.dispose() : owner.destroy?.());
 }
 
 function isAbortError(error: unknown): boolean {
@@ -20,6 +20,9 @@ function evaluatorAbortError(message: string): Error {
 
 export class RuntimeFallbackEvaluator implements Evaluator {
   private fallbackPromise?: Promise<Evaluator>;
+  private fallbackCreation?: Promise<Evaluator>;
+  private primaryRetirement?: Promise<void>;
+  private closePromise?: Promise<void>;
   private primaryFailed = false;
   private disposed = false;
   private readonly primary: Evaluator;
@@ -47,7 +50,7 @@ export class RuntimeFallbackEvaluator implements Evaluator {
       const fallbackReason = error instanceof Error ? error.message : String(error);
       const primaryLabel = this.fallbackRuntime === 'custom-webgpu-fallback-ort' ? 'Custom WebGPU' : 'TVMJS WebGPU';
       console.warn(`${primaryLabel} runtime failed; switching Centipawn to ORT.`, { fallbackReason });
-      destroyEvaluator(this.primary);
+      this.primaryRetirement = disposeEvaluator(this.primary);
       publishBrowserRuntimeAudit({
         ...this.auditBase,
         resolvedRuntime: this.fallbackRuntime,
@@ -57,11 +60,13 @@ export class RuntimeFallbackEvaluator implements Evaluator {
     return this.fallbackEvaluator();
   }
 
-  private fallbackEvaluator(): Promise<Evaluator> {
+  private async fallbackEvaluator(): Promise<Evaluator> {
+    await this.primaryRetirement;
+    if (this.disposed) throw evaluatorAbortError('Centipawn runtime evaluator is destroyed');
     if (!this.fallbackPromise) {
-      const creation = this.createFallback().then((fallback) => {
+      this.fallbackCreation = this.createFallback();
+      const creation = this.fallbackCreation.then((fallback) => {
         if (!this.disposed) return fallback;
-        destroyEvaluator(fallback);
         throw evaluatorAbortError('Centipawn runtime evaluator is destroyed');
       });
       this.fallbackPromise = creation;
@@ -104,10 +109,20 @@ export class RuntimeFallbackEvaluator implements Evaluator {
     }
   }
 
-  destroy(): void {
-    if (this.disposed) return;
+  dispose(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.disposed = true;
-    destroyEvaluator(this.primary);
-    void this.fallbackPromise?.then(destroyEvaluator).catch(() => undefined);
+    this.primaryRetirement ??= disposeEvaluator(this.primary);
+    const fallbackRetirement = this.fallbackCreation?.then(disposeEvaluator, () => undefined);
+    this.closePromise = Promise.allSettled([this.primaryRetirement, fallbackRetirement]).then((results) => {
+      const errors = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+      if (errors.length) throw new AggregateError(errors, 'Centipawn runtime retirement failed');
+    });
+    void this.closePromise.catch(() => undefined);
+    return this.closePromise;
+  }
+
+  destroy(): void {
+    void this.dispose();
   }
 }

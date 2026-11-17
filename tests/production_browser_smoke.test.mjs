@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   actionableErrorEntries,
+  assertClientDocument,
   browserMaxAge,
   failedRequestEntries,
   isExpectedAppShellCacheControl,
@@ -27,6 +28,17 @@ test('production browser smoke dry-run describes the bounded cross-surface journ
   assert.equal(report.status, 'PRODUCTION_BROWSER_SMOKE_DRY_RUN');
   assert.equal(report.baseUrl, 'https://example.test');
   assert.deepEqual(report.journey, ['Play/Centipawn', 'Arena', 'Analysis', 'Play/Stormphrax', 'Analysis/return']);
+});
+
+test('document identity is rechecked after controller readiness and worker retirement', async () => {
+  let token = 'original';
+  const session = { documentToken: token, page: { evaluate: async () => token } };
+  await assertClientDocument(session, 'initial path');
+  token = undefined;
+  await assert.rejects(assertClientDocument(session, 'destination ready'), /full navigation instead of client-side navigation/);
+  const source = readFileSync(script, 'utf8');
+  assert.match(source, /async function inspectBrowser\(session, surface\) \{\s*await assertClientDocument\(session, surface\)/);
+  assert.match(source, /await assertClientDocument\(session, 'Worker retirement'\);\s*return workerRetirementReport/);
 });
 
 test('navigation guard requires real worker retirement and a lower count on Analysis -> Play', () => {
