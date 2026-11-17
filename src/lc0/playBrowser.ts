@@ -2215,6 +2215,21 @@ function ctxInit(ctx: PlayContext): void {
     }
     const previousEngineId = ctx.lastEngineId;
     const selectionGame = ctx.abort.signal;
+    const resumeRevertedOpponent = () => {
+      // Discarding the initial asset probe also removed its preparation callback.
+      if (
+        wasResolvingSavedEngine &&
+        !ctx.disposed &&
+        !selectionGame.aborted &&
+        !ctx.engineThinking &&
+        !ctx.preparingEngine &&
+        !ctx.gameOver &&
+        ctx.lastEngineId === previousEngineId
+      ) {
+        ctxSetEngineNote('');
+        ctxPrepareOrStartEngine(ctx);
+      }
+    };
     if (ctx.engineThinking) {
       selectEl('engineSelect').value = previousEngineId;
       ctxRender(ctx);
@@ -2224,20 +2239,13 @@ function ctxInit(ctx: PlayContext): void {
     if (option.family === 'lc0' && option.variant !== 'small') {
       selectEl('engineSelect').value = previousEngineId;
       if (!(await requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], ctx.consentAbort.signal, false))) {
-        // Cancelling the initial saved-asset probe also cancelled its eventual
-        // preparation callback. Resume the reverted opponent, not that restore.
-        if (
-          wasResolvingSavedEngine && !ctx.disposed && !selectionGame.aborted && !ctx.engineThinking &&
-          !ctx.preparingEngine && !ctx.gameOver && ctx.lastEngineId === previousEngineId
-        ) {
-          ctxSetEngineNote('');
-          ctxPrepareOrStartEngine(ctx);
-        }
+        resumeRevertedOpponent();
         return;
       }
-      if (ctx.disposed || ctx.engineThinking || ctx.lastEngineId !== previousEngineId) return;
+      if (ctx.disposed || selectionGame.aborted || ctx.engineThinking || ctx.lastEngineId !== previousEngineId) return;
       if (ctxEngineOptionState(option).disabled) {
         ctxRefreshEngineOptions(ctx);
+        resumeRevertedOpponent();
         return;
       }
       ctxRefreshEngineOptions(ctx);

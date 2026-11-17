@@ -465,8 +465,13 @@ for (const action of ['dismiss', 'confirm']) {
   });
 }
 
-for (const stale of [false, true]) {
-  test(`cancelling a picker warning resumes the initial reverted opponent only for its current game (stale=${stale})`, async () => {
+for (const [accepted, stale] of [
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+]) {
+  test(`declined/unavailable picker selection resumes only its current reverted game (accepted=${accepted}, stale=${stale})`, async () => {
     const ctx = {
       pendingPreferredEngineId: 'leela-queen-odds',
       pendingPreferredEngineTimer: 42,
@@ -481,6 +486,7 @@ for (const stale of [false, true]) {
     const node = { value: 'lc0-bt4' };
     let handler;
     let preparations = 0;
+    let refreshes = 0;
     let note = 'Checking your saved engine assets…';
     const cleared = [];
     const deps = {
@@ -494,8 +500,10 @@ for (const stale of [false, true]) {
       ctxDraftEngine: () => ({ id: 'lc0-bt4', family: 'lc0', variant: 'bt4' }),
       requestLargeNetConsent: async () => {
         if (stale) ctx.abort.abort();
-        return false;
+        return accepted;
       },
+      ctxEngineOptionState: () => ({ disabled: true }),
+      ctxRefreshEngineOptions: () => refreshes++,
       ctxSetEngineNote: (text) => {
         note = text;
       },
@@ -508,6 +516,7 @@ for (const stale of [false, true]) {
     assert.equal(ctx.pendingPreferredEngineId, null, 'late saved asset callbacks cannot change opponents');
     assert.deepEqual(cleared, [42]);
     assert.equal(preparations, stale ? 0 : 1);
+    assert.equal(refreshes, accepted && !stale ? 1 : 0);
     if (!stale) assert.equal(note, '', 'checking text cannot strand the unprepared fallback');
   });
 }
