@@ -56,7 +56,7 @@ Safari needs only Node, clang/pidfp and the existing driver (`4446` on the mini)
 
 1. **Analysis default:** cold mid-game FEN URL, Lc0 Small + SF Lite default rows; auto-analysis on, real user-move hook while analyzing, then a 60 s observation window. Defaults are finite search budgets, not an artificial infinite search. Require worker and UI progress, not just a visible board.
 2. **Analysis four:** same, add two rows through the UI and select Berserk and PlentyChess (CPU); after 60 s, make ten further legal user plies, waiting for new auto-analysis progress after each.
-3. **Play Maia3 / Small:** separate ten-full-move games (20 plies) as White at the UI's fastest strength. Deterministic legal opening development/castling preferences avoid trivial early checkmates; real engine replies are required. An early terminal game is invalid, not silently restarted.
+3. **Play Maia3 / Small:** separate ten-full-move games (20 plies) as White at the UI's fastest strength. A deterministic host-side three-ply material/development chooser avoids trivial early checkmates, adding no browser engine/worker. It replays committed SAN, only runs on the user's turn and must match the board's legal destinations (including back-rank castling/rook moves). Real engine replies are required. An early terminal game is invalid, not silently restarted.
 4. **Arena CPU / Small:** one completed SF Lite–Berserk game, then a separate Small–SF Lite game, 100 ms equal movetime, one game/opening, concurrency one. Require a completed game chip/log; errors/forfeits/timeouts are invalid.
 5. **Navigation:** Analysis → Play → Arena → Analysis via actual header links, three cycles, then 20 s settle. Verify the document identity survives every transition; a hard reload cannot masquerade as client-side cleanup.
 
@@ -92,7 +92,7 @@ Raw specs, full time series, process/context/worker evidence and immutable failu
 
 ## Initial production baseline
 
-Production source is **`c808bad0e2955d3841daff5372ee0c0598ec4d56`**, built from its archive, not a later refactor. Local build: `.local-dev-artifacts/perf-routes/production-build/`. Initial smoke diagnostics are excluded from the balanced cohort.
+Production source is **`c808bad0e2955d3841daff5372ee0c0598ec4d56`**, built from its archive, not a later refactor. Local build: `.local-dev-artifacts/perf-routes/production-build/`. Initial smoke diagnostics are excluded from the balanced cohort. The first calibration cohort (`production-self-chrome`) was stopped as a whole after calibration exposed weak move selection and a turn predicate that stalled when the human was in check; every attempt is retained with `ABORTED.txt`. Its owned coordinator was stopped, the active browser child was allowed to finish/clean up, and only that coordinator's lock was removed after ownership verification. The replacement cohort starts from zero with the stronger host-side chooser; no successful outlier is selectively dropped.
 
 The production self-comparison uses the **same built bytes** in both arms, five independently measured repeats per arm/journey, interleaved/reversed order on the M4 Mac mini's headless Chrome. Its baseline arm is the production baseline; the candidate arm independently estimates the gate's self-comparison false-positive rate. See the attached `summary.md`, not a fabricated duplicated baseline dataset.
 

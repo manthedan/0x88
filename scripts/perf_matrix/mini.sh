@@ -49,6 +49,12 @@ record_helper() {
   # Wait for nohup/ssh to exec before recording an identity; never trust the fork's shell command.
   for attempt in {1..20}; do
     identity=$(process_identity "$pid") || return 1
+    # nohup's argv already contains the expected child command before exec; recording
+    # that transient wrapper identity would make every subsequent ownership check fail.
+    if [[ "$identity" == *" nohup "* || "$identity" == *" /usr/bin/nohup "* ]]; then
+      sleep 0.1
+      continue
+    fi
     if [[ "$identity" == *"$expected"* ]]; then
       printf '%s\n' "$identity" >"$file.identity"
       return 0
@@ -82,9 +88,10 @@ up)
   ssh -o BatchMode=yes "$HOST" "mkdir -p ~/$WORKSPACE/scripts/perf_matrix ~/$WORKSPACE/out"
   # Isolate this branch's scripts from agents using ~/perf-matrix; share only its mutex.
   rsync -a --delete "$REPO/scripts/perf_matrix/" "$HOST:$WORKSPACE/scripts/perf_matrix/"
-  ssh -o BatchMode=yes "$HOST" "mkdir -p ~/$WORKSPACE/scripts/perf_routes ~/$WORKSPACE/scripts/lib"
+  ssh -o BatchMode=yes "$HOST" "mkdir -p ~/$WORKSPACE/scripts/perf_routes ~/$WORKSPACE/scripts/lib ~/$WORKSPACE/src/chess"
   rsync -a --delete "$REPO/scripts/perf_routes/" "$HOST:$WORKSPACE/scripts/perf_routes/"
   rsync -a "$REPO/scripts/lib/perf_canary_stats.mjs" "$HOST:$WORKSPACE/scripts/lib/"
+  rsync -a "$REPO/src/chess/board.ts" "$REPO/src/chess/moveCodec.ts" "$REPO/src/chess/movegen.ts" "$REPO/src/chess/san.ts" "$HOST:$WORKSPACE/src/chess/"
   code=$(ssh -o BatchMode=yes "$HOST" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$MPORT/lab/mobile-soak/")
   echo "server pid $(cat "$STATE/server.pid") (laptop :$LPORT), tunnel pid $(cat "$STATE/tunnel.pid") (mini :$MPORT), page HTTP $code"
   ;;

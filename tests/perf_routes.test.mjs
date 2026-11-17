@@ -5,6 +5,7 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { startCountingProxy } from '../scripts/perf_matrix/proxy.mjs';
 import { compareRuns, JOURNEYS, parseArgs, plan, stats, verdict } from '../scripts/perf_routes/gate.mjs';
+import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -169,6 +170,20 @@ test('route probes retain original worker payloads, count teardown once and pars
   sf.terminate();
   assert.equal(window.__routePerf.workers, 0);
   assert.equal(cpu.terminated, true);
+});
+
+test('host-side human moves are deterministic/legal and reject terminal or wrong-turn games', () => {
+  assert.equal(playHumanTurn('You are in check'), true);
+  assert.equal(playHumanTurn('Your move'), true);
+  assert.equal(playHumanTurn('Lc0 Small wins — checkmate'), false);
+  assert.equal(playHumanTurn('Lc0 Small to move'), false);
+  const opening = chooseHumanMove([]);
+  assert.equal(chooseHumanMove([]), opening);
+  assert.match(opening, /^[a-h][12][a-h][34]$/);
+  assert.match(chooseHumanMove(['e4', 'e5', 'Nf3', 'Nc6', 'Bc4', 'Nf6', 'd3', 'Bc5']), /^[a-h][1-8][a-h][1-8]$/);
+  assert.throws(() => chooseHumanMove(['e4']), /White turn/);
+  assert.throws(() => chooseHumanMove(['not-san']), /Cannot replay/);
+  assert.throws(() => chooseHumanMove(['f3', 'e5', 'g4', 'Qh4#']), /ended before/);
 });
 
 test('missing throughput for one selected engine cannot yield a clean comparison', () => {

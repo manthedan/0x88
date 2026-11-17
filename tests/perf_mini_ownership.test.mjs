@@ -91,3 +91,26 @@ test('helper launch records the start time and exec command used by later owners
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(file + '.identity', 'utf8').trim(), identity);
 });
+
+test('helper launch does not mistake nohup argv for the final child exec identity', (t) => {
+  const f = fixture(t);
+  const source = readFileSync(script, 'utf8');
+  const functions = source.slice(source.indexOf('process_identity()'), source.indexOf('case "$cmd" in'));
+  const file = join(f.dir, 'nohup.pid');
+  const marker = join(f.dir, 'exec-observed');
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `${functions}
+process_identity() { if [ ! -f '${marker}' ]; then touch '${marker}'; printf '%s\\n' '${identity.replace(' node ', ' nohup node ')}'; else printf '%s\\n' '${identity}'; fi; }
+record_helper "$1" 123 '/owned/serve_isolated_static.mjs /owned/dist'
+`,
+      'test',
+      file,
+    ],
+    { encoding: 'utf8', env: { ...process.env, BASH_ENV: join(f.dir, 'mocks.sh') } },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(file + '.identity', 'utf8').trim(), identity);
+});

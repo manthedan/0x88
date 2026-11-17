@@ -1,4 +1,7 @@
 import { sleep } from '../perf_matrix/common.mjs';
+import { chooseHumanMove, playHumanTurn } from './human.mjs';
+
+const PLAY_TURN = `(${playHumanTurn.toString()})(document.querySelector('#status')?.textContent)`;
 
 export const MIDGAME = 'r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 6 6';
 export const routeFor = (name) => (name.startsWith('play') ? 'play' : name.startsWith('arena') ? 'arena' : 'analysis');
@@ -62,24 +65,25 @@ async function analysisSetup(evaluate, four = false) {
 
 // Select a legal move through the accessible board, then invoke the existing real user-move hook.
 // A queued task plus two animation frames measures main-thread queue/handler/render latency, not hardware latency.
-export async function userMove(evaluate, analysis, index = 0) {
+export async function userMove(evaluate, analysis, index = 0, preferredMove = '') {
   const before = await evaluate(analysis ? `window.__analysisSchedulingState().fen` : `document.querySelectorAll('#moveList .san').length`);
   const result = await evaluate(`(() => {
     const host = document.querySelector('#keyboardBoard');
     const cells = [...host.querySelectorAll('[data-square]')];
     const color = ${analysis} ? (window.__analysisSchedulingState().fen.split(' ')[1] === 'w' ? 'White' : 'Black') : 'White';
     const own = cells.filter(c => c.getAttribute('aria-label').includes(color));
-    const book = ['e2e4','g1f3','f1c4','d2d3','e1g1','c2c3','f1e1','b1d2','h2h3','d2f1'];
-    const preferred = ${analysis} ? '' : book[${index}] ?? '';
-    // Develop/castle rather than pushing ten arbitrary flank pawns into a quick checkmate.
+    const preferred = ${JSON.stringify(preferredMove)};
+    // The host-side legal chooser adds no in-browser engine/worker to the measurements.
     own.sort((a,b) => Number(b.dataset.square === preferred.slice(0,2)) - Number(a.dataset.square === preferred.slice(0,2)) || Number(b.getAttribute('aria-label').includes('knight')) - Number(a.getAttribute('aria-label').includes('knight')) || a.dataset.square.localeCompare(b.dataset.square));
     for (const source of own) {
+      if (preferred && source.dataset.square !== preferred.slice(0,2)) continue;
       host.querySelector('[data-square="'+source.dataset.square+'"]').click();
-      const dests = [...host.querySelectorAll('[aria-label*="legal destination"]')].filter(c => !/[18]$/.test(c.dataset.square));
+      const dests = [...host.querySelectorAll('[aria-label*="legal destination"]')].filter(c => !source.getAttribute('aria-label').includes('pawn') || !/[18]$/.test(c.dataset.square));
       if (!dests.length) continue;
       dests.sort((a,b) => Math.abs(a.dataset.square.charCodeAt(0)-100.5) - Math.abs(b.dataset.square.charCodeAt(0)-100.5) || a.dataset.square.localeCompare(b.dataset.square));
       const from = source.dataset.square;
-      const to = from === preferred.slice(0,2) && dests.some(c => c.dataset.square === preferred.slice(2,4)) ? preferred.slice(2,4) : dests[${index} % dests.length].dataset.square;
+      if (preferred && !dests.some(c => c.dataset.square === preferred.slice(2,4))) throw Error('Legal chooser move is not interactive on the board: '+preferred);
+      const to = preferred ? preferred.slice(2,4) : dests[${index} % dests.length].dataset.square;
       const start = performance.now();
       window.__routeMove = {from,to,start,done:false};
       setTimeout(() => {
@@ -139,12 +143,10 @@ export async function runJourney(evaluate, name, mark = () => {}) {
     await waitFor(evaluate, `/is ready/.test(document.querySelector('#engineNote')?.textContent)`);
     await click(evaluate, '#newGame');
     for (let i = 0; i < 10; i++) {
-      await waitFor(evaluate, `/Your move/.test(document.querySelector('#status')?.textContent)`);
-      evidence.moves.push(await userMove(evaluate, false, i));
-      await waitFor(
-        evaluate,
-        `document.querySelectorAll('#moveList .san').length >= ${(i + 1) * 2} && /Your move/.test(document.querySelector('#status')?.textContent)`,
-      );
+      await waitFor(evaluate, PLAY_TURN);
+      const sans = await evaluate(`[...document.querySelectorAll('#moveList .san')].map(el => el.textContent)`);
+      evidence.moves.push(await userMove(evaluate, false, i, chooseHumanMove(sans)));
+      await waitFor(evaluate, `document.querySelectorAll('#moveList .san').length >= ${(i + 1) * 2} && ${PLAY_TURN}`);
     }
     evidence.plies = await evaluate(`document.querySelectorAll('#moveList .san').length`);
   } else if (name.startsWith('arena')) {

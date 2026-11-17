@@ -25,6 +25,7 @@ proposals. A historical record is not an instruction to restore its old defaults
 - [`browser_runtime.md`](browser_runtime.md) — current runtime/context guide, with separately scoped smoke notes.
 - [`browser_runtime_configuration_and_benchmark_schema.md`](browser_runtime_configuration_and_benchmark_schema.md) — runtime benchmark/config schema.
 - [`perf_canary.md`](perf_canary.md) — local CPU fixed-suite canary. Not a CI gate.
+- [`perf_route_gate.md`](perf_route_gate.md) — built-preview route memory/speed comparisons required before refactor merges; noise rules, mini transport and measurement limits.
 - [`browser_uci_adapter_contract.md`](browser_uci_adapter_contract.md) — browser UCI adapter contract.
 - [`neural_browser_runtimes.md`](neural_browser_runtimes.md) — ONNX WebGPU, TVMJS, custom WGSL, WebNN, and ONNX QDQ runtime lanes.
 - [`cpu_wasm_runtimes.md`](cpu_wasm_runtimes.md) — CPU WebAssembly runtime choices and Emscripten/Rust WASM build targets.
