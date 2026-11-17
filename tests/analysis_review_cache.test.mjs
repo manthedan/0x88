@@ -103,7 +103,7 @@ function reviewHandoffPage() {
     let retryOriginalOrientation, retryOriginalAuto, retryOriginalShapes = [], restoreRetryPanels = null;
     const elements = new Map();
     const el = (id) => elements.get(id) ?? (elements.set(id, {
-      textContent: '', hidden: false, checked: true, value: id === 'retrySide' ? 'w' : '',
+      textContent: '', hidden: false, checked: true, dataset: {}, value: id === 'retrySide' ? 'w' : '',
       toggleAttribute() {}, focus() {}, querySelector() { return {}; }, scrollTop: 0,
     }), elements.get(id));
     const inputEl = el, selectEl = el;

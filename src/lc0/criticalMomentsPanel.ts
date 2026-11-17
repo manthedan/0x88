@@ -1,6 +1,6 @@
 import type { AnalysisLine } from './analysisFormat.ts';
 import { patchAnalysisResults } from './analysisPresentation.ts';
-import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
+import { type BrowserDom, htmlEscape } from './browserDom.ts';
 import {
   type CriticalMoment,
   type CriticalReport,
@@ -17,6 +17,7 @@ import type { GameReview } from './gameReview.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
 
 interface PanelOptions {
+  dom: Pick<BrowserDom, 'el' | 'inputEl' | 'selectEl'>;
   broker: EngineResourceBroker;
   baseline(): { review: GameReview; fens: string[]; signature: string; source: string } | undefined;
   settings(): unknown;
@@ -30,6 +31,7 @@ interface PanelOptions {
 
 /** DOM-only adapter; the runner and report model do not depend on this panel or the board. */
 export function mountCriticalMomentsPanel(options: PanelOptions) {
+  const { el, inputEl, selectEl } = options.dom;
   let report: CriticalReport | undefined;
   let controller: AbortController | undefined;
   let disposed = false;

@@ -194,7 +194,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     let tree = { root: { fen: START_FEN }, current: { fen: START_FEN }, historyBoards: () => history };
     const elements = new Map();
     const el = (id) => elements.get(id) ?? (elements.set(id, element()), elements.get(id));
-    const selectEl = el, inputEl = el;
+    const selectEl = el, inputEl = el, maybeEl = el;
     const document = { getElementById: el };
     const BIG_NETS = { bt4: BT4_NET, t3: T3_NET };
     const bigNetFor = async (variant) => {

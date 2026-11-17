@@ -24,7 +24,7 @@ import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
-import { buttonEl, el, htmlEscape, maybeEl, selectEl } from './browserDom.ts';
+import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   BIG_NETS,
   type Bt4SearchOptions,
@@ -75,6 +75,8 @@ import { uciGameHistory } from './uciGameHistory.ts';
 import { createWakeLockManager } from './wakeLock.ts';
 import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './workspaceAutosave.ts';
 
+const pageDom = createBrowserDom();
+const { buttonEl, el, maybeEl, selectEl } = pageDom;
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
@@ -2378,7 +2380,7 @@ function ctxInit(ctx: PlayContext): void {
   } else if (!ctx.gameOver) ctxPrepareOrStartEngine(ctx);
 }
 
-function hasPlayBrowserDom(): boolean {
+function hasPlayBrowserDom(root: HTMLElement): boolean {
   const required = [
     'positionNotice',
     'positionNoticeText',
@@ -2437,7 +2439,7 @@ function hasPlayBrowserDom(): boolean {
     'moveForm',
     'moveInput',
   ];
-  const missing = required.filter((id) => !document.getElementById(id));
+  const missing = required.filter((id) => root.id !== id && !root.querySelector(`[id=${JSON.stringify(id)}]`));
   if (!missing.length) return true;
   console.warn(`Play browser mount skipped; missing required DOM element(s): ${missing.map((id) => `#${id}`).join(', ')}`);
   return false;
@@ -2446,13 +2448,15 @@ function hasPlayBrowserDom(): boolean {
 let lastPlayMountHref: string | null = null;
 
 export function mountPlayBrowser(): () => void {
-  if (!hasPlayBrowserDom()) return () => undefined;
+  const root = document.getElementById('main');
+  if (!root || !hasPlayBrowserDom(root)) return () => undefined;
   const href = location.href;
   if (lastPlayMountHref !== null && lastPlayMountHref !== href) {
     location.reload();
     return () => undefined;
   }
   lastPlayMountHref = href;
+  const releaseDom = pageDom.mount(root);
   const ctx = createPlayContext();
   ctxInit(ctx);
 
@@ -2462,43 +2466,47 @@ export function mountPlayBrowser(): () => void {
   (globalThis as unknown as { __playUserMove?: (from: string, to: string) => void }).__playUserMove = hook;
 
   return () => {
-    ctx.autosave?.flush();
-    ctx.autosave = null;
-    ctx.disposed = true;
-    ctx.consentAbort.abort();
-    ctxCancelEngineTurn(ctx);
-    ctx.abort.abort();
-    void retireUnusedPlayNeuralEngines().catch(() => undefined);
-    centipawnEvaluatorGeneration += 1;
-    centipawnEvaluator?.clear();
-    const destroyCentipawn = (centipawnEvaluator?.inner as (Evaluator & { destroy?: () => void }) | undefined)?.destroy;
-    if (typeof destroyCentipawn === 'function') destroyCentipawn.call(centipawnEvaluator?.inner);
-    centipawnEvaluator = null;
-    centipawnLoadPromise = null;
-    playRuntimeFallbackAudits.clear();
-    // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
-    // engines it must not remain cached after this Play route is gone.
-    disposeCachedCpuEngine('stormphrax');
-    if (ctx.resignArmTimer) {
-      clearTimeout(ctx.resignArmTimer);
-      ctx.resignArmTimer = null;
+    try {
+      ctx.autosave?.flush();
+      ctx.autosave = null;
+      ctx.disposed = true;
+      ctx.consentAbort.abort();
+      ctxCancelEngineTurn(ctx);
+      ctx.abort.abort();
+      void retireUnusedPlayNeuralEngines().catch(() => undefined);
+      centipawnEvaluatorGeneration += 1;
+      centipawnEvaluator?.clear();
+      const destroyCentipawn = (centipawnEvaluator?.inner as (Evaluator & { destroy?: () => void }) | undefined)?.destroy;
+      if (typeof destroyCentipawn === 'function') destroyCentipawn.call(centipawnEvaluator?.inner);
+      centipawnEvaluator = null;
+      centipawnLoadPromise = null;
+      playRuntimeFallbackAudits.clear();
+      // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
+      // engines it must not remain cached after this Play route is gone.
+      disposeCachedCpuEngine('stormphrax');
+      if (ctx.resignArmTimer) {
+        clearTimeout(ctx.resignArmTimer);
+        ctx.resignArmTimer = null;
+      }
+      ctxDisarmNewGame(ctx);
+      ctx.keyboardBoard?.destroy();
+      ctx.keyboardBoard = null;
+      if (ctx.pendingPreferredEngineTimer) {
+        clearTimeout(ctx.pendingPreferredEngineTimer);
+        ctx.pendingPreferredEngineTimer = null;
+      }
+      (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
+      ctx.ground = null;
+      for (const { target, type, fn } of ctx.listeners) {
+        target.removeEventListener(type, fn);
+      }
+      ctx.listeners = [];
+      // Only clear the test hook if it is still ours (a newer re-entrant mount
+      // may have installed its own).
+      const g = globalThis as unknown as { __playUserMove?: (from: string, to: string) => void };
+      if (g.__playUserMove === hook) delete g.__playUserMove;
+    } finally {
+      releaseDom();
     }
-    ctxDisarmNewGame(ctx);
-    ctx.keyboardBoard?.destroy();
-    ctx.keyboardBoard = null;
-    if (ctx.pendingPreferredEngineTimer) {
-      clearTimeout(ctx.pendingPreferredEngineTimer);
-      ctx.pendingPreferredEngineTimer = null;
-    }
-    (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
-    ctx.ground = null;
-    for (const { target, type, fn } of ctx.listeners) {
-      target.removeEventListener(type, fn);
-    }
-    ctx.listeners = [];
-    // Only clear the test hook if it is still ours (a newer re-entrant mount
-    // may have installed its own).
-    const g = globalThis as unknown as { __playUserMove?: (from: string, to: string) => void };
-    if (g.__playUserMove === hook) delete g.__playUserMove;
   };
 }

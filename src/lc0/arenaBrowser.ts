@@ -81,7 +81,7 @@ import {
 } from './berserkVariants.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
 import { boardCheck } from './boardUx.ts';
-import { el, htmlEscape, inputEl, maybeEl, selectEl } from './browserDom.ts';
+import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
   boundedIntValue,
@@ -336,6 +336,8 @@ interface EngineOutputSnapshot {
   visits?: number;
 }
 
+const pageDom = createBrowserDom();
+const { el, inputEl, maybeEl, selectEl } = pageDom;
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
@@ -640,7 +642,7 @@ function formatNodes(nodes: number): string {
 }
 
 function downloadProgressEl(): HTMLElement | null {
-  return document.getElementById('downloadProgress');
+  return maybeEl('downloadProgress');
 }
 
 function showDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Loading'): void {
@@ -918,10 +920,10 @@ function installRuntimeAuditPanel(): void {
   arenaAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.surface && detail.surface !== 'arena') return;
-    const warningTarget = document.getElementById('runtimeWarning');
+    const warningTarget = maybeEl('runtimeWarning');
     if (warningTarget && activeRuntimeAuditIdentities().has(browserRuntimeAuditIdentity(detail))) updateRuntimeFallbackWarning(warningTarget, detail);
     if (detail.family !== 'lc0') return;
-    const target = document.getElementById('runtimeAuditInfo');
+    const target = maybeEl('runtimeAuditInfo');
     if (!target) return;
     target.innerHTML = diagBlockHtml('LC0 audit', [htmlEscape(formatBrowserRuntimeAudit(detail))]);
   };
@@ -937,7 +939,7 @@ function normalizeLc0InputBackend(value: string | null): 'js' | 'wgsl' | 'wasm' 
 }
 
 function lc0HybridInputBackend(): 'js' | 'wgsl' | 'wasm' {
-  const node = document.getElementById('lc0InputBackendSelect') as HTMLSelectElement | null;
+  const node = maybeEl('lc0InputBackendSelect') as HTMLSelectElement | null;
   return normalizeLc0InputBackend(node?.value ?? params.get('inputBackend') ?? params.get('lc0InputBackend'));
 }
 
@@ -946,7 +948,7 @@ function normalizeLc0LegalPriorsBackend(value: string | null): 'js' | 'wasm' | '
 }
 
 function lc0HybridLegalPriorsBackend(): 'js' | 'wasm' | 'gpu' {
-  const node = document.getElementById('lc0LegalPriorsSelect') as HTMLSelectElement | null;
+  const node = maybeEl('lc0LegalPriorsSelect') as HTMLSelectElement | null;
   return normalizeLc0LegalPriorsBackend(
     node?.value ?? params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors'),
   );
@@ -963,7 +965,7 @@ function normalizeLc0EncoderKernelVariant(value: string | null): Lc0WebEncoderKe
 }
 
 function lc0EncoderKernelVariant(): Lc0WebEncoderKernelVariant {
-  const node = document.getElementById('lc0EncoderKernelSelect') as HTMLSelectElement | null;
+  const node = maybeEl('lc0EncoderKernelSelect') as HTMLSelectElement | null;
   return normalizeLc0EncoderKernelVariant(node?.value ?? params.get('encoderKernel') ?? params.get('lc0EncoderKernel') ?? params.get('encoderKernelVariant'));
 }
 
@@ -977,12 +979,12 @@ function lc0HybridConfigLabel(runtime = selectedLc0Runtime()): string {
 }
 
 function lc0BatchSize(): number {
-  const node = document.getElementById('lc0BatchSizeInput') as HTMLInputElement | null;
+  const node = maybeEl('lc0BatchSizeInput') as HTMLInputElement | null;
   return boundedIntValue(node?.value ?? params.get('lc0BatchSize') ?? params.get('batchSize') ?? params.get('batch'), 1, 1, 64);
 }
 
 function lc0BatchPipelineDepth(): number {
-  const node = document.getElementById('lc0BatchPipelineDepthInput') as HTMLInputElement | null;
+  const node = maybeEl('lc0BatchPipelineDepthInput') as HTMLInputElement | null;
   return boundedIntValue(node?.value ?? params.get('lc0BatchPipelineDepth') ?? params.get('batchPipelineDepth'), 1, 1, 16);
 }
 
@@ -1361,9 +1363,9 @@ function renderEngineOutputs(): void {
     // A newly completed result starts at its first move; ongoing searches retain the reader's place.
     if (previous && previous.fen === line.dataset.fen) line.scrollLeft = previous.scrollLeft;
   }
-  const raw = document.getElementById('engineRaw');
+  const raw = maybeEl('engineRaw');
   if (raw) raw.innerHTML = ids.map(engineRawHtml).join('');
-  const section = document.getElementById('engineOutputsSection');
+  const section = maybeEl('engineOutputsSection');
   if (section) section.hidden = !cards.length;
 }
 
@@ -1573,7 +1575,7 @@ function renderReviewBar(): void {
 /** Following the live game, the list stays scrolled to its newest row (even as panels above resize it). */
 function keepMovesAtLiveEnd(): void {
   if (reviewing) return;
-  const strip = document.getElementById('gameMoves');
+  const strip = maybeEl('gameMoves');
   if (strip) strip.scrollTop = strip.scrollHeight;
 }
 
@@ -1581,7 +1583,7 @@ function keepMovesAtLiveEnd(): void {
 function renderMoveStrip(): void {
   const strip = el('gameMoves');
   const restoreFocus = rememberMoveFocus(strip, 'data-idx');
-  const block = document.getElementById('movesBlock');
+  const block = maybeEl('movesBlock');
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   if (!trail || trail.entries.length <= 1) {
     if (block) block.hidden = true;
@@ -1893,7 +1895,7 @@ function activeRuntimeAuditIdentities(): Set<string> {
 }
 
 function reconcileActiveRuntimeFallbackWarning(): void {
-  const warningTarget = document.getElementById('runtimeWarning');
+  const warningTarget = maybeEl('runtimeWarning');
   if (warningTarget) reconcileRuntimeFallbackWarning(warningTarget, activeRuntimeAuditIdentities());
 }
 
@@ -1992,7 +1994,7 @@ function arenaGamesPerOpening(): number {
 
 /** One-line description of the locked setup, shown in place of the forms while a match runs. */
 function renderSetupSummary(): void {
-  const node = document.getElementById('setupSummaryText');
+  const node = maybeEl('setupSummaryText');
   if (!node) return;
   const mode = arenaTournamentMode();
   const names = activeSeatRows().map((row) => {
@@ -2026,7 +2028,7 @@ function renderSetupSummary(): void {
 
 /** Setup vs running sidebar states (CSS keys off these data attributes on <main>). */
 function syncArenaPhase(): void {
-  const main = document.getElementById('main');
+  const main = maybeEl('main');
   if (!main) return;
   const wasRunning = main.dataset.phase === 'running';
   main.dataset.phase = running ? 'running' : 'setup';
@@ -2034,10 +2036,10 @@ function syncArenaPhase(): void {
   main.dataset.match = arenaMatchState;
   (el('setupPane') as HTMLFieldSetElement).disabled = running || startPending;
   if (!running) main.dataset.config = 'closed';
-  const editButton = document.getElementById('editSetup');
+  const editButton = maybeEl('editSetup');
   if (editButton) editButton.setAttribute('aria-expanded', String(main.dataset.config === 'open'));
   el('start').textContent = checkpoint ? 'Start new tournament' : arenaTournamentMode() === 'match' ? 'Start match' : 'Start tournament';
-  const title = document.getElementById('scoreboardTitle');
+  const title = maybeEl('scoreboardTitle');
   const displayedMode = checkpoint?.config.mode ?? arenaTournamentMode();
   if (title) title.textContent = displayedMode === 'match' ? 'Match' : displayedMode === 'gauntlet' ? 'Gauntlet' : 'Round robin';
   renderSetupSummary();
@@ -3999,7 +4001,7 @@ async function runIsolatedCpuTournament(
 }
 
 function renderCheckpointStatus(): void {
-  const host = document.getElementById('checkpointSection');
+  const host = maybeEl('checkpointSection');
   if (!host) return;
   // Routine storage status belongs with exports, not above the live scoresheet.
   host.hidden = running ? !checkpointProblem : !checkpoint && !checkpointProblem;
@@ -5113,7 +5115,7 @@ function wireEvents() {
     if (trail) enterReview(trail, trail.entries.length - 1);
   });
   el('editSetup').addEventListener('click', () => {
-    const main = document.getElementById('main');
+    const main = maybeEl('main');
     if (!main) return;
     main.dataset.config = main.dataset.config === 'open' ? 'closed' : 'open';
     syncArenaPhase();
@@ -5507,6 +5509,7 @@ export function mountArenaBrowser(): () => void {
     return () => undefined;
   }
   lastArenaMountHref = href;
+  const releaseDom = pageDom.mount(document.getElementById('main'));
   resetArenaPageState();
   resetArenaUnload();
   const controller = new AbortController();
@@ -5538,20 +5541,24 @@ export function mountArenaBrowser(): () => void {
     el('pairing').textContent = 'Arena initialization failed.';
   });
   return () => {
-    controller.abort();
-    if (mountAbort !== controller) return;
-    disposeRuntimeResources();
-    if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
-    arenaKeydownHandler = null;
-    if (arenaAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
-    arenaAuditHandler = null;
-    if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
-    arenaPagehideHandler = null;
-    if (arenaClockTimer) clearInterval(arenaClockTimer);
-    arenaClockTimer = null;
-    arenaChartResizeObserver?.disconnect();
-    arenaChartResizeObserver = null;
-    (ground as { destroy?: () => void } | null)?.destroy?.();
-    ground = null;
+    try {
+      controller.abort();
+      if (mountAbort !== controller) return;
+      disposeRuntimeResources();
+      if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
+      arenaKeydownHandler = null;
+      if (arenaAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
+      arenaAuditHandler = null;
+      if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
+      arenaPagehideHandler = null;
+      if (arenaClockTimer) clearInterval(arenaClockTimer);
+      arenaClockTimer = null;
+      arenaChartResizeObserver?.disconnect();
+      arenaChartResizeObserver = null;
+      (ground as { destroy?: () => void } | null)?.destroy?.();
+      ground = null;
+    } finally {
+      releaseDom();
+    }
   };
 }

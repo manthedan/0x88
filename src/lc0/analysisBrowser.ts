@@ -155,7 +155,7 @@ import {
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
-import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
+import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
   lc0EncoderLayers as browserLc0EncoderLayers,
@@ -302,6 +302,8 @@ import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
+const pageDom = createBrowserDom();
+const { el, inputEl, selectEl, maybeEl } = pageDom;
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
@@ -839,10 +841,10 @@ function installRuntimeAuditPanel(): void {
   analysisAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.surface && detail.surface !== 'analysis') return;
-    const warningTarget = document.getElementById('runtimeWarning');
+    const warningTarget = maybeEl('runtimeWarning');
     if (warningTarget && activeRuntimeAuditIdentities().has(browserRuntimeAuditIdentity(detail))) updateRuntimeFallbackWarning(warningTarget, detail);
     if (detail.family !== 'lc0') return;
-    const target = document.getElementById('runtimeAudit');
+    const target = maybeEl('runtimeAudit');
     if (!target) return;
     target.textContent = formatBrowserRuntimeAudit(detail);
   };
@@ -1038,7 +1040,7 @@ function searchProgressHtml(progress: SearchProgressSnapshot): string {
 }
 
 function renderAnalysisSearchProgress(): void {
-  const node = document.getElementById('analysisSearchProgress');
+  const node = maybeEl('analysisSearchProgress');
   if (!node) return;
   const items = [...searchProgressByEngine.values()];
   node.hidden = items.length === 0;
@@ -1048,8 +1050,8 @@ function renderAnalysisSearchProgress(): void {
 
 /** Live progress on the Stop button, which occupies Analyze's slot while a search runs. */
 function renderStopProgress(items: SearchProgressSnapshot[]): void {
-  const stop = document.getElementById('stop');
-  const label = document.getElementById('stopProgress');
+  const stop = maybeEl('stop');
+  const label = maybeEl('stopProgress');
   if (!stop || !label) return;
   const bounded = items.filter(hasBoundedSearchProgress);
   const completed = bounded.reduce((sum, item) => sum + Math.max(0, item.completed ?? 0), 0);
@@ -1149,9 +1151,9 @@ async function workerLc0Lines(
 }
 
 function modelProgressEl(): HTMLElement {
-  let node = document.getElementById('downloadProgress');
+  let node = maybeEl('downloadProgress');
   if (node) return node;
-  node = document.getElementById('modelLoadProgress');
+  node = maybeEl('modelLoadProgress');
   if (!node) {
     node = document.createElement('div');
     node.id = 'modelLoadProgress';
@@ -1823,7 +1825,7 @@ function activeRuntimeAuditIdentities(): Set<string> {
 }
 
 function reconcileActiveRuntimeFallbackWarning(): void {
-  const warningTarget = document.getElementById('runtimeWarning');
+  const warningTarget = maybeEl('runtimeWarning');
   if (warningTarget) reconcileRuntimeFallbackWarning(warningTarget, activeRuntimeAuditIdentities());
 }
 
@@ -2454,7 +2456,7 @@ function renderPgnImportNotice(text?: string): void {
 function renderAnalysisStatus(): void {
   renderPgnImportNotice();
   if (retry) return;
-  const status = document.getElementById('analysisStatus');
+  const status = maybeEl('analysisStatus');
   if (!status) return;
   const lines = lineCache.get(tree.current.fen) ?? [];
   const ready = new Set(lines.filter((line) => line.multipv === 1 && !line.error).map((line) => analysisEngineName(line.engine))).size;
@@ -2473,7 +2475,7 @@ function renderAnalysisStatus(): void {
   const overview = status.closest<HTMLElement>('.analysis-overview');
   if (overview && overview.dataset.status !== state) overview.dataset.status = state;
   // The primary action reflects the state: filled "Analyze" when idle, quiet "Re-analyze" once done.
-  const label = document.getElementById('analyzeLabel');
+  const label = maybeEl('analyzeLabel');
   const verb = state === 'done' ? 'Re-analyze' : 'Analyze';
   if (label && label.textContent !== verb) label.textContent = verb;
 }
@@ -3632,7 +3634,7 @@ function startMistakeRetry(): void {
   ]);
   el('retryEntry').hidden = true;
   el('retryActive').hidden = false;
-  document.querySelector<HTMLElement>('.analysis-workspace')!.dataset.retrying = 'true';
+  el('main').dataset.retrying = 'true';
   for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd'])
     el(id).toggleAttribute('disabled', true);
   el('message').textContent = '';
@@ -3768,7 +3770,7 @@ function exitMistakeRetry(render = true): void {
   const savedShapes = retryOriginalShapes;
   retryOriginalShapes = [];
   inputEl('autoAnalyze').checked = retryOriginalAuto;
-  delete document.querySelector<HTMLElement>('.analysis-workspace')!.dataset.retrying;
+  delete el('main').dataset.retrying;
   el('retryActive').hidden = true;
   el('retryEntry').hidden = false;
   for (const id of ['retrySolution', 'retryHumanStatus', 'retryStatus', 'boardAnnouncement']) el(id).textContent = '';
@@ -4024,7 +4026,7 @@ function deferHiddenTabWork(kind: HiddenTabWork): boolean {
   if (!requested.start && kind === 'analysis') {
     // Stop may have disabled the button after the previous run's finally.
     // A new hidden request has no running search to enable it again.
-    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+    maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
   }
   return !requested.start;
 }
@@ -4046,7 +4048,7 @@ function applyHiddenTab(hidden: boolean): void {
   }
   if (transition.pause.includes('analysis')) {
     void dispatchAnalysis({ type: 'VISIBILITY', visible: false, resumeSearch: false });
-    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+    maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
     clearAnalysisSearchProgress();
     lineCache.delete(tree.current.fen);
     renderLines();
@@ -4772,7 +4774,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       completeAnalysisKeys.add(selectionCacheKey);
       if (completeAnalysisKeys.size > 512) completeAnalysisKeys.delete(completeAnalysisKeys.values().next().value!);
     }
-    const message = document.getElementById('message');
+    const message = maybeEl('message');
     if (message)
       message.textContent = hadTaskFailure
         ? `Analysis completed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`
@@ -4781,7 +4783,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
           : `Analysis complete · ${selectedLabels}`;
   } catch (error) {
     controller.abort();
-    const message = document.getElementById('message');
+    const message = maybeEl('message');
     if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message && runId === activeAnalysisRunId && analysisAbort === controller)
       message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
@@ -4793,8 +4795,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       retireAnalysisRunCentipawnKeys();
       clearAnalysisSearchProgress();
       renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
-      document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
-      document.getElementById('analyze')?.toggleAttribute('disabled', false);
+      maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+      maybeEl('analyze')?.toggleAttribute('disabled', false);
     }
     void executeAnalysisEffects(effects);
   }
@@ -5735,7 +5737,7 @@ function wireEvents() {
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
     // The paused run's finally already ran and left Stop enabled. Cancelling
     // the suspended search has to disable it here; that finally will not run again.
-    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+    maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
   });
   window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeAnalysisPhoneLargeNets, { signal: mountAbort.signal });
   el('engineList').addEventListener('change', async (event) => {
@@ -5857,6 +5859,7 @@ function wireEvents() {
     deferAnalysisSettingsRefresh();
   });
   criticalPanel = mountCriticalMomentsPanel({
+    dom: pageDom,
     broker: resourceBroker,
     suspended: () => !!retry,
     baseline: () =>
@@ -6160,13 +6163,13 @@ function disposeRuntimeResources(): void {
   if (reviewWasRunning) {
     void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'review' });
     reviewRunSignature = '';
-    const progress = document.getElementById('reviewProgress');
+    const progress = maybeEl('reviewProgress');
     if (progress) progress.hidden = true;
     // Runtime reload keeps the page mounted. The stale review's identity guard
     // intentionally skips its finally block, so restore controls here.
-    (document.getElementById('reviewGame') as HTMLButtonElement | null)?.toggleAttribute('disabled', false);
-    (document.getElementById('reviewStop') as HTMLButtonElement | null)?.toggleAttribute('disabled', true);
-    const status = document.getElementById('reviewStatus');
+    (maybeEl('reviewGame') as HTMLButtonElement | null)?.toggleAttribute('disabled', false);
+    (maybeEl('reviewStop') as HTMLButtonElement | null)?.toggleAttribute('disabled', true);
+    const status = maybeEl('reviewStatus');
     if (status) status.textContent = 'Review stopped after runtime changed.';
   }
   if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
@@ -6549,6 +6552,7 @@ export function mountAnalysisBrowser(): () => void {
     return () => undefined;
   }
   lastAnalysisMountHref = href;
+  const releaseDom = pageDom.mount(document.getElementById('main'));
   resetAnalysisPageState();
   pendingAnalysisInput = null;
   workspaceAutosave = createWorkspaceAutosave(
@@ -6597,7 +6601,7 @@ export function mountAnalysisBrowser(): () => void {
       fen: tree.current.fen,
       workerProgressMessages: analysisWorkerProgressMessages,
       uiProgressSamples: analysisUiProgressSamples,
-      message: document.getElementById('message')?.textContent ?? '',
+      message: maybeEl('message')?.textContent ?? '',
     });
   const transitionLogHook = () => analysisTransitionLog;
   const setHiddenHook = (hidden: boolean) => applyHiddenTab(hidden);
@@ -6687,17 +6691,21 @@ export function mountAnalysisBrowser(): () => void {
   );
   void init(controller.signal);
   return () => {
-    pvResize.disconnect();
-    evalResize.disconnect();
-    controller.abort();
-    if (mountAbort === controller) {
-      disposePageResources();
+    try {
+      pvResize.disconnect();
+      evalResize.disconnect();
+      controller.abort();
+      if (mountAbort === controller) {
+        disposePageResources();
+      }
+      // Only clear the test hook if it is still ours (a newer mount may have
+      // installed its own).
+      if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
+      if (smokeGlobal.__analysisSchedulingState === schedulingStateHook) delete smokeGlobal.__analysisSchedulingState;
+      if (smokeGlobal.__analysisTransitionLog === transitionLogHook) delete smokeGlobal.__analysisTransitionLog;
+      if (smokeGlobal.__analysisSetHidden === setHiddenHook) delete smokeGlobal.__analysisSetHidden;
+    } finally {
+      releaseDom();
     }
-    // Only clear the test hook if it is still ours (a newer mount may have
-    // installed its own).
-    if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
-    if (smokeGlobal.__analysisSchedulingState === schedulingStateHook) delete smokeGlobal.__analysisSchedulingState;
-    if (smokeGlobal.__analysisTransitionLog === transitionLogHook) delete smokeGlobal.__analysisTransitionLog;
-    if (smokeGlobal.__analysisSetHidden === setHiddenHook) delete smokeGlobal.__analysisSetHidden;
   };
 }
