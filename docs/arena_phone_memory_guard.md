@@ -124,6 +124,14 @@ Desktop keeps the existing whole-roster warmup.
 Phone dialogs have no slow-WebGPU sentence or turn-off fine print. Native
 inertness, focus restoration, Tab trapping and Escape behavior remain intact.
 An aborted or superseded metadata lookup cannot open a stale second dialog.
+Picker requests have their own cancellation scopes: row/profile edits, a newer
+selection, game startup, revocation and unmount cancel obsolete probes before a
+modal or persistent consent. Play keeps restored-download approval separate from
+picker ownership; a restart draft cannot clear the live opponent's gate. Restored
+Play opponents (including engine-first moves) and Arena/checkpoint rosters require
+download approval before acquisition. Declined or unavailable Play selections
+resume an abandoned initial fallback preparation only for the current owner;
+replacement picker requests inherit that preparation responsibility.
 
 ### Artifact sizes and verified cache presence (v2 copy)
 
@@ -155,6 +163,10 @@ and repair behavior.
 - Shared policy matrix, storage failures, restore fallback and acquisition boundary:
   `tests/phone_large_net_policy.test.mjs`
 - Saved-profile consent: `tests/engine_setups.test.mjs`
+- Async profile/startup/restore ownership, cancellation and retirement:
+  `tests/phone_download_ownership.test.mjs`
+- Picker probe cancellation on selection/roster edits and startup:
+  `tests/phone_picker_ownership.test.mjs`
 - Classifier: `tests/device_memory_class.test.mjs`
 - Pairings, start-entry block, warmup routing, passive diagnostics:
   `tests/arena_memory_guard.test.mjs`
@@ -216,27 +228,39 @@ unused gated workers without aborting an unaffected active/starting tournament.
 
 ### Release 2 owner copy follow-up (v2)
 
-The v2 rules above supersede the earlier screenshot copy. Full
-`LC0_MEMORY_MODEL_DIR=<worktree>/.local-dev-artifacts/release2/models npm test -- --test-concurrency=2`:
-**2522 passed, 4 existing optional skips** (`npm-test-v2.log`), with all seven
-folding goldens and real Small parity running. Typecheck (zero errors/warnings),
-repository lint, targeted Biome checks and the product build pass
-(`product-build-v2.log`).
+The v2 rules above supersede the earlier screenshot copy. Final full
+`LC0_MEMORY_MODEL_DIR=<worktree>/.local-dev-artifacts/release2/models npm test -- --test-concurrency=1`:
+**2574 passed, 4 existing optional skips** (`npm-test-final-v2.log`), with all seven
+folding goldens and real Small parity running. Final typecheck (zero errors/warnings),
+repository lint, targeted Biome checks and `BUILD_SCOPE=product npm run build:client`
+pass (`typecheck-final-v2.log`, `lint-final-v2.log`, `product-build-final-v2.log`).
 
-Fresh agent-browser artifacts in scratchpad `mobile-soak/release2/`:
+All six agent-browser screenshots were refreshed against the final reviewed
+product build (`f0e86b94`), in scratchpad `mobile-soak/release2/`:
 
 - `phone-analysis-bt4-dialog-v2.png`: 390×844, uncached BT4 crash/download copy.
 - `phone-play-queen-odds-uncached-v2.png`: download-only Queen Odds dialog.
 - `phone-play-queen-odds-cached-v2.png`: actual verified Cache Storage entry, no
-  dialog and no crash opt-in. `cache-proof-v2.json` records the real 95,662,716
-  bytes and pinned SHA-256, freshly hashed by `loadLc0ModelForOrt()` without an
-  inference session. A temporary local-only bundle of that loader staged the
-  cache; it is not an app hook, committed asset or deployment.
+  dialog and crash opt-in still off. The final pass used the normal Play Download
+  action, switched to Maia, then reselected cached Queen Odds: ready, no dialog.
+  `cache-proof-final-v2.json` records the exact Cache Storage key and verification
+  metadata: 95,662,716 observed/expected bytes and matching pinned SHA-256.
+  No fake entry, custom app hook or cache-warming bundle was used in this pass.
 - `phone-picker-off-v2.png` / `phone-picker-on-v2.png`: exact shorter hints.
   Turning off with Queen Odds selected preserves that exempt opponent.
 - `desktop-play-v2.png`: 1280×900, desktop unchanged with no phone hint/dialog.
 
-Browser checks confirm Cancel/Escape keep the prior picker selection for both
-uncached warnings. Cache presence is not simulated with localStorage or a fake
-response. No cellular detection, physical-iPhone/Safari automation, push,
-deployment or upload was introduced.
+The five phone screenshots use 390×844 and `?memoryClass=phone`. Browser checks
+confirm Cancel/Escape keep the prior picker selection for both uncached warnings.
+The exact hint states were exercised through Use anyway and Turn off with auto
+analysis disabled. Cache presence is not simulated with localStorage or a fake
+response. The owned browser session and local static server were stopped.
+
+Final Codex whole-branch review used the same command above (`--mode branch
+--base main --engine codex --model gpt-6.1-sol --thinking xhigh`), plus
+repository-relative-path guidance and JSON output. All actionable findings were
+verified, fixed and regression-tested; none was waived. The final
+`autoreview-copy-8-v2.log/json` is **exit 0, clean, no accepted/actionable findings**
+on `f0e86b94`. No redundant review followed; only this documentation closeout
+changed afterward. No cellular detection, physical-iPhone/Safari automation,
+push, merge, deployment or upload was introduced.
