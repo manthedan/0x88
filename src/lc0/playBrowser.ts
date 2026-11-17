@@ -1808,6 +1808,9 @@ function ctxRender(ctx: PlayContext): void {
 function ctxSetOpponent(ctx: PlayContext, next: PlayOpponentState): void {
   const previousEngineId = ctx.opponent.active.engineId;
   ctx.opponent = next;
+  // A draft approval is not permission to download the still-live opponent.
+  // Only a committed replacement retires that live model's outstanding gate.
+  if (next.active.engineId !== previousEngineId && ctx.restoredDownloadEngineId === previousEngineId) ctx.restoredDownloadEngineId = null;
   // Stormphrax's large WASM heap must not share residency with the next model.
   // A pending restart still belongs to the current game, so retain it until commit.
   if (previousEngineId === 'stormphrax' && next.active.engineId !== previousEngineId) disposeCachedCpuEngine(previousEngineId);
@@ -2226,7 +2229,7 @@ function ctxInit(ctx: PlayContext): void {
       }
       ctxRefreshEngineOptions(ctx);
       selectEl('engineSelect').value = option.id;
-      ctx.restoredDownloadEngineId = null;
+      if (ctx.restoredDownloadEngineId === option.id) ctx.restoredDownloadEngineId = null;
     }
     if (option.family === 'maia3' && previousEngineId.startsWith('maia-')) {
       const carried = Number(ctx.lastEngineId.slice('maia-'.length));

@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
+import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
 
 const source = Object.fromEntries(
   ['analysis', 'arena', 'play'].map((name) => [name, readFileSync(new URL(`../src/lc0/${name}Browser.ts`, import.meta.url), 'utf8')]),
@@ -348,6 +349,90 @@ test('engine-first Play retires the previous large net and awaits its cleanup be
   await pending;
   assert.deepEqual(events, ['create:bt4', 'dispose:bt4', 'create:t3']);
   pool.disposeAllNow();
+});
+
+for (const action of ['dismiss', 'confirm']) {
+  test(`Queen Odds draft approval does not transfer to a live restored BT4 gate (${action})`, async () => {
+    const active = { engineId: 'lc0-bt4', color: 'white', level: 3 };
+    const draft = { ...active, engineId: 'leela-queen-odds' };
+    const ctx = {
+      opponent: committedPlayOpponent(active),
+      lastEngineId: active.engineId,
+      restoredDownloadEngineId: active.engineId,
+      restoredDownloadConsent: null,
+      abort: new AbortController(),
+      consentAbort: new AbortController(),
+      disposed: false,
+      engineThinking: false,
+      gameOver: null,
+    };
+    const node = { value: draft.engineId };
+    const prompts = [];
+    let selectedHandler;
+    const deps = {
+      ctx,
+      BIG_NETS,
+      committedPlayOpponent,
+      transitionPlayOpponent,
+      trackListener: (_ctx, _node, _event, handler) => {
+        selectedHandler = handler;
+      },
+      selectEl: () => node,
+      ctxDraftEngine: () => ({ id: draft.engineId, family: 'lc0', variant: 'lqo' }),
+      ctxSelectedEngine: () =>
+        ctx.opponent.active.engineId === active.engineId
+          ? { id: active.engineId, family: 'lc0', variant: 'bt4' }
+          : { id: draft.engineId, family: 'lc0', variant: 'lqo' },
+      requestLargeNetConsent: async (config) => {
+        prompts.push(config.key);
+        return config.key === 'lqo';
+      },
+      ctxEngineOptionState: () => ({ disabled: false }),
+      ctxRefreshEngineOptions() {},
+      ctxRenderLevelOptions() {},
+      ctxGameIsFresh: () => false,
+      ctxCurrentPlayPreferences: () => draft,
+      ctxRestoreOpponentControls() {},
+      ctxPersistPlayPreferences() {},
+      ctxRender() {},
+      ctxNewGame() {},
+      ctxSetEngineNote() {},
+      buttonEl: () => ({}),
+      ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),
+    };
+    const code =
+      extract(source.play, 'function ctxSetOpponent(', 'function ctxRestoreOpponentControls(') +
+      extract(source.play, 'function ctxMaybeQueueRestart(', 'function ctxTuneOpponent(') +
+      extract(source.play, "  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {", "  trackListener(ctx, selectEl('levelSelect')") +
+      restoreGuard;
+    const api = new Function(
+      'deps',
+      `const { ${Object.keys(deps)} } = deps; ${code}; return {dismiss:ctxDismissRestart,confirm:ctxConfirmRestart,check:ctxCheckRestoredDownloadConsent};`,
+    )(deps);
+    await selectedHandler();
+    assert.equal(ctx.opponent.active.engineId, active.engineId);
+    assert.equal(ctx.opponent.pending.engineId, draft.engineId);
+    assert.equal(ctx.restoredDownloadEngineId, active.engineId, 'approving a draft leaves the live model gate intact');
+    api[action](ctx);
+    if (action === 'dismiss') {
+      assert.equal(ctx.opponent.active.engineId, active.engineId);
+      assert.equal(await api.check(ctx), false, 'Retry still asks for BT4 download approval');
+      assert.deepEqual(prompts, ['lqo', 'bt4']);
+    } else {
+      assert.equal(ctx.opponent.active.engineId, draft.engineId);
+      assert.equal(ctx.restoredDownloadEngineId, null, 'committing the replacement retires the old model gate');
+      assert.equal(await api.check(ctx), true);
+      assert.deepEqual(prompts, ['lqo']);
+    }
+  });
+}
+
+test('committing an asset-probed saved opponent preserves that destination model download gate', () => {
+  const code = extract(source.play, 'function ctxSetOpponent(', 'function ctxRestoreOpponentControls(');
+  const setOpponent = new Function(`${code}; return ctxSetOpponent;`)();
+  const ctx = { opponent: committedPlayOpponent({ engineId: 'maia3' }), restoredDownloadEngineId: 'leela-queen-odds' };
+  setOpponent(ctx, committedPlayOpponent({ engineId: 'leela-queen-odds' }));
+  assert.equal(ctx.restoredDownloadEngineId, 'leela-queen-odds');
 });
 
 test('cancelled Play restore cannot admit an engine or overwrite a replacement consent owner', async () => {
