@@ -172,6 +172,43 @@ At the cold total peak, LQO Gigacage was **182 MB**, versus 1180 MB at baseline.
 - CI fixture staging now includes all seven goldens, keeps hash-verified local staging zero-network, and includes Maia's committed manifest in the CI cache key. No model binaries are committed and this is not a new production streaming/hash path. An offline check of the seven local fixtures passed with `network:false`.
 - Validation: required lint; 208 relevant tests plus 46 post-format lifecycle/recovery/IO checks; Svelte typecheck; **`npm test`: 2340 passed, 4 unrelated existing skips** (three Python-transformer fixtures and the LC0 C++ encoder source); product build. All changed TS/JS/JSON files pass targeted Biome check. The optional repository-wide `check:biome` also reports pre-existing import/format findings in unrelated soak/telemetry files; no broad cleanup is folded into this memory change.
 
-## Remaining work / costs
+## Step 4 and final controls
 
-Step 4 and final no-fold controls will be recorded next. The requested sub-1 GB LQO / sub-2 GB BT4 peaks are **not achieved**. Expanded f16 models still enter ORT, and significant native/WebKit cost and reload retention remain. Do not promise an iPhone fix, disable folding by default, weaken integrity, or embark on OPFS/streaming hash work based on these observations.
+### Step 4: Analysis immediately retires unused big nets
+
+**Choice: TTL 0 on all platforms, like Play.** Both Analysis maintenance/model switching (`disposeUnusedEngines`) and runtime/page teardown now cancel and immediately release unused big-net workers, rather than retain them for three minutes. There is no measured justification here for a desktop exemption, and Safari does not expose a reliable RAM threshold. Switching back sacrifices native session reuse; the verified model-byte cache remains warm. Multiple **explicitly active** Analysis rows remain supported. The shared pool's default TTL and its identity-checked detach/replacement protection are unchanged for other owners.
+
+Tests execute the **actual extracted controller functions** with a real pool: T3 is disposed synchronously before acquiring BT4; no idle timer is created; both active T3/BT4 rows survive unused-engine cleanup; runtime teardown cancels/disposes all nets; the pool default remains 180000 ms outside this Analysis policy. Required lint, 19 relevant lifecycle/pool/override tests, targeted Biome, Svelte typecheck and the product build passed. Final **`npm test`: 2344 passed, 4 existing skips**, with all seven goldens and real Small inference parity running.
+
+After step 4, same cold/warm protocol:
+
+| Model | Cold peak / end MB | Warm peak / end MB | Load cold / warm ms | Midgame visits/s cold / warm |
+|---|---:|---:|---:|---:|
+| lqo | 2169 / 1822 | 5355 / 5193 | 13436 / 3657 | 12.3 / 38.1 |
+| t3 | 2585 / 2563 | 5577 / 5529 | 11931 / 3966 | 63.5 / 57.3 |
+| bt4 | 3768 / 3629 | 6989 / 6637 | 18455 / 8572 | 23.2 / 21.8 |
+
+The soak adapter already retires each net immediately, so the Analysis-only TTL change is **not expected to reduce these isolated lab loads**. Differences versus step 3 are another indication of run-to-run native/GC/compilation variability, not evidence of an Analysis TTL effect. On the 24 GiB desktop host, the final cold LQO total peak had 1826 MB WebKit malloc and 308 MB graphics; Gigacage was absent from the harness's ≥5 MB category list at that instant. Large JS serialization copies are no longer an adequate explanation for the remaining total.
+
+### Final `ortDequantFold=0` controls
+
+The same product build, production-selected artifacts, CPU IO, graph optimization **`all`**, and cold/warm protocol were used. Every ready message was checked for **effective** `dequantFoldEnabled:false`, `graphOptimizationLevel:'all'`, `ortIoMode:'cpu'`; every step completed successfully and every warm load was an actual metadata-trusted hit. Only this explicit diagnostic query disables app folding; **the default remains enabled**.
+
+| Model | Cold peak / end MB | Warm peak / end MB | Load cold / warm ms | Midgame visits/s cold / warm |
+|---|---:|---:|---:|---:|
+| lqo | 2534 / 2468 | 4813 / 4679 | 8592 / 2405 | 64.2 / 62.0 |
+| t3 | 2844 / 2769 | 5649 / 5575 | 10834 / 3451 | 58.7 / 48.9 |
+| bt4 | 2562 / 2482 | 6065 / 6050 | 15617 / 5032 | 12.1 / 13.0 |
+
+BT4's cold no-fold peak is lower here, but it still exceeds 2 GB and its tiny-search speed is lower. LQO's no-fold cold peak is **higher** than the final folded run despite the smaller JS input, unlike the owner's earlier comparison. T3 is already plain f16 and its fold-off flag does not remove weight conversion. These one-pair observations, post-disposal allocator retention, and the wide LQO speed variation do **not** justify a universal fold-off memory/performance claim or a default change.
+
+### Verification limits and remaining native cost
+
+- Baseline → final sampled cold peaks: **LQO 3627 → 2169 MB; T3 1747 → 2585 MB; BT4 2800 → 3768 MB**. Warm reloads remain substantially higher. There is no claim of uniform total-footprint improvement; the deterministic wins are one normal LQO session instead of two, the eliminated serialization allocations, and no three-minute unused Analysis worker retention.
+- The requested **sub-1 GB LQO / sub-2 GB BT4 targets are not achieved**, including the final no-fold controls. This is desktop Safari evidence, **not physical-iPhone validation**.
+- The post-done window is still an observation, not proof of a steady plateau. Some totals continue to change after disposal. Investigate longer-tail JSC/WASM compilation, ORT runtime/allocator and GPU-driver retention before attributing the whole WebKit-malloc category to C++ tensor copies. The captured baseline **413 MB WASM linear-memory high-water** does not establish Carbon's proposed 4–5× native model-copy multiplier.
+- The new folded models are still **189.4/370.6 MB** for LQO/BT4 and still enter ORT's normal native ingestion. Dropping JS roots does not shrink the WASM heap, release the native runtime, or guarantee immediate OS reclamation. Immediate Analysis retirement proves logical worker/pool lifetime, not a particular physical-memory drop.
+- The quick T3/BT4 comparisons above show no consistent slowdown across cold/warm observations, but do **not establish a <2% performance bound**. An additional warmed, IO-only 10-second A/B and refreshed shader/heap instrumentation were prepared but could not be run during repeated shared-Safari pairing conflicts. The last recorded owned session was confirmed invalid; no other session or driver was terminated. Native graph-optimizer folding/fusion behavior is not inferred merely from the app-fold flag.
+- Full-model goldens and the existing Small numerical/move/prior parity test are green. Small's real production Safari worker had already selected split-K, reported **gpu-capture** and completed eight visits in step 1; the final build retains that default and the preflight checks, but no new post-step-3 Safari Small worker probe was completed.
+
+**Phase-1 code and four staged desktop measurement sets are complete.** No OPFS work, incremental/streaming hash redesign, model-format change, ORT patch, global fold disable, integrity weakening, deployment or navigation link was introduced. More native-memory evidence and a real-phone retest are needed before promising an iPhone fix.

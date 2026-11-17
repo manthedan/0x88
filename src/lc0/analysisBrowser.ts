@@ -9,7 +9,7 @@ import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame } from '../chess/p
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
-import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, requestedOrtRuntimeDiagnosticOptions, ortDequantFoldEnabled } from '../nn/ortRuntime.ts';
+import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
   type BrowserRuntimeAuditDetail,
@@ -2146,7 +2146,8 @@ function disposeUnusedEngines(): void {
   for (const key of ANALYSIS_BIG_NET_KEYS) {
     if (usesBigNetRow(key)) continue;
     peekBigNetSearcher(key)?.cancel();
-    releaseBigNetSearcher(key);
+    // Match Play: an unused net must not overlap its replacement for three minutes.
+    releaseBigNetSearcher(key, 0);
   }
   disposeUnusedCentipawnEvaluators();
   const activeRows = activeEngineRows();
@@ -6029,7 +6030,7 @@ function disposeRuntimeResources(): void {
   resetSearchWorker('LC0 worker disposed');
   for (const key of ANALYSIS_BIG_NET_KEYS) {
     peekBigNetSearcher(key)?.cancel();
-    releaseBigNetSearcher(key);
+    releaseBigNetSearcher(key, 0);
   }
   disposeStockfish('lite');
   disposeStockfish('full');
