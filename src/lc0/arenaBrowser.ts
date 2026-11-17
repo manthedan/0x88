@@ -4145,17 +4145,21 @@ function queueCheckpointSave(saved: ArenaCheckpoint, mountSignal: AbortSignal): 
     });
 }
 
-async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null): Promise<void> {
+async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null, matchAbort = new AbortController()): Promise<void> {
   if (running || startPending) return;
   const mountSignal = mountAbort.signal;
+  // The same controller owns startup AND play, so revocation/teardown can cancel
+  // the first asset/checkpoint await, not only a match that is already live.
+  abort = matchAbort;
+  const startupCancelled = () => matchAbort.signal.aborted || abort !== matchAbort || isStaleMount(mountSignal);
   startPending = true;
   setArenaStartDisabled(true);
   syncArenaPhase();
   await checkpointWrites;
-  if (isStaleMount(mountSignal)) return;
+  if (startupCancelled()) return;
   if (checkpointUnreadable) throw new Error('Discard the unreadable saved tournament before starting a new run.');
   const compatibility = await checkpointCompatibility();
-  if (isStaleMount(mountSignal)) return;
+  if (startupCancelled()) return;
   if (resume) {
     if (resume.config.compatibility !== compatibility)
       throw new Error(
@@ -4184,7 +4188,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     return;
   }
   const selectedAssetsAvailable = await ensureSelectedRecklessAssetsAvailable();
-  if (isStaleMount(mountSignal)) return;
+  if (startupCancelled()) return;
   if (!selectedAssetsAvailable) {
     clearStartPending();
     return;
@@ -4227,7 +4231,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   const byPid = new Map(participants.map((participant) => [participant.pid, participant]));
   const bigNetRows = activeSeatRows().filter((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant));
   const bigNetRuntimeSupported = !bigNetRows.length || (await probeBt4Support()) || isMemoryConstrainedDevice();
-  if (isStaleMount(mountSignal)) return;
+  if (startupCancelled()) return;
   if (!bigNetRuntimeSupported) {
     el('message').textContent = 'Lc0 big nets need WebGPU, which is unavailable in this browser.';
     clearStartPending();
@@ -4239,7 +4243,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     checkedBigNetVariants.add(row.variant);
     const config = BIG_NETS[row.variant];
     const status = await checkBigNetAsset(config, whileArenaMounted(renderSeatSelectors));
-    if (isStaleMount(mountSignal)) return;
+    if (startupCancelled()) return;
     if (status !== 'present') {
       el('message').textContent = bigNetUnavailableText(config);
       renderSeatSelectors();
@@ -4288,7 +4292,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     if (error instanceof ArenaCheckpointConflictError) throw error;
     checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Keep this tab open and export PGN before leaving.`;
   }
-  if (isStaleMount(mountSignal)) return;
+  if (startupCancelled()) return;
   checkpoint = runCheckpoint;
   const pendingIndices = arenaRemainingIndices(runCheckpoint);
   startPending = false;
@@ -4300,8 +4304,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   el('crosstableSection').hidden = mode === 'match';
   gameResultChips.length = 0;
   el('pairing').textContent = `Game 1 of ${schedule.length}`;
-  const matchAbort = new AbortController();
-  abort = matchAbort;
   refreshOpeningPreview();
   refreshStockfishControls();
   refreshRecklessVariantUi();
@@ -4518,17 +4520,24 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   }
 }
 async function startMatch(minimumWarmupVisibleMs = 400, resume: ArenaCheckpoint | null = null): Promise<void> {
+  if (running || startPending) return;
   const mountSignal = mountAbort.signal;
+  const matchAbort = new AbortController();
   try {
-    await startMatchUnchecked(minimumWarmupVisibleMs, resume);
+    await startMatchUnchecked(minimumWarmupVisibleMs, resume, matchAbort);
   } catch (error) {
-    if (isStaleMount(mountSignal)) return;
+    if (isStaleMount(mountSignal) || abort !== matchAbort || matchAbort.signal.aborted) return;
     hideEngineWarmupStatus();
     clearStartPending();
     const detail = error instanceof Error ? error.message : String(error);
     el('message').textContent = `Match preparation failed: ${detail}`;
     if (!checkpoint) el('pairing').textContent = 'Match did not start.';
     renderCheckpointStatus();
+  } finally {
+    if (abort === matchAbort && !running) {
+      abort = null;
+      if (startPending) clearStartPending();
+    }
   }
 }
 

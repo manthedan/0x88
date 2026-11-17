@@ -56,6 +56,7 @@ test('Arena start entry blocks restored/URL/programmatic pairings before acquiri
       const deps = {
         running: false,
         startPending: false,
+        abort: null,
         mountAbort: new AbortController(),
         setArenaStartDisabled() {},
         syncArenaPhase() {},

@@ -1370,14 +1370,16 @@ function bigNetUnavailableText(config: BigNetConfig): string {
   if (bigNetAssetStatusSync(config) === 'unknown') return `Lc0 ${config.name} model asset is still being checked.`;
   return '';
 }
-async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean): Promise<EngineRow[]> {
+async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean, signal?: AbortSignal): Promise<EngineRow[]> {
   const result: EngineRow[] = [];
   for (const [index, row] of rows.entries()) {
+    if (signal?.aborted) return [];
     const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
       // Read metadata only: declining a saved setup must not acquire a runtime/session.
       const config = BIG_NETS[next.variant];
-      const allowed = !phoneBigNetBlocked(config.key) && bigNetSelectableSync(config) && allowBt4Prompt && (await requestLargeNetConsent(config, mountAbort.signal));
+      const allowed = !phoneBigNetBlocked(config.key) && bigNetSelectableSync(config) && allowBt4Prompt && (await requestLargeNetConsent(config, signal ?? mountAbort.signal));
+      if (signal?.aborted) return [];
       if (!allowed) next.variant = 'small';
     }
     result.push(next);
@@ -1436,13 +1438,17 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
     ? profileSummary(profile, builtIn?.note)
     : 'Manual engine setup. Choose a saved setup or save the current engines.';
 }
+let profileLoadAbort: AbortController | null = null;
 async function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): Promise<void> {
+  profileLoadAbort?.abort();
+  const request = new AbortController();
+  profileLoadAbort = request;
   const runtime = engineSetupRuntime(profile.lc0Runtime, params.has('dev'));
   const runtimeChanged = selectedLc0Runtime() !== runtime;
   cancelAllAnalysisAssetPrefetches();
-  const signal = mountAbort.signal;
-  const rows = await profileRowsForUse(profile.rows, true);
-  if (signal.aborted) return;
+  const signal = AbortSignal.any([mountAbort.signal, request.signal]);
+  const rows = await profileRowsForUse(profile.rows, true, signal);
+  if (signal.aborted || profileLoadAbort !== request) return;
   engineRows = rows;
   if (phoneLargeNetsBlocked() && profileHasBt4(profile.rows)) showPhoneLargeNetFallback();
   inputEl('multiPvInput').value = String(profile.multiPv);
@@ -5647,6 +5653,7 @@ function wireEvents() {
     { signal: mountAbort.signal },
   );
   el('engineList').addEventListener('change', async (event) => {
+    profileLoadAbort?.abort();
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     const i = Number(target.dataset.i);
     if (Number.isNaN(i) || !engineRows[i]) return;
@@ -5693,6 +5700,7 @@ function wireEvents() {
     prefetchAnalysisAssetsForAddedRow(engineRows[i]);
   });
   el('engineProfileSelect').addEventListener('change', () => {
+    profileLoadAbort?.abort();
     const value = selectEl('engineProfileSelect').value;
     const builtIn = builtInEngineProfiles().find((entry) => builtInProfileValue(entry.id) === value);
     if (builtIn) {

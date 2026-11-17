@@ -185,6 +185,8 @@ interface PlayContext {
   pendingInput: PendingInput | null;
   restoredGame: boolean;
   consentAbort: AbortController;
+  restoredDownloadEngineId: string | null;
+  restoredDownloadConsent: Promise<boolean> | null;
   abort: AbortController;
   disposed: boolean;
   ground: ReturnType<typeof Chessground> | null;
@@ -248,6 +250,8 @@ function createPlayContext(): PlayContext {
     pendingInput: null,
     restoredGame: false,
     consentAbort: new AbortController(),
+    restoredDownloadEngineId: null,
+    restoredDownloadConsent: null,
     abort: new AbortController(),
     disposed: false,
     ground: null,
@@ -914,12 +918,14 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
   return engine.bestMove(history.fen, signal, { moves: history.moves });
 }
 async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
-  if (ctx.disposed || ctx.board.turn !== ctx.humanColor) return;
+  if (ctx.disposed || ctx.board.turn !== ctx.humanColor || ctx.restoredDownloadConsent) return;
   const resumingGame = ctx.moves.length > 0;
   const option = ctxSelectedEngine(ctx);
   const preferences = ctx.opponent.active;
-  releaseUnusedBigNetSearchers(option.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
   const signal = ctx.abort.signal;
+  if (ctx.restoredDownloadEngineId && !(await ctxCheckRestoredDownloadConsent(ctx))) return;
+  if (signal.aborted || ctx.disposed) return;
+  releaseUnusedBigNetSearchers(option.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
   const generation = ++ctx.enginePreparationGeneration;
   ctx.engineReady = false;
   ctx.preparingEngine = true;
@@ -1016,6 +1022,7 @@ function ctxSetEngineThinking(ctx: PlayContext, thinking: boolean): void {
 function ctxCancelEngineTurn(ctx: PlayContext): void {
   ctx.abort.abort();
   ctx.abort = new AbortController();
+  ctx.restoredDownloadConsent = null;
   ctxSetEngineThinking(ctx, false);
   ctx.preparingEngine = false;
   ctx.enginePreparationGeneration += 1;
@@ -1059,8 +1066,10 @@ function ctxPhase(ctx: PlayContext): PlayPhase {
 }
 
 async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
-  if (ctx.gameOver || ctx.board.turn === ctx.humanColor) return;
+  if (ctx.gameOver || ctx.board.turn === ctx.humanColor || ctx.restoredDownloadConsent) return;
   const signal = ctx.abort.signal;
+  if (ctx.restoredDownloadEngineId && !(await ctxCheckRestoredDownloadConsent(ctx))) return;
+  if (signal.aborted || ctx.disposed) return;
   ctxSetEngineThinking(ctx, true);
   ctx.lastProgressAnnouncement = -1;
   el('progressAnnouncement').textContent = '';
@@ -1896,6 +1905,41 @@ function ctxResetStartPosition(ctx: PlayContext): void {
   }
 }
 
+/** Restored preferences are not download approval: Cache Storage may have been
+ * evicted since the previous visit. Both readiness and engine-first moves enter
+ * here before any acquisition; one owner shares the prompt during this mount.
+ */
+async function ctxCheckRestoredDownloadConsent(ctx: PlayContext): Promise<boolean> {
+  const option = ctxSelectedEngine(ctx);
+  if (ctx.restoredDownloadEngineId !== option.id) return true;
+  if (ctx.restoredDownloadConsent) return ctx.restoredDownloadConsent;
+  const signal = AbortSignal.any([ctx.abort.signal, ctx.consentAbort.signal]);
+  const pending = requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], signal, false)
+    .then((accepted) => {
+      if (signal.aborted || ctx.disposed || ctx.opponent.active.engineId !== option.id) return false;
+      if (accepted) ctx.restoredDownloadEngineId = null;
+      else {
+        ctx.engineReady = false;
+        ctxSetEngineNote('Download cancelled. Use Retry when you want to load this opponent.');
+        buttonEl('retryEngine').hidden = false;
+        ctxRender(ctx);
+      }
+      return accepted;
+    })
+    .catch((error) => {
+      if (!signal.aborted && !ctx.disposed) {
+        ctxSetEngineFailure(ctx, error);
+        ctxRender(ctx);
+      }
+      return false;
+    })
+    .finally(() => {
+      if (ctx.restoredDownloadConsent === pending) ctx.restoredDownloadConsent = null;
+    });
+  ctx.restoredDownloadConsent = pending;
+  return pending;
+}
+
 /** Imported setup must not make an opponent move before the player presses Play. */
 function ctxPrepareOrStartEngine(ctx: PlayContext): void {
   if (ctx.practicePosition && !ctx.started) return;
@@ -1987,6 +2031,7 @@ function ctxInit(ctx: PlayContext): void {
     Object.assign(ctx, game);
     el('playRestoreNotice').hidden = false;
   }
+  ctx.restoredDownloadEngineId = preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' ? preferredOption.id : null;
   ctx.autosave = createWorkspaceAutosave('play', undefined, 400, undefined, undefined, (type) => ctxUpdatePendingInput(ctx, { type }));
   trackListener(ctx, window, 'pagehide', () => ctx.autosave?.flush());
   trackListener(ctx, window, 'pageshow', (event: Event) => {
@@ -2177,6 +2222,7 @@ function ctxInit(ctx: PlayContext): void {
       }
       ctxRefreshEngineOptions(ctx);
       selectEl('engineSelect').value = option.id;
+      ctx.restoredDownloadEngineId = null;
     }
     if (option.family === 'maia3' && previousEngineId.startsWith('maia-')) {
       const carried = Number(ctx.lastEngineId.slice('maia-'.length));
