@@ -3,6 +3,7 @@
   import { isMemoryConstrainedDevice } from '../../lc0/deviceMemoryClass.ts';
   import { PHONE_LARGE_NET_REASON, phoneLargeNetPreference } from '../../lc0/phoneLargeNetPolicy.ts';
 
+  let { showHint = true }: { showHint?: boolean } = $props();
   let constrained = $state(false);
   let enabled = $state(false);
   onMount(() => {
@@ -13,13 +14,12 @@
 </script>
 
 <p id="phoneLargeNetFallback" class="phone-large-net-preference" role="status" hidden>{PHONE_LARGE_NET_REASON}</p>
-{#if constrained}
+{#if constrained && showHint}
   <p class="phone-large-net-preference" role="status">
-    BT4 and t3 on this device: {enabled ? 'on' : 'off'}
     {#if enabled}
-      · <button type="button" onclick={() => phoneLargeNetPreference.setEnabled(false)}>turn off</button>
+      BT4 and t3 on for this phone · <button type="button" onclick={() => phoneLargeNetPreference.setEnabled(false)}>Turn off</button>
     {:else}
-      <span> — may crash this tab. Choose BT4 or t3 to review the warning.</span>
+      BT4 and t3 are off on phones (crash risk).
     {/if}
   </p>
 {/if}

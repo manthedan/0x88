@@ -11,10 +11,8 @@ import {
   hasBigNetSearcher,
 } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS, bigNetOptionState, phoneBlockedBigNetModelUrl } from '../src/lc0/bt4Engine.ts';
-import { requestLargeNetConsent } from '../src/lc0/largeNetConsent.ts';
+import { requestLargeNetConsent as requestLargeNetConsentWithCache } from '../src/lc0/largeNetConsent.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
-import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
-import { requestSoakLargeNetConsent } from '../src/lc0/mobileSoakBrowser.ts';
 import {
   createPhoneLargeNetPreference,
   PHONE_LARGE_NET_STORAGE_KEY,
@@ -208,17 +206,22 @@ test('modal cancellation restores focus; Tab stays trapped; opt-in happens only 
   });
   Object.defineProperty(globalThis, 'location', { configurable: true, value: new URL('https://example.test/?memoryClass=phone') });
   phoneLargeNetPreference.setEnabled(false);
+  let cached = false;
+  const requestLargeNetConsent = (config, signal, desktopWarning = true) =>
+    requestLargeNetConsentWithCache(config, signal, desktopWarning, undefined, async () => ({
+      url: config.modelUrl,
+      cached,
+      downloadBytes: config.approxMb * 1_000_000,
+    }));
   try {
     let pending = requestLargeNetConsent(BIG_NETS.bt4);
+    await new Promise(setImmediate);
     let dialog = body.children.at(-1);
     const [cancel, use] = dialog.children.at(-1).children;
     assert.equal(dialog.attributes['aria-modal'], 'true');
-    assert.equal(dialog.children[0].textContent, 'Use a large net on this phone?');
-    assert.equal(
-      dialog.children[1].textContent,
-      'BT4 and t3 can crash this tab on phones and are very slow without WebGPU. Downloads ~178 MB, cached after first load.',
-    );
-    assert.equal(dialog.children[2].textContent, 'You can turn this off below the engine picker.');
+    assert.equal(dialog.children[0].textContent, 'Use BT4 on this phone?');
+    assert.equal(dialog.children[1].textContent, 'Large nets can crash the tab on phones. BT4 is a 178 MB download, cached after the first time.');
+    assert.equal(dialog.children.length, 3, 'no extra small print');
     assert.equal(document.activeElement, cancel);
     const tab = () => {
       const event = new Event('keydown', { cancelable: true });
@@ -234,69 +237,32 @@ test('modal cancellation restores focus; Tab stays trapped; opt-in happens only 
     assert.equal(document.activeElement, previous);
     assert.equal(phoneLargeNetPreference.enabled(), false);
     pending = requestLargeNetConsent(BIG_NETS.t3);
+    await new Promise(setImmediate);
     dialog = body.children.at(-1);
     assert.match(dialog.children[1].textContent, /163 MB/);
     dialog.children.at(-1).children[1].dispatchEvent(new Event('click'));
     assert.equal(await pending, true);
     assert.equal(phoneLargeNetPreference.enabled(), true);
     assert.equal(document.activeElement, previous);
-    // Once opted in, no second dialog is necessary on another surface/net.
+    // Once opted in, a cached net needs no second dialog on another surface.
+    cached = true;
     assert.equal(await requestLargeNetConsent(BIG_NETS.bt4), true);
+    cached = false;
     phoneLargeNetPreference.setEnabled(false);
     const abort = new AbortController();
     pending = requestLargeNetConsent(BIG_NETS.t3, abort.signal);
     abort.abort();
     assert.equal(await pending, false);
     assert.equal(phoneLargeNetPreference.enabled(), false);
-    const count = body.children.length;
-    assert.equal(await requestLargeNetConsent(BIG_NETS.lqo, undefined, false), true);
-    assert.equal(body.children.length, count, 'Play Queen Odds never shows the phone opt-in');
     pending = requestLargeNetConsent(BIG_NETS.lqo);
-    dialog = body.children.at(-1);
-    assert.equal(dialog.children[0].textContent, 'Use Lc0 Queen Odds?');
-    assert.match(dialog.children[1].textContent, /96MB download/);
-    dialog.children.at(-1).children[1].dispatchEvent(new Event('click'));
-    assert.equal(await pending, true);
-    assert.equal(phoneLargeNetPreference.enabled(), false, 'ordinary Queen Odds warning never grants BT4/t3 consent');
-    const binding = createSoakBigNetBinding('bt4');
-    assert.throws(() => binding.acquire(), /BT4 and t3 are off on phones/);
-    const dialogs = body.children.length;
-    assert.equal(await requestSoakLargeNetConsent(['lqo', 'heat'], new AbortController().signal), true);
-    assert.equal(body.children.length, dialogs, 'Queen Odds-only diagnostics need no phone opt-in');
-    pending = requestSoakLargeNetConsent(['arena'], new AbortController().signal);
     await new Promise(setImmediate);
     dialog = body.children.at(-1);
-    assert.equal(dialog.children[0].textContent, 'Use a large net on this phone?');
-    dialog.children.at(-1).children[0].dispatchEvent(new Event('click'));
-    assert.equal(await pending, false);
-    assert.throws(() => binding.acquire(), /BT4 and t3 are off on phones/);
-    const countBeforeQueenOverride = body.children.length;
-    assert.equal(await requestSoakLargeNetConsent(['lqo'], new AbortController().signal, { lqo: BIG_NETS.lqo.modelUrl }), true);
-    assert.equal(body.children.length, countBeforeQueenOverride, 'the actual shipped Queen Odds override remains exempt');
-    for (const [override, size] of [
-      [BIG_NETS.bt4.modelUrl, '178 MB'],
-      [lc0SplitKUrl(BIG_NETS.t3.modelUrl), '163 MB'],
-      ['/models/lc0/unlisted.onnx', 'size is unknown'],
-    ]) {
-      assert.ok(override);
-      pending = requestSoakLargeNetConsent(['lqo'], new AbortController().signal, { lqo: override });
-      await new Promise(setImmediate);
-      dialog = body.children.at(-1);
-      assert.equal(dialog.children[0].textContent, 'Use a large net on this phone?');
-      assert.ok(dialog.children[1].textContent.includes(size));
-      dialog.children.at(-1).children[0].dispatchEvent(new Event('click'));
-      assert.equal(await pending, false, 'a gated or unknown override never inherits the Queen Odds exemption');
-      assert.equal(phoneLargeNetPreference.enabled(), false);
-    }
-    pending = requestSoakLargeNetConsent(['t3'], new AbortController().signal);
-    await new Promise(setImmediate);
-    dialog = body.children.at(-1);
-    assert.match(dialog.children[1].textContent, /163 MB/);
+    assert.equal(dialog.children[0].textContent, 'Download Queen Odds?');
+    assert.equal(dialog.children[1].textContent, "It's a 96 MB download, cached after the first time.");
+    assert.equal(dialog.children.at(-1).children[1].textContent, 'Download');
     dialog.children.at(-1).children[1].dispatchEvent(new Event('click'));
     assert.equal(await pending, true);
-    const searcher = binding.acquire();
-    assert.equal(binding.retire(searcher), true);
-    await searcher.dispose();
+    assert.equal(phoneLargeNetPreference.enabled(), false, 'Queen Odds download approval never grants BT4/t3 consent');
   } finally {
     phoneLargeNetPreference.setEnabled(false);
     if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);

@@ -424,6 +424,8 @@ function logicalUrlField(modelUrl: string, resolvedUrl: string): string | undefi
 
 interface ResolvedModelArtifact {
   url: string;
+  /** Encoded representation size when known, otherwise the raw artifact size. */
+  downloadBytes?: number;
   expectedBytes?: number;
   expectedSha256?: string;
 }
@@ -475,6 +477,7 @@ async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | 
       if (!representation) return undefined;
       return {
         url: new URL(representation.url, releaseUrl).href,
+        downloadBytes: representation.bytes,
         expectedBytes: artifact.raw.bytes,
         expectedSha256: artifact.raw.sha256,
       };
@@ -482,6 +485,7 @@ async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | 
     return artifact.artifactUrl
       ? {
           url: new URL(artifact.artifactUrl, releaseUrl).href,
+          downloadBytes: artifact.bytes,
           expectedBytes: artifact.bytes,
           expectedSha256: artifact.sha256,
         }
@@ -497,9 +501,11 @@ async function resolveArtifactUrl(
   channelUrl: string | undefined,
 ): Promise<ResolvedModelArtifact> {
   const artifactUrl = manifestArtifactUrl(manifest.entry, manifest.manifestUrl);
-  if (artifactUrl) return { url: artifactUrl, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
+  if (artifactUrl)
+    return { url: artifactUrl, downloadBytes: manifest.entry?.bytes, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
   const channelArtifact = await resolveChannelArtifactUrl(modelUrl, channelUrl);
-  if (!channelArtifact) return { url: modelUrl, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
+  if (!channelArtifact)
+    return { url: modelUrl, downloadBytes: manifest.entry?.bytes, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
   // The asset host cannot replace pins supplied by the app-origin manifest.
   // Check outside resolveChannelArtifactUrl's unavailable-channel fallback catch:
   // contradictory metadata must fail closed, not silently choose another URL.
@@ -576,15 +582,57 @@ export async function verifyLc0ModelBytes(
 
 function metadataMatches(
   metadata: Lc0ModelVerificationMetadata | undefined,
-  bytes: ArrayBuffer,
+  byteLength: number,
   expectation: Lc0ModelBytesExpectation,
   rehashAfterMs: number,
 ): metadata is Lc0ModelVerificationMetadata {
   if (!metadata || metadata.schemaVersion !== METADATA_SCHEMA_VERSION || metadata.runtimeVersion !== METADATA_RUNTIME_VERSION) return false;
   if (!expectation.expectedSha256 || metadata.sha256 !== expectation.expectedSha256.toLowerCase()) return false;
-  if (metadata.observedBytes !== bytes.byteLength) return false;
+  if (metadata.observedBytes !== byteLength) return false;
   if (expectation.expectedBytes !== undefined && metadata.observedBytes !== expectation.expectedBytes) return false;
   return rehashAfterMs === Infinity || epochMs() - metadata.verifiedAt <= Math.max(0, rehashAfterMs);
+}
+
+export interface Lc0ModelDownloadState {
+  url: string;
+  downloadBytes?: number;
+  cached: boolean;
+}
+
+/** Read-only UI probe: resolve the loader's exact artifact and require a current
+ * verification record AND a Cache Storage key. Never download/read model bytes,
+ * create a cache bucket, update LRU metadata, or weaken the inference loader.
+ */
+export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<Lc0ModelDownloadState> {
+  options.signal?.throwIfAborted();
+  const manifest = options.manifestEntry
+    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl }
+    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
+  const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+  const state: Lc0ModelDownloadState = { url: resolved.url, downloadBytes: resolved.downloadBytes, cached: false };
+  const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
+  try {
+    if (!cacheApiAvailable() || !/^[a-f0-9]{64}$/i.test(resolved.expectedSha256 ?? '') || !(await untilAborted(caches.has(cacheName), options.signal)))
+      return state;
+    const store = options.metadataStore ?? browserMetadataStore();
+    const key = metadataKey(cacheName, resolved.url);
+    const metadata = await untilAborted(ignoreMetadataFailure(store ? () => store.get(key) : undefined), options.signal);
+    if (
+      !metadata ||
+      metadata.key !== key ||
+      metadata.cacheName !== cacheName ||
+      metadata.url !== absoluteUrl(resolved.url) ||
+      !metadataMatches(metadata, metadata.observedBytes, resolved, options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS)
+    )
+      return state;
+    const cache = await untilAborted(caches.open(cacheName), options.signal);
+    const keys = await untilAborted(cache.keys(new Request(resolved.url)), options.signal);
+    return { ...state, cached: keys.length > 0 };
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    return state; // Missing/denied/stale verification is never a confirmed cache hit.
+  }
 }
 
 interface FetchModelBytesResult {
@@ -827,7 +875,7 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     const cacheReadMs = nowMs() - cacheReadStarted;
     const metadata = await ignoreMetadataFailure(store ? () => store.get(key) : undefined);
     options.signal?.throwIfAborted();
-    if (metadataMatches(metadata, bytes, expectation, options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS)) {
+    if (metadataMatches(metadata, bytes.byteLength, expectation, options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS)) {
       await ignoreMetadataFailure(store ? () => store.put({ ...metadata, lastUsedAt: epochMs() }) : undefined);
       options.signal?.throwIfAborted();
       return {

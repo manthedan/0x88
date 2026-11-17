@@ -160,15 +160,18 @@ export async function requestSoakLargeNetConsent(
           [config.modelUrl, lc0SplitKUrl(config.modelUrl)].some((url) => url && assetPathname(url) === assetPathname(override)),
         )
       : BIG_NETS[key];
-    // The exemption is for the actual shipped Queen Odds model, not an arbitrary
-    // diagnostic model loaded through its step name/private pool namespace.
-    if (key === 'lqo' && effective?.key === 'lqo') continue;
-    return requestLargeNetConsent(
-      { ...(effective ?? BIG_NETS[key]), key: key === 'lqo' ? 'bt4' : key },
-      signal,
-      false,
-      override && !effective ? 'Diagnostic override download size is unknown; cached after first load.' : undefined,
-    );
+    // Queen Odds is exempt from crash opt-in, not from an uncached download warning.
+    // Unknown diagnostic models must not inherit its crash-risk exemption.
+    const config = effective ?? BIG_NETS[key];
+    if (
+      !(await requestLargeNetConsent(
+        { ...config, modelUrl: override ?? config.modelUrl, key: key === 'lqo' ? (effective?.key ?? 'bt4') : key },
+        signal,
+        false,
+        override && !effective ? 'Download size is unavailable; cached after the first time.' : undefined,
+      ))
+    )
+      return false;
   }
   return !signal.aborted;
 }

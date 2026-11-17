@@ -65,7 +65,7 @@ async function copy() {
     <p class="note">Memory is normally unavailable on Safari (null). Chrome numbers exclude some GPU memory. WASM heaps are private in these production adapters, so heap byteLength is null.</p>
   </section>
   <fieldset class="phone-policy" disabled={running} aria-label="Phone large-net preference">
-    <PhoneLargeNetPreference />
+    <PhoneLargeNetPreference showHint={false} />
   </fieldset>
   <div class="controls">
     <button id="mobile-soak-start" data-testid="start" class="primary" disabled={!api || running || unsafeDisposal || report?.state === 'crashed-awaiting-choice'} on:click={start}>Start</button>

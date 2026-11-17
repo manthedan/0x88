@@ -1,0 +1,273 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+import { BIG_NETS, bigNetLoadWarning } from '../src/lc0/bt4Engine.ts';
+import { requestLargeNetConsent } from '../src/lc0/largeNetConsent.ts';
+import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
+import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
+import { requestSoakLargeNetConsent } from '../src/lc0/mobileSoakBrowser.ts';
+import { phoneLargeNetPreference } from '../src/lc0/phoneLargeNetPolicy.ts';
+
+const tick = () => new Promise(setImmediate);
+function browser(t, device = 'phone') {
+  class Element extends EventTarget {
+    children = [];
+    attributes = {};
+    isConnected = true;
+    append(...nodes) {
+      this.children.push(...nodes);
+    }
+    setAttribute(key, value) {
+      this.attributes[key] = value;
+    }
+    getAttribute(key) {
+      return this.attributes[key] ?? null;
+    }
+    showModal() {
+      this.open = true;
+    }
+    close() {
+      this.open = false;
+      this.dispatchEvent(new Event('close'));
+    }
+    remove() {
+      this.isConnected = false;
+    }
+    focus() {
+      document.activeElement = this;
+    }
+  }
+  const previousFocus = new Element();
+  const body = new Element();
+  const globals = {
+    document: { body, activeElement: previousFocus, createElement: () => new Element(), getElementById: () => null },
+    location: new URL(`https://example.test/?memoryClass=${device}`),
+    caches: undefined,
+  };
+  for (const [key, value] of Object.entries(globals)) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+    t.after(() => {
+      if (previous) Object.defineProperty(globalThis, key, previous);
+      else delete globalThis[key];
+    });
+  }
+  const abort = new AbortController();
+  phoneLargeNetPreference.setEnabled(false);
+  t.after(() => {
+    abort.abort();
+    phoneLargeNetPreference.setEnabled(false);
+  });
+  const state = { cached: false, downloadBytes: undefined };
+  const inspect = async (config) => ({ ...state, url: config.modelUrl, downloadBytes: state.downloadBytes ?? config.approxMb * 1_000_000 });
+  return {
+    body,
+    state,
+    previousFocus,
+    abort,
+    request: (config, overrides = {}) =>
+      requestLargeNetConsent(config, overrides.signal ?? abort.signal, overrides.desktopWarning ?? false, undefined, overrides.inspect ?? inspect),
+    async dialog() {
+      for (let i = 0; i < 100; i++) {
+        const dialog = body.children.find((node) => node.isConnected && node.open);
+        if (dialog) return dialog;
+        await tick();
+      }
+      assert.fail('expected a consent dialog');
+    },
+  };
+}
+function choose(dialog, accept) {
+  dialog.children.at(-1).children[accept ? 1 : 0].dispatchEvent(new Event('click'));
+}
+
+for (const key of ['bt4', 't3']) {
+  for (const cached of [false, true]) {
+    test(`${key} ${cached ? 'cached' : 'uncached'} phone warning uses per-net title and cache-aware copy`, async (t) => {
+      const f = browser(t);
+      f.state.cached = cached;
+      const pending = f.request(BIG_NETS[key]);
+      const dialog = await f.dialog();
+      const name = key === 'bt4' ? 'BT4' : 't3';
+      assert.equal(dialog.children[0].textContent, `Use ${name} on this phone?`);
+      assert.equal(
+        dialog.children[1].textContent,
+        `Large nets can crash the tab on phones.${cached ? '' : ` ${name} is a ${BIG_NETS[key].approxMb} MB download, cached after the first time.`}`,
+      );
+      assert.equal(dialog.children.length, 3, 'no extra fine print');
+      assert.deepEqual(
+        dialog.children[2].children.map((node) => node.textContent),
+        ['Cancel', 'Use anyway'],
+      );
+      assert.equal(dialog.attributes['aria-describedby'], 'largeNetConsentDescription');
+      choose(dialog, false);
+      assert.equal(await pending, false);
+      assert.equal(document.activeElement, f.previousFocus);
+      assert.equal(phoneLargeNetPreference.enabled(), false);
+    });
+  }
+}
+
+test('download copy uses selected artifact bytes, not the stale config estimate', async (t) => {
+  const f = browser(t);
+  f.state.downloadBytes = 164789252;
+  const pending = f.request(BIG_NETS.bt4);
+  const dialog = await f.dialog();
+  assert.equal(dialog.children[1].textContent, 'Large nets can crash the tab on phones. BT4 is a 165 MB download, cached after the first time.');
+  choose(dialog, false);
+  await pending;
+});
+
+test('BT4/t3 crash consent persists, but an uncached model still gets its download warning', async (t) => {
+  const f = browser(t);
+  const pending = f.request(BIG_NETS.bt4);
+  choose(await f.dialog(), true);
+  assert.equal(await pending, true);
+  assert.equal(phoneLargeNetPreference.enabled(), true);
+  f.state.cached = true;
+  assert.equal(await f.request(BIG_NETS.t3), true);
+  f.state.cached = false;
+  const another = f.request(BIG_NETS.t3);
+  const dialog = await f.dialog();
+  assert.match(dialog.children[1].textContent, /t3 is a 163 MB download/);
+  choose(dialog, false);
+  assert.equal(await another, false);
+  assert.equal(phoneLargeNetPreference.enabled(), true, 'cancelling a download does not revoke existing crash consent');
+});
+
+for (const accept of [false, true]) {
+  test(`uncached Queen Odds has a download-only dialog (accepted=${accept}) without granting opt-in`, async (t) => {
+    const f = browser(t);
+    const pending = f.request(BIG_NETS.lqo);
+    const dialog = await f.dialog();
+    assert.equal(dialog.children[0].textContent, 'Download Queen Odds?');
+    assert.equal(dialog.children[1].textContent, "It's a 96 MB download, cached after the first time.");
+    assert.deepEqual(
+      dialog.children[2].children.map((node) => node.textContent),
+      ['Cancel', 'Download'],
+    );
+    choose(dialog, accept);
+    assert.equal(await pending, accept);
+    assert.equal(phoneLargeNetPreference.enabled(), false);
+    f.state.cached = true;
+    const count = f.body.children.length;
+    assert.equal(await f.request(BIG_NETS.lqo), true);
+    assert.equal(f.body.children.length, count, 'verified cached Queen Odds has no dialog');
+  });
+}
+
+test('Queen Odds approval is not remembered if its model is still uncached', async (t) => {
+  const f = browser(t);
+  const first = f.request(BIG_NETS.lqo);
+  choose(await f.dialog(), true);
+  await first;
+  const second = f.request(BIG_NETS.lqo);
+  choose(await f.dialog(), false);
+  assert.equal(await second, false);
+});
+
+test('aborting a slow cache probe returns without showing a late dialog', async (t) => {
+  const f = browser(t);
+  const probe = Promise.withResolvers();
+  const pending = f.request(BIG_NETS.lqo, { inspect: () => probe.promise });
+  f.abort.abort();
+  assert.equal(await pending, false);
+  probe.resolve({ url: BIG_NETS.lqo.modelUrl, cached: false, downloadBytes: 95662716 });
+  await tick();
+  assert.equal(f.body.children.length, 0);
+});
+
+test('a newer picker choice cancels a stale cache probe rather than opening two dialogs', async (t) => {
+  const f = browser(t);
+  const probe = Promise.withResolvers();
+  const previous = f.request(BIG_NETS.bt4, { inspect: () => probe.promise });
+  const current = f.request(BIG_NETS.lqo);
+  assert.equal(await previous, false);
+  const dialog = await f.dialog();
+  assert.equal(dialog.children[0].textContent, 'Download Queen Odds?');
+  choose(dialog, false);
+  await current;
+  probe.resolve({ url: BIG_NETS.bt4.modelUrl, cached: false });
+  await tick();
+  assert.equal(f.body.children.length, 1);
+});
+
+test('a failed cache inspection never suppresses an uncached download warning', async (t) => {
+  const f = browser(t);
+  const pending = f.request(BIG_NETS.lqo, {
+    inspect: async () => {
+      throw new Error('denied');
+    },
+  });
+  const dialog = await f.dialog();
+  assert.match(dialog.children[1].textContent, /Download size is unavailable/);
+  choose(dialog, false);
+  assert.equal(await pending, false);
+});
+
+for (const key of Object.keys(BIG_NETS)) {
+  test(`desktop ${key} keeps its existing warning and skip behavior without a cache probe`, async (t) => {
+    const f = browser(t, 'desktop');
+    const inspect = () => assert.fail('desktop behavior is not cache-aware');
+    assert.equal(await f.request(BIG_NETS[key], { inspect }), true, 'Play still skips the desktop warning');
+    const pending = f.request(BIG_NETS[key], { desktopWarning: true, inspect });
+    const dialog = await f.dialog();
+    assert.equal(dialog.children[0].textContent, `Use Lc0 ${BIG_NETS[key].name}?`);
+    assert.equal(dialog.children[1].textContent, bigNetLoadWarning(BIG_NETS[key]));
+    assert.deepEqual(
+      dialog.children[2].children.map((node) => node.textContent),
+      ['Cancel', 'Use anyway'],
+    );
+    choose(dialog, false);
+    assert.equal(await pending, false);
+  });
+}
+
+test('lab download warnings inspect effective Queen Odds overrides and do not bypass acquisition consent', async (t) => {
+  const f = browser(t);
+  const models = Object.values(BIG_NETS).flatMap((config) =>
+    [config.modelUrl, lc0SplitKUrl(config.modelUrl)].filter(Boolean).map((url) => ({
+      file: url.split('/').at(-1),
+      url,
+      bytes: config.approxMb * 1_000_000,
+      sha256: 'a'.repeat(64),
+    })),
+  );
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    assert.match(String(url), /manifest.json$/);
+    return Response.json({ models });
+  });
+  const binding = createSoakBigNetBinding('bt4');
+  assert.throws(() => binding.acquire(), /BT4 and t3 are off/);
+  for (const [override, title, copy] of [
+    [undefined, 'Download Queen Odds?', '96 MB'],
+    [BIG_NETS.lqo.modelUrl, 'Download Queen Odds?', '96 MB'],
+    [BIG_NETS.bt4.modelUrl, 'Use BT4 on this phone?', '178 MB'],
+    [lc0SplitKUrl(BIG_NETS.t3.modelUrl), 'Use t3 on this phone?', '163 MB'],
+    ['/models/lc0/unlisted.onnx', 'Use BT4 on this phone?', 'size is unavailable'],
+  ]) {
+    const pending = requestSoakLargeNetConsent(['lqo'], f.abort.signal, override ? { lqo: override } : undefined);
+    const dialog = await f.dialog();
+    assert.equal(dialog.children[0].textContent, title);
+    assert.ok(dialog.children[1].textContent.includes(copy));
+    choose(dialog, false);
+    assert.equal(await pending, false);
+    assert.equal(phoneLargeNetPreference.enabled(), false);
+  }
+  const pending = requestSoakLargeNetConsent(['bt4'], f.abort.signal);
+  choose(await f.dialog(), true);
+  assert.equal(await pending, true);
+  const searcher = binding.acquire();
+  assert.equal(binding.retire(searcher), true);
+  await searcher.dispose();
+});
+
+test('the short preference hint is limited to engine pickers that offer gated nets', () => {
+  const component = readFileSync(new URL('../src/lib/components/PhoneLargeNetPreference.svelte', import.meta.url), 'utf8');
+  assert.match(component, /constrained && showHint/);
+  assert.match(component, /BT4 and t3 are off on phones \(crash risk\)\./);
+  assert.match(component, /BT4 and t3 on for this phone ·/);
+  assert.match(component, />Turn off<\/button>/);
+  const lab = readFileSync(new URL('../src/routes/lab/mobile-soak/+page.svelte', import.meta.url), 'utf8');
+  assert.match(lab, /PhoneLargeNetPreference showHint=\{false\}/);
+});

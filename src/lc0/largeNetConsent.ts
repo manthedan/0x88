@@ -1,5 +1,6 @@
 import { type BigNetConfig, bigNetLoadWarning } from './bt4Engine.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
+import { inspectLargeNetDownload } from './largeNetDownload.ts';
 import { PHONE_LARGE_NET_REASON, phoneBigNetBlocked, phoneLargeNetPreference } from './phoneLargeNetPolicy.ts';
 
 export function showPhoneLargeNetFallback(modelOverride = false): void {
@@ -12,21 +13,61 @@ export function showPhoneLargeNetFallback(modelOverride = false): void {
   }
 }
 
-/** Native modal, like Analysis's engine manager: inert background, focus trap and Escape. */
+let activeConsent: AbortController | undefined;
+
+/** A newer picker choice supersedes an earlier metadata probe or open dialog. */
 export async function requestLargeNetConsent(
   config: BigNetConfig,
   signal?: AbortSignal,
   desktopWarning = true,
-  downloadNotice = `Downloads ~${config.approxMb} MB, cached after first load.`,
+  downloadNotice?: string,
+  inspect = inspectLargeNetDownload,
+): Promise<boolean> {
+  if (signal?.aborted) return false;
+  const request = new AbortController();
+  activeConsent?.abort();
+  activeConsent = request;
+  try {
+    return await showLargeNetConsent(config, signal ? AbortSignal.any([signal, request.signal]) : request.signal, desktopWarning, downloadNotice, inspect);
+  } finally {
+    if (activeConsent === request) activeConsent = undefined;
+  }
+}
+
+/** Native modal, like Analysis's engine manager: inert background, focus trap and Escape. */
+async function showLargeNetConsent(
+  config: BigNetConfig,
+  signal?: AbortSignal,
+  desktopWarning = true,
+  downloadNotice?: string,
+  inspect = inspectLargeNetDownload,
 ): Promise<boolean> {
   const phone = isMemoryConstrainedDevice();
   if (signal?.aborted) return false;
-  const phoneConsent = phoneBigNetBlocked(config.key);
-  // Queen Odds keeps the ordinary download warning, never the device opt-in.
-  if (phone && config.key !== 'lqo' ? !phoneConsent : !desktopWarning) return true;
+  if (!phone && !desktopWarning) return true;
   const previousFocus = document.activeElement as HTMLElement | null;
   const previousFocusId = previousFocus?.id;
   const previousFocusLabel = previousFocus?.getAttribute('aria-label');
+  const cancelled = Promise.withResolvers<null>();
+  const abortLookup = () => cancelled.resolve(null);
+  signal?.addEventListener('abort', abortLookup, { once: true });
+  let state: { cached: boolean; downloadBytes?: number } | null = null;
+  try {
+    state = phone ? await Promise.race([inspect(config, signal).catch(() => ({ cached: false, downloadBytes: undefined })), cancelled.promise]) : null;
+  } finally {
+    signal?.removeEventListener('abort', abortLookup);
+  }
+  if (signal?.aborted) return false;
+  const phoneRisk = phone && config.key !== 'lqo';
+  if (phone && state?.cached && !phoneBigNetBlocked(config.key)) return true;
+  const name = config.key === 'bt4' ? 'BT4' : config.key === 't3' ? 't3' : 'Queen Odds';
+  const bytes = state?.downloadBytes;
+  const mb = typeof bytes === 'number' && Number.isFinite(bytes) && bytes > 0 ? Math.max(1, Math.round(bytes / 1_000_000)) : undefined;
+  const download =
+    downloadNotice ??
+    (mb === undefined
+      ? 'Download size is unavailable; cached after the first time.'
+      : `${phoneRisk ? `${name} is` : "It's"} a ${mb} MB download, cached after the first time.`);
   const dialog = document.createElement('dialog');
   dialog.className = 'large-net-consent';
   dialog.setAttribute('aria-modal', 'true');
@@ -34,11 +75,13 @@ export async function requestLargeNetConsent(
   dialog.setAttribute('aria-describedby', 'largeNetConsentDescription');
   const title = document.createElement('h2');
   title.id = 'largeNetConsentTitle';
-  title.textContent = phoneConsent ? 'Use a large net on this phone?' : `Use Lc0 ${config.name}?`;
+  title.textContent = phone ? (phoneRisk ? `Use ${name} on this phone?` : 'Download Queen Odds?') : `Use Lc0 ${config.name}?`;
   const description = document.createElement('p');
   description.id = 'largeNetConsentDescription';
-  description.textContent = phoneConsent
-    ? `BT4 and t3 can crash this tab on phones and are very slow without WebGPU. ${downloadNotice}`
+  description.textContent = phone
+    ? phoneRisk
+      ? `Large nets can crash the tab on phones.${state?.cached ? '' : ` ${download}`}`
+      : download
     : bigNetLoadWarning(config);
   const actions = document.createElement('div');
   actions.className = 'large-net-consent-actions';
@@ -47,16 +90,10 @@ export async function requestLargeNetConsent(
   cancel.textContent = 'Cancel';
   const use = document.createElement('button');
   use.type = 'button';
-  use.textContent = 'Use anyway';
+  use.textContent = phone && !phoneRisk ? 'Download' : 'Use anyway';
   use.className = 'primary';
   actions.append(cancel, use);
-  dialog.append(title, description);
-  if (phoneConsent) {
-    const note = document.createElement('small');
-    note.textContent = 'You can turn this off below the engine picker.';
-    dialog.append(note);
-  }
-  dialog.append(actions);
+  dialog.append(title, description, actions);
   document.body.append(dialog);
   return new Promise<boolean>((resolve) => {
     let accepted = false;
@@ -88,7 +125,7 @@ export async function requestLargeNetConsent(
               ? Array.from(document.querySelectorAll<HTMLElement>('[aria-label]')).find((node) => node.getAttribute('aria-label') === previousFocusLabel)
               : null;
         returnFocus?.focus({ preventScroll: true });
-        if (accepted && !signal?.aborted && phoneConsent) {
+        if (accepted && !signal?.aborted && phoneRisk && phoneBigNetBlocked(config.key)) {
           const notice = document.getElementById('phoneLargeNetFallback');
           if (notice) notice.hidden = true;
           phoneLargeNetPreference.setEnabled(true);
