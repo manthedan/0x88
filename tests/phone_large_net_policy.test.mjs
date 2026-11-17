@@ -298,15 +298,26 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
     'sf-lite': { family: 'sf', variant: 'lite' },
     ...Object.fromEntries(Object.keys(BIG_NETS).map((key) => [key, { family: 'lc0', variant: key }])),
   };
-  for (const [engineId, option] of Object.entries(options)) {
+  const scenarios = [...Object.entries(options).map(([engineId, option]) => [engineId, option, false]), ['maia3', options.maia3, true]];
+  for (const [engineId, option, cancellingRestore] of scenarios) {
     const activeLarge = Object.hasOwn(BIG_NETS, option.variant);
     const active = { engineId, color: 'white', level: 3, maiaElo: 1700 };
-    const opponent = transitionPlayOpponent(committedPlayOpponent(active), {
-      type: 'edit',
-      preferences: { ...active, engineId: activeLarge ? 'sf-lite' : 'bt4', color: 'black' },
-      gameInProgress: true,
-    });
-    const ctx = { opponent, pendingPreferredEngineId: 't3', pendingPreferredEngineTimer: 42, board: 'saved-game' };
+    const opponent = cancellingRestore
+      ? committedPlayOpponent(active)
+      : transitionPlayOpponent(committedPlayOpponent(active), {
+          type: 'edit',
+          preferences: { ...active, engineId: activeLarge ? 'sf-lite' : 'bt4', color: 'black' },
+          gameInProgress: true,
+        });
+    const ctx = {
+      opponent,
+      pendingPreferredEngineId: cancellingRestore ? 't3' : null,
+      pendingPreferredEngineTimer: cancellingRestore ? 42 : null,
+      board: 'saved-game',
+    };
+    const replacesOpponent = activeLarge || cancellingRestore;
+    let note = cancellingRestore ? 'Checking your saved engine assets…' : '';
+    let renders = 0;
     let cancelled = 0;
     let prepared = 0;
     let dismissed = 0;
@@ -320,6 +331,9 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
       ctxCancelEngineTurn: () => {
         cancelled++;
       },
+      ctxSetEngineNote: (text) => {
+        note = text;
+      },
       releaseUnusedBigNetSearchers() {},
       ctxSetOpponent: (ctx, next) => {
         ctx.opponent = next;
@@ -328,7 +342,9 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
       ctxRestoreOpponentControls() {},
       showPhoneLargeNetFallback() {},
       ctxPersistPlayPreferences() {},
-      ctxRender() {},
+      ctxRender() {
+        renders++;
+      },
       ctxRefreshEngineOptions() {},
       ctxPrepareOrStartEngine: () => {
         prepared++;
@@ -340,17 +356,19 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
     };
     const revoke = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${fn}; return ctxRevokePhoneLargeNets;`)(deps);
     revoke(ctx);
-    assert.equal(ctx.opponent.active.engineId, activeLarge ? 'lc0-small' : engineId);
+    assert.equal(ctx.opponent.active.engineId, replacesOpponent ? 'lc0-small' : engineId);
     assert.equal(ctx.opponent.active.color, active.color);
     assert.equal(ctx.opponent.active.level, active.level);
     assert.equal(ctx.opponent.pending, null);
-    assert.equal(cancelled, activeLarge ? 1 : 0, 'unaffected live work is not cancelled');
-    assert.equal(prepared, activeLarge ? 1 : 0);
-    assert.equal(dismissed, activeLarge ? 0 : 1);
+    assert.equal(cancelled, replacesOpponent ? 1 : 0, 'unaffected live work is not cancelled');
+    assert.equal(prepared, replacesOpponent ? 1 : 0, 'a cancelled saved restore must prepare the small fallback');
+    assert.equal(renders, replacesOpponent ? 1 : 0);
+    assert.equal(note, '', 'saved-engine checking text must not survive revocation');
+    assert.equal(dismissed, replacesOpponent ? 0 : 1);
     assert.equal(ctx.board, 'saved-game');
     assert.equal(ctx.pendingPreferredEngineId, null);
     assert.equal(ctx.pendingPreferredEngineTimer, null);
-    assert.deepEqual(clearedTimers, [42]);
+    assert.deepEqual(clearedTimers, cancellingRestore ? [42] : []);
   }
 });
 

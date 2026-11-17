@@ -1921,6 +1921,7 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
   if (!phoneLargeNetsBlocked()) return;
   // A saved-engine asset probe must not restore a large opponent after revocation.
+  const cancellingRestore = !!ctx.pendingPreferredEngineId;
   ctx.pendingPreferredEngineId = null;
   if (ctx.pendingPreferredEngineTimer) {
     clearTimeout(ctx.pendingPreferredEngineTimer);
@@ -1928,8 +1929,9 @@ function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
   }
   const active = ctxSelectedEngine(ctx);
   const draft = ctxDraftEngine();
-  if (phoneSafeEngineVariant(active.family, active.variant) !== active.variant) {
+  if (cancellingRestore || phoneSafeEngineVariant(active.family, active.variant) !== active.variant) {
     ctxCancelEngineTurn(ctx);
+    ctxSetEngineNote('');
     releaseUnusedBigNetSearchers([], 0);
     const preferences = { ...ctx.opponent.active, engineId: 'lc0-small' };
     ctxSetOpponent(ctx, committedPlayOpponent(preferences));
