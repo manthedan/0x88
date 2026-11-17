@@ -22,7 +22,41 @@ mkdir -p "$STATE"
 cmd=${1:-status}
 shift || true
 
-alive() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
+process_identity() { LC_ALL=C ps -p "$1" -o lstart= -o command= 2>/dev/null; }
+recorded_pid_live() {
+  [ -f "$1" ] || return 1
+  local pid
+  pid=$(<"$1")
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null
+}
+alive() {
+  recorded_pid_live "$1" && [ -f "$1.identity" ] || return 1
+  local actual expected
+  actual=$(process_identity "$(<"$1")") || return 1
+  expected=$(<"$1.identity")
+  [ -n "$expected" ] && [ "$actual" = "$expected" ]
+}
+require_owned_or_dead() {
+  if recorded_pid_live "$1" && ! alive "$1"; then
+    echo "refusing unverified live PID in $1 (missing/mismatched start time or command); owner inspection required" >&2
+    return 1
+  fi
+}
+record_helper() {
+  local file=$1 pid=$2 expected=$3 identity attempt
+  printf '%s\n' "$pid" >"$file"
+  # Wait for nohup/ssh to exec before recording an identity; never trust the fork's shell command.
+  for attempt in {1..20}; do
+    identity=$(process_identity "$pid") || return 1
+    if [[ "$identity" == *"$expected"* ]]; then
+      printf '%s\n' "$identity" >"$file.identity"
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "could not verify started helper $pid; leaving its PID for owner inspection" >&2
+  return 1
+}
 
 case "$cmd" in
 up)
@@ -30,14 +64,16 @@ up)
   LPORT=${2:-8781}
   MPORT=${3:-18781}
   [ -d "$DIST" ] || { echo "no build at $DIST (BUILD_SCOPE=product npm run build:client)"; exit 1; }
+  require_owned_or_dead "$STATE/server.pid"
+  require_owned_or_dead "$STATE/tunnel.pid"
   if ! alive "$STATE/server.pid"; then
     PORT=$LPORT nohup node "$REPO/scripts/serve_isolated_static.mjs" "$DIST" >"$STATE/server.log" 2>&1 &
-    echo $! >"$STATE/server.pid"
+    record_helper "$STATE/server.pid" "$!" "$REPO/scripts/serve_isolated_static.mjs $DIST"
   fi
   if ! alive "$STATE/tunnel.pid"; then
     ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
       -R "127.0.0.1:$MPORT:127.0.0.1:$LPORT" "$HOST" >"$STATE/tunnel.log" 2>&1 &
-    echo $! >"$STATE/tunnel.pid"
+    record_helper "$STATE/tunnel.pid" "$!" "-R 127.0.0.1:$MPORT:127.0.0.1:$LPORT $HOST"
   fi
   echo "$MPORT" >"$STATE/mini-port"
   sleep 2
@@ -67,10 +103,13 @@ fetch)
   echo "$DEST"
   ;;
 down)
+  result=0
   for p in tunnel server; do
-    if alive "$STATE/$p.pid"; then kill "$(cat "$STATE/$p.pid")" && echo "stopped $p $(cat "$STATE/$p.pid")"; fi
-    rm -f "$STATE/$p.pid"
+    if ! require_owned_or_dead "$STATE/$p.pid"; then result=1; continue; fi
+    if alive "$STATE/$p.pid"; then kill "$(<"$STATE/$p.pid")" && echo "stopped $p $(<"$STATE/$p.pid")"; fi
+    rm -f "$STATE/$p.pid" "$STATE/$p.pid.identity"
   done
+  exit "$result"
   ;;
 status)
   for p in tunnel server; do alive "$STATE/$p.pid" && echo "$p running ($(cat "$STATE/$p.pid"))" || echo "$p stopped"; done
