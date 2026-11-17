@@ -5,7 +5,7 @@ import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
-import { peakFootprint } from './gate.mjs';
+import { jsBytesByRoute, peakFootprint } from './gate.mjs';
 import { MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
@@ -179,11 +179,7 @@ try {
   // Freeze route bytes before navigation away; workers' JS glue is included, model/WASM bytes are not.
   result.requests = proxy.requests.map((r) => ({ ...r }));
   result.metrics.jsBytes = result.requests.filter((r) => /\.(m?js)(?:\?|$)/.test(r.path)).reduce((n, r) => n + r.bytes, 0);
-  result.jsBytesByRoute = {};
-  for (const r of result.requests.filter((r) => /\.(m?js)(?:\?|$)/.test(r.path))) {
-    const route = result.routeMarks.findLast((m) => m.at <= r.at)?.route ?? routeFor(spec.journey);
-    result.jsBytesByRoute[route] = (result.jsBytesByRoute[route] ?? 0) + r.bytes;
-  }
+  result.jsBytesByRoute = jsBytesByRoute(result.requests, result.routeMarks);
   for (const [route, bytes] of Object.entries(result.jsBytesByRoute)) result.metrics[`jsBytes.${route}`] = bytes;
   if (p.errors.length) throw Error(`Worker errors: ${p.errors.join('; ')}`);
   const active = result.samples.filter((s) => s.phase !== 'residual');

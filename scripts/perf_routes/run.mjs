@@ -6,7 +6,7 @@ import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sleep } from '../perf_matrix/common.mjs';
-import { compareRuns, HELP, parseArgs, plan } from './gate.mjs';
+import { compareRuns, HELP, parseArgs, plan, previewEnvironment } from './gate.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // Build/archive/git/file operations are confined to the calling worktree's ignored output tree.
@@ -93,7 +93,10 @@ async function serve(dist, out, arm) {
   await new Promise((r) => socket.listen(0, '127.0.0.1', r));
   const port = socket.address().port;
   await new Promise((r) => socket.close(r));
-  const child = spawn(process.execPath, [join(root, 'scripts/serve_isolated_static.mjs'), dist, String(port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [join(root, 'scripts/serve_isolated_static.mjs'), dist, String(port)], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: previewEnvironment(port),
+  });
   child.stdout.on('data', (d) => appendFileSync(join(out, `${arm}-server.log`), d));
   child.stderr.on('data', (d) => appendFileSync(join(out, `${arm}-server.log`), d));
   const base = `http://127.0.0.1:${port}`;

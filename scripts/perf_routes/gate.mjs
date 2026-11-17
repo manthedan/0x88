@@ -112,6 +112,17 @@ export function verdict(name, baseline, candidate, expected = 5) {
   return { name, baseline: a, candidate: b, deltaRatio, threshold, status };
 }
 
+export const previewEnvironment = (port, env = process.env) => ({ ...env, PORT: String(port) });
+
+export function jsBytesByRoute(requests, marks) {
+  const bytes = Object.fromEntries(marks.map((mark) => [mark.route, 0]));
+  for (const r of requests.filter((r) => /\.(m?js)(?:\?|$)/.test(r.path))) {
+    const route = marks.findLast((mark) => mark.at <= r.at)?.route ?? marks[0].route;
+    bytes[route] += r.bytes;
+  }
+  return bytes;
+}
+
 export function peakFootprint(browser, samples, navigationPeak = 0) {
   if (!samples.length) throw Error('No footprint samples');
   return browser === 'safari'

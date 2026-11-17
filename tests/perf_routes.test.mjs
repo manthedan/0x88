@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { startCountingProxy } from '../scripts/perf_matrix/proxy.mjs';
-import { compareRuns, JOURNEYS, parseArgs, peakFootprint, plan, stats, verdict } from '../scripts/perf_routes/gate.mjs';
+import { compareRuns, JOURNEYS, jsBytesByRoute, parseArgs, peakFootprint, plan, previewEnvironment, stats, verdict } from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
 import { arenaGameFailed, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
 
@@ -188,6 +188,25 @@ test('host-side human moves are deterministic/legal and reject terminal or wrong
   assert.throws(() => chooseHumanMove(['e4']), /White turn/);
   assert.throws(() => chooseHumanMove(['not-san']), /Cannot replay/);
   assert.throws(() => chooseHumanMove(['f3', 'e5', 'g4', 'Qh4#']), /ended before/);
+});
+
+test('visited routes with cached JS are explicit zero baselines, not missing samples', () => {
+  const marks = [
+    { route: 'analysis', at: 0 },
+    { route: 'play', at: 10 },
+    { route: 'arena', at: 20 },
+  ];
+  const baseline = jsBytesByRoute([{ path: '/app.js', at: 1, bytes: 100 }], marks);
+  assert.deepEqual(baseline, { analysis: 100, play: 0, arena: 0 });
+  const candidate = jsBytesByRoute(
+    [
+      { path: '/app.js', at: 1, bytes: 100 },
+      { path: '/lazy.js', at: 11, bytes: 50 },
+    ],
+    marks,
+  );
+  assert.equal(verdict('jsBytes.play', same(baseline.play), same(candidate.play)).status, 'regressed');
+  assert.deepEqual(previewEnvironment(12345, { PORT: '9999', OTHER: 'kept' }), { PORT: '12345', OTHER: 'kept' });
 });
 
 test('Safari peaks use kernel intervals; Chrome totals never sum independent process maxima', () => {
