@@ -1,4 +1,4 @@
-# Mobile memory, phases 1–2 — 2026-11-17
+# Mobile memory, phases 1–3 — 2026-11-17
 
 **Phase 1 below is historical. Its sampled peaks and same-tab “warm” rows are superseded by [Phase 2](#phase-2-fresh-process-measurements-and-per-net-policy).** Same-tab reloads inherited the previous process's allocations; the variable post-disposal tail also captured WebAssembly JIT growth. Those rows must not be used as load-peak or speed comparisons. The phase-1 blanket CPU-IO policy was a real fixed-net regression, not random noise; Phase 2 removes it. Phase 2 also supersedes the old all-model fold-on policy.
 
@@ -301,3 +301,79 @@ Validation after review fixes: lint; targeted IO/policy/lifetime/worker tests; s
 Codex closeout used `~/.pi/agent/skills/autoreview/scripts/autoreview --mode branch --base main --engine codex --model gpt-6.1-sol --thinking xhigh`. The first output failed schema validation for an absolute finding path; the same engine/model was retried with repository-relative-path guidance. Verified and fixed three real harness findings in separate commits: `ca14af0c` retains a completed Chrome cold load if the warm load throws; `33e5d436` reads Chrome's actual `rendererTopMb` done mark; `0d506f13` counts extensionless channel-v2 identity/Brotli model traffic by manifest-pinned raw hashes without counting runtime artifacts. None changes the reported successful load/lifetime peaks. The final same-model branch review (`autoreview-4.log/json`, with only path-format guidance added) exited **0: no accepted/actionable findings**. No speculative production rewrite was accepted, and no extra review was run after that clean result.
 
 Remaining: finish the externally blocked baseline Maia3 warm repeat (resume the saved balanced matrix after Safari is available); investigate Maia3 and LQO's post-disposal Safari compiler/lifetime growth; physical-iPhone Jetsam validation; potentially larger cold cohorts if a 150 MB effect matters. LQO's final desktop load peak remains above 1 GB. BT4's observed desktop load/lifetime peaks are below 2 GB, **not a guarantee of phone safety**. No LQO dimension/capture override, worker reuse, release-before-terminate change, new model format, ORT patch, OPFS, hash redesign, cache-integrity weakening, deployment or push was introduced.
+
+## Phase 3: LQO batch-one capture and Maia3 folding restored
+
+### Mechanism and product policy
+
+The independent `lab/perf-harness` follow-up, `docs/safari_omg_memory_2026-11-17.md`, corrects the “post-dispose” framing: on Safari 26 the OMG compiler burst **starts during search**. Per-node ORT WASM execution triggers it with CPU IO **and non-captured GPU IO**; capture largely avoids that executor path. Those measurements include 90 s laptop peaks of 4.8–9.7 GB, stack samples in `OMGPlan`/B3/Air, and owner-approved JSC flag controls. The flags are not a product option. Safari 27 on the mini behaves differently; neither hardware nor browser version was held constant, and this is not iPhone evidence.
+
+`e879a375` makes LQO's product config explicitly `freeDimensionOverrides: { batch: 1 }`. The same map reaches worker reuse identity, declaration preflight and **only the captured GPU session options**. The shared resolver reads prototype IO getters, validates positive integer values, substitutes named symbols without changing numeric dimensions, and does not mutate the original metadata. Post-create IO must agree with the preflight shape: an unexpected numeric batch 8 is rejected rather than accepted as capture success.
+
+The model is still `lqo_v2.f16.qdq8.onnx`: **95,662,716 bytes**, SHA-256 `4effd3079add6ab04043f066057f987b54e90e7e54cdf62ac0931b300769fc0e`. No model rewrite, alternate URL, hash, manifest, or cache entry is introduced. Normal capture creates exactly **one** native session. If capture/metadata/warmup fails, existing cleanup and verified lazy reload feed the ordinary **unpinned CPU-IO/WASM fallback**; that failure path may create a second session. It is not confused with a speculative normal-load probe.
+
+**Search batch handling:** LQO's PUCT recommendation remains a **logical leaf batch of up to 8**. The effective GPU binding's fixed batch, not symbolic native metadata or `physicalBatchMode=logical`, governs physical execution. A larger logical request is split into serial **batch-1** invokes, preserving order and returning only real rows. Tests submit eight positions and observe one warmup plus eight 14,336-byte f16 input runs. The real parity probe submits the entire ten-position corpus in one logical call and observes **ten b1 readbacks**. Worker diagnostics report effective `ioMode` and `fixedBatchSize`; mini runs confirm `gpu-capture` / `1`.
+
+`f75d6131` restores **Maia3 fold ON**, using the existing shared explicit page/worker config. Small stays on; LQO/BT4/t3 stay off. URL and worker overrides still force either fold arm. No Maia capture implementation, worker reuse, or session/device-release-before-terminate change was made.
+
+### Full-position parity and dedicated speed
+
+An optional `lc0Io=cpu|gpu-capture` mode was added to the existing `ort-profile.html`. It uses the production verified evaluator factory and synchronized b1 evaluation (encoding/postprocess included), not the soak page's eight-visit rate. Timing has no raw-output observer; **after timing only**, the parity path observes the existing binding's CPU readback and applies the page's unchanged gates against shipped, unfurled ORT WASM outputs. It does not patch the model, gate thresholds or exception lists. The ordinary raw-session benchmark is unchanged.
+
+Final Chrome WebGPU capture, full **10/10 fixtures** including rule50/promotions: raw max abs policy/WDL/MLH **1.3359375 / 0.01806640625 / 0.09375**; zero non-finite outputs; max legal-prior difference **0.01649118**; **10/10 best moves**, no tolerated flips needed. All existing raw and legal/top-3 gates pass. Effective backend is `webgpu->webgpu`, IO `gpu-capture`, fixed batch 1; verified loader provenance confirms the original bytes/hash. This establishes the full-corpus release gate, not bit-identical WebGPU/WASM math. The other agent's direct b1 CPU-IO vs capture comparison was bit-identical on four positions; it is not mislabeled as our ten-position bit-identity test.
+
+Dedicated timings: Chrome 157 / Apple M4, benchlock, 3 fresh document loads per arm, 5 warmups + 15 invocations, reversed arm order in round 2. Baseline is the phase-2 source build (`5ac94eb4`); final engine source is `e879a375` + `f75d6131`. Maia uses ordinary raw `ort-profile` b1 with explicit fold=0/1; LQO uses the production-evaluator b1 IO mode with fold off in both arms. Do not compare absolute times across those two benchmark layers.
+
+| Benchmark | Phase 2 ms, median [run-median range] | Phase 3 ms | Final/baseline |
+|---|---:|---:|---:|
+| LQO production b1, CPU IO → capture | 20.685 [18.810–21.015] | 19.105 [18.765–19.870] | 0.924× |
+| Maia3 raw b1, fold off → on | 10.555 [10.530–11.290] | 9.855 [9.565–10.150] | 0.934× |
+
+### Memory protocol and builds
+
+Use `scripts/perf_matrix/`: fresh page process per load, cold new profile/origin, warm fresh window with the old Safari PID gone and **zero model bytes on the wire**, kernel interval/lifetime peaks, normal JSC flags. MB = MiB. The short-run “load peak” includes the two test searches; lifetime includes **10 s** settle. Long rows below separate initial-load and **90 s search** peaks and use a predeclared **70 s** settle, not the short-run lifetime window.
+
+Both builds are local product builds, with identical pinned model/runtime artifacts. Phase 2 was archived under this worktree's ignored `phase2-src`; only the same **lab-only single-load timed-search hook** and optional benchmark overlay were added to both builds. `labSearchSeconds=90` runs one sustained search inside the selected net step, rather than loading a second `heat` engine or contaminating a phase boundary with two loads. A controller regression verifies one load/search/disposal and a 90000 ms search budget. Cohorts are interleaved across builds/models, not selected by measured peak.
+
+Mini transport uses the provided `mini.sh` plumbing with branch-isolated remote scripts in `~/perf-mobile-soak-phase3`, separate local state for each server/tunnel, and the **shared mini mutex** `~/perf-matrix/safari.lock`. Other agents' `~/perf-matrix/scripts` are not overwritten. The mini's existing driver **PID 36158 / port 4446 was never started, stopped or killed**. Secure context, COOP/COEP isolation, Safari UA, effective IO/fold and cache-wire assertions were checked for every completed load. A stale/foreign lock is never recursively removed automatically (avoids racing another stale-lock taker); it requires owner cleanup. The laptop uses the supplied benchlock, not the mini lock.
+
+### Mac mini, Safari 27.0.1: completed short cohorts
+
+M4 / 16 GiB, n=5 per cell, median [min–max]. These are **within-mini** comparisons; not a Safari-26 or iPhone substitute.
+
+| Net / cache | Phase 2 load MB | Phase 3 load MB | Phase 2 lifetime MB | Phase 3 lifetime MB |
+|---|---:|---:|---:|---:|
+| LQO cold | 705 [689–716] | 625 [607–638] | 705 [689–728] | 625 [607–638] |
+| LQO warm | 650 [607–684] | 651 [551–661] | 650 [612–684] | 651 [551–661] |
+| Maia3 cold | 338 [329–411] | 460 [440–469] | 366 [355–411] | 468 [460–489] |
+
+All **30 loads valid**; no exclusions. LQO's short warm peaks are indistinguishable at this sample count. On the mini, restoring Maia's expanded f16 weights **raises** the short memory peak, as expected when the Safari-26 burst is absent. The default nevertheless follows the owner's all-device policy for the Safari-26/iPhone target; no claim of uniform cross-version memory improvement is made.
+
+### Mac mini: 90 s LQO searches (two per build)
+
+| Build / repeat | Initial load MB | Search peak MB | Lifetime MB (70 s settle) | Wasm compiler CPU-s during search | Visits/s |
+|---|---:|---:|---:|---:|---:|
+| phase2 / 0 | 680 | 1822 | 1822 | 4.517 | 17.1 |
+| phase3 / 0 | 613 | 1499 | 1499 | 0.549 | 31.4 |
+| phase2 / 1 | 606 | 1756 | 1756 | 4.866 | 16.8 |
+| phase3 / 1 | 621 | 1511 | 1511 | 0.401 | 31.3 |
+
+All four valid; final runs report actual capture/b1. Final 10 s slices stay about **31–33 visits/s**; baseline slices vary roughly **10–21**. Mini GPU-process peak delta is about **1599–1607 MB baseline vs 136–138 MB final** (shared GPU-process delta, not private VRAM accounting). The large Safari-26 OMG burst was already absent in this mini baseline; these results show lower compiler activity and steady throughput, not proof about the laptop or iOS 26.
+
+### Laptop Safari 26: externally blocked
+
+The coordinator is queued under benchlock for LQO cold+warm n≥5, Maia3 cold n≥5, and the same two 90 s LQO searches per build. **No phase-3 laptop cell has completed:** the existing port-4445 driver refuses session creation because Safari is paired with another WebDriver session. Pairing failures yield benchlock and back off outside it; no foreign session or driver is terminated. Owner/perf-harness measurements motivate the change but are not relabeled as this phase's baseline/final matrix. This required machine remains an explicit verification gap.
+
+### Maia3 capture feasibility (inspection only)
+
+The actual graph has three float32 feeds: `tokens [unk__0,64,12]`, `elo_self [batch_size]`, `elo_oppo [batch_size]`; outputs are `logits_move [batch_size,4352]` and `logits_value [batch_size,3]`. Fixed b1 or b11 is structurally possible by pinning **both** symbols consistently. But the current LC0 binding supports **one input**, not Maia's three, and one statically captured session cannot simply alternate b1/b6/b11. A shape-specific session/cache or other explicit capture strategy, extra model/session residency, warmup cost and parity/lifetime testing would be needed. Feed bytes alone are cheap (3080 B at b1, 33880 B at b11), but that does **not** establish cheap overall capture. Nothing was implemented.
+
+Batch 8 remains a follow-up **candidate only**: the other agent measured **52.9 / 62.7 visits/s** (b8 capture) vs **24.9 / 20.7** (b1 capture), max |Δlogit| **0.132**, |ΔWDL| **1.95e-3**, |Δprior| **3.37e-3**, top move 4/4. These differences prevent a bit-identical claim; batch 8 is not this product policy and is not shipped.
+
+### Reproduction and closeout status
+
+Raw evidence: `.local-dev-artifacts/mobile-memory-phase3/{mini-short,mini-long}/`, `parity-lqo-capture.json`, `speed-r{0,1,2}.json`, `speed.json`; laptop specs/queue log are preserved separately. Mini summaries come from `mini.sh fetch`, with original counter time series retained. Its own lock is used by `mini.sh run`; no laptop Safari control is involved.
+
+Build + overlay as before. Full captured gate: `/lab/kernel-hillclimb/ort-profile.html?preset=lqo&batch=1&lc0Io=gpu-capture&parity=wasm&warmup=5&iters=15&profileInvokes=0&ortDequantFold=0`. Baseline speed uses `lc0Io=cpu` on the phase-2 build. Timed memory search uses `/lab/mobile-soak/?steps=lqo&labSearchSeconds=90`; n=2 per build was chosen, stronger than a single long confirmation.
+
+Validation so far: lint, 98 relevant capture/controller/protocol/kernel tests; full suite **2367 passed, 4 existing skips**; typecheck zero errors/warnings; product build; real full-corpus WebGPU gate. Codex branch closeout is pending. The laptop comparisons and laptop 90 s burst confirmation are **not complete**, and no iPhone safety or Safari-26 burst-removal claim is made from the mini alone.
