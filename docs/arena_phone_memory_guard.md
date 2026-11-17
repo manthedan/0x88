@@ -144,7 +144,7 @@ behavior are unchanged.
 
 Rebased onto `main` including mobile-memory Phase 4. Full
 `LC0_MEMORY_MODEL_DIR=<worktree>/.local-dev-artifacts/release2/models npm test -- --test-concurrency=2`:
-**2463 passed, 4 existing optional skips**, including all seven folding goldens
+**2488 passed, 4 existing optional skips**, including all seven folding goldens
 and real Small inference parity. Typecheck: zero errors/warnings; repository lint,
 targeted Biome checks and `BUILD_SCOPE=product npm run build:client` pass.
 
@@ -161,6 +161,25 @@ Agent-browser product-build evidence is in scratchpad `mobile-soak/release2/`:
   also requires no opt-in, even with consent off; Analysis retains its ordinary
   download warning; Arena has no phone control or large-pair restriction. An
   additional **1280×900** Arena screenshot covers the desktop layout.
+- The required phone screenshots were refreshed against the final reviewed build.
+  A lab autorun with `steps=lqo` but a BT4 `lqoModel` override shows the ~178 MB
+  consent dialog before any step or ballast; Escape leaves the step skipped,
+  consent unset and allocated ballast zero (`phone-lab-override-dialog.png`).
 - The optional Reckless assets are not staged locally, so adding that Analysis
-  row produces an unrelated 404/failure row. No actual iPhone, Safari automation,
+  row in the earlier browser pass produced an unrelated 404/failure row. No actual iPhone, Safari automation,
   physical-memory measurement, deployment or upload was performed.
+
+Codex closeout used
+`~/.pi/agent/skills/autoreview/scripts/autoreview --mode branch --base main --engine codex --model gpt-6.1-sol --thinking xhigh`.
+The first attempt failed absolute-path schema validation; subsequent runs added
+only repository-relative-path guidance plus JSON output. All **eight** actionable
+findings were verified and fixed: reinit resurrection/retry poisoning; retained
+Play workers/lab consent; cross-tab revocation/effective lab overrides; hidden
+Analysis retirement/unaffected Arena runs. New controlled-worker, actual-pool,
+controller and extracted-handler tests cover these paths. None was waived.
+`autoreview-6.log/json` is the final same-model whole-branch review: **exit 0,
+clean, no accepted/actionable findings**. No redundant review followed.
+`npm-test-final.log` and `product-build-final.log` record the final complete suite
+and product rebuild; the final source is `008ae26f`. Analysis revocation detaches
+gated workers immediately, independent of deferred maintenance; Arena retires
+unused gated workers without aborting an unaffected active/starting tournament.
