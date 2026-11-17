@@ -218,6 +218,18 @@ test('worker observation records effective IO/fold settings without changing the
   assert.equal(Object.hasOwn(window.__perfWorkerReady[0], 'model'), false);
 });
 
+test('Chrome rejects sequences before acquiring proxy/browser resources instead of reporting partial peaks', () => {
+  const source = readFileSync(new URL('../scripts/perf_matrix/chrome_session.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf("// Chrome's monotonic");
+  const end = source.indexOf('const settleMs');
+  assert.ok(start > 0 && end < source.indexOf('const proxy = await'));
+  const validate = new Function('spec', source.slice(start, end));
+  assert.throws(() => validate({ net: 'lc0-small,lqo' }), /exactly one soak step/);
+  assert.throws(() => validate({ net: 't3', params: { steps: 't3,maia3' } }), /exactly one soak step/);
+  assert.doesNotThrow(() => validate({ net: 't3' }));
+  assert.doesNotThrow(() => validate({ net: 'arena' }));
+});
+
 test('Chrome clears renderer refresh when the cache/setup probe throws before sampling starts', async () => {
   const source = readFileSync(new URL('../scripts/perf_matrix/chrome_session.mjs', import.meta.url), 'utf8');
   const body = source.slice(source.indexOf('async function measure('));

@@ -17,6 +17,15 @@ import { startCountingProxy } from './proxy.mjs';
 
 const [specPath, outPath] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+// Chrome's monotonic phase/GPU accounting currently supports one soak step only.
+// Refuse sequences before opening a proxy/browser, rather than accepting partial peaks.
+if (
+  String(spec.params?.steps ?? spec.net)
+    .split(',')
+    .filter(Boolean).length !== 1
+) {
+  throw new Error('Chrome memory measurements require exactly one soak step; use the Safari runner for sequences');
+}
 const settleMs = spec.settleMs ?? 10_000;
 const sampleMs = spec.sampleMs ?? 100;
 const timeoutMs = spec.timeoutMs ?? 240_000;
