@@ -5,6 +5,7 @@ import { type Move, moveToActionId } from '../chess/moveCodec.ts';
 import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import { isSquareAttacked, legalMoves } from '../chess/movegen.ts';
 import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
+import { createCentipawnOrtSession } from './centipawnModel.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import * as ort from './ortRuntime.ts';
@@ -967,8 +968,11 @@ export class SquareFormerEvaluator implements Evaluator {
     modelPath: string | Uint8Array | ArrayBuffer,
     meta: SquareFormerMeta,
     settings: SquareFormerSettings = {},
+    options: { verifiedCentipawn?: boolean } = {},
   ): Promise<SquareFormerEvaluator> {
-    return new SquareFormerEvaluator(await ort.createOrtSession(modelPath), meta, settings);
+    const session =
+      options.verifiedCentipawn && typeof modelPath === 'string' ? await createCentipawnOrtSession(modelPath) : await ort.createOrtSession(modelPath);
+    return new SquareFormerEvaluator(session, meta, settings);
   }
   async evaluate(board: BoardState, context: EvaluationContext = {}): Promise<Evaluation> {
     return (await this.evaluateBatch([board], [context]))[0];

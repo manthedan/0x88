@@ -28,7 +28,7 @@ test('Play Retry evicts a fatally failed Maia cache once, even with concurrent c
   const Maia = factory();
   const ensure = compile(
     `
-    let maia3Promise = null, maia3Status = null;
+    let maia3Promise = null, maia3Status = null, maia3Generation = 0;
     const ctxAsyncUiIsCurrent = () => false;
     ${extracted('../src/lc0/playBrowser.ts', 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
     return ctxEnsureMaia3;
@@ -50,7 +50,8 @@ test('Analysis Maia failure removes the failed owner, settles task ownership and
   const Maia = factory();
   const api = compile(
     `
-    let maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelLoadGeneration = 0;
+    let maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelLoadGeneration = 0, maia3PanelPending = null;
+    const awaitEngineRetirements = async () => {};
     let maia3PanelTask = null, maia3PanelTimer = null, explorerMaia = null;
     const elements = new Map();
     const el = (id) => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); };

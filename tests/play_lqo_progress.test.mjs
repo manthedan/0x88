@@ -22,6 +22,7 @@ for (const lifecycle of ['current', 'cancelled', 'disposed']) {
         },
       };
       const deps = {
+        retireUnusedPlayNeuralEngines: async () => {},
         ctxSelectedEngine: () => ({ family: 'lc0', variant: 'lqo' }),
         ctxStrengthFor: () => 1,
         acquireBigNetSearcherAsync: async () => searcher,

@@ -43,6 +43,7 @@ import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineReside
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
+import { awaitEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
@@ -139,12 +140,14 @@ const LQO_WHITE_SEARCH_CONTEMPT_LIMIT = 40;
 const LQO_BLACK_SEARCH_CONTEMPT_LIMIT = 32;
 
 // ---------------------------------------------------------------------------
-// Module-level engine caches (intentionally persistent across mount/unmount
-// to avoid re-downloading engines on navigation)
+// Module-level engine owners. Neural sessions retire on switch/unmount;
+// verified model bytes remain cached independently of native session residency.
 // ---------------------------------------------------------------------------
 const BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3', 'lqo'];
 let lc0Searcher: Lc0PuctSearcher | null = null;
 let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
+let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null } = { evaluator: null };
+let maia3Generation = 0;
 let centipawnEvaluator: CachedEvaluator | null = null;
 let centipawnLoadPromise: Promise<Evaluator> | null = null;
 let centipawnEvaluatorGeneration = 0;
@@ -557,10 +560,45 @@ function ctxHideDownloadProgress(): void {
   hideLoadingProgress(container);
 }
 
+function retireUnusedPlayNeuralEngines(option?: PlayEngineOption): Promise<void> {
+  if (option?.family !== 'maia3' && maia3Promise) {
+    const pending = maia3Promise;
+    maia3Promise = null;
+    maia3Status = null;
+    maia3Generation += 1;
+    trackEngineRetirement(
+      pending.then(
+        (evaluator) => evaluator.dispose(),
+        () => undefined,
+      ),
+    );
+  }
+  if (!(option?.family === 'lc0' && option.variant === 'small') && lc0LoadPromise) {
+    const pending = lc0LoadPromise;
+    const owner = lc0SmallOwner;
+    lc0SmallOwner = { evaluator: null };
+    lc0LoadPromise = null;
+    lc0Searcher = null;
+    trackEngineRetirement(
+      pending.then(
+        async (searcher) => {
+          searcher.resetTree();
+          await owner.evaluator?.dispose();
+          owner.evaluator = null;
+        },
+        () => undefined,
+      ),
+    );
+  }
+  releaseUnusedBigNetSearchers(option?.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
+  return awaitEngineRetirements();
+}
+
 function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
   if (lc0Searcher) return Promise.resolve(lc0Searcher);
   if (!lc0LoadPromise) {
     const uiGeneration = ctx.enginePreparationGeneration;
+    const owner = lc0SmallOwner;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Lc0 small net…');
     lc0LoadPromise = (async () => {
       // Download progress hides only once the session exists: on Apple WebGPU a
@@ -576,11 +614,13 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
         },
       });
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxHideDownloadProgress();
-      lc0Searcher = new Lc0PuctSearcher(new CachedLc0Evaluator(evaluator, { maxEntries: 2048 }));
+      owner.evaluator = new CachedLc0Evaluator(evaluator, { maxEntries: 2048 });
+      const loaded = new Lc0PuctSearcher(owner.evaluator);
+      if (owner === lc0SmallOwner) lc0Searcher = loaded;
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
-      return lc0Searcher;
+      return loaded;
     })().catch((error: Error) => {
-      lc0LoadPromise = null;
+      if (owner === lc0SmallOwner) lc0LoadPromise = null;
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
         ctxHideDownloadProgress();
         ctxSetEngineNote(`Lc0 load failed: ${error.message}`, true);
@@ -646,6 +686,7 @@ async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> 
     return ctxEnsureMaia3(ctx);
   }
   const uiGeneration = ctx.enginePreparationGeneration;
+  const generation = maia3Generation;
   maia3Promise = (async () => {
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Maia3 human model…');
     const evaluator = await Maia3BrowserEvaluator.create({
@@ -659,11 +700,11 @@ async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> 
     const load = evaluator.modelLoad;
     const origin = load.cacheStatus === 'hit' ? 'from cache' : load.cacheStatus === 'miss' ? 'downloaded' : 'loaded';
     const integrity = load.sha256Valid === true ? ', sha256 ✓' : load.sha256Valid === false ? ', sha256 MISMATCH' : '';
-    maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
+    if (generation === maia3Generation) maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
     return evaluator;
   })().catch((error: Error) => {
-    maia3Promise = null;
+    if (generation === maia3Generation) maia3Promise = null;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
       ctxHideDownloadProgress();
       ctxSetEngineNote(`Maia3 load failed: ${error.message}`, true);
@@ -754,6 +795,8 @@ async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal)
 
 async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Promise<string | null> {
   const option = ctxSelectedEngine(ctx);
+  await retireUnusedPlayNeuralEngines(option);
+  if (signal.aborted || ctx.disposed) return null;
   const preferences = ctx.opponent.active;
   const level = preferences.level;
   const visitsOrDepth = ctxStrengthFor(option, level);
@@ -928,7 +971,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   const signal = ctx.abort.signal;
   if (ctx.restoredDownloadEngineId && !(await ctxCheckRestoredDownloadConsent(ctx))) return;
   if (signal.aborted || ctx.disposed) return;
-  releaseUnusedBigNetSearchers(option.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
+  const retirement = retireUnusedPlayNeuralEngines(option);
   const generation = ++ctx.enginePreparationGeneration;
   ctx.engineReady = false;
   ctx.preparingEngine = true;
@@ -936,6 +979,8 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   ctxSetEngineNote(resumingGame ? `Checking ${option.label} before play resumes…` : `Preparing ${option.label} before the first move…`);
   ctxRender(ctx);
   try {
+    await retirement;
+    if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration) return;
     if (option.family === 'maia3') {
       const player = await ctxEnsureMaia3(ctx);
       await player.chooseMove(
@@ -2407,7 +2452,7 @@ export function mountPlayBrowser(): () => void {
     ctx.consentAbort.abort();
     ctxCancelEngineTurn(ctx);
     ctx.abort.abort();
-    releaseUnusedBigNetSearchers([], 0);
+    void retireUnusedPlayNeuralEngines().catch(() => undefined);
     centipawnEvaluatorGeneration += 1;
     centipawnEvaluator?.clear();
     const destroyCentipawn = (centipawnEvaluator?.inner as (Evaluator & { destroy?: () => void }) | undefined)?.destroy;

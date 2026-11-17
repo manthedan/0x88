@@ -24,3 +24,22 @@ export function isMemoryConstrainedDevice(
   const memory = device?.deviceMemory;
   return typeof memory !== 'number' || !Number.isFinite(memory) || memory <= 4;
 }
+
+export type DeviceMemoryClass = 'phone' | 'tablet' | 'desktop';
+
+/** Safari exposes no RAM size; use conservative device classes, with a diagnostic override. */
+export function deviceMemoryClass(
+  search = typeof location === 'undefined' ? '' : location.search,
+  nav = typeof navigator === 'undefined' ? undefined : navigator,
+): DeviceMemoryClass {
+  const override = new URLSearchParams(search).get('memoryClass');
+  if (override === 'phone' || override === 'tablet' || override === 'desktop') return override;
+  const ua = nav?.userAgent ?? '';
+  if (/iPhone|iPod|Android.*Mobile/i.test(ua)) return 'phone';
+  if (/iPad|Android/i.test(ua) || (/Macintosh/i.test(ua) && (nav?.maxTouchPoints ?? 0) > 1)) return 'tablet';
+  return 'desktop';
+}
+
+export function shouldAutoAnalyzePosition(memoryClass: DeviceMemoryClass, hasInput: boolean, rootFen: string, defaultFen: string, moves: number): boolean {
+  return memoryClass !== 'phone' || hasInput || rootFen !== defaultFen || moves > 0;
+}

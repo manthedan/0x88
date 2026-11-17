@@ -48,6 +48,7 @@ function controller(activeKeys = []) {
     const noop=()=>{},cpu={retain:noop,disposeAll:noop};
     const recklessEngines=cpu,viridithasEngines=cpu,berserkEngines=cpu,plentyChessEngines=cpu,stormphraxEngines=cpu;
     const activeEngineRows=()=>[],reviewEngineRows=()=>[],disposeUnusedCentipawnEvaluators=noop,disposeStockfish=noop,renderRecklessRuntimeInfo=noop;
+    const trackEngineRetirement=noop;
     let analysisAbort={abort:noop},analysisRunCentipawnKeys=new Set(),reviewAbort=null,activeWorkerSearchId=null,searchWorker=null;
     const cancelAllAnalysisAssetPrefetches=noop,preparedCpuEngineKeys=new Set(),resetSearchWorker=noop,disposeCentipawnEvaluators=noop;
     let mainEvaluator={dispose:noop},searcher={},lc0ServedModelUrl='test';

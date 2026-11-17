@@ -42,6 +42,8 @@ import { writeClipboard } from './clipboard.ts';
 import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
 import { criticalPositionLines } from './criticalMomentsPresentation.ts';
+import { deviceMemoryClass, isMemoryConstrainedDevice, shouldAutoAnalyzePosition } from './deviceMemoryClass.ts';
+import { awaitEngineRetirements, hasEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
 import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from './evalBarPresentation.ts';
 import { compactEvalSpread, compareEvals, evalPercent } from './evalCompare.ts';
@@ -500,6 +502,7 @@ function restoreAnalysisWorkspace(): void {
         throw new Error('Could not keep the previous analysis. Export it before replacing it.');
       clearAnalysisWorkspace(false);
       tree = replacement;
+      analysisHasExplicitInput = true;
       tree.toStart();
       analysisGameTree = tree;
       if (parsed) {
@@ -915,7 +918,7 @@ function resetSearchWorker(reason: string | Error): void {
   if (retired) {
     if (reason instanceof Error)
       retired.terminate(); // A broken transport cannot acknowledge release.
-    else void disposeOrtWorker(retired).catch(() => undefined);
+    else trackEngineRetirement(disposeOrtWorker(retired));
   }
   workerReady = false;
   workerBackend = '';
@@ -2193,6 +2196,15 @@ function disposeUnusedEngines(): void {
   }
   disposeUnusedCentipawnEvaluators();
   const activeRows = activeEngineRows();
+  // The eval bar consumes these rows' cached lines; review/retry are CPU-only.
+  // Neither owns an independent Small search once its last row is gone.
+  if (!activeRows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) {
+    resetSearchWorker('Unused Lc0 Small retired');
+    const retired = mainEvaluator;
+    mainEvaluator = null;
+    searcher = null;
+    if (retired) trackEngineRetirement(Promise.resolve(retired.dispose?.()));
+  }
   // Game review always runs SF Lite, so a running review keeps its rows too.
   const stockfishRows = reviewAbort ? [...activeRows, ...reviewEngineRows()] : activeRows;
   for (const kind of ['lite', 'full'] as const) {
@@ -4067,6 +4079,7 @@ function invalidateAnalysisSettings(
   maintenance: Maintenance = { reloadLc0: false, disposeUnused: false },
   request = analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null,
 ): void {
+  request = request && automaticAnalysisAllowed();
   if (request && hiddenTab.hidden) deferHiddenTabWork('analysis');
   void dispatchAnalysis({ type: 'SETTINGS_CHANGED', revision: analysisRunState.revision + 1, intent: analysisIntent(), maintenance, request });
 }
@@ -4398,7 +4411,15 @@ async function performAnalysisMaintenance(operationId: number, maintenance: Main
   }
 }
 
+let analysisHasExplicitInput = false;
+
+function automaticAnalysisAllowed(): boolean {
+  return shouldAutoAnalyzePosition(deviceMemoryClass(), analysisHasExplicitInput, tree.root.fen, START_FEN, mainlineNodes().length - 1);
+}
+
 async function analyzeCurrent(options: { force?: boolean } = {}) {
+  if (options.force) analysisHasExplicitInput = true;
+  if (!options.force && !automaticAnalysisAllowed()) return;
   if (mountAbort.signal.aborted || analysisRunState.modes.includes('review') || analysisRunState.modes.includes('retry')) return;
   if (analysisRunState.modes.includes('critical')) {
     criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
@@ -4442,6 +4463,11 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     // rows, runtime/broker settings, served models, keys. A settings change made
     // during init ends this run in favour of the queued one (below). A run with
     // no uninitialized big net does not yield.
+    if (isMemoryConstrainedDevice() && rows.some((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant))) {
+      unloadMaia3Panel('Maia3 unloaded to make room for Lc0. Enable Maia3 to reload.');
+    }
+    if (hasEngineRetirements()) await awaitEngineRetirements();
+    if (controller.signal.aborted || mountAbort.signal.aborted) return;
     const uninitializedBigNets = bigNetsAwaitingInit(rows);
     let bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
     if (uninitializedBigNets.length) {
@@ -4833,6 +4859,7 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
 const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
 let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
+let maia3PanelPending: Promise<Maia3BrowserEvaluator> | null = null;
 let maia3PanelLoadGeneration = 0;
 let maia3PanelTask: LatestOnlyTask<string> | null = null;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -4844,6 +4871,35 @@ function maia3PanelStatus(text: string): void {
   el('maia3PanelStatus').textContent = text;
 }
 
+function unloadMaia3Panel(message: string): void {
+  maia3PanelLoadGeneration += 1;
+  maia3PanelTask?.dispose();
+  maia3PanelTask = null;
+  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  maia3PanelTimer = null;
+  const pending = maia3PanelPending;
+  const evaluator = maia3PanelEvaluator;
+  maia3PanelPending = null;
+  maia3PanelEvaluator = null;
+  maia3PanelLoading = false;
+  if (pending)
+    trackEngineRetirement(
+      pending.then(
+        (loaded) => loaded.dispose(),
+        () => undefined,
+      ),
+    );
+  else if (evaluator) trackEngineRetirement(evaluator.dispose());
+  explorerMaia = null;
+  renderExplorerComparison();
+  el('maia3Grid').hidden = true;
+  el('maia3Caption').hidden = true;
+  const enable = el('maia3Enable') as HTMLButtonElement;
+  enable.hidden = false;
+  enable.disabled = false;
+  maia3PanelStatus(message);
+}
+
 async function enableMaia3Panel(): Promise<void> {
   if (maia3PanelEvaluator || maia3PanelLoading) return;
   const mountSignal = mountAbort.signal;
@@ -4853,7 +4909,9 @@ async function enableMaia3Panel(): Promise<void> {
   try {
     maia3PanelStatus('Loading Maia3…');
     showModelProgress('Maia3', undefined, undefined, 'Preparing');
-    const evaluator = await Maia3BrowserEvaluator.create({
+    await awaitEngineRetirements();
+    if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
+    maia3PanelPending = Maia3BrowserEvaluator.create({
       onFailure: (error) => {
         if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
         maia3PanelTask?.dispose();
@@ -4877,6 +4935,7 @@ async function enableMaia3Panel(): Promise<void> {
         }
       },
     });
+    const evaluator = await maia3PanelPending;
     if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) {
       await evaluator.dispose();
       return;
@@ -4901,6 +4960,7 @@ async function enableMaia3Panel(): Promise<void> {
     if (generation === maia3PanelLoadGeneration) {
       hideModelProgress();
       maia3PanelLoading = false;
+      maia3PanelPending = null;
     }
   }
 }
@@ -5040,6 +5100,7 @@ function loadFen() {
     return;
   }
   clearAnalysisWorkspace();
+  analysisHasExplicitInput = true;
   lineCache.clear();
   completeAnalysisKeys.clear();
   el('message').textContent = 'Loaded FEN.';
@@ -5058,6 +5119,7 @@ function loadPgn() {
     workspaceHeaders = tags;
     workspaceResult = result;
     tree = parsed;
+    analysisHasExplicitInput = true;
     tree.toStart();
     reviewMetadata.set(tree, { tags, result, signature: reviewSignature() });
     lineCache.clear();
@@ -5644,6 +5706,7 @@ function wireEvents() {
     clearAnalysisWorkspace();
     inputEl('pgnInput').value = '';
     tree = new GameTree();
+    analysisHasExplicitInput = false;
     lineCache.clear();
     completeAnalysisKeys.clear();
     el('message').textContent = 'Reset.';
@@ -6131,7 +6194,15 @@ function disposePageResources(): void {
   analysisReloadAbort = null;
   disposeRuntimeResources();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
-  void maia3PanelEvaluator?.dispose();
+  if (maia3PanelPending)
+    trackEngineRetirement(
+      maia3PanelPending.then(
+        (loaded) => loaded.dispose(),
+        () => undefined,
+      ),
+    );
+  else if (maia3PanelEvaluator) trackEngineRetirement(maia3PanelEvaluator.dispose());
+  maia3PanelPending = null;
   maia3PanelEvaluator = null;
   maia3PanelLoading = false;
   maia3PanelLoadGeneration += 1;
@@ -6183,6 +6254,7 @@ async function loadLc0Backend(
         !loadCancelled() &&
         runAutoAnalyze === true &&
         inputEl('autoAnalyze').checked &&
+        automaticAnalysisAllowed() &&
         analysisRunState.execution.tag === 'maintaining' &&
         analysisRunState.execution.operationId === operationId &&
         !analysisRunState.wanted
@@ -6196,6 +6268,8 @@ async function loadLc0Backend(
 }
 
 async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
+  await awaitEngineRetirements();
+  if (loadCancelled()) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
@@ -6388,12 +6462,20 @@ async function init(mountSignal: AbortSignal) {
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   void refreshBt4Availability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
-  await loadLc0Backend(true, mountSignal);
+  if (!automaticAnalysisAllowed()) {
+    el('analyze').toggleAttribute('disabled', false);
+    selectEl('lc0RuntimeSelect').disabled = false;
+    el('message').textContent = 'Play a move, load a game/FEN, or tap Analyze to start.';
+    return;
+  }
+  if (activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) await loadLc0Backend(true, mountSignal);
+  else await analyzeCurrent();
 }
 
 let lastAnalysisMountHref: string | null = null;
 
 function resetAnalysisPageState(): void {
+  analysisHasExplicitInput = false;
   tree = new GameTree(START_FEN);
   workspaceHeaders = {};
   workspaceResult = '*';

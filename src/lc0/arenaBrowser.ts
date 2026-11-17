@@ -145,6 +145,7 @@ import {
   stormphraxCacheKey,
   viridithasCacheKey,
 } from './engineProvision.ts';
+import { awaitEngineRetirements } from './engineRetirement.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
@@ -3562,6 +3563,8 @@ function hideEngineWarmupStatus(): void {
 }
 
 async function warmUpSelectedEngines(ids: string[], signal: AbortSignal, minimumVisibleMs = 400): Promise<void> {
+  await awaitEngineRetirements();
+  if (signal.aborted) return;
   const pending: ArenaEngine[] = [];
   const seen = new Set<string>();
   for (const id of ids) {
@@ -4607,7 +4610,7 @@ function disposeRuntimeResources(): void {
   stormphraxEngines.disposeAll();
   for (const key of ARENA_BIG_NET_KEYS) {
     peekBigNetSearcher(key)?.cancel();
-    releaseBigNetSearcher(key);
+    releaseBigNetSearcher(key, 0);
   }
 }
 
@@ -4671,6 +4674,8 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
   el('message').textContent = 'Loading the Lc0 network…';
   showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
+    await awaitEngineRetirements();
+    signal.throwIfAborted();
     const evaluator = await loadArenaResource(() => createSelectedLc0Evaluator(signal), signal);
     const ortDiagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics({ probeAdapter: false }) : undefined;
     if (isStaleMount(mountSignal) || signal.aborted) {
@@ -5191,13 +5196,13 @@ function wireEvents() {
     for (const key of ARENA_BIG_NET_KEYS) {
       if (activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) continue;
       peekBigNetSearcher(key)?.cancel();
-      releaseBigNetSearcher(key);
+      releaseBigNetSearcher(key, 0);
     }
     buildEngines();
     populateSeats();
     if (target.classList.contains('seat-var')) el('arenaSeatList').querySelector<HTMLElement>(`.seat-var[data-seat="${seat}"]`)?.focus();
-    if (selectedSeatsNeedLc0Evaluator() && !lc0Cache && !loadingLc0) void loadLc0Evaluator();
-    else if (!loadingLc0) setArenaStartDisabled(false);
+    // Seat selection does not allocate a neural session. Start owns the lazy load.
+    if (!loadingLc0) setArenaStartDisabled(false);
   });
   el('arenaSeatList').addEventListener('input', (event) => {
     if (running || startPending) return;
@@ -5419,7 +5424,12 @@ async function init(mountSignal: AbortSignal) {
       : `Local saving is unavailable: ${error instanceof Error ? error.message : String(error)}. Export PGN before leaving.`;
     renderCheckpointStatus();
   }
-  if (!checkpoint) await loadLc0Evaluator(mountSignal);
+  // startMatch / the fixed-suite autorun load Small only when actually needed.
+  if (!checkpoint && !checkpointUnreadable) {
+    el('start').toggleAttribute('disabled', false);
+    el('message').textContent = readyMessage();
+    refreshSeatControls();
+  }
   void renderRuntimeBadge();
   void runFixedSuiteBenchAutorun();
   void runArenaBenchAutorun();

@@ -1,5 +1,6 @@
 import { BIG_NETS, type BigNetConfig, Bt4WorkerSearcher } from './bt4Engine.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
+import { trackEngineRetirement } from './engineRetirement.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { PHONE_LARGE_NET_REASON, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
 
@@ -124,7 +125,7 @@ export class BigNetSessionPool<T extends DisposableSearcher> {
     this.records.delete(key);
     const disposal = record.searcher.dispose();
     if (disposal) {
-      const pending = Promise.resolve(disposal);
+      const pending = trackEngineRetirement(disposal);
       this.retiring.add(pending);
       // Synchronous page/pool owners remain supported without unhandled rejection.
       void pending.finally(() => this.retiring.delete(pending)).catch(() => undefined);

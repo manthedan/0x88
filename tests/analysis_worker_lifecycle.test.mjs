@@ -43,6 +43,7 @@ function controller() {
     let searchWorker = null, workerReady = false, workerBackend = '', workerRuntime = '', workerSeq = 0;
     let activeWorkerSearchId = null, workerSearchWarm = false, analysisWorkerProgressMessages = 0;
     const workerPending = new Map();
+    const trackEngineRetirement = (promise) => promise;
     const selectedLc0Runtime = () => 'onnx', lc0InitMessage = () => ({ type: 'init' });
     const publishBrowserRuntimeAudit = () => {}, lc0ResolvedRuntime = () => 'fake', multiPv = () => 1;
     const showModelProgress = () => {}, MODEL_URL = '/unused', LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole';

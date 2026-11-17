@@ -191,7 +191,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     const engineLineCache = new Map(), lineCache = new Map(), completeAnalysisKeys = new Set();
     const published = [];
     let history = [parseFen(START_FEN)], cpuHistory = [];
-    let tree = { current: { fen: START_FEN }, historyBoards: () => history };
+    let tree = { root: { fen: START_FEN }, current: { fen: START_FEN }, historyBoards: () => history };
     const elements = new Map();
     const el = (id) => elements.get(id) ?? (elements.set(id, element()), elements.get(id));
     const selectEl = el, inputEl = el;
@@ -246,6 +246,9 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       return true;
     };
     const isStaleMount = (signal) => signal.aborted || signal !== mountAbort.signal;
+    const isMemoryConstrainedDevice = () => false, deviceMemoryClass = () => 'desktop';
+    const shouldAutoAnalyzePosition = () => true, mainlineNodes = () => [];
+    const awaitEngineRetirements = async () => {}, hasEngineRetirements = () => false;
     const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {};
     let centipawnHybridManifestStatus = 'unknown';
     // The TVMJS manifest fallback only runs for the legacy research override;

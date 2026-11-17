@@ -24,6 +24,10 @@ return { lite: stockfishLite, full: stockfishFull };`;
     const prepared = new Set(['sf:lite', 'sf:full', 'berserk:x']);
     const dependencies = {
       state: { lite: engine('lite'), full: engine('full') },
+      resetSearchWorker: () => {},
+      mainEvaluator: null,
+      searcher: null,
+      isLc0BigNetVariant: (variant) => ['bt4', 't3', 'lqo'].includes(variant),
       ANALYSIS_BIG_NET_KEYS: [],
       usesBigNetRow: () => false,
       peekBigNetSearcher: () => null,

@@ -100,7 +100,8 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta));
   const modelId = inferRuntimeModelId(spec);
   const requestedRuntime = parseBrowserRuntimeSelector(options.runtime ?? spec.runtime ?? params?.get('runtime'));
-  const createOrtEvaluator = () => SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId));
+  const createOrtEvaluator = () =>
+    SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId), { verifiedCentipawn: modelId === S4FIX_V_EMA_MODEL_ID });
   const fallback = options.fallback ?? (params ? runtimeFallbackEnabled(params, true) : true);
   const tvmjsEntry = promotedTvmjsRuntimeForModel(modelId);
   const customEntry = promotedCustomRuntimeForModel(modelId);
