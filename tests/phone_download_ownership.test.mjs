@@ -24,8 +24,23 @@ async function until(predicate) {
   assert.fail('expected an async checkpoint');
 }
 
-for (const replacement of ['cpu-profile', 'manual', 'add', 'remove', 'lines', 'runtime', 'unmount']) {
-  test(`Analysis ${replacement} supersedes a pending large-profile cache probe without another prompt or stale commit`, async () => {
+for (const replacement of [
+  'cpu-profile',
+  'manual',
+  'add',
+  'remove',
+  'lines',
+  'runtime',
+  'unmount',
+  'picker-cpu-profile',
+  'picker-add',
+  'picker-remove',
+  'picker-lines',
+  'picker-unmount',
+]) {
+  test(`Analysis ${replacement} supersedes a pending profile/picker probe without another prompt or stale commit`, async () => {
+    const picker = replacement.startsWith('picker-');
+    const action = replacement.replace(/^picker-/, '');
     const probe = Promise.withResolvers();
     const mountAbort = new AbortController();
     const prompts = [];
@@ -37,7 +52,7 @@ for (const replacement of ['cpu-profile', 'manual', 'add', 'remove', 'lines', 'r
       return nodes.get(id);
     };
     const initial = [
-      { family: 'sf', variant: 'lite', strength: 8 },
+      { family: picker ? 'lc0' : 'sf', variant: picker ? 'small' : 'lite', strength: 8 },
       { family: 'sf', variant: 'full', strength: 12 },
     ];
     const deps = {
@@ -82,24 +97,27 @@ for (const replacement of ['cpu-profile', 'manual', 'add', 'remove', 'lines', 'r
     const code =
       extract(source.analysis, 'async function profileRowsForUse(', 'function loadEngineProfiles(') +
       extract(source.analysis, 'let profileLoadAbort:', 'function saveCurrentEngineProfile(') +
+      extract(source.analysis, "  el('engineList').addEventListener('change'", "  el('engineProfileSelect').addEventListener(") +
       extract(source.analysis, "  el('engineList').addEventListener('click'", '  criticalPanel = mountCriticalMomentsPanel(');
     const api = new Function(
       'deps',
       `let { ${Object.keys(deps)} } = deps; ${code}; return {
       apply: applyEngineProfile, rows: () => engineRows,
-      manual() { profileLoadAbort?.abort(); engineRows = [{family:'sf',variant:'full',strength:12}]; }
+      manual() { abortEngineSelectionConsent(); engineRows = [{family:'sf',variant:'full',strength:12}]; }
     };`,
     )(deps);
-    const old = api.apply({ name: 'old', rows: ['bt4', 't3'].map((variant) => ({ family: 'lc0', variant, strength: 10 })), multiPv: 1 });
+    const old = picker
+      ? listeners.get('engineList:change')({ target: { value: 'bt4', dataset: { i: '0' }, classList: { contains: (name) => name === 'row-var' } } })
+      : api.apply({ name: 'old', rows: ['bt4', 't3'].map((variant) => ({ family: 'lc0', variant, strength: 10 })), multiPv: 1 });
     await until(() => prompts.length === 1);
-    if (replacement === 'cpu-profile') await api.apply({ name: 'new', rows: [{ family: 'sf', variant: 'full', strength: 12 }], multiPv: 2 });
-    else if (replacement === 'manual') api.manual();
-    else if (replacement === 'add') listeners.get('addEngine:click')();
-    else if (replacement === 'remove') listeners.get('engineList:click')({ target: { closest: () => ({ dataset: { i: '0' } }) } });
-    else if (replacement === 'lines') {
+    if (action === 'cpu-profile') await api.apply({ name: 'new', rows: [{ family: 'sf', variant: 'full', strength: 12 }], multiPv: 2 });
+    else if (action === 'manual') api.manual();
+    else if (action === 'add') listeners.get('addEngine:click')();
+    else if (action === 'remove') listeners.get('engineList:click')({ target: { closest: () => ({ dataset: { i: '0' } }) } });
+    else if (action === 'lines') {
       el('multiPvInput').value = '7';
       listeners.get('multiPvInput:change')();
-    } else if (replacement === 'runtime') listeners.get('lc0RuntimeSelect:change')();
+    } else if (action === 'runtime') listeners.get('lc0RuntimeSelect:change')();
     else mountAbort.abort();
     assert.equal(prompts[0].signal.aborted, true);
     probe.resolve(true);
@@ -109,10 +127,10 @@ for (const replacement of ['cpu-profile', 'manual', 'add', 'remove', 'lines', 'r
       ['bt4'],
       'the old second row must never prompt',
     );
-    assert.deepEqual(api.rows(), ['unmount', 'add', 'lines', 'runtime'].includes(replacement) ? initial : [{ family: 'sf', variant: 'full', strength: 12 }]);
-    if (replacement === 'add') assert.equal(api.rows().length, 3);
-    if (replacement === 'remove') assert.equal(api.rows().length, 1);
-    if (replacement === 'lines') assert.equal(el('multiPvInput').value, '7');
+    assert.deepEqual(api.rows(), ['unmount', 'add', 'lines', 'runtime'].includes(action) ? initial : [{ family: 'sf', variant: 'full', strength: 12 }]);
+    if (action === 'add') assert.equal(api.rows().length, 3);
+    if (action === 'remove') assert.equal(api.rows().length, 1);
+    if (action === 'lines') assert.equal(el('multiPvInput').value, '7');
     assert.equal(
       messages.some((message) => message.includes('“old”')),
       false,

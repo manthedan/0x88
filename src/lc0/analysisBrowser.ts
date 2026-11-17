@@ -1439,8 +1439,13 @@ function renderEngineProfiles(selected = storageGet(LAST_ENGINE_PROFILE_STORAGE_
     : 'Manual engine setup. Choose a saved setup or save the current engines.';
 }
 let profileLoadAbort: AbortController | null = null;
-async function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): Promise<void> {
+let pickerConsentAbort: AbortController | null = null;
+function abortEngineSelectionConsent(): void {
   profileLoadAbort?.abort();
+  pickerConsentAbort?.abort();
+}
+async function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): Promise<void> {
+  abortEngineSelectionConsent();
   const request = new AbortController();
   profileLoadAbort = request;
   const runtime = engineSetupRuntime(profile.lc0Runtime, params.has('dev'));
@@ -5203,6 +5208,7 @@ function hoverLine(pvUci: string[], engine: string) {
 
 function revokeAnalysisPhoneLargeNets(): void {
   if (!phoneLargeNetsBlocked()) return;
+  abortEngineSelectionConsent();
   // Hidden pages and blocking modes may defer maintenance indefinitely. Retire
   // workers now, including in-flight initialization, before scheduling UI work.
   for (const key of ANALYSIS_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
@@ -5653,7 +5659,7 @@ function wireEvents() {
     { signal: mountAbort.signal },
   );
   el('engineList').addEventListener('change', async (event) => {
-    profileLoadAbort?.abort();
+    abortEngineSelectionConsent();
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     const i = Number(target.dataset.i);
     if (Number.isNaN(i) || !engineRows[i]) return;
@@ -5670,9 +5676,11 @@ function wireEvents() {
         const selectedVariant = target.value;
         const config = BIG_NETS[selectedVariant];
         target.value = engineRows[i].variant;
-        const signal = mountAbort.signal;
+        const request = new AbortController();
+        pickerConsentAbort = request;
+        const signal = AbortSignal.any([mountAbort.signal, request.signal]);
         if (!(await requestLargeNetConsent(config, signal))) return;
-        if (signal.aborted || engineRows[i] !== previousRow) return;
+        if (signal.aborted || pickerConsentAbort !== request || engineRows[i] !== previousRow) return;
         if (!bigNetSelectableSync(config)) {
           el('message').textContent = bigNetUnavailableText(config);
           renderEngineList();
@@ -5700,7 +5708,7 @@ function wireEvents() {
     prefetchAnalysisAssetsForAddedRow(engineRows[i]);
   });
   el('engineProfileSelect').addEventListener('change', () => {
-    profileLoadAbort?.abort();
+    abortEngineSelectionConsent();
     const value = selectEl('engineProfileSelect').value;
     const builtIn = builtInEngineProfiles().find((entry) => builtInProfileValue(entry.id) === value);
     if (builtIn) {
@@ -5737,7 +5745,7 @@ function wireEvents() {
     if (!button) return;
     const i = Number(button.dataset.i);
     if (Number.isNaN(i) || engineRows.length <= 1) return;
-    profileLoadAbort?.abort();
+    abortEngineSelectionConsent();
     const [removedRow] = engineRows.splice(i, 1);
     cancelAnalysisAssetPrefetch(removedRow);
     persistManualEngineRows();
@@ -5746,7 +5754,7 @@ function wireEvents() {
     deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
   });
   const addEngineRow = () => {
-    profileLoadAbort?.abort();
+    abortEngineSelectionConsent();
     const family = nextEngineFamily();
     const row = normalizeDeployEngineRow({ family, variant: defaultVariant(family), strength: defaultStrength(family) }, 'analysis', engineRows.length);
     engineRows.push(row);
@@ -5760,11 +5768,11 @@ function wireEvents() {
   el('addEngine').addEventListener('click', addEngineRow);
   el('addEngineInManager').addEventListener('click', addEngineRow);
   el('lc0RuntimeSelect').addEventListener('change', () => {
-    profileLoadAbort?.abort();
+    abortEngineSelectionConsent();
     deferAnalysisSettingsRefresh({ reloadLc0: true });
   });
   el('multiPvInput').addEventListener('change', () => {
-    profileLoadAbort?.abort();
+    abortEngineSelectionConsent();
     lineCache.delete(tree.current.fen);
     deferAnalysisSettingsRefresh();
   });

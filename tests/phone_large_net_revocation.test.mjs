@@ -31,6 +31,7 @@ test('Analysis revocation retires large workers even when maintenance cannot adv
   const revoke = handler('analysis', 'revokeAnalysisPhoneLargeNets', {
     phoneLargeNetsBlocked: () => true,
     ANALYSIS_BIG_NET_KEYS: ['bt4', 't3'],
+    abortEngineSelectionConsent: () => events.push('cancel-consent'),
     disposeBigNetSearcherNow: (key) => pool.disposeNow(key),
     cancelActiveAnalysisRun: () => {
       assert.equal(pool.has('bt4'), false);
@@ -47,7 +48,7 @@ test('Analysis revocation retires large workers even when maintenance cannot adv
   assert.equal(bt4.disposeCalls, 1);
   assert.equal(t3.disposeCalls, 1);
   assert.equal(queen.disposeCalls, 0);
-  assert.deepEqual(events, ['cancel', 'cancel-prefetch', 'render', 'persist', 'deferred']);
+  assert.deepEqual(events, ['cancel-consent', 'cancel', 'cancel-prefetch', 'render', 'persist', 'deferred']);
   pool.disposeAllNow();
 });
 
