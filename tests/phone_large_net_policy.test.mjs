@@ -59,6 +59,30 @@ test('consent persists, can be revoked, and notifies controls', () => {
   assert.equal(changes, 2);
 });
 
+test('cross-tab storage revocation supersedes a session opt-in and notifies active controls', () => {
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value) };
+  const firstEvents = new EventTarget();
+  const first = createPhoneLargeNetPreference(() => storage, firstEvents);
+  const second = createPhoneLargeNetPreference(() => storage);
+  let notifications = 0;
+  first.subscribe(() => notifications++);
+  first.setEnabled(true);
+  second.setEnabled(false);
+  assert.equal(first.enabled(), true, 'local override stays authoritative until the other-tab event');
+  firstEvents.dispatchEvent(Object.assign(new Event('storage'), { key: PHONE_LARGE_NET_STORAGE_KEY, storageArea: storage }));
+  assert.equal(first.enabled(), false);
+  assert.equal(phoneBigNetBlocked('bt4', true, first.enabled()), true);
+  assert.equal(notifications, 2);
+  first.setEnabled(true);
+  second.setEnabled(false);
+  firstEvents.dispatchEvent(Object.assign(new Event('storage'), { key: PHONE_LARGE_NET_STORAGE_KEY, storageArea: {} }));
+  assert.equal(first.enabled(), true, 'sessionStorage and unrelated storage areas cannot overwrite session consent');
+  values.clear();
+  firstEvents.dispatchEvent(Object.assign(new Event('storage'), { key: null, storageArea: storage }));
+  assert.equal(first.enabled(), false, 'clearing localStorage in another tab revokes consent too');
+});
+
 for (const failure of ['access', 'read', 'write', 'missing']) {
   test(`storage ${failure} failure keeps opt-in and revocation for this page session`, () => {
     const preference = createPhoneLargeNetPreference(() => {
@@ -246,6 +270,24 @@ test('modal cancellation restores focus; Tab stays trapped; opt-in happens only 
     dialog.children.at(-1).children[0].dispatchEvent(new Event('click'));
     assert.equal(await pending, false);
     assert.throws(() => binding.acquire(), /BT4 and t3 are off on phones/);
+    const countBeforeQueenOverride = body.children.length;
+    assert.equal(await requestSoakLargeNetConsent(['lqo'], new AbortController().signal, { lqo: BIG_NETS.lqo.modelUrl }), true);
+    assert.equal(body.children.length, countBeforeQueenOverride, 'the actual shipped Queen Odds override remains exempt');
+    for (const [override, size] of [
+      [BIG_NETS.bt4.modelUrl, '178 MB'],
+      [lc0SplitKUrl(BIG_NETS.t3.modelUrl), '163 MB'],
+      ['/models/lc0/unlisted.onnx', 'size is unknown'],
+    ]) {
+      assert.ok(override);
+      pending = requestSoakLargeNetConsent(['lqo'], new AbortController().signal, { lqo: override });
+      await new Promise(setImmediate);
+      dialog = body.children.at(-1);
+      assert.equal(dialog.children[0].textContent, 'Use a large net on this phone?');
+      assert.ok(dialog.children[1].textContent.includes(size));
+      dialog.children.at(-1).children[0].dispatchEvent(new Event('click'));
+      assert.equal(await pending, false, 'a gated or unknown override never inherits the Queen Odds exemption');
+      assert.equal(phoneLargeNetPreference.enabled(), false);
+    }
     pending = requestSoakLargeNetConsent(['t3'], new AbortController().signal);
     await new Promise(setImmediate);
     dialog = body.children.at(-1);

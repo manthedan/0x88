@@ -113,7 +113,7 @@ function browser(t, search = '?steps=sf-lite,t3') {
 for (const mode of ['manual', 'auto', 'continue']) {
   for (const accepted of [false, true]) {
     test(`${mode} diagnostics await explicit phone consent before engines or ballast (accepted=${accepted})`, async (t) => {
-      const search = `?steps=sf-lite,t3&labBallastMb=1${mode === 'auto' ? '&auto=1' : ''}`;
+      const search = `?steps=sf-lite,t3&labBallastMb=1&t3Model=/models/lc0/diagnostic.onnx${mode === 'auto' ? '&auto=1' : ''}`;
       const f = browser(t, search);
       if (mode === 'continue') {
         const at = '2026-11-16T00:00:00.000Z';
@@ -124,7 +124,8 @@ for (const mode of ['manual', 'auto', 'continue']) {
       const requests = [];
       const loaded = [];
       const controller = f.mount({
-        requestConsent: async (ids, signal) => {
+        requestConsent: async (ids, signal, overrides) => {
+          assert.equal(overrides.t3, '/models/lc0/diagnostic.onnx', 'effective model overrides reach the consent decision');
           requests.push([...ids]);
           assert.equal(signal.aborted, false);
           return permission.promise;

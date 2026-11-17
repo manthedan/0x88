@@ -23,7 +23,9 @@ on dismissal. The dialog follows Analysis's existing native-dialog pattern.
 
 `phoneLargeNetPolicy.ts` remembers consent under `0x88-phone-large-nets-v1` in
 localStorage. Access and writes are guarded; a session override keeps opt-in
-and revocation working when storage fails. Revoking Play consent replaces a large
+and revocation working when storage fails. Matching localStorage events reconcile
+other tabs' opt-in, revocation and storage clearing, notify controls, and cancel
+gated product work; unrelated storage areas cannot overwrite session consent. Revoking Play consent replaces a large
 live opponent with Small, but only dismisses a blocked restart draft when the live
 opponent is unaffected; unresolved saved-BT4/t3 probes are also cancelled. Every
 revocation retires retained BT4/t3 sessions, including leftovers from an earlier
@@ -46,7 +48,10 @@ The mobile-soak lab explicitly requests the same consent before any engines or
 ballast for a run containing BT4, t3 or Arena, including `auto=1` and crash
 continuation. Declining skips the remaining steps without loading a model;
 leaving aborts the dialog. Desktop and Queen Odds-only diagnostics need no
-phone prompt. The lab exposes the shared preference control, locked during runs;
+phone prompt. A lab override only inherits the Queen Odds exemption when it
+actually names the shipped Queen Odds model; BT4/t3 and unknown overrides require
+consent. Known overrides use their own download size; unknown ones explicitly say
+the size is unknown. The lab exposes the shared preference control, locked during runs;
 its deliberate two-net Arena stress step is not a product tournament pairing.
 
 Critical-moments review offers only Lc0 Small (plus Stockfish and Maia), so it has

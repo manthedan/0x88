@@ -1,3 +1,4 @@
+import { assetPathname } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import {
@@ -141,12 +142,35 @@ export class MobileSoakDocument {
 }
 
 /** Diagnostic runs still need explicit device consent, including documented autorun URLs. */
-export async function requestSoakLargeNetConsent(stepIds: readonly string[], signal: AbortSignal): Promise<boolean> {
-  const key = stepIds.includes('bt4') || stepIds.includes('arena') ? 'bt4' : stepIds.includes('t3') ? 't3' : null;
-  if (!key || !isMemoryConstrainedDevice()) return !signal.aborted;
+export async function requestSoakLargeNetConsent(
+  stepIds: readonly string[],
+  signal: AbortSignal,
+  modelOverrides?: SoakReport['modelOverrides'],
+): Promise<boolean> {
+  if (!isMemoryConstrainedDevice()) return !signal.aborted;
+  const keys = (['bt4', 't3', 'lqo'] as const).filter((key) => stepIds.includes(key) || (key !== 'lqo' && stepIds.includes('arena')));
+  if (!keys.length) return !signal.aborted;
   const { BIG_NETS } = await import('./bt4Engine.ts');
+  const { lc0SplitKUrl } = await import('./lc0SmallModelSelection.ts');
   const { requestLargeNetConsent } = await import('./largeNetConsent.ts');
-  return requestLargeNetConsent(BIG_NETS[key], signal, false);
+  for (const key of keys) {
+    const override = modelOverrides?.[key];
+    const effective = override
+      ? Object.values(BIG_NETS).find((config) =>
+          [config.modelUrl, lc0SplitKUrl(config.modelUrl)].some((url) => url && assetPathname(url) === assetPathname(override)),
+        )
+      : BIG_NETS[key];
+    // The exemption is for the actual shipped Queen Odds model, not an arbitrary
+    // diagnostic model loaded through its step name/private pool namespace.
+    if (key === 'lqo' && effective?.key === 'lqo') continue;
+    return requestLargeNetConsent(
+      { ...(effective ?? BIG_NETS[key]), key: key === 'lqo' ? 'bt4' : key },
+      signal,
+      false,
+      override && !effective ? 'Diagnostic override download size is unknown; cached after first load.' : undefined,
+    );
+  }
+  return !signal.aborted;
 }
 
 export interface MobileSoakServices {
@@ -154,7 +178,7 @@ export interface MobileSoakServices {
   memory(): Promise<MemorySample>;
   makeEngine(id: string, signal: AbortSignal, modelOverride?: string): Promise<SoakEngine>;
   documentScope: MobileSoakDocument;
-  requestConsent(stepIds: readonly string[], signal: AbortSignal): Promise<boolean>;
+  requestConsent(stepIds: readonly string[], signal: AbortSignal, modelOverrides?: SoakReport['modelOverrides']): Promise<boolean>;
   wait(ms: number, signal: AbortSignal): Promise<void>;
 }
 const defaultServices: MobileSoakServices = {
@@ -395,7 +419,7 @@ export function mountMobileSoak(
           const remaining = report.stepIds.slice(report.nextIndex);
           const heatNet = remaining.includes('heat') ? strongestLoadedNet(report.steps) : null;
           if (heatNet) remaining.push(heatNet);
-          const consent = await services.requestConsent(remaining, abort.signal);
+          const consent = await services.requestConsent(remaining, abort.signal, report.modelOverrides);
           if (!mounted || abort.signal.aborted) return;
           if (!consent) {
             report = skipRemainingSoakSteps(report, 'Phone large-net consent declined; no engines started.', iso());

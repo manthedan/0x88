@@ -6,9 +6,22 @@ export const PHONE_LARGE_NET_SUFFIX = ' (Large net — off on phones)';
 type PreferenceStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 /** The session override is authoritative even when storage access or writes fail. */
-export function createPhoneLargeNetPreference(storage: () => PreferenceStorage | undefined) {
+export function createPhoneLargeNetPreference(storage: () => PreferenceStorage | undefined, events?: Pick<Window, 'addEventListener'>) {
   let session: boolean | undefined;
   const listeners = new Set<() => void>();
+  events?.addEventListener('storage', (event: StorageEvent) => {
+    if (event.key !== PHONE_LARGE_NET_STORAGE_KEY && event.key !== null) return;
+    try {
+      const current = storage();
+      if (!current || event.storageArea !== current) return;
+      // A successful change in another tab supersedes even a local session opt-in.
+      // Read the current value rather than replaying a potentially stale newValue.
+      session = current.getItem(PHONE_LARGE_NET_STORAGE_KEY) === 'on';
+    } catch {
+      return; // Denied storage still preserves this tab's explicit session choice.
+    }
+    for (const listener of listeners) listener();
+  });
   return {
     enabled(): boolean {
       if (session !== undefined) return session;
@@ -36,7 +49,10 @@ export function createPhoneLargeNetPreference(storage: () => PreferenceStorage |
   };
 }
 
-export const phoneLargeNetPreference = createPhoneLargeNetPreference(() => (typeof localStorage === 'undefined' ? undefined : localStorage));
+export const phoneLargeNetPreference = createPhoneLargeNetPreference(
+  () => (typeof localStorage === 'undefined' ? undefined : localStorage),
+  typeof window === 'undefined' ? undefined : window,
+);
 
 export const PHONE_LARGE_NET_CHANGE_EVENT = 'phone-large-net-preference-change';
 phoneLargeNetPreference.subscribe(() => {

@@ -13,7 +13,12 @@ export function showPhoneLargeNetFallback(modelOverride = false): void {
 }
 
 /** Native modal, like Analysis's engine manager: inert background, focus trap and Escape. */
-export async function requestLargeNetConsent(config: BigNetConfig, signal?: AbortSignal, desktopWarning = true): Promise<boolean> {
+export async function requestLargeNetConsent(
+  config: BigNetConfig,
+  signal?: AbortSignal,
+  desktopWarning = true,
+  downloadNotice = `Downloads ~${config.approxMb} MB, cached after first load.`,
+): Promise<boolean> {
   const phone = isMemoryConstrainedDevice();
   if (signal?.aborted) return false;
   const phoneConsent = phoneBigNetBlocked(config.key);
@@ -33,7 +38,7 @@ export async function requestLargeNetConsent(config: BigNetConfig, signal?: Abor
   const description = document.createElement('p');
   description.id = 'largeNetConsentDescription';
   description.textContent = phoneConsent
-    ? `BT4 and t3 can crash this tab on phones and are very slow without WebGPU. Downloads ~${config.approxMb} MB, cached after first load.`
+    ? `BT4 and t3 can crash this tab on phones and are very slow without WebGPU. ${downloadNotice}`
     : bigNetLoadWarning(config);
   const actions = document.createElement('div');
   actions.className = 'large-net-consent-actions';
