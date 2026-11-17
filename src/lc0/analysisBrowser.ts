@@ -101,7 +101,6 @@ import {
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
-import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import {
   analysisAgreementHeadline,
   analysisArrowCandidates,
@@ -180,6 +179,7 @@ import {
   probeBt4Support,
 } from './bt4Engine.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
+import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import {
   canonicalEngineFamily,
   centipawnEngineLabel,
@@ -904,7 +904,8 @@ function resetSearchWorker(reason: string | Error): void {
   const retired = searchWorker;
   searchWorker = null;
   if (retired) {
-    if (reason instanceof Error) retired.terminate(); // A broken transport cannot acknowledge release.
+    if (reason instanceof Error)
+      retired.terminate(); // A broken transport cannot acknowledge release.
     else void disposeOrtWorker(retired).catch(() => undefined);
   }
   workerReady = false;

@@ -1,4 +1,6 @@
 name: production-smoke
+# Keep the manual target visible so the release gate cannot mistake preview health for production.
+run-name: production-smoke (${{ inputs.base_url || 'https://0x88.app' }})
 
 on:
   schedule:

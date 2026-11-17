@@ -1,7 +1,7 @@
-import { requestedOrtRuntimeDiagnosticOptions, ortDequantFoldEnabled } from '../nn/ortRuntime.ts';
 import { boardToFen, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
+import { ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { type Lc0SearchLike, lc0AnalysisLines, stockfishAnalysisLines } from './analysisFormat.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type CriticalLane, type CriticalMoment, type CriticalProvenance, type CriticalResult } from './criticalMoments.ts';

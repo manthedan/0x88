@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { START_FEN } from '../src/chess/board.ts';
 import { createSoakCpuProbe, soakCpuResident } from '../src/lc0/mobileSoakCpu.ts';
 import { RecklessEngine } from '../src/lc0/recklessEngine.ts';
 import { ViridithasEngine } from '../src/lc0/viridithasEngine.ts';
-import { START_FEN } from '../src/chess/board.ts';
 
 for (const [id, Engine] of [
   ['viridithas', ViridithasEngine],

@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { writeClipboard } from '../../../lc0/clipboard.ts';
-import { buildSoakSteps, soakRuntimeSummary, type SoakReport } from '../../../lc0/mobileSoak.ts';
+import { buildSoakSteps, type SoakReport, soakRuntimeSummary } from '../../../lc0/mobileSoak.ts';
 import type { MobileSoakApi } from '../../../lc0/mobileSoakBrowser.ts';
 
 let report: SoakReport | null = null;
@@ -12,28 +12,45 @@ $: running = report?.state === 'running';
 $: unsafeDisposal = !!report && api?.unsafeDisposal === true;
 $: json = report ? JSON.stringify(report, null, 2) : '';
 $: selected = (report?.stepIds ?? []).flatMap((id) => steps.filter((step) => step.id === id));
-const ms = (value: number | null | undefined) => value == null ? '—' : `${Math.round(value)} ms`;
+const ms = (value: number | null | undefined) => (value == null ? '—' : `${Math.round(value)} ms`);
 
 onMount(() => {
   let disposed = false;
   let destroy: (() => void) | undefined;
-  void import('../../../lc0/mobileSoakBrowser.ts').then((module) => {
-    if (disposed) return;
-    const controller = module.mountMobileSoak((value) => { report = value; });
-    api = controller.api;
-    destroy = controller.destroy;
-    return controller.ready;
-  }).catch((error) => { notice = String(error); });
-  return () => { disposed = true; destroy?.(); };
+  void import('../../../lc0/mobileSoakBrowser.ts')
+    .then((module) => {
+      if (disposed) return;
+      const controller = module.mountMobileSoak((value) => {
+        report = value;
+      });
+      api = controller.api;
+      destroy = controller.destroy;
+      return controller.ready;
+    })
+    .catch((error) => {
+      notice = String(error);
+    });
+  return () => {
+    disposed = true;
+    destroy?.();
+  };
 });
 async function start() {
-  try { await api?.start(); } catch (error) { notice = String(error); }
+  try {
+    await api?.start();
+  } catch (error) {
+    notice = String(error);
+  }
 }
 async function resume() {
-  try { await api?.continueAfterCrash(); } catch (error) { notice = String(error); }
+  try {
+    await api?.continueAfterCrash();
+  } catch (error) {
+    notice = String(error);
+  }
 }
 async function copy() {
-  notice = await writeClipboard(json) ? 'Results copied.' : 'Clipboard unavailable. Select the JSON below to copy it.';
+  notice = (await writeClipboard(json)) ? 'Results copied.' : 'Clipboard unavailable. Select the JSON below to copy it.';
 }
 </script>
 

@@ -10,13 +10,14 @@ import { checkDeployCachePolicy } from './check_deploy_cache_policy.mjs';
 import { checkOrtRuntimeAssets } from './check_ort_runtime_assets.mjs';
 import { EXTERNAL_ENGINE_ARTIFACT_DIRECTORIES, isExternalArtifactName } from './engine_artifact_registry.mjs';
 import { parseScriptArgs } from './lib/cli.mjs';
+import { checkReleaseGate, checkReleaseTree, validateReleaseOverrides } from './lib/release_gate.mjs';
 import { isSameOriginThreadedStockfishScript } from './prepare_netlify_r2_public_assets.mjs';
 
 const DEFAULT_ASSET_BASE_URL = 'https://assets.0x88.app';
 const DEFAULT_CHANNEL_URL = `${DEFAULT_ASSET_BASE_URL}/channels/stable.json`;
 const STAMP_FILE = 'release-build.json';
 
-const USAGE = `Usage: node scripts/netlify_r2_release.mjs [options]\n\nOptions:\n  --dist DIR          Built dist directory (default dist-client)\n  --channel-url URL   Artifact channel URL baked into the app shell\n  --asset-base URL    R2/Worker origin for engine/model asset URLs (default https://assets.0x88.app)\n  --build-if-needed   Run the R2/pruned build when the dist stamp is missing/stale\n  --check             Verify the current dist is stamped and pruned; do not build/deploy\n  --deploy            Deploy the verified dist with netlify deploy --no-build\n  --prod              Pass --prod to netlify deploy\n  --message TEXT      Netlify deploy message\n  --npm-bin BIN       npm executable (default npm)\n  --netlify-bin BIN   netlify executable (default netlify)\n  --json              Print machine-readable summary\n  -h, --help          Show help\n`;
+const USAGE = `Usage: node scripts/netlify_r2_release.mjs [options]\n\nOptions:\n  --dist DIR          Built dist directory (default dist-client)\n  --channel-url URL   Artifact channel URL baked into the app shell\n  --asset-base URL    R2/Worker origin for engine/model asset URLs (default https://assets.0x88.app)\n  --build-if-needed   Run the R2/pruned build when the dist stamp is missing/stale\n  --check             Verify the current dist is stamped and pruned; do not build/deploy\n  --deploy            Deploy the verified dist with netlify deploy --no-build\n  --prod              Pass --prod to netlify deploy (requires green HEAD ci)\n  --message TEXT      Netlify deploy message\n  --skip-ci-check REASON     Override the HEAD ci check; reason is logged in deploy message\n  --accept-red-smoke REASON  Override production-smoke health; reason is logged in deploy message\n  --npm-bin BIN       npm executable (default npm)\n  --netlify-bin BIN   netlify executable (default netlify)\n  --json              Print machine-readable summary\n  -h, --help          Show help\n`;
 
 function parseArgs(argv) {
   const args = parseScriptArgs(argv, {
@@ -29,12 +30,15 @@ function parseArgs(argv) {
       deploy: { type: 'boolean', default: false },
       prod: { type: 'boolean', default: false },
       message: { type: 'string' },
+      'skip-ci-check': { type: 'string' },
+      'accept-red-smoke': { type: 'string' },
       'npm-bin': { type: 'string', default: 'npm' },
       'netlify-bin': { type: 'string', default: 'netlify' },
       json: { type: 'boolean', default: false },
     },
     usage: USAGE,
   });
+  validateReleaseOverrides(args);
   args.assetBase = args.assetBase !== undefined ? args.assetBase.replace(/\/+$/, '') : process.env.VITE_LC0_BROWSER_ASSET_BASE_URL || DEFAULT_ASSET_BASE_URL;
   if (args.check && (args.buildIfNeeded || args.deploy)) {
     throw new Error('--check is verification-only and cannot be combined with --build-if-needed or --deploy');
@@ -190,6 +194,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const dist = resolve(args.dist);
   const timings = [];
+  const releaseGate = args.deploy ? await timed('release gate', timings, () => checkReleaseGate(args)) : undefined;
   // Deploy header policy is a property of the source config, so check it before
   // spending a build on a tree that must not ship.
   const buildEnv = { ...process.env, VITE_LC0_ARTIFACT_CHANNEL_URL: args.channelUrl, VITE_LC0_BROWSER_ASSET_BASE_URL: args.assetBase };
@@ -222,10 +227,13 @@ async function main() {
 
   const verification = await timed('verify pruned dist', timings, () => verifyPrunedDist(dist));
 
+  const deployMessage = [args.message, ...(releaseGate?.overrides ?? [])].filter(Boolean).join(' | ');
   if (args.deploy) {
+    // Builds must not introduce tracked changes or switch away from the checked HEAD.
+    checkReleaseTree(releaseGate.commit);
     const deployArgs = ['deploy', '--no-build', '--dir', dist];
     if (args.prod) deployArgs.push('--prod');
-    if (args.message) deployArgs.push('--message', args.message);
+    if (deployMessage) deployArgs.push('--message', deployMessage);
     await timed('netlify deploy', timings, () => run(args.netlifyBin, deployArgs));
   }
 
@@ -235,6 +243,8 @@ async function main() {
     stampMatches,
     built,
     deployed: args.deploy,
+    releaseGate,
+    deployMessage,
     artifactChannelUrl: args.channelUrl,
     assetBaseUrl: args.assetBase,
     cachePolicy,

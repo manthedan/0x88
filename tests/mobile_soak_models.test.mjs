@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
 import { acquireBigNetSearcher, disposeAllBigNetSearchersNow, peekBigNetSearcher } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
 import { lc0SplitKUrl, selectLc0OrtModelUrl } from '../src/lc0/lc0SmallModelSelection.ts';
+import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
 
 for (const key of ['lqo', 't3', 'bt4']) {
   test(`${key} diagnostic pool and model config cannot collide with the shipped net`, (t) => {

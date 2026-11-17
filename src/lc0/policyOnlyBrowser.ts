@@ -8,11 +8,11 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import {
   collectOrtRuntimeDiagnostics,
-  requestedOrtRuntimeDiagnosticOptions,
   describeOrtBackendConfig,
   type OrtExecutionProviderPreference,
   type OrtRuntimeDiagnostics,
   type OrtWasmArtifactSelection,
+  requestedOrtRuntimeDiagnosticOptions,
 } from '../nn/ortRuntime.ts';
 import { publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
@@ -24,8 +24,8 @@ import { isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface } from './engineProvision.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { FenInputFixtureListSchema, HistoryInputFixtureListSchema } from './inputFixtureSchema.ts';
-import { clearLc0ModelCache, describeLc0ModelLoad } from './modelCache.ts';
 import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
+import { clearLc0ModelCache, describeLc0ModelLoad } from './modelCache.ts';
 import { type Lc0Evaluation, type Lc0EvaluatorInput, Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { workerFallbackReplayAbort } from './ortWorkerFallback.ts';
 import { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { clearLc0ModelCache, clearLc0ModelCacheEntry, loadLc0ModelForOrt, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
 import { createLc0OnnxEvaluatorFromUrl } from '../src/lc0/lc0SmallModelSelection.ts';
+import { clearLc0ModelCache, clearLc0ModelCacheEntry, loadLc0ModelForOrt, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
 
 // Known SHA-256 test vector: the empty input hashes to this digest.
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';

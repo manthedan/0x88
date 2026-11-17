@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { BT4_NET, Bt4WorkerSearcher } from '../src/lc0/bt4Engine.ts';
+import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { createOrtDeviceLossMonitor, watchOrtDeviceLoss } from '../src/nn/ortDeviceLoss.ts';
 import { env } from '../src/nn/ortRuntime.ts';
-import { Bt4WorkerSearcher, BT4_NET } from '../src/lc0/bt4Engine.ts';
-import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');

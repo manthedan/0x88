@@ -39,6 +39,8 @@ jobs:
   # Reports advisories without gating tests or the build. Four low advisories
   # remain in the SvelteKit chain that only a SvelteKit 3 major resolves.
   audit:
+    # Report-only while dependency upgrades land: https://github.com/manthedan/0x88/tree/chore/deps-upgrade
+    continue-on-error: true
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5

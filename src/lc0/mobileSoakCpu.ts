@@ -1,5 +1,5 @@
 import type { BrowserUciEngine, BrowserUciRuntimeStatus } from './browserUciEngine.ts';
-import { type SearchSample, rate } from './mobileSoak.ts';
+import { rate, type SearchSample } from './mobileSoak.ts';
 
 /** Only these production modes represent a runtime that prewarm actually initialized. */
 export function soakCpuResident(status: BrowserUciRuntimeStatus): boolean {

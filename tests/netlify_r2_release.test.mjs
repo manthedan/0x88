@@ -11,8 +11,9 @@ async function fakeBin(path, body) {
   await chmod(path, 0o755);
 }
 
-test('netlify_r2_release builds once, stamps dist, then deploys with no-build without rebuilding', async () => {
+test('netlify_r2_release builds once, stamps dist, then deploys with no-build without rebuilding', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'lc0-netlify-r2-release-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const dist = join(root, 'dist-client');
   const npmLog = join(root, 'npm.log');
   const netlifyLog = join(root, 'netlify.log');
@@ -20,14 +21,20 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
   const netlify = join(root, 'fake-netlify.sh');
   await fakeBin(
     npm,
-    'printf "%s\\n" "$*" >> "$NPM_LOG"\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.jspi.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.jspi.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.wasm"\nexit 0',
+    'printf "%s\\n" "$*" >> "$NPM_LOG"\nif [ "$*" = "run check:biome" ]; then exit 0; fi\nmkdir -p "$NETLIFY_R2_RELEASE_DIST/models/lc0" "$NETLIFY_R2_RELEASE_DIST/ort"\nprintf "{}\\n" > "$NETLIFY_R2_RELEASE_DIST/models/lc0/manifest.json"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.asyncify.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.jspi.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.jspi.wasm"\nprintf "new Worker(new URL(import.meta.url), { name: \\"em-pthread\\" });\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.mjs"\nprintf "wasm\\n" > "$NETLIFY_R2_RELEASE_DIST/ort/ort-wasm-simd-threaded.wasm"\nexit 0',
   );
   await fakeBin(netlify, 'printf "%s\\n" "$*" >> "$NETLIFY_LOG"\nexit 0');
+  await fakeBin(
+    join(root, 'git'),
+    'case "$1" in\nrev-parse) printf "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n" ;;\nstatus) printf "%s" "$FAKE_DIRTY" ;;\ndiff) ;;\n*) exit 1 ;;\nesac',
+  );
+  await fakeBin(join(root, 'gh'), 'printf \'[{"status":"completed","conclusion":"success","event":"schedule"}]\\n\'');
+  const env = { ...process.env, PATH: `${root}:${process.env.PATH}`, NPM_LOG: npmLog, NETLIFY_LOG: netlifyLog, FAKE_DIRTY: '' };
 
   const first = spawnSync(process.execPath, ['scripts/netlify_r2_release.mjs', '--dist', dist, '--build-if-needed', '--npm-bin', npm, '--json'], {
     cwd: process.cwd(),
     encoding: 'utf8',
-    env: { ...process.env, NPM_LOG: npmLog, NETLIFY_LOG: netlifyLog },
+    env,
   });
   assert.equal(first.status, 0, first.stderr);
   const firstSummary = JSON.parse(first.stdout);
@@ -67,17 +74,60 @@ test('netlify_r2_release builds once, stamps dist, then deploys with no-build wi
       netlify,
       '--json',
     ],
-    { cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, NPM_LOG: npmLog, NETLIFY_LOG: netlifyLog } },
+    { cwd: process.cwd(), encoding: 'utf8', env },
   );
   assert.equal(second.status, 0, second.stderr);
   const secondSummary = JSON.parse(second.stdout);
   assert.equal(secondSummary.built, false);
   assert.equal(secondSummary.deployed, true);
   assert.ok(secondSummary.timings.some((entry) => entry.name === 'netlify deploy'));
-  assert.equal((await readFile(npmLog, 'utf8')).trim().split('\n').length, 1);
+  assert.deepEqual((await readFile(npmLog, 'utf8')).trim().split('\n'), ['run build:netlify:r2', 'run check:biome']);
   const deployLog = await readFile(netlifyLog, 'utf8');
   assert.match(deployLog, /deploy --no-build --dir .* --prod --message test deploy/);
+  assert.equal(secondSummary.releaseGate.ci, 'success');
+
+  const overrideArgs = [
+    'scripts/netlify_r2_release.mjs',
+    '--dist',
+    dist,
+    '--deploy',
+    '--prod',
+    '--message',
+    'emergency deploy',
+    '--skip-ci-check',
+    'CI outage',
+    '--accept-red-smoke',
+    'known smoke failure',
+    '--npm-bin',
+    npm,
+    '--netlify-bin',
+    netlify,
+    '--json',
+  ];
+  const override = spawnSync(process.execPath, overrideArgs, { cwd: process.cwd(), encoding: 'utf8', env });
+  assert.equal(override.status, 0, override.stderr);
+  const message = 'emergency deploy | --skip-ci-check: CI outage | --accept-red-smoke: known smoke failure';
+  assert.equal(JSON.parse(override.stdout).deployMessage, message);
+  assert.ok((await readFile(netlifyLog, 'utf8')).includes(`--message ${message}`));
+  assert.match(override.stderr, /WARNING override --skip-ci-check: CI outage/);
+  assert.match(override.stderr, /WARNING override --accept-red-smoke: known smoke failure/);
+
+  const before = await readFile(netlifyLog, 'utf8');
+  const blocked = spawnSync(process.execPath, overrideArgs, { cwd: process.cwd(), encoding: 'utf8', env: { ...env, FAKE_DIRTY: ' M source.ts' } });
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /Tracked working tree is dirty/);
+  assert.equal(await readFile(netlifyLog, 'utf8'), before, 'a failed gate never calls Netlify');
 });
+
+for (const flag of ['--skip-ci-check', '--accept-red-smoke']) {
+  test(`netlify_r2_release rejects empty or missing ${flag} reasons at argument parsing`, () => {
+    for (const reason of [[], [''], ['  ']]) {
+      const result = spawnSync(process.execPath, ['scripts/netlify_r2_release.mjs', flag, ...reason], { cwd: process.cwd(), encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /requires a (non-empty reason|value)/);
+    }
+  });
+}
 
 test('netlify_r2_release check mode rejects side-effect flags', async () => {
   const result = spawnSync(process.execPath, ['scripts/netlify_r2_release.mjs', '--check', '--build-if-needed'], { cwd: process.cwd(), encoding: 'utf8' });

@@ -1,7 +1,7 @@
-import { requestedOrtRuntimeDiagnosticOptions, ortDequantFoldEnabled } from '../nn/ortRuntime.ts';
 import { type BoardState, boardToFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
+import { ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import {
   BATCHING_STRENGTH_BUILD,
   LQO_BLACK_DRAW_SCORE,

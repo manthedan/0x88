@@ -1,5 +1,5 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { acquireBigNetSearcher, BigNetSessionPool, type BigNetKey, detachBigNetSearcher } from './bigNetSessionPool.ts';
+import { acquireBigNetSearcher, type BigNetKey, BigNetSessionPool, detachBigNetSearcher } from './bigNetSessionPool.ts';
 import { BIG_NETS, Bt4WorkerSearcher } from './bt4Engine.ts';
 import { lc0SplitKUrl } from './lc0SmallModelSelection.ts';
 import { validateSoakModelOverride } from './mobileSoak.ts';
