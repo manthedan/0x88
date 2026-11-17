@@ -88,6 +88,11 @@ test('a turn aborted or disposed while acquiring a wake lock never renders or st
       releases = 0;
     const ctx = { gameOver: null, board: { turn: 'b' }, humanColor: 'w', abort: new AbortController(), disposed: false };
     const dependencies = {
+      ctxSelectedEngine: () => ({ family: 'sf', variant: 'lite' }),
+      releaseUnusedBigNetSearchers: (keys, ttl) => {
+        assert.deepEqual(keys, []);
+        assert.equal(ttl, 0);
+      },
       wakeLocks: { acquire: () => pending.promise },
       el: () => ({ textContent: '' }),
       ctxRender: () => {
