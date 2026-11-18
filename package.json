@@ -14,6 +14,7 @@
     "test:targeted": "node scripts/run_targeted_tests.mjs",
     "test:stage-lc0-assets": "node scripts/stage_lc0_test_assets.mjs",
     "test:timings": "node scripts/test_timings.mjs",
+    "test:who-reads": "node scripts/check_source_text_reads.mjs --who-reads",
     "perf:canary": "node scripts/perf_canary.mjs",
     "perf:routes": "node scripts/perf_routes/run.mjs",
     "validate:quick": "node scripts/validate_change.mjs --mode quick",
