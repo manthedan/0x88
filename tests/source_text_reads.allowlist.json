@@ -165,6 +165,20 @@
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts"]
     },
+    "tests/feature_registry.test.mjs": {
+      "reason": "asserts the root layout sets data-hydrated, the walker's post-hydration readiness signal",
+      "reads": [
+        "src/lib/components/AnalysisPreview.svelte",
+        "src/lib/components/BrowserCapabilities.svelte",
+        "src/lib/components/PhoneLargeNetPreference.svelte",
+        "src/lib/components/RestoreNotice.svelte",
+        "src/lib/components/SiteHeader.svelte"
+      ]
+    },
+    "tests/feature_walk.test.mjs": {
+      "reason": "asserts the root layout sets data-hydrated, the walker's post-hydration readiness signal",
+      "reads": ["src/routes/+layout.svelte"]
+    },
     "tests/hidden_tab_pause.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts"]
