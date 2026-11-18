@@ -607,7 +607,15 @@ function disposePlayCpuEngines(): void {
 
 function ctxAcquireBigNet(key: BigNetKey, signal: AbortSignal) {
   const reclaim = preparePhoneBigNet(key, 2048, signal, disposePlayCpuEngines, () => ctxSetEngineNote('Freeing memory…'));
-  return reclaim ? reclaim.then(() => acquireBigNetSearcherAsync(key, false, signal)) : acquireBigNetSearcherAsync(key, false, signal);
+  if (!reclaim) return acquireBigNetSearcherAsync(key, false, signal);
+  return reclaim.then(
+    () => acquireBigNetSearcherAsync(key, false, signal),
+    (error: unknown) => {
+      // A cancelled wait (resign, new game, opponent change) must not leave the note on the next screen.
+      if (maybeEl('engineNote')?.textContent === 'Freeing memory…') ctxSetEngineNote('');
+      throw error;
+    },
+  );
 }
 
 function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
