@@ -250,6 +250,25 @@ test('disposing a hybrid evaluator aborts its lazy pack load instead of draining
   await warmupSettled;
 });
 
+test('an evaluation queued behind a cancelled hybrid init does not restart the init', async () => {
+  let creates = 0;
+  const evaluator = new Lc0WebHybridEvaluator(
+    { packUrl: '/fake.lc0web.json', verifyShards: false },
+    {
+      createRuntime: (options) => {
+        creates += 1;
+        return new Promise((_resolve, reject) => options.signal?.addEventListener('abort', () => reject(options.signal.reason), { once: true }));
+      },
+    },
+  );
+  const warmup = assert.rejects(evaluator.evaluate('first'), { name: 'AbortError' });
+  const queued = assert.rejects(evaluator.evaluate('second'), { name: 'AbortError' });
+  while (!creates) await Promise.resolve();
+  await evaluator.dispose();
+  await Promise.all([warmup, queued]);
+  assert.equal(creates, 1, 'a fresh device and pack request would outlive the retirement');
+});
+
 test('hybrid WebGPU runtime disposal awaits session release before final device destruction', async () => {
   const source = await readFile(new URL('../src/lc0/wgslMatmulAddProbe.ts', import.meta.url), 'utf8');
   const runtimeDispose = source.slice(
