@@ -211,10 +211,11 @@ async function analysisEngines(ctx) {
   });
   await ctx.step('BT4 download and first lines', async () => {
     await closeManager(ctx);
-    // The download may start a moment after consent; a cached model shows no progress at all.
-    await waitFor(ctx.evaluate, `document.querySelector('#downloadProgress')?.hidden === false`, 20000).catch(() =>
-      ctx.note('info', 'No BT4 download progress shown (cached model?)'),
-    );
+    // The download may start a moment after consent. A cached or loopback-fast model can show lines
+    // without any progress, so lines end this wait too instead of idling out the timeout.
+    const progressShown = `document.querySelector('#downloadProgress')?.hidden === false`;
+    await waitFor(ctx.evaluate, `${progressShown} || !!${BT4_RESULT}`, 20000).catch(() => {});
+    if (!(await ctx.evaluate(progressShown))) ctx.note('info', 'No BT4 download progress seen (cached or fast model?)');
     await waitFor(ctx.evaluate, `(() => { const p = document.querySelector('#downloadProgress'); return !p || p.hidden; })()`, 300000);
     // A hidden indicator also follows a failed init, and the CPU fallback can still be searching:
     // removing Berserk next must not race BT4's first result.

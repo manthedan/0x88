@@ -632,6 +632,23 @@ test('analysis journey waits for a BT4 line and fails on a BT4 error before remo
   assert.ok(!log.some(([kind, s]) => kind === 'click' && /row-rm/.test(s)), 'Berserk is not removed after a failed BT4 init');
 });
 
+test('analysis journey stops waiting for BT4 download progress once BT4 lines are up', async () => {
+  const { ctx, log, steps } = fakeJourneyContext((e) => {
+    if (/option\[value="bt4"\]/.test(e)) return 'ok';
+    // A fast load never shows the progress indicator; only a wait that also accepts BT4 lines can end at once.
+    if (e === "document.querySelector('#downloadProgress')?.hidden === false") return false;
+    return undefined;
+  });
+  const started = Date.now();
+  await JOURNEYS['analysis-engines'].run(ctx);
+  assert.ok(Date.now() - started < 5000, 'no idle 20 s progress timeout');
+  assert.deepEqual(
+    steps.find(([label]) => label === 'BT4 download and first lines'),
+    ['BT4 download and first lines', 'ok'],
+  );
+  assert.ok(log.some(([kind, text]) => kind === 'info' && /No BT4 download progress seen/.test(text)));
+});
+
 test('phone journeys open Board tools for Play from here and show the engine cards first', async () => {
   const { ctx, log } = fakeJourneyContext((e) => (/restartBanner/.test(e) ? false : /gameOverCard/.test(e) && !/status/.test(e) ? false : undefined));
   await JOURNEYS['play-promotion'].run(ctx);
