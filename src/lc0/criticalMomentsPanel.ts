@@ -1,6 +1,7 @@
+import { el, inputEl, selectEl } from '../features/analysisDom.ts';
 import type { AnalysisLine } from './analysisFormat.ts';
 import { patchAnalysisResults } from './analysisPresentation.ts';
-import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
+import { htmlEscape } from './browserDom.ts';
 import {
   type CriticalMoment,
   type CriticalReport,
