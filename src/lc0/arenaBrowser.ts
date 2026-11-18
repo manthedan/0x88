@@ -522,7 +522,8 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
   // Storage can evict a model that was cached at Start (loading Lc0 Small into a
   // full cache is enough), so a load not covered by a download approval asks again.
-  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.loaded) {
+  // Ask unless the warm session will be reused; preparePhoneBigNet retires one configured differently.
+  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries: arenaCacheEntries() })) {
     const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal);
     signal.throwIfAborted();
     if (!consent) throw new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
@@ -4352,8 +4353,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     clearStartPending();
     return;
   }
-  const checkedBigNetVariants = new Set<string>();
-  arenaRunDownloads.clear();
+  const checkedBigNetVariants = new Set<BigNetKey>();
   for (const row of bigNetRows) {
     if (!isLc0BigNetVariant(row.variant) || checkedBigNetVariants.has(row.variant)) continue;
     checkedBigNetVariants.add(row.variant);
@@ -4366,16 +4366,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       refreshSeatControls();
       clearStartPending();
       return;
-    }
-    // URL/restored rosters and resumed checkpoints never imply download approval.
-    if (isMemoryConstrainedDevice()) {
-      const consent = arenaDownloadApprovals.delete(row.variant) ? 'download' : await requestLargeNetDownloadConsent(config, matchAbort.signal);
-      if (startupCancelled()) return;
-      if (!consent) {
-        clearStartPending();
-        return;
-      }
-      if (consent === 'download') arenaRunDownloads.add(row.variant);
     }
   }
   const engineA = participants[0].engine!;
@@ -4422,6 +4412,22 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       return;
     }
     if (!lc0Cache) return; // The loader reported the failure; leave prior results intact.
+  }
+
+  // Ask after Small loads, which can evict a cached large net, and before the
+  // checkpoint is replaced, so declining keeps the previous tournament.
+  arenaRunDownloads.clear();
+  if (isMemoryConstrainedDevice()) {
+    for (const variant of checkedBigNetVariants) {
+      // URL/restored rosters and resumed checkpoints never imply download approval.
+      const consent = arenaDownloadApprovals.delete(variant) ? 'download' : await requestLargeNetDownloadConsent(BIG_NETS[variant], matchAbort.signal);
+      if (startupCancelled()) return;
+      if (!consent) {
+        clearStartPending();
+        return;
+      }
+      if (consent === 'download') arenaRunDownloads.add(variant);
+    }
   }
 
   const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);

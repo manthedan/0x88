@@ -301,32 +301,56 @@ for (const phase of [
 }
 
 test('Arena Start carries its consent to the load: a cache hit approves no download', async () => {
-  const loopStart = source.arena.indexOf('  const checkedBigNetVariants = new Set<string>();');
-  const loopEnd = source.arena.indexOf('  const engineA = participants[0].engine!;', loopStart);
-  assert.ok(loopStart >= 0 && loopEnd > loopStart, 'production boundaries: Start consent loop');
-  const start = stripTypeScriptTypes(`async function start() {\n${source.arena.slice(loopStart, loopEnd)}}`);
+  // Startup from the Small load through the checkpoint save.
+  const from = source.arena.indexOf('  // Lazy Small loading is still part of setup.');
+  const to = source.arena.indexOf('  if (startupCancelled()) {\n    // The save replaced', from);
+  assert.ok(from >= 0 && to > from, 'production boundaries: Start setup');
+  const start = stripTypeScriptTypes(`async function start() {\n${source.arena.slice(from, to)}}`);
   const bigNetFor = extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation');
   const prompts = [];
+  const saves = [];
   let answer = 'cached';
+  let smallLoaded = false;
   let loaded = false;
+  let configured = true;
+  const matchAbort = new AbortController();
   const deps = {
     arenaRunDownloads: new Set(),
     arenaDownloadApprovals: new Set(),
-    bigNetRows: [{ family: 'lc0', variant: 'bt4' }],
-    isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
+    checkedBigNetVariants: new Set(['bt4']),
     BIG_NETS,
-    checkBigNetAsset: async () => 'present',
-    whileArenaMounted: (fn) => fn,
-    renderSeatSelectors() {},
     startupCancelled: () => false,
     isMemoryConstrainedDevice: () => true,
-    matchAbort: new AbortController(),
+    matchAbort,
+    abort: matchAbort,
+    mountSignal: new AbortController().signal,
+    isStaleMount: () => false,
+    selectedSeatsNeedLc0Evaluator: () => true,
+    loadSmall: async () => {
+      smallLoaded = true;
+    },
     requestLargeNetDownloadConsent: async (config) => {
+      // Small can evict a cached large net, so the answer must reflect the cache after it loads.
+      assert.equal(smallLoaded, true, 'consent is asked after Lc0 Small loads');
       prompts.push(config.key);
       return answer;
     },
     clearStartPending() {},
-    peekBigNetSearcher: () => ({ loaded }),
+    resume: null,
+    claimArenaCheckpoint: () => assert.fail('not a resume'),
+    createArenaCheckpoint: () => ({ runId: 'new', revision: 1 }),
+    captureCheckpointConfig: () => ({}),
+    participants: [],
+    compatibility: 'compatible',
+    schedule: [{}],
+    saveArenaCheckpoint: async (saved) => {
+      saves.push(saved.runId);
+    },
+    checkpointToken: { runId: 'old', revision: 3 },
+    checkpoint: { runId: 'old' },
+    checkpointProblem: '',
+    ArenaCheckpointConflictError: class extends Error {},
+    peekBigNetSearcher: () => ({ loaded, isInitializedFor: () => loaded && configured }),
     preparePhoneBigNet: () => null,
     arenaCacheEntries: () => 0,
     disposeArenaCpuEngines() {},
@@ -339,28 +363,46 @@ test('Arena Start carries its consent to the load: a cache hit approves no downl
   const api = new Function(
     'deps',
     `let { ${Object.keys(deps)} } = deps;
+    let lc0Cache = null;
+    async function loadLc0Evaluator() { await deps.loadSmall(); lc0Cache = {}; }
     ${bigNetFor}
     ${start}
-    return { start, bigNetFor };`,
+    return { start: async () => { lc0Cache = null; await start(); }, bigNetFor, checkpoint: () => [checkpoint, checkpointToken] };`,
   )(deps);
   const signal = new AbortController().signal;
 
-  // Cached at Start: the load must ask again, since storage may have evicted it.
+  // Declining keeps the previous tournament: nothing is saved over it.
+  answer = false;
   await api.start();
+  assert.deepEqual(saves, []);
+  assert.deepEqual(api.checkpoint(), [{ runId: 'old' }, { runId: 'old', revision: 3 }]);
+
+  // Cached at Start: the load must ask again, since storage may have evicted it.
+  prompts.length = 0;
+  answer = 'cached';
+  await api.start();
+  assert.deepEqual(saves, ['new']);
   assert.deepEqual(prompts, ['bt4']);
   assert.equal(deps.arenaRunDownloads.has('bt4'), false);
   answer = false;
   await assert.rejects(api.bigNetFor('bt4', signal), /no longer cached/);
   assert.equal(loaded, false, 'a declined download never reaches the loader');
-  answer = 'download';
+  answer = 'cached';
   await api.bigNetFor('bt4', signal);
   assert.equal(loaded, true);
-  assert.deepEqual(prompts, ['bt4', 'bt4', 'bt4']);
+  assert.equal(prompts.length, 3);
+  await api.bigNetFor('bt4', signal);
+  assert.equal(prompts.length, 3, 'a reusable warm session needs no check');
+  // A warm session configured differently is retired, so its replacement may download.
+  configured = false;
+  answer = 'download';
+  await api.bigNetFor('bt4', signal);
+  assert.equal(prompts.length, 4);
   loaded = false;
   await api.bigNetFor('bt4', signal);
-  assert.equal(prompts.length, 3, 'an approved download is not asked again within the run');
+  assert.equal(prompts.length, 4, 'an approved download is not asked again within the run');
 
-  // A picker or Start download approval covers the run's loads.
+  // A picker download approval covers the run's loads.
   prompts.length = 0;
   deps.arenaDownloadApprovals.add('bt4');
   await api.start();
