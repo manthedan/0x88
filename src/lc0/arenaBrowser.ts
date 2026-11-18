@@ -4329,6 +4329,22 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     return;
   }
 
+  // Lazy Small loading is still part of setup. Keep the old checkpoint and
+  // exportable games until the replacement evaluator is ready.
+  if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {
+    el('cancelSetupLoad').hidden = false;
+    try {
+      await loadLc0Evaluator(mountSignal, matchAbort.signal);
+    } finally {
+      if (abort === matchAbort && !isStaleMount(mountSignal)) el('cancelSetupLoad').hidden = true;
+    }
+    if (startupCancelled()) {
+      if (abort === matchAbort && !isStaleMount(mountSignal)) el('message').textContent = 'Tournament preparation stopped.';
+      return;
+    }
+    if (!lc0Cache) return; // The loader reported the failure; leave prior results intact.
+  }
+
   const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);
   // Establish the slot before any games run. A stale tab must not overwrite it.
   try {
@@ -4480,10 +4496,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       el('message').textContent = 'Preparing private CPU workers…';
       await runIsolatedCpuTournament(schedule, pendingIndices, byPid, matchAbort.signal, completeGame);
     } else {
-      if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {
-        await loadLc0Evaluator(mountSignal, matchAbort.signal);
-        if (!lc0Cache) throw new Error('The saved Lc0 network could not be loaded.');
-      }
       resetLc0SearchTrees(seatIds);
       // A safe gauntlet can have several large nets in the field. On phones,
       // prepare only this game's seats, never the entire retained roster.
@@ -4762,7 +4774,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
     lc0Searchers.clear();
     renderCacheInfo();
     hideDownloadProgress();
-    setArenaStartDisabled(false);
+    setArenaStartDisabled(startPending || running);
     el('message').textContent = readyMessage();
   } catch (error) {
     retireUninstalled();
@@ -5115,10 +5127,12 @@ function wireEvents() {
       }
     })();
   });
-  el('stop').addEventListener('click', () => {
+  const stopMatch = () => {
     abort?.abort();
     el('message').textContent = 'Stopping…';
-  });
+  };
+  el('stop').addEventListener('click', stopMatch);
+  el('cancelSetupLoad').addEventListener('click', stopMatch);
   el('exportPgn').addEventListener('click', exportPgn);
   // History review: charts, move strip, and finished-game log rows jump the
   // board to a past position; Live (or Escape) returns to the running game.

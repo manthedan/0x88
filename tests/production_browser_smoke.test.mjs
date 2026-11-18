@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   actionableErrorEntries,
+  advertisesWorkerRetirement,
   assertClientDocument,
   browserMaxAge,
   failedRequestEntries,
@@ -39,6 +40,18 @@ test('document identity is rechecked after controller readiness and worker retir
   const source = readFileSync(script, 'utf8');
   assert.match(source, /async function inspectBrowser\(session, surface\) \{\s*await assertClientDocument\(session, surface\)/);
   assert.match(source, /await assertClientDocument\(session, 'Worker retirement'\);\s*return workerRetirementReport/);
+});
+
+test('nightly smoke recognizes old and new deployed Play markup during rollout', async () => {
+  const shipped = readFileSync('src/routes/app/play/+page.svelte', 'utf8').match(/data-worker-retirement="([^"]+)"/)?.[1];
+  for (const [advertised, expected] of [
+    [undefined, false],
+    [shipped, true],
+  ]) {
+    const document = { getElementById: (id) => (id === 'main' ? { dataset: { workerRetirement: advertised } } : null) };
+    const session = { page: { evaluate: async (expression) => new Function('document', `return ${expression}`)(document) } };
+    assert.equal(await advertisesWorkerRetirement(session), expected);
+  }
 });
 
 test('navigation guard requires real worker retirement and a lower count on Analysis -> Play', () => {

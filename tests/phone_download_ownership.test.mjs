@@ -229,6 +229,7 @@ for (const phase of [
       buildSchedule: () => [{ whiteId: '0', blackId: '1', opening: {} }],
       tournamentPairings: () => [],
       selectedOpenings: () => [],
+      selectedSeatsNeedLc0Evaluator: () => false,
       createArenaCheckpoint: () => ({ runId: 'test', revision: 1 }),
       captureCheckpointConfig: () => ({}),
       saveArenaCheckpoint: () => wait('save', undefined),

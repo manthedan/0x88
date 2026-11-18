@@ -12,7 +12,7 @@ const EVAL_TIMEOUT_MS = 15_000;
 const ENGINE_FAMILIES = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax', 'centipawn'];
 const RUNTIME_TOKENS = ['Centipawn:', 'Reckless:', 'Viridithas:', 'Berserk:', 'PlentyChess:', 'Stormphrax:'];
 
-const USAGE = `Usage: node scripts/production_browser_smoke.mjs [options]\n\nRuns a production browser journey across Play, Arena, and Analysis. Centipawn and Stormphrax must each complete a first move. Analysis -> Play -> Analysis must stay client-side, retire the previous workers, and reduce worker count on leaving Analysis. The smoke also verifies engine order, runtime diagnostics, page errors, failed network requests, and production cache headers.\n\nRequires a Playwright Chromium build: npx playwright install chromium\n\nOptions:\n  --base-url URL        Production origin (default ${DEFAULT_BASE_URL})\n  --timeout MS          Per-engine/browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --headed              Run Chromium with a visible window (debugging)\n  --out PATH            JSON artifact path\n  --dry-run             Print the planned journey without opening a browser\n  -h, --help            Show this help\n`;
+const USAGE = `Usage: node scripts/production_browser_smoke.mjs [options]\n\nRuns a production browser journey across Play, Arena, and Analysis. Centipawn and Stormphrax must each complete a first move. On builds advertising worker retirement, Analysis -> Play -> Analysis must stay client-side, retire the previous workers, and reduce worker count on leaving Analysis. The smoke also verifies engine order, runtime diagnostics, page errors, failed network requests, and production cache headers.\n\nRequires a Playwright Chromium build: npx playwright install chromium\n\nOptions:\n  --base-url URL        Production origin (default ${DEFAULT_BASE_URL})\n  --timeout MS          Per-engine/browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --headed              Run Chromium with a visible window (debugging)\n  --out PATH            JSON artifact path\n  --dry-run             Print the planned journey without opening a browser\n  -h, --help            Show this help\n`;
 
 function parseArgs(argv) {
   const args = parseScriptArgs(argv, {
@@ -430,6 +430,10 @@ async function probeHttp(args) {
   return results;
 }
 
+export async function advertisesWorkerRetirement(session) {
+  return (await evaluate(session, `document.getElementById('main')?.dataset.workerRetirement`)) === '1';
+}
+
 async function runSmoke(args) {
   const report = {
     status: 'PRODUCTION_BROWSER_SMOKE_RUNNING',
@@ -442,16 +446,20 @@ async function runSmoke(args) {
     report.http = await probeHttp(args);
     session = await openBrowserSession(args);
     report.play.centipawn = await playFirstMove(session, 'centipawn', true);
+    // The scheduled smoke uses the current script against whatever is deployed.
+    const retirementSupported = await advertisesWorkerRetirement(session);
     report.arena = await inspectArena(session);
     report.analysis = await inspectAnalysis(session);
-    const analysisWorkers = await waitForAnalysisWorkers(session);
+    const analysisWorkers = retirementSupported ? await waitForAnalysisWorkers(session) : null;
     report.play.stormphrax = await playFirstMove(session, 'stormphrax');
-    report.navigation = { analysisToPlay: await waitForWorkerRetirement(session, analysisWorkers, true) };
-    const playWorkers = session.page.workers();
-    report.analysisReturn = await inspectAnalysis(session);
-    await waitForAnalysisWorkers(session);
-    report.navigation.playToAnalysis = await waitForWorkerRetirement(session, playWorkers);
-    await inspectBrowser(session, 'Analysis -> Play -> Analysis');
+    if (analysisWorkers) {
+      report.navigation = { analysisToPlay: await waitForWorkerRetirement(session, analysisWorkers, true) };
+      const playWorkers = session.page.workers();
+      report.analysisReturn = await inspectAnalysis(session);
+      await waitForAnalysisWorkers(session);
+      report.navigation.playToAnalysis = await waitForWorkerRetirement(session, playWorkers);
+      await inspectBrowser(session, 'Analysis -> Play -> Analysis');
+    } else report.navigation = { skipped: 'Deployed Play does not advertise worker retirement' };
     report.failedRequests = failedRequestEntries(session.failedRequests);
     if (report.failedRequests.length) throw new Error(`Production journey had failed network requests: ${JSON.stringify(report.failedRequests)}`);
     report.status = 'PRODUCTION_BROWSER_SMOKE_DONE';

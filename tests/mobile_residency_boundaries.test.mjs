@@ -328,6 +328,7 @@ for (const reason of ['navigation', 'seat cancellation', 'diagnostics failure'])
     const api = compile(
       `
     let lc0LoadAbort=null,loadingLc0=false,lc0Cache=null;
+    const startPending=false,running=false;
     ${extract(source('arenaBrowser'), 'async function loadLc0Evaluator(', 'async function reloadLc0Evaluator(')}
     return {load:()=>loadLc0Evaluator(),cancel:()=>lc0LoadAbort.abort(),peek:()=>lc0Cache};
   `,
@@ -377,6 +378,53 @@ for (const reason of ['navigation', 'seat cancellation', 'diagnostics failure'])
     assert.equal(calls, 1, 'native disposal is idempotent across cancellation and the resumed handoff');
     assert.equal(api.peek(), null);
   });
+
+for (const outcome of ['failure', 'cancelled', 'ready']) {
+  test(`Arena Small preparation preserves old exportable games until ready (${outcome})`, async () => {
+    const text = source('arenaBrowser');
+    const setup = extract(text, '  // Lazy Small loading is still part of setup.', '  const runCheckpoint =');
+    assert.match(text, /const runCheckpoint = [^;]+;[\s\S]*await saveArenaCheckpoint\(runCheckpoint,[\s\S]*games\.length = 0;/);
+    const load = Promise.withResolvers();
+    const matchAbort = new AbortController();
+    const mountSignal = new AbortController().signal;
+    const cancel = { hidden: true };
+    const message = { textContent: '' };
+    const run = compile(
+      `
+      return async function(){
+        const abort=matchAbort;
+        const startupCancelled=()=>abort.signal.aborted;
+        let lc0Cache=null;
+        const loadLc0Evaluator=async (_mount, signal)=>{
+          if(signal!==matchAbort.signal) throw new Error('setup load must be cancellable');
+          lc0Cache=await load;
+        };
+        ${setup}
+        replaceResults();
+      };`,
+      {
+        load: load.promise,
+        matchAbort,
+        mountSignal,
+        selectedSeatsNeedLc0Evaluator: () => true,
+        isStaleMount: (signal) => signal.aborted,
+        el: (id) => (id === 'cancelSetupLoad' ? cancel : message),
+        replaceResults: () => {
+          results = [];
+        },
+      },
+    );
+    let results = ['old game PGN'];
+    const pending = run();
+    assert.equal(cancel.hidden, false);
+    assert.deepEqual(results, ['old game PGN']);
+    if (outcome === 'cancelled') matchAbort.abort();
+    load.resolve(outcome === 'failure' ? null : {});
+    await pending;
+    assert.equal(cancel.hidden, true);
+    assert.deepEqual(results, outcome === 'ready' ? [] : ['old game PGN']);
+  });
+}
 
 test("Stop during retirement reaches Arena's stopped-state handler rather than leaving a live match", async () => {
   const text = source('arenaBrowser'),
