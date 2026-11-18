@@ -114,11 +114,7 @@ export class RuntimeFallbackEvaluator implements Evaluator {
     this.disposed = true;
     this.primaryRetirement ??= disposeEvaluator(this.primary);
     const fallbackRetirement = this.fallbackCreation?.then(disposeEvaluator, () => undefined);
-    this.closePromise = Promise.allSettled([this.primaryRetirement, fallbackRetirement]).then((results) => {
-      const errors = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
-      if (errors.length) throw new AggregateError(errors, 'Centipawn runtime retirement failed');
-    });
-    void this.closePromise.catch(() => undefined);
+    this.closePromise = Promise.allSettled([this.primaryRetirement, fallbackRetirement]).then(() => undefined);
     return this.closePromise;
   }
 

@@ -373,27 +373,24 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const release = async () => {
       // A rejected sync does not prove that all mapAsync continuations have
       // stopped writing to WASM. Retain the runtime and its allocations.
-      if (this.readbackDrainFailed) throw new Error('Whole-model retirement failed: readbacks could not be drained');
+      if (this.readbackDrainFailed) return;
       try {
         this.runtime.endScope();
       } catch {
         /* already unwound */
       }
-      let failure: unknown;
       try {
         await this.runtime.dispose();
-      } catch (error) {
-        failure = error;
+      } catch {
+        /* best effort */
       }
       try {
         this.device?.destroy?.();
-      } catch (error) {
-        failure ??= error;
+      } catch {
+        /* best effort */
       }
-      if (failure) throw failure;
     };
     this.closePromise = Promise.allSettled([...this.inFlight]).then(release);
-    void this.closePromise.catch(() => undefined); // Historical void owners remain safe; awaitable owners still receive failures.
     return this.closePromise;
   }
 

@@ -313,11 +313,8 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       const vm = runtime.createVirtualMachine(runtime.webgpu());
       return new SquareformerTvmjsWebgpuEvaluator(runtime, device, vm.getInternalModule(), meta, model.batch, manifestResolved.toString());
     } catch (error) {
-      try {
-        runtime?.dispose();
-      } finally {
-        device.destroy();
-      }
+      runtime?.dispose();
+      device.destroy();
       throw error;
     }
   }
@@ -437,21 +434,18 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       } catch {
         /* already unwound */
       }
-      const errors: unknown[] = [];
       try {
         await this.runtime.dispose();
-      } catch (error) {
-        errors.push(error);
+      } catch {
+        /* best effort */
       }
       try {
         this.device.destroy();
-      } catch (error) {
-        errors.push(error);
+      } catch {
+        /* best effort */
       }
-      if (errors.length) throw new AggregateError(errors, 'TVMJS runtime retirement failed');
     };
     this.closePromise = this.queue.idle().then(dispose);
-    void this.closePromise.catch(() => undefined);
     return this.closePromise;
   }
 

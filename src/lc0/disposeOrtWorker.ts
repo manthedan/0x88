@@ -2,13 +2,6 @@
  * The dedicated listener still observes the ack after the owner's transport is retired.
  * Timeout/error means best effort failed; termination remains the hard boundary.
  */
-export class RetiredOrtWorkerError extends Error {
-  constructor(failure: Error) {
-    super(failure.message, { cause: failure });
-    this.name = 'RetiredOrtWorkerError';
-  }
-}
-
 const closing = new WeakMap<Worker, Promise<void>>();
 export function disposeOrtWorker(worker: Worker, timeoutMs = 1500): Promise<void> {
   const existing = closing.get(worker);
@@ -25,9 +18,7 @@ export function disposeOrtWorker(worker: Worker, timeoutMs = 1500): Promise<void
       worker.removeEventListener('messageerror', failed);
       try {
         worker.terminate();
-        // Awaitable diagnostic/lab owners still receive the release error, but
-        // product replacement owners can distinguish it from failed termination.
-        if (failure) reject(new RetiredOrtWorkerError(failure));
+        if (failure) reject(failure);
         else resolve();
       } catch (error) {
         reject(error);

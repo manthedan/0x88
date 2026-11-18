@@ -6312,16 +6312,7 @@ async function loadLc0Backend(
 }
 
 async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
-  try {
-    await awaitEngineRetirements();
-  } catch (error) {
-    if (!loadCancelled()) {
-      el('analyze').toggleAttribute('disabled', false);
-      selectEl('lc0RuntimeSelect').disabled = false;
-      el('message').textContent = `Previous engine could not be retired. Reload this page before loading another model: ${(error as Error).message}`;
-    }
-    return false; // A failed termination is not permission to create a main-thread fallback.
-  }
+  await awaitEngineRetirements();
   if (loadCancelled()) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);

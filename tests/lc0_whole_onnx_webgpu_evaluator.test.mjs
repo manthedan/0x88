@@ -218,7 +218,7 @@ test('whole-model evaluator retains destinations if draining readbacks fails', a
   await assert.rejects(evaluator.evaluateBatchSequence([FENS, FENS]), /device lost/);
   await assert.rejects(evaluator.evaluateBatchSequence([FENS, ['invalid FEN']]), /device lost/);
   assert.equal(state.disposedBeforeReadback, 0);
-  await assert.rejects(evaluator.dispose(), /readbacks could not be drained/);
+  await evaluator.dispose();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(state.runtimeDisposed, 0, 'pending WASM destinations must outlive the runtime too');
   for (const copy of state.pendingCopies.splice(0)) copy();

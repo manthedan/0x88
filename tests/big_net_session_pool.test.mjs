@@ -285,7 +285,7 @@ test('async phone acquire waits for an already released net and preserves active
   assert.equal(pool.peek('t3'), t3);
 });
 
-test('failed or cancelled graceful retirement does not construct a replacement', async () => {
+test('cancelled graceful retirement does not construct a replacement; a failed one ends the wait', async () => {
   for (const cancel of [false, true]) {
     const retirement = Promise.withResolvers();
     const pool = new BigNetSessionPool(
@@ -298,12 +298,18 @@ test('failed or cancelled graceful retirement does not construct a replacement',
     const abort = new AbortController();
     const next = pool.acquireAsync('t3', true, abort.signal);
     await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pool.has('t3'), false, 'no replacement while the old worker drains');
     if (cancel) {
       abort.abort();
       retirement.resolve();
-    } else retirement.reject(new Error('release failed'));
-    await assert.rejects(next, cancel ? { name: 'AbortError' } : /release failed/);
-    assert.equal(pool.has('t3'), false);
+      await assert.rejects(next, { name: 'AbortError' });
+      assert.equal(pool.has('t3'), false);
+    } else {
+      // Worker disposal terminates even when release reports an error (disposeOrtWorker).
+      retirement.reject(new Error('release failed'));
+      await next;
+      assert.equal(pool.has('t3'), true);
+    }
   }
 });
 

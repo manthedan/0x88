@@ -683,23 +683,9 @@ async function createLc0GpuIoSession(
     options.signal?.throwIfAborted();
     return { session, binding };
   } catch (error) {
-    if (session || binding)
-      await trackEngineRetirement(
-        (async () => {
-          const failures: unknown[] = [];
-          try {
-            if (session) await ort.releaseOrtSession(session);
-          } catch (failure) {
-            failures.push(failure);
-          }
-          try {
-            await binding?.dispose();
-          } catch (failure) {
-            failures.push(failure);
-          }
-          if (failures.length) throw new AggregateError(failures, 'GPU IO initialization retirement failed');
-        })(),
-      );
+    const owned = session;
+    // Tracked: a cancelled owner's replacement still waits for this release.
+    if (owned) await trackEngineRetirement(Promise.resolve(binding?.dispose()).finally(() => ort.releaseOrtSession(owned)));
     options.signal?.throwIfAborted();
     const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
     if (rejectParse && isOnnxModelParseError(error)) throw error;

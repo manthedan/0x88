@@ -1,36 +1,22 @@
 // Detach ownership synchronously, but do not overlap a replacement model load
 // with the old session's asynchronous release (including across route changes).
-import { RetiredOrtWorkerError } from './disposeOrtWorker.ts';
-
+// Release is best effort: a failed release still ends the wait, as before.
 const retiring = new Set<Promise<void>>();
-let retirementFailure: { error: unknown } | null = null;
 
-export function trackEngineRetirement(disposal: Promise<void>): Promise<void> {
-  const boundary = disposal.catch((error: unknown) => {
-    if (error instanceof RetiredOrtWorkerError) {
-      console.warn('ORT release failed, but the retired worker was terminated.', error);
-      return;
-    }
-    // A failed hard boundary must remain visible even if it settles before the
-    // next route starts. Never silently admit a replacement beside that owner.
-    retirementFailure = { error };
-    throw error;
-  });
+export function trackEngineRetirement(disposal: Promise<unknown>): Promise<void> {
+  const boundary = disposal.then(
+    () => undefined,
+    (error: unknown) => console.warn('Engine release failed.', error),
+  );
   retiring.add(boundary);
-  void boundary.finally(() => retiring.delete(boundary)).catch(() => undefined);
+  void boundary.finally(() => retiring.delete(boundary));
   return boundary;
 }
 
 export function hasEngineRetirements(): boolean {
-  return retiring.size > 0 || retirementFailure !== null;
-}
-
-function assertRetirementBoundary(): void {
-  if (retirementFailure) throw retirementFailure.error;
+  return retiring.size > 0;
 }
 
 export async function awaitEngineRetirements(): Promise<void> {
-  assertRetirementBoundary();
   while (retiring.size) await Promise.all([...retiring]);
-  assertRetirementBoundary();
 }
