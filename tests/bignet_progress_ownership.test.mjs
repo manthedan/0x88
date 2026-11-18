@@ -61,12 +61,20 @@ for (const workflow of ['Arena', 'Analysis']) {
                 hide,
                 () => 2048,
               )(controller.signal)
-            : new Function('bigNetFor', 'showModelProgress', 'hideModelProgress', 'ANALYSIS_BIG_NET_SESSION', `${analysis}\nreturn initBigNetsForRun;`)(
+            : new Function(
+                'bigNetFor',
+                'showModelProgress',
+                'hideModelProgress',
+                'ANALYSIS_BIG_NET_SESSION',
+                'analysisCacheOnlyBigNets',
+                `${analysis}\nreturn initBigNetsForRun;`,
+              )(
                 bigNetFor,
                 show,
                 hide,
                 { evalCacheEntries: 0 },
-              )(['t3'], () => controller.signal.aborted);
+                new Set(),
+              )(['t3'], () => controller.signal.aborted, controller.signal);
         await new Promise(setImmediate);
         const init = commands.find((message) => message.type === 'init');
         assert.ok(init, 'the real pooled searcher is waiting for model initialization');

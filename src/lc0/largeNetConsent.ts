@@ -21,6 +21,16 @@ let activeConsent: AbortController | undefined;
  */
 export type LargeNetConsent = false | 'cached' | 'download';
 
+/**
+ * A 'cached' approval's load found the model evicted or its body unreadable. The cache key can
+ * still be there, so the inspection is overridden to ask as for a download, never 'cached'.
+ */
+export function requestLargeNetRedownloadConsent(config: BigNetConfig, signal?: AbortSignal): Promise<LargeNetConsent> {
+  const uncached = (inspected: BigNetConfig, inspectSignal?: AbortSignal) =>
+    inspectLargeNetDownload(inspected, inspectSignal).then((state) => ({ ...state, cached: false }));
+  return requestLargeNetDownloadConsent(config, signal, true, undefined, uncached);
+}
+
 /** A newer picker choice supersedes an earlier metadata probe or open dialog. */
 export async function requestLargeNetConsent(...args: Parameters<typeof requestLargeNetDownloadConsent>): Promise<boolean> {
   return (await requestLargeNetDownloadConsent(...args)) !== false;
