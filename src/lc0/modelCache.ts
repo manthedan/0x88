@@ -120,6 +120,8 @@ export interface Lc0ModelLoadOptions {
   maxCacheBytes?: number;
   /** Injectable for tests or non-browser hosts; IndexedDB is used by default. */
   metadataStore?: Lc0ModelVerificationMetadataStore;
+  /** Set by prefetchLc0ModelToCache: fail instead of downloading bytes Cache Storage cannot keep. */
+  cacheOnly?: boolean;
 }
 
 /**
@@ -786,6 +788,7 @@ function modelLoadFlightKey(modelUrl: string, options: Lc0ModelLoadOptions): str
     options.minimumFreeBytesAfterCache ?? DEFAULT_CACHE_FREE_BYTES_RESERVE,
     options.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES,
     options.maxCacheBytes ?? DEFAULT_MAX_CACHE_BYTES,
+    options.cacheOnly ?? false,
   ]);
 }
 
@@ -986,6 +989,18 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   });
 }
 
+/**
+ * Download, verify and store a model in Cache Storage through the normal
+ * loader, without returning its bytes. Resolves true when Cache Storage holds
+ * verified bytes (already, or now), false when the verified bytes could not be
+ * stored (cache.put failed). Rejects before downloading when Cache Storage or
+ * its quota cannot keep the model.
+ */
+export async function prefetchLc0ModelToCache(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<boolean> {
+  const result = await loadLc0ModelForOrt(modelUrl, { ...options, cache: true, cacheOnly: true });
+  return result.mode === 'cache';
+}
+
 async function fetchUncachedVerifiedModel(
   modelUrl: string,
   resolved: ResolvedModelArtifact,
@@ -996,6 +1011,8 @@ async function fetchUncachedVerifiedModel(
   storagePersistent?: boolean,
 ): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
+  // A prefetch would download bytes only to drop them; its caller loads them itself.
+  if (options.cacheOnly) throw new Error(`LC0 model cannot be cached here (${cacheStatus}): ${modelUrl}`);
   if (options.allowUnverified && !options.onProgress) {
     return {
       model: resolved.url,
