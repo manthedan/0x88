@@ -153,6 +153,7 @@ import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebH
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
+import { untilAborted } from './modelCache.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, type Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import {
@@ -764,12 +765,12 @@ function activeCentipawnEvaluatorKeys(): Set<string> {
   );
 }
 
-function centipawnEvaluator(variant: string): Promise<Evaluator> {
+function centipawnEvaluator(variant: string, signal?: AbortSignal): Promise<Evaluator> {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
   const model = centipawnModel();
   const key = centipawnEvaluatorCacheKey(variant);
-  return centipawnCache.get(
+  const loading = centipawnCache.get(
     key,
     {
       spec: {
@@ -793,6 +794,7 @@ function centipawnEvaluator(variant: string): Promise<Evaluator> {
     },
     () => activeCentipawnEvaluatorKeys().has(key),
   );
+  return untilAborted(loading, signal); // Stop cancels this consumer, not the selected seat's shared owner.
 }
 
 function disposeUnusedCentipawnEvaluators(): void {
@@ -3083,7 +3085,8 @@ function buildEngines() {
     async (positions, signal) => {
       const current = positions[positions.length - 1];
       const fen = boardToFen(current);
-      const evaluator = await centipawnEvaluator(row.variant);
+      const evaluator = await centipawnEvaluator(row.variant, signal);
+      signal.throwIfAborted();
       const timed = arenaBudgetMode() === 'movetime';
       const result = await chooseMove(current, evaluator, {
         visits: timed ? undefined : row.strength,
@@ -3239,7 +3242,8 @@ function buildEngines() {
     }
   };
   const centipawnWarmup = (row: EngineRow) => async (signal: AbortSignal) => {
-    const evaluator = await centipawnEvaluator(row.variant);
+    const evaluator = await centipawnEvaluator(row.variant, signal);
+    signal.throwIfAborted();
     await chooseMove(warmupPositions[0], evaluator, {
       visits: 1,
       batchSize: 1,
@@ -4786,7 +4790,13 @@ async function reloadLc0Evaluator(): Promise<void> {
   disposeLc0Resources();
   reconcileActiveRuntimeFallbackWarning();
   renderCacheInfo();
-  await loadLc0Evaluator();
+  hideDownloadProgress();
+  refreshSeatControls();
+  void renderRuntimeBadge();
+  if (!running && !startPending) {
+    el('start').toggleAttribute('disabled', false);
+    el('message').textContent = readyMessage();
+  }
 }
 
 function setBenchResult(result: unknown): void {

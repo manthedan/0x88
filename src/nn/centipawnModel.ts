@@ -32,9 +32,10 @@ export async function createCentipawnOrtSession(modelUrl: string, deps = DEFAULT
   // Synchronous consumption keeps original bytes out of the suspended async
   // session-creation frame. Unfolded/provider fallback reacquires verified bytes.
   const create = () => {
+    signal?.throwIfAborted();
     const input = owned.input!;
     owned.input = undefined;
-    return deps.create(input, { reloadModel, rejectModelParseErrors: () => isMetadataTrustedModel(owned.info) });
+    return deps.create(input, { signal, reloadModel, rejectModelParseErrors: () => isMetadataTrustedModel(owned.info) });
   };
   try {
     return await create();

@@ -92,9 +92,11 @@ test('the pinned loader follows the ONNX artifact identity, not metadata or a cl
 });
 
 test('Centipawn uses manifest-pinned SHA-256 and Cache Storage; second creation and lazy fallback read verified cache', async (t) => {
-  const env = await environment(t);
+  const env = await environment(t),
+    controller = new AbortController();
+  await createCentipawnOrtSession(URL, env.deps, controller.signal);
   await createCentipawnOrtSession(URL, env.deps);
-  await createCentipawnOrtSession(URL, env.deps);
+  assert.equal(env.sessions[0].options.signal, controller.signal, 'the owner signal reaches native ORT preparation, not just byte loading');
   assert.equal(env.loads[0].verification, 'hashed');
   assert.equal(env.loads[0].sha256Valid, true);
   assert.equal(env.loads[1].cacheStatus, 'hit');

@@ -5,6 +5,7 @@ import test from 'node:test';
 import { analysisCanPrepare } from '../src/lc0/analysisRunState.ts';
 import { loadRetirableResource } from '../src/lc0/arenaResourceLoad.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../src/lc0/engineRetirement.ts';
+import { untilAborted } from '../src/lc0/modelCache.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from '../src/lc0/wholeOnnxWebgpuEvaluator.ts';
 
 const source = (name) => readFileSync(new URL(`../src/lc0/${name}.ts`, import.meta.url), 'utf8');
@@ -207,6 +208,88 @@ for (const pendingNative of [false, true])
     await retirement;
     assert.equal(retired, true);
   });
+
+test('Arena Stop interrupts a Centipawn warmup consumer without canceling the selected shared owner', async () => {
+  const loading = Promise.withResolvers(),
+    controller = new AbortController();
+  let searches = 0,
+    request;
+  const text = source('arenaBrowser');
+  const warmup = compile(
+    `
+    ${extract(text, 'function centipawnEvaluator(', 'function disposeUnusedCentipawnEvaluators(')}
+    ${extract(text, '  const centipawnWarmup =', '  const stockfishWarmupStatus =')}
+    return centipawnWarmup({variant:'ort'});
+  `,
+    {
+      untilAborted,
+      centipawnRuntimeForVariant: () => 'ort',
+      centipawnRuntimeFallbackForVariant: () => false,
+      centipawnModel: () => ({ modelId: 's4', onnx: 'model', meta: 'meta' }),
+      centipawnEvaluatorCacheKey: () => 'held',
+      centipawnCache: {
+        get: (_key, value) => {
+          request = value;
+          return loading.promise;
+        },
+      },
+      centipawnEngineLabel: () => 'Centipawn',
+      CENTIPAWN_HYBRID_MANIFEST_URL: 'manifest',
+      params: new URLSearchParams(),
+      arenaCacheEntries: () => 128,
+      warmupPositions: [{}],
+      centipawnSearchOptions: {},
+      chooseMove: async () => {
+        searches++;
+      },
+    },
+  );
+  const pending = warmup(controller.signal),
+    settled = pending.then(
+      () => 'completed',
+      (error) => error.name,
+    );
+  controller.abort();
+  const result = await Promise.race([settled, new Promise((resolve) => setImmediate(() => resolve('still-waiting')))]);
+  loading.resolve({});
+  await new Promise(setImmediate);
+  assert.equal(result, 'AbortError');
+  assert.equal(searches, 0);
+  assert.equal(request.options.signal, undefined, 'a match consumer does not own the selected seat cache');
+});
+
+test('Arena setup runtime edits invalidate resources but do not eagerly allocate Small', async () => {
+  const elements = new Map(),
+    events = [];
+  const reload = compile(
+    `let running=false,startPending=false;${extract(source('arenaBrowser'), 'async function reloadLc0Evaluator():', 'function setBenchResult(')}return reloadLc0Evaluator;`,
+    {
+      abort: { abort: () => events.push('abort') },
+      disposeLc0Resources: () => events.push('dispose'),
+      reconcileActiveRuntimeFallbackWarning: () => {},
+      renderCacheInfo: () => {},
+      hideDownloadProgress: () => events.push('hide'),
+      refreshSeatControls: () => events.push('controls'),
+      renderRuntimeBadge: async () => {},
+      readyMessage: () => 'Ready',
+      el: (id) => {
+        if (!elements.has(id))
+          elements.set(id, {
+            disabled: true,
+            toggleAttribute(_name, disabled) {
+              this.disabled = disabled;
+            },
+          });
+        return elements.get(id);
+      },
+      loadLc0Evaluator: () => assert.fail('only Start/autorun may load a setup runtime'),
+    },
+  );
+  await reload();
+  assert.deepEqual(events, ['abort', 'dispose', 'hide', 'controls']);
+  assert.equal(elements.get('start').disabled, false);
+  assert.equal(elements.get('message').textContent, 'Ready');
+});
 
 test('Arena forwards cancellation into whole-model initialization before any fetch', async () => {
   const create = compile(
