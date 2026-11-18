@@ -77,6 +77,7 @@ import {
   showDownloadProgress as ctxShowDownloadProgress,
   type PlayEngineUiState,
 } from './play/playEngineUi.ts';
+import { reloadForChangedOverrides } from './play/playOverrides.ts';
 import { BIG_NET_LEVELS, lqoSearchOptions, PLAY_DRAW_SCORE, PLAY_SEARCH_CONTEMPT_LIMIT } from './play/playSearchSettings.ts';
 import { playMaterial } from './playMaterial.ts';
 import { committedPlayOpponent, type PlayOpponentState, transitionPlayOpponent } from './playOpponentState.ts';
@@ -1328,7 +1329,11 @@ function ctxEnsureOpeningNames(ctx: PlayContext): void {
     .then((index: unknown) => {
       if (index && typeof index === 'object' && !Array.isArray(index)) openingIndex = index as OpeningNameIndex;
     })
-    .catch(() => undefined);
+    .catch(() => undefined)
+    .then(() => {
+      // A failed fetch must not stick for the document: the next mount retries.
+      if (!openingIndex) openingIndexPromise = null;
+    });
   void openingIndexPromise.then(() => {
     if (!ctxIsDisposed(ctx) && openingIndex) ctxRender(ctx);
   });
@@ -2161,6 +2166,7 @@ function hasPlayBrowserDom(root: HTMLElement): boolean {
 /** Mounts Play on `scope.root`. Engines are not mount-scoped: they live in the module-level host and outlive this mount. */
 export function mountPlayBrowser(scope: MountScope): void {
   if (!hasPlayBrowserDom(scope.root)) return;
+  if (reloadForChangedOverrides(scope.url)) return;
   // Decided at mount: by teardown the URL may already show the next route.
   const retireCpuOnUnmount = isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu;
   const ctx = createPlayContext(scope);

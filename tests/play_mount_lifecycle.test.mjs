@@ -4,6 +4,7 @@
 // structural guarantees are checked from source at the end.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
@@ -398,11 +399,12 @@ function sourceFiles(dir) {
   });
 }
 
-test('location.reload sites only shrink, and Play has none', () => {
+test('location.reload sites only shrink, and Play keeps only its override-change reload', () => {
   // Ratchet: lower a count (or delete the row) when a reload goes; never raise one.
   const allowed = {
     'src/lc0/analysisBrowser.ts': 1,
     'src/lc0/arenaBrowser.ts': 1,
+    'src/lc0/play/playOverrides.ts': 1,
     'src/lc0/policyOnlyBrowser.ts': 1,
     'src/routes/app/analysis/+page.svelte': 1,
     'src/routes/single-engine/+page.svelte': 1,
@@ -415,6 +417,62 @@ test('location.reload sites only shrink, and Play has none', () => {
   for (const [file, count] of Object.entries(actual)) assert.ok(count <= (allowed[file] ?? 0), `${file}: ${count} location.reload call(s)`);
   assert.equal(actual['src/lc0/playBrowser.ts'], undefined);
   assert.equal(actual['src/routes/app/play/+page.svelte'], undefined);
+});
+
+test('Play reloads only when a remount changes the dev overrides this document loaded with', async () => {
+  const { createOverrideGate } = await import('../src/lc0/play/playOverrides.ts');
+  const gate = createOverrideGate();
+  const at = (query) => new URL(`https://0x88.test/app/play${query}`);
+  assert.equal(gate(at('?ep=wasm&assetBase=https://a.cdn')), false, 'the first mount defines the document');
+  assert.equal(gate(at('?assetBase=https://a.cdn&ep=wasm')), false, 'order does not matter');
+  // ?model= is read per mount, so changing it stays a client-side remount.
+  assert.equal(gate(at('?ep=wasm&assetBase=https://a.cdn&model=/m.onnx')), false);
+  for (const changed of ['', '?ep=webgpu&assetBase=https://a.cdn', '?ep=wasm', '?ep=wasm&assetBase=https://a.cdn&ortThreads=4']) {
+    assert.equal(gate(at(changed)), true, changed || 'overrides dropped');
+  }
+  // Ordinary navigation without overrides never reloads.
+  const plain = createOverrideGate();
+  assert.equal(plain(at('')), false);
+  assert.equal(plain(at('?model=/m.onnx')), false);
+  assert.equal(plain(at('')), false);
+});
+
+test('Play checks its overrides before it creates any engine', () => {
+  const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
+  const mount = play.slice(play.indexOf('export function mountPlayBrowser('));
+  const reload = mount.indexOf('reloadForChangedOverrides(scope.url)');
+  assert.ok(reload > 0, 'mountPlayBrowser consults the override gate');
+  assert.ok(reload < mount.indexOf('createPlayContext(scope)'), 'before the mount builds its context');
+  assert.ok(reload < mount.indexOf('ctxInit(ctx)'), 'before any engine starts');
+});
+
+test('a failed opening-index fetch is retried by a later mount', async () => {
+  const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
+  const code = play.slice(play.indexOf('let openingIndex:'), play.indexOf('function ctxOpeningAt('));
+  const responses = [Promise.reject(new TypeError('offline')), Promise.resolve({ ok: true, json: async () => ({ k: ['A00', 'Start'] }) })];
+  const renders = [];
+  const ensure = new Function(
+    'fetch',
+    'resolvePublicAssetUrl',
+    'START_FEN',
+    'ctxIsDisposed',
+    'ctxRender',
+    `${stripTypeScriptTypes(code)}; return { ensure: ctxEnsureOpeningNames, index: () => openingIndex };`,
+  )(
+    () => responses.shift(),
+    (url) => url,
+    'start',
+    () => false,
+    (ctx) => renders.push(ctx.id),
+  );
+  const mount = (id) => ({ id, moves: ['e2e4'], startFen: 'start', openingNamesRequested: false });
+  ensure.ensure(mount('a'));
+  for (let i = 0; i < 5; i++) await new Promise(setImmediate);
+  assert.equal(ensure.index(), null);
+  ensure.ensure(mount('b'));
+  for (let i = 0; i < 5; i++) await new Promise(setImmediate);
+  assert.deepEqual(ensure.index(), { k: ['A00', 'Start'] }, 'the next mount fetches again');
+  assert.deepEqual(renders, ['b']);
 });
 
 test('Play keeps per-mount state off the module and registers listeners only through its scope', () => {
