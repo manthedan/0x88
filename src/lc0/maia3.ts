@@ -332,9 +332,19 @@ export class Maia3BrowserEvaluator {
     const create = async (loaded: Lc0ModelLoadResult) => {
       options.signal?.throwIfAborted();
       const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
+      // Publish the close once, synchronously when an abort starts it: an owner's
+      // retirement snapshot taken right after abort() must already include it.
+      let closing: Promise<void> | undefined;
+      const close = () => {
+        if (closing) return closing;
+        closing = disposeOrtWorker(worker);
+        options.onInitCleanup?.(closing);
+        return closing;
+      };
       try {
         const names = await Maia3BrowserEvaluator.postInit(
           worker,
+          close,
           loaded.model,
           options.ep,
           options.signal,
@@ -348,10 +358,9 @@ export class Maia3BrowserEvaluator {
         evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
         return evaluator;
       } catch (error) {
-        const closing = disposeOrtWorker(worker);
-        options.onInitCleanup?.(closing);
-        if (options.signal?.aborted) void closing.catch(() => undefined);
-        else await closing;
+        const closed = close();
+        if (options.signal?.aborted) void closed.catch(() => undefined);
+        else await closed;
         throw error;
       }
     };
@@ -385,6 +394,7 @@ export class Maia3BrowserEvaluator {
 
   private static postInit(
     worker: Worker,
+    close: () => Promise<void>,
     model: string | ArrayBuffer,
     ep?: Maia3BrowserEvaluatorOptions['ep'],
     signal?: AbortSignal,
@@ -401,7 +411,7 @@ export class Maia3BrowserEvaluator {
       };
       const onAbort = () => {
         cleanup();
-        void disposeOrtWorker(worker).catch(() => undefined);
+        void close().catch(() => undefined);
         reject(new DOMException('Maia3 cancelled', 'AbortError'));
       };
       const onError = (event: ErrorEvent) => {
