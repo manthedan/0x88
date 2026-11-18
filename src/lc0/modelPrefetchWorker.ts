@@ -1,0 +1,36 @@
+// Throwaway worker for phone cold loads (largeNetDownload.ts prefetchLargeNetToCache).
+// It imports only the model cache, never ORT; its owner terminates it after one reply.
+import { prefetchLc0ModelToCache } from './modelCache.ts';
+
+export type ModelPrefetchRequest = {
+  type: 'prefetch';
+  modelUrl: string;
+  requestPersistentStorage?: boolean;
+  minimumFreeBytesAfterCache?: number;
+};
+
+export type ModelPrefetchReply =
+  | { type: 'progress'; loadedBytes: number; totalBytes?: number }
+  | { type: 'done'; cached: boolean }
+  | { type: 'error'; error: string };
+
+const post = (reply: ModelPrefetchReply) => self.postMessage(reply);
+
+self.addEventListener('message', (event: MessageEvent<ModelPrefetchRequest>) => {
+  const { type, modelUrl, requestPersistentStorage, minimumFreeBytesAfterCache } = event.data;
+  if (type !== 'prefetch') return;
+  // ~2 MB steps, like the search worker, so a large net does not post once per chunk.
+  let lastReported = -Infinity;
+  prefetchLc0ModelToCache(modelUrl, {
+    requestPersistentStorage,
+    minimumFreeBytesAfterCache,
+    onProgress: (loadedBytes, totalBytes) => {
+      if (loadedBytes - lastReported < 2_000_000 && loadedBytes !== totalBytes) return;
+      lastReported = loadedBytes;
+      post({ type: 'progress', loadedBytes, totalBytes });
+    },
+  }).then(
+    (cached) => post({ type: 'done', cached }),
+    (error: unknown) => post({ type: 'error', error: error instanceof Error ? error.message : String(error) }),
+  );
+});
