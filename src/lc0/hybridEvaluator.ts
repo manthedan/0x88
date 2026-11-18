@@ -51,6 +51,8 @@ export class Lc0WebHybridEvaluator {
   private runtimePromise?: Promise<Lc0WebHybridEvaluatorRuntime>;
   private currentRuntime?: Lc0WebHybridEvaluatorRuntime;
   private readonly evaluationQueue = new ExclusiveQueue();
+  // The pack loads lazily inside the first evaluation, which dispose() drains.
+  private readonly owner = new AbortController();
   private disposed = false;
   private disposePromise?: Promise<void>;
 
@@ -88,6 +90,7 @@ export class Lc0WebHybridEvaluator {
         inputBackend: this.inputBackend,
         legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
+        signal: this.owner.signal,
       });
       runtimePromise
         .then((runtime) => {
@@ -144,6 +147,7 @@ export class Lc0WebHybridEvaluator {
   async dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise;
     this.disposed = true;
+    this.owner.abort();
     this.disposePromise = (async () => {
       await this.evaluationQueue.idle();
       const runtimePromise = this.runtimePromise;

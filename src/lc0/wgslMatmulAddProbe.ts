@@ -8056,6 +8056,8 @@ function wgslHeadsFootprintCategories(): Record<string, Lc0WebExecutionFootprint
 
 export type Lc0WebHybridRuntimeCreateOptions = Omit<Lc0WebHybridEvaluationOptions, 'input'> & {
   encoderProfileOnly?: boolean;
+  /** Owner cancellation for the lazy pack download. */
+  signal?: AbortSignal;
 };
 
 class Lc0WebHybridRuntime {
@@ -8173,6 +8175,7 @@ class Lc0WebHybridRuntime {
     const initialization = await Promise.allSettled([
       loadLc0WebModelPack(options.packUrl, {
         verifyShards: options.verifyShards ?? true,
+        signal: options.signal,
         tensorNames: Array.from(
           new Set([
             ...inputBodyTensorNameList(),
