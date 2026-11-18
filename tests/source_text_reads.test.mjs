@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { ALLOWLIST_PATH, compareWithAllowlist, inventory, loadAllowlist, scanTestSource, whoReads } from '../scripts/check_source_text_reads.mjs';
+import {
+  ALLOWLIST_PATH,
+  compareWithAllowlist,
+  formatAllowlist,
+  inventory,
+  loadAllowlist,
+  scanTestSource,
+  whoReads,
+} from '../scripts/check_source_text_reads.mjs';
 
 // Paths under src/fake/ do not exist, so this file never shows up in the real inventory.
 const tree = {
@@ -70,7 +79,20 @@ test('cwd-relative, root-joined and helper-argument paths count', () => {
 test('who-reads matches exact files and directory scans that cover them', () => {
   const found = { 'tests/a.test.mjs': ['src/fake/util.ts'], 'tests/b.test.mjs': ['src/'], 'tests/c.test.mjs': ['src/fake/playBrowser.ts'] };
   assert.deepEqual(
-    whoReads(found, 'src/fake/util.ts').map((hit) => hit.test),
+    whoReads(found, 'src/fake/util.ts', tree.files).map((hit) => hit.test),
     ['tests/a.test.mjs', 'tests/b.test.mjs'],
   );
+  // A bare file name resolves to its src path first, so the src/ scan still counts.
+  assert.deepEqual(
+    whoReads(found, 'util.ts', tree.files).map((hit) => hit.test),
+    ['tests/a.test.mjs', 'tests/b.test.mjs'],
+  );
+});
+
+test('--update output is laid out exactly as Biome formats the committed allowlist', () => {
+  const committed = readFileSync(new URL(`../${ALLOWLIST_PATH}`, import.meta.url), 'utf8');
+  // The committed file passes `biome check` in CI and holds both short (inline) and long (expanded) reads arrays.
+  assert.match(committed, /"reads": \["/);
+  assert.match(committed, /"reads": \[\n/);
+  assert.equal(`${formatAllowlist(JSON.parse(committed))}\n`, committed);
 });
