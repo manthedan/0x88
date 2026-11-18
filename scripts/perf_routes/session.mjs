@@ -13,17 +13,23 @@ import {
   jsBytesByRoute,
   naturalVisibilityValid,
   peakFootprint,
+  platformProblem,
   requestFailures,
   safariWebContentPid,
 } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
 import { checkSessionCancellation, cleanupMarker, safariCreationRefused, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
+import { LINUX_CHROME_ARGS, LINUX_LIMITATION, linuxFootprintReader } from './linux_memory.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
 const probe = `(() => {${WORKER_READY_SCRIPT}})();\n${readFileSync(new URL('./probe.js', import.meta.url), 'utf8')}`;
+const linux = platform() === 'linux';
+// The Linux reader keeps per-PID sampled peaks, so it is created once per session.
+const readChromeFootprint = linux ? linuxFootprintReader() : readFootprint;
 const result = {
   ...spec,
+  platform: platform(),
   at: new Date().toISOString(),
   host: { hostname: hostname(), platform: platform(), release: release(), loadBefore: loadavg() },
   status: 'invalid',
@@ -111,7 +117,7 @@ async function sample() {
   const sampledPhase = phase;
   try {
     const { render, gpu } = cdp
-      ? await chromeFootprint(chromePids, readFootprint)
+      ? await chromeFootprint(chromePids, readChromeFootprint)
       : { render: footprintSum([safariPid], readFootprint([safariPid], { reset: true }), 'Safari WebContent'), gpu: null };
     result.samples.push({
       ms: Date.now() - t0,
@@ -120,6 +126,7 @@ async function sample() {
       gpuMb: gpu?.cur ?? null,
       rendererIntervalMb: render.interval,
       gpuIntervalMb: gpu?.interval ?? null,
+      ...(gpu?.vram === undefined ? {} : { gpuVramMb: gpu.vram }),
     });
   } catch (e) {
     samplingError ??= e;
@@ -142,7 +149,9 @@ async function uaMemory(label) {
 }
 try {
   checkSessionCancellation(outFile, signal);
-  if (platform() !== 'darwin') throw Error('OS footprint gate currently requires macOS pidfp; no RSS substitution');
+  const unsupported = platformProblem(spec);
+  if (unsupported) throw Error(unsupported);
+  if (linux) result.limitations.push(LINUX_LIMITATION);
   proxy = await startCountingProxy(spec.base, { htmlScript: probe });
   signal.throwIfAborted();
   if (spec.browser === 'chrome') {
@@ -151,11 +160,13 @@ try {
     markBrowserStarting();
     browser = await chromium
       .launch({
-        channel: 'chrome',
+        // Linux: Playwright's Chromium in new-headless mode (not headless-shell); PERF_ROUTES_CHROMIUM
+        // points at a specific build when the installed Playwright expects a revision that is absent.
+        ...(linux ? { channel: 'chromium', executablePath: process.env.PERF_ROUTES_CHROMIUM || undefined } : { channel: 'chrome' }),
         headless: true,
         handleSIGINT: false,
         handleSIGTERM: false,
-        args: ['--enable-blink-features=ForceEagerMeasureMemory'],
+        args: ['--enable-blink-features=ForceEagerMeasureMemory', ...(linux ? LINUX_CHROME_ARGS : [])],
       })
       .catch((error) => {
         // Playwright closes a failed launch before rejecting.
@@ -257,6 +268,7 @@ try {
   const active = result.samples.filter((s) => s.phase !== 'residual');
   result.metrics['memory.rendererPeakMb'] = Math.max(result.navigationPeakMb ?? 0, ...active.map((s) => s.rendererIntervalMb));
   if (cdp) result.metrics['memory.gpuPeakMb'] = Math.max(...active.map((s) => s.gpuIntervalMb));
+  if (linux) result.metrics['memory.gpuVramPeakMb'] = Math.max(...active.map((s) => s.gpuVramMb));
   // Total is the simultaneous sampled sum, NOT the sum of independent high-water marks.
   result.metrics['memory.peakMb'] = peakFootprint(spec.browser, active, result.navigationPeakMb ?? 0);
   const settled = active.filter((s) => s.ms >= active.at(-1).ms - 2000);
@@ -308,6 +320,16 @@ try {
   // UA measurement triggers GC (eager with our Chrome flag). Never request it until
   // ALL natural footprint, worker, speed, input and long-task observations are frozen.
   await uaMemory('postResidualGc');
+  if (linux) {
+    // A SwiftShader/llvmpipe fallback would silently measure the wrong machine. Checked last so the
+    // extra adapter object cannot touch any natural observation.
+    result.webgpuAdapter = await evaluate(`(async () => {
+      const a = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
+      return a && { vendor: a.info.vendor, architecture: a.info.architecture, device: a.info.device, description: a.info.description, fallback: a.info.isFallbackAdapter };
+    })()`);
+    if (!result.webgpuAdapter || result.webgpuAdapter.fallback || /swiftshader|llvmpipe/i.test(JSON.stringify(result.webgpuAdapter)))
+      throw Error(`No hardware WebGPU adapter: ${JSON.stringify(result.webgpuAdapter)}`);
+  }
   result.status = 'ok';
 } catch (error) {
   if (evaluate && !signal.aborted)

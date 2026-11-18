@@ -15,6 +15,8 @@ export const HELP = `npm run perf:routes -- --baseline <built-dir|commit> --cand
   --build-only                  prepare archived product builds, no measurements
   --resume                      continue an existing --out DIR (same arms/options); start it if absent
   --dry-run                     validate/print plan without building or writing
+Linux: --browser chrome only, NVIDIA GPU + nvidia-smi; PERF_ROUTES_CHROMIUM=<chrome binary> overrides
+  Playwright's Chromium. A separate datapoint: never compared with macOS runs.
 Full gate: seven journeys, >=5 interleaved repeats, 60s analysis, 20s settle.
 Exit: 0 clean, 1 regressed, 2 incomplete/noisy/invalid. No push or deployment.`;
 
@@ -70,6 +72,16 @@ export function parseArgs(argv) {
     throw Error('A machine-wide --benchlock or --lock-dir is required');
   return options;
 }
+
+// Linux is a Chrome/NVIDIA-only second datapoint (no Safari, different memory counters).
+export function platformProblem(options, os = process.platform) {
+  if (os === 'darwin') return null;
+  if (os !== 'linux') return `perf:routes measures memory on macOS or Linux only, not ${os}`;
+  return options.browser === 'chrome' ? null : 'On Linux pass --browser chrome (Safari is macOS-only)';
+}
+
+// Older rows only carry host.platform; synthetic test rows carry neither.
+export const runPlatform = (row) => row.platform ?? row.host?.platform;
 
 export function plan(options) {
   const browsers = options.browser === 'all' ? ['safari', 'chrome'] : [options.browser];
@@ -146,7 +158,9 @@ export function footprintSum(pids, readings, label) {
     (sum, pid) => {
       const row = readings.get(pid);
       if (!validFootprint(row)) throw Error(`Missing/invalid ${label} footprint for PID ${pid}`);
-      return { cur: sum.cur + row.cur, life: sum.life + row.life, interval: sum.interval + row.interval };
+      const total = { cur: sum.cur + row.cur, life: sum.life + row.life, interval: sum.interval + row.interval };
+      // Linux rows break out VRAM (already inside cur); macOS rows have no such field.
+      return row.vram === undefined ? total : { ...total, vram: (sum.vram ?? 0) + row.vram };
     },
     { cur: 0, life: 0, interval: 0 },
   );
@@ -154,14 +168,15 @@ export function footprintSum(pids, readings, label) {
 
 export async function chromeFootprint(discover, read) {
   const first = await discover();
-  const initial = read([...first.rendererPids, ...first.gpuPids], { reset: true });
+  // macOS reads are synchronous; the Linux reader is async.
+  const initial = await read([...first.rendererPids, ...first.gpuPids], { reset: true });
   const gpu = footprintSum(first.gpuPids, initial, 'Chrome GPU');
   const unreadable = first.rendererPids.filter((pid) => !validFootprint(initial.get(pid)));
   if (!unreadable.length) return { render: footprintSum(first.rendererPids, initial, 'renderer'), gpu };
 
   const current = await discover();
   if (unreadable.some((pid) => current.rendererPids.includes(pid))) footprintSum(first.rendererPids, initial, 'renderer');
-  const refreshed = read([...current.rendererPids, ...current.gpuPids], { reset: true });
+  const refreshed = await read([...current.rendererPids, ...current.gpuPids], { reset: true });
   // The first read reset live counters. Carry those high-water marks into the retried sample.
   for (const [pid, row] of refreshed) {
     const previous = initial.get(pid);
@@ -249,6 +264,10 @@ export const REQUIRED = [
   'jsBytes',
 ];
 export function compareRuns(runs, options) {
+  const platforms = [...new Set(runs.map(runPlatform).filter(Boolean))];
+  // macOS phys_footprint and Linux Pss_Dirty+VRAM measure different things; never mix them in one verdict.
+  if (platforms.length > 1) throw Error(`Refusing to compare runs from different platforms: ${platforms.join(', ')}`);
+  const platform = platforms[0] ?? null;
   const groups = [...new Set(plan(options).map((r) => `${r.browser}/${r.journey}`))];
   return groups.map((key) => {
     const [browser, journey] = key.split('/');
@@ -272,6 +291,7 @@ export function compareRuns(runs, options) {
       ...(journey.startsWith('analysis') || journey.startsWith('play') ? ['inputLatencyMs'] : []),
       ...(browser === 'chrome' && journey.startsWith('analysis') ? ['longTaskCount', 'longTaskTotalMs', 'longTaskP95Ms'] : []),
       ...(browser === 'chrome' ? ['memory.gpuPeakMb'] : []),
+      ...(platform === 'linux' ? ['memory.gpuVramPeakMb'] : []),
     ];
     const names = [...new Set([...required, ...rows.flatMap((r) => Object.keys(r.metrics ?? {}))])];
     const metrics = names.map((name) =>
@@ -289,6 +309,7 @@ export function compareRuns(runs, options) {
     const missing = metrics.filter((m) => required.includes(m.name) && m.status === 'unavailable');
     const incomplete = rows.length !== options.repeats * 2 || rows.some((r) => r.status !== 'ok') || missing.length > 0;
     return {
+      platform,
       browser,
       journey,
       invalid: rows.filter((r) => r.status !== 'ok').map((r) => ({ arm: r.arm, repeat: r.repeat, error: r.error })),

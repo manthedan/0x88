@@ -7,7 +7,7 @@ import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { linkAssets, localAssets } from './assets.mjs';
-import { compareRuns, HELP, parseArgs, plan, previewEnvironment } from './gate.mjs';
+import { compareRuns, HELP, parseArgs, plan, platformProblem, previewEnvironment } from './gate.mjs';
 import {
   acquireLock,
   cancellationMarker,
@@ -160,6 +160,8 @@ function harnessHash() {
   return hash.digest('hex');
 }
 async function run(signal) {
+  const unsupported = platformProblem(args);
+  if (unsupported && !args['build-only']) throw Error(unsupported);
   const out = resolve(args.out ?? `.local-dev-artifacts/perf-routes/${new Date().toISOString().replace(/[:.]/g, '-')}`);
   if (args.benchlock && !existsSync(args.benchlock)) throw Error('benchlock does not exist');
   const sources = {};
@@ -288,6 +290,11 @@ function report(dir) {
     `Completed attempts: ${runs.length}/${plan(options).length}. Regressed metrics: ${flagged}/${metrics.length} (${fmt(metrics.length ? (flagged / metrics.length) * 100 : 0)}%).`,
     `Exempted aborts: ${runs.reduce((n, r) => n + (r.teardownAborts?.length ?? 0), 0)} at teardown/transitions; ${runs.reduce((n, r) => n + (r.optionalPrefetchFailures?.filter((entry) => entry.clientAborted).length ?? 0), 0)} optional.`,
     ...(options.repeats === 1 ? ['Same-build smoke only; at least five repeats per arm are required for a gate verdict.'] : []),
+    ...(summary[0]?.platform === 'linux'
+      ? [
+          'Platform: **linux** (Chromium, NVIDIA). Memory = smaps_rollup Pss_Dirty+SwapPss per process plus nvidia-smi VRAM in the GPU process (`memory.gpuVramPeakMb` alone); peaks are sampled. Never compare with macOS results.',
+        ]
+      : []),
     `Gate: **${summary.some((s) => s.status === 'regressed') ? 'REGRESSED' : summary.some((s) => s.status !== 'clean') ? 'INCOMPLETE / NOISY' : 'CLEAN'}**. A subset is not a full merge gate.`,
     'Memory MB = MiB. Peak total = simultaneous sampled renderer+owned Chrome GPU; independent kernel renderer/GPU peaks are separate. Settled/residual = median final 2s of fixed 20s windows; no forced GC or plateau claim.',
     'UA postResidualGc memory is sampled only after every natural footprint/worker/task/speed observation is frozen; the API-triggered GC cannot affect the natural retention numbers.',
