@@ -30,8 +30,9 @@ gitignored model links. `node scripts/worktree_setup.mjs <worktree-path>` links
 both from the main checkout (plus `<worktree>/../models`, where the model links
 point), then checks every model in the lc0 and Maia3 manifests resolves at the
 right size. Rerunning it is safe; `--check` only verifies. A branch that
-changes `package-lock.json` needs its own `npm ci` instead of the shared
-install; a linked install gets its own Vite cache (`.vite-cache/`) so the two
+changes `package-lock.json` needs its own install: run `rm node_modules`
+first (it removes only the symlink), then `npm ci`. Running `npm ci` through the
+symlink deletes the main checkout's packages. A linked install gets its own Vite cache (`.vite-cache/`) so the two
 checkouts' dev servers do not clobber each other's optimized deps.
 
 `npm run hooks:install` installs an opt-in git pre-push hook. It is not
