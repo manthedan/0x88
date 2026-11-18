@@ -75,8 +75,16 @@ const server = createServer((req, res) => {
   }
   if (!existsSync(file) || statSync(file).isDirectory()) file = join(file, 'index.html');
   if (!existsSync(file)) {
-    res.writeHead(404);
-    res.end('Not found');
+    // Mirror Netlify: unknown paths get the build's 404.html page, still with status 404.
+    const notFoundPage = join(root, '404.html');
+    if (!existsSync(notFoundPage)) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+    if (req.method === 'HEAD') res.end();
+    else createReadStream(notFoundPage).pipe(res);
     return;
   }
   const encoded = encodedCandidate(req, file);

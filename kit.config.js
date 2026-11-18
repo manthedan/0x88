@@ -33,6 +33,9 @@ export default {
   adapter: adapter({
     pages: outDir,
     assets: outDir,
+    // Netlify answers unknown paths with /404.html (status 404). Kit's fallback is a client shell
+    // that renders src/routes/+error.svelte; prerendered pages are unaffected.
+    fallback: '404.html',
   }),
   csp: {
     mode: 'hash',

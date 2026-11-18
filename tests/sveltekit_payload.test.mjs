@@ -61,3 +61,13 @@ test('Kit 3 checks nested pages too', async (t) => {
   await writeFile(join(root, 'docs/index.html'), html.replaceAll('./_app/', '../_app/').replace('build.1', 'stale'));
   await assert.rejects(checkSvelteKitRuntimeId(root), /payload version mismatch/);
 });
+
+test('Kit 3 accepts the fallback shell, whose entries are root-absolute', async (t) => {
+  const { root, html } = await fixture(t);
+  await writeFile(join(root, '404.html'), html.replaceAll('./_app/', '/_app/'));
+  await checkSvelteKitRuntimeId(root);
+  await writeFile(join(root, '404.html'), html.replaceAll('./_app/', '/_app/').replace('build.1', 'stale'));
+  await assert.rejects(checkSvelteKitRuntimeId(root), /payload version mismatch/);
+  await writeFile(join(root, '404.html'), html.replaceAll('./_app/', '/_app/').replace('start.hash.js', 'start.gone.js'));
+  await assert.rejects(checkSvelteKitRuntimeId(root), { code: 'ENOENT' });
+});

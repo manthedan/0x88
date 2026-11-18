@@ -44,7 +44,10 @@ async function checkPayloadBuild(output, pages, runtimeId) {
     for (const entry of ['start', 'app']) {
       const imports = [...html.matchAll(new RegExp(`import\\(["']([^"']*\\/_app/immutable/entry/${entry}\\.[^"'/]+\\.js)["']\\)`, 'g'))];
       if (imports.length !== 1) throw new Error(`Missing SvelteKit ${entry} entry: ${page}`);
-      const path = resolve(dirname(page), imports[0][1]);
+      // Prerendered pages import relative to themselves; the 404.html fallback shell is served at
+      // any depth, so Kit gives it root-absolute URLs.
+      const url = imports[0][1];
+      const path = url.startsWith('/') ? join(output, url) : resolve(dirname(page), url);
       if (!path.startsWith(join(output, '_app', 'immutable', 'entry') + sep)) throw new Error(`Unsafe SvelteKit entry: ${path}`);
       await readFile(path, 'utf8');
     }
