@@ -67,7 +67,7 @@ for (const replacement of [
       phoneBigNetBlocked: () => false,
       phoneLargeNetsBlocked: () => false,
       bigNetSelectableSync: () => true,
-      requestLargeNetConsent: (config, signal) => {
+      requestAnalysisBigNetConsent: (config, signal) => {
         prompts.push({ key: config.key, signal });
         return probe.promise;
       },
@@ -343,7 +343,13 @@ test('Arena Start carries its consent to the load: a cache hit approves no downl
     captureCheckpointConfig: () => ({}),
     participants: [],
     compatibility: 'compatible',
-    schedule: [{}],
+    schedule: [{ whiteId: '0', blackId: '1' }],
+    byPid: new Map([
+      ['0', { engine: { id: 'sf-a' } }],
+      ['1', { engine: { id: 'sf-b' } }],
+    ]),
+    rowForEngineId: () => ({ family: 'sf', variant: 'lite' }),
+    isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
     saveArenaCheckpoint: async (saved) => {
       saves.push(saved.runId);
     },
@@ -455,6 +461,194 @@ for (const answer of [false, 'download']) {
     assert.equal(deps.arenaRunDownloads.has('bt4'), !!answer, 'only an accepted prompt approves the download');
   });
 }
+
+for (const outcome of ['declined', 'accepted', 'download-approved', 'resume']) {
+  test(`Arena resolves the first game's cache-only big-net load before replacing the checkpoint (${outcome})`, async () => {
+    const from = source.arena.indexOf('  // Lazy Small loading is still part of setup.');
+    const to = source.arena.indexOf('  if (startupCancelled()) {\n    // The save replaced', from);
+    assert.ok(from >= 0 && to > from, 'production boundaries: Start setup');
+    const start = stripTypeScriptTypes(`async function start() {\n${source.arena.slice(from, to)}}`);
+    const order = [];
+    const node = { textContent: '' };
+    const matchAbort = new AbortController();
+    const resume = outcome === 'resume' ? { runId: 'old' } : null;
+    const deps = {
+      arenaRunDownloads: new Set(),
+      arenaDownloadApprovals: new Set(),
+      checkedBigNetVariants: new Set(['bt4']),
+      BIG_NETS,
+      startupCancelled: () => false,
+      isMemoryConstrainedDevice: () => true,
+      matchAbort,
+      abort: matchAbort,
+      mountSignal: new AbortController().signal,
+      isStaleMount: () => false,
+      selectedSeatsNeedLc0Evaluator: () => false,
+      lc0Cache: {},
+      requestLargeNetDownloadConsent: async () => (outcome === 'download-approved' ? 'download' : 'cached'),
+      clearStartPending: () => order.push('clear'),
+      resume,
+      claimArenaCheckpoint: (saved) => saved,
+      createArenaCheckpoint: () => ({ runId: 'new', revision: 1 }),
+      captureCheckpointConfig: () => ({}),
+      participants: [],
+      compatibility: 'compatible',
+      schedule: [{ whiteId: '0', blackId: '1' }],
+      byPid: new Map([
+        ['0', { engine: { id: 'lc0-bt4' } }],
+        ['1', { engine: { id: 'sf-full' } }],
+      ]),
+      rowForEngineId: (id) => (id === 'lc0-bt4' ? { family: 'lc0', variant: 'bt4' } : { family: 'sf', variant: 'full' }),
+      isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
+      bigNetFor: async (variant, signal) => {
+        order.push(`load ${variant}`);
+        assert.equal(signal, matchAbort.signal);
+        assert.equal(node.hidden, false, 'setup Cancel stays available while the load is pending');
+        // The cache-only load found the net evicted and the re-asked download was declined.
+        if (outcome === 'declined') throw new Error('Lc0 BT4 is no longer cached and its download was not approved.');
+      },
+      saveArenaCheckpoint: async (saved) => {
+        order.push(`save ${saved.runId}`);
+      },
+      checkpointToken: { runId: 'old', revision: 3 },
+      checkpoint: { runId: 'old' },
+      checkpointProblem: '',
+      ArenaCheckpointConflictError: class extends Error {},
+      el: () => node,
+    };
+    const api = new Function(
+      'deps',
+      `let { ${Object.keys(deps)} } = deps;
+      ${start}
+      return { start, checkpoint: () => [checkpoint, checkpointToken] };`,
+    )(deps);
+    await api.start();
+    const expected = {
+      declined: ['load bt4', 'clear'],
+      accepted: ['load bt4', 'save new'],
+      'download-approved': ['save new'],
+      resume: ['save old'],
+    }[outcome];
+    assert.deepEqual(order, expected);
+    if (expected.includes('load bt4')) assert.equal(node.hidden, true, 'setup Cancel hides once the load settles');
+    if (outcome === 'declined') {
+      assert.deepEqual(api.checkpoint(), [{ runId: 'old' }, { runId: 'old', revision: 3 }], 'the previous tournament stays saved');
+      assert.match(node.textContent, /Engine preparation failed: .*no longer cached/);
+    }
+  });
+}
+
+for (const answer of [false, 'download']) {
+  test(`Analysis loads a cache-hit approval cache-only and asks before downloading an evicted net (accepted=${!!answer})`, async () => {
+    const inits = [];
+    const prompts = [];
+    let initialized = false;
+    const searcher = {
+      isInitializedFor: () => initialized,
+      async init(options) {
+        inits.push(options);
+        if (options.noDownload) throw new Error(`${LC0_MODEL_DOWNLOAD_NOT_APPROVED}: t3.onnx`);
+        initialized = true;
+      },
+    };
+    const cacheOnly = new Set(['t3']);
+    const declined = new Set();
+    const signal = new AbortController().signal;
+    const deps = {
+      bigNetFor: async (key) => ({ config: BIG_NETS[key], searcher, cacheOnly: cacheOnly.has(key) }),
+      showModelProgress() {},
+      hideModelProgress() {},
+      ANALYSIS_BIG_NET_SESSION: { evalCacheEntries: 0 },
+      analysisCacheOnlyBigNets: cacheOnly,
+      analysisDeclinedBigNetDownloads: declined,
+      LC0_MODEL_DOWNLOAD_NOT_APPROVED,
+      requestLargeNetRedownloadConsent: async (config, promptSignal) => {
+        prompts.push(config.key);
+        assert.equal(promptSignal, signal);
+        return answer;
+      },
+    };
+    const initBigNetsForRun = new Function(
+      'deps',
+      `const { ${Object.keys(deps)} } = deps;
+      ${extract(source.analysis, 'async function initBigNetsForRun(', '/** After initBigNetsForRun:')}
+      return initBigNetsForRun;`,
+    )(deps);
+    const prompt = { signal, current: () => true };
+    const errors = await initBigNetsForRun(['t3'], () => false, prompt);
+    assert.deepEqual(prompts, ['t3'], 'the evicted net is a download prompt, asked once');
+    if (answer) {
+      assert.deepEqual(inits, [{ evalCacheEntries: 0, noDownload: true }, { evalCacheEntries: 0 }]);
+      assert.equal(errors.size, 0);
+      assert.equal(cacheOnly.has('t3'), false, 'an accepted download covers later loads');
+    } else {
+      assert.deepEqual(inits, [{ evalCacheEntries: 0, noDownload: true }], 'a declined download never reaches the loader');
+      assert.match(errors.get('t3').message, /no longer cached and its download was not approved/);
+      assert.equal(cacheOnly.has('t3'), true);
+      // The next automatic run (Auto analysis stepping through a game) fails the row without asking again.
+      const again = await initBigNetsForRun(['t3'], () => false, prompt);
+      assert.deepEqual(prompts, ['t3'], 'a decline is remembered across automatic runs');
+      assert.match(again.get('t3').message, /not approved/);
+    }
+  });
+}
+
+test('a superseded Analysis run never asks to download a cache-only net', async () => {
+  const prompts = [];
+  const inits = [];
+  const searcher = {
+    isInitializedFor: () => false,
+    async init(options) {
+      inits.push(options);
+      throw new Error(`${LC0_MODEL_DOWNLOAD_NOT_APPROVED}: bt4.onnx`);
+    },
+  };
+  const deps = {
+    bigNetFor: async (key) => ({ config: BIG_NETS[key], searcher, cacheOnly: true }),
+    showModelProgress() {},
+    hideModelProgress() {},
+    ANALYSIS_BIG_NET_SESSION: { evalCacheEntries: 0 },
+    analysisCacheOnlyBigNets: new Set(['bt4']),
+    analysisDeclinedBigNetDownloads: new Set(),
+    LC0_MODEL_DOWNLOAD_NOT_APPROVED,
+    requestLargeNetRedownloadConsent: async (config) => {
+      prompts.push(config.key);
+      return 'download';
+    },
+  };
+  const initBigNetsForRun = new Function(
+    'deps',
+    `const { ${Object.keys(deps)} } = deps;
+    ${extract(source.analysis, 'async function initBigNetsForRun(', '/** After initBigNetsForRun:')}
+    return initBigNetsForRun;`,
+  )(deps);
+  // The row was removed while the cache-only load was pending: the run no longer prepares.
+  const errors = await initBigNetsForRun(['bt4'], () => false, { signal: new AbortController().signal, current: () => false });
+  assert.deepEqual(prompts, []);
+  assert.deepEqual(inits, [{ evalCacheEntries: 0, noDownload: true }]);
+  assert.equal(errors.size, 0, 'the next run reports on the current rows');
+});
+
+test('Analysis records only cache-hit row approvals as cache-only', async () => {
+  const consentFn = extract(source.analysis, 'const analysisCacheOnlyBigNets =', 'async function initBigNetsForRun(');
+  let answer;
+  const api = new Function(
+    'requestLargeNetDownloadConsent',
+    `${consentFn}\nreturn { ask: requestAnalysisBigNetConsent, cacheOnly: analysisCacheOnlyBigNets, declined: analysisDeclinedBigNetDownloads };`,
+  )(async () => answer);
+  const signal = new AbortController().signal;
+  answer = 'cached';
+  assert.equal(await api.ask(BIG_NETS.bt4, signal), true);
+  assert.deepEqual([...api.cacheOnly], ['bt4']);
+  answer = false;
+  assert.equal(await api.ask(BIG_NETS.bt4, signal), false);
+  assert.deepEqual([...api.cacheOnly], ['bt4'], 'a decline leaves the row unchanged');
+  api.declined.add('bt4');
+  answer = 'download';
+  assert.equal(await api.ask(BIG_NETS.bt4, signal), true);
+  assert.deepEqual([...api.cacheOnly], [], 'a download approval lifts the cache-only load');
+  assert.deepEqual([...api.declined], [], 'choosing the net again retries a declined download');
+});
 
 test('Arena Stop landing as the pool hands over the searcher skips the cache-only init', async () => {
   const controller = new AbortController();

@@ -4476,6 +4476,34 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       }
       if (consent === 'download') arenaRunDownloads.add(variant);
     }
+    // A 'cached' approval loads cache-only, and that load can still find the net evicted or
+    // unreadable and ask again. Load the first game's nets now (it would next anyway), so a
+    // decline there also keeps the previous tournament. Resumes keep their own checkpoint.
+    if (!resume && [...checkedBigNetVariants].some((variant) => !arenaRunDownloads.has(variant))) {
+      for (const pid of [schedule[0].whiteId, schedule[0].blackId]) {
+        const row = rowForEngineId(byPid.get(pid)!.engine!.id);
+        if (row?.family !== 'lc0' || !isLc0BigNetVariant(row.variant) || arenaRunDownloads.has(row.variant)) continue;
+        // Stop is hidden during setup; this button cancels a slow or stalled load.
+        el('cancelSetupLoad').hidden = false;
+        try {
+          await bigNetFor(row.variant, matchAbort.signal);
+        } catch (error) {
+          if (startupCancelled()) {
+            if (abort === matchAbort && !isStaleMount(mountSignal)) el('message').textContent = 'Tournament preparation stopped.';
+            return;
+          }
+          el('message').textContent = `Engine preparation failed: ${error instanceof Error ? error.message : String(error)}`;
+          clearStartPending();
+          return;
+        } finally {
+          if (abort === matchAbort && !isStaleMount(mountSignal)) el('cancelSetupLoad').hidden = true;
+        }
+        if (startupCancelled()) {
+          if (abort === matchAbort && !isStaleMount(mountSignal)) el('message').textContent = 'Tournament preparation stopped.';
+          return;
+        }
+      }
+    }
   }
 
   const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);

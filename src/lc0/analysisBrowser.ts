@@ -243,9 +243,10 @@ import {
   requestHiddenTabWork,
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
-import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { requestLargeNetDownloadConsent, requestLargeNetRedownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from './modelCache.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
 import {
@@ -612,9 +613,9 @@ function syncBrokerParticipants(rows: EngineRow[]): void {
 }
 type AnalysisBigNetKey = Extract<BigNetKey, 'bt4' | 't3'>;
 const ANALYSIS_BIG_NET_KEYS: readonly AnalysisBigNetKey[] = ['bt4', 't3'];
-async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
-  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
-  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, false, signal) };
+async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher; cacheOnly: boolean }> {
+  const key: AnalysisBigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
+  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, false, signal), cacheOnly: analysisCacheOnlyBigNets.has(key) };
 }
 let ground: Ground | null = null;
 let pvGround: Ground | null = null;
@@ -1418,7 +1419,7 @@ async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean, sig
         !phoneBigNetBlocked(config.key) &&
         bigNetSelectableSync(config) &&
         allowBt4Prompt &&
-        (await requestLargeNetConsent(config, signal ?? mountAbort.signal));
+        (await requestAnalysisBigNetConsent(config, signal ?? mountAbort.signal));
       if (signal?.aborted) return [];
       if (!allowed) next.variant = 'small';
     }
@@ -1988,12 +1989,38 @@ function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
   return [...keys];
 }
 
-async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boolean): Promise<Map<AnalysisBigNetKey, Error>> {
+/**
+ * Big nets approved on a phone because they were cached ('cached' consent). That approves no
+ * download: loading Lc0 Small (or anything else) can evict the net before the run loads it, so
+ * initBigNetsForRun loads these cache-only and asks again before downloading.
+ */
+const analysisCacheOnlyBigNets = new Set<AnalysisBigNetKey>();
+/** Cache-only nets whose download the user declined: automatic runs fail them without asking again. */
+const analysisDeclinedBigNetDownloads = new Set<AnalysisBigNetKey>();
+/** Phone/desktop large-net consent for a row choice; records a cache-hit approval. */
+async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortSignal): Promise<boolean> {
+  const consent = await requestLargeNetDownloadConsent(config, signal);
+  const key = config.key as AnalysisBigNetKey;
+  if (consent === 'cached') analysisCacheOnlyBigNets.add(key);
+  else if (consent === 'download') analysisCacheOnlyBigNets.delete(key);
+  // Choosing the net again is the explicit retry of a declined download.
+  if (consent) analysisDeclinedBigNetDownloads.delete(key);
+  return consent !== false;
+}
+/**
+ * `prompt` owns the download prompt a cache-only approval may need (bigNetFor().cacheOnly);
+ * `current` is false once the run is superseded, so a removed row is never asked about.
+ */
+async function initBigNetsForRun(
+  keys: AnalysisBigNetKey[],
+  cancelled: () => boolean,
+  prompt?: { signal: AbortSignal; current: () => boolean },
+): Promise<Map<AnalysisBigNetKey, Error>> {
   const errors = new Map<AnalysisBigNetKey, Error>();
   await Promise.all(
     keys.map(async (key) => {
       try {
-        const { config, searcher } = await bigNetFor(key);
+        const { config, searcher, cacheOnly } = await bigNetFor(key);
         // Checked before each attempt: a stopped run must not reload a pooled
         // session that Play or Arena may have taken back.
         if (cancelled()) return;
@@ -2005,11 +2032,34 @@ async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boo
         searcher.onDownloadProgress = (loaded, total) => {
           if (!cancelled()) showModelProgress(label, loaded, total, 'Downloading');
         };
-        try {
-          await searcher.init(ANALYSIS_BIG_NET_SESSION);
+        const load = async (options: { evalCacheEntries?: number; noDownload?: boolean }) => {
+          await searcher.init(options);
           // An init already in flight for other options resolves with those; reload once.
           if (cancelled() || searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) return;
-          await searcher.init(ANALYSIS_BIG_NET_SESSION);
+          await searcher.init(options);
+        };
+        try {
+          if (!cacheOnly) {
+            await load(ANALYSIS_BIG_NET_SESSION);
+            return;
+          }
+          try {
+            await load({ ...ANALYSIS_BIG_NET_SESSION, noDownload: true });
+          } catch (error) {
+            if (cancelled() || !(error instanceof Error && error.message.includes(LC0_MODEL_DOWNLOAD_NOT_APPROVED))) throw error;
+            const notApproved = () => new Error(`Lc0 ${config.name} is no longer cached and its download was not approved.`);
+            if (!prompt || analysisDeclinedBigNetDownloads.has(key)) throw notApproved();
+            if (!prompt.current()) return;
+            const consent = await requestLargeNetRedownloadConsent(config, prompt.signal);
+            if (cancelled()) return;
+            if (consent !== 'download') {
+              analysisDeclinedBigNetDownloads.add(key);
+              throw notApproved();
+            }
+            analysisCacheOnlyBigNets.delete(key);
+            if (!prompt.current()) return;
+            await load(ANALYSIS_BIG_NET_SESSION);
+          }
         } finally {
           if (!cancelled()) hideModelProgress();
         }
@@ -4578,7 +4628,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       analysisBigNetInit = { owner: controller, keys: uninitializedBigNets };
       let initErrors: Map<AnalysisBigNetKey, Error>;
       try {
-        initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+        const prompt = { signal: AbortSignal.any([controller.signal, mountAbort.signal]), current: () => analysisCanPrepare(analysisRunState, owner) };
+        initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted, prompt);
       } finally {
         if (analysisBigNetInit?.owner === controller) analysisBigNetInit = null;
       }
@@ -5878,7 +5929,7 @@ function wireEvents() {
         const request = new AbortController();
         pickerConsentAbort = request;
         const signal = AbortSignal.any([mountAbort.signal, request.signal]);
-        if (!(await requestLargeNetConsent(config, signal))) return;
+        if (!(await requestAnalysisBigNetConsent(config, signal))) return;
         if (signal.aborted || pickerConsentAbort !== request || engineRows[i] !== previousRow) return;
         if (!bigNetSelectableSync(config)) {
           el('message').textContent = bigNetUnavailableText(config);
