@@ -343,7 +343,8 @@ test('Play keeps per-mount state off the module and registers listeners only thr
   assert.doesNotMatch(play, /^const (params|pageDom|blockedModelOverride|LC0_SMALL_MODEL|playRuntimeFallbackAudits)\b/m);
   assert.doesNotMatch(play, /new URLSearchParams\(location\.search\)/, 'the URL is read per mount from scope.url');
   assert.doesNotMatch(page, /afterNavigate|onMount/);
-  assert.match(page, /\{#key page\.url\.search\}/);
+  // Prerendering throws on url.search, so the key reads it only in the browser.
+  assert.match(page, /\{#key browser \? page\.url\.search : ''\}/);
   assert.match(page, /\{@attach play\}/);
   assert.match(page, /routeController\(/);
 });

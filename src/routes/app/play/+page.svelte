@@ -4,6 +4,7 @@ import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.sve
 import RestoreNotice from '#lib/components/RestoreNotice.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
 import { routeController } from '#lib/routeController.ts';
+import { browser } from '$app/environment';
 import { page } from '$app/state';
 
 const title = '0x88 Chess — play chess vs an engine in your browser';
@@ -20,8 +21,9 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
 </svelte:head>
 
 <SiteHeader pageTitle="Play" />
-<!-- A new query (?model=…) is a new mount with fresh state; the engine host outlives both. -->
-{#key page.url.search}
+<!-- A new query (?model=…) is a new mount with fresh state; the engine host outlives both.
+     Prerendering forbids reading url.search, and the server has no query to key on. -->
+{#key browser ? page.url.search : ''}
 <main id="main" class="app-main play-workspace" data-phase="setup" data-worker-retirement="1" {@attach play}>
   <section class="panel board-panel" aria-label="Board">
     <div id="topStrip" class="player-strip" data-player="engine" data-turn="false">
