@@ -494,3 +494,19 @@ Validation: product build; Svelte typecheck **zero errors/warnings**; repository
 Required Codex command: `~/.pi/agent/skills/autoreview/scripts/autoreview --mode branch --base main --engine codex --model gpt-6.1-sol --thinking xhigh`. The first review found one accepted issue in the inherited mini wrapper: persisted PID files were checked only with `kill -0`, allowing PID reuse to target a foreign helper. `086c831d` now persists/verifies **start time + exact command**, refuses unverified live records before reuse/stop, and adds eight executable tests with mocked signals (no real process is killed by the tests). The second review identified two additional accepted defects: an aborted Maia initialization could lose its awaitable cleanup handle at a route remount, and Chrome's monotonic single-step phase accounting could accept incomplete sequence peaks. `5158c60e` retains/awaits aborted-init cleanup without delaying logical cancellation, with actual-adapter remount/failure and real-create timeout tests. `b3ed910c` explicitly rejects multi-step Chrome specs **before** acquiring proxy/browser resources; Safari remains the sequence measurement path. No successful mini measurement exercised either defective path. The final same-command whole-branch rerun (`autoreview-3.log`) exited **0: clean, no accepted/actionable findings**. All three accepted findings were fixed; none was waived. No redundant review was run after that clean result. The final product rebuild also passed (`final-reviewed-build.log`); `npm-test-final-reviewed.log` records the green full suite. Only the four verified helper PIDs started here (69088/69089/69159/69160) were stopped; mini mutex was free and driver 36158 remained running.
 
 **Task-5 verdict: complete — Phase 4 records all tables, protocol/provenance, corrected premises, implementation/test verdicts and limits. Overall: Small-switch carryover improves on the mini; graceful teardown is bounded and verified; delayed reclaim is measurable; Arena remains unresolved on the iPhone.**
+
+## Phase 5: iPhone reclaim matrix (2026-11-18)
+
+Owner iPhone, built reclaim branch, fresh origin per config, Play (Maia3 game) → Analysis → swap row 0 to BT4, three runs each
+(run 1 cold, runs 2–3 cached). Per-tab jetsam limit unchanged (ActiveHard 2048 MB).
+
+| Config | Run 1 (cold) | Run 2 | Run 3 | Consent → BT4 load starts |
+|---|---|---|---|---|
+| C: no CPU retire, gap 0 | BT4 unavailable: `[webgpu] RangeError: Out of memory` (tab survived) | ok | ok | ~10 s |
+| B: CPU retire, gap 0 | ok | ok | ok | ~10 s |
+| A: CPU retire, 20 s gap | ok | ok | inconclusive (free phase 45 s; still loading at the 90 s capture cutoff) | 26 / 26 / 55 s |
+
+Under A, `play-bt4` and `analysis-t3` also passed. The device log shows no WebContent kill of the active tab in any run; all ten
+WebContent kills were `long-idle-exit` of earlier tabs. The only failure needed CPU engines left resident on a cold load, so the
+default gap is now **0** with CPU retirement kept; `0x88-reclaim-gap-ms` remains a diagnostic override. n=3 per config is
+small: the evidence that CPU retirement matters rests on one cold failure.

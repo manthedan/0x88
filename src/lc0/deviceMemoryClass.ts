@@ -27,6 +27,9 @@ export function isMemoryConstrainedDevice(
 
 const RECLAIM_GAP_KEY = '0x88-reclaim-gap-ms';
 const RETIRE_CPU_KEY = '0x88-retire-cpu';
+// iPhone matrix 2026-11-18: retiring CPU engines alone stopped the cold BT4 WebGPU OOM; a 20 s gap added 15-45 s of
+// waiting with no observed benefit. The key stays as a diagnostic override.
+const DEFAULT_RECLAIM_GAP_MS = 0;
 
 export function phoneReclaimSettings(): { reclaimGapMs: number; retireCpu: boolean } {
   const search = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
@@ -51,7 +54,10 @@ export function phoneReclaimSettings(): { reclaimGapMs: number; retireCpu: boole
     const ms = Number(value);
     return value.trim() !== '' && ms >= 0 && ms <= 120_000;
   });
-  return { reclaimGapMs: gap === null ? 20_000 : Number(gap), retireCpu: setting(RETIRE_CPU_KEY, (value) => value === '0' || value === '1') !== '0' };
+  return {
+    reclaimGapMs: gap === null ? DEFAULT_RECLAIM_GAP_MS : Number(gap),
+    retireCpu: setting(RETIRE_CPU_KEY, (value) => value === '0' || value === '1') !== '0',
+  };
 }
 
 export type DeviceMemoryClass = 'phone' | 'tablet' | 'desktop';
