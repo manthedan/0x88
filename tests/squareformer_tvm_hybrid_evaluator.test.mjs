@@ -16,12 +16,13 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       env,
     });
     assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
-    assert.match(child.stdout, /^# pass 4$/m);
+    assert.match(child.stdout, /^# pass 6$/m);
     assert.match(child.stdout, /^# fail 0$/m);
   });
 } else {
   const { parseFen, START_FEN } = await import('../src/chess/board.ts');
-  const { RuntimeFallbackEvaluator } = await import('../src/nn/runtimeFallbackEvaluator.ts');
+  const { disposeEvaluator, RuntimeFallbackEvaluator } = await import('../src/nn/runtimeFallbackEvaluator.ts');
+  const { createBrowserSquareformerRuntimeEvaluator } = await import('../src/nn/browserRuntimeEvaluator.ts');
   const { THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES } = await import('../src/nn/squareformerEvaluator.ts');
   const { SquareformerTvmHybridEvaluator } = await import('../src/nn/squareformerTvmHybridEvaluator.ts');
 
@@ -173,5 +174,59 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
     assert.match(warnings[0], /^Custom WebGPU runtime failed/);
     await tick();
     assert.equal(state.deviceDestroys, 1, 'the fallback destroys the failed primary and its device');
+  });
+
+  test('disposing the custom WebGPU evaluator resolves only after its queue drains and the device is destroyed', async () => {
+    const { evaluator, state, settleNext } = fakeHybrid();
+    const running = evaluator.evaluateEncoded(...encoded());
+    while (!state.pending.length) await tick();
+    let disposed = false;
+    const disposal = disposeEvaluator(evaluator).then(() => {
+      disposed = true;
+    });
+    await tick();
+    assert.equal(disposed, false, 'a retirement barrier must keep holding while the device is live');
+    await settleNext();
+    await running;
+    await disposal;
+    assert.equal(state.deviceDestroys, 1);
+  });
+
+  test('cancelling a custom WebGPU load aborts its stalled artifact fetch and releases the acquired device', async (t) => {
+    const fetches = [];
+    t.mock.method(globalThis, 'fetch', (url, init = {}) => {
+      if (String(url).endsWith('.meta.json')) return Promise.resolve({ ok: true, json: async () => META });
+      fetches.push(String(url));
+      // A stalled request: it only ever settles through its abort signal, like fetch().
+      return new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+    });
+    let deviceDestroys = 0;
+    const device = {
+      destroy() {
+        deviceDestroys += 1;
+      },
+    };
+    Object.defineProperty(globalThis.navigator, 'gpu', {
+      configurable: true,
+      value: { requestAdapter: async () => ({ requestDevice: async () => device }) },
+    });
+    t.after(() => delete globalThis.navigator.gpu);
+    const controller = new AbortController();
+    const loading = createBrowserSquareformerRuntimeEvaluator(
+      { modelId: 'custom-test', onnx: '/models/custom-test.onnx', meta: '/models/custom-test.meta.json' },
+      { runtime: 'custom-webgpu', manifestUrl: '/runtimes/custom-test/manifest.json', signal: controller.signal, fallback: true },
+    );
+    while (!fetches.length) await tick();
+    assert.match(fetches[0], /manifest\.json$/);
+    controller.abort();
+    const settled = await Promise.race([
+      loading.then(
+        () => 'loaded',
+        (error) => error,
+      ),
+      new Promise((resolve) => setTimeout(() => resolve('stalled'), 200)),
+    ]);
+    assert.equal(settled?.name, 'AbortError', 'the owner signal ends the stalled fetch instead of leaving the load pending');
+    assert.equal(deviceDestroys, 1, 'the device acquired before cancellation is released');
   });
 }
