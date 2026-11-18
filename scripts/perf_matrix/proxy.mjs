@@ -48,6 +48,7 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
       else if (!res.destroyed) res.writeHead(502).end('Upstream request failed');
     };
     res.on('finish', () => {
+      entry.endedAt = Date.now();
       entry.complete = upstreamComplete && !entry.failure;
     });
     const up = request(
@@ -95,6 +96,7 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
     up.on('error', (error) => fail(`Upstream request: ${error.message}`));
     res.on('close', () => {
       if (res.writableFinished) return;
+      entry.endedAt = Date.now();
       if (!entry.failure) {
         entry.clientAborted = true;
         entry.failure = 'Browser disconnected before response finished';

@@ -7,7 +7,7 @@ import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
 import { chromeFootprint, footprintSum, jsBytesByRoute, naturalVisibilityValid, peakFootprint, requestFailures, safariWebContentPid } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
-import { cleanupMarker, safariCreationRefused, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
+import { checkSessionCancellation, cleanupMarker, safariCreationRefused, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
@@ -35,7 +35,10 @@ const guarded =
 let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling, safariPid;
 const wc = 'com.apple.WebKit.WebContent';
 const pendingCleanup = cleanupMarker(outFile);
-const markBrowserStarting = () => writeFileSync(pendingCleanup, `${spec.browser} session process ${process.pid}\n`, { flag: 'wx', mode: 0o600 });
+const markBrowserStarting = () => {
+  checkSessionCancellation(outFile, signal);
+  writeFileSync(pendingCleanup, `${spec.browser} session process ${process.pid}\n`, { flag: 'wx', mode: 0o600 });
+};
 let phase = 'journey',
   busy = false,
   samplingError;
@@ -113,6 +116,7 @@ async function uaMemory(label) {
   if (Number.isFinite(value?.bytes)) result.metrics[`memory.ua.${label}Mb`] = value.bytes / 1048576;
 }
 try {
+  checkSessionCancellation(outFile, signal);
   if (platform() !== 'darwin') throw Error('OS footprint gate currently requires macOS pidfp; no RSS substitution');
   proxy = await startCountingProxy(spec.base, { htmlScript: probe });
   signal.throwIfAborted();

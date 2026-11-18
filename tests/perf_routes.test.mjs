@@ -26,7 +26,16 @@ import {
 } from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
 import { arenaGameFailed, DOCS_READY, observeMovePvs, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
-import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession, safariCreationRefused, waitForCleanup } from '../scripts/perf_routes/lifecycle.mjs';
+import {
+  acquireLock,
+  checkSessionCancellation,
+  claimOutput,
+  cleanupMarker,
+  releaseAfterSession,
+  runOwnedSession,
+  safariCreationRefused,
+  waitForCleanup,
+} from '../scripts/perf_routes/lifecycle.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -218,6 +227,17 @@ test('proxy records upstream failure before headers, truncated bodies and downst
       unexpected: [brokenProbe, missingModel, late, recklessBroken, failedDownload],
     },
   );
+});
+
+test('availability probe cancellation needs a confirmed missing sibling, not merely a client disconnect', () => {
+  const absent = { method: 'HEAD', path: '/berserk/berserk-9b84c340af7e.nn', at: 1, endedAt: 4, complete: true, status: 404 };
+  const sibling = { ...absent, path: '/berserk/berserk.wasm', at: 2, endedAt: 5, complete: false, status: null, clientAborted: true };
+  const notConcurrent = { ...sibling, at: 6, endedAt: 7 };
+  const otherFamily = { ...sibling, path: '/stormphrax/stormphrax-emscripten.wasm' };
+  assert.deepEqual(requestFailures([absent, sibling, notConcurrent, otherFamily]), {
+    optional: [absent, sibling],
+    unexpected: [notConcurrent, otherFamily],
+  });
 });
 
 test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
@@ -553,6 +573,28 @@ test('Safari releases after a refused connect, but not when the result of POST /
   assert.equal(safariCreationRefused(wrapped(new AggregateError([refused, reset]))), false);
   assert.equal(safariCreationRefused(wrapped(reset)), false);
   assert.equal(safariCreationRefused(Object.assign(Error('already paired'), { webDriverError: 'session not created' })), true);
+});
+
+test('interrupt marks a benchlock-wrapped session cancelled before browser startup without killing its wrapper', async (t) => {
+  const output = join(scratch(t), 'attempt.json');
+  const module = new URL('../scripts/perf_routes/lifecycle.mjs', import.meta.url).href;
+  const controller = new AbortController();
+  const done = runOwnedSession(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+    import { checkSessionCancellation } from ${JSON.stringify(module)};
+    try { checkSessionCancellation(${JSON.stringify(output)}, new AbortController().signal); }
+    catch (error) { process.exitCode = error.message === 'Interrupted before browser startup' ? 2 : 3; }`,
+    ],
+    controller.signal,
+    output,
+  );
+  controller.abort(Error('test interrupt'));
+  assert.equal(await done, 2);
+  assert.throws(() => checkSessionCancellation(output, new AbortController().signal), /Interrupted before browser startup/);
 });
 
 test('unconfirmed owned browser cleanup retains the mutex', async (t) => {

@@ -182,7 +182,7 @@ async function run(signal) {
         try {
           const commandArgs = [join(root, 'scripts/perf_routes/session.mjs'), specFile, resultFile];
           const bin = args.benchlock ?? process.execPath;
-          status = await runOwnedSession(bin, args.benchlock ? [process.execPath, ...commandArgs] : commandArgs, signal, !!args.benchlock);
+          status = await runOwnedSession(bin, args.benchlock ? [process.execPath, ...commandArgs] : commandArgs, signal, args.benchlock ? resultFile : null);
         } finally {
           cleanupConfirmed = releaseAfterSession(resultFile, release);
         }

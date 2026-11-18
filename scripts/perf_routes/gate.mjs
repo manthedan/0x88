@@ -171,18 +171,27 @@ export async function chromeFootprint(discover, read) {
   return { render: retryRender, gpu: retryGpu };
 }
 
+const cpuProbeFamily = (r) =>
+  r.method === 'HEAD' ? /^\/(stockfish|berserk|plentychess|stormphrax|viridithas)\/[^/?]+\.(?:m?js|wasm|data|nnue|nn)(?:\?|$)/.exec(r.path)?.[1] : undefined;
+const absent = (r) => r.complete && !r.failure && [404, 410].includes(r.status);
+
 export function requestFailures(requests) {
   const optional = [],
     unexpected = [];
+  const missingRuntimeProbes = requests.filter((r) => absent(r) && cpuProbeFamily(r));
   for (const r of requests) {
     if (r.complete && !r.failure && r.status < 400) continue;
+    const family = cpuProbeFamily(r);
     const probe =
-      r.method === 'HEAD' &&
-      (/^\/(?:models\/lc0\/(?:(?:BT4-|t3-)[^/?]+|lqo_v2\.f16\.qdq8)\.onnx|engine-logos\/[^/?]+\.(?:svg|png|jpe?g))(?:\?|$)/i.test(r.path) ||
-        /^\/(?:stockfish|berserk|plentychess|stormphrax|viridithas)\/[^/?]+\.(?:m?js|wasm|data|nnue)(?:\?|$)/.test(r.path));
+      family ||
+      (r.method === 'HEAD' &&
+        /^\/(?:models\/lc0\/(?:(?:BT4-|t3-)[^/?]+|lqo_v2\.f16\.qdq8)\.onnx|engine-logos\/[^/?]+\.(?:svg|png|jpe?g))(?:\?|$)/i.test(r.path));
     const speculative = ['GET', 'HEAD'].includes(r.method) && r.path.startsWith('/reckless/');
-    const absent = r.complete && !r.failure && [404, 410].includes(r.status);
-    if ((probe && absent) || (speculative && (absent || r.clientAborted))) optional.push(r);
+    const siblingCancelled =
+      family &&
+      r.clientAborted &&
+      missingRuntimeProbes.some((p) => cpuProbeFamily(p) === family && p.at <= r.endedAt && r.at <= p.endedAt && p.endedAt <= r.endedAt);
+    if ((probe && absent(r)) || siblingCancelled || (speculative && (absent(r) || r.clientAborted))) optional.push(r);
     else unexpected.push(r);
   }
   return { optional, unexpected };

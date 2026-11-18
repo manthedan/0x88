@@ -59,6 +59,12 @@ export async function acquireLock(dir, signal) {
 }
 
 export const cleanupMarker = (resultFile) => `${resultFile}.cleanup-pending`;
+export const cancellationMarker = (resultFile) => `${resultFile}.cancelled`;
+
+export function checkSessionCancellation(resultFile, signal) {
+  signal.throwIfAborted();
+  if (existsSync(cancellationMarker(resultFile))) throw Error('Interrupted before browser startup');
+}
 
 function refusedConnect(error) {
   if (error?.code === 'ECONNREFUSED' && error.syscall === 'connect') return true;
@@ -94,12 +100,19 @@ export async function shutdownDelay(ms, signal) {
   });
 }
 
-export async function runOwnedSession(bin, argv, signal, wrapped) {
+export async function runOwnedSession(bin, argv, signal, wrappedResultFile) {
   signal.throwIfAborted();
   // Separate from terminal Ctrl-C; don't interrupt a benchlock wrapper that holds a live session's mutex.
   const child = spawn(bin, argv, { stdio: 'inherit', detached: true });
   const stop = () => {
-    if (!wrapped) child.kill('SIGTERM');
+    if (!wrappedResultFile) child.kill('SIGTERM');
+    else {
+      try {
+        writeFileSync(cancellationMarker(wrappedResultFile), `${signal.reason}\n`);
+      } catch (error) {
+        console.error(`Unable to cancel queued session: ${error.message}`);
+      }
+    }
   };
   signal.addEventListener('abort', stop, { once: true });
   try {
