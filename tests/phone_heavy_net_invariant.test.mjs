@@ -185,34 +185,31 @@ function playOwner(native) {
   const engines = createPlayEngines({ loadCentipawn: () => assert.fail('unused'), createMaia3: native.createMaia });
   const owner = link(
     `
-    ${slice(play, '  const retireCpuOnUnmount =', '  const releaseDom =', play.indexOf('export function mountPlayBrowser('))}
+    ${slice(play, '  const retireCpuOnUnmount =', '  const ctx = createPlayContext(scope);', play.indexOf('export function mountPlayBrowser('))}
     const ctx={abort:new AbortController(),consentAbort:new AbortController(),enginePreparationGeneration:0,
-      board:{turn:'w'},humanColor:'w',positions:[],moves:[],listeners:[],opponent:{active:{maiaElo:1500}},engineUi};
+      board:{turn:'w'},humanColor:'w',positions:[],moves:[],opponent:{active:{maiaElo:1500}},engineUi,runtimeFallbackAudits:new Map(),
+      dom:{buttonEl:el,el,queryAll:()=>[{}]},scope:{listen}};
     let option=maia;
     const ctxSelectedEngine=()=>option;
-    const hook=()=>{},releaseDom=()=>{};
     ${slice(play, 'async function ctxVerifySelectedEngineReady(', 'function ctxPriorFens(')}
-    ${slice(play, "  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-analyze]'))", "  trackListener(ctx, el('downloadPgn')", play.indexOf('function ctxInit('))}
-    function teardown(){${slice(play, '  return () => {\n    try {\n      ctx.autosave?.flush();', '\n  };', play.indexOf('export function mountPlayBrowser('))}\n    };}
+    ${slice(play, "  for (const link of ctx.dom.queryAll<HTMLAnchorElement>('[data-analyze]'))", "  ctx.scope.listen(ctx.dom.el('downloadPgn')", play.indexOf('function ctxInit('))}
+    function teardown(){${slice(play, '    ctx.autosave?.flush();', '\n  });', play.indexOf('export function mountPlayBrowser('))}\n    }
     return {prepare:()=>ctxVerifySelectedEngineReady(ctx),ready:()=>ctx.engineReady,
       select:(next)=>{ctxCancelEngineTurn(ctx);option=next;return ctxVerifySelectedEngineReady(ctx);},
-      finishMove:()=>ctx.moves.push('e2e4'),unmount:teardown()};`,
+      finishMove:()=>ctx.moves.push('e2e4'),unmount:teardown};`,
     {
       engines,
       engineUi: { current: () => () => false, mounted: () => true, note: nop, clearNote: nop, progress: nop, hideProgress: nop },
       maia: row('maia3'),
-      buttonEl: node,
       ctxSetEngineNote: nop,
       ctxRender: nop,
       ctxHideDownloadProgress: nop,
       ctxDisarmNewGame: nop,
       ctxSetEngineFailure: (_ctx, error) => assert.fail(error),
       lqoSearchOptions: () => ({}),
-      playRuntimeFallbackAudits: new Map(),
       PLAY_DRAW_SCORE: 0,
       PLAY_SEARCH_CONTEMPT_LIMIT: 0,
-      document: { querySelectorAll: () => [{}] },
-      trackListener: (_ctx, _target, _type, listener) => links.push(listener),
+      listen: (_target, _type, listener) => links.push(listener),
       ctxExportPgn: () => pgn,
       writeAnalysisHandoff: (value) => handoffs.push(value),
     },
