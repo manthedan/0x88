@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import test from 'node:test';
-import { LAB_PATH } from '../src/lib/buildScope.ts';
+import { LAB_PATH, UNROUTED_PATH } from '../src/lib/buildScope.ts';
 import { LAB_ROUTE_ID, PRODUCT_ROUTES, prerenderConfig } from '../svelte.config.js';
 
 const routeFiles = () => readdirSync(new URL('../src/routes', import.meta.url), { recursive: true }).map((file) => file.split('\\').join('/'));
@@ -68,10 +68,12 @@ test('product builds refuse client navigation to lab routes; other builds instal
   assert.equal(LAB_PATH.source, LAB_ROUTE_ID.source);
   const reroute = await rerouteFor('product');
   for (const pathname of ['/lab/mobile-soak/', '/lab/copy-prototypes/x/', '/single-engine/', '/single-engine', '/l%61b/mobile-soak/', '/%6Cab/']) {
-    assert.throws(() => reroute({ url: new URL(pathname, 'https://0x88.app') }), /not in product builds/);
+    assert.equal(reroute({ url: new URL(pathname, 'https://0x88.app') }), UNROUTED_PATH, pathname);
   }
   for (const pathname of [...PRODUCT_ROUTES, '/labs/', '/single-engines/']) {
     assert.equal(reroute({ url: new URL(pathname, 'https://0x88.app') }), undefined);
   }
   for (const scope of ['', 'dev']) assert.equal(await rerouteFor(scope), undefined);
+  // The target must match no route, or the hook would mount that page instead of 404ing.
+  assert.ok(!pageRouteIds().some((id) => id === UNROUTED_PATH.replace(/\/$/, '')), UNROUTED_PATH);
 });
