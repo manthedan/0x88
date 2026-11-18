@@ -440,7 +440,16 @@ test('probe samples overflow, controls and texts from a DOM', () => {
   };
   const stop = el('button', [250, 0, 340, 40], { id: 'stop', innerText: 'Stop 41%', childNodes: [{ nodeType: 3, textContent: 'Stop' }] });
   const toolbar = el('div', [0, 0, 300, 40], { id: 'toolbar' }, [stop]);
-  const body = el('body', [0, 0, 400, 800], {}, [toolbar]);
+  // Neither a 1px screen-reader-only box nor a closed <details> body is on screen, so neither overflows.
+  const srOnly = el('p', [0, 50, 1, 51], {
+    id: 'announcement',
+    scrollWidth: 400,
+    style: { display: 'block', visibility: 'visible', overflowX: 'hidden', overflowY: 'hidden', position: 'absolute', clip: 'auto', clipPath: 'inset(50%)' },
+  });
+  const summary = el('summary', [0, 60, 300, 80], { id: 'summary' });
+  const hiddenBody = el('div', [0, 80, 360, 200], { id: 'detailsBody' });
+  const details = el('details', [0, 60, 300, 80], { id: 'details', open: false }, [summary, hiddenBody]);
+  const body = el('body', [0, 0, 400, 800], {}, [toolbar, srOnly, details]);
   const html = el('html', [0, 0, 400, 800], {}, [body]);
   body.parentElement = html;
   const document = {
@@ -473,6 +482,11 @@ test('probe samples overflow, controls and texts from a DOM', () => {
   runInNewContext(`(${installUatProbe})(${detectOverflows}, ${JSON.stringify({ ...PROBE_OPTIONS, textSelectors: ['#status'] })})`, window);
   const sample = JSON.parse(JSON.stringify(window.__uat.sample())); // cross-realm objects
   assert.deepEqual(sample.overflow, [{ key: '#stop', kind: 'escapes', dx: 40, dy: 0, text: 'Stop 41%' }]);
+  details.open = true;
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.__uat.sample())).overflow.map((o) => `${o.key} ${o.kind}`),
+    ['#stop escapes', '#detailsBody escapes'],
+  );
   assert.deepEqual(sample.controls, { '#stop': [250, 0, 90, 40] });
   assert.deepEqual(sample.texts, [['#toolbar', 'Searching…']]);
   assert.equal(sample.url, '/app/analysis/');
@@ -616,6 +630,23 @@ test('analysis journey waits for a BT4 line and fails on a BT4 error before remo
   await JOURNEYS['analysis-engines'].run(ctx);
   assert.deepEqual(steps.at(-1), ['BT4 download and first lines', 'failed', 'BT4 failed: WebGPU device lost']);
   assert.ok(!log.some(([kind, s]) => kind === 'click' && /row-rm/.test(s)), 'Berserk is not removed after a failed BT4 init');
+});
+
+test('analysis journey stops waiting for BT4 download progress once BT4 lines are up', async () => {
+  const { ctx, log, steps } = fakeJourneyContext((e) => {
+    if (/option\[value="bt4"\]/.test(e)) return 'ok';
+    // A fast load never shows the progress indicator; only a wait that also accepts BT4 lines can end at once.
+    if (e === "document.querySelector('#downloadProgress')?.hidden === false") return false;
+    return undefined;
+  });
+  const started = Date.now();
+  await JOURNEYS['analysis-engines'].run(ctx);
+  assert.ok(Date.now() - started < 5000, 'no idle 20 s progress timeout');
+  assert.deepEqual(
+    steps.find(([label]) => label === 'BT4 download and first lines'),
+    ['BT4 download and first lines', 'ok'],
+  );
+  assert.ok(log.some(([kind, text]) => kind === 'info' && /No BT4 download progress seen/.test(text)));
 });
 
 test('phone journeys open Board tools for Play from here and show the engine cards first', async () => {

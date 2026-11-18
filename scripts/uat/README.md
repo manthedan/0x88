@@ -71,7 +71,8 @@ re-render.
   returns:
   - layout-shift entries (Chrome only)
   - overflow findings from a cheap DOM walk (`detectOverflows`: clipped, ellipsis, text-spill,
-    escapes, offscreen and page-scroll-x)
+    escapes, offscreen and page-scroll-x). The walk skips screen-reader-only boxes and the bodies of
+    closed `<details>`, which are off screen on purpose
   - the rects of on-screen controls, which the recorder diffs into resized/moved events
   - status and live-region texts
   - console and worker errors (Safari only; Chrome gets these from CDP)

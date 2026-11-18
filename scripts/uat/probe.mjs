@@ -96,6 +96,8 @@ export function installUatProbe(detect, options) {
       let index = parent;
       if (cs.display !== 'contents' && cs.visibility !== 'hidden') {
         const r = el.getBoundingClientRect();
+        // Screen-reader-only text (a 1px clipped box) is clipped on purpose and never on screen.
+        if (r.width <= 1 && r.height <= 1 && (cs.overflowX !== 'visible' || cs.clip !== 'auto' || cs.clipPath !== 'none')) return;
         if (r.width > 0 || r.height > 0) {
           index = nodes.length;
           elements.push(el);
@@ -118,7 +120,8 @@ export function installUatProbe(detect, options) {
         }
       }
       if (LEAF.has(el.localName)) return;
-      for (const child of el.children) walk(child, index);
+      // A closed <details> hides its body, which still reports layout boxes; only the summary is on screen.
+      for (const child of el.children) if (el.localName !== 'details' || el.open || child.localName === 'summary') walk(child, index);
     };
     if (document.body) walk(document.body, -1);
     const viewport = { width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth };
