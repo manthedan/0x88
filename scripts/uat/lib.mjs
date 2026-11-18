@@ -138,6 +138,19 @@ export function diffControlRects(prev, next, tolerance = 1) {
 }
 
 const overflowId = (o) => `${o.kind} ${o.key}`;
+const overflowPx = (o) => Math.max(o.dx, o.dy);
+
+// Recordings get shared and re-rendered; only the recorder's own relative media names may become
+// image sources or links (no schemes, absolute paths or parent segments).
+const MEDIA_PATH = /^(?:frames\/[\w-]+\.(?:jpg|png)|video\.webm)$/;
+export const mediaPath = (p) => (typeof p === 'string' && MEDIA_PATH.test(p) ? p : null);
+
+/** Requested viewport name, plus the measured one when the browser did not honour it (Safari's minimum window). */
+export function viewportLabel(meta) {
+  const m = meta.measuredViewport;
+  const differs = m && (m.width !== meta.viewport.width || m.height !== meta.viewport.height);
+  return differs ? `${meta.viewport.name} (measured ${m.width}x${m.height})` : meta.viewport.name;
+}
 
 /**
  * Turns raw recorder samples into the reviewer-facing timeline.
@@ -171,7 +184,7 @@ export function assembleTimeline({ meta, samples, steps = [], events = [] }) {
       reason: s.reason,
       ...(s.label ? { label: s.label } : {}),
       step: stepAt(s.t),
-      file: s.frame?.file ?? null,
+      file: mediaPath(s.frame?.file),
       duplicate: !!s.frame?.duplicate,
       hash: s.frame?.hash ?? null,
       ...(s.url ? { url: s.url } : {}),
@@ -181,6 +194,8 @@ export function assembleTimeline({ meta, samples, steps = [], events = [] }) {
         active: overflow.size,
         appeared: [...overflow].filter(([id]) => !prevOverflow.has(id)).map(([, o]) => o),
         resolved: [...prevOverflow.keys()].filter((id) => !overflow.has(id)),
+        // Still active but a different size, so the digest can track each span's peak.
+        changed: [...overflow].filter(([id, o]) => prevOverflow.has(id) && overflowPx(prevOverflow.get(id)) !== overflowPx(o)).map(([, o]) => o),
       },
       controlChanges: diffControlRects(prevControls, s.controls),
       layoutShift: Number((s.shifts ?? []).reduce((sum, x) => sum + x.value, 0).toFixed(4)),
@@ -215,7 +230,8 @@ export function assembleTimeline({ meta, samples, steps = [], events = [] }) {
 export function collapseFrames(frames) {
   const entries = [];
   for (const f of frames) {
-    if (!f.file) continue;
+    const file = mediaPath(f.file);
+    if (!file) continue;
     const last = entries.at(-1);
     if (last && last.hash === f.hash) {
       last.until = f.t;
@@ -224,7 +240,7 @@ export function collapseFrames(frames) {
       continue;
     }
     if (last) last.until = f.t;
-    entries.push({ i: f.i, t: f.t, until: f.t, file: f.file, hash: f.hash, step: f.step, reason: f.reason, label: f.label, count: 1, notes: frameNotes(f) });
+    entries.push({ i: f.i, t: f.t, until: f.t, file, hash: f.hash, step: f.step, reason: f.reason, label: f.label, count: 1, notes: frameNotes(f) });
   }
   for (const e of entries) e.heldMs = e.until - e.t;
   return entries;
@@ -250,9 +266,13 @@ export function digestTimeline({ frames, steps }, events = []) {
   for (const f of frames) {
     for (const o of f.overflow.appeared) {
       const id = overflowId(o);
-      const span = { key: o.key, kind: o.kind, text: o.text ?? '', from: f.t, to: null, step: f.step, maxPx: Math.max(o.dx, o.dy) };
+      const span = { key: o.key, kind: o.kind, text: o.text ?? '', from: f.t, to: null, step: f.step, maxPx: overflowPx(o) };
       open.set(id, span);
       spans.set(`${id}@${f.t}`, span);
+    }
+    for (const o of f.overflow.changed ?? []) {
+      const span = open.get(overflowId(o));
+      if (span) span.maxPx = Math.max(span.maxPx, overflowPx(o));
     }
     for (const id of f.overflow.resolved) {
       const span = open.get(id);
@@ -341,10 +361,10 @@ export function renderJourneyHtml(timeline, { sheets = [] } = {}) {
       )
       .join('');
   const table = (head, body) => (body ? `<table><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr>${body}</table>` : '<p>None.</p>');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(`${meta.journey} ${meta.viewport.name}`)}</title><style>${SHEET_CSS}
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(`${meta.journey} ${viewportLabel(meta)}`)}</title><style>${SHEET_CSS}
 .grid{grid-template-columns:repeat(auto-fill,minmax(${thumbWidth}px,1fr))}table{border-collapse:collapse;margin:6px 0 14px}td,th{border:1px solid #333;padding:3px 6px;text-align:left;vertical-align:top}h2{font-size:14px;margin:16px 0 4px}a{color:#8cf}</style></head><body>
-<h1>${esc(meta.journey)} · ${esc(meta.viewport.name)} · ${esc(meta.browser)} · ${esc(meta.status)}</h1>
-<p>${esc(digest.frames)} samples, ${esc(digest.uniqueFrames)} unique frames, ${entries.length} filmstrip entries, cadence ${esc(meta.cadenceMs)} ms. ${sheets.length ? `Sheets: ${sheets.map((s) => `<a href="${esc(s)}">${esc(s)}</a>`).join(' ')}` : ''} <a href="timeline.json">timeline.json</a>${meta.video ? ` · <a href="${esc(meta.video)}">video</a>` : ''}</p>
+<h1>${esc(meta.journey)} · ${esc(viewportLabel(meta))} · ${esc(meta.browser)} · ${esc(meta.status)}</h1>
+<p>${esc(digest.frames)} samples, ${esc(digest.uniqueFrames)} unique frames, ${entries.length} filmstrip entries, cadence ${esc(meta.cadenceMs)} ms. ${sheets.length ? `Sheets: ${sheets.map((s) => `<a href="${esc(s)}">${esc(s)}</a>`).join(' ')}` : ''} <a href="timeline.json">timeline.json</a>${mediaPath(meta.video) ? ` · <a href="${esc(meta.video)}">video</a>` : ''}</p>
 <h2>Steps</h2>${table(
     ['t', 'step', 'duration', 'status', 'error'],
     rows(steps, (s) => [secs(s.t), s.label, secs(s.durationMs), s.status, s.error ?? '']),
@@ -370,7 +390,7 @@ export function renderIndexHtml(runs) {
   const body = runs
     .map(
       (r) =>
-        `<tr><td><a href="${esc(r.dir)}/index.html">${esc(r.journey)}</a></td><td>${esc(r.viewport)}</td><td>${esc(r.status)}</td><td>${esc(r.uniqueFrames)}</td><td>${esc(r.overflowSpans)}</td><td>${esc(r.controlResizes)}</td><td>${esc(r.errors)}</td><td>${esc(r.error ?? '')}</td></tr>`,
+        `<tr><td><a href="./${esc(encodeURIComponent(r.dir))}/index.html">${esc(r.journey)}</a></td><td>${esc(r.viewport)}</td><td>${esc(r.status)}</td><td>${esc(r.uniqueFrames)}</td><td>${esc(r.overflowSpans)}</td><td>${esc(r.controlResizes)}</td><td>${esc(r.errors)}</td><td>${esc(r.error ?? '')}</td></tr>`,
     )
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>UAT journeys</title><style>${SHEET_CSS}table{border-collapse:collapse}td,th{border:1px solid #333;padding:3px 8px;text-align:left}a{color:#8cf}</style></head><body><h1>UAT journey recordings</h1><table><tr><th>journey</th><th>viewport</th><th>status</th><th>unique frames</th><th>overflow spans</th><th>resized controls</th><th>errors</th><th>failure</th></tr>${body}</table></body></html>`;

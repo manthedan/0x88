@@ -2,7 +2,7 @@
 // Records dense screenshot timelines of real user journeys against a built preview, for
 // vision-model UAT review of motion and state transitions (see README.md next to this file).
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -25,6 +25,7 @@ import {
   renderJourneyHtml,
   renderSheetHtml,
   sheetLayout,
+  viewportLabel,
 } from './lib.mjs';
 import { PROBE_OPTIONS, probeScript } from './probe.mjs';
 
@@ -281,9 +282,6 @@ async function safariDriver(args) {
           const inner = await evaluate('[innerWidth, innerHeight]');
           const rect = await call('GET', '/window/rect');
           await call('POST', '/window/rect', { width: rect.width + viewport.width - inner[0], height: rect.height + viewport.height - inner[1] });
-          const actual = await evaluate('[innerWidth, innerHeight]');
-          if (actual[0] !== viewport.width)
-            onEvent({ type: 'warning', text: `Safari viewport is ${actual.join('x')}, not ${viewport.name} (window minimum size?)` });
         },
         async close() {
           await call('DELETE', '').catch((error) => {
@@ -387,12 +385,18 @@ async function recordRun(driver, base, item, args, outDir, signal) {
   let status = 'ok',
     error = null,
     video = null,
+    measuredViewport = null,
     recording = true;
   try {
     proxy = await startCountingProxy(base, { htmlScript: probeScript({ ...PROBE_OPTIONS, captureConsole: driver.captureConsoleInPage }) });
     session = await driver.open(item.viewport, runDir, { onEvent, onBurst });
     await session.goto(proxy.url + item.entry);
     await session.fit?.();
+    // Safari clamps windows to a minimum size; reviewers must see which breakpoint was really recorded.
+    const [width, height] = await session.evaluate('[innerWidth, innerHeight]');
+    measuredViewport = { width, height };
+    if (width !== item.viewport.width || height !== item.viewport.height)
+      onEvent({ type: 'warning', text: `Viewport is ${width}x${height}, not the requested ${item.viewport.name} (window minimum size?)` });
     const loop = (async () => {
       while (recording) {
         const ms = cadenceFor(store.unique, { cadenceMs: args.cadence, softCap: args.softCap, hardCap: args.hardCap });
@@ -443,6 +447,7 @@ async function recordRun(driver, base, item, args, outDir, signal) {
     journey: item.journey,
     about: JOURNEYS[item.journey].about,
     viewport: item.viewport,
+    ...(measuredViewport ? { measuredViewport } : {}),
     browser: driver.name,
     browserVersion: driver.version,
     entry: item.entry,
@@ -464,7 +469,7 @@ function summarize(dir, timeline) {
   return {
     dir,
     journey: meta.journey,
-    viewport: meta.viewport.name,
+    viewport: viewportLabel(meta),
     status: meta.status,
     uniqueFrames: digest.uniqueFrames,
     overflowSpans: digest.overflowSpans.length,
@@ -472,6 +477,25 @@ function summarize(dir, timeline) {
     errors: digest.errors.length,
     error: meta.error ?? digest.failedSteps.map((s) => `${s.label}: ${s.error}`).join('; '),
   };
+}
+
+/**
+ * Writes `rel` under `root`, refusing any symlinked component: --sheets-only rewrites reports inside a
+ * recording that may have come from someone else, and must not truncate files outside it.
+ */
+export function writeInside(root, rel, data) {
+  let path = root;
+  for (const part of rel.split('/')) {
+    path = join(path, part);
+    let stat = null;
+    try {
+      stat = lstatSync(path);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (stat?.isSymbolicLink()) throw Error(`Refusing to write through symlink ${path}`);
+  }
+  writeFileSync(path, data);
 }
 
 /** Writes each run's index.html and contact-sheet images (rendered by Chromium from HTML grids). */
@@ -483,6 +507,7 @@ async function renderReview(outDir, dirs, browser) {
   try {
     for (const dir of dirs) {
       const runDir = join(outDir, dir);
+      const write = (rel, data) => writeInside(outDir, `${dir}/${rel}`, data);
       const timeline = JSON.parse(readFileSync(join(runDir, 'timeline.json'), 'utf8'));
       const layout = sheetLayout(timeline.meta.viewport);
       const pages = chunk(collapseFrames(timeline.frames), layout.cols * layout.rows);
@@ -493,19 +518,19 @@ async function renderReview(outDir, dirs, browser) {
         try {
           for (const [i, entries] of pages.entries()) {
             const name = `sheets/sheet-${String(i + 1).padStart(2, '0')}`;
-            const title = `${timeline.meta.journey} · ${timeline.meta.viewport.name} · sheet ${i + 1}/${pages.length} · t=${(entries[0].t / 1000).toFixed(1)}–${(entries.at(-1).until / 1000).toFixed(1)}s`;
-            writeFileSync(join(runDir, `${name}.html`), renderSheetHtml(entries, { title, ...layout }));
+            const title = `${timeline.meta.journey} · ${viewportLabel(timeline.meta)} · sheet ${i + 1}/${pages.length} · t=${(entries[0].t / 1000).toFixed(1)}–${(entries.at(-1).until / 1000).toFixed(1)}s`;
+            write(`${name}.html`, renderSheetHtml(entries, { title, ...layout }));
             await page.goto(pathToFileURL(join(runDir, `${name}.html`)).href, { waitUntil: 'load' });
             // Every thumbnail must be decoded before the full-page capture measures and paints the grid.
             await page.evaluate(() => Promise.all([...document.images].map((img) => img.decode().catch(() => {}))));
-            await page.screenshot({ path: join(runDir, `${name}.jpg`), fullPage: true, type: 'jpeg', quality: 80 });
+            write(`${name}.jpg`, await page.screenshot({ fullPage: true, type: 'jpeg', quality: 80 }));
             sheets.push(`${name}.jpg`);
           }
         } finally {
           await page.close();
         }
       }
-      writeFileSync(join(runDir, 'index.html'), renderJourneyHtml(timeline, { sheets }));
+      write('index.html', renderJourneyHtml(timeline, { sheets }));
     }
   } finally {
     await sheetBrowser?.close();
@@ -526,7 +551,7 @@ async function main() {
     const dirs = findRunDirs(outDir);
     await renderReview(outDir, dirs);
     const runs = dirs.map((dir) => summarize(dir, JSON.parse(readFileSync(join(outDir, dir, 'timeline.json'), 'utf8'))));
-    writeFileSync(join(outDir, 'index.html'), renderIndexHtml(runs));
+    writeInside(outDir, 'index.html', renderIndexHtml(runs));
     console.log(`[uat] re-rendered ${dirs.length} runs: ${join(outDir, 'index.html')}`);
     return;
   }

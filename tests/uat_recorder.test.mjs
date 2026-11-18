@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { JOURNEYS, PROMOTION_FEN } from '../scripts/uat/journeys.mjs';
@@ -11,13 +14,15 @@ import {
   detectOverflows,
   diffControlRects,
   FrameStore,
+  mediaPath,
   parseViewports,
   renderIndexHtml,
   renderJourneyHtml,
   renderSheetHtml,
+  viewportLabel,
 } from '../scripts/uat/lib.mjs';
 import { installUatProbe, PROBE_OPTIONS, probeScript } from '../scripts/uat/probe.mjs';
-import { entryPath, parseArgs, plan } from '../scripts/uat/record_journeys.mjs';
+import { entryPath, parseArgs, plan, writeInside } from '../scripts/uat/record_journeys.mjs';
 
 const box = (left, top, right, bottom, extra = {}) => ({
   parent: -1,
@@ -268,6 +273,71 @@ test('review pages escape every imported timeline field (--sheets-only reads sha
   assert.ok(!index.includes('<script>'));
 });
 
+test('overflow spans report their peak, not the size when they appeared', () => {
+  const grow = (t, dx) => ({ t, reason: 'cadence', overflow: [{ key: '#stop', kind: 'escapes', dx, dy: 0 }] });
+  const tl = assembleTimeline({
+    meta: { startedAt: 0 },
+    samples: [grow(100, 4), grow(350, 40), { t: 500, reason: 'cadence', error: 'timed out' }, grow(600, 12), { t: 850, reason: 'cadence', overflow: [] }],
+  });
+  assert.deepEqual(
+    tl.digest.overflowSpans.map((o) => [o.from, o.to, o.maxPx]),
+    [[100, 850, 40]],
+  );
+});
+
+test('shared recordings: only recorder-made media paths become links or images', () => {
+  for (const ok of ['frames/0001.jpg', 'frames/0002.png', 'video.webm']) assert.equal(mediaPath(ok), ok);
+  for (const bad of ['javascript:alert(1)', '/etc/passwd', '../x/frames/0001.jpg', 'frames/../../a.jpg', 'https://x/a.jpg', 'frames/a.svg', null, 7])
+    assert.equal(mediaPath(bad), null, String(bad));
+  const tl = {
+    meta: { journey: 'j', viewport: { name: 'v', mobile: false }, video: 'javascript:alert(1)' },
+    digest: { frames: 2, uniqueFrames: 2, overflowSpans: [], controlResizes: [], errors: [] },
+    steps: [],
+    frames: [
+      { i: 0, t: 0, file: 'javascript:alert(1)', hash: 'a', overflow: { appeared: [], resolved: [] }, controlChanges: [], events: [] },
+      { i: 1, t: 250, file: 'frames/0002.jpg', hash: 'b', overflow: { appeared: [], resolved: [] }, controlChanges: [], events: [] },
+    ],
+  };
+  const page = renderJourneyHtml(tl);
+  assert.ok(!page.includes('javascript:'));
+  assert.match(page, /frames\/0002\.jpg/);
+  assert.equal(collapseFrames(tl.frames).length, 1);
+  assert.match(renderIndexHtml([{ dir: 'javascript:alert(1)', journey: 'j' }]), /href="\.\/javascript%3Aalert\(1\)\/index\.html"/);
+});
+
+test('review artifacts show the measured viewport when the browser clamped it', () => {
+  const viewport = { name: '320x640', width: 320, height: 640, mobile: true };
+  assert.equal(viewportLabel({ viewport }), '320x640');
+  assert.equal(viewportLabel({ viewport, measuredViewport: { width: 320, height: 640 } }), '320x640');
+  assert.equal(viewportLabel({ viewport, measuredViewport: { width: 500, height: 640 } }), '320x640 (measured 500x640)');
+  assert.equal(viewportLabel({ viewport, measuredViewport: { width: 320, height: 571 } }), '320x640 (measured 320x571)');
+  const tl = assembleTimeline({
+    meta: { startedAt: 0, journey: 'j', viewport, measuredViewport: { width: 500, height: 640 }, browser: 'safari', status: 'ok' },
+    samples: [],
+  });
+  assert.match(renderJourneyHtml(tl), /320x640 \(measured 500x640\)/);
+});
+
+test('report writes refuse symlinks inside a recording (--sheets-only on shared output)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'uat-'));
+  try {
+    const victim = join(dir, 'victim.txt');
+    writeFileSync(victim, 'keep');
+    const rec = join(dir, 'rec');
+    mkdirSync(join(rec, 'run'), { recursive: true });
+    mkdirSync(join(dir, 'elsewhere'));
+    symlinkSync(victim, join(rec, 'index.html'));
+    symlinkSync(join(dir, 'elsewhere'), join(rec, 'run', 'sheets'));
+    assert.throws(() => writeInside(rec, 'index.html', 'x'), /symlink/);
+    assert.throws(() => writeInside(rec, 'run/sheets/sheet-01.jpg', 'x'), /symlink/);
+    assert.equal(readFileSync(victim, 'utf8'), 'keep');
+    writeInside(rec, 'run/index.html', 'ok');
+    assert.equal(readFileSync(join(rec, 'run', 'index.html'), 'utf8'), 'ok');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('injected probe script parses and survives String.replace in the proxy', () => {
   const script = probeScript();
   assert.doesNotThrow(() => new Function(script));
@@ -442,4 +512,33 @@ test('arena journey fails the run when the result chip records an illegal move',
   await JOURNEYS['arena-match'].run(ctx);
   assert.deepEqual(steps.at(-1).slice(0, 2), ['finished match', 'failed']);
   assert.match(steps.at(-1)[2], /did not complete validly/);
+});
+
+test('play journey fails when the game-over card records an engine forfeit', async () => {
+  let queenPicked = false;
+  const { ctx, steps } = fakeJourneyContext((e) => {
+    if (/restartBanner/.test(e)) return false;
+    if (/resultReason/.test(e)) return 'Engine played illegal move a1a1 · 1 moves';
+    if (/gameOverCard/.test(e) && !/status/.test(e)) return queenPicked;
+    return undefined;
+  });
+  const click = ctx.click;
+  ctx.click = async (selector) => {
+    if (selector.includes('promo-tile')) queenPicked = true;
+    return click(selector);
+  };
+  await JOURNEYS['play-promotion'].run(ctx);
+  assert.deepEqual(steps.at(-1).slice(0, 2), ['engine reply after promotion', 'failed']);
+  assert.match(steps.at(-1)[2], /forfeited: Engine played illegal move/);
+});
+
+test('analysis journey waits for a BT4 line and fails on a BT4 error before removing Berserk', async () => {
+  const { ctx, log, steps } = fakeJourneyContext((e) => {
+    if (/option\[value="bt4"\]/.test(e)) return 'ok';
+    if (/\.line-error/.test(e)) return { error: 'WebGPU device lost' };
+    return undefined;
+  });
+  await JOURNEYS['analysis-engines'].run(ctx);
+  assert.deepEqual(steps.at(-1), ['BT4 download and first lines', 'failed', 'BT4 failed: WebGPU device lost']);
+  assert.ok(!log.some(([kind, s]) => kind === 'click' && /row-rm/.test(s)), 'Berserk is not removed after a failed BT4 init');
 });

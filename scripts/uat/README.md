@@ -51,7 +51,12 @@ control, the recorder logs a `warning` event and falls back to a DOM click.
 Viewports narrower than 700 px are emulated as touch phones (`isMobile`, `hasTouch`, DPR 2) but keep
 a desktop UA. Add `--memory-class phone` to exercise the phone large-net policy
 (`?memoryClass=phone`). Safari can't always shrink its window to phone widths. In that case the
-recorder logs the viewport it actually got.
+recorder stores the viewport it actually got (`meta.measuredViewport`), and the index, review pages
+and sheets show it next to the requested size.
+
+`--sheets-only` refuses to write through symlinks inside the recording, and review pages only link
+the recorder's own `frames/*` and `video.webm` files, so a recording from someone else is safe to
+re-render.
 
 ## How it records
 
