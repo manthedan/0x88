@@ -152,12 +152,13 @@ test('Linux Chrome flags and Chromium channel apply only on Linux; macOS launche
   assert.match(source, /args: \['--enable-blink-features=ForceEagerMeasureMemory', \.\.\.\(linux \? LINUX_CHROME_ARGS : \[\]\)\]/);
   assert.ok(LINUX_CHROME_ARGS.includes('--enable-features=Vulkan'));
   assert.ok(!LINUX_CHROME_ARGS.includes('--enable-unsafe-webgpu'), 'the WebGPU blocklist stays as users have it');
+  assert.ok(LINUX_CHROME_ARGS.includes('--enable-dawn-features=vulkan_enable_f16_on_nvidia'), 'NVIDIA drivers < 615.71 hide shader-f16 otherwise');
   const warm = source.indexOf('await warmWebGpu(');
   assert.ok(warm > source.indexOf('newBrowserCDPSession()') && warm < source.indexOf('browser.newContext('), 'warm-up precedes the measured context');
   assert.ok(warm < source.indexOf('sampling = setInterval(sample, 100)'), 'warm-up precedes sampling');
 });
 
-test('WebGPU warm-up retries the early null adapter, rejects software adapters and always closes its context', async () => {
+test('WebGPU warm-up retries the early null adapter, rejects software and f16-less adapters and always closes its context', async () => {
   const fakeBrowser = (answers) => {
     const state = { closed: 0, routed: 0, evaluations: 0 };
     return {
@@ -169,7 +170,7 @@ test('WebGPU warm-up retries the early null adapter, rejects software adapters a
       }),
     };
   };
-  const nvidia = { vendor: 'nvidia', architecture: 'ampere', device: '', description: '', fallback: false };
+  const nvidia = { vendor: 'nvidia', architecture: 'ampere', device: '', description: '', fallback: false, shaderF16: true };
   let gone = 0;
   const ok = fakeBrowser([null, nvidia]);
   const info = await warmWebGpu(ok, async () => ++gone > 2, { delayMs: 0 });
@@ -185,4 +186,7 @@ test('WebGPU warm-up retries the early null adapter, rejects software adapters a
     );
     assert.equal(browser.state.closed, 1);
   }
+  const noF16 = fakeBrowser([{ ...nvidia, shaderF16: false }]);
+  await assert.rejects(warmWebGpu(noF16, async () => true, { attempts: 3, delayMs: 0 }), /lacks shader-f16/);
+  assert.equal(noF16.state.closed, 1);
 });

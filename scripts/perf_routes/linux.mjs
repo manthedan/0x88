@@ -80,11 +80,15 @@ export function linuxFootprintReader({ readText = (path) => readFile(path, 'utf8
 // Headless Chromium on Linux exposes the NVIDIA Vulkan adapter only with these (verified on Yukon,
 // Chromium 149 / driver 580, no display). Without Vulkan, ANGLE and Dawn fall back to SwiftShader; no
 // surface exists headless. --enable-unsafe-webgpu is not needed, so users' WebGPU blocklist applies.
-export const LINUX_CHROME_ARGS = ['--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface'];
+// Dawn withholds shader-f16 on NVIDIA Vulkan drivers older than 615.71 (crbug.com/42251215) unless
+// vulkan_enable_f16_on_nvidia is set. Without shader-f16 the app runs every ORT session (Lc0, Maia3)
+// on WASM, so the run would measure the CPU fallback, not the WebGPU path that Windows/NVIDIA (D3D12)
+// users get. Linux Chrome users on such drivers do get WASM; this datapoint stands in for Windows.
+export const LINUX_CHROME_ARGS = ['--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface', '--enable-dawn-features=vulkan_enable_f16_on_nvidia'];
 
 export const ADAPTER_INFO = `(async () => {
   const a = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
-  return a && { vendor: a.info.vendor, architecture: a.info.architecture, device: a.info.device, description: a.info.description, fallback: a.info.isFallbackAdapter };
+  return a && { vendor: a.info.vendor, architecture: a.info.architecture, device: a.info.device, description: a.info.description, fallback: a.info.isFallbackAdapter, shaderF16: a.features.has('shader-f16') };
 })()`;
 
 /**
@@ -112,9 +116,11 @@ export async function warmWebGpu(browser, isRendererGone, { attempts = 40, delay
   }
   if (!adapter || adapter.fallback || /swiftshader|llvmpipe/i.test(JSON.stringify(adapter)))
     throw Error(`No hardware WebGPU adapter: ${JSON.stringify(adapter)}`);
+  // The app treats an adapter without shader-f16 as no adapter: every model would silently run on WASM.
+  if (!adapter.shaderF16) throw Error(`WebGPU adapter lacks shader-f16; the app would run its models on WASM: ${JSON.stringify(adapter)}`);
   for (let i = 0; i < 50 && !(await isRendererGone()); i++) await new Promise((r) => setTimeout(r, 100));
   return { ...adapter, attempts: tries - 1, ms: Date.now() - started };
 }
 
 export const LINUX_LIMITATION =
-  'Linux/NVIDIA: memory = smaps_rollup Pss_Dirty+SwapPss per process plus nvidia-smi VRAM for the GPU process; peaks are 100 ms sampled maxima (no kernel high-water). Chromium runs headless with ANGLE/Vulkan, after a WebGPU warm-up in a throwaway context. Not comparable with macOS phys_footprint results.';
+  'Linux/NVIDIA: memory = smaps_rollup Pss_Dirty+SwapPss per process plus nvidia-smi VRAM for the GPU process; peaks are 100 ms sampled maxima (no kernel high-water). Chromium runs headless with ANGLE/Vulkan and Dawn vulkan_enable_f16_on_nvidia, after a WebGPU warm-up in a throwaway context. Not comparable with macOS phys_footprint results.';
