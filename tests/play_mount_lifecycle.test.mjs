@@ -310,6 +310,59 @@ test('Lc0 Small is cached per model URL: a new ?model= retires the old session b
   await engines.retireUnusedEngines();
 });
 
+function recordingLc0Small(events, disposals = new Map()) {
+  return createPlayEngines({
+    loadCentipawn: () => assert.fail('unused'),
+    loadLc0Small: async (url, { deviceSelection, load }) => {
+      load.signal.throwIfAborted();
+      const name = `${url} ${deviceSelection ? 'device' : 'exact'}`;
+      events.push(`load ${name}`);
+      return {
+        evaluator: {
+          dispose: async () => {
+            await disposals.get(name)?.promise;
+            events.push(`dispose ${name}`);
+          },
+        },
+      };
+    },
+  });
+}
+const quietUi = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+
+test('Lc0 Small is cached per request: the same URL with another device rule is a different session', async () => {
+  const events = [];
+  const engines = recordingLc0Small(events);
+  // The default request and an explicit ?model= naming the default file share a URL.
+  const device = await engines.ensureLc0Small({ modelUrl: '/a.onnx', deviceSelection: true }, quietUi);
+  const exact = await engines.ensureLc0Small({ modelUrl: '/a.onnx', deviceSelection: false }, quietUi);
+  assert.notEqual(exact, device);
+  assert.deepEqual(events, ['load /a.onnx device', 'dispose /a.onnx device', 'load /a.onnx exact']);
+  await engines.retireUnusedEngines();
+});
+
+test('a replacement retired before its predecessor finishes disposing still settles, and later starts load', async () => {
+  const events = [];
+  const slowDispose = deferred();
+  const engines = recordingLc0Small(events, new Map([['/a.onnx exact', slowDispose]]));
+  await engines.ensureLc0Small({ modelUrl: '/a.onnx', deviceSelection: false }, quietUi);
+  // B replaces A and waits for A's session to go; B is retired before that happens.
+  const b = engines.ensureLc0Small({ modelUrl: '/b.onnx', deviceSelection: false }, quietUi);
+  const bSettled = b.then(
+    () => 'loaded',
+    (error) => error.name,
+  );
+  const retired = engines.retireUnusedEngines();
+  slowDispose.resolve();
+  const settles = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('hung'), 200))]);
+  assert.equal(await settles(bSettled), 'AbortError', 'a retired replacement never loads');
+  assert.notEqual(await settles(retired), 'hung', 'retirement must not wait on itself');
+  const c = settles(engines.ensureLc0Small({ modelUrl: '/c.onnx', deviceSelection: false }, quietUi));
+  assert.notEqual(await c, 'hung', 'later engine starts are not blocked');
+  assert.deepEqual(events, ['load /a.onnx exact', 'dispose /a.onnx exact', 'load /c.onnx exact']);
+  await settles(engines.retireUnusedEngines());
+});
+
 function sourceFiles(dir) {
   return readdirSync(dir).flatMap((name) => {
     const path = `${dir}/${name}`;

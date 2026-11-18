@@ -92,8 +92,8 @@ export function createPlayEngines(deps: PlayEngineDeps) {
   let lc0Searcher: Lc0PuctSearcher | null = null;
   let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
   let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null; abort: AbortController } = { evaluator: null, abort: new AbortController() };
-  /** The model the cached Lc0 Small searcher was built from; a remount may ask for another (?model=). */
-  let lc0SmallUrl: string | null = null;
+  /** The request the cached Lc0 Small searcher was built from; a remount may ask for another (?model=). */
+  let lc0SmallModel: Lc0SmallModel | null = null;
   let maia3Abort: AbortController | null = null;
   let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
   /** One-line model/cache status shown in the caption once Maia3 has loaded. */
@@ -124,16 +124,17 @@ export function createPlayEngines(deps: PlayEngineDeps) {
     return awaitEngineRetirements();
   }
 
-  function retireLc0Small(): void {
-    if (!lc0LoadPromise) return;
+  /** Resolves once this session is gone; replacements wait on exactly this, not the global barrier. */
+  function retireLc0Small(): Promise<void> | undefined {
+    if (!lc0LoadPromise) return undefined;
     const pending = lc0LoadPromise;
     const owner = lc0SmallOwner;
     lc0SmallOwner = { evaluator: null, abort: new AbortController() };
     lc0LoadPromise = null;
     lc0Searcher = null;
-    lc0SmallUrl = null;
+    lc0SmallModel = null;
     owner.abort.abort();
-    trackEngineRetirement(
+    return trackEngineRetirement(
       pending.then(
         async (searcher) => {
           searcher.resetTree();
@@ -164,16 +165,18 @@ export function createPlayEngines(deps: PlayEngineDeps) {
 
   function ensureLc0Small(model: Lc0SmallModel, ui: EngineUiPort): Promise<Lc0PuctSearcher> {
     // Another model's session must be gone before this one loads: one Lc0 Small resident at a time.
-    const replacing = !!lc0LoadPromise && lc0SmallUrl !== model.modelUrl;
-    if (replacing) retireLc0Small();
+    const replacing = !!lc0SmallModel && (lc0SmallModel.modelUrl !== model.modelUrl || lc0SmallModel.deviceSelection !== model.deviceSelection);
+    // Not awaitEngineRetirements(): if this load is retired in turn, its own retirement
+    // waits on this promise, and the global barrier would then wait on itself.
+    const predecessor = replacing ? retireLc0Small() : undefined;
     if (lc0Searcher) return Promise.resolve(lc0Searcher);
     if (!lc0LoadPromise) {
       const current = ui.current();
       const owner = lc0SmallOwner;
-      lc0SmallUrl = model.modelUrl;
+      lc0SmallModel = model;
       if (current()) ui.note('Loading Lc0 small net…');
       lc0LoadPromise = (async () => {
-        if (replacing) await awaitEngineRetirements();
+        await predecessor;
         // Download progress hides only once the session exists: on Apple WebGPU a
         // failed session reloads the original model for its WASM fallback.
         const { evaluator } = await loadLc0Small(model.modelUrl, {
@@ -196,7 +199,7 @@ export function createPlayEngines(deps: PlayEngineDeps) {
       })().catch((error: Error) => {
         if (owner === lc0SmallOwner) {
           lc0LoadPromise = null;
-          lc0SmallUrl = null;
+          lc0SmallModel = null;
         }
         if (current()) {
           ui.hideProgress();
