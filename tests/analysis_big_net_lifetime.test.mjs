@@ -48,10 +48,11 @@ function controller(activeKeys = []) {
     dial: 'balanced',
     centipawn: { legacyOverride: false, modelUrl: '', metaUrl: '', legacyModelUrl: '', legacyMetaUrl: '', manifestUrl: '' },
     loadCentipawn: () => assert.fail('unused'),
-    centipawnCache: { retain: noop, clear: noop, has: () => false, get: () => assert.fail('unused') },
+    centipawnCache: { retain: noop, clear: () => events.push('clear:centipawn'), has: () => false, get: () => assert.fail('unused') },
     variants: {},
     activeRows: () => [],
     preload: async () => {},
+    createStockfish: () => ({ dispose: () => events.push('dispose:sf') }),
     bigNets: { peek: (key) => pool.peek(key), release: (key, ttl) => pool.release(key, ttl), acquire: () => assert.fail('unused'), disposeNow: noop },
   });
   const engineRows = [...active].map((variant) => ({ family: 'lc0', variant }));
@@ -59,17 +60,17 @@ function controller(activeKeys = []) {
     `
     const noop=()=>{};
     const activeEngineRows=()=>[],reviewEngineRows=()=>[],renderRecklessRuntimeInfo=noop,isLc0BigNetVariant=()=>true;
-    const trackEngineRetirement=noop;
+    const trackEngineRetirement=(promise)=>promise;
     let analysisAbort={abort:noop},reviewAbort=null,activeWorkerSearchId=null,searchWorker=null;
     const cancelAllAnalysisAssetPrefetches=noop,resetSearchWorker=noop;
-    let mainEvaluator={dispose:noop},searcher={},lc0ServedModelUrl='test';
+    let mainEvaluator={dispose:()=>events.push('dispose:main')},searcher={},lc0ServedModelUrl='test';
     ${unused}
     ${runtime}
     return {disposeUnusedEngines,disposeRuntimeResources};
   `,
     { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
   );
-  return { ...new Function('engines', 'engineRows', code)(engines, engineRows), pool, events, timers, active };
+  return { ...new Function('engines', 'engineRows', 'events', code)(engines, engineRows, events), engines, pool, events, timers, active };
 }
 
 test('Analysis t3 -> BT4 switch destroys the previous worker before replacement acquisition, without an idle timer', () => {
@@ -116,10 +117,16 @@ test('Analysis releases each of its big nets without a row, and leaves other poo
 test('Analysis runtime/page teardown cancels and destroys all big nets synchronously', () => {
   const api = controller(['t3', 'bt4']);
   const nets = ['t3', 'bt4'].map((key) => api.pool.acquire(key));
+  api.engines.getStockfish('lite');
+  api.engines.pinAnalysisRunCentipawnKeys([{ family: 'centipawn', variant: 'bt4-auto' }]);
+  api.events.length = 0;
   api.disposeRuntimeResources();
   assert.ok(nets.every((net) => net.cancels === 1 && net.disposals === 1));
   assert.ok(['t3', 'bt4'].every((key) => !api.pool.has(key)));
   assert.equal(api.timers.length, 0);
+  // Big nets, then Centipawn, then CPU engines, then the Small evaluator.
+  assert.deepEqual(api.events, ['cancel:bt4', 'dispose:bt4', 'cancel:t3', 'dispose:t3', 'clear:centipawn', 'dispose:sf', 'dispose:main']);
+  assert.deepEqual(api.engines.analysisRunCentipawnKeys(), [], 'teardown drops the run pins');
 });
 
 test('the shared pool default remains three minutes for callers that explicitly choose retention', () => {

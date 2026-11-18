@@ -5,7 +5,7 @@ import test from 'node:test';
 // The engine host stays page-free so the Svelte route can own the DOM: it
 // reaches the page only through its AnalysisEnginePort.
 const HOST = new URL('../src/lc0/analysis/analysisEngines.ts', import.meta.url);
-const IMPORT = /^\s*(?:import|export)\s[^;]*?from\s+'([^']+)'/gm;
+const IMPORT = /^\s*(?:import|export)\s(?:[^;]*?\sfrom\s+)?'([^']+)'/gm;
 
 function importGraph(entry) {
   const seen = new Map();

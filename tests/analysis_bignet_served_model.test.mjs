@@ -1150,6 +1150,37 @@ test('an old evaluator callback cannot release a replacement owner’s Centipawn
   assert.deepEqual(page.snapshotPins(), []);
 });
 
+test('a settled run keeps the visible Centipawn row’s evaluator alive', async () => {
+  const page = analysisPage({ rows: [{ family: 'centipawn', variant: 'bt4-custom', strength: 64 }], searchers: new Map() });
+  await page.analyzeCurrent();
+  await settled(page);
+  assert.deepEqual(page.centipawnVariants, ['bt4-custom']);
+  assert.deepEqual(page.snapshotPins(), []);
+  assert.deepEqual(page.pinRetentions.at(-1), ['bt4-custom'], 'the run pin is gone; the visible row still keeps its evaluator');
+});
+
+test('a stopped big-net search cannot clear the model progress the next owner shows', () =>
+  withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK, searchTicks: 20 }] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    try {
+      await t3.init({ evalCacheEntries: 0 });
+      const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+      const running = page.analyzeCurrent();
+      await until(() => FakeWorker.searchLog.length === 1);
+      page.stop();
+      const release = page.holdBackend();
+      const loading = page.loadBackend();
+      assert.equal(page.modelProgress(), true);
+      await running;
+      for (let i = 0; i < 25; i++) await new Promise(setImmediate);
+      assert.equal(page.modelProgress(), true, 'the stopped search cleared progress it no longer owns');
+      release();
+      await loading;
+    } finally {
+      t3.dispose();
+    }
+  }));
+
 test('changing engines after Stop does not wait for a cancelled big-net init to drain', () =>
   withWorkers({ [T3_ORIGINAL]: [{ servedModelUrl: T3_SPLITK, hold: true }] }, async () => {
     const t3 = new Bt4WorkerSearcher(T3_NET);
