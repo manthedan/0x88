@@ -85,8 +85,8 @@ build must surface.
 | Asset | Source | Licence |
 | --- | --- | --- |
 | `public/openings/eco.json` (opening names) | [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) at `3ba6b20d`, see `public/openings/README.md` | CC0-1.0 (`public/openings/COPYING.txt`, copied from upstream) |
-| Chess pieces (`public/chessground.cburnett.css`, embedded SVGs) | Byte-identical copy of `assets/chessground.cburnett.css` from the `chessground` npm package | Shipped under the package's licence, GPL-3.0-or-later; no separate licence for the piece artwork is recorded here — to be confirmed by the maintainer |
-| Board CSS (`public/chessground.base.css`, `public/chessground.brown.css`) | Locally modified copies of the `chessground` package assets | GPL-3.0-or-later (package licence) |
+| Chess pieces (`chessground/assets/chessground.cburnett.css`, embedded SVGs) | Imported unmodified from the `chessground` npm package and bundled by Vite | Shipped under the package's licence, GPL-3.0-or-later; no separate licence for the piece artwork is recorded here — to be confirmed by the maintainer |
+| Board CSS (`src/styles/chessground.base.css`, `src/styles/chessground.brown.css`) | Locally modified copies of the `chessground` package assets | GPL-3.0-or-later (package licence) |
 | Engine marks in `public/engine-logos/` (`lc0.svg`, `stockfish.png`, `reckless.png`, `viridithas.png`, `berserk.jpg`) | The respective engine projects | Licence not recorded here — to be confirmed by the maintainer. `public/engine-logos/README.md` treats them as trademarks used only to identify the engines. |
 | `public/engine-logos/centipawn.svg`, `public/engine-logos/generic.svg` | Not recorded | Licence not recorded here — to be confirmed by the maintainer |
 

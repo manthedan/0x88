@@ -110,8 +110,10 @@ test('only navigations, hashed build output and small shell files are intercepte
   assert.equal(route('/app/play/', { mode: 'navigate' }), 'navigate');
   assert.equal(route('/_app/immutable/entry/start.C1MMvhS4.js'), 'immutable');
   assert.equal(route('/_app/immutable/assets/app.Bx1.css'), 'immutable');
-  assert.equal(route('/app-shell.css'), 'shell');
+  assert.equal(route('/favicon.svg'), 'shell');
   assert.equal(route('/manifest.webmanifest'), 'shell');
+  // Global CSS is Vite output now; the old unhashed public/ names are not shell files.
+  assert.equal(route('/app-shell.css'), null);
   // Engine artifacts and control-plane pointers are left to the browser.
   for (const path of [
     '/ort/ort-wasm-simd-threaded.jsep.wasm',
@@ -154,8 +156,7 @@ test('activate deletes earlier builds and the legacy shell caches, never the mod
 });
 
 const SHELL_HTML = [
-  '<link rel="stylesheet" href="/chessground.base.css" />',
-  '<link rel="stylesheet" href="/app-shell.css" />',
+  '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />',
   '<link rel="manifest" href="/manifest.webmanifest" />',
   '<link href="../../_app/immutable/entry/start.C1MMvhS4.js" rel="modulepreload">',
   '<link href="../../_app/immutable/nodes/2.Ab.js" rel="modulepreload">',
@@ -167,8 +168,7 @@ const SHELL_HTML = [
 
 test('the shell page is precached with its build chunks and shell files', async () => {
   assert.deepEqual(Array.from(loadWorker().context.shellSubresourceUrls(SHELL_HTML, `${ORIGIN}/app/play/`)), [
-    `${ORIGIN}/chessground.base.css`,
-    `${ORIGIN}/app-shell.css`,
+    `${ORIGIN}/favicon.svg`,
     `${ORIGIN}/manifest.webmanifest`,
     `${ORIGIN}/_app/immutable/entry/start.C1MMvhS4.js`,
     `${ORIGIN}/_app/immutable/nodes/2.Ab.js`,
@@ -187,9 +187,8 @@ test('the shell page is precached with its build chunks and shell files', async 
     `${ORIGIN}/_app/immutable/assets/2.Cd.css`,
     `${ORIGIN}/_app/immutable/entry/start.C1MMvhS4.js`,
     `${ORIGIN}/_app/immutable/nodes/2.Ab.js`,
-    `${ORIGIN}/app-shell.css`,
     `${ORIGIN}/app/play/`,
-    `${ORIGIN}/chessground.base.css`,
+    `${ORIGIN}/favicon.svg`,
     `${ORIGIN}/manifest.webmanifest`,
   ]);
 });
@@ -303,7 +302,7 @@ test('a slow navigation falls back to the cached page after the timeout', async 
 
 for (const [path, mode, contentType] of [
   ['/app/analysis/', 'navigate', 'text/html'],
-  ['/app-shell.css', 'cors', 'text/css'],
+  ['/manifest.webmanifest', 'cors', 'application/manifest+json'],
 ]) {
   test(`network response headers return before a slow body is cached: ${contentType}`, async (t) => {
     let stream;
@@ -367,7 +366,7 @@ test('an offline navigation falls back to the page, then to the app shell', asyn
   await cache.put(`${ORIGIN}/app/play/`, basic('shell', { contentType: 'text/html' }));
   const response = await worker.context.networkFirst(request('/app/arena/', { mode: 'navigate' }));
   assert.equal(await response.text(), 'shell');
-  await assert.rejects(worker.context.networkFirst(request('/app-shell.css')), /offline/);
+  await assert.rejects(worker.context.networkFirst(request('/favicon.svg')), /offline/);
 });
 
 test('navigation timeout is a few seconds', () => {

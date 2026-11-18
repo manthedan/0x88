@@ -259,6 +259,22 @@ test('write-once release manifests keep their immutable policy', async () => {
   );
 });
 
+test('Vite hashed bundles, which carry the global CSS, keep their immutable policy', async () => {
+  const dir = await fixture((toml) =>
+    replaceOnce(
+      toml,
+      '  for = "/_app/immutable/*"\n  [headers.values]\n    Cache-Control = "public, max-age=31536000, immutable"',
+      '  for = "/_app/immutable/*"\n  [headers.values]\n    Cache-Control = "public, max-age=14400"',
+    ),
+  );
+  const result = await runChecker(dir);
+  assert.equal(result.status, 1);
+  assert.ok(
+    failures(result).some((entry) => entry.includes('missing Vite hashed bundle (JS and global CSS) immutable Cache-Control')),
+    result.stderr,
+  );
+});
+
 // Netlify: "Any line beginning with # will be ignored as a comment."
 test('a commented-out directive does not satisfy a requirement', async () => {
   const dir = await fixture((toml) =>

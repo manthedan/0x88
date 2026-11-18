@@ -6,6 +6,7 @@
       "**",
       "!.claude",
       "!public",
+      "!src/styles",
       "!package-lock.json",
       "!.svelte-kit",
       "!dist-client",

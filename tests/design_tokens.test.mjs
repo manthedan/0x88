@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const SHELL_PATH = join(ROOT, 'public', 'app-shell.css');
+const SHELL_PATH = join(ROOT, 'src', 'styles', 'app-shell.css');
 
 /* ---------- file collection ---------- */
 
@@ -26,8 +26,8 @@ async function collectFiles(dir, exts, out = []) {
 }
 
 async function designSources() {
-  const svelteFiles = await collectFiles(join(ROOT, 'src'), new Set(['.svelte', '.css']));
-  const files = [...svelteFiles, SHELL_PATH];
+  // src/ includes the global stylesheets (src/styles/app-shell.css defines the tokens).
+  const files = await collectFiles(join(ROOT, 'src'), new Set(['.svelte', '.css']));
   const sources = new Map();
   for (const file of files) sources.set(file, await readFile(file, 'utf8'));
   return sources;
@@ -110,6 +110,23 @@ test('retired tokens stay retired', async () => {
     }
   }
   assert.deepEqual(failures, [], failures.join('\n'));
+});
+
+// public/ files are served under stable names, so the CDN/browser can pair new HTML with
+// hours-old CSS after a deploy. Imported styles ship content-hashed under /_app/immutable/.
+test('global stylesheets are Vite imports in cascade order, never public/ files', async () => {
+  const template = await readFile(join(ROOT, 'src', 'app.html'), 'utf8');
+  assert.doesNotMatch(template, /rel="stylesheet"/);
+  const publicCss = (await readdir(join(ROOT, 'public'))).filter((name) => name.endsWith('.css'));
+  assert.deepEqual(publicCss, []);
+  const layout = await readFile(join(ROOT, 'src', 'routes', '+layout.svelte'), 'utf8');
+  const imports = [...layout.matchAll(/^import '([^']+\.css)';$/gm)].map((match) => match[1]);
+  assert.deepEqual(imports, [
+    '../styles/chessground.base.css',
+    '../styles/chessground.brown.css',
+    'chessground/assets/chessground.cburnett.css',
+    '../styles/app-shell.css',
+  ]);
 });
 
 test('app-shell does not reintroduce !important surface overrides', async () => {

@@ -1,4 +1,11 @@
 <script lang="ts">
+// Global styles go through Vite so they ship content-hashed under /_app/immutable/ and Kit links
+// them render-blocking in every prerendered page. Cascade order matters: Chessground base,
+// board, pieces, then the app shell (and component styles after that).
+import '../styles/chessground.base.css';
+import '../styles/chessground.brown.css';
+import 'chessground/assets/chessground.cburnett.css';
+import '../styles/app-shell.css';
 import { onMount } from 'svelte';
 import { registerServiceWorker } from '#lib/pwa/register.ts';
 import { boardStyle, syncThemeToDom, theme } from '#lib/stores/theme.ts';

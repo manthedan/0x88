@@ -12,8 +12,8 @@
 // Handled:
 //   - navigations: network first, falling back to the cached page (or the
 //     /app/play/ shell) after NAVIGATION_TIMEOUT_MS or on network failure;
-//   - /_app/immutable/*: content-hashed build output, cache first;
-//   - a few small shell files the HTML links: network first.
+//   - /_app/immutable/*: content-hashed build output (JS and CSS), cache first;
+//   - the favicon and web manifest the HTML links: network first.
 //
 // Everything lives in one cache per build. src/lib/pwa/register.ts registers
 // /sw.js?v=<SvelteKit build version>; a new version is a new script URL, so
@@ -23,14 +23,8 @@ const CACHE_PREFIX = '0x88-app-';
 const LEGACY_CACHE_PREFIXES = ['0x88-app-shell-', 'lc0-app-shell-'];
 const APP_SHELL_FALLBACK = '/app/play/';
 const NAVIGATION_TIMEOUT_MS = 3500;
-const SHELL_ASSETS = new Set([
-  '/app-shell.css',
-  '/chessground.base.css',
-  '/chessground.brown.css',
-  '/chessground.cburnett.css',
-  '/favicon.svg',
-  '/manifest.webmanifest',
-]);
+// Stylesheets are not here: they are Vite build output under /_app/immutable/.
+const SHELL_ASSETS = new Set(['/favicon.svg', '/manifest.webmanifest']);
 // Never cache these even under an allowlisted prefix.
 const HEAVY_EXTENSIONS = ['.wasm', '.data', '.nnue', '.onnx', '.bin', '.pack', '.br', '.gz', '.tar'];
 
