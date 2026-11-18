@@ -169,7 +169,7 @@ export async function runJourney(evaluate, name, mark = () => {}, pause = sleep)
     evidence.moves.push(firstMove);
     const windowMs = 60000;
     evidence.analysisObservation = await requireAnalysisForMove(evaluate, firstMove, windowMs);
-    await waitFor(evaluate, `performance.now() >= ${firstMove.started + windowMs}`, windowMs);
+    await waitFor(evaluate, `performance.now() >= ${firstMove.started + windowMs}`, windowMs + 15000);
     if (name === 'analysis-four') {
       for (let i = 0; i < 10; i++) {
         const move = await userMove(evaluate, true, i);

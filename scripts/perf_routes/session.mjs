@@ -288,7 +288,7 @@ try {
     throw Error('Unobserved cross-origin assets bypass the JS counting proxy; stage same-origin assets before comparing (see externalAssetUrls).');
   const requestsThroughResidual = proxy.requests.map((r) => ({ ...r }));
   result.postNavigationRequests = requestsThroughResidual.filter((r) => r.at >= awayAt);
-  const failures = requestFailures(requestsThroughResidual);
+  const failures = requestFailures(requestsThroughResidual, spec.journey);
   result.optionalPrefetchFailures = failures.optional;
   result.networkFailures = failures.unexpected;
   if (result.networkFailures.length) throw Error('Failed or incomplete asset request; see networkFailures');

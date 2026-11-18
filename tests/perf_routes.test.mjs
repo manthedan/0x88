@@ -240,6 +240,13 @@ test('availability probe cancellation needs a confirmed missing sibling, not mer
   });
 });
 
+test('Analysis Four may cancel its unused Viridithas prefetch, but upstream errors remain fatal', () => {
+  const cancelled = { method: 'GET', path: '/viridithas/viridithas.wasm', clientAborted: true, complete: false, status: 200 };
+  const truncated = { ...cancelled, clientAborted: false, failure: 'upstream truncated' };
+  assert.deepEqual(requestFailures([cancelled, truncated], 'analysis-four'), { optional: [cancelled], unexpected: [truncated] });
+  assert.deepEqual(requestFailures([cancelled], 'analysis-default').unexpected, [cancelled]);
+});
+
 test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
   class NativeWorker {
     constructor() {
