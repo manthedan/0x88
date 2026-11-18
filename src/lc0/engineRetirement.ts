@@ -41,13 +41,16 @@ export async function awaitWorkerReclaim(gapMs: number, signal: AbortSignal, onW
   }
 }
 
+/** Only the admission barrier is capped; the returned promise is the real
+ * release, for callers that must not allocate until it has finished. */
 export function trackEngineRetirement(disposal: Promise<unknown>): Promise<void> {
+  const released = disposal.then(
+    () => undefined,
+    (error: unknown) => console.warn('Engine release failed.', error),
+  );
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const boundary = Promise.race([
-    disposal.then(
-      () => undefined,
-      (error: unknown) => console.warn('Engine release failed.', error),
-    ),
+  const admission = Promise.race([
+    released,
     new Promise<void>((resolve) => {
       timer = setTimeout(() => {
         console.warn(`Engine release still pending after ${ENGINE_RETIREMENT_CAP_MS} ms; starting the next engine anyway.`);
@@ -55,9 +58,9 @@ export function trackEngineRetirement(disposal: Promise<unknown>): Promise<void>
       }, ENGINE_RETIREMENT_CAP_MS);
     }),
   ]).finally(() => clearTimeout(timer));
-  retiring.add(boundary);
-  void boundary.finally(() => retiring.delete(boundary));
-  return boundary;
+  retiring.add(admission);
+  void admission.finally(() => retiring.delete(admission));
+  return released;
 }
 
 export function hasEngineRetirements(): boolean {
