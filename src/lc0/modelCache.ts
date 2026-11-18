@@ -617,12 +617,7 @@ export interface Lc0ModelDownloadState {
  * create a cache bucket, update LRU metadata, or weaken the inference loader.
  */
 export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<Lc0ModelDownloadState> {
-  options.signal?.throwIfAborted();
-  const manifest = options.manifestEntry
-    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl }
-    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
-  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+  const resolved = await resolveLoaderArtifact(modelUrl, options);
   const state: Lc0ModelDownloadState = { url: resolved.url, downloadBytes: resolved.downloadBytes, cached: false };
   const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
   try {
@@ -646,6 +641,28 @@ export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0Mode
     if (options.signal?.aborted) throw error;
     return state; // Missing/denied/stale verification is never a confirmed cache hit.
   }
+}
+
+/** The artifact (URL and integrity pins) the loader would fetch for modelUrl. */
+async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOptions): Promise<ResolvedModelArtifact> {
+  options.signal?.throwIfAborted();
+  const manifest = options.manifestEntry
+    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl }
+    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
+  return untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+}
+
+/** Whether Cache Storage has an entry for the loader's exact artifact, without
+ * reading its body or consulting verification metadata. Not proof of integrity:
+ * the loader still verifies the entry (metadata, else a rehash) when it reads it.
+ */
+export async function lc0ModelCacheEntryExists(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<boolean> {
+  const resolved = await resolveLoaderArtifact(modelUrl, options);
+  const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
+  if (!cacheApiAvailable() || !(await untilAborted(caches.has(cacheName), options.signal))) return false;
+  const cache = await untilAborted(caches.open(cacheName), options.signal);
+  return (await untilAborted(cache.keys(new Request(resolved.url)), options.signal)).length > 0;
 }
 
 interface FetchModelBytesResult {
@@ -991,14 +1008,12 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
 
 /**
  * Download, verify and store a model in Cache Storage through the normal
- * loader, without returning its bytes. Resolves true when Cache Storage holds
- * verified bytes (already, or now), false when the verified bytes could not be
- * stored (cache.put failed). Rejects before downloading when Cache Storage or
- * its quota cannot keep the model.
+ * loader. mode 'cache' means Cache Storage holds verified bytes (already, or
+ * now); 'memory' means cache.put failed and `model` holds the verified bytes.
+ * Rejects before downloading when Cache Storage or its quota cannot keep the model.
  */
-export async function prefetchLc0ModelToCache(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<boolean> {
-  const result = await loadLc0ModelForOrt(modelUrl, { ...options, cache: true, cacheOnly: true });
-  return result.mode === 'cache';
+export function prefetchLc0ModelToCache(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<Lc0ModelLoadResult> {
+  return loadLc0ModelForOrt(modelUrl, { ...options, cache: true, cacheOnly: true });
 }
 
 async function fetchUncachedVerifiedModel(

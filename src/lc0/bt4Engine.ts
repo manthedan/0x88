@@ -387,13 +387,18 @@ export class Bt4WorkerSearcher {
     return this.ready;
   }
 
-  private post<T>(message: Record<string, unknown>, onId?: (id: number) => void, onProgress?: (progress: Bt4SearchProgress) => void): Promise<T> {
+  private post<T>(
+    message: Record<string, unknown>,
+    onId?: (id: number) => void,
+    onProgress?: (progress: Bt4SearchProgress) => void,
+    transfer: Transferable[] = [],
+  ): Promise<T> {
     if (!this.worker) return Promise.reject(new Error('Lc0 BT4 worker unavailable'));
     const id = ++this.seq;
     onId?.(id);
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
-      this.worker!.postMessage({ ...message, id });
+      this.worker!.postMessage({ ...message, id }, transfer);
     });
   }
 
@@ -431,28 +436,32 @@ export class Bt4WorkerSearcher {
     if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
     if (this.initPromise) return this.initPromise;
     const initializing = (async () => {
-      // Phones only: a cold net is fetched into Cache Storage by a throwaway worker
-      // first, so this worker's load is a cached load (largeNetDownload.ts).
-      const prefetchAbort = new AbortController();
-      const prefetching = this.coldPrefetch(this.config, {
-        signal: prefetchAbort.signal,
-        onProgress: (loaded, total) => this.onDownloadProgress?.(loaded, total),
-        load: { requestPersistentStorage: true, minimumFreeBytesAfterCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES },
-      });
-      if (prefetching) {
-        this.prefetchAbort = prefetchAbort;
-        // It rejects only when dispose() aborts it, which the generation check below reports.
-        await prefetching.catch(() => undefined);
-        if (this.prefetchAbort === prefetchAbort) this.prefetchAbort = null;
-      }
-      if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
-      const worker = this.startWorker();
       // WebGPU-first with wasm-CPU fallback: 'auto' resolves to
       // ['webgpu','wasm'] when an adapter is usable and ['wasm'] otherwise,
       // so big nets stay playable (slowly) without WebGPU — callers read
       // `backend` and scale visit budgets via config.wasmLevels. An explicit
       // ?ortEp=wasm page override forces the CPU path end to end.
       const ep = requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
+      // Phones only: a cold net is fetched into Cache Storage by a throwaway worker
+      // first, so this worker's load is a cached load (largeNetDownload.ts).
+      const prefetchAbort = new AbortController();
+      const prefetching = this.coldPrefetch(this.config, {
+        signal: prefetchAbort.signal,
+        ep,
+        onProgress: (loaded, total) => this.onDownloadProgress?.(loaded, total),
+        load: { requestPersistentStorage: true, minimumFreeBytesAfterCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES },
+      });
+      let prefetched: LargeNetPrefetchResult | undefined;
+      if (prefetching) {
+        this.prefetchAbort = prefetchAbort;
+        // It rejects only when dispose() aborts it, which the generation check below reports.
+        prefetched = await prefetching.catch(() => undefined);
+        if (this.prefetchAbort === prefetchAbort) this.prefetchAbort = null;
+      }
+      if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
+      // cache.put failed after a verified download: hand the bytes over rather than download twice.
+      const prefetchedModel = prefetched?.status === 'memory' ? { url: prefetched.modelUrl, load: prefetched.load } : undefined;
+      const worker = this.startWorker();
       // Big nets opt into app-owned Cache Storage so immutable model bytes
       // survive route changes even when the browser HTTP cache skips large
       // entries. Quota-limited browsers fall back to URL-loading in the worker.
@@ -462,19 +471,25 @@ export class Bt4WorkerSearcher {
         ortFallback?: OrtRuntimeDiagnostics['fallback'];
         servedModelUrl?: string;
         ortRuntime?: OrtSessionDiagnostics;
-      }>({
-        type: 'init',
-        modelUrl: this.config.modelUrl,
-        // Keep the production device rule for both shipped and lab-selected configs.
-        deviceModelSelection: true,
-        ep,
-        cacheModel: true,
-        ...diagnostics,
-        evalCacheEntries,
-        reportDownloadProgress: this.config.streamDownloadProgress === true,
-        requestPersistentModelStorage: true,
-        minimumFreeBytesAfterModelCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES,
-      });
+      }>(
+        {
+          type: 'init',
+          modelUrl: this.config.modelUrl,
+          // Keep the production device rule for both shipped and lab-selected configs.
+          deviceModelSelection: true,
+          ep,
+          cacheModel: true,
+          ...diagnostics,
+          evalCacheEntries,
+          reportDownloadProgress: this.config.streamDownloadProgress === true,
+          requestPersistentModelStorage: true,
+          minimumFreeBytesAfterModelCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES,
+          ...(prefetchedModel ? { prefetchedModel } : {}),
+        },
+        undefined,
+        undefined,
+        prefetchedModel ? [prefetchedModel.load.model] : [],
+      );
       if (this.worker !== worker) throw new Error('Lc0 BT4 worker invalidated during initialization');
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;

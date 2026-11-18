@@ -130,7 +130,7 @@ export type Lc0OrtEvaluatorDeps = {
   clearCacheEntry?: typeof clearLc0ModelCacheEntry;
 };
 
-const DEFAULT_DEPS: Lc0OrtEvaluatorDeps = {
+export const DEFAULT_LC0_ORT_EVALUATOR_DEPS: Lc0OrtEvaluatorDeps = {
   placement: resolveOrtSessionPlacement,
   load: loadLc0ModelForOrt,
   createEvaluator: (model, options) => Lc0OnnxEvaluator.create(model, options),
@@ -159,7 +159,7 @@ function errorMessage(error: unknown): string {
 export async function createLc0OnnxEvaluatorFromUrl(
   requestedUrl: string,
   options: Lc0OrtEvaluatorFromUrlOptions = {},
-  deps: Lc0OrtEvaluatorDeps = DEFAULT_DEPS,
+  deps: Lc0OrtEvaluatorDeps = DEFAULT_LC0_ORT_EVALUATOR_DEPS,
 ): Promise<Lc0OrtEvaluatorFromUrl> {
   const loadOptions = options.load ?? {};
   loadOptions.signal?.throwIfAborted();

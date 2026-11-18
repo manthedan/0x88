@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BT4_NET, Bt4WorkerSearcher } from '../src/lc0/bt4Engine.ts';
+import { BT4_NET, Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
 import { prefetchLargeNetToCache } from '../src/lc0/largeNetDownload.ts';
+import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { loadLc0ModelForOrt, prefetchLc0ModelToCache } from '../src/lc0/modelCache.ts';
+import { resetWebGpuAdapterProbeForTests, resolveOrtSessionPlacement } from '../src/nn/ortRuntime.ts';
 
 // Phone cold loads: the net is downloaded, verified and cached by a throwaway
 // worker that is terminated before the session worker starts, so the session
@@ -31,11 +33,11 @@ globalThis.self = workerScope;
 await import('../src/lc0/modelPrefetchWorker.ts');
 
 /** Cache Storage, the app manifest and the network; `put` can be made to fail. */
-function environment(t, { phone = true, putFails = false, holdPrefetch = false } = {}) {
+function environment(t, { phone = true, putFails = false, holdPrefetch = false, query = '' } = {}) {
   const trace = [];
   const responses = new Map();
   const counts = { downloads: 0 };
-  replaceGlobal(t, 'location', new URL(`https://example.test/analysis?memoryClass=${phone ? 'phone' : 'desktop'}`));
+  replaceGlobal(t, 'location', new URL(`https://example.test/analysis?memoryClass=${phone ? 'phone' : 'desktop'}${query}`));
   replaceGlobal(t, 'localStorage', { getItem: () => null, setItem: () => undefined });
   const cache = {
     async match(request) {
@@ -71,12 +73,14 @@ function environment(t, { phone = true, putFails = false, holdPrefetch = false }
         super();
         this.kind = String(url).includes('modelPrefetchWorker') ? 'prefetch' : 'search';
         this.messages = [];
+        this.transfers = [];
         this.terminated = false;
         workers.push(this);
         trace.push(`${this.kind}:spawn`);
       }
-      postMessage(message) {
+      postMessage(message, transfer = []) {
         this.messages.push(message);
+        this.transfers.push(transfer);
         if (this.kind === 'prefetch') {
           if (holdPrefetch) return; // a download that never finishes on its own
           toPrefetchOwner = (data) => {
@@ -115,24 +119,39 @@ test('phone cold load: prefetch worker caches the net and is terminated before t
   assert.equal(load.sha256Valid, true);
   assert.equal(env.counts.downloads, 1);
   await searcher.dispose();
+  // Warm: the entry exists. This test realm has no IndexedDB, so it has no verification
+  // metadata either; key presence alone decides, and the session loader verifies it.
+  env.trace.length = 0;
+  const warm = new Bt4WorkerSearcher(config);
+  assert.equal(await warm.init(), 'mock-webgpu');
+  assert.deepEqual(env.trace, ['search:spawn', 'search:init'], 'no prefetch worker for a cached net');
+  await warm.dispose();
 });
 
-test('phone warm load: a cached net spawns no prefetch worker', async (t) => {
-  const env = environment(t);
-  const inspected = [];
-  const result = await prefetchLargeNetToCache(
-    config,
-    { signal: new AbortController().signal, load: {} },
-    {
-      placement: () => assert.fail('BT4 has no device-specific rewrite'),
-      inspect: async (url) => (inspected.push(url), { url, cached: true }),
-      spawn: () => assert.fail('no worker for a cached net'),
-      reclaimGapMs: () => 0,
-    },
+test('t3 prefetch resolves its file with the EP the session worker will get, not the page preference', async (t) => {
+  // ?ortEp=webgpu page on an Apple adapter without shader-f16: the worker is sent `auto`,
+  // resolves to WASM and loads the original t3, so that is the file to prefetch.
+  environment(t, { query: '&ortEp=webgpu' });
+  replaceGlobal(t, 'navigator', { gpu: { requestAdapter: async () => ({ features: new Set(), info: { vendor: 'apple' } }) } });
+  resetWebGpuAdapterProbeForTests();
+  t.after(resetWebGpuAdapterProbeForTests);
+  let sent;
+  const searcher = new Bt4WorkerSearcher(T3_NET, (_config, options) => {
+    sent = options.ep;
+    return undefined;
+  });
+  t.after(() => searcher.dispose());
+  void searcher.init().catch(() => undefined);
+  assert.equal(sent, 'auto');
+  const probed = [];
+  await prefetchLargeNetToCache(
+    T3_NET,
+    { signal: new AbortController().signal, ep: sent, load: {} },
+    { placement: resolveOrtSessionPlacement, cached: async (url) => (probed.push(url), true), spawn: () => assert.fail(), reclaimGapMs: () => 0 },
   );
-  assert.equal(result, 'cached');
-  assert.deepEqual(inspected, [modelUrl]);
-  assert.deepEqual(env.trace, []);
+  assert.deepEqual(probed, [T3_NET.modelUrl]);
+  assert.notEqual(lc0SplitKUrl(T3_NET.modelUrl), undefined, 'the page preference alone would have picked split-K');
+  assert.deepEqual((await resolveOrtSessionPlacement()).providers, ['webgpu']);
 });
 
 test('desktop init does not prefetch and creates its worker without awaiting', async (t) => {
@@ -158,24 +177,27 @@ test('dispose (Stop, seat swap) during the prefetch terminates its worker and ne
   assert.equal(env.workers.length, 1, 'no session worker after Stop');
 });
 
-test('a failed cache.put falls back to the in-worker load', async (t) => {
+test('a failed cache.put hands the verified bytes to the session worker: one download', async (t) => {
   const env = environment(t, { putFails: true });
   const searcher = new Bt4WorkerSearcher(config);
-  t.mock.method(console, 'warn', () => undefined);
   assert.equal(await searcher.init(), 'mock-webgpu');
   assert.deepEqual(env.trace, ['prefetch:spawn', 'download', 'prefetch:terminate', 'search:spawn', 'search:init']);
   assert.equal(env.responses.size, 0);
-  // The session worker then loads exactly as before the prefetch existed.
-  const load = await loadLc0ModelForOrt(modelUrl, { cache: true, signal: AbortSignal.timeout(5000) });
-  assert.equal(load.mode, 'memory');
-  assert.equal(env.counts.downloads, 2);
+  const search = env.workers[1];
+  const { prefetchedModel } = search.messages[0];
+  assert.equal(prefetchedModel.url, modelUrl);
+  assert.equal(prefetchedModel.load.mode, 'memory');
+  assert.equal(prefetchedModel.load.sha256Valid, true);
+  assert.equal(new TextDecoder().decode(prefetchedModel.load.model), 'abc');
+  assert.deepEqual(search.transfers[0], [prefetchedModel.load.model], 'transferred, not copied');
+  assert.equal(env.counts.downloads, 1);
   await searcher.dispose();
 });
 
 test('prefetch reports put failure and refuses to download what Cache Storage cannot keep', async (t) => {
   const env = environment(t, { putFails: true });
   const manifestEntry = { file: 'prefetch.onnx', url: modelUrl, bytes: 3, sha256 };
-  assert.equal(await prefetchLc0ModelToCache(modelUrl, { manifestEntry, channelUrl: null }), false);
+  assert.equal((await prefetchLc0ModelToCache(modelUrl, { manifestEntry, channelUrl: null })).mode, 'memory');
   assert.equal(env.counts.downloads, 1);
   replaceGlobal(t, 'caches', undefined);
   await assert.rejects(prefetchLc0ModelToCache(modelUrl, { manifestEntry, channelUrl: null }), /cannot be cached here \(unavailable\)/);
@@ -195,9 +217,9 @@ test('the session load waits out the phone reclaim gap counted from the prefetch
   };
   const result = await prefetchLargeNetToCache(
     config,
-    { signal: new AbortController().signal, load: {} },
-    { placement: () => assert.fail('unused'), inspect: async (url) => ({ url, cached: false }), spawn: () => worker, reclaimGapMs: () => 40 },
+    { signal: new AbortController().signal, ep: 'auto', load: {} },
+    { placement: () => assert.fail('unused'), cached: async () => false, spawn: () => worker, reclaimGapMs: () => 40 },
   );
-  assert.equal(result, 'prefetched');
+  assert.deepEqual(result, { status: 'prefetched' });
   assert.ok(performance.now() - terminatedAt >= 35, 'resolved only after the gap');
 });

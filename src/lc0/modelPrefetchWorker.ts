@@ -1,6 +1,6 @@
 // Throwaway worker for phone cold loads (largeNetDownload.ts prefetchLargeNetToCache).
 // It imports only the model cache, never ORT; its owner terminates it after one reply.
-import { prefetchLc0ModelToCache } from './modelCache.ts';
+import { type Lc0ModelLoadResult, prefetchLc0ModelToCache } from './modelCache.ts';
 
 export type ModelPrefetchRequest = {
   type: 'prefetch';
@@ -11,10 +11,12 @@ export type ModelPrefetchRequest = {
 
 export type ModelPrefetchReply =
   | { type: 'progress'; loadedBytes: number; totalBytes?: number }
-  | { type: 'done'; cached: boolean }
+  | { type: 'done'; cached: true }
+  /** cache.put failed: the verified bytes, transferred so they need not be downloaded again. */
+  | { type: 'done'; cached: false; load: Lc0ModelLoadResult & { model: ArrayBuffer } }
   | { type: 'error'; error: string };
 
-const post = (reply: ModelPrefetchReply) => self.postMessage(reply);
+const post = (reply: ModelPrefetchReply, transfer: Transferable[] = []) => self.postMessage(reply, { transfer });
 
 self.addEventListener('message', (event: MessageEvent<ModelPrefetchRequest>) => {
   const { type, modelUrl, requestPersistentStorage, minimumFreeBytesAfterCache } = event.data;
@@ -30,7 +32,13 @@ self.addEventListener('message', (event: MessageEvent<ModelPrefetchRequest>) => 
       post({ type: 'progress', loadedBytes, totalBytes });
     },
   }).then(
-    (cached) => post({ type: 'done', cached }),
+    (load) => {
+      if (load.mode === 'cache') post({ type: 'done', cached: true });
+      else {
+        const model = load.model as ArrayBuffer; // cacheOnly never yields a URL
+        post({ type: 'done', cached: false, load: { ...load, model } }, [model]);
+      }
+    },
     (error: unknown) => post({ type: 'error', error: error instanceof Error ? error.message : String(error) }),
   );
 });

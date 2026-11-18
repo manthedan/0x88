@@ -1,9 +1,9 @@
-import { resolveOrtSessionPlacement } from '../nn/ortRuntime.ts';
+import { type OrtExecutionProviderPreference, resolveOrtSessionPlacement } from '../nn/ortRuntime.ts';
 import type { BigNetConfig } from './bt4Engine.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { awaitWorkerReclaim, terminateEngineWorker } from './engineRetirement.ts';
 import { lc0SplitKUrl, selectLc0OrtModelUrl } from './lc0SmallModelSelection.ts';
-import { inspectLc0ModelDownload, type Lc0ModelDownloadState, untilAborted } from './modelCache.ts';
+import { inspectLc0ModelDownload, type Lc0ModelDownloadState, type Lc0ModelLoadResult, lc0ModelCacheEntryExists, untilAborted } from './modelCache.ts';
 import type { ModelPrefetchReply, ModelPrefetchRequest } from './modelPrefetchWorker.ts';
 
 const defaultDeps = { placement: resolveOrtSessionPlacement, inspect: inspectLc0ModelDownload };
@@ -11,7 +11,7 @@ const defaultDeps = { placement: resolveOrtSessionPlacement, inspect: inspectLc0
 export type LargeNetDownloadState = Lc0ModelDownloadState & { mayDownloadFallback?: boolean; downloadBytesIncomplete?: boolean };
 
 /** The model URL the production worker selects first (split-K on Apple WebGPU where listed). */
-async function selectedLargeNetUrl(config: BigNetConfig, placement: typeof defaultDeps.placement): Promise<string> {
+async function selectedLargeNetUrl(config: BigNetConfig, placement: () => ReturnType<typeof defaultDeps.placement>): Promise<string> {
   const originalUrl = config.modelUrl;
   return lc0SplitKUrl(originalUrl) ? selectLc0OrtModelUrl(originalUrl, await placement()) : originalUrl;
 }
@@ -42,16 +42,25 @@ export async function inspectLargeNetDownload(config: BigNetConfig, signal?: Abo
 export type LargeNetPrefetchOptions = {
   /** Aborted when the owning searcher is disposed (Stop, seat swap, page hide). */
   signal: AbortSignal;
+  /** The EP preference the session worker will be pinned to, so the prefetch picks its model file. */
+  ep: OrtExecutionProviderPreference;
   onProgress?: (loadedBytes: number, totalBytes?: number) => void;
   /** The session load's Cache Storage options, so both name and size-check the same entry. */
   load: Pick<ModelPrefetchRequest, 'requestPersistentStorage' | 'minimumFreeBytesAfterCache'>;
 };
 
-/** 'cached': nothing to do; 'prefetched': Cache Storage now holds it; 'fallback': load it as before. */
-export type LargeNetPrefetchResult = 'cached' | 'prefetched' | 'fallback';
+/**
+ * 'cached': already in Cache Storage; 'prefetched': now in it; 'fallback': load as before.
+ * 'memory': cache.put failed; `load` holds the verified bytes of `modelUrl` for the
+ * session worker, so the net is still downloaded once.
+ */
+export type LargeNetPrefetchResult =
+  | { status: 'cached' | 'prefetched' | 'fallback' }
+  | { status: 'memory'; modelUrl: string; load: Lc0ModelLoadResult & { model: ArrayBuffer } };
 
 const defaultPrefetchDeps = {
-  ...defaultDeps,
+  placement: resolveOrtSessionPlacement,
+  cached: lc0ModelCacheEntryExists,
   spawn: (): Worker => new Worker(new URL('./modelPrefetchWorker.ts', import.meta.url), { type: 'module' }),
   reclaimGapMs: () => phoneReclaimSettings().reclaimGapMs,
 };
@@ -74,28 +83,32 @@ export async function prefetchLargeNetToCache(
   signal.throwIfAborted();
   let modelUrl: string;
   try {
-    modelUrl = await untilAborted(selectedLargeNetUrl(config, deps.placement), signal);
-    // Byte-free probe: a warm net must not pay for a worker or a second cache read.
-    if ((await deps.inspect(modelUrl, { signal })).cached) return 'cached';
+    modelUrl = await untilAborted(
+      selectedLargeNetUrl(config, () => deps.placement(options.ep)),
+      signal,
+    );
+    // Key presence only, no body read: a cached net must not pay for a worker or a second read.
+    // The session worker's loader still verifies the entry (metadata, else a rehash).
+    if (await deps.cached(modelUrl, { signal })) return { status: 'cached' };
   } catch (error) {
     signal.throwIfAborted();
     console.warn(`Lc0 ${config.name}: cache probe failed; loading without prefetch.`, error);
-    return 'fallback';
+    return { status: 'fallback' };
   }
   const worker = deps.spawn();
-  let cached = false;
+  let result: LargeNetPrefetchResult = { status: 'fallback' };
   try {
-    const reply = new Promise<boolean>((resolve, reject) => {
+    const reply = new Promise<LargeNetPrefetchResult>((resolve, reject) => {
       worker.addEventListener('message', (event: MessageEvent<ModelPrefetchReply>) => {
         const data = event.data;
         if (data.type === 'progress') options.onProgress?.(data.loadedBytes, data.totalBytes);
-        else if (data.type === 'done') resolve(data.cached);
-        else reject(new Error(data.error));
+        else if (data.type === 'error') reject(new Error(data.error));
+        else resolve(data.cached ? { status: 'prefetched' } : { status: 'memory', modelUrl, load: data.load });
       });
       worker.addEventListener('error', (event) => reject(new Error(event.message || 'model prefetch worker failed')));
       worker.postMessage({ type: 'prefetch', modelUrl, ...options.load } satisfies ModelPrefetchRequest);
     });
-    cached = await untilAborted(reply, signal);
+    result = await untilAborted(reply, signal);
   } catch (error) {
     signal.throwIfAborted();
     // No Cache Storage or quota (rejected before downloading), or a network/integrity
@@ -106,9 +119,7 @@ export async function prefetchLargeNetToCache(
   }
   // Counted from the termination above; 0 by default, a diagnostic override otherwise.
   await awaitWorkerReclaim(deps.reclaimGapMs(), signal, () => undefined);
-  // A failed cache.put lost the bytes with the worker, so the fallback downloads again.
-  // Rare: the quota was checked before the download.
-  return cached ? 'prefetched' : 'fallback';
+  return result;
 }
 
 /** Phones with Cache Storage only. Elsewhere returns undefined, so callers add no await. */
