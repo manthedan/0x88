@@ -524,8 +524,7 @@ function webgpuUsableForProviderSelection(): boolean {
   return webgpuAvailable() && probedWebGpuAdapterUsable !== false && probedWebGpuShaderF16 !== false;
 }
 
-export function resolvedOrtExecutionProviders(): string[] {
-  const requested = requestedOrtExecutionProvider();
+export function resolvedOrtExecutionProviders(requested = requestedOrtExecutionProvider()): string[] {
   if (requested === 'webgpu') return ['webgpu'];
   if (requested === 'webgpu,wasm') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
   if (requested === 'auto') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
@@ -1374,10 +1373,9 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
  * `['webgpu']` regardless so it still surfaces "WebGPU unavailable" rather than
  * silently degrading.
  */
-async function ensureWebGpuAdapterProbed(): Promise<void> {
+async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvider()): Promise<void> {
   if (probedWebGpuAdapterUsable !== null) return;
   if (!webgpuAvailable()) return;
-  const requested = requestedOrtExecutionProvider();
   if (requested === 'wasm' || requested === 'webgpu') return;
   try {
     const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
@@ -1451,11 +1449,12 @@ export type OrtSessionPlacement = {
 /**
  * Where the next session on this thread will run, decided the same way
  * createOrtSession decides it. Lets a caller pick device-specific model bytes
- * before downloading them (src/lc0/lc0SmallModelSelection.ts).
+ * before downloading them (src/lc0/lc0SmallModelSelection.ts). `requested`
+ * answers for another thread's EP pin, e.g. a worker this page will start.
  */
-export async function resolveOrtSessionPlacement(): Promise<OrtSessionPlacement> {
-  await ensureWebGpuAdapterProbed();
-  const providers = resolvedOrtExecutionProviders();
+export async function resolveOrtSessionPlacement(requested = requestedOrtExecutionProvider()): Promise<OrtSessionPlacement> {
+  await ensureWebGpuAdapterProbed(requested);
+  const providers = resolvedOrtExecutionProviders(requested);
   if (!providers.includes('webgpu') || !webgpuAvailable()) return { providers };
   const adapterVendor = await webGpuAdapterVendor();
   return adapterVendor ? { providers, adapterVendor } : { providers };

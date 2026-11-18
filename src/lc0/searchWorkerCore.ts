@@ -16,8 +16,8 @@ import {
 } from '../nn/ortRuntime.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 import type { Lc0WebEncoderKernelVariant, Lc0WebExecutionFootprint, Lc0WebHybridLegalPriorsBackend } from './hybridEvaluator.ts';
-import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
-import { describeLc0ModelLoad } from './modelCache.ts';
+import { createLc0OnnxEvaluatorFromUrl, DEFAULT_LC0_ORT_EVALUATOR_DEPS } from './lc0SmallModelSelection.ts';
+import { describeLc0ModelLoad, type Lc0ModelLoadResult } from './modelCache.ts';
 import {
   CachedLc0Evaluator,
   defaultLc0OrtIoMode,
@@ -77,6 +77,8 @@ type InitMessage = {
   reportDownloadProgress?: boolean;
   requestPersistentModelStorage?: boolean;
   minimumFreeBytesAfterModelCache?: number;
+  /** Verified bytes from a phone prefetch whose cache.put failed (largeNetDownload.ts), for one load of `url`. */
+  prefetchedModel?: { url: string; load: Lc0ModelLoadResult };
 };
 
 type SearchMessage = {
@@ -429,28 +431,43 @@ async function handleInit(message: InitMessage): Promise<void> {
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   const initAbort = new AbortController();
   activeInit = initAbort;
-  const created = await createLc0OnnxEvaluatorFromUrl(message.modelUrl, {
-    deviceSelection: message.deviceModelSelection === true,
-    evaluator: {
-      physicalBatchMode,
-      ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true),
-      freeDimensionOverrides: message.ortFreeDimensionOverrides,
+  let prefetched = message.prefetchedModel;
+  message.prefetchedModel = undefined; // Only `prefetched` may keep the bytes alive.
+  const deps = prefetched && {
+    ...DEFAULT_LC0_ORT_EVALUATOR_DEPS,
+    load: (url: string, options: Parameters<typeof DEFAULT_LC0_ORT_EVALUATOR_DEPS.load>[1]) => {
+      if (prefetched?.url !== url) return DEFAULT_LC0_ORT_EVALUATOR_DEPS.load(url, options);
+      const { load } = prefetched;
+      prefetched = undefined; // Reloads (recovery, fallbacks) go through the loader again.
+      return Promise.resolve(load);
     },
-    load: {
-      cache: message.cacheModel,
-      allowUnverified: message.allowUnverifiedModel,
-      requestPersistentStorage: message.requestPersistentModelStorage,
-      minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
-      signal: initAbort.signal,
-      onProgress: message.reportDownloadProgress
-        ? (loadedBytes, totalBytes) => {
-            if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
-            lastReportedBytes = loadedBytes;
-            post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
-          }
-        : undefined,
+  };
+  const created = await createLc0OnnxEvaluatorFromUrl(
+    message.modelUrl,
+    {
+      deviceSelection: message.deviceModelSelection === true,
+      evaluator: {
+        physicalBatchMode,
+        ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true),
+        freeDimensionOverrides: message.ortFreeDimensionOverrides,
+      },
+      load: {
+        cache: message.cacheModel,
+        allowUnverified: message.allowUnverifiedModel,
+        requestPersistentStorage: message.requestPersistentModelStorage,
+        minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
+        signal: initAbort.signal,
+        onProgress: message.reportDownloadProgress
+          ? (loadedBytes, totalBytes) => {
+              if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
+              lastReportedBytes = loadedBytes;
+              post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
+            }
+          : undefined,
+      },
     },
-  }).finally(() => {
+    deps,
+  ).finally(() => {
     if (activeInit === initAbort) activeInit = null;
   });
   const baseEvaluator = created.evaluator;
