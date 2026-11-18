@@ -10,10 +10,11 @@ import { ExclusiveQueue } from '../../src/lc0/exclusiveQueue.ts';
 import { parseScriptArgs } from '../lib/cli.mjs';
 import { sleep } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
-import { acquireLock, claimOutput, watchShutdown } from '../perf_routes/lifecycle.mjs';
+import { acquireLock, claimOutput, shutdownDelay, watchShutdown } from '../perf_routes/lifecycle.mjs';
 import { JOURNEYS } from './journeys.mjs';
 import {
   assembleTimeline,
+  burstGapFor,
   cadenceFor,
   chunk,
   collapseFrames,
@@ -44,7 +45,7 @@ Options:
   --cadence MS          Fixed screenshot cadence [250]
   --burst-gap MS        Minimum gap between mutation-burst captures [100]
   --soft-cap N          Unique frames per run before cadence drops 4x [400]
-  --hard-cap N          Unique frames per run before only step/burst captures remain [900]
+  --hard-cap N          Unique frames per run before only step and (sparser, capped) burst captures remain [900]
   --format FMT          jpeg or png (Chrome; Safari is always png) [jpeg]
   --quality N           JPEG quality [70]
   --memory-class CLASS  Append ?memoryClass=phone|desktop to entry URLs (phone large-net policy)
@@ -256,10 +257,16 @@ async function safariDriver(args) {
             return wd(method, s + path, body);
           }
         });
-      await call('POST', '/timeouts', { pageLoad: 90000, script: 120000 });
-      await call('POST', '/window/rect', { width: viewport.width, height: viewport.height });
-      // An occluded automation window pauses rAF and auto-analysis (see perf_routes/session.mjs).
-      execFileSync('osascript', ['-e', 'tell application "Safari" to activate']);
+      try {
+        await call('POST', '/timeouts', { pageLoad: 90000, script: 120000 });
+        await call('POST', '/window/rect', { width: viewport.width, height: viewport.height });
+        // An occluded automation window pauses rAF and auto-analysis (see perf_routes/session.mjs).
+        execFileSync('osascript', ['-e', 'tell application "Safari" to activate']);
+      } catch (error) {
+        // The caller never gets a handle to close; a leaked session blocks the next pairing.
+        await wd('DELETE', s).catch(() => {});
+        throw error;
+      }
       const evaluate = (expression) => call('POST', '/execute/sync', { script: `return (${expression});`, args: [] });
       return {
         evaluate,
@@ -331,19 +338,27 @@ async function recordRun(driver, base, item, args, outDir, signal) {
       });
   };
   const onBurst = () => {
-    const gap = store.unique >= args.softCap ? args.burstGap * 4 : args.burstGap;
-    if (inFlight === 0 && store.unique < args.hardCap && Date.now() - lastCaptureAt >= gap) capture('burst').catch(() => {});
+    const gap = burstGapFor(store.unique, args);
+    if (gap !== null && inFlight === 0 && Date.now() - lastCaptureAt >= gap) capture('burst').catch(() => {});
   };
-  let recording = true;
+  // Aborting the run (timeout or Ctrl-C) makes the active step's next page call or pause throw,
+  // so it settles and records its failure frame before the final capture and teardown.
+  const runAbort = new AbortController();
+  const runSignal = AbortSignal.any([signal, runAbort.signal]);
   const ctx = {
     viewport: item.viewport,
-    evaluate: (expression) => session.evaluate(expression),
-    pause: (ms) => sleep(ms),
+    async evaluate(expression) {
+      runSignal.throwIfAborted();
+      return session.evaluate(expression);
+    },
+    pause: (ms) => shutdownDelay(ms, runSignal),
     note: (type, text) => onEvent({ type, text }),
     async click(selector) {
+      runSignal.throwIfAborted();
       try {
         await session.click(selector);
       } catch (error) {
+        runSignal.throwIfAborted();
         // A control the pointer cannot reach (covered, off-screen, zero-size) is itself a UAT finding.
         onEvent({ type: 'warning', text: `Pointer click on ${selector} failed (${String(error.message ?? error).split('\n')[0]}); used DOM click` });
         await session.evaluate(
@@ -353,7 +368,7 @@ async function recordRun(driver, base, item, args, outDir, signal) {
     },
     async step(label, fn) {
       if (failed) return;
-      signal.throwIfAborted();
+      runSignal.throwIfAborted();
       const step = { label, t: Date.now(), status: 'running' };
       steps.push(step);
       await capture('step', label);
@@ -371,7 +386,8 @@ async function recordRun(driver, base, item, args, outDir, signal) {
   };
   let status = 'ok',
     error = null,
-    video = null;
+    video = null,
+    recording = true;
   try {
     proxy = await startCountingProxy(base, { htmlScript: probeScript({ ...PROBE_OPTIONS, captureConsole: driver.captureConsoleInPage }) });
     session = await driver.open(item.viewport, runDir, { onEvent, onBurst });
@@ -384,11 +400,17 @@ async function recordRun(driver, base, item, args, outDir, signal) {
         if (recording && ms !== null && inFlight === 0) await capture('cadence').catch(() => {});
       }
     })();
+    const journey = JOURNEYS[item.journey].run(ctx);
     try {
-      await bounded(JOURNEYS[item.journey].run(ctx), `${item.journey} run`, args.runTimeout).catch((e) => {
-        failed = true; // stop a timed-out journey's remaining steps
-        throw e;
-      });
+      await bounded(journey, `${item.journey} run`, args.runTimeout);
+    } catch (e) {
+      runAbort.abort(e);
+      await bounded(
+        journey.catch(() => {}),
+        'journey cancellation',
+        30000,
+      ).catch(() => onEvent({ type: 'warning', text: 'Journey did not settle within 30 s of cancellation' }));
+      throw e;
     } finally {
       failed ||= steps.some((s) => s.status === 'failed');
       await capture('final', 'end of journey').catch(() => {});
@@ -403,14 +425,19 @@ async function recordRun(driver, base, item, args, outDir, signal) {
     console.error(`[uat] ${item.dir}: ${error}`);
   } finally {
     recording = false;
-    // A step still waiting when the run timed out must not keep capturing into a closed session.
     failed = true;
+    runAbort.abort(Error('run finished'));
     if (session)
       video = await session.close().catch((e) => {
         onEvent({ type: 'warning', text: `close: ${e.message}` });
         return null;
       });
     if (proxy) await proxy.close();
+  }
+  // Steps can all pass while every screenshot fails; an empty filmstrip is not a recording.
+  if (store.unique === 0) {
+    status = 'failed';
+    error ??= `No screenshots recorded: ${samples.find((s) => s.error)?.error ?? 'no samples taken'}`;
   }
   const meta = {
     journey: item.journey,
@@ -469,6 +496,8 @@ async function renderReview(outDir, dirs, browser) {
             const title = `${timeline.meta.journey} · ${timeline.meta.viewport.name} · sheet ${i + 1}/${pages.length} · t=${(entries[0].t / 1000).toFixed(1)}–${(entries.at(-1).until / 1000).toFixed(1)}s`;
             writeFileSync(join(runDir, `${name}.html`), renderSheetHtml(entries, { title, ...layout }));
             await page.goto(pathToFileURL(join(runDir, `${name}.html`)).href, { waitUntil: 'load' });
+            // Every thumbnail must be decoded before the full-page capture measures and paints the grid.
+            await page.evaluate(() => Promise.all([...document.images].map((img) => img.decode().catch(() => {}))));
             await page.screenshot({ path: join(runDir, `${name}.jpg`), fullPage: true, type: 'jpeg', quality: 80 });
             sheets.push(`${name}.jpg`);
           }

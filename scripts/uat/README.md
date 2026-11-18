@@ -7,7 +7,19 @@ Stop/progress button overflowing, the toolbar re-stacking as progress changed, e
 
 ## Run
 
-Build the product preview first (`BUILD_SCOPE=product npm run build:client`), then from the worktree root:
+The journeys need real model files, which are gitignored: Lc0 Small (Play, Arena, Analysis) and BT4
+(`analysis-engines`). A plain `build:client` in a fresh checkout serves 404s for them. Stage the
+pinned models, then build an archive of the commit with the models linked in. This is the same
+build `perf:routes` measures. Run from the worktree root:
+
+```sh
+npm run test:stage-lc0-assets      # pinned Lc0 Small, BT4, Maia3 into ../models/lc0-bestnets (hash-checked)
+npm run perf:routes -- --baseline HEAD --candidate HEAD --build-only --out .local-dev-artifacts/uat-build
+```
+
+Then record with `--dist .local-dev-artifacts/uat-build/builds/baseline/dist-client`. A checkout whose
+`public/models` already links the models can use `BUILD_SCOPE=product npm run build:client` and the
+default `--dist dist-client`.
 
 ```sh
 node scripts/uat/record_journeys.mjs                     # all journeys × 1280x800, 390x844, 320x640 in Chrome
@@ -59,7 +71,9 @@ recorder logs the viewport it actually got.
   - console and worker errors (Safari only; Chrome gets these from CDP)
 - **Size.** Identical screenshots are stored once (content hash). After `--soft-cap` unique frames
   the cadence drops 4×. After `--hard-cap`, only step and burst frames are kept. JPEG quality 70 is
-  the default, and Safari is always PNG.
+  the default, and Safari is always PNG. Mutation-burst captures keep going past the hard cap, at
+  most one every 2 s, so late transitions in a long Arena game still show up. They stop at 1.5×
+  the hard cap.
 
 ## Output
 

@@ -31,6 +31,16 @@ export function cadenceFor(uniqueFrames, { cadenceMs = 250, softCap = 400, hardC
   return uniqueFrames >= softCap ? cadenceMs * 4 : cadenceMs;
 }
 
+/**
+ * Minimum gap between mutation-burst captures. Bursts outlive the periodic cadence (they catch
+ * late transitions between steps in long runs) but thin out, and stop at 1.5x the hard cap.
+ */
+export function burstGapFor(uniqueFrames, { burstGap = 100, softCap = 400, hardCap = 900 } = {}) {
+  if (uniqueFrames >= hardCap * 1.5) return null;
+  if (uniqueFrames >= hardCap) return burstGap * 20;
+  return uniqueFrames >= softCap ? burstGap * 4 : burstGap;
+}
+
 /** Content-addressed frame store: identical screenshots are written once and referenced after. */
 export class FrameStore {
   constructor(write, { ext = 'jpg', prefix = 'frames/' } = {}) {
@@ -293,8 +303,9 @@ figure{margin:0;background:#1c1c1f;border:1px solid #333;border-radius:4px;overf
 figure.flag{border-color:#e0a030}figure img{display:block;width:100%;height:auto;background:#000}
 figcaption{padding:4px 6px}.t{font-weight:700;font-variant-numeric:tabular-nums}.n{color:#f0b040}.s{color:#9ab}`;
 
-function figure(e, { link = false } = {}) {
-  const img = `<img src="${esc(e.file)}" alt="${esc(`t=${secs(e.t)} ${e.step ?? ''}`)}" loading="lazy">`;
+// Sheets are screenshotted once loaded, so their images must load eagerly; the browsable page can be lazy.
+function figure(e, { link = false, lazy = true } = {}) {
+  const img = `<img src="${esc(e.file)}" alt="${esc(`t=${secs(e.t)} ${e.step ?? ''}`)}"${lazy ? ' loading="lazy"' : ''}>`;
   return `<figure class="${e.notes.length ? 'flag' : ''}">${link ? `<a href="${esc(e.file)}">${img}</a>` : img}<figcaption><span class="t">t=${secs(e.t)}</span>${e.heldMs ? ` · held ${secs(e.heldMs)}` : ''} · <span class="s">${esc(e.step ?? '(before first step)')}</span>${e.notes.length ? `<br><span class="n">${esc([...new Set(e.notes)].join(' · '))}</span>` : ''}</figcaption></figure>`;
 }
 
@@ -311,7 +322,7 @@ export function chunk(items, size) {
 /** One contact-sheet page, meant to be screenshotted into a single image for a vision reviewer. */
 export function renderSheetHtml(entries, { title, cols, thumbWidth, base = '../' }) {
   const width = cols * thumbWidth + (cols - 1) * 10 + 24;
-  const figures = entries.map((e) => figure({ ...e, file: base + e.file })).join('');
+  const figures = entries.map((e) => figure({ ...e, file: base + e.file }, { lazy: false })).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${SHEET_CSS}body{width:${width - 24}px}.grid{grid-template-columns:repeat(${cols},${thumbWidth}px)}</style></head><body><h1>${esc(title)}</h1><div class="grid">${figures}</div></body></html>`;
 }
 
@@ -319,7 +330,7 @@ export function renderSheetHtml(entries, { title, cols, thumbWidth, base = '../'
 export function renderJourneyHtml(timeline, { sheets = [] } = {}) {
   const { meta, digest, steps } = timeline;
   const entries = collapseFrames(timeline.frames);
-  const { cols, thumbWidth } = sheetLayout(meta.viewport);
+  const { thumbWidth } = sheetLayout(meta.viewport);
   const rows = (items, cells) =>
     items
       .map(
@@ -333,7 +344,7 @@ export function renderJourneyHtml(timeline, { sheets = [] } = {}) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(`${meta.journey} ${meta.viewport.name}`)}</title><style>${SHEET_CSS}
 .grid{grid-template-columns:repeat(auto-fill,minmax(${thumbWidth}px,1fr))}table{border-collapse:collapse;margin:6px 0 14px}td,th{border:1px solid #333;padding:3px 6px;text-align:left;vertical-align:top}h2{font-size:14px;margin:16px 0 4px}a{color:#8cf}</style></head><body>
 <h1>${esc(meta.journey)} · ${esc(meta.viewport.name)} · ${esc(meta.browser)} · ${esc(meta.status)}</h1>
-<p>${digest.frames} samples, ${digest.uniqueFrames} unique frames, ${entries.length} filmstrip entries, cadence ${meta.cadenceMs} ms. ${sheets.length ? `Sheets: ${sheets.map((s) => `<a href="${esc(s)}">${esc(s)}</a>`).join(' ')}` : ''} <a href="timeline.json">timeline.json</a>${meta.video ? ` · <a href="${esc(meta.video)}">video</a>` : ''}</p>
+<p>${esc(digest.frames)} samples, ${esc(digest.uniqueFrames)} unique frames, ${entries.length} filmstrip entries, cadence ${esc(meta.cadenceMs)} ms. ${sheets.length ? `Sheets: ${sheets.map((s) => `<a href="${esc(s)}">${esc(s)}</a>`).join(' ')}` : ''} <a href="timeline.json">timeline.json</a>${meta.video ? ` · <a href="${esc(meta.video)}">video</a>` : ''}</p>
 <h2>Steps</h2>${table(
     ['t', 'step', 'duration', 'status', 'error'],
     rows(steps, (s) => [secs(s.t), s.label, secs(s.durationMs), s.status, s.error ?? '']),
@@ -351,7 +362,6 @@ export function renderJourneyHtml(timeline, { sheets = [] } = {}) {
     rows(digest.errors, (e) => [secs(e.t), e.type, e.text]),
   )}
 <h2>Filmstrip</h2><div class="grid">${entries.map((e) => figure(e, { link: true })).join('')}</div>
-<!-- ${cols} columns per contact sheet -->
 </body></html>`;
 }
 
@@ -360,7 +370,7 @@ export function renderIndexHtml(runs) {
   const body = runs
     .map(
       (r) =>
-        `<tr><td><a href="${esc(r.dir)}/index.html">${esc(r.journey)}</a></td><td>${esc(r.viewport)}</td><td>${esc(r.status)}</td><td>${r.uniqueFrames ?? ''}</td><td>${r.overflowSpans ?? ''}</td><td>${r.controlResizes ?? ''}</td><td>${r.errors ?? ''}</td><td>${esc(r.error ?? '')}</td></tr>`,
+        `<tr><td><a href="${esc(r.dir)}/index.html">${esc(r.journey)}</a></td><td>${esc(r.viewport)}</td><td>${esc(r.status)}</td><td>${esc(r.uniqueFrames)}</td><td>${esc(r.overflowSpans)}</td><td>${esc(r.controlResizes)}</td><td>${esc(r.errors)}</td><td>${esc(r.error ?? '')}</td></tr>`,
     )
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>UAT journeys</title><style>${SHEET_CSS}table{border-collapse:collapse}td,th{border:1px solid #333;padding:3px 8px;text-align:left}a{color:#8cf}</style></head><body><h1>UAT journey recordings</h1><table><tr><th>journey</th><th>viewport</th><th>status</th><th>unique frames</th><th>overflow spans</th><th>resized controls</th><th>errors</th><th>failure</th></tr>${body}</table></body></html>`;
