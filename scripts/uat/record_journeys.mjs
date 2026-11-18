@@ -100,6 +100,12 @@ export function parseArgs(argv) {
   for (const name of names) if (!JOURNEYS[name]) throw Error(`Unknown journey ${name}; known: ${Object.keys(JOURNEYS).join(', ')}`);
   args.journeyNames = names;
   args.viewportList = parseViewports(args.viewports);
+  // Each journey x viewport pair owns one output directory; a repeat would overwrite the first run.
+  const repeated = (list) => list.find((x, i) => list.indexOf(x) !== i);
+  const journey = repeated(names);
+  if (journey) throw Error(`--journeys lists ${journey} twice`);
+  const viewport = repeated(args.viewportList.map((v) => v.name));
+  if (viewport) throw Error(`--viewports lists ${viewport} twice`);
   return args;
 }
 
@@ -133,7 +139,7 @@ async function serveDist(dist, signal) {
   await new Promise((r) => socket.listen(0, '127.0.0.1', r));
   const port = socket.address().port;
   await new Promise((r) => socket.close(r));
-  const child = spawn(process.execPath, [join(root, 'scripts/serve_isolated_static.mjs'), dist, String(port)], {
+  const child = spawn(process.execPath, [join(root, 'scripts/serve_isolated_static.mjs'), dist, String(port), '127.0.0.1'], {
     stdio: 'ignore',
     env: { ...process.env, PORT: String(port) },
   });
@@ -316,6 +322,7 @@ async function recordRun(driver, base, item, args, outDir, signal) {
   const onEvent = (e) => events.push({ t: Date.now(), ...e });
   const queue = new ExclusiveQueue();
   let inFlight = 0,
+    probed = 0,
     lastCaptureAt = 0,
     failed = false,
     session,
@@ -327,8 +334,10 @@ async function recordRun(driver, base, item, args, outDir, signal) {
         const sample = { reason, ...(label ? { label } : {}) };
         try {
           const page = await session.evaluate('window.__uat ? window.__uat.sample() : null');
-          if (page) Object.assign(sample, page, { sampledAt: page.t });
-          else sample.error = 'probe unavailable (navigation in progress?)';
+          if (page) {
+            Object.assign(sample, page, { sampledAt: page.t });
+            probed++;
+          } else sample.error = 'probe unavailable (navigation in progress?)';
         } catch (error) {
           sample.error = `sample: ${String(error.message ?? error).slice(0, 300)}`;
         }
@@ -454,6 +463,11 @@ async function recordRun(driver, base, item, args, outDir, signal) {
   if (store.unique === 0) {
     status = 'failed';
     error ??= `No screenshots recorded: ${samples.find((s) => s.error)?.error ?? 'no samples taken'}`;
+  }
+  // Without the probe (CSP, proxy injection or a crashed page) frames carry no overflow, control or text data.
+  if (probed === 0) {
+    status = 'failed';
+    error ??= `No probe samples: ${samples.find((s) => s.error)?.error ?? 'no samples taken'}`;
   }
   const meta = {
     journey: item.journey,
