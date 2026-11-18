@@ -1,6 +1,7 @@
 // Pure parts of scripts/feature_walk.mjs: seeding, action/value choice, in-page
 // expression builders, and invariant evaluation. No browser here, so tests cover it.
 import { featuresOn, routeForPath } from '../../src/features/registry.ts';
+import { ARENA_SEAT_STORAGE_KEY, defaultEngineStrength, defaultStaticEngineVariant } from '../../src/lc0/engineCatalog.ts';
 import { DEFAULT_PLAY_PREFERENCES, PLAY_PREFERENCES_STORAGE_KEY } from '../../src/lc0/playPreferences.ts';
 import { actionableErrorEntries } from '../production_browser_smoke.mjs';
 
@@ -140,20 +141,67 @@ export function locateRoute(href, baseUrl) {
   return routeForPath(url.pathname);
 }
 
+/** POSIX shell word: safe characters pass through, anything else is single-quoted. */
+export function shellQuote(value) {
+  const text = String(value);
+  return /^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replaceAll("'", `'\\''`)}'`;
+}
+
 /** Replay command carrying every option that changes which actions are eligible when. */
 export function replayCommand(args, seed) {
   const flags = [
-    `--base-url ${args.baseUrl}`,
-    `--seed ${seed}`,
-    `--steps ${args.steps}`,
-    `--start ${args.start}`,
-    `--viewport ${args.viewport}`,
-    `--settle-ms ${args.settleMs}`,
-    `--ready-timeout ${args.readyTimeout}`,
-    ...(args.keepGoing ? ['--keep-going'] : []),
-    ...(args.headed ? ['--headed'] : []),
-  ];
+    ['--base-url', args.baseUrl],
+    ['--seed', seed],
+    ['--steps', args.steps],
+    ['--start', args.start],
+    ['--viewport', args.viewport],
+    ['--settle-ms', args.settleMs],
+    ['--ready-timeout', args.readyTimeout],
+  ].map(([flag, value]) => `${flag} ${shellQuote(value)}`);
+  if (args.keepGoing) flags.push('--keep-going');
+  if (args.headed) flags.push('--headed');
   return `node scripts/feature_walk.mjs ${flags.join(' ')}`;
+}
+
+/**
+ * Same-tab link destination of a clicked node (absolute href), or null when the click is not
+ * a link or opens elsewhere. Self-contained so Playwright's locator.evaluate can run it as-is.
+ */
+export function clickDestination(node) {
+  const link = node.closest?.('a[href]');
+  if (!link || (link.target && link.target !== '_self')) return null;
+  return link.href;
+}
+
+/** Resolve true once `check()` is truthy, false at the deadline; a throwing check (navigation mid-poll) retries. */
+export async function pollUntil(check, timeoutMs, intervalMs = 150) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      if (await check()) return true;
+    } catch {
+      // Retry until the deadline.
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+/**
+ * Append-only log read in windows: each take() returns what arrived since the previous take(),
+ * so entries logged between checks (while choosing or performing the next action) are never dropped.
+ */
+export function createCheckLog() {
+  const entries = [];
+  let mark = 0;
+  return {
+    push: (entry) => entries.push(entry),
+    take() {
+      const fresh = entries.slice(mark);
+      mark = entries.length;
+      return fresh;
+    },
+  };
 }
 
 // One page read per step; `ids` are the route's owned ids, `ready` its mount expression.
@@ -207,10 +255,16 @@ export function evaluateInvariants(names, snap, context) {
 }
 
 /**
- * localStorage preset for a fresh walk context. Play defaults to Maia3 sampling, which draws
- * from the app's unseeded Math.random; the app's own "Top move" (argmax) style makes replies
- * replayable. Applied only when the key is absent, so in-walk preference changes persist.
+ * localStorage presets for a fresh walk context, each applied only when its key is absent so
+ * in-walk changes persist.
+ * - Play defaults to Maia3 sampling, which draws from the app's unseeded Math.random; the app's
+ *   own "Top move" (argmax) style makes replies replayable.
+ * - Arena's default roster seats LC0; a CPU-only roster keeps quickMatch from loading a net.
  */
-export function walkStoragePreset() {
-  return { key: PLAY_PREFERENCES_STORAGE_KEY, value: JSON.stringify({ ...DEFAULT_PLAY_PREFERENCES, maiaStyle: 'argmax' }) };
+export function walkStoragePresets() {
+  const cpuSeat = (family) => ({ family, variant: defaultStaticEngineVariant(family), strength: defaultEngineStrength(family, 'arena') });
+  return [
+    { key: PLAY_PREFERENCES_STORAGE_KEY, value: JSON.stringify({ ...DEFAULT_PLAY_PREFERENCES, maiaStyle: 'argmax' }) },
+    { key: ARENA_SEAT_STORAGE_KEY, value: JSON.stringify([cpuSeat('sf'), cpuSeat('berserk')]) },
+  ];
 }

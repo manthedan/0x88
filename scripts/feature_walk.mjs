@@ -13,18 +13,21 @@ import {
   chooseAction,
   chooseTargetIndex,
   chooseValue,
+  clickDestination,
+  createCheckLog,
   createRng,
   eligibilityExpression,
   evaluateInvariants,
   locateRoute,
   parseSeed,
+  pollUntil,
   replayCommand,
   routeActions,
   routeInvariants,
   routeOwnedIds,
   snapshotExpression,
   usableNodes,
-  walkStoragePreset,
+  walkStoragePresets,
 } from './lib/feature_walk_core.mjs';
 
 const VIEWPORTS = { desktop: { width: 1366, height: 900 }, phone: { width: 390, height: 844 } };
@@ -97,18 +100,8 @@ export function coverage() {
   );
 }
 
-async function waitForExpression(page, expression, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  do {
-    try {
-      if (await page.evaluate(expression)) return true;
-    } catch {
-      // Navigation can destroy the execution context mid-poll; retry until the deadline.
-    }
-    await delay(150);
-  } while (Date.now() < deadline);
-  return false;
-}
+// Navigation can destroy the execution context mid-poll; pollUntil retries until the deadline.
+const waitForExpression = (page, expression, timeoutMs) => pollUntil(() => page.evaluate(expression), timeoutMs);
 
 /** A usable (visible, enabled, not behind a modal) match of `target`; `pick` draws one with the walk RNG. */
 async function targetLocator(page, rng, step) {
@@ -121,8 +114,10 @@ async function targetLocator(page, rng, step) {
 async function performStep(page, rng, step) {
   switch (step.do) {
     case 'click': {
-      await (await targetLocator(page, rng, step)).click({ timeout: STEP_TIMEOUT_MS });
-      return { target: step.target };
+      const locator = await targetLocator(page, rng, step);
+      const href = await locator.evaluate(clickDestination);
+      await locator.click({ timeout: STEP_TIMEOUT_MS });
+      return href ? { target: step.target, href } : { target: step.target };
     }
     case 'select': {
       const locator = await targetLocator(page, rng, step);
@@ -180,16 +175,16 @@ async function walk(args) {
     await context.addInitScript(() => {
       window.__featureWalkDocumentId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     });
-    await context.addInitScript((preset) => {
+    await context.addInitScript((presets) => {
       try {
-        if (localStorage.getItem(preset.key) === null) localStorage.setItem(preset.key, preset.value);
+        for (const { key, value } of presets) if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
       } catch {
         // Storage can be unavailable (e.g. opaque origins); the walk still runs, only less replayable.
       }
-    }, walkStoragePreset());
+    }, walkStoragePresets());
     const page = await context.newPage();
-    const pageErrors = [];
-    const consoleErrors = [];
+    const pageErrors = createCheckLog();
+    const consoleErrors = createCheckLog();
     page.on('pageerror', (error) => pageErrors.push(`Uncaught ${error?.stack ?? error}`));
     // Accept native dialogs deliberately (e.g. Arena's leave-during-match confirm) so navigation
     // proceeds and the menu closes; Playwright would otherwise dismiss them silently.
@@ -204,7 +199,7 @@ async function walk(args) {
     const documentId = () => page.evaluate(() => window.__featureWalkDocumentId).catch(() => null);
 
     // Check the page where it is now: stay on the walk origin and a registered route, mount, then hold the invariants.
-    const checkRoute = async (step, action, errorMarks, documentIdBefore, allowsReload, routeBefore) => {
+    const checkRoute = async (step, action, documentIdBefore, allowsReload, routeBefore) => {
       const route = locateRoute(page.url(), args.baseUrl);
       if (!route) {
         report.failures.push({ step, action, invariant: 'stayedInApp', detail: `left the registered routes: ${page.url()}` });
@@ -219,8 +214,9 @@ async function walk(args) {
       const failures = evaluateInvariants(routeInvariants(route), snap, {
         route,
         expectedIds: routeOwnedIds(route),
-        pageErrors: pageErrors.slice(errorMarks[0]),
-        consoleErrors: consoleErrors.slice(errorMarks[1]),
+        // Everything logged since the last completed check, including between steps.
+        pageErrors: pageErrors.take(),
+        consoleErrors: consoleErrors.take(),
         documentIdBefore,
         allowsReload,
       });
@@ -230,7 +226,7 @@ async function walk(args) {
 
     await page.goto(new URL(ROUTES[args.start].path, args.baseUrl).href, { waitUntil: 'domcontentloaded', timeout: 45_000 });
     // Startup errors and a controller that never mounts fail here, before any action can navigate away.
-    let route = await checkRoute('start', 'load', [0, 0], null, true, null);
+    let route = await checkRoute('start', 'load', null, true, null);
 
     for (let index = 0; route && (args.keepGoing || !report.failures.length) && index < args.steps; index++) {
       const candidates = routeActions(route);
@@ -245,13 +241,17 @@ async function walk(args) {
       }
       const label = `${choice.feature}/${choice.action.name}`;
       const documentIdBefore = await documentId();
-      const errorMarks = [pageErrors.length, consoleErrors.length];
       const dialogMark = dialogs.length;
       const record = { step: index, route, feature: choice.feature, action: choice.action.name, results: [] };
       report.steps.push(record);
       try {
         for (const step of choice.action.steps) {
-          record.results.push(await performStep(page, rng, step));
+          const result = await performStep(page, rng, step);
+          record.results.push(result);
+          // A same-tab link into the app must actually land there; checkRoute alone would pass on the old page.
+          const destination = result.href && locateRoute(result.href, args.baseUrl);
+          if (destination && !(await pollUntil(() => locateRoute(page.url(), args.baseUrl) === destination, args.readyTimeout)))
+            throw new Error(`navigation to ${destination} (${result.href}) never arrived; still at ${page.url()}`);
           await delay(100);
         }
       } catch (error) {
@@ -259,7 +259,7 @@ async function walk(args) {
       }
       await delay(args.settleMs);
       if (dialogs.length > dialogMark) record.acceptedDialogs = dialogs.slice(dialogMark);
-      route = await checkRoute(index, label, errorMarks, documentIdBefore, choice.action.allowsReload, route);
+      route = await checkRoute(index, label, documentIdBefore, choice.action.allowsReload, route);
       record.routeAfter = route;
     }
   } finally {
