@@ -1,6 +1,7 @@
 // Resume bookkeeping: a run directory may only continue the exact cohort it started.
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { cleanupMarker } from './lifecycle.mjs';
 
 export const sessionId = (cell, i) => `${String(i).padStart(3, '0')}-${cell.browser}-${cell.journey}-${cell.arm}-r${cell.repeat}`;
@@ -67,6 +68,32 @@ export function measuringFiles(root, entry, extras = []) {
 export function reusableBuild(recordFile, commit) {
   const built = readJson(recordFile);
   return built?.commit === commit && existsSync(resolve(built.dist, 'app/analysis/index.html')) ? built : null;
+}
+
+// Identity of a prebuilt dist: every path with its size and mtime, and each link's target. A rebuild in
+// place changes it even without _app/version.json. Contents are not hashed: a dist built without the
+// harness holds ~6 GB of copied models, and linked assets are live by design (see the docs).
+export function buildFingerprint(dist) {
+  const hash = createHash('sha256');
+  const walk = (rel) => {
+    for (const name of readdirSync(join(dist, rel)).sort()) {
+      const path = join(rel, name),
+        stat = lstatSync(join(dist, path));
+      if (stat.isDirectory()) walk(path);
+      else hash.update(`${path}\0${stat.isSymbolicLink() ? `-> ${readlinkSync(join(dist, path))}` : `${stat.size} ${stat.mtimeMs}`}\n`);
+    }
+  };
+  walk('');
+  return hash.digest('hex');
+}
+
+// Whether the candidate is served from the baseline's build. Same bytes share one build, decided by the
+// resolved commit rather than the typed refs, so `main HEAD` and `<sha> <sha>` agree. A resumed run keeps
+// the mapping its builds.json recorded, whatever rule built it.
+export function sharesBaselineBuild(sources, savedBuilds) {
+  if (sources.baseline.kind !== 'archived-source' || sources.candidate.kind !== 'archived-source') return false;
+  if (savedBuilds?.baseline?.dist && savedBuilds?.candidate?.dist) return savedBuilds.baseline.dist === savedBuilds.candidate.dist;
+  return sources.baseline.commit === sources.candidate.commit;
 }
 
 // Operator stops and Safari-busy attempts are not outcomes (a fresh run would have retried them). A

@@ -139,7 +139,17 @@ export async function runOwnedSession(bin, argv, signal, wrappedResultFile, owne
   signal.throwIfAborted();
   // Separate from terminal Ctrl-C; don't interrupt a benchlock wrapper that holds a live session's mutex.
   const child = spawn(bin, argv, { stdio: 'inherit', detached: true });
-  if (ownedResultFile && child.pid) writeFileSync(ownerRecord(ownedResultFile), `${child.pid}\n`);
+  const closed = once(child, 'close');
+  if (ownedResultFile && child.pid)
+    try {
+      writeFileSync(ownerRecord(ownedResultFile), `${child.pid}\n`);
+    } catch (error) {
+      // An unrecorded child could outlive a SIGKILLed coordinator unseen by resume. Stop it before the
+      // caller releases the mutex; it has not reached the browser yet (or cleans up on SIGTERM).
+      child.kill('SIGTERM');
+      await closed;
+      throw error;
+    }
   const stop = () => {
     if (!wrappedResultFile) child.kill('SIGTERM');
     else {
@@ -152,7 +162,7 @@ export async function runOwnedSession(bin, argv, signal, wrappedResultFile, owne
   };
   signal.addEventListener('abort', stop, { once: true });
   try {
-    const [status] = await once(child, 'close');
+    const [status] = await closed;
     if (ownedResultFile) rmSync(ownerRecord(ownedResultFile), { force: true });
     return status;
   } finally {

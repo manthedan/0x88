@@ -20,7 +20,18 @@ import {
   shutdownDelay,
   watchShutdown,
 } from './lifecycle.mjs';
-import { manifestMismatches, measuringFiles, readJson, recordAttempt, reusableBuild, runManifest, selectSessions, writeJsonAtomic } from './resume.mjs';
+import {
+  buildFingerprint,
+  manifestMismatches,
+  measuringFiles,
+  readJson,
+  recordAttempt,
+  reusableBuild,
+  runManifest,
+  selectSessions,
+  sharesBaselineBuild,
+  writeJsonAtomic,
+} from './resume.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // Build/archive/git/file operations are confined to the calling worktree's ignored output tree.
@@ -64,7 +75,8 @@ function armSource(input) {
     const dist = existsSync(join(dir, 'app/analysis/index.html')) ? dir : join(dir, 'dist-client');
     if (!existsSync(join(dist, 'app/analysis/index.html'))) throw Error(`Not a built product preview: ${input}`);
     const version = join(dist, '_app/version.json');
-    return { dist, input, kind: 'prebuilt', version: existsSync(version) ? readFileSync(version, 'utf8') : null };
+    // The path alone does not identify bytes: a rebuild in place must not resume the old cohort.
+    return { dist, input, kind: 'prebuilt', version: existsSync(version) ? readFileSync(version, 'utf8') : null, fingerprint: buildFingerprint(dist) };
   }
   const rev = git('rev-parse', '--verify', `${input}^{commit}`);
   if (rev.status !== 0) throw Error(`Not a directory or commit: ${input}`);
@@ -79,25 +91,29 @@ function build(source, out, arm) {
     console.log(`reusing ${arm} build of ${source.commit}`);
     return reused;
   }
-  // Unrecorded means interrupted mid-build. rm does not follow the node_modules/asset links.
   rmSync(record, { force: true });
-  rmSync(dir, { recursive: true, force: true });
-  const archive = join(out, 'builds', `${arm}.tar`);
-  mkdirSync(dir, { recursive: true });
+  // Each attempt builds in its own directory: tar/npm orphaned by a SIGKILLed coordinator may still be
+  // writing into an earlier one. Only a finished build is renamed into place (links are absolute).
+  const stage = `${dir}.staging-${process.pid}-${Date.now()}`;
+  const archive = `${stage}.tar`;
+  mkdirSync(stage, { recursive: true });
   command('git', ['archive', '--format=tar', '-o', archive, source.commit]);
-  command('tar', ['-xf', archive, '-C', dir]);
+  command('tar', ['-xf', archive, '-C', stage]);
   rmSync(archive);
   // Same lockfile: use the worktree's installed dependencies read-only. A dependency refactor gets
   // its own install; never run npm install/ci in the shared checkout/node_modules.
-  const sameLock = readFileSync(join(dir, 'package-lock.json')).equals(readFileSync(join(root, 'package-lock.json')));
-  if (sameLock) symlinkSync(realpathSync(join(root, 'node_modules')), join(dir, 'node_modules'), 'dir');
-  else command('npm', ['ci', '--ignore-scripts'], dir);
-  const links = localAssets(root, dir);
-  command('env', ['BUILD_SCOPE=product', 'npm', 'run', 'build:client'], dir);
-  const dist = join(dir, 'dist-client');
-  linkAssets(links, dist);
+  const sameLock = readFileSync(join(stage, 'package-lock.json')).equals(readFileSync(join(root, 'package-lock.json')));
+  if (sameLock) symlinkSync(realpathSync(join(root, 'node_modules')), join(stage, 'node_modules'), 'dir');
+  else command('npm', ['ci', '--ignore-scripts'], stage);
+  const links = localAssets(root, stage);
+  command('env', ['BUILD_SCOPE=product', 'npm', 'run', 'build:client'], stage);
+  linkAssets(links, join(stage, 'dist-client'));
   // Intermediate copy of the client output; only dist-client is served.
-  rmSync(join(dir, '.svelte-kit/output'), { recursive: true, force: true });
+  rmSync(join(stage, '.svelte-kit/output'), { recursive: true, force: true });
+  // A tree left here by an unrecorded earlier attempt was only ever renamed in, never written to.
+  rmSync(dir, { recursive: true, force: true });
+  renameSync(stage, dir);
+  const dist = join(dir, 'dist-client');
   const built = {
     dist,
     commit: source.commit,
@@ -188,6 +204,7 @@ async function run(signal) {
   }
 }
 async function measure(signal, out, sources, resuming) {
+  const shared = sharesBaselineBuild(sources, resuming ? readJson(join(out, 'builds.json')) : null);
   const cells = selectSessions(plan(args), (id) => {
     const file = join(out, 'sessions', `${id}.json`);
     return { result: readJson(file), cleanupPending: existsSync(cleanupMarker(file)), owner: liveOwner(file) };
@@ -201,7 +218,7 @@ async function measure(signal, out, sources, resuming) {
       if (sources[arm].kind === 'externally-served') builds[arm] = { input: args[arm], base: sources[arm].url, kind: 'externally-served' };
       else {
         // Self comparisons share identical bytes, but use separate origins/sessions.
-        builds[arm] = arm === 'candidate' && args.baseline === args.candidate ? { ...builds.baseline } : build(sources[arm], out, arm);
+        builds[arm] = arm === 'candidate' && shared ? { ...builds.baseline } : build(sources[arm], out, arm);
         const server = await serve(builds[arm].dist, out, arm, signal);
         servers.push(server.stop);
         builds[arm].base = server.base;
@@ -220,9 +237,6 @@ async function measure(signal, out, sources, resuming) {
       }
       const specFile = join(out, 'sessions', `${id}.spec.json`),
         resultFile = join(out, 'sessions', `${id}.json`);
-      // A stale cancellation marker would abort the new attempt; a stale result must not outlive a crash.
-      rmSync(cancellationMarker(resultFile), { force: true });
-      rmSync(resultFile, { force: true });
       writeFileSync(
         specFile,
         JSON.stringify({ ...cell, base: builds[cell.arm].base, source: builds[cell.arm], driver: args.driver, externalLock: !!args.benchlock }, null, 2),
@@ -230,6 +244,10 @@ async function measure(signal, out, sources, resuming) {
       console.log(`[${i + 1}/${cells.length}] ${id}`);
       let status, cleanupConfirmed;
       do {
+        // Per attempt (Safari-busy retries too): a stale cancellation marker would abort the new attempt,
+        // and a stale result must not stand in for an attempt that wrote none.
+        rmSync(cancellationMarker(resultFile), { force: true });
+        rmSync(resultFile, { force: true });
         const release = args['lock-dir'] ? await acquireLock(resolve(args['lock-dir']), signal) : () => {};
         try {
           const commandArgs = [join(root, 'scripts/perf_routes/session.mjs'), specFile, resultFile];

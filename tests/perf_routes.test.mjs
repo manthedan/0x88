@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, get } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -42,6 +42,7 @@ import {
   waitForCleanup,
 } from '../scripts/perf_routes/lifecycle.mjs';
 import {
+  buildFingerprint,
   manifestMismatches,
   measuringFiles,
   readJson,
@@ -50,6 +51,7 @@ import {
   runManifest,
   selectSessions,
   sessionId,
+  sharesBaselineBuild,
   writeJsonAtomic,
 } from '../scripts/perf_routes/resume.mjs';
 
@@ -1140,4 +1142,76 @@ test('a session wrapper records its PID before waiting and clears it on exit; on
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a failed owner record stops the just-spawned session before the caller can release the mutex', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'perf-routes-owner-fail-'));
+  const pidFile = join(dir, 'child.pid');
+  try {
+    const child = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30000)`;
+    // The sessions directory is missing, so the owner record cannot be written.
+    await assert.rejects(runOwnedSession(process.execPath, ['-e', child], new AbortController().signal, null, join(dir, 'missing/000.json')), /ENOENT/);
+    // A child left running would have written its PID by now.
+    await new Promise((r) => setTimeout(r, 500));
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, 'utf8'));
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'the unrecorded child must be stopped');
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the candidate shares the baseline build by resolved commit, and a resume keeps the recorded mapping', () => {
+  const sha = (commit) => ({ kind: 'archived-source', commit });
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('a') }), true, 'main HEAD resolving to one SHA');
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('b') }), false);
+  const prebuilt = { kind: 'prebuilt', dist: '/x' };
+  assert.equal(sharesBaselineBuild({ baseline: prebuilt, candidate: prebuilt }), false, 'prebuilt arms are served as given');
+  assert.equal(sharesBaselineBuild({ baseline: { kind: 'externally-served' }, candidate: { kind: 'externally-served' } }, null), false);
+  // A run that built both arms separately keeps doing so when resumed by SHA, and vice versa.
+  const separate = { baseline: { dist: '/o/builds/baseline/dist-client' }, candidate: { dist: '/o/builds/candidate/dist-client' } };
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('a') }, separate), false);
+  const shared = { baseline: { dist: '/o/builds/baseline/dist-client' }, candidate: { dist: '/o/builds/baseline/dist-client' } };
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('a') }, shared), true);
+  // builds.json from a run interrupted before both arms were recorded: fall back to the commit rule.
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('a') }, { baseline: separate.baseline }), true);
+});
+
+test('a prebuilt dist is identified by its paths, sizes, mtimes and link targets, not its path alone', () => {
+  const dist = mkdtempSync(join(tmpdir(), 'perf-routes-dist-'));
+  try {
+    mkdirSync(join(dist, '_app/immutable'), { recursive: true });
+    writeFileSync(join(dist, '_app/immutable/entry.abc.js'), 'x');
+    symlinkSync('/models/a.onnx', join(dist, 'model.onnx'));
+    const first = buildFingerprint(dist);
+    assert.equal(buildFingerprint(dist), first);
+    utimesSync(join(dist, '_app/immutable/entry.abc.js'), new Date(1000), new Date(1000));
+    const touched = buildFingerprint(dist);
+    assert.notEqual(touched, first, 'a rebuild in place rewrites files');
+    writeFileSync(join(dist, '_app/immutable/entry.abc.js'), 'xy');
+    utimesSync(join(dist, '_app/immutable/entry.abc.js'), new Date(1000), new Date(1000));
+    const resized = buildFingerprint(dist);
+    assert.notEqual(resized, touched, 'size');
+    rmSync(join(dist, 'model.onnx'));
+    symlinkSync('/models/b.onnx', join(dist, 'model.onnx'));
+    const relinked = buildFingerprint(dist);
+    assert.notEqual(relinked, resized, 'link target');
+    writeFileSync(join(dist, 'new.js'), '');
+    assert.notEqual(buildFingerprint(dist), relinked, 'added file');
+  } finally {
+    rmSync(dist, { recursive: true, force: true });
+  }
+});
+
+test('builds stage per attempt and rename into place; session attempts clear stale results before each try', () => {
+  const source = readFileSync(new URL('../scripts/perf_routes/run.mjs', import.meta.url), 'utf8');
+  const build = source.slice(source.indexOf('function build('), source.indexOf('async function serve('));
+  assert.match(build, /const stage = `\$\{dir\}\.staging-\$\{process\.pid\}-\$\{Date\.now\(\)\}`/);
+  assert.ok(!/command\([^)]*\bdir\)/.test(build) && !/'-C', dir\]/.test(build), 'tar/npm never write into the final arm directory');
+  assert.ok(build.indexOf('renameSync(stage, dir)') > build.indexOf("npm', 'run', 'build:client'"), 'renamed only after the build');
+  assert.ok(build.indexOf('writeJsonAtomic(record') > build.indexOf('renameSync(stage, dir)'), 'recorded only once in place');
+  const loop = source.slice(source.indexOf('      do {'), source.indexOf('} while (cleanupConfirmed && status === 75'));
+  assert.match(loop, /rmSync\(cancellationMarker\(resultFile\), \{ force: true \}\);\s*rmSync\(resultFile, \{ force: true \}\);[\s\S]*acquireLock/);
+  assert.match(source, /arm === 'candidate' && shared \? \{ \.\.\.builds\.baseline \}/);
 });
