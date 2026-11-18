@@ -157,8 +157,8 @@ function playOwner(native) {
     const ctx={abort:new AbortController(),consentAbort:new AbortController(),enginePreparationGeneration:0,
       board:{turn:'w'},humanColor:'w',positions:[],moves:[],listeners:[],opponent:{active:{maiaElo:1500}}};
     let option=maia;
-    let maia3Promise=null,maia3Status=null,maia3Generation=0,maia3Owner=null;
-    let centipawnLoadPromise=null,lc0LoadPromise=null;
+    let maia3Promise=null,maia3Status=null,maia3Abort=null,lc0LoadPromise=null;
+    const playCentipawn={clear(){}};
     const ctxSelectedEngine=()=>option;
     const hook=()=>{},releaseDom=()=>{};
     ${slice(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureLc0Small(')}

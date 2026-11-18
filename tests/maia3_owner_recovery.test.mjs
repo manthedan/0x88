@@ -28,8 +28,8 @@ test('Play Retry evicts a fatally failed Maia cache once, even with concurrent c
   const Maia = factory();
   const ensure = compile(
     `
-    let maia3Promise = null, maia3Status = null, maia3Generation = 0, maia3Owner = null;
-    const ctxAsyncUiIsCurrent = () => false;
+    let maia3Promise = null, maia3Status = null, maia3Abort = null;
+    const ctxAsyncUiIsCurrent = () => false, trackEngineRetirement = () => {};
     ${extracted('../src/lc0/playBrowser.ts', 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
     return ctxEnsureMaia3;
   `,

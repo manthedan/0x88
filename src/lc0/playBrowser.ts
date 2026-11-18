@@ -9,7 +9,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { sanToMove } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import type { Evaluator } from '../nn/evaluator.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
   type BrowserRuntimeAuditDetail,
@@ -21,7 +21,6 @@ import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { chooseMove } from '../search/puct.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
-import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
@@ -39,6 +38,7 @@ import {
   probeBt4Support,
   T3_NET,
 } from './bt4Engine.ts';
+import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { writeClipboard } from './clipboard.ts';
 import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineResidency.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
@@ -150,12 +150,9 @@ const BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3', 'lqo'];
 let lc0Searcher: Lc0PuctSearcher | null = null;
 let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
 let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null; abort: AbortController } = { evaluator: null, abort: new AbortController() };
-let maia3Generation = 0;
-let maia3Owner: { abort: AbortController; cleanup: Promise<void> | null } | null = null;
-let centipawnEvaluator: CachedEvaluator | null = null;
-let centipawnLoadPromise: Promise<Evaluator> | null = null;
-let centipawnEvaluatorGeneration = 0;
-let centipawnLoadAbort: AbortController | null = null;
+let maia3Abort: AbortController | null = null;
+const PLAY_CENTIPAWN_KEY = 's4fix-v-ema';
+const playCentipawn = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 const playRuntimeFallbackAudits = new Map<string, BrowserRuntimeAuditDetail>();
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 const pendingCpuNewGames = new PendingCpuNewGames();
@@ -565,39 +562,19 @@ function ctxHideDownloadProgress(): void {
   hideLoadingProgress(container);
 }
 
-async function disposePlayCentipawn(evaluator: Evaluator): Promise<void> {
-  if (evaluator instanceof CachedEvaluator) evaluator.clear();
-  const owned = (evaluator instanceof CachedEvaluator ? evaluator.inner : evaluator) as Evaluator & {
-    dispose?: () => void | Promise<void>;
-    destroy?: () => void | Promise<void>;
-  };
-  await (owned.dispose ? owned.dispose() : owned.destroy?.());
-}
-
 function retireUnusedPlayNeuralEngines(option?: PlayEngineOption): Promise<void> {
-  if (option?.family !== 'centipawn' && centipawnLoadPromise) {
-    const pending = centipawnLoadPromise;
-    centipawnEvaluatorGeneration += 1;
-    centipawnEvaluator = null;
-    centipawnLoadPromise = null;
-    centipawnLoadAbort?.abort();
-    centipawnLoadAbort = null;
-    trackEngineRetirement(pending.then(disposePlayCentipawn, () => undefined));
-  }
+  if (option?.family !== 'centipawn') playCentipawn.clear();
   if (option?.family !== 'maia3' && maia3Promise) {
     const pending = maia3Promise;
-    const owner = maia3Owner;
-    maia3Owner = null;
+    maia3Abort?.abort();
+    maia3Abort = null;
     maia3Promise = null;
     maia3Status = null;
-    maia3Generation += 1;
-    owner?.abort.abort();
+    // An aborted initialization publishes its worker cleanup through onInitCleanup.
     trackEngineRetirement(
       pending.then(
         (evaluator) => evaluator.dispose(),
-        async () => {
-          await owner?.cleanup;
-        },
+        () => undefined,
       ),
     );
   }
@@ -662,80 +639,52 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
 }
 
 function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
-  if (centipawnEvaluator) return Promise.resolve(centipawnEvaluator);
-  if (!centipawnLoadPromise) {
-    const evaluatorGeneration = centipawnEvaluatorGeneration;
-    const uiGeneration = ctx.enginePreparationGeneration;
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Centipawn…');
-    const loadAbort = new AbortController();
-    centipawnLoadAbort = loadAbort;
-    centipawnLoadPromise = loadRetirableResource(async () => {
-      const loaded = await createBrowserSquareformerRuntimeEvaluator(
-        {
-          id: 's4fix-v-ema',
-          modelId: 's4fix-v-ema',
-          label: 'Centipawn',
-          onnx: CENTIPAWN_MODEL_URL,
-          meta: CENTIPAWN_META_URL,
-          runtime: 'ort',
-        },
-        {
-          runtime: 'ort',
-          fallback: true,
-          audit: { surface: 'play' },
-          signal: loadAbort.signal,
-        },
-      );
-      return { ...loaded, dispose: () => disposePlayCentipawn(loaded.evaluator) };
-    }, loadAbort.signal)
-      .then(async (loaded) => {
-        if (ctxIsDisposed(ctx) || evaluatorGeneration !== centipawnEvaluatorGeneration) {
-          await trackEngineRetirement(loaded.dispose());
-          const error = new Error('Centipawn load discarded after Play teardown');
-          error.name = 'AbortError';
-          throw error;
-        }
-        centipawnEvaluator = new CachedEvaluator(loaded.evaluator, {
-          maxEntries: 4096,
-          includeHistory: true,
-          includeLegalMoves: true,
-          label: `centipawn-play:${loaded.resolvedRuntime}`,
-        });
-        if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
-        return centipawnEvaluator;
-      })
-      .catch((error: Error) => {
-        if (evaluatorGeneration === centipawnEvaluatorGeneration) centipawnLoadPromise = null;
-        if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
-        throw error;
-      });
-  }
-  return centipawnLoadPromise;
+  const starting = !playCentipawn.has(PLAY_CENTIPAWN_KEY);
+  const uiGeneration = ctx.enginePreparationGeneration;
+  const loading = playCentipawn.get(
+    PLAY_CENTIPAWN_KEY,
+    {
+      spec: { id: 's4fix-v-ema', modelId: 's4fix-v-ema', label: 'Centipawn', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL, runtime: 'ort' },
+      options: { runtime: 'ort', fallback: true, audit: { surface: 'play' } },
+      maxEntries: 4096,
+      label: 'centipawn-play:ort',
+    },
+    () => !ctxIsDisposed(ctx),
+  );
+  if (!starting) return loading;
+  if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Centipawn…');
+  return loading.then(
+    (evaluator) => {
+      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
+      return evaluator;
+    },
+    (error: Error) => {
+      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
+      throw error;
+    },
+  );
 }
 
 async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
   if (maia3Promise) {
     const cached = maia3Promise;
-    const owner = maia3Owner;
+    const owner = maia3Abort;
     const evaluator = await cached;
-    if (owner?.abort.signal.aborted) throw new DOMException('Maia3 owner retired', 'AbortError');
+    if (owner?.signal.aborted) throw new DOMException('Maia3 owner retired', 'AbortError');
     if (!evaluator.failure) return evaluator;
     if (maia3Promise === cached) maia3Promise = null;
     return ctxEnsureMaia3(ctx);
   }
   const uiGeneration = ctx.enginePreparationGeneration;
-  const generation = ++maia3Generation;
-  const owner = { abort: new AbortController(), cleanup: null as Promise<void> | null };
-  maia3Owner = owner;
+  const owner = new AbortController();
+  maia3Abort = owner;
   maia3Promise = (async () => {
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Maia3 human model…');
     const evaluator = await Maia3BrowserEvaluator.create({
       selfElo: ctx.opponent.active.maiaElo,
       oppoElo: ctx.opponent.active.maiaElo,
-      signal: owner.abort.signal,
-      onInitCleanup: (cleanup) => {
-        owner.cleanup = cleanup;
-      },
+      signal: owner.signal,
+      onInitCleanup: trackEngineRetirement,
       onProgress: (loaded, total) => {
         if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Maia3', loaded, total);
       },
@@ -744,11 +693,11 @@ async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> 
     const load = evaluator.modelLoad;
     const origin = load.cacheStatus === 'hit' ? 'from cache' : load.cacheStatus === 'miss' ? 'downloaded' : 'loaded';
     const integrity = load.sha256Valid === true ? ', sha256 ✓' : load.sha256Valid === false ? ', sha256 MISMATCH' : '';
-    if (generation === maia3Generation) maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
+    if (owner === maia3Abort) maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
     return evaluator;
   })().catch((error: Error) => {
-    if (generation === maia3Generation) maia3Promise = null;
+    if (owner === maia3Abort) maia3Promise = null;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
       ctxHideDownloadProgress();
       ctxSetEngineNote(`Maia3 load failed: ${error.message}`, true);

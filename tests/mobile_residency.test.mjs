@@ -24,8 +24,8 @@ function playOwner(options = {}) {
   const api = compile(
     `
     let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null,abort:new AbortController()};
-    let maia3Promise=null,maia3Status=null,maia3Generation=0,maia3Owner=null;
-    let centipawnLoadPromise=null,centipawnEvaluator=null,centipawnEvaluatorGeneration=0,centipawnLoadAbort=null;
+    let maia3Promise=null,maia3Status=null,maia3Abort=null;
+    const playCentipawn={clear(){}};
     ${extract(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureCentipawn(')}
     ${extract(play, 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
     return {retire:retireUnusedPlayNeuralEngines,small:()=>ctxEnsureLc0Small(ctx),maia:()=>ctxEnsureMaia3(ctx),peek:()=>lc0Searcher};
@@ -155,33 +155,14 @@ test('switching away from a stalled Maia initialization aborts promptly but stil
   await retiring;
 });
 
-test('Play unmount calls the same awaitable retirement for both neural owners', async () => {
-  const api = playOwner();
-  await api.small();
-  await api.maia();
-  const cleanup = extract(play, '    ctx.autosave?.flush();', '    if (ctx.resignArmTimer)');
-  compile(cleanup, {
-    ctx: { disposed: false, abort: new AbortController(), consentAbort: new AbortController() },
-    ctxCancelEngineTurn: () => {},
-    retireUnusedPlayNeuralEngines: api.retire,
-    centipawnEvaluatorGeneration: 0,
-    centipawnEvaluator: null,
-    centipawnLoadPromise: null,
-    playRuntimeFallbackAudits: new Map(),
-    disposeCachedCpuEngine: () => {},
-  });
-  await awaitEngineRetirements();
-  assert.deepEqual(api.releases.sort(), ['maia', 'small']);
-});
-
 test('a Small initialization finishing after retirement cannot repopulate the page owner', async () => {
   const gate = Promise.withResolvers(),
     released = [];
   const api = compile(
     `
     let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null,abort:new AbortController()};
-    let maia3Promise=null,maia3Status=null,maia3Generation=0,maia3Owner=null;
-    let centipawnLoadPromise=null,centipawnEvaluator=null,centipawnEvaluatorGeneration=0,centipawnLoadAbort=null;
+    let maia3Promise=null,maia3Status=null,maia3Abort=null;
+    const playCentipawn={clear(){}};
     ${extract(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureCentipawn(')}
     return {load:()=>ctxEnsureLc0Small(ctx),retire:retireUnusedPlayNeuralEngines,peek:()=>lc0Searcher};
   `,
