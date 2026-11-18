@@ -344,12 +344,12 @@ export class Maia3BrowserEvaluator {
       try {
         const names = await Maia3BrowserEvaluator.postInit(
           worker,
-          close,
           loaded.model,
           options.ep,
           options.signal,
           options.wasmThreads,
           loaded.sha256Valid === true ? { url: loaded.logicalUrl ?? loaded.url, metadataTrusted: isMetadataTrustedModel(loaded) } : undefined,
+          close,
         );
         options.signal?.throwIfAborted();
         const evaluator = new Maia3BrowserEvaluator(worker, loaded, selfElo, oppoElo, names, options.onFailure);
@@ -394,12 +394,12 @@ export class Maia3BrowserEvaluator {
 
   private static postInit(
     worker: Worker,
-    close: () => Promise<void>,
     model: string | ArrayBuffer,
     ep?: Maia3BrowserEvaluatorOptions['ep'],
     signal?: AbortSignal,
     wasmThreads?: number,
     reloadModel?: { url: string; metadataTrusted: boolean },
+    close: () => Promise<void> = () => disposeOrtWorker(worker),
   ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics }> {
     return new Promise((resolve, reject) => {
       const id = 0;
