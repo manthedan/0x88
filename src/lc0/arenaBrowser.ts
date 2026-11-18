@@ -157,7 +157,7 @@ import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
-import { requestLargeNetConsent, requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { untilAborted } from './modelCache.ts';
@@ -511,6 +511,8 @@ let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown'
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 // A picker acceptance approves its next startup, not every future uncached run.
 const arenaDownloadApprovals = new Set<BigNetKey>();
+/** Big nets the current run may download. A Start check that found one cached approved no download. */
+const arenaRunDownloads = new Set<BigNetKey>();
 let arenaPickerConsentAbort: AbortController | null = null;
 function abortArenaPickerConsent(): void {
   arenaPickerConsentAbort?.abort();
@@ -518,6 +520,15 @@ function abortArenaPickerConsent(): void {
 }
 async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
+  // Storage can evict a model that was cached at Start (loading Lc0 Small into a
+  // full cache is enough), so a load not covered by a download approval asks again.
+  // Ask unless the warm session will be reused; preparePhoneBigNet retires one configured differently.
+  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries: arenaCacheEntries() })) {
+    const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal);
+    signal.throwIfAborted();
+    if (!consent) throw new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
+    if (consent === 'download') arenaRunDownloads.add(key);
+  }
   const reclaim =
     isMemoryConstrainedDevice() &&
     preparePhoneBigNet(
@@ -4152,6 +4163,35 @@ function applyCheckpointConfig(saved: ArenaCheckpoint): void {
   refreshSeatControls();
 }
 
+/** Results, match status and PGN export of a saved run that is not playing. */
+function presentSavedCheckpoint(saved: ArenaCheckpoint): void {
+  showCheckpointResults(saved);
+  arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
+  el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
+  inputEl('pgnOut').value = '';
+  inputEl('pgnOut').hidden = true;
+  // Inspect results without loading engines or changing the saved configuration.
+  const last = saved.completed.at(-1);
+  if (last) {
+    const trail = finishedTrails[last.scheduleIndex];
+    liveTrail = trail;
+    historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
+    board = historyBoards[historyBoards.length - 1];
+    lastUci = trail.entries.at(-1)?.uci ?? null;
+    const scheduled = saved.schedule[last.scheduleIndex];
+    setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
+    enterReview(trail, trail.entries.length - 1);
+  } else {
+    // Nothing played yet: show this run's first opening, not the replaced run's last game
+    // or its charts (as Discard does).
+    liveTrail = null;
+    exitReview();
+    resetGameCharts();
+    el('chartsPanel').hidden = true;
+    setOpeningPreview(resultsSchedule[0].opening);
+  }
+}
+
 function showCheckpointResults(saved: ArenaCheckpoint): void {
   resultsSchedule = hydrateArenaSchedule(saved);
   resultsNames = new Map(saved.config.seats.map((seat) => [seat.id, seat.name]));
@@ -4316,7 +4356,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     clearStartPending();
     return;
   }
-  const checkedBigNetVariants = new Set<string>();
+  const checkedBigNetVariants = new Set<BigNetKey>();
   for (const row of bigNetRows) {
     if (!isLc0BigNetVariant(row.variant) || checkedBigNetVariants.has(row.variant)) continue;
     checkedBigNetVariants.add(row.variant);
@@ -4329,15 +4369,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       refreshSeatControls();
       clearStartPending();
       return;
-    }
-    // URL/restored rosters and resumed checkpoints never imply download approval.
-    if (isMemoryConstrainedDevice() && !arenaDownloadApprovals.delete(row.variant)) {
-      const approved = await requestLargeNetConsent(config, matchAbort.signal);
-      if (startupCancelled()) return;
-      if (!approved) {
-        clearStartPending();
-        return;
-      }
     }
   }
   const engineA = participants[0].engine!;
@@ -4386,6 +4417,22 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     if (!lc0Cache) return; // The loader reported the failure; leave prior results intact.
   }
 
+  // Ask after Small loads, which can evict a cached large net, and before the
+  // checkpoint is replaced, so declining keeps the previous tournament.
+  arenaRunDownloads.clear();
+  if (isMemoryConstrainedDevice()) {
+    for (const variant of checkedBigNetVariants) {
+      // URL/restored rosters and resumed checkpoints never imply download approval.
+      const consent = arenaDownloadApprovals.delete(variant) ? 'download' : await requestLargeNetDownloadConsent(BIG_NETS[variant], matchAbort.signal);
+      if (startupCancelled()) return;
+      if (!consent) {
+        clearStartPending();
+        return;
+      }
+      if (consent === 'download') arenaRunDownloads.add(variant);
+    }
+  }
+
   const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);
   // Establish the slot before any games run. A stale tab must not overwrite it.
   try {
@@ -4401,7 +4448,11 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     if (error instanceof ArenaCheckpointConflictError) throw error;
     checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Keep this tab open and export PGN before leaving.`;
   }
-  if (startupCancelled()) return;
+  if (startupCancelled()) {
+    // The save replaced the stored run, so show that run's results, not the replaced one's.
+    if (checkpoint === runCheckpoint && abort === matchAbort && !isStaleMount(mountSignal)) presentSavedCheckpoint(runCheckpoint);
+    return;
+  }
   checkpoint = runCheckpoint;
   const pendingIndices = arenaRemainingIndices(runCheckpoint);
   startPending = false;
@@ -5508,21 +5559,7 @@ async function init(mountSignal: AbortSignal) {
     checkpoint = saved;
     checkpointToken = saved ? { runId: saved.runId, revision: saved.revision } : null;
     if (saved) {
-      showCheckpointResults(saved);
-      arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
-      el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
-      // Inspect results without loading engines or changing the saved configuration.
-      const last = saved.completed.at(-1);
-      if (last) {
-        const trail = finishedTrails[last.scheduleIndex];
-        liveTrail = trail;
-        historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
-        board = historyBoards[historyBoards.length - 1];
-        lastUci = trail.entries.at(-1)?.uci ?? null;
-        const scheduled = saved.schedule[last.scheduleIndex];
-        setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
-        enterReview(trail, trail.entries.length - 1);
-      }
+      presentSavedCheckpoint(saved);
       setArenaStartDisabled(false);
       syncArenaPhase();
     }

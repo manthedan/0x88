@@ -631,6 +631,9 @@ export function startSearchWorker(options: { createHybridEvaluator?: HybridEvalu
     }
     void enqueueModelOperation(async () => {
       try {
+        // Work queued before dispose would only delay release (an init would start a
+        // fresh download that the 1.5 s disposal timeout then waits on).
+        if (retiring && message.type !== 'dispose') throw new Error('LC0 search worker is shutting down');
         if (message.type === 'dispose') {
           deviceLossMonitor.stop();
           const previous = evaluator;

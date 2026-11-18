@@ -340,6 +340,9 @@ for (const outcome of ['failure', 'cancelled', 'ready']) {
         matchAbort,
         mountSignal,
         selectedSeatsNeedLc0Evaluator: () => true,
+        // Desktop: the large-net consent step that follows Small loading is a no-op.
+        isMemoryConstrainedDevice: () => false,
+        arenaRunDownloads: new Set(),
         isStaleMount: (signal) => signal.aborted,
         el: (id) => (id === 'cancelSetupLoad' ? cancel : message),
         replaceResults: () => {

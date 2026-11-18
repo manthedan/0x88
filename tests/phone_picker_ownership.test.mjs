@@ -90,7 +90,7 @@ for (const action of ['cpu', 'startup', 'replacement-picker']) {
   });
 }
 
-function arenaPicker(requestConsent) {
+function arenaPicker(requestConsent, overrides = {}) {
   const rows = [
     { family: 'lc0', variant: 'small', strength: 8 },
     { family: 'sf', variant: 'lite', strength: 8 },
@@ -142,6 +142,8 @@ function arenaPicker(requestConsent) {
     renderBerserkRuntimeInfo() {},
     renderPlentyChessRuntimeInfo() {},
     renderStormphraxRuntimeInfo() {},
+    // The handler binds these when it is built, so overrides must apply first.
+    ...overrides,
   };
   const code =
     extract(source.arena, 'let arenaPickerConsentAbort:', 'async function bigNetFor(') +
@@ -160,11 +162,13 @@ for (const action of ['cpu', 'startup', 'remove', 'add', 'mode']) {
   test(`Arena ${action} aborts obsolete picker metadata without changing the new roster`, async () => {
     const permission = Promise.withResolvers();
     let consent;
-    const { rows, callbacks, approvals, deps, api, pick, event } = arenaPicker((_config, signal) => {
-      consent = signal;
-      return permission.promise;
-    });
-    deps.bigNetSelectableSync = () => assert.fail('an obsolete picker must never validate or commit its model');
+    const { rows, callbacks, approvals, deps, api, pick, event } = arenaPicker(
+      (_config, signal) => {
+        consent = signal;
+        return permission.promise;
+      },
+      { bigNetSelectableSync: () => assert.fail('an obsolete picker must never validate or commit its model') },
+    );
     const old = pick('bt4');
     assert.equal(consent.aborted, false);
     if (action === 'cpu') await callbacks.get('arenaSeatList:change')(event('seat-fam', 'sf'));
