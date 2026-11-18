@@ -365,6 +365,9 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
       SquareformerTvmValueHeadWebgpuBlock.create(device as never, valueWeights, last.summary.shape),
       SquareformerTvmLegalPolicyGatherWebgpuBlock.createDynamic(device as never, Math.max(1, Number(meta.max_legal_moves ?? 256)), meta.policy_size),
     ]);
+    // Shader compilation is not abortable; never hand a cancelled owner an evaluator.
+    // The caller still owns the device here and destroys it, freeing every block.
+    signal?.throwIfAborted();
     return new SquareformerTvmHybridEvaluator(
       device,
       meta,

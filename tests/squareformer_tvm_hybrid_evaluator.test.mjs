@@ -16,7 +16,7 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       env,
     });
     assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
-    assert.match(child.stdout, /^# pass 6$/m);
+    assert.match(child.stdout, /^# pass 7$/m);
     assert.match(child.stdout, /^# fail 0$/m);
   });
 } else {
@@ -25,6 +25,12 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
   const { createBrowserSquareformerRuntimeEvaluator } = await import('../src/nn/browserRuntimeEvaluator.ts');
   const { THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES } = await import('../src/nn/squareformerEvaluator.ts');
   const { SquareformerTvmHybridEvaluator } = await import('../src/nn/squareformerTvmHybridEvaluator.ts');
+  const { SquareformerTvmFullLayerWebgpuBlock } = await import('../src/nn/squareformerTvmFullLayerWebgpu.ts');
+  const { SquareformerTvmInputStemWebgpuBlock } = await import('../src/nn/squareformerTvmInputStemWebgpu.ts');
+  const { SquareformerTvmPolicyHeadWebgpuBlock } = await import('../src/nn/squareformerTvmPolicyHeadWebgpu.ts');
+  const { SquareformerTvmValueHeadWebgpuBlock } = await import('../src/nn/squareformerTvmValueHeadWebgpu.ts');
+  const { SquareformerTvmLegalPolicyGatherWebgpuBlock } = await import('../src/nn/squareformerTvmLegalPolicyGatherWebgpu.ts');
+  const { readFileSync } = await import('node:fs');
 
   const META = {
     kind: 'squareformer_v2',
@@ -228,5 +234,77 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
     ]);
     assert.equal(settled?.name, 'AbortError', 'the owner signal ends the stalled fetch instead of leaving the load pending');
     assert.equal(deviceDestroys, 1, 'the device acquired before cancellation is released');
+  });
+
+  test('cancelling a custom WebGPU load during shader compilation returns no evaluator and releases the device', async (t) => {
+    const evaluatorSource = readFileSync(new URL('../src/nn/squareformerTvmHybridEvaluator.ts', import.meta.url), 'utf8');
+    const arrays = Object.fromEntries([...evaluatorSource.matchAll(/arrays\.(\w+)\.file/g)].map(([, key]) => [key, { file: `${key}.bin` }]));
+    const kernelRows = [
+      'attn_qkv_:bias',
+      'ffn_dense1_gelu_:bias-gelu',
+      'ffn_dense2_residual_:bias-residual',
+      'attn_out_residual_:bias-residual',
+      'policy_pair_proj_:bias',
+      'policy_proj_:bias',
+    ].map((row) => {
+      const [label, epilogue] = row.split(':');
+      return { label, epilogue, file: `${label}.wgsl` };
+    });
+    const files = {
+      '/runtimes/custom-test/manifest.json': { schema: 'centipawn.squareformer-tvm-hybrid.v1' },
+      '/k/summary.json': kernelRows,
+      '/f/summary.json': { layers: [{ path: 'l0', summary: 'summary.json' }] },
+      '/f/l0/summary.json': { layer: 0, shape: { rows: 64, dModel: 4, dFf: 8 }, arrays },
+    };
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).endsWith('.meta.json')) return { ok: true, json: async () => META };
+      const body = files[url] ? new TextEncoder().encode(JSON.stringify(files[url])).buffer : new ArrayBuffer(4);
+      return { ok: true, arrayBuffer: async () => body };
+    });
+    const blocks = [];
+    const fakeBlock = (name) => {
+      const block = { name, destroyed: false, uploadAttentionBias() {}, destroy: () => (block.destroyed = true) };
+      blocks.push(block);
+      return block;
+    };
+    let compileHead;
+    t.mock.method(SquareformerTvmFullLayerWebgpuBlock, 'create', async () => fakeBlock('layer'));
+    t.mock.method(SquareformerTvmInputStemWebgpuBlock, 'create', async () => fakeBlock('stem'));
+    // Pipeline compilation cannot be aborted: the policy head finishes compiling after cancel.
+    t.mock.method(SquareformerTvmPolicyHeadWebgpuBlock, 'create', () => new Promise((resolve) => (compileHead = () => resolve(fakeBlock('policy')))));
+    t.mock.method(SquareformerTvmValueHeadWebgpuBlock, 'create', async () => fakeBlock('value'));
+    t.mock.method(SquareformerTvmLegalPolicyGatherWebgpuBlock, 'createDynamic', async () => fakeBlock('legal'));
+    let deviceDestroys = 0;
+    const device = {
+      destroy() {
+        deviceDestroys += 1;
+      },
+    };
+    Object.defineProperty(globalThis.navigator, 'gpu', {
+      configurable: true,
+      value: { requestAdapter: async () => ({ requestDevice: async () => device }) },
+    });
+    t.after(() => delete globalThis.navigator.gpu);
+    const controller = new AbortController();
+    const loading = createBrowserSquareformerRuntimeEvaluator(
+      { modelId: 'custom-test', onnx: '/models/custom-test.onnx', meta: '/models/custom-test.meta.json' },
+      {
+        runtime: 'custom-webgpu',
+        manifestUrl: '/runtimes/custom-test/manifest.json',
+        kernelBase: '/k',
+        fixtureRoot: '/f',
+        signal: controller.signal,
+        fallback: true,
+      },
+    );
+    while (!compileHead) await tick();
+    controller.abort();
+    compileHead();
+    const settled = await loading.then(
+      (evaluator) => evaluator,
+      (error) => error,
+    );
+    assert.equal(settled?.name, 'AbortError', 'a cancelled owner never receives an evaluator');
+    assert.equal(deviceDestroys, 1, 'the device, and every block allocated on it, is released');
   });
 }
