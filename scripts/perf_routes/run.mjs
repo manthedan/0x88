@@ -1,11 +1,26 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { linkAssets, localAssets } from './assets.mjs';
 import { compareRuns, HELP, parseArgs, plan, previewEnvironment } from './gate.mjs';
-import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession, runOwnedSession, shutdownDelay, watchShutdown } from './lifecycle.mjs';
+import {
+  acquireLock,
+  cancellationMarker,
+  claimOutput,
+  cleanupMarker,
+  liveOwner,
+  lockRun,
+  releaseAfterSession,
+  runOwnedSession,
+  shutdownDelay,
+  watchShutdown,
+} from './lifecycle.mjs';
+import { manifestMismatches, measuringFiles, readJson, recordAttempt, reusableBuild, runManifest, selectSessions, writeJsonAtomic } from './resume.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // Build/archive/git/file operations are confined to the calling worktree's ignored output tree.
@@ -42,27 +57,34 @@ function git(...argv) {
   console.log(`pwd: ${process.cwd()}; git ${argv.join(' ')}`);
   return spawnSync('git', argv, { cwd: root, encoding: 'utf8', maxBuffer: 1024 * 1024 });
 }
-function sourceAsset(source) {
-  for (let dir = root; ; dir = dirname(dir)) {
-    const candidate = resolve(dir, source);
-    if (existsSync(candidate)) return candidate;
-    if (dirname(dir) === dir) return null;
-  }
-}
-function build(input, out, arm) {
+// Identify an arm before building so a resumed run can refuse a different cohort up front.
+function armSource(input) {
   if (existsSync(input)) {
     const dir = resolve(input);
     const dist = existsSync(join(dir, 'app/analysis/index.html')) ? dir : join(dir, 'dist-client');
     if (!existsSync(join(dist, 'app/analysis/index.html'))) throw Error(`Not a built product preview: ${input}`);
-    return { dist, input, kind: 'prebuilt' };
+    const version = join(dist, '_app/version.json');
+    return { dist, input, kind: 'prebuilt', version: existsSync(version) ? readFileSync(version, 'utf8') : null };
   }
   const rev = git('rev-parse', '--verify', `${input}^{commit}`);
   if (rev.status !== 0) throw Error(`Not a directory or commit: ${input}`);
-  const commit = rev.stdout.trim(),
-    dir = join(out, 'builds', arm),
-    archive = join(out, 'builds', `${arm}.tar`);
+  return { input, kind: 'archived-source', commit: rev.stdout.trim() };
+}
+function build(source, out, arm) {
+  if (source.kind === 'prebuilt') return source;
+  const dir = join(out, 'builds', arm),
+    record = join(out, 'builds', `${arm}.json`);
+  const reused = reusableBuild(record, source.commit);
+  if (reused) {
+    console.log(`reusing ${arm} build of ${source.commit}`);
+    return reused;
+  }
+  // Unrecorded means interrupted mid-build. rm does not follow the node_modules/asset links.
+  rmSync(record, { force: true });
+  rmSync(dir, { recursive: true, force: true });
+  const archive = join(out, 'builds', `${arm}.tar`);
   mkdirSync(dir, { recursive: true });
-  command('git', ['archive', '--format=tar', '-o', archive, commit]);
+  command('git', ['archive', '--format=tar', '-o', archive, source.commit]);
   command('tar', ['-xf', archive, '-C', dir]);
   rmSync(archive);
   // Same lockfile: use the worktree's installed dependencies read-only. A dependency refactor gets
@@ -70,33 +92,22 @@ function build(input, out, arm) {
   const sameLock = readFileSync(join(dir, 'package-lock.json')).equals(readFileSync(join(root, 'package-lock.json')));
   if (sameLock) symlinkSync(realpathSync(join(root, 'node_modules')), join(dir, 'node_modules'), 'dir');
   else command('npm', ['ci', '--ignore-scripts'], dir);
-  // Supply ignored local runtime/model assets without replacing historical manifests or tracked bytes.
-  cpSync(join(root, 'public'), join(dir, 'public'), {
-    recursive: true,
-    dereference: false,
-    filter: (src, dst) => lstatSync(src).isDirectory() || !existsSync(dst),
-  });
-  for (const family of ['lc0', 'maia3']) {
-    const manifest = JSON.parse(readFileSync(join(dir, 'public/models', family, 'manifest.json'), 'utf8'));
-    for (const entry of manifest.models ?? []) {
-      if (!entry.file || !entry.source) continue;
-      const target = join(dir, 'public/models', family, entry.file);
-      if (existsSync(target)) continue;
-      const asset = sourceAsset(entry.source);
-      if (asset) {
-        rmSync(target, { force: true });
-        symlinkSync(asset, target);
-      }
-    }
-  }
+  const links = localAssets(root, dir);
   command('env', ['BUILD_SCOPE=product', 'npm', 'run', 'build:client'], dir);
-  return {
-    dist: join(dir, 'dist-client'),
-    commit,
-    input,
-    kind: 'archived-source',
+  const dist = join(dir, 'dist-client');
+  linkAssets(links, dist);
+  // Intermediate copy of the client output; only dist-client is served.
+  rmSync(join(dir, '.svelte-kit/output'), { recursive: true, force: true });
+  const built = {
+    dist,
+    commit: source.commit,
+    input: source.input,
+    kind: source.kind,
     dependencies: sameLock ? 'shared-installed/same-lockfile' : 'isolated-npm-ci',
+    linkedLocalAssets: links.size,
   };
+  writeJsonAtomic(record, built);
+  return built;
 }
 async function serve(dist, out, arm, signal) {
   const socket = createServer();
@@ -142,21 +153,53 @@ async function serve(dist, out, arm, signal) {
     throw error;
   }
 }
+function harnessHash() {
+  const hash = createHash('sha256');
+  for (const file of measuringFiles(root, 'scripts/perf_routes/session.mjs', ['scripts/perf_matrix/pidfp.c', 'scripts/serve_isolated_static.mjs']))
+    hash.update(`${file}\0`).update(readFileSync(join(root, file)));
+  return hash.digest('hex');
+}
 async function run(signal) {
   const out = resolve(args.out ?? `.local-dev-artifacts/perf-routes/${new Date().toISOString().replace(/[:.]/g, '-')}`);
   if (args.benchlock && !existsSync(args.benchlock)) throw Error('benchlock does not exist');
-  claimOutput(out);
-  mkdirSync(join(out, 'sessions'));
-  writeFileSync(join(out, 'plan.json'), JSON.stringify(args, null, 2));
+  const sources = {};
+  for (const arm of ['baseline', 'candidate'])
+    sources[arm] = args[`${arm}-url`] ? { input: args[arm], url: args[`${arm}-url`], kind: 'externally-served' } : armSource(args[arm]);
+  const manifest = runManifest(args, sources, { host: hostname(), harness: harnessHash() });
+  const resuming = args.resume && existsSync(out);
+  if (!resuming) claimOutput(out);
+  const unlock = lockRun(out);
+  try {
+    if (resuming) {
+      const saved = readJson(join(out, 'manifest.json'));
+      if (!saved) throw Error(`Cannot resume ${out}: no readable manifest.json (not started by a resumable run)`);
+      const mismatches = manifestMismatches(saved, manifest);
+      if (mismatches.length) throw Error(`Cannot resume ${out}; it measured a different cohort: ${mismatches.join(', ')}`);
+    } else {
+      mkdirSync(join(out, 'sessions'));
+      writeJsonAtomic(join(out, 'plan.json'), args);
+      writeJsonAtomic(join(out, 'manifest.json'), manifest);
+    }
+    await measure(signal, out, sources, resuming);
+  } finally {
+    unlock();
+  }
+}
+async function measure(signal, out, sources, resuming) {
+  const cells = selectSessions(plan(args), (id) => {
+    const file = join(out, 'sessions', `${id}.json`);
+    return { result: readJson(file), cleanupPending: existsSync(cleanupMarker(file)), owner: liveOwner(file) };
+  });
+  if (resuming) console.log(`resume ${out}: reusing ${cells.filter((c) => c.reuse).length}/${cells.length} sessions`);
   const servers = [];
   try {
     const builds = {};
     for (const arm of ['baseline', 'candidate']) {
       signal.throwIfAborted();
-      if (args[`${arm}-url`]) builds[arm] = { input: args[arm], base: args[`${arm}-url`], kind: 'externally-served' };
+      if (sources[arm].kind === 'externally-served') builds[arm] = { input: args[arm], base: sources[arm].url, kind: 'externally-served' };
       else {
         // Self comparisons share identical bytes, but use separate origins/sessions.
-        builds[arm] = arm === 'candidate' && args.baseline === args.candidate ? { ...builds.baseline } : build(args[arm], out, arm);
+        builds[arm] = arm === 'candidate' && args.baseline === args.candidate ? { ...builds.baseline } : build(sources[arm], out, arm);
         const server = await serve(builds[arm].dist, out, arm, signal);
         servers.push(server.stop);
         builds[arm].base = server.base;
@@ -165,12 +208,19 @@ async function run(signal) {
     signal.throwIfAborted();
     writeFileSync(join(out, 'builds.json'), JSON.stringify(builds, null, 2));
     if (args['build-only']) return;
-    const cells = plan(args);
-    for (const [i, cell] of cells.entries()) {
+    // runs.jsonl is rebuilt in plan order from the session files; keep the old index for audit.
+    if (existsSync(join(out, 'runs.jsonl'))) renameSync(join(out, 'runs.jsonl'), join(out, `runs.${Date.now()}.prev.jsonl`));
+    for (const [i, { cell, id, reuse }] of cells.entries()) {
       signal.throwIfAborted();
-      const id = `${String(i).padStart(3, '0')}-${cell.browser}-${cell.journey}-${cell.arm}-r${cell.repeat}`;
+      if (reuse) {
+        appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(reuse)}\n`);
+        continue;
+      }
       const specFile = join(out, 'sessions', `${id}.spec.json`),
         resultFile = join(out, 'sessions', `${id}.json`);
+      // A stale cancellation marker would abort the new attempt; a stale result must not outlive a crash.
+      rmSync(cancellationMarker(resultFile), { force: true });
+      rmSync(resultFile, { force: true });
       writeFileSync(
         specFile,
         JSON.stringify({ ...cell, base: builds[cell.arm].base, source: builds[cell.arm], driver: args.driver, externalLock: !!args.benchlock }, null, 2),
@@ -182,7 +232,13 @@ async function run(signal) {
         try {
           const commandArgs = [join(root, 'scripts/perf_routes/session.mjs'), specFile, resultFile];
           const bin = args.benchlock ?? process.execPath;
-          status = await runOwnedSession(bin, args.benchlock ? [process.execPath, ...commandArgs] : commandArgs, signal, args.benchlock ? resultFile : null);
+          status = await runOwnedSession(
+            bin,
+            args.benchlock ? [process.execPath, ...commandArgs] : commandArgs,
+            signal,
+            args.benchlock ? resultFile : null,
+            resultFile,
+          );
         } finally {
           cleanupConfirmed = releaseAfterSession(resultFile, release);
         }
@@ -191,14 +247,13 @@ async function run(signal) {
           await shutdownDelay(30000, signal);
         }
       } while (cleanupConfirmed && status === 75 && !signal.aborted);
-      const row = existsSync(resultFile)
-        ? JSON.parse(readFileSync(resultFile, 'utf8'))
-        : { ...cell, status: 'invalid', error: `session process exited ${status}` };
-      if (!cleanupConfirmed) {
-        row.status = 'invalid';
-        row.error = `Browser cleanup unconfirmed; see ${cleanupMarker(resultFile)}${args['lock-dir'] ? `; mutex retained at ${args['lock-dir']}` : ''}`;
-        console.error(row.error);
-      }
+      const row = recordAttempt(cell, resultFile, {
+        status,
+        cleanupConfirmed,
+        interruption: signal.aborted ? signal.reason.message : undefined,
+        lockDir: args['lock-dir'],
+      });
+      if (!cleanupConfirmed) console.error(row.error);
       appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(row)}\n`);
       signal.throwIfAborted();
       if (!cleanupConfirmed) {
